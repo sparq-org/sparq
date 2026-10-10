@@ -16,10 +16,11 @@
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
 //!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
 //!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
-//!   it issues ([`tokens`]).
+//!   it issues ([`tokens`]);
+//! - **access grants and access requests** ([`access`]): the LWS Access Profile.
 //!
-//! Authorization ([`access`]): the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, and
-//! the agent that created a resource may do anything with it.
+//! Authorization: the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, the agent that
+//! created a resource may do anything with it, and anyone else what an access grant gives them.
 //! `SOLID_SERVER_LWS_OPEN=1` is a development mode with no authentication at all.
 
 pub mod access;
@@ -49,6 +50,7 @@ pub const LWS_NS: &str = "https://www.w3.org/ns/lws#";
 pub const LWS_CONTEXT: &str = "https://www.w3.org/ns/lws/v1";
 pub const CID_CONTEXT: &str = "https://www.w3.org/ns/cid/v1";
 pub const AS_CONTEXT: &str = "https://www.w3.org/ns/activitystreams";
+pub const FOAF_AGENT: &str = "http://xmlns.com/foaf/0.1/Agent";
 
 pub const LWS_JSON: &str = "application/lws+json";
 pub const LWS_CID: &str = "application/lws+cid";
@@ -58,6 +60,11 @@ pub const LINKSET_JSON: &str = "application/linkset+json";
 pub const JSON_PATCH: &str = "application/json-patch+json";
 pub const PROBLEM_JSON: &str = "application/problem+json";
 
+/// Where the LWS services live, relative to the storage root. The `.lws/` and `.well-known/`
+/// namespaces are never listed in the root container and cannot be created by clients (a POST
+/// slug never starts with a dot).
+pub const GRANTS_PATH: &str = "/.lws/grants/";
+pub const REQUESTS_PATH: &str = "/.lws/requests/";
 pub const AS_METADATA_PATH: &str = "/.well-known/lws-configuration";
 pub const AS_METADATA_OAUTH_PATH: &str = "/.well-known/oauth-authorization-server";
 pub const AS_JWKS_PATH: &str = "/.well-known/lws/jwks";
@@ -440,6 +447,7 @@ pub struct Inner<S: Store> {
     /// Every change to the store moves the listing snapshots it concerns (see [`tracked`]).
     pub store: tracked::Tracked<S>,
     pub cfg: LwsConfig,
+    pub access: access::AccessStore,
     /// Fetches identity documents, OpenID provider metadata and JWKS.
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
@@ -474,8 +482,9 @@ impl<S: Store + 'static> LwsState<S> {
         Journal::new(self, limit)
     }
 
-    /// Build the state: ensure the storage root exists, and put back any change a process stop
-    /// cut short (see the `intents` module).
+    /// Build the state: ensure the storage root and the service containers exist, put back any
+    /// change a process stop cut short (see the `intents` module), and load the stored access
+    /// grants and requests.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
@@ -489,10 +498,14 @@ impl<S: Store + 'static> LwsState<S> {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
         }
+        // Grants and requests are loaded once changes cut short are put back (a grant's create
+        // or revocation among them).
+        let access = access::AccessStore::empty();
         let state = Self {
             inner: Arc::new(Inner {
                 store: tracked::Tracked::new(store, cfg.storage()),
                 cfg,
+                access,
                 http,
                 locks: Default::default(),
                 set_aside_bytes: Default::default(),
@@ -501,7 +514,15 @@ impl<S: Store + 'static> LwsState<S> {
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
-        intents::recover(&state).await?;
+        // Nothing put back in the background starts until every step that can fail has
+        // succeeded: a start that fails leaves nothing running to put an old state back over a
+        // later start's writes, and grants are loaded while what is hidden stays hidden.
+        let hidden = intents::recover(&state).await?;
+        let loaded =
+            access::AccessStore::load_with(&state.store, &state.cfg, |iri| state.visible(iri))
+                .await?;
+        state.access.replace(loaded);
+        state.settle_hidden(hidden);
         Ok(state)
     }
 
@@ -606,9 +627,21 @@ impl<S: Store + 'static> LwsState<S> {
     /// any is put back: a change settled early touches the containers owed a touch that are
     /// visible ([`LwsState::touch_owed`]), and must not touch one that a later change in `all`
     /// would then restore to a date from before the touch.
+    #[cfg(test)]
     pub(crate) fn set_aside_all(&self, all: Vec<Unsettled>) {
+        self.settle_hidden(self.hide_all(all));
+    }
+
+    /// Hide each of `all`, to be put back by [`LwsState::settle_hidden`]: until then nothing of
+    /// them is put back, so what is not visible stays so.
+    pub(crate) fn hide_all(&self, all: Vec<Unsettled>) -> Hidden {
         let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
-        for (left, hidden) in all.into_iter().zip(hidden) {
+        Hidden(all.into_iter().zip(hidden).collect())
+    }
+
+    /// Put back, each in a task of its own, the changes [`LwsState::hide_all`] hid.
+    pub(crate) fn settle_hidden(&self, hidden: Hidden) {
+        for (left, hidden) in hidden.0 {
             self.settle_aside(left, hidden, ());
         }
     }
@@ -879,7 +912,7 @@ type StoredMeta = crate::store::ResourceMeta;
 
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
 /// the backend, where the change may have landed before the failure was reported.
-fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
+pub(crate) fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
     matches!(outcome, Ok(_) | Err(crate::error::ServerError::Storage(_)))
 }
 
@@ -985,6 +1018,10 @@ impl Undo {
 /// What is left to put back of a change that could not be put back after a few tries, the next
 /// to apply first.
 pub(crate) struct Unsettled(Vec<Undo>);
+
+/// Changes set aside and hidden ([`LwsState::hide_all`]), not yet being put back.
+#[must_use = "hidden changes are put back only by LwsState::settle_hidden"]
+pub(crate) struct Hidden(Vec<(Unsettled, (Vec<String>, usize))>);
 
 impl Unsettled {
     /// About how many bytes it holds to put back: each body, and each record at its limit.
@@ -1363,11 +1400,11 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     }
 }
 
-/// Delete the stored member `iri` of `container`.
+/// Delete the stored record `iri` of a service container (a grant or a request).
 /// The index commit is the deletion point: when the store reports a failure but the record no
 /// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
 /// record is gone.
-async fn delete_record<S: Store>(
+pub(crate) async fn delete_record<S: Store>(
     store: &S,
     iri: &str,
     container: &str,
@@ -1378,6 +1415,282 @@ async fn delete_record<S: Store>(
             Ok(false) => Ok(()),
             _ => Err(e),
         },
+    }
+}
+
+/// Whether the record `iri` is stored as a start would load it: listed in `container` and there
+/// to read. An error when that cannot be told.
+pub(crate) async fn still_listed<S: Store>(
+    store: &S,
+    iri: &str,
+    container: &str,
+) -> Result<bool, crate::error::ServerError> {
+    let listed = store
+        .list_children(container)
+        .await?
+        .iter()
+        .any(|child| child.as_str() == iri);
+    if !listed {
+        return Ok(false);
+    }
+    match store.read(iri).await {
+        Ok(_) => Ok(true),
+        Err(crate::error::ServerError::NotFound) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// How long a request to a service container (a create, a revocation) waits for a lock before
+/// answering `503`: a request never queues behind a lock held by a change that is being put
+/// back, or by a store call that stalls.
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Take a lock (`lock`, from [`resources::IriLocks`]) in the request path, waiting at most
+/// [`LOCK_WAIT`]: `503` when it is busy, or set aside. Only once it is held may the request
+/// start a task of its own, so no request leaves a detached task waiting on a lock.
+pub(crate) async fn within_wait<T>(
+    lock: impl std::future::Future<Output = Option<T>>,
+) -> Result<T, Response> {
+    match tokio::time::timeout(LOCK_WAIT, lock).await {
+        Ok(Some(guard)) => Ok(guard),
+        Ok(None) => Err(resources::set_aside_meanwhile()),
+        Err(_) => Err(resources::retry_later("the resource is busy")),
+    }
+}
+
+/// Store a new record (an access grant or request) at `iri` in `container` in one write and,
+/// once it is confirmed stored, put it in force in memory with `register`. Memory follows the
+/// store, and the answer says only what is confirmed:
+///
+/// - The container is taken (shared, unless the caller holds it exclusively) in the request,
+///   waiting at most [`LOCK_WAIT`] (then `503`), so a conditional create sees no member
+///   arrive between its check and its own registration. The write and the registration then run
+///   in a task of their own, holding the request's share of its admission permit (`admission`):
+///   a client that goes away cannot stop a stored record from being registered.
+/// - The record's own lock is held from before it is created until it is registered, so a
+///   revocation of it waits for that. A name already stored is refused.
+/// - A write that succeeds registers the record. One that fails is checked against the listing
+///   ([`still_listed`]): stored after all, it is registered; not stored, `register` (and the
+///   quota place it holds) is dropped and the create fails; not known, the create answers that,
+///   and a task holding the record's lock and the quota place settles it from the listing once
+///   the store answers, registering it under the container's lock, shared. A start loads whatever the listing holds.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn create_record<S, F>(
+    state: &LwsState<S>,
+    container: &str,
+    iri: &str,
+    body: Bytes,
+    admission: Option<crate::overload::AdmissionSlot>,
+    held: Option<resources::IriGuard>,
+    register: F,
+) -> Result<(), Response>
+where
+    S: Store + 'static,
+    F: FnOnce() + Send + 'static,
+{
+    use crate::error::ServerError;
+    let failed = |e: ServerError| problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+    let shared = match held {
+        Some(_) => None,
+        None => Some(within_wait(state.locks.read(container)).await?),
+    };
+    // A new IRI: its lock is free unless the name was just taken, and it is only tried, so
+    // taking it under the container's cannot deadlock.
+    let Some(own) = state.locks.try_lock(iri) else {
+        return Err(failed(ServerError::Conflict(
+            "the record's name is taken".into(),
+        )));
+    };
+    let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
+    let task = async move {
+        let _admission = admission;
+        let _container = (shared, held);
+        // Under the lock, the name must not be stored either (a quarantined record holds its
+        // name, and no lock).
+        match state.store.exists(&iri).await {
+            Ok(false) => {}
+            Ok(true) => return Err(ServerError::Conflict("the record's name is taken".into())),
+            Err(e) => return Err(e),
+        }
+        let written = state
+            .store
+            .create_in_container(&container, &iri, body, LWS_JSON)
+            .await;
+        let Err(e) = written else {
+            register();
+            return Ok(());
+        };
+        match still_listed(&state.store, &iri, &container).await {
+            Ok(true) => {
+                register();
+                Ok(())
+            }
+            Ok(false) => Err(e),
+            Err(_) => {
+                // Settled holding the record's own lock (a revocation of it waits); the
+                // container's is taken only to register it.
+                let state = state.clone();
+                tokio::spawn(async move {
+                    let _own = own;
+                    if until_done(|| still_listed(&state.store, &iri, &container)).await {
+                        // Registered under the container's lock, shared (taken after the
+                        // record's, as a revocation takes them), so no conditional create sees
+                        // the listing change between its check and its own registration. This
+                        // task holds no admission, so it may wait for it.
+                        let _listing =
+                            until_done(|| async { state.locks.read(&container).await.ok_or(()) })
+                                .await;
+                        register();
+                    }
+                });
+                Err(ServerError::Storage(
+                    "whether the record was stored is not known; the request may be retried".into(),
+                ))
+            }
+        }
+    };
+    tokio::spawn(task)
+        .await
+        .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
+        .map_err(failed)
+}
+
+/// The preconditions of a create in a service container (grants, requests),
+/// evaluated against `listing` with the container held exclusively: `Ok(None)` when the create is
+/// unconditional, `Ok(Some(guard))` when its preconditions hold (the guard is passed on to
+/// [`create_record`], so no member arrives or leaves until the new one is registered), and the
+/// response to send otherwise. A listing that cannot be produced (a representation the client does
+/// not accept, a page that does not exist) is that response: its absent `ETag` is not the absence
+/// of the container.
+pub(crate) async fn service_preconditions<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    container: &str,
+    listing: impl FnOnce(&LwsRequest) -> axum::response::Response,
+) -> Result<Option<resources::IriGuard>, axum::response::Response> {
+    if !resources::is_conditional(req) {
+        return Ok(None);
+    }
+    let guard = within_wait(state.locks.lock(container)).await?;
+    let current = listing(&resources::plain_get(req));
+    if !current.status().is_success() {
+        return Err(current);
+    }
+    let (etag, modified) = resources::validators_of(&current);
+    match resources::unless_preconditions(req, etag.as_deref(), modified) {
+        Some(refused) => Err(refused),
+        None => Ok(Some(guard)),
+    }
+}
+
+/// Parse a JSON body that anyone authenticated may send for a record of their own (an access
+/// request), refusing it with 413 before any parsing when it is over `limit`
+/// bytes: what such a record costs is bounded by its size, never by what parsing it builds.
+#[allow(clippy::result_large_err)]
+pub(crate) fn bounded_json(body: &[u8], limit: usize, what: &str) -> Result<Value, Response> {
+    if body.len() > limit {
+        return Err(problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some(&format!("{what} is at most {limit} bytes")),
+        ));
+    }
+    serde_json::from_slice(body)
+        .map_err(|_| problem(StatusCode::BAD_REQUEST, Some("the body is not JSON")))
+}
+
+/// The share of the store that records anyone authenticated may create (access requests) can
+/// take: at most `total` of them, and `per_author` by one agent. A create
+/// [`Quota::reserve`]s its place before any storage work, under the same lock as every other
+/// reservation, and holds the [`QuotaSlot`] until its record is registered (or the create
+/// fails), so concurrent creates cannot both take the last place.
+pub(crate) struct Quota {
+    total: usize,
+    per_author: usize,
+    in_flight: Arc<std::sync::Mutex<QuotaCounts>>,
+}
+
+#[derive(Default)]
+struct QuotaCounts {
+    total: usize,
+    by_author: std::collections::HashMap<Option<String>, usize>,
+}
+
+/// Why [`Quota::reserve`] refused.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum QuotaFull {
+    Author,
+    Total,
+}
+
+impl QuotaFull {
+    pub(crate) fn response(&self, what: &str) -> Response {
+        match self {
+            QuotaFull::Author => problem(
+                StatusCode::TOO_MANY_REQUESTS,
+                Some(&format!("this agent holds as many {what} as it may")),
+            ),
+            QuotaFull::Total => problem(
+                StatusCode::INSUFFICIENT_STORAGE,
+                Some(&format!("the server holds as many {what} as it may")),
+            ),
+        }
+    }
+}
+
+/// A place reserved by [`Quota::reserve`]; dropping it gives the place back. Drop it once the
+/// record it was for is registered: from then on the record itself is counted.
+pub(crate) struct QuotaSlot {
+    in_flight: Arc<std::sync::Mutex<QuotaCounts>>,
+    author: Option<String>,
+}
+
+impl Drop for QuotaSlot {
+    fn drop(&mut self) {
+        let mut c = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        c.total -= 1;
+        if let Some(n) = c.by_author.get_mut(&self.author) {
+            *n -= 1;
+            if *n == 0 {
+                c.by_author.remove(&self.author);
+            }
+        }
+    }
+}
+
+impl Quota {
+    pub(crate) fn new(total: usize, per_author: usize) -> Self {
+        Self {
+            total,
+            per_author,
+            in_flight: Default::default(),
+        }
+    }
+
+    /// Reserve a place for a record by `author`. `registered` counts the records already in
+    /// force, overall and by `author`; it is called under the reservation lock, so a record
+    /// registered concurrently is counted either there or as a reservation still held, never
+    /// neither (a registration inserts its record before it drops its slot).
+    pub(crate) fn reserve(
+        &self,
+        author: Option<&str>,
+        registered: impl FnOnce() -> (usize, usize),
+    ) -> Result<QuotaSlot, QuotaFull> {
+        let mut c = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        let (all, mine) = registered();
+        let author = author.map(str::to_string);
+        let mine = mine + c.by_author.get(&author).copied().unwrap_or(0);
+        if mine >= self.per_author {
+            return Err(QuotaFull::Author);
+        }
+        if all + c.total >= self.total {
+            return Err(QuotaFull::Total);
+        }
+        c.total += 1;
+        *c.by_author.entry(author.clone()).or_default() += 1;
+        Ok(QuotaSlot {
+            in_flight: self.in_flight.clone(),
+            author,
+        })
     }
 }
 
@@ -1440,12 +1753,26 @@ pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Rout
         .layer(axum::middleware::from_fn(crate::ldp::cors::cors_middleware)))
 }
 
+/// The largest body a request to `path` may carry: the service routes that anyone may send to
+/// (access requests) are held to their own limits while the body is
+/// read, so no more than that is ever buffered for them; everything else to `max_body`.
+fn body_limit(path: &str, max_body: usize) -> usize {
+    let limit = if path.starts_with(REQUESTS_PATH) {
+        access::MAX_REQUEST_BYTES
+    } else if path.starts_with(GRANTS_PATH) {
+        access::MAX_GRANT_BYTES
+    } else {
+        max_body
+    };
+    limit.min(max_body)
+}
+
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     if let Err(refused) = check_headers(&parts.headers) {
         return refused;
     }
-    let limit = state.cfg.max_body;
+    let limit = body_limit(parts.uri.path(), state.cfg.max_body);
     let body = match axum::body::to_bytes(body, limit).await {
         Ok(b) => b,
         Err(_) => return problem(StatusCode::PAYLOAD_TOO_LARGE, None),
@@ -1535,6 +1862,12 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Ok(agent) => agent,
         Err(error) => return state.challenge(Some(error)),
     };
+    if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
+        if let Some(unavailable) = resources::unavailable(state, &req) {
+            return unavailable;
+        }
+        return access::handle(state, &req, &agent).await;
+    }
     if path.starts_with("/.lws/") || path == "/.lws" {
         return problem(StatusCode::NOT_FOUND, None);
     }
@@ -1600,11 +1933,172 @@ pub fn add_link(headers: &mut HeaderMap, target: &str, rel: &str, media_type: Op
 // helpers give their listings what [`resources`] gives a stored container: content negotiation,
 // paging, an entity tag and the container links.
 
+/// The page a request asks for (`?page=`, 1 when absent), or `None` when it is not one of `pages`.
+pub fn requested_page(req: &LwsRequest, pages: usize) -> Option<usize> {
+    let page = match req.query_param("page") {
+        None => 1,
+        Some(p) => p.parse::<usize>().ok()?,
+    };
+    (1..=pages).contains(&page).then_some(page)
+}
+
+/// Append the paging links of page `page` of `pages` at `base?page=N`: first (always), prev and
+/// next where there is one, and last.
+pub fn add_page_links(headers: &mut HeaderMap, base: &str, page: usize, pages: usize) {
+    let page_uri = |n: usize| format!("{base}?page={n}");
+    add_link(headers, &page_uri(1), "first", None);
+    if page > 1 {
+        add_link(headers, &page_uri(page - 1), "prev", None);
+    }
+    if page < pages {
+        add_link(headers, &page_uri(page + 1), "next", None);
+    }
+    add_link(headers, &page_uri(pages), "last", None);
+}
+
+/// The links a service container or one of its members carries: `up` (the service container for
+/// a member; the storage root for the container itself, since `/.lws/` is no resource), the
+/// storage, its LWS type and its linkset.
+pub fn service_links(cfg: &LwsConfig, headers: &mut HeaderMap, uri: &str, up: &str) {
+    add_link(headers, up, "up", None);
+    add_link(headers, &cfg.storage(), &format!("{LWS_NS}storage"), None);
+    let ty = if uri.ends_with('/') {
+        "Container"
+    } else {
+        "DataResource"
+    };
+    add_link(headers, &format!("{LWS_NS}{ty}"), "type", None);
+    add_link(headers, &meta_key(uri), "linkset", Some(LINKSET_JSON));
+}
+
+/// A strong entity tag over `parts`.
+pub fn etag_of<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    for p in parts {
+        h.update(p.as_bytes());
+        h.update([0]);
+    }
+    format!("\"{}\"", jose::b64url(&h.finalize()[..18]))
+}
+
+/// GET or HEAD on a service container at `uri` holding `items` (each with an `id`, sorted):
+/// negotiated (406 when nothing offered is acceptable), paged at `cfg.page_size` (404 for a page
+/// that does not exist), with an entity tag over `version`, the page and its members (304 when
+/// `If-None-Match` names it), `Vary: Accept` and the container links.
+pub fn service_listing(
+    cfg: &LwsConfig,
+    req: &LwsRequest,
+    uri: &str,
+    items: Vec<Value>,
+    version: &str,
+) -> Response {
+    // Negotiated as a stored container's listing is.
+    let Some(media_type) = resources::negotiate_container(req.header(header::ACCEPT)) else {
+        return problem(StatusCode::NOT_ACCEPTABLE, None);
+    };
+    let size = cfg.page_size.max(1);
+    let pages = items.len().div_ceil(size).max(1);
+    let Some(page) = requested_page(req, pages) else {
+        return problem(StatusCode::NOT_FOUND, None);
+    };
+    let total = items.len();
+    let shown: Vec<Value> = items
+        .into_iter()
+        .skip((page - 1) * size)
+        .take(size)
+        .collect();
+    // The tag covers everything the page shows: the members it lists, as listed, and how many
+    // there are in all (which its paging links follow), so a member that leaves without a
+    // version change (an expiry) still changes it.
+    let (page_tag, total_tag) = (page.to_string(), total.to_string());
+    let listed: Vec<String> = shown.iter().map(Value::to_string).collect();
+    let etag = etag_of(
+        [version, page_tag.as_str(), total_tag.as_str()]
+            .into_iter()
+            .chain(listed.iter().map(String::as_str)),
+    );
+    let refusal = resources::read_refusal(req, &etag);
+    if refusal == Some(StatusCode::PRECONDITION_FAILED) {
+        return problem(StatusCode::PRECONDITION_FAILED, None);
+    }
+    let mut resp = if let Some(status) = refusal {
+        status.into_response()
+    } else {
+        let body = json!({
+            "@context": LWS_CONTEXT,
+            "id": uri,
+            "type": "Container",
+            "totalItems": total,
+            "items": shown,
+        });
+        json_response(StatusCode::OK, &media_type, &body)
+    };
+    let h = resp.headers_mut();
+    set(h, header::ETAG, &etag);
+    set(h, header::VARY, "Accept");
+    service_links(cfg, h, uri, &cfg.storage());
+    if pages > 1 {
+        add_page_links(h, uri, page, pages);
+    }
+    resp
+}
+
+/// The read-only linkset of a service container or member at `anchor`: it has no user-managed
+/// links.
+pub fn service_linkset(cfg: &LwsConfig, req: &LwsRequest, anchor: &str) -> Response {
+    if !matches!(req.method, Method::GET | Method::HEAD) {
+        return method_not_allowed("GET, HEAD");
+    }
+    let doc = json!({"linkset": [{"anchor": anchor}]});
+    let etag = etag_of([anchor]);
+    // Read as any representation is, under the request's preconditions.
+    let mut resp = match resources::read_refusal(req, &etag) {
+        Some(StatusCode::NOT_MODIFIED) => StatusCode::NOT_MODIFIED.into_response(),
+        Some(refused) => problem(refused, None),
+        None => json_response(StatusCode::OK, LINKSET_JSON, &doc),
+    };
+    set(resp.headers_mut(), header::ETAG, &etag);
+    add_link(
+        resp.headers_mut(),
+        &cfg.storage(),
+        &format!("{LWS_NS}storage"),
+        None,
+    );
+    resp
+}
+
+/// Whether a JSON-LD `@context` (a string or an ordered set) includes the LWS context.
+pub fn has_lws_context(v: Option<&Value>) -> bool {
+    match v {
+        Some(Value::String(s)) => s == LWS_CONTEXT,
+        Some(Value::Array(a)) => a.iter().any(|c| c.as_str() == Some(LWS_CONTEXT)),
+        _ => false,
+    }
+}
+
 /// Whether `v` is an absolute IRI (RFC 3987): a scheme, a colon and something after it, with
 /// every character and percent-encoding the grammar allows. One parser checks every IRI a client
 /// sends, so `%ZZ`, a space or a bare fragment is refused everywhere alike.
 pub fn is_uri(v: &str) -> bool {
     v.split_once(':').is_some_and(|(_, rest)| !rest.is_empty()) && oxiri::Iri::parse(v).is_ok()
+}
+
+/// A JSON value that is a string holding an absolute URI.
+pub fn json_is_uri(v: &Value) -> bool {
+    v.as_str().is_some_and(is_uri)
+}
+
+/// Whether a JSON `type` value (a string or an array) names `wanted`, short or in the LWS namespace.
+pub fn has_type(v: &Value, wanted: &str) -> bool {
+    let matches = |t: &Value| {
+        t.as_str()
+            .is_some_and(|t| t == wanted || t.strip_prefix(LWS_NS) == Some(wanted))
+    };
+    match v {
+        Value::Array(a) => a.iter().any(matches),
+        other => matches(other),
+    }
 }
 
 /// Most link relations (each a target and one relation) a request's Link headers may declare.
@@ -1729,8 +2223,10 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
-        /// `read` of this IRI alone fails with a backend error.
+        /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
+        /// fails with a backend error.
         pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
+        pub fail_read_of_any: Arc<std::sync::Mutex<Vec<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of every IRI that starts with this fails with a backend error.
@@ -1750,6 +2246,8 @@ pub(crate) mod test_store {
         pub hold_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// As `hold_next_create`, for the next `write` of the IRI named.
         pub hold_next_write_of: GateOf,
+        /// The next `read` of the IRI named reads it, then waits on the gate before it answers.
+        pub hold_next_read_reply_of: GateOf,
         /// `delete` of this IRI removes it, then reports a failure, as when the cleanup of its
         /// bytes fails after the index commit.
         pub fail_after_delete_of: Arc<std::sync::Mutex<Option<String>>>,
@@ -1757,12 +2255,21 @@ pub(crate) mod test_store {
         pub hold_next_delete_of: GateOf,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
         pub hide: Arc<std::sync::Mutex<Option<String>>>,
-        /// `write` of this IRI commits, then reports a backend failure, as when a remote store's
-        /// reply is lost after the update landed.
+        /// The next `write` of this IRI (or, one ending in `/`, of a member of that container)
+        /// commits, then reports a backend failure, as when a remote store's reply is lost after
+        /// the update landed.
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
-        /// `create_in_container` commits, then reports a backend failure, as when a remote
-        /// store's reply is lost after the update landed.
+        /// `meta` fails, as in a backend outage.
+        pub fail_meta: Arc<AtomicBool>,
+        /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
+        /// before the rest fail.
+        pub exists_answers: Arc<std::sync::atomic::AtomicUsize>,
+        /// `create_in_container` of a resource (not of an intent, see the `intents` module)
+        /// commits, then reports a backend failure, as when a remote store's reply is lost after
+        /// the update landed.
         pub fail_after_create: Arc<AtomicBool>,
+        /// `list_children` fails, as in a backend outage.
+        pub fail_list: Arc<AtomicBool>,
         /// `write` of this IRI is refused before anything is written, as by a full store.
         pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `delete` of this IRI detaches it from its parent, then fails with the record still
@@ -1770,14 +2277,19 @@ pub(crate) mod test_store {
         pub partial_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// How many `delete`s named a parent: removals of a member that are not one step.
         pub two_step_deletes: Arc<std::sync::atomic::AtomicUsize>,
+        /// Fail every [`Store::restore`] of this resource until cleared.
+        pub fail_restore_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// How many times `restore` was called.
+        pub restores: Arc<std::sync::atomic::AtomicUsize>,
         /// When set to `n`, the store step (write, create, delete) after the next `n` fails, once,
         /// before it changes anything; then it is cleared. See [`each_failure_changes_nothing`].
         pub fail_step: Arc<std::sync::Mutex<Option<usize>>>,
-        /// `restore` of this IRI alone fails with a backend error.
-        pub fail_restore_of: Arc<std::sync::Mutex<Option<String>>>,
         /// Once [`FlakyStore::fail_step`] has failed a step, the step after the next `n` fails
         /// too, once: the harness fails putting a mutation back as well as the mutation.
         pub fail_then: Arc<std::sync::Mutex<Option<usize>>>,
+        /// Once [`FlakyStore::fail_step`] has failed a step, every later step fails too: the
+        /// store is gone from then on, as for a process that stops there.
+        pub dead_after: Arc<AtomicBool>,
         fired: Arc<AtomicBool>,
     }
 
@@ -1792,6 +2304,7 @@ pub(crate) mod test_store {
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
                 hold_next_write_of: Default::default(),
+                hold_next_read_reply_of: Default::default(),
                 hold_next_delete_of: Default::default(),
                 fail_after_delete_of: Default::default(),
                 fail_exists_of: Default::default(),
@@ -1801,15 +2314,21 @@ pub(crate) mod test_store {
                 fail_write_under: Default::default(),
                 write_budget: Default::default(),
                 fail_read_of: Default::default(),
+                fail_read_of_any: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
+                fail_list: Default::default(),
+                fail_meta: Default::default(),
+                exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
                 fail_after_create: Default::default(),
                 partial_delete_of: Default::default(),
                 two_step_deletes: Default::default(),
-                fail_step: Default::default(),
                 fail_restore_of: Default::default(),
+                restores: Default::default(),
+                fail_step: Default::default(),
                 fail_then: Default::default(),
+                dead_after: Default::default(),
                 fired: Default::default(),
             }
         }
@@ -1828,7 +2347,8 @@ pub(crate) mod test_store {
                 None => false,
             };
             let fail = if self.fired.load(Ordering::SeqCst) {
-                countdown(&mut self.fail_then.lock().unwrap())
+                self.dead_after.load(Ordering::SeqCst)
+                    || countdown(&mut self.fail_then.lock().unwrap())
             } else {
                 let mut slot = self.fail_step.lock().unwrap();
                 let first = slot.is_some();
@@ -1857,16 +2377,42 @@ pub(crate) mod test_store {
     #[async_trait]
     impl Store for FlakyStore {
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
-            if self.fail_read_of.lock().unwrap().as_deref() == Some(iri) {
+            let failing = self
+                .fail_read_of
+                .lock()
+                .unwrap()
+                .as_deref()
+                .is_some_and(|of| {
+                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
+                })
+                || self
+                    .fail_read_of_any
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|of| of == iri);
+            if failing {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.read(iri).await
+            let read = self.inner.read(iri).await;
+            if let Some(gate) = held(&self.hold_next_read_reply_of, iri) {
+                gate.acquire().await.expect("gate").forget();
+            }
+            read
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+            if self.fail_meta.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.meta(iri).await
         }
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
-            if self.fail_exists.load(Ordering::SeqCst) {
+            if self.fail_exists.load(Ordering::SeqCst)
+                && self
+                    .exists_answers
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                    .is_err()
+            {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             if self.fail_exists_of.lock().unwrap().as_deref() == Some(iri) {
@@ -1912,7 +2458,17 @@ pub(crate) mod test_store {
                 return sent.await.expect("write");
             }
             let written = self.inner.write(iri, body, ct).await;
-            if self.fail_after_write_of.lock().unwrap().as_deref() == Some(iri) {
+            let lost = {
+                let mut slot = self.fail_after_write_of.lock().unwrap();
+                let lost = slot.as_deref().is_some_and(|of| {
+                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
+                });
+                if lost {
+                    *slot = None;
+                }
+                lost
+            };
+            if lost {
                 written?;
                 return Err(ServerError::Storage("the reply was lost".into()));
             }
@@ -1946,7 +2502,9 @@ pub(crate) mod test_store {
                 .inner
                 .create_in_container(container, child, body, ct)
                 .await;
-            if self.fail_after_create.load(Ordering::SeqCst) {
+            if self.fail_after_create.load(Ordering::SeqCst)
+                && !container.starts_with(super::intents::PREFIX)
+            {
                 created?;
                 return Err(ServerError::Storage("the reply was lost".into()));
             }
@@ -1961,6 +2519,7 @@ pub(crate) mod test_store {
         ) -> ServerResult<ResourceMeta> {
             // Counted as a step (so the harness fails it in turn); the write hooks are for the
             // writes a mutation makes, not for putting them back.
+            self.restores.fetch_add(1, Ordering::SeqCst);
             self.step()?;
             if self.fail_restore_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
@@ -2035,6 +2594,9 @@ pub(crate) mod test_store {
             Ok(outcome)
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+            if self.fail_list.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.list_children(container).await
         }
     }
@@ -2188,12 +2750,57 @@ pub(crate) mod test_store {
         let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
         (state, store)
     }
+
+    /// The `Link` targets of `resp` with relation `rel`.
+    pub fn links(resp: &axum::response::Response, rel: &str) -> Vec<String> {
+        resp.headers()
+            .get_all(axum::http::header::LINK)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(super::parse_links)
+            .filter(|(_, p)| p.get("rel").map(String::as_str) == Some(rel))
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    pub async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_store::request;
+    use test_store::{body_json, links, request};
+
+    /// Review finding: request caps were checked against what was registered, and the record
+    /// registered after an asynchronous create, so concurrent creates all passed. Places are
+    /// reserved under one lock and held until registration.
+    #[test]
+    fn quota_places_are_reserved_until_released() {
+        let q = Quota::new(3, 2);
+        let a = q.reserve(Some("a"), || (0, 0)).unwrap();
+        let _a2 = q.reserve(Some("a"), || (0, 0)).unwrap();
+        assert_eq!(
+            q.reserve(Some("a"), || (0, 0)).err(),
+            Some(QuotaFull::Author)
+        );
+        let _b = q.reserve(Some("b"), || (0, 0)).unwrap();
+        assert_eq!(
+            q.reserve(Some("c"), || (0, 0)).err(),
+            Some(QuotaFull::Total)
+        );
+        // Registered records count too.
+        drop(a);
+        assert_eq!(
+            q.reserve(Some("a"), || (1, 1)).err(),
+            Some(QuotaFull::Author)
+        );
+        assert!(q.reserve(Some("c"), || (0, 0)).is_ok());
+    }
 
     async fn http(app: &Router, method: &str, path: &str, body: &'static str) -> StatusCode {
         use tower::ServiceExt;
@@ -2287,8 +2894,53 @@ mod tests {
         assert_eq!(send("link", fine).await, StatusCode::CREATED);
     }
 
+    /// Review finding: every body was buffered up to the server-wide ceiling before any route
+    /// limit applied, so an anonymous request to a service route anyone may post to buffered
+    /// megabytes before its 16 KiB limit refused it. Each route's limit applies while the body
+    /// is read, and no route can raise the ceiling.
+    #[tokio::test]
+    async fn every_route_reads_no_more_than_its_limit() {
+        use tower::ServiceExt;
+        let max = 1 << 20;
+        let app = open_router(max).await;
+        let send = |method: &'static str, path: &'static str, len: usize| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("content-type", LWS_JSON)
+                    .body(Body::from(vec![b' '; len]))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            }
+        };
+        let routes = [
+            ("POST", REQUESTS_PATH, access::MAX_REQUEST_BYTES),
+            ("POST", GRANTS_PATH, access::MAX_GRANT_BYTES),
+            ("POST", "/", max),
+            ("PUT", "/x", max),
+            ("PATCH", "/x", max),
+        ];
+        for (method, path, limit) in routes {
+            assert!(limit <= max);
+            assert_eq!(
+                send(method, path, limit + 1).await,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "{method} {path}"
+            );
+            assert_ne!(
+                send(method, path, limit).await,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "{method} {path}"
+            );
+        }
+        assert_eq!(body_limit("/", 10), 10);
+        assert_eq!(body_limit(REQUESTS_PATH, 10), 10);
+    }
+
     /// Review finding: a member's record and its parent's membership edge were removed in two
-    /// steps on some paths, so a failure in between left
+    /// steps on some paths (service records), so a failure in between left
     /// a live record its container no longer listed. Every removal goes through
     /// [`remove_member`]; this drives each one and counts the two-step deletes it makes.
     #[tokio::test]
@@ -2325,6 +2977,27 @@ mod tests {
         let mut req = request(Method::DELETE, "/c/", &[("depth", "infinity")], "");
         req.headers.insert("depth", "infinity".parse().unwrap());
         assert_eq!(route(&state, req).await.status(), StatusCode::NO_CONTENT);
+        // A grant and an access request, each created and removed.
+        let storage = state.cfg.storage();
+        let access = |kind: &str| {
+            json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": [kind],
+                "storage": storage,
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+            })
+            .to_string()
+        };
+        for (path, body) in [
+            (GRANTS_PATH, access("AccessGrant")),
+            (REQUESTS_PATH, access("AccessRequest")),
+        ] {
+            let r = send(Method::POST, path.into(), LWS_JSON, body).await;
+            assert_eq!(r.status(), StatusCode::CREATED, "{path}");
+            let at = local(r.headers()[header::LOCATION].to_str().unwrap());
+            let r = send(Method::DELETE, at, LWS_JSON, String::new()).await;
+            assert!(r.status().is_success(), "{path}: {}", r.status());
+        }
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }
 
@@ -2386,6 +3059,94 @@ mod tests {
             http(&app, "GET", "/", "").await,
             StatusCode::GATEWAY_TIMEOUT
         );
+    }
+
+    #[test]
+    fn lws_context_check() {
+        assert!(has_lws_context(Some(&json!([LWS_CONTEXT]))));
+        assert!(has_lws_context(Some(&json!(["https://x/", LWS_CONTEXT]))));
+        assert!(has_lws_context(Some(&json!(LWS_CONTEXT))));
+        assert!(!has_lws_context(Some(&json!(["https://x/"]))));
+        assert!(!has_lws_context(None));
+    }
+
+    #[tokio::test]
+    async fn service_listings_page_negotiate_and_tag() {
+        let cfg = LwsConfig::new("http://h");
+        let uri = cfg.absolute(GRANTS_PATH);
+        let items: Vec<Value> = (0..5)
+            .map(|i| json!({"id": format!("{uri}{i}"), "type": "DataResource"}))
+            .collect();
+        let mut cfg = cfg;
+        cfg.page_size = 2;
+        let cfg = cfg;
+        let get = |q: &str, h: &[(&str, &str)]| {
+            service_listing(
+                &cfg,
+                &request(Method::GET, &format!("{GRANTS_PATH}{q}"), h, ""),
+                &uri,
+                items.clone(),
+                "v1",
+            )
+        };
+        let first = get("", &[]);
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(first.headers()[header::CONTENT_TYPE], LWS_JSON);
+        assert_eq!(first.headers()[header::VARY], "Accept");
+        assert_eq!(links(&first, "type"), vec![format!("{LWS_NS}Container")]);
+        assert_eq!(links(&first, "up"), vec![cfg.storage()]);
+        assert_eq!(links(&first, "linkset"), vec![meta_key(&uri)]);
+        assert_eq!(links(&first, "first"), vec![format!("{uri}?page=1")]);
+        assert_eq!(links(&first, "next"), vec![format!("{uri}?page=2")]);
+        assert_eq!(links(&first, "last"), vec![format!("{uri}?page=3")]);
+        assert!(links(&first, "prev").is_empty());
+        let etag = first.headers()[header::ETAG].to_str().unwrap().to_string();
+        let doc = body_json(first).await;
+        assert_eq!(doc["totalItems"], 5);
+        assert_eq!(doc["items"].as_array().unwrap().len(), 2);
+
+        let last = get("?page=3", &[("accept", "application/json")]);
+        assert_eq!(last.headers()[header::CONTENT_TYPE], JSON);
+        assert_eq!(links(&last, "prev"), vec![format!("{uri}?page=2")]);
+        assert!(links(&last, "next").is_empty());
+        assert_ne!(last.headers()[header::ETAG].to_str().unwrap(), etag);
+        assert_eq!(body_json(last).await["items"].as_array().unwrap().len(), 1);
+
+        assert_eq!(get("?page=4", &[]).status(), StatusCode::NOT_FOUND);
+        assert_eq!(get("?page=0", &[]).status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            get("", &[("accept", "text/turtle")]).status(),
+            StatusCode::NOT_ACCEPTABLE
+        );
+        // Review finding: a request for ld+json with the LWS profile, refusing lws+json, got
+        // lws+json. It gets what it asked for, as from a stored container.
+        let ld = get(
+            "",
+            &[(
+                "accept",
+                "application/ld+json; profile=\"https://www.w3.org/ns/lws/v1\", application/lws+json;q=0",
+            )],
+        );
+        assert_eq!(ld.status(), StatusCode::OK);
+        assert_eq!(
+            ld.headers()[header::CONTENT_TYPE],
+            "application/ld+json; profile=\"https://www.w3.org/ns/lws/v1\""
+        );
+        assert_eq!(
+            get("", &[("if-none-match", &etag)]).status(),
+            StatusCode::NOT_MODIFIED
+        );
+        // A one-page listing carries no paging links.
+        let mut roomy = cfg.clone();
+        roomy.page_size = 10;
+        let one = service_listing(
+            &roomy,
+            &request(Method::GET, GRANTS_PATH, &[], ""),
+            &uri,
+            items.clone(),
+            "v1",
+        );
+        assert!(links(&one, "first").is_empty());
     }
 
     #[test]
