@@ -3824,15 +3824,16 @@ struct Representation<'a> {
 }
 
 impl<'a> Representation<'a> {
-    /// The longest a representation of `format` is described as: the largest size, and a
-    /// modification time (whose text is always as long). What a write checks a linkset with
-    /// ([`admissible_meta`]), so that a later change to the content, which grows the size it
-    /// gives but checks no linkset, never makes a stored linkset one a PATCH refuses.
+    /// The longest a representation of `format` is described as: the largest size, and the
+    /// latest modification time a stored date can give (its text grows with the year). What a
+    /// write checks a linkset with ([`admissible_meta`]), so that a later change to the
+    /// content, which changes the size and time it gives but checks no linkset, never makes a
+    /// stored linkset one a PATCH refuses.
     fn longest(format: &'a str) -> Self {
         Self {
             format,
             size: u64::MAX.to_string(),
-            modified: format_rfc3339(0),
+            modified: format_rfc3339(to_secs(u64::MAX) as i64),
         }
     }
 }
@@ -3868,6 +3869,12 @@ async fn linkset_document<S: Store + 'static>(
         meta,
         representation,
     ))
+}
+
+/// What a JSON Patch charges for its target ([`json_patch_within`], in memory): its size as
+/// written and what it allocates.
+fn patch_cost(target: &Value) -> usize {
+    json_size(target).saturating_add(value_cost(target))
 }
 
 /// [`linkset_document`], given the representation it describes.
@@ -3922,8 +3929,10 @@ fn served_linkset(
 /// the result against the linkset's own URI (`base_len` bytes long) then costs and is capped by
 /// ([`linkset_cost`], which charges at least the target's size and [`value_cost`]), with the
 /// document within what the metadata holds ([`LINKSET_SERVED_BYTES`]). Every write that changes
-/// a linkset (POST, PUT and PATCH) checks the document it would serve with this, and a PATCH
-/// checks its target with it, so whatever is stored can be patched.
+/// a linkset (POST, PUT and PATCH) checks the document it would serve with this, so whatever it
+/// stores can be patched within [`LINKSET_COST_BUDGET`]. Metadata stored before this was checked
+/// is not refused when it is read or put back (a rollback restores exactly what was stored); a
+/// PATCH of it is applied within its own cost, and must leave it admissible.
 fn admissible(served: &Value, base_len: usize) -> bool {
     valid_linkset(served)
         && serialized_size(served) <= LINKSET_SERVED_BYTES
@@ -3944,7 +3953,7 @@ fn admissible_meta(
     if !admissible(&served, linkset_base(uri).len()) {
         return Err(problem(
             StatusCode::PAYLOAD_TOO_LARGE,
-            Some("the resource's linkset would be more than a linkset may hold"),
+            Some("the resource's linkset would be more than a linkset may hold (a PATCH of the linkset can shrink it)"),
         ));
     }
     Ok(())
@@ -4071,15 +4080,7 @@ async fn linkset<S: Store + 'static>(
             if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
                 return r;
             }
-            // The target is held to what every write that stores a linkset checks the document
-            // it would serve with ([`admissible`]), so a linkset this server stored passes.
             let base = linkset_base(uri);
-            if !admissible(&document, base.len()) {
-                return problem(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    Some("the resource's linkset is more than a linkset may hold"),
-                );
-            }
             // The patch holds its numbers as their text, so the linkset is read the same way,
             // and written back with every number restored. A linkset holds no numbers, so one a
             // patch adds is refused below, whatever its size.
@@ -4090,8 +4091,13 @@ async fn linkset<S: Store + 'static>(
                 return problem(StatusCode::INTERNAL_SERVER_ERROR, None);
             };
             // Applied within the cost budget with every value charged as `linkset_cost` charges
-            // it, so no clone the patch makes is past what resolving the result may cost.
-            let mut patched = match patch.apply_in_memory(&held, LINKSET_COST_BUDGET) {
+            // it, so no clone the patch makes is past what resolving the result may cost. A
+            // linkset this server stored is within it ([`admissible`]); one stored before that
+            // was checked may not be, and is patched within its own cost (already paid to load
+            // it, and bounded by the metadata's size), so a patch can shrink it: the result is
+            // held to the budget and every cap below whatever the target was.
+            let budget = LINKSET_COST_BUDGET.max(patch_cost(&held));
+            let mut patched = match patch.apply_in_memory(&held, budget) {
                 Ok(v) => v,
                 Err(r) => return r,
             };
@@ -6294,6 +6300,39 @@ mod tests {
         // One that keeps within the cap applies.
         let r = call(&st, "PATCH", &path, &[patch], "[]").await;
         assert!(r.status().is_success(), "{}", r.status());
+    }
+
+    /// Review finding: metadata stored before linksets were held to their caps (an href past
+    /// the field cap, more targets than a linkset may hold) could not be patched at all, not even
+    /// to remove what passes the caps. A PATCH of it is applied within its own cost, and the result
+    /// is held to every cap: one that removes the excess succeeds, one that keeps it is refused.
+    #[tokio::test]
+    async fn a_linkset_stored_past_the_caps_can_be_patched_back_within_them() {
+        let st = state().await;
+        let patch = ("content-type", JSON_PATCH);
+        let long = format!("https://ex.org/{}", "a".repeat(MAX_LINKSET_FIELD));
+        let many: Vec<Value> = (0..3 * MAX_LINKSET_TARGETS)
+            .map(|i| json!({"href": format!("https://ex.org/{i}")}))
+            .collect();
+        for license in [json!([{"href": long}]), Value::Array(many)] {
+            let uri = post(&st, "legacy", "text/plain", "x", &[]).await;
+            let path = format!("{}{META_SUFFIX}", path_of(&uri));
+            let mut meta = st.resource_meta(&uri).await.unwrap();
+            meta.linkset = Some(json!({"linkset": [{"anchor": uri, "license": license}]}));
+            st.put_resource_meta(&uri, &meta).await.unwrap();
+            let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            let keep = r#"[{"op":"add","path":"/linkset/0/describedby","value":[{"href":"https://ex.org/d"}]}]"#;
+            let r = call(&st, "PATCH", &path, &[patch], keep).await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            let remove = r#"[{"op":"remove","path":"/linkset/0/license"}]"#;
+            let r = call(&st, "PATCH", &path, &[patch], remove).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            let served = json_of(call(&st, "GET", &path, &[], "").await).await;
+            assert!(served["linkset"][0].get("license").is_none());
+            let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        }
     }
 
     /// Review findings: a patched linkset was checked, with the server's links put back, only
