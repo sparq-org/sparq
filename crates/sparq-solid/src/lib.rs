@@ -1925,7 +1925,7 @@ impl PodStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "odrl-bridge", feature = "trust-graph")))]
 mod dropped_view_tests;
 
 #[cfg(test)]

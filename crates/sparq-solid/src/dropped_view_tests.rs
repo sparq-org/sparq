@@ -7,6 +7,7 @@
 use super::*;
 
 const N1: &str = "https://pod.ex/notes/n1";
+#[cfg(feature = "odrl-bridge")]
 const ALICE: &str = "https://alice.ex/card#me";
 const BOB: &str = "https://bob.ex/card#me";
 
@@ -29,6 +30,7 @@ fn reads(store: &PodStore, agent: &str, doc: &str) -> bool {
     store.accessible(&s, Mode::Read).iter().any(|g| g.as_str() == doc)
 }
 
+#[cfg(feature = "odrl-bridge")]
 /// Drive `install` on a live pod (it must report an install, and when `grants`, Alice must
 /// then read [`N1`]) and on a dropped one (it must report none, and nobody may read anything).
 fn assert_guarded(name: &str, grants: bool, install: impl Fn(&mut PodStore) -> bool) {
@@ -121,7 +123,8 @@ mod odrl {
             assert!(store.materialize_odrl_permission(&permit, &req).granted);
             store
         };
-        let refreshes: [(&str, &dyn Fn(&mut PodStore)); 2] = [
+        type Refresh<'a> = &'a dyn Fn(&mut PodStore);
+        let refreshes: [(&str, Refresh<'_>); 2] = [
             ("refresh_odrl_grants", &|s| {
                 s.refresh_odrl_grants();
             }),
