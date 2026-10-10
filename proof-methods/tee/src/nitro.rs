@@ -66,7 +66,8 @@ pub struct Document {
 ///
 /// Checks, in order: size; COSE_Sign1 shape and an ES384 protected header;
 /// payload fields; the timestamp's freshness; `cabundle[0]` equal to `root`;
-/// every `cabundle` certificate a CA whose key usage includes certificate
+/// `root` valid at the document's timestamp and at `now_ms`; every `cabundle`
+/// certificate a CA whose key usage includes certificate
 /// signing, and the leaf's key usage, if stated, including digital
 /// signatures; RFC 5280 path validation of the leaf through `cabundle[1..]`
 /// to `root` (ECDSA P-384 / SHA-384 signatures, basic constraints, path length
@@ -108,7 +109,14 @@ pub fn verify(
     }
     let parse =
         |der: &[u8]| Certificate::from_der(der).map_err(|_| Rejected("malformed certificate"));
-    // Key usage, which the path validator below does not check.
+    // The trust anchor's validity and every certificate's key usage, which
+    // the path validator below does not check.
+    let anchor = parse(root)?;
+    for unix_seconds in [fields.timestamp / 1000, now_ms / 1000] {
+        if !valid_at(&anchor, unix_seconds) {
+            return Err(Rejected("trusted root certificate is not valid"));
+        }
+    }
     for der in bundle {
         let cert = parse(der)?;
         if !is_ca(&cert) {
@@ -382,6 +390,12 @@ fn validate_path(
             _ => "attestation certificate chain does not verify",
         })
     })
+}
+
+fn valid_at(cert: &Certificate, unix_seconds: u64) -> bool {
+    let validity = &cert.tbs_certificate.validity;
+    validity.not_before.to_unix_duration().as_secs() <= unix_seconds
+        && unix_seconds <= validity.not_after.to_unix_duration().as_secs()
 }
 
 /// The Nitro attestation profile assigns no meaning to extended key usage, so

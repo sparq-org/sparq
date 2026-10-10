@@ -17,12 +17,13 @@ use sparq_vcq_disclosed::fixtures::{self, QUERIES};
 use sparq_vcq_tee::protocol::{self, Attester, EnclaveRequest, EnclaveResponse};
 use sparq_vcq_tee::{Rejected, Statement, TeeProof, TrustPolicy, nitro, verify};
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+use x509_cert::der::asn1::UtcTime;
 use x509_cert::ext::AsExtension;
 use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
-use x509_cert::time::Validity;
+use x509_cert::time::{Time, Validity};
 
 const SALT: [u8; 32] = [0xa5; 32];
 const NONCE: [u8; 32] = [7; 32];
@@ -37,7 +38,23 @@ fn now_ms() -> u64 {
 }
 
 fn cert(profile: Profile, subject: &str, key: &SigningKey, signer: &SigningKey) -> Vec<u8> {
-    cert_with(profile, subject, key, signer, 3600, |_| {})
+    cert_with(
+        profile,
+        subject,
+        key,
+        signer,
+        Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        |_| {},
+    )
+}
+
+/// Validity from `start_ms` (truncated to whole seconds) for `secs` seconds.
+fn window(start_ms: u64, secs: u64) -> Validity {
+    let at = |s: u64| Time::UtcTime(UtcTime::from_unix_duration(Duration::from_secs(s)).unwrap());
+    Validity {
+        not_before: at(start_ms / 1000),
+        not_after: at(start_ms / 1000 + secs),
+    }
 }
 
 fn cert_with(
@@ -45,14 +62,14 @@ fn cert_with(
     subject: &str,
     key: &SigningKey,
     signer: &SigningKey,
-    valid_for_secs: u64,
+    validity: Validity,
     extend: impl FnOnce(&mut CertificateBuilder<'_, SigningKey>),
 ) -> Vec<u8> {
     let spki = SubjectPublicKeyInfoOwned::from_key(*key.verifying_key()).unwrap();
     let mut builder = CertificateBuilder::new(
         profile,
         SerialNumber::from(1u32),
-        Validity::from_now(Duration::from_secs(valid_for_secs)).unwrap(),
+        validity,
         Name::from_str(subject).unwrap(),
         spki,
         signer,
@@ -384,7 +401,7 @@ fn rejections() {
     };
     assert_eq!(
         reject(&statement, &expired, &policy, now + 2 * 3600 * 1000),
-        "attestation certificate is not valid at the document's time"
+        "trusted root certificate is not valid"
     );
     nitro.timestamp = None;
 
@@ -541,7 +558,7 @@ fn certificate_path_constraints() {
         "CN=test-intermediate",
         &mid_key,
         &root_key,
-        3600,
+        Validity::from_now(Duration::from_secs(3600)).unwrap(),
         |builder| {
             builder
                 .add_extension(&BasicConstraints {
@@ -571,7 +588,7 @@ fn certificate_path_constraints() {
         "CN=test-intermediate",
         &mid_key,
         &root_key,
-        3600,
+        Validity::from_now(Duration::from_secs(3600)).unwrap(),
         |builder| builder.add_extension(&UnknownCritical).unwrap(),
     );
     let mut nitro = TestNitro::with_chain(root.clone(), vec![unknown], leaf, leaf_key.clone());
@@ -592,13 +609,89 @@ fn certificate_path_constraints() {
         "CN=test-enclave",
         &leaf_key,
         &mid_key,
-        10,
+        window(now, 10),
         |_| {},
     );
-    let mut nitro = TestNitro::with_chain(root, vec![intermediate], short_leaf, leaf_key);
+    let mut nitro = TestNitro::with_chain(
+        root,
+        vec![intermediate.clone()],
+        short_leaf,
+        leaf_key.clone(),
+    );
     nitro.timestamp = Some(now);
     assert_eq!(
         chain_rejection(&mut nitro, now + 60_000),
         "attestation certificate is not valid now"
     );
+
+    // A root valid when the document was made but expired when it is
+    // verified, over an intermediate and leaf that are valid at both times.
+    let (root_at, mid_at, leaf_at) = (now - 3_600_000, now - 3_600_000, now - 3_600_000);
+    let chain_under = |root_validity: Validity| {
+        let root = cert_with(
+            Profile::Root,
+            "CN=test-root",
+            &root_key,
+            &root_key,
+            root_validity,
+            |_| {},
+        );
+        let intermediate = cert_with(
+            sub_ca("CN=test-root", None),
+            "CN=test-intermediate",
+            &mid_key,
+            &root_key,
+            window(mid_at, 7200),
+            |_| {},
+        );
+        let leaf = cert_with(
+            leaf_profile("CN=test-intermediate"),
+            "CN=test-enclave",
+            &leaf_key,
+            &mid_key,
+            window(leaf_at, 7200),
+            |_| {},
+        );
+        TestNitro::with_chain(root, vec![intermediate], leaf, leaf_key.clone())
+    };
+    let mut nitro = chain_under(window(root_at, 3600 + 30));
+    nitro.timestamp = Some(now);
+    assert_eq!(
+        chain_rejection(&mut nitro, now + 60_000),
+        "trusted root certificate is not valid"
+    );
+
+    // A root valid when the document is verified but not yet valid when it
+    // was made.
+    let mut nitro = chain_under(window(now - 30_000, 3600));
+    nitro.timestamp = Some(now - 120_000);
+    assert_eq!(
+        chain_rejection(&mut nitro, now),
+        "trusted root certificate is not valid"
+    );
+
+    // A leaf issued after the document's time, under a root valid at both
+    // times.
+    let mut nitro = chain_under(window(root_at, 7200));
+    nitro.leaf = cert_with(
+        leaf_profile("CN=test-intermediate"),
+        "CN=test-enclave",
+        &leaf_key,
+        &mid_key,
+        window(now - 30_000, 3600),
+        |_| {},
+    );
+    nitro.timestamp = Some(now - 120_000);
+    assert_eq!(
+        chain_rejection(&mut nitro, now),
+        "attestation certificate is not valid at the document's time"
+    );
+
+    // The same chain with a root valid at both times verifies.
+    let mut nitro = chain_under(window(root_at, 7200));
+    nitro.timestamp = Some(now - 120_000);
+    let policy = nitro.policy();
+    let request = fixtures::request(query("Q1"), DatasetAuthority::HolderDeclared, NONCE);
+    let (statement, proof) = present(&mut nitro, &request, 1);
+    assert!(verify(&request, &statement, &proof, &policy, now).is_ok());
 }
