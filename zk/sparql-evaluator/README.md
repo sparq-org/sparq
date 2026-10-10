@@ -16,6 +16,9 @@ The [V2 dataset API](../../skills/zk-query-proofs/references/exact-datasets-v2.m
 documents its separate wire schema, N-Quads/catalog commitment and GRAPH plus
 local-snapshot FROM/FROM NAMED behavior. V1 commitment semantics are unchanged.
 `coverage.json` inventories V1 only; its named-graph rejections do not describe V2.
+`coverage-authenticated-rdf.json` inventories the authenticated-RDF (V5) relation from
+guest executions of the accepted V5 image; `scripts/authenticated_rdf_coverage.py`
+regenerates it from the `host/examples/paper_sweep.rs` executor records.
 V2 native and actual-guest test definitions are listed in the linked V2 reference.
 The separate [V3 graph-result API](../../skills/zk-query-proofs/references/graph-results-v3.md)
 adds bounded blank-node/graph results; its guest/receipt evidence is separate.

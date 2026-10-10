@@ -9,6 +9,11 @@ license = "MIT"
 
 [workspace]
 
+# Measurement only: report per-phase cycle counts to the host's stdout. The
+# production image never enables it; methods builds it as a separate image.
+[features]
+phase-cycles = []
+
 [dependencies]
 risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
 sparq-proved-evaluator-model = { path = "../../model", features = ["graph-results", "authenticated-rdf"] }
