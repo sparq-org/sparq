@@ -3593,15 +3593,16 @@ async fn linkset<S: Store + 'static>(
         },
         Method::OPTIONS => StatusCode::NO_CONTENT.into_response(),
         Method::PATCH => {
+            // The patch format is settled before the preconditions, as for a data resource.
+            let patch = match Patch::parse(req) {
+                Ok(p) => p,
+                Err(r) => return r,
+            };
             if let Precondition::Failed | Precondition::NotModified =
                 evaluate(&req.headers, Some(&etag), None, false)
             {
                 return problem(StatusCode::PRECONDITION_FAILED, None);
             }
-            let patch = match Patch::parse(req) {
-                Ok(p) => p,
-                Err(r) => return r,
-            };
             if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
                 return r;
             }
@@ -4087,6 +4088,38 @@ mod tests {
     /// A JSON Patch replacing the `linkset` array with `doc`'s.
     fn replace_linkset(doc: &Value) -> String {
         json!([{"op": "replace", "path": "/linkset", "value": doc["linkset"]}]).to_string()
+    }
+
+    /// A linkset PATCH in another format is a 415 whatever its validators, and a JSON Patch with
+    /// a stale one a 412.
+    #[tokio::test]
+    async fn a_linkset_patch_checks_its_format_before_its_preconditions() {
+        let st = state().await;
+        let uri = post(&st, "f.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let stale = ("if-match", "\"stale\"");
+        let ops =
+            r#"[{"op":"add","path":"/linkset/0/license","value":[{"href":"https://ex.org/l"}]}]"#;
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", "application/merge-patch+json"), stale],
+            "{}",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH), stale],
+            ops,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], ops).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]
