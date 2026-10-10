@@ -283,9 +283,12 @@ For some queries SPARQL 1.1 permits more than one result over the same dataset: 
 LIMIT where ORDER BY does not fix the order of solutions (no ORDER BY, solutions it leaves
 equal, or values it does not compare), REDUCED, SAMPLE, GROUP_CONCAT, aggregates over
 floating-point values, and blank nodes made by `BNODE`. An Exact answer to such a query is one
-of the permitted results, and the holder chooses which. A verifier that needs one particular
-result writes a query that determines it, for example with an ORDER BY over keys that SPARQL
-1.1 totally orders and that are unique among the solutions.
+of the permitted results, and the holder chooses which. The result is unique when every OFFSET and LIMIT, at every level of the query,
+follows an ORDER BY that strictly orders all the solutions at that level, and the query uses
+no REDUCED, SAMPLE, GROUP_CONCAT or `BNODE`, no SUM or AVG over `xsd:float` or `xsd:double`
+values, and no MIN or MAX over values that compare equal but are different terms. A verifier
+that needs one particular result writes such a query. A proof method MAY fix these choices
+itself, but a verifier MUST NOT rely on that unless the method publishes it.
 
 An Exact answer never satisfies a request for a Supported answer, and the reverse; the kinds
 MUST be equal.
@@ -593,6 +596,9 @@ by hashing it. The Merkle-root cryptosuites sign a salted digest, which avoids t
 problem while the salt stays private, but not the first. For this reason the revealed mode
 sends the signature without the salt (section 6.3). Whether signatures can be forged by an attacker with a quantum computer depends on the
 cryptosuite, not on the mode: for Ed25519, the public key alone is enough.
+
+Where SPARQL 1.1 permits several results (section 6.1), the holder's choice among them
+reveals nothing beyond the result it returns.
 
 In the disclosed signature mode the verifier learns everything the disclosed credentials or
 derived presentations contain, including claims the issuer made mandatory to disclose.
