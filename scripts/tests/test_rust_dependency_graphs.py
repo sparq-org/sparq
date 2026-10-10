@@ -25,11 +25,13 @@ class GraphCoverage(unittest.TestCase):
             (self.root / manifest.with_name("Cargo.lock")).write_text("version = 4\n")
 
     def test_each_independent_lock_is_required(self):
-        # zkp-14.5: the separately pinned V5 guest is a fourth graph.
+        # zkp-14.5: the separately pinned V5 guest is a fourth graph; the
+        # detached proof-methods workspace is a fifth.
         self.assertEqual(tuple(map(str, gate.MANIFESTS)), (
             "Cargo.toml", "zk/sparql-evaluator/Cargo.toml",
             "zk/sparql-evaluator/methods/guest/Cargo.toml",
-            "zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml"))
+            "zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml",
+            "proof-methods/Cargo.toml"))
         for missing in gate.MANIFESTS:
             with self.subTest(missing=str(missing)):
                 lock = self.root / missing.with_name("Cargo.lock")
@@ -46,12 +48,12 @@ class GraphCoverage(unittest.TestCase):
                     SimpleNamespace(returncode=int(i == failing)) for i in range(len(gate.MANIFESTS))
                 ]) as run:
                     self.assertEqual(gate.run_graphs("deny-advisories", self.root), 1)
-                    self.assertEqual(run.call_count, 4)
+                    self.assertEqual(run.call_count, 5)
 
-    def test_all_four_successes_are_required(self):
+    def test_all_five_successes_are_required(self):
         with patch.object(gate.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as run:
             self.assertEqual(gate.run_graphs("vet", self.root), 0)
-            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_count, 5)
             for call in run.call_args_list:
                 args = call.args[0]
                 self.assertIn("--cargo-arg=--locked", args)
@@ -59,8 +61,8 @@ class GraphCoverage(unittest.TestCase):
                 self.assertIn("--frozen", args)
                 self.assertNotIn("--filter-graph", args)
 
-    def test_deny_uses_one_absolute_policy_for_exactly_four_manifests(self):
-        self.assertEqual(len(gate.MANIFESTS), 4)
+    def test_deny_uses_one_absolute_policy_for_exactly_five_manifests(self):
+        self.assertEqual(len(gate.MANIFESTS), 5)
         for manifest in gate.MANIFESTS:
             self.assertEqual(gate.command("deny-integrity", manifest, self.root), [
                 gate.os.environ.get("CARGO", "cargo"), "deny", "--manifest-path", str(manifest),
@@ -98,9 +100,10 @@ class GraphCoverage(unittest.TestCase):
     def test_sbom_inventory_includes_detached_guests(self):
         with patch.object(gate.subprocess, "check_output", side_effect=self.metadata()):
             paths = gate.sbom_paths(self.root)
-        self.assertEqual(len(paths), 4)
+        self.assertEqual(len(paths), 5)
         self.assertIn(Path("zk/sparql-evaluator/methods/guest/member2.cdx.json"), paths)
         self.assertIn(Path("zk/sparql-evaluator/methods/guest-authrdf/member3.cdx.json"), paths)
+        self.assertIn(Path("proof-methods/member4.cdx.json"), paths)
 
     def test_root_sboms_cannot_mask_missing_guest_sbom(self):
         for missing in (2, 3):
@@ -150,6 +153,8 @@ class GraphCoverage(unittest.TestCase):
             expected = set(gate.SDK_PATCHES)
             if str(manifest) in guests:
                 expected -= {"risc0-build", "rzup"}
+            if str(manifest) == "proof-methods/Cargo.toml":
+                expected = set()  # No zkVM SDK in the proof-methods graph.
             self.assertEqual(set(selected), expected)
             for name, package in selected.items():
                 self.assertEqual(package["version"], gate.SDK_PATCHES[name])
