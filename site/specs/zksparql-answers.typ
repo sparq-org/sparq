@@ -160,7 +160,8 @@ anything the holder returns.
     keys. An empty array means the verifier
     accepts an input dataset whose credentials are not checked against any issuer key.],
   [`signatureModes`], [array of strings], [REQUIRED if `issuers` is not empty, and absent
-    otherwise. The signature modes the verifier accepts: `"hidden"`, `"revealed"` or both.
+    otherwise. The signature modes the verifier accepts: one or more of `"hidden"`, `"revealed"` and
+    `"disclosed"`.
     Section 6.3.],
   [`proofMethods`], [array of objects], [REQUIRED, non-empty. The proof methods the verifier
     accepts, in order of preference. Each entry has `id`, `version`, `artifact` and
@@ -221,9 +222,9 @@ The holder service returns one answer presentation for one query request.
   [`proof`], [byte string], [REQUIRED. The proof, in the encoding the proof method defines.],
 )
 
-The presentation carries no credential and no per-row provenance. In the hidden signature
-mode it also carries no issuer identity. What
-the verifier learns is listed in section 10.2.
+Except in the disclosed signature mode (section 6.3), the presentation carries no credential
+and no per-row provenance, and in the hidden signature mode it also carries no issuer
+identity. What the verifier learns is listed in section 10.2.
 
 == Result encoding
 
@@ -287,7 +288,7 @@ verifier-agreed one.
 == Signature modes
 
 When the request lists issuer keys, the proof must show that every credential in $D$ is signed
-by one of them. There are two ways to do that, and the verifier chooses which it accepts.
+by one of them. There are three ways to do that, and the verifier chooses which it accepts.
 
 In the #emph[hidden] mode, the proof shows that the holder knows a valid signature from one of
 the listed keys on every credential in $D$. The signatures, the signed messages and which key
@@ -300,6 +301,14 @@ against a key in `issuers`. The proof then only has to show that $D$ is exactly 
 signed messages cover, and that the result is correct over $D$. This is cheaper to prove, but
 discloses the signatures, the signed messages, the issuer keys used and the number of
 credentials (section 10.2).
+
+In the #emph[disclosed] mode, used only by proof methods whose evidence is disclosed
+credentials (section 9), the `proof` member carries the credentials, or presentations derived
+from them by a selective-disclosure cryptosuite such as `bbs-2023` #cite("VC-DI-BBS") or
+`ecdsa-sd-2023` #cite("VC-DI-ECDSA"). The `signatures` member is absent. The verifier checks
+them under their cryptosuite against a key in `issuers`, builds $D$ from what they disclose,
+and evaluates the query itself. The verifier sees all the disclosed data, so a verifier lists
+this mode only if it may see that data.
 
 A proof method states which modes it supports for each cryptosuite (section 9). Other
 trade-offs between what is hidden and what is revealed, such as revealing only which issuers
@@ -402,7 +411,9 @@ check that fails. It returns no partial result and no warning instead of a rejec
   reject unless `input.commitment` equals the request's.
 + If the request has `signatureModes`, reject unless `signatureMode` is one of them. In the
   revealed mode, reject unless every entry of `signatures` verifies under its cryptosuite, with
-  a `verificationMethod` and `cryptosuite` that match an entry of the request's `issuers`.
+  a `verificationMethod` and `cryptosuite` that match an entry of the request's `issuers`. In
+  the disclosed mode, the proof method's checks in the step below verify the disclosed
+  credentials in the same way.
 + Reject if the result breaks section 5.1 or 6.1: the wrong shape for the query form, a
   Supported ASK of `false`, an empty Supported SELECT, duplicate rows in a Supported SELECT, or
   more than `limits.maxResultRows` rows or triples.
@@ -498,8 +509,10 @@ version 1.
     credentials; the verifier checks the signatures and evaluates the query itself. A baseline
     for comparison: it hides nothing.],
   [`selective-disclosure-reevaluation`], [disclosed credentials, selectively], [The holder
-    discloses, with `bbs-2023` or `ecdsa-sd-2023`, only the triples each returned solution
-    uses; the verifier checks them and evaluates the query over them. Supported answers only,
+    discloses, with `bbs-2023` or `ecdsa-sd-2023`, the claims each returned solution uses,
+    together with any claims the issuer made mandatory to disclose and the structure the
+    cryptosuite needs; the verifier checks them and evaluates the query over them. The holder
+    service must check everything a derived presentation discloses before sending it. Supported answers only,
     for queries whose solutions remain solutions when data is added (no negation, OPTIONAL or
     aggregation).],
   [`vole-designated-verifier`], [zero-knowledge proof, interactive, designated-verifier],
@@ -543,6 +556,9 @@ the same credential. When the signed message is an unsalted hash of the credenti
 by hashing it. A cryptosuite that salts what it signs avoids the second problem but not the
 first. Whether signatures can be forged by an attacker with a quantum computer depends on the
 cryptosuite, not on the mode: for Ed25519, the public key alone is enough.
+
+In the disclosed signature mode the verifier learns everything the disclosed credentials or
+derived presentations contain, including claims the issuer made mandatory to disclose.
 
 A holder service SHOULD use a fresh salt for each holder-declared presentation. A reused
 salt over the same credentials repeats the commitment, which lets verifiers link
@@ -704,6 +720,10 @@ presents and agrees inputs, not what the holder sends.
     v2.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-data-model-2.0/.]),
   ("VC-DATA-INTEGRITY", [Sporny, M.; Longley, D.; et al. (eds). #emph[Verifiable Credential
     Data Integrity 1.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-data-integrity/.]),
+  ("VC-DI-BBS", [Sporny, M.; Longley, D.; et al. (eds). #emph[Data Integrity BBS Cryptosuites
+    v1.0]. W3C. https://www.w3.org/TR/vc-di-bbs/.]),
+  ("VC-DI-ECDSA", [Sporny, M.; Longley, D.; et al. (eds). #emph[Data Integrity ECDSA
+    Cryptosuites v1.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-di-ecdsa/.]),
   ("VC-DI-EDDSA", [Sporny, M.; Longley, D.; et al. (eds). #emph[Data Integrity EdDSA
     Cryptosuites v1.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-di-eddsa/.]),
   ("OID4VP", [Terbu, O.; Lodderstedt, T.; Yasuda, K.; Fett, D.; Heenan, J. #emph[OpenID for
