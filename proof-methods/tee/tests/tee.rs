@@ -17,6 +17,8 @@ use sparq_vcq_disclosed::fixtures::{self, QUERIES};
 use sparq_vcq_tee::protocol::{self, Attester, EnclaveRequest, EnclaveResponse};
 use sparq_vcq_tee::{Rejected, Statement, TeeProof, TrustPolicy, nitro, verify};
 use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+use x509_cert::ext::AsExtension;
+use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages};
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
@@ -35,23 +37,74 @@ fn now_ms() -> u64 {
 }
 
 fn cert(profile: Profile, subject: &str, key: &SigningKey, signer: &SigningKey) -> Vec<u8> {
+    cert_with(profile, subject, key, signer, 3600, |_| {})
+}
+
+fn cert_with(
+    profile: Profile,
+    subject: &str,
+    key: &SigningKey,
+    signer: &SigningKey,
+    valid_for_secs: u64,
+    extend: impl FnOnce(&mut CertificateBuilder<'_, SigningKey>),
+) -> Vec<u8> {
     let spki = SubjectPublicKeyInfoOwned::from_key(*key.verifying_key()).unwrap();
-    let builder = CertificateBuilder::new(
+    let mut builder = CertificateBuilder::new(
         profile,
         SerialNumber::from(1u32),
-        Validity::from_now(Duration::from_secs(3600)).unwrap(),
+        Validity::from_now(Duration::from_secs(valid_for_secs)).unwrap(),
         Name::from_str(subject).unwrap(),
         spki,
         signer,
     )
     .unwrap();
+    extend(&mut builder);
     builder.build::<DerSignature>().unwrap().to_der().unwrap()
+}
+
+fn sub_ca(issuer: &str, path_len_constraint: Option<u8>) -> Profile {
+    Profile::SubCA {
+        issuer: Name::from_str(issuer).unwrap(),
+        path_len_constraint,
+    }
+}
+
+fn leaf_profile(issuer: &str) -> Profile {
+    Profile::Leaf {
+        issuer: Name::from_str(issuer).unwrap(),
+        enable_key_agreement: false,
+        enable_key_encipherment: false,
+        include_subject_key_identifier: true,
+    }
+}
+
+/// A critical extension no verifier understands.
+struct UnknownCritical;
+
+impl const_oid::AssociatedOid for UnknownCritical {
+    const OID: const_oid::ObjectIdentifier =
+        const_oid::ObjectIdentifier::new_unwrap("1.3.6.1.4.1.55555.1");
+}
+
+impl der::Encode for UnknownCritical {
+    fn encoded_len(&self) -> der::Result<der::Length> {
+        der::asn1::Null.encoded_len()
+    }
+    fn encode(&self, writer: &mut impl der::Writer) -> der::Result<()> {
+        der::asn1::Null.encode(writer)
+    }
+}
+
+impl AsExtension for UnknownCritical {
+    fn critical(&self, _: &Name, _: &[x509_cert::ext::Extension]) -> bool {
+        true
+    }
 }
 
 /// A root, an intermediate and a leaf key, and documents signed by the leaf.
 struct TestNitro {
     root: Vec<u8>,
-    intermediate: Vec<u8>,
+    intermediates: Vec<Vec<u8>>,
     leaf: Vec<u8>,
     leaf_key: SigningKey,
     pcr0: [u8; 48],
@@ -65,27 +118,29 @@ impl TestNitro {
         let leaf_key = SigningKey::random(&mut OsRng);
         let root = cert(Profile::Root, "CN=test-root", &root_key, &root_key);
         let intermediate = cert(
-            Profile::SubCA {
-                issuer: Name::from_str("CN=test-root").unwrap(),
-                path_len_constraint: None,
-            },
+            sub_ca("CN=test-root", None),
             "CN=test-intermediate",
             &mid_key,
             &root_key,
         );
         let leaf = cert(
-            Profile::Leaf {
-                issuer: Name::from_str("CN=test-intermediate").unwrap(),
-                enable_key_agreement: false,
-                enable_key_encipherment: false,
-            },
+            leaf_profile("CN=test-intermediate"),
             "CN=test-enclave",
             &leaf_key,
             &mid_key,
         );
+        Self::with_chain(root, vec![intermediate], leaf, leaf_key)
+    }
+
+    fn with_chain(
+        root: Vec<u8>,
+        intermediates: Vec<Vec<u8>>,
+        leaf: Vec<u8>,
+        leaf_key: SigningKey,
+    ) -> Self {
         Self {
             root,
-            intermediate,
+            intermediates,
             leaf,
             leaf_key,
             pcr0: PCR0,
@@ -120,10 +175,12 @@ impl TestNitro {
             (text("certificate"), Value::Bytes(self.leaf.clone())),
             (
                 text("cabundle"),
-                Value::Array(vec![
-                    Value::Bytes(self.root.clone()),
-                    Value::Bytes(self.intermediate.clone()),
-                ]),
+                Value::Array(
+                    std::iter::once(&self.root)
+                        .chain(&self.intermediates)
+                        .map(|der| Value::Bytes(der.clone()))
+                        .collect(),
+                ),
             ),
             (text("public_key"), Value::Null),
             (text("user_data"), Value::Bytes(user_data.to_vec())),
@@ -309,7 +366,7 @@ fn rejections() {
     // A leaf signed by a key outside the chain.
     let mut forged = TestNitro::new();
     forged.root = nitro.root.clone();
-    forged.intermediate = nitro.intermediate.clone();
+    forged.intermediates = nitro.intermediates.clone();
     let forged_doc = TeeProof {
         attestation: forged.sign(&forged.payload(&digest, &NONCE), -35),
         ..proof.clone()
@@ -404,4 +461,144 @@ fn messages_are_length_prefixed_and_bounded() {
     );
     let too_long = ((protocol::MAX_MESSAGE_BYTES + 1) as u32).to_be_bytes();
     assert!(protocol::read_message(&mut too_long.as_slice()).is_err());
+}
+
+/// Rejects a document from `nitro` with the message the verifier gives,
+/// verified at `now`.
+fn chain_rejection(nitro: &mut TestNitro, now: u64) -> &'static str {
+    let policy = nitro.policy();
+    let request = fixtures::request(query("Q1"), DatasetAuthority::HolderDeclared, NONCE);
+    let (statement, proof) = present(nitro, &request, 1);
+    verify(&request, &statement, &proof, &policy, now)
+        .unwrap_err()
+        .0
+}
+
+#[test]
+fn certificate_path_constraints() {
+    let root_key = SigningKey::random(&mut OsRng);
+    let mid_key = SigningKey::random(&mut OsRng);
+    let extra_key = SigningKey::random(&mut OsRng);
+    let leaf_key = SigningKey::random(&mut OsRng);
+    let root = cert(Profile::Root, "CN=test-root", &root_key, &root_key);
+    // Ahead of the certificates built below, whose notBefore is truncated to
+    // the whole second they are built in.
+    let now = now_ms() + 2_000;
+
+    // root -> CA with pathLenConstraint 0 -> another CA -> leaf.
+    let constrained = cert(
+        sub_ca("CN=test-root", Some(0)),
+        "CN=test-intermediate",
+        &mid_key,
+        &root_key,
+    );
+    let extra = cert(
+        sub_ca("CN=test-intermediate", None),
+        "CN=test-extra",
+        &extra_key,
+        &mid_key,
+    );
+    let leaf = cert(
+        leaf_profile("CN=test-extra"),
+        "CN=test-enclave",
+        &leaf_key,
+        &extra_key,
+    );
+    let mut nitro = TestNitro::with_chain(
+        root.clone(),
+        vec![constrained.clone(), extra],
+        leaf,
+        leaf_key.clone(),
+    );
+    assert_eq!(
+        chain_rejection(&mut nitro, now),
+        "attestation chain exceeds a path length constraint"
+    );
+
+    // The same constraint admits a leaf directly under that CA.
+    let leaf = cert(
+        leaf_profile("CN=test-intermediate"),
+        "CN=test-enclave",
+        &leaf_key,
+        &mid_key,
+    );
+    let mut nitro = TestNitro::with_chain(
+        root.clone(),
+        vec![constrained],
+        leaf.clone(),
+        leaf_key.clone(),
+    );
+    let policy = nitro.policy();
+    let request = fixtures::request(query("Q1"), DatasetAuthority::HolderDeclared, NONCE);
+    let (statement, proof) = present(&mut nitro, &request, 1);
+    assert!(verify(&request, &statement, &proof, &policy, now).is_ok());
+
+    // A CA whose key usage excludes certificate signing.
+    let no_cert_sign = cert_with(
+        Profile::Manual {
+            issuer: Some(Name::from_str("CN=test-root").unwrap()),
+        },
+        "CN=test-intermediate",
+        &mid_key,
+        &root_key,
+        3600,
+        |builder| {
+            builder
+                .add_extension(&BasicConstraints {
+                    ca: true,
+                    path_len_constraint: None,
+                })
+                .unwrap();
+            builder
+                .add_extension(&KeyUsage(KeyUsages::DigitalSignature.into()))
+                .unwrap();
+        },
+    );
+    let mut nitro = TestNitro::with_chain(
+        root.clone(),
+        vec![no_cert_sign],
+        leaf.clone(),
+        leaf_key.clone(),
+    );
+    assert_eq!(
+        chain_rejection(&mut nitro, now),
+        "attestation CA certificate is not for certificate signing"
+    );
+
+    // An intermediate with a critical extension the verifier does not process.
+    let unknown = cert_with(
+        sub_ca("CN=test-root", None),
+        "CN=test-intermediate",
+        &mid_key,
+        &root_key,
+        3600,
+        |builder| builder.add_extension(&UnknownCritical).unwrap(),
+    );
+    let mut nitro = TestNitro::with_chain(root.clone(), vec![unknown], leaf, leaf_key.clone());
+    assert_eq!(
+        chain_rejection(&mut nitro, now),
+        "attestation certificate has an unsupported critical extension"
+    );
+
+    // A leaf valid when the document was made but expired when it is verified.
+    let intermediate = cert(
+        sub_ca("CN=test-root", None),
+        "CN=test-intermediate",
+        &mid_key,
+        &root_key,
+    );
+    let short_leaf = cert_with(
+        leaf_profile("CN=test-intermediate"),
+        "CN=test-enclave",
+        &leaf_key,
+        &mid_key,
+        10,
+        |_| {},
+    );
+    let mut nitro = TestNitro::with_chain(root, vec![intermediate], short_leaf, leaf_key);
+    nitro.timestamp = Some(now);
+    assert_eq!(
+        chain_rejection(&mut nitro, now + 60_000),
+        "attestation certificate is not valid now"
+    );
 }

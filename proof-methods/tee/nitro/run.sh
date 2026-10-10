@@ -16,7 +16,15 @@ set -euo pipefail
 REPS=${1:-21}
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 WORK=$(mktemp -d)
-trap 'nitro-cli terminate-enclave --all >/dev/null 2>&1 || true; rm -rf "$WORK"' EXIT
+ENCLAVE_ID=
+# Terminate only the enclave this script started, if it started one.
+cleanup() {
+  if [ -n "$ENCLAVE_ID" ]; then
+    nitro-cli terminate-enclave --enclave-id "$ENCLAVE_ID" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 if [ "${SETUP:-0}" = 1 ]; then
   dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel docker jq >&2
@@ -35,5 +43,6 @@ echo "PCR0 $PCR0" >&2
 cp "$WORK/build.json" "$ROOT/proof-methods/target/tee-build.json"
 
 nitro-cli run-enclave --eif-path "$WORK/enclave.eif" --cpu-count 2 --memory 2048 > "$WORK/run.json"
+ENCLAVE_ID=$(jq -r .EnclaveID "$WORK/run.json")
 CID=$(jq -r .EnclaveCID "$WORK/run.json")
 "$ROOT/proof-methods/target/release/sparq-vcq-tee-holder" "$CID" "$PCR0" "$REPS"

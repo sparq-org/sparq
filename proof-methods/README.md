@@ -43,9 +43,12 @@ of UltraHonk, so both proof systems can be compared on the same statement; see
 `tee` runs the same relation inside an AWS Nitro Enclave. The enclave asks
 the Nitro Secure Module for an attestation document whose `user_data` is the
 SHA-256 statement digest and whose `nonce` is the request nonce; the verifier
-checks the document's chain to the pinned AWS Nitro Enclaves root G1, its
+validates the document's certificate path to the pinned AWS Nitro Enclaves
+root G1 (RFC 5280, at the document's time and at verification time), its
 ES384 COSE signature, its age, the enclave image measurement (PCR0) against
-the ones it accepts, and the binding of statement and nonce. The verifier must
+the ones it accepts, and the binding of statement and nonce. A document
+verifies again until it is too old, so the verifier prevents replay by
+issuing a fresh request nonce and accepting each nonce once. The verifier must
 trust AWS's attestation keys and hypervisor, the measured program and the
 enclave's isolation; it learns the statement and the attestation document, but
 not the credentials. The evidence is publicly verifiable and transferable.

@@ -6,7 +6,7 @@
 //! ("Verifying the root of trust").
 
 use ciborium::Value;
-use der::{Decode, Encode};
+use der::Decode;
 use p384::ecdsa::signature::Verifier;
 use p384::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
@@ -29,8 +29,6 @@ const MAX_CHAIN: usize = 8;
 const MAX_PCRS: usize = 32;
 /// Accepted clock skew for a document dated after the verifier's clock.
 const MAX_FUTURE_MS: u64 = 60_000;
-const ECDSA_WITH_SHA384: der::asn1::ObjectIdentifier =
-    der::asn1::ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
 const COSE_ES384: i64 = -35;
 const COSE_SIGN1_TAG: u64 = 18;
 
@@ -67,11 +65,17 @@ pub struct Document {
 /// dated no more than `max_age_ms` before `now_ms`, and returns its payload.
 ///
 /// Checks, in order: size; COSE_Sign1 shape and an ES384 protected header;
-/// payload fields; `cabundle[0]` equal to `root`; each certificate of
-/// `cabundle[1..]` and the leaf signed with ECDSA P-384 / SHA-384 by the one
-/// before it, with every non-leaf certificate a CA; every certificate valid at
-/// the document's timestamp; the COSE signature under the leaf key; and the
-/// timestamp's freshness.
+/// payload fields; the timestamp's freshness; `cabundle[0]` equal to `root`;
+/// every `cabundle` certificate a CA whose key usage includes certificate
+/// signing, and the leaf's key usage, if stated, including digital
+/// signatures; RFC 5280 path validation of the leaf through `cabundle[1..]`
+/// to `root` (ECDSA P-384 / SHA-384 signatures, basic constraints, path length
+/// constraints, no unsupported critical extension) at both the document's
+/// timestamp and `now_ms`; and the COSE signature under the leaf key.
+///
+/// The document is not single-use: it verifies again until it is
+/// `max_age_ms` old. The caller prevents replay by issuing a fresh request
+/// nonce and accepting each nonce once.
 ///
 /// # Errors
 /// Any failed check.
@@ -87,6 +91,12 @@ pub fn verify(
     let (protected, payload, signature) = cose_sign1(bytes)?;
     let fields = Fields::parse(&payload)?;
 
+    if fields.timestamp > now_ms.saturating_add(MAX_FUTURE_MS) {
+        return Err(Rejected("attestation is dated in the future"));
+    }
+    if now_ms.saturating_sub(fields.timestamp) > max_age_ms {
+        return Err(Rejected("attestation is too old"));
+    }
     let bundle = &fields.cabundle;
     if bundle.is_empty() || bundle.len() > MAX_CHAIN {
         return Err(Rejected("attestation CA bundle length"));
@@ -96,21 +106,41 @@ pub fn verify(
             "attestation chain does not start at the trusted root",
         ));
     }
-    let mut chain = Vec::with_capacity(bundle.len() + 1);
-    for der in bundle.iter().chain(std::iter::once(&fields.certificate)) {
-        chain.push(Certificate::from_der(der).map_err(|_| Rejected("malformed certificate"))?);
-    }
-    let seconds = fields.timestamp / 1000;
-    for (index, cert) in chain.iter().enumerate() {
-        check_validity(cert, seconds)?;
-        let is_leaf = index + 1 == chain.len();
-        if !is_leaf && !is_ca(cert) {
+    let parse =
+        |der: &[u8]| Certificate::from_der(der).map_err(|_| Rejected("malformed certificate"));
+    // Key usage, which the path validator below does not check.
+    for der in bundle {
+        let cert = parse(der)?;
+        if !is_ca(&cert) {
             return Err(Rejected("attestation chain certificate is not a CA"));
         }
-        let issuer = if index == 0 { cert } else { &chain[index - 1] };
-        check_signed_by(cert, issuer)?;
+        if !key_usage(&cert)?.is_some_and(|usage| usage.key_cert_sign()) {
+            return Err(Rejected(
+                "attestation CA certificate is not for certificate signing",
+            ));
+        }
     }
-    let leaf = key_of(chain.last().expect("chain is non-empty"))?;
+    let leaf = parse(&fields.certificate)?;
+    if key_usage(&leaf)?.is_some_and(|usage| !usage.digital_signature()) {
+        return Err(Rejected(
+            "attestation certificate is not for digital signatures",
+        ));
+    }
+    validate_path(
+        root,
+        &bundle[1..],
+        &fields.certificate,
+        fields.timestamp / 1000,
+        "attestation certificate is not valid at the document's time",
+    )?;
+    validate_path(
+        root,
+        &bundle[1..],
+        &fields.certificate,
+        now_ms / 1000,
+        "attestation certificate is not valid now",
+    )?;
+    let leaf = key_of(&leaf)?;
 
     let to_be_signed = sig_structure(&protected, &payload)?;
     let signature = Signature::from_slice(&signature)
@@ -118,12 +148,6 @@ pub fn verify(
     leaf.verify(&to_be_signed, &signature)
         .map_err(|_| Rejected("attestation signature does not verify"))?;
 
-    if fields.timestamp > now_ms.saturating_add(MAX_FUTURE_MS) {
-        return Err(Rejected("attestation is dated in the future"));
-    }
-    if now_ms.saturating_sub(fields.timestamp) > max_age_ms {
-        return Err(Rejected("attestation is too old"));
-    }
     Ok(Document {
         module_id: fields.module_id,
         timestamp: fields.timestamp,
@@ -312,16 +336,65 @@ fn pcr_map(value: Value) -> Result<Vec<(u64, Vec<u8>)>, Rejected> {
     Ok(pcrs)
 }
 
-fn check_validity(cert: &Certificate, unix_seconds: u64) -> Result<(), Rejected> {
-    let validity = &cert.tbs_certificate.validity;
-    let not_before = validity.not_before.to_unix_duration().as_secs();
-    let not_after = validity.not_after.to_unix_duration().as_secs();
-    if unix_seconds < not_before || unix_seconds > not_after {
-        return Err(Rejected(
-            "attestation certificate is not valid at the document's time",
-        ));
+/// Validates the path from `leaf` through `intermediates` to `root` at
+/// `unix_seconds` with ECDSA P-384 / SHA-384 as the only signature algorithm.
+/// `expired` is the rejection for a certificate outside its validity period.
+fn validate_path(
+    root: &[u8],
+    intermediates: &[Vec<u8>],
+    leaf: &[u8],
+    unix_seconds: u64,
+    expired: &'static str,
+) -> Result<(), Rejected> {
+    use rustls_pki_types::{CertificateDer, UnixTime};
+    use webpki::Error;
+
+    let root = CertificateDer::from(root);
+    let anchor = webpki::anchor_from_trusted_cert(&root)
+        .map_err(|_| Rejected("malformed trusted root certificate"))?;
+    let intermediates: Vec<CertificateDer<'_>> = intermediates
+        .iter()
+        .map(|der| CertificateDer::from(der.as_slice()))
+        .collect();
+    let leaf = CertificateDer::from(leaf);
+    let leaf =
+        webpki::EndEntityCert::try_from(&leaf).map_err(|_| Rejected("malformed certificate"))?;
+    leaf.verify_for_usage(
+        &[webpki::ring::ECDSA_P384_SHA384],
+        &[anchor],
+        &intermediates,
+        UnixTime::since_unix_epoch(std::time::Duration::from_secs(unix_seconds)),
+        AnyExtendedKeyUsage,
+        None,
+        None,
+    )
+    .map(|_| ())
+    .map_err(|error| {
+        Rejected(match error {
+            Error::CertExpired { .. } | Error::CertNotValidYet { .. } => expired,
+            Error::PathLenConstraintViolated => {
+                "attestation chain exceeds a path length constraint"
+            }
+            Error::UnsupportedCriticalExtension => {
+                "attestation certificate has an unsupported critical extension"
+            }
+            Error::InvalidSignatureForPublicKey => "certificate signature does not verify",
+            _ => "attestation certificate chain does not verify",
+        })
+    })
+}
+
+/// The Nitro attestation profile assigns no meaning to extended key usage, so
+/// any well-formed list is accepted.
+struct AnyExtendedKeyUsage;
+
+impl webpki::ExtendedKeyUsageValidator for AnyExtendedKeyUsage {
+    fn validate(&self, purposes: webpki::KeyPurposeIdIter<'_, '_>) -> Result<(), webpki::Error> {
+        for purpose in purposes {
+            purpose?;
+        }
+        Ok(())
     }
-    Ok(())
 }
 
 fn is_ca(cert: &Certificate) -> bool {
@@ -335,6 +408,20 @@ fn is_ca(cert: &Certificate) -> bool {
     })
 }
 
+fn key_usage(cert: &Certificate) -> Result<Option<x509_cert::ext::pkix::KeyUsage>, Rejected> {
+    let Some(extensions) = &cert.tbs_certificate.extensions else {
+        return Ok(None);
+    };
+    extensions
+        .iter()
+        .find(|ext| ext.extn_id == const_oid::db::rfc5280::ID_CE_KEY_USAGE)
+        .map(|ext| {
+            x509_cert::ext::pkix::KeyUsage::from_der(ext.extn_value.as_bytes())
+                .map_err(|_| Rejected("malformed certificate key usage"))
+        })
+        .transpose()
+}
+
 fn key_of(cert: &Certificate) -> Result<VerifyingKey, Rejected> {
     let spki = &cert.tbs_certificate.subject_public_key_info;
     let point = spki
@@ -342,32 +429,6 @@ fn key_of(cert: &Certificate) -> Result<VerifyingKey, Rejected> {
         .as_bytes()
         .ok_or(Rejected("malformed certificate key"))?;
     VerifyingKey::from_sec1_bytes(point).map_err(|_| Rejected("certificate key is not P-384"))
-}
-
-fn check_signed_by(cert: &Certificate, issuer: &Certificate) -> Result<(), Rejected> {
-    if cert.signature_algorithm.oid != ECDSA_WITH_SHA384
-        || cert.tbs_certificate.signature.oid != ECDSA_WITH_SHA384
-    {
-        return Err(Rejected(
-            "certificate is not signed with ECDSA P-384 / SHA-384",
-        ));
-    }
-    if cert.tbs_certificate.issuer != issuer.tbs_certificate.subject {
-        return Err(Rejected("certificate issuer does not match the chain"));
-    }
-    let tbs = cert
-        .tbs_certificate
-        .to_der()
-        .map_err(|_| Rejected("certificate encoding"))?;
-    let signature = cert
-        .signature
-        .as_bytes()
-        .ok_or(Rejected("malformed certificate signature"))?;
-    let signature =
-        Signature::from_der(signature).map_err(|_| Rejected("malformed certificate signature"))?;
-    key_of(issuer)?
-        .verify(&tbs, &signature)
-        .map_err(|_| Rejected("certificate signature does not verify"))
 }
 
 fn base64_decode(text: &str) -> Option<Vec<u8>> {

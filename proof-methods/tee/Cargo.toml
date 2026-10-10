@@ -16,6 +16,9 @@ x509-cert = "0.2.5"
 der = "0.7"
 p384 = { version = "0.13", features = ["ecdsa"] }
 const-oid = { version = "0.9", features = ["db"] }
+# RFC 5280 path validation (path length, critical extensions, validity).
+rustls-webpki = { version = "0.103.15", default-features = false, features = ["std", "ring"] }
+rustls-pki-types = { version = "1.12", default-features = false, features = ["std"] }
 # Enclave side: Nitro Secure Module and vsock.
 aws-nitro-enclaves-nsm-api = { version = "0.5.2", optional = true }
 vsock = { version = "0.5.4", optional = true }
@@ -30,7 +33,7 @@ host = ["dep:vsock", "sparq-vcq-disclosed/fixtures"]
 
 [dev-dependencies]
 sparq-vcq-disclosed = { path = "../disclosed", features = ["fixtures"] }
-x509-cert = { version = "0.2.5", features = ["builder"] }
+x509-cert = { version = "0.2.5", features = ["builder", "hazmat"] }
 p384 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 sha2 = { version = "0.10", features = ["oid"] }
