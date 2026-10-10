@@ -200,7 +200,7 @@ Rules for the verifier service:
   `BNODE()` with no argument): the input dataset is the only data the query may read.
 + With `"answerKind": "supported"`, the query MUST be a monotone query (section 2).
 + With `"answerKind": "exact"`, the query MUST NOT use REDUCED, whose number of duplicates
-  SPARQL 1.1 leaves open, or SAMPLE or GROUP_CONCAT (section 6.1).
+  SPARQL 1.1 leaves open, or SAMPLE, GROUP_CONCAT or `BNODE` (section 6.1).
 + The verifier service MUST list a proof method only if it holds that method's verification
   key in its own configuration.
 + The verifier service MUST store the request and its request digest, and MUST NOT accept a
@@ -297,10 +297,10 @@ reversing that condition:
 
 The term key of an RDF term is its N-Triples form compared as UTF-8 bytes, with blank nodes
 labelled as RDF Dataset Canonicalization (RDFC-1.0) #cite("RDF-CANON") labels them in the
-input dataset; a blank node made by `BNODE` with an argument takes the label
-`_:b` followed by that argument's lexical form.
+input dataset.
 
-An Exact query MUST NOT use SAMPLE or GROUP_CONCAT, whose results SPARQL 1.1 also leaves open.
+An Exact query MUST NOT use SAMPLE or GROUP_CONCAT, whose results SPARQL 1.1 also leaves open,
+or `BNODE`, whose new blank nodes have no term key.
 The SAMPLE that SPARQL 1.1 applies to a GROUP BY variable in the projection is allowed: every
 solution in a group has the same value for it. With these rules the result is unique.
 
@@ -664,7 +664,7 @@ What differs or is missing:
 + The RISC Zero methods' `imageId` is eight 32-bit words; the code encodes it as the words in
   order, each little-endian. A wire profile has to fix that encoding.
 + It has not been checked that the RISC Zero methods use the total order of section 6.1
-  before OFFSET and LIMIT, or that they reject REDUCED, SAMPLE and GROUP_CONCAT for Exact
+  before OFFSET and LIMIT, or that they reject REDUCED, SAMPLE, GROUP_CONCAT and `BNODE` for Exact
   answers.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
   (a verifier-agreed SELECT); its other five combinations have run only in tests without
