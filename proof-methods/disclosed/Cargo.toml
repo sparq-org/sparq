@@ -1,0 +1,25 @@
+[package]
+name = "sparq-vcq-disclosed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sparq-proved-evaluator-model = { path = "../../zk/sparql-evaluator/model", features = ["authenticated-rdf"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc"], optional = true }
+
+[features]
+default = []
+# Synthetic signed credentials and the Q1-Q5 query set, for tests and benchmarks.
+fixtures = ["dep:ed25519-dalek"]
+
+[dev-dependencies]
+sparq-vcq-disclosed = { path = ".", features = ["fixtures"] }
+
+[[example]]
+name = "measure"
+required-features = ["fixtures"]
