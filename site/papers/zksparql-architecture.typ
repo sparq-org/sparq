@@ -730,7 +730,7 @@ Appendix #ref(<app-inventories>, supplement: none) details the records.
 A CI job built the evaluator from source and produced #headline("zkvcq.exact_hosted_receipts")
 receipts. They cover a `SELECT` with duplicate rows, a false `ASK`, `CONSTRUCT` and `DESCRIBE`,
 under both input kinds, though not every form under each (Appendix
-#ref(<exact-detail>, supplement: none)). Some used `DESCRIBE` or `FROM NAMED`, which version 1 of
+#ref(<app-inventories>, supplement: none)). Some used `DESCRIBE` or `FROM NAMED`, which version 1 of
 the specification excludes and the current evaluator rejects before proving. Their `DESCRIBE` answer
 contained every default-graph triple whose subject was the described resource and, recursively,
 every triple whose subject was a blank node reached as an object. The same job ran
@@ -911,125 +911,136 @@ Realistic credentials, the cost measurements and an external audit remain to be 
 #bibliography("zksparql-architecture.refs.yml", style: "ieee", title: none)
 
 // ---------------------------------------------------------------------------------------------
-// Appendix: lettered sections after the references. Not part of the main-body page budget.
+// Appendix: at most two LNCS pages after the references. It states what an accepted presentation
+// shows and lists the test cases behind Table 3. The supplementary material follows it.
 // ---------------------------------------------------------------------------------------------
 #pagebreak(weak: true)
+#heading(level: 1, numbering: none)[Appendix]
 #counter(heading).update(0)
 #set heading(numbering: (..n) => {
   let ns = n.pos()
   numbering("A.1.", ..if ns.len() > 1 { ns.slice(1) } else { ns })
 })
 
-== Formal relation and conditional design arguments <app-relation>
+== What an accepted presentation shows <app-relation>
 
-=== The contract tuple <app-contract>
+We argue informally that, under assumptions A1 to A5 below, an accepted presentation means what
+§#ref(<meaning>, supplement: none) says.
 
-A request carries an explicit contract
-$ C = ⟨ m, o, q, f, a, s, e, d, b, t ⟩ $
-whose components are:
+*Relation.* Let $Q$ be the query of the request whose request digest is a public input
+(§#ref(<linkage>, supplement: none)). The witness consists of the credentials, a salt and, in the
+hidden mode, the credentials' signatures. Public inputs and witness satisfy the relation if:
 
-/ $m$, method: query-proof method identifier, version and descriptor digest (§#ref(<request>, supplement: none)).
-/ $o$, answer mode: `SelectedResults`, the supported mode (every released distinct row is
-  supported; no multiplicity or completeness), or `Exact` (the released result is the complete
-  answer). A method may fix $o$; the adapters' methods fix `Exact`.
-/ $q$, query: the query text and declared language version (SPARQL 1.1; SPARQL 1.2 @sparql12 optional).
-/ $f$, result form: bag `SELECT`, set `SELECT`, `ASK`, `CONSTRUCT` or `DESCRIBE` with its closure
-  policy, and the canonical result encoding.
-/ $a$, authority: HolderDeclared, or VerifierAgreed with an anchor $k$.
-/ $s$, scope: default-graph and named-graph construction, including `FROM` and `FROM NAMED`.
-/ $e$, source evidence: `None`, or accepted signature suites, issuer/verification-method/key
-  table, representation mapping, status requirement and holder-binding requirement.
-/ $d$, disclosure policy: what the verifier may learn beyond the result (issuer identities,
-  credential count, capacity profile, method).
-/ $b$, bounds: row, triple and capacity limits.
-/ $t$, session: challenge, audience and validity window.
++ the dataset commitment is the proof method's commitment to these credentials under this salt;
++ $D$ is built from these credentials as the proof method states
+  (§#ref(<meaning>, supplement: none)); with issuer keys, from their signed canonical N-Quads, so
+  that every term keeps its signed lexical form;
++ if the request lists issuer keys, each credential carries a signature that verifies under a
+  listed key whose entry matches the credential's issuer, verification method and cryptosuite. The
+  proof verifies these signatures in the hidden mode. In the revealed mode, the signed messages
+  are public inputs computed from the credentials, and the verifier checks the signatures;
++ the result is an answer of the requested kind for $Q$ over $D$
+  (§#ref(<semantics>, supplement: none)).
 
-A presentation returns a result $r$ and a proof $pi$ whose public output (the journal, for a zkVM
-method) binds the contract, a dataset commitment $c$ and $r$ or its digest. Conceptually the
-contract enters as a digest $h(C)$; an implementation may realise that binding indirectly rather
-than as a literal journal field. In the adapter, the verifier's stored method descriptor and
-request binding determine a derived nonce, which enters the model request whose digest the journal
-carries, so the session bytes in $t$ are cryptographically bound to the proof (under assumptions A1
-and A3 below). The verifier additionally checks the validity window and audience of $t$ on the host
-and consumes the challenge (§#ref(<validation>, supplement: none)).
+*Assumptions.*
 
-=== The relation <app-relation-def>
+/ A1: The proof system is knowledge-sound: from any prover whose receipt verifies under the
+  verifier's image ID, an efficient extractor obtains an input on which the guest program completes
+  and writes the receipt's journal. We accept only succinct receipts
+  (§#ref(<security>, supplement: none)).
+/ A2: The guest program completes only on inputs that satisfy the relation for the values it
+  writes to the journal; in particular, it evaluates $Q$ as SPARQL 1.1 specifies.
+/ A3: SHA-256 is collision-resistant, so the request digest determines the request and the dataset
+  commitment is binding.
+/ A4: The verifier service performs the checks of §#ref(<validation>, supplement: none) against its
+  stored request, with the image ID from its own configuration, and takes the result only from the
+  journal.
+/ A5: The cryptosuite's signatures are unforgeable, and only the issuer named in a key's entry can
+  sign under that key.
 
-The commitment and the queried dataset are method-defined. Let $E$ be the signed or source encoding
-of the credentials, $K$ the graph catalog that names default and named graphs, and $rho$ a salt or
-other auxiliary witness where the profile requires one. Let $p_C$ be the publicly known,
-method-specific commitment parameters that the method extracts from $C$, for example an
-authorisation table, evaluation policy or representation mapping, as applicable; $p_C$ is empty
-where a method binds none. A method fixes a commitment function $"Com"_m (E, K, rho; p_C)$ and,
-separately, a dataset mapping $D = "Map"_m (E, K)$ from that encoding to the RDF dataset the query
-runs over. Request version 3 of the exact evaluator commits source bytes and the graph catalog; the
-authenticated extension V5 commits the canonical authenticated documents together with the
-verifier's authorisation table as part of $p_C$. The commitment need not bind the whole contract:
-the query, challenge and other session data are bound, where they are bound, through the request
-and descriptor digests rather than through $"Com"_m$. Keeping $"Map"_m$ explicit prevents a
-signature over one representation from being read as a signature over an abstract dataset $D$.
-With public input $(C, c, r)$, the intended relation is
-$ ((C, c, r), w) ∈ R_C quad ⟺ quad
-  & w = (E, K, rho, sigma, x) \
-  & ∧ c = "Com"_m (E, K, rho; p_C) ∧ D = "Map"_m (E, K) \
-  & ∧ "Anc"_a (c) ∧ "Src"_e (E, sigma) ∧ "Scp"_s (D) \
-  & ∧ "Bnd"_b (D, r) ∧ "Ans"_o^f (r, ⟦q⟧_D) $
-where $sigma$ are credential signatures, $x$ further auxiliary witness data,
-$"Anc"_"HolderDeclared" (c)$ is always true, $"Anc"_("VerifierAgreed"(k)) (c)$ holds iff $c = k$,
-and $"Src"_"None"$ is always true.
+Tests support A2 and A4 (Appendix #ref(<app-inventories>, supplement: none)); A1, A3 and A5 concern
+the proof system, the hash function and the issuers.
 
-The answer predicate depends on the mode and the form. $"Ans"_"Exact"^f$ requires $r$ to equal the
-answer under the method's canonical equality for $f$: multiset equality for an unordered table, the
-method's ordering and tie rules for `ORDER BY`, `LIMIT` and `OFFSET` results, boolean equality for
-`ASK`, and the method's canonical graph equality, with its blank-node and closure policy, for
-`CONSTRUCT` and `DESCRIBE`. Write $⊑$ for sub-multiset inclusion. $"Ans"_"SelectedResults"^f (r, R)$
- is $r ⊆ "supp"(R)$, where $r$ is a set of distinct rows and $"supp"(R)$ is the set of rows
-occurring in $R$ at least once. It is defined only for unordered distinct-set (`SELECT DISTINCT`)
-results of a positive pattern and asserts neither multiplicity nor completeness; it is not a
-relation for bag tables, booleans, graphs or ordered results. A true `ASK` over a positive pattern
-is conceptually a separate positive-existence statement, supportable by exhibiting one supporting
-solution rather than by table membership; the implemented selected-results relation V4 does not
-support `ASK`. A false `ASK` needs `Exact`.
+*Argument.* Suppose the verifier accepts a presentation. By A4, the receipt verifies under the
+verifier's image ID for a journal that holds the stored request's digest, its answer and input
+kinds, and the presented commitment and result. By A1, an input exists on which the guest program
+writes this journal; by A2, that input satisfies the relation. By A3, except with negligible
+probability, $Q$ is the stored request's query and the commitment fixes $D$. The result is
+therefore an answer of the requested kind for $Q$ over $D$, and for a verifier-agreed input, $D$ is
+the dataset whose commitment the verifier agreed to. If the request lists issuer keys, each
+credential in $D$ carries a signature under a listed key, which by A5 only that key's issuer could
+have made. For a Supported answer, each returned row $mu$ is in $[| Q' |]_D$. As $Q'$ is a monotone
+query, $mu$ is also in $[| Q' |]_(D')$ for every dataset $D'$ that contains $D$ graph by graph, so
+the row stays a solution when the holder's other credentials are added.
 
-For a positive pattern, bag evaluation is monotone under sub-multiset inclusion: $D ⊆ D'$ implies
-$⟦P⟧_D ⊑ ⟦P⟧_(D')$. A row and a lower bound on its multiplicity obtained by evaluating over a fully
-known authenticated subset therefore remain valid over all of the holder's data. That lower bound
-is available to whoever knows the whole authenticated supporting subset; it is not what a
-selected-results presentation establishes, which shows only that each released distinct row occurs
-in the answer. Repeated witnesses for one row prove no further multiplicity.
+In the prototype, the guest program's request holds a SHA-256 hash of the stored request and its
+proof-method entry (§#ref(<prototype>, supplement: none)). Under A3, the journal therefore also
+binds the challenge, audience and validity period.
 
-=== Conditional design arguments <arguments>
+*Public inputs computable from the result.* Suppose the pattern of $Q$ is a single basic graph
+pattern without blank nodes, and a returned row $mu$ binds all its variables. Then $mu$ is a
+solution over $D$ exactly when, for each triple pattern $t$, $mu(t)$ is in the default graph of
+$D$. A circuit that takes each $mu(t)$ as a public input, and checks that it is in $D$ and signed,
+therefore shows the same statement as one that finds these triples in its witness. It discloses
+nothing that the verifier cannot compute from $mu$. The baseline and public-triple circuits of
+§#ref(<pilot-evidence>, supplement: none) differ in exactly this way.
 
-*Design argument 1 (exact result under a contract).* Assume (A1) knowledge soundness of the
-receipt system for the pinned guest image; (A2) functional correctness of the guest evaluator: for
-every input admitted by bounds $b$ it computes $"Map"_m (E, K)$ and the canonical form-$f$ encoding
-of $⟦q⟧_D$ under the declared semantics; (A3) binding of the dataset commitment $"Com"_m$, and
-collision resistance and domain separation of the hash functions that form the request and
-method-descriptor digests; and (A4) that the verifier accepts only if the journal's request
-binding, authority, anchor and scope match its stored request and the result claimed in the
-response equals the result in the verified journal. Then acceptance implies, except with the
-failure probabilities of A1 and A3, that some $(E, K, rho)$ with $"Com"_m (E, K, rho; p_C) = c$
-satisfies $"Ans"_"Exact"^f (r, ⟦q⟧_D)$ for $D = "Map"_m (E, K)$; under VerifierAgreed,
-additionally $c = k$. Nothing follows about issuers unless $e ≠ "None"$ and (A5) $"Src"_e$ is
-enforced inside the proved relation. A2 is supported by tests and native replay
-(§#ref(<evidence>, supplement: none)), not proved; A1 and A3 are assumptions on third-party
-components; A4 is implemented and exercised by the adapters' controls. These are design arguments,
-not a proof that the implementation meets them, and they carry no weight beyond their named
-assumptions while the external audit remains open.
+== Test cases behind Table 3 <app-inventories>
 
-*Design argument 2 (public eligibility, conditional).* Under conditions
-(i)–(v) of §#ref(<rule>, supplement: none), replacing the hidden witness for $t mu$ by a public
-input leaves $R_C$ unchanged: the constraint "the witness term equals the constant or projected
-value" becomes a direct public-input constraint, and every other conjunct is untouched. The
-verifier learns nothing beyond $(q, r)$ and the attribution that $d$ already permits, because
-$t mu$ is a function of $(q, r)$; this concerns the statement after release and says nothing about
-disclosure before release or on abort (§#ref(<release>, supplement: none)). Condition (i) also
-excludes hidden joins through $t$: every variable of $t$ is public, so $t$ connects to other
-patterns only through public terms. The argument is about the relation, not about any
-implementation's constraint system, and it assumes that the specialised relation still checks (iv)
-and (v).
+@test-cases-table shows the Exact answers that each zkVM experiment of @evidence-table proved, by
+input kind. The inputs were small synthetic graphs or, with signature checks, the W3C test vector
+for `eddsa-rdfc-2022` and the payment credential of §#ref(<v5-evidence>, supplement: none). The
+supplementary material lists every test, negative test, source commit and guest binary.
 
-== Evidence detail and control inventories <app-inventories>
+#[
+#show figure: set block(breakable: false)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1.9fr, 0.9fr, 1.1fr, 0.9fr, 1fr, 1.2fr),
+      align: (left, center, center, center, center, center),
+      table.header(
+        [Exact answer], [CI build], [Our services], [First case], [Payment †], [Remaining †],
+      ),
+      [`SELECT`, duplicate rows], [H], [H, V], [V], [–], [H],
+      [`SELECT`, `ORDER BY` and `COUNT`], [V], [–], [–], [–], [–],
+      [`ASK`, true], [–], [V], [–], [–], [V],
+      [`ASK`, false], [H, V], [H], [–], [H, V], [H],
+      [`CONSTRUCT`], [V], [H, V], [–], [–], [H, V],
+      [`DESCRIBE`], [H], [–], [–], [–], [–],
+      [`SELECT` over the row limit, rejected], [–], [V], [–], [–], [V],
+      [Negative tests], [In its tests], [#headline("zkvcq.adapter_controls") in total],
+        [#headline("zkvcq.vcqg_controls")],
+        [#headline("zkvcq.vcqp_controls") V, #headline("zkvcq.vcqph_controls") H],
+        [#headline("zkvcq.ci_asktva_controls") V, #headline("zkvcq.ci_askfhd_controls") H each],
+    )
+  },
+  caption: [
+    Exact answers proved, by input kind: H holder-declared, V verifier-agreed; an entry may stand
+    for several receipts. The columns are the rows of @evidence-table with receipts: the
+    evaluator's CI build and its run with our services; with signature checks, the first test case,
+    the payment question and the remaining test cases. † No internal check.
+  ],
+) <test-cases-table>
+]
+
+// ---------------------------------------------------------------------------------------------
+// Supplementary material: not part of the appendix; at submission it goes behind an anonymous
+// link. Sections and tables are numbered S1, S2, ...
+// ---------------------------------------------------------------------------------------------
+#pagebreak(weak: true)
+#heading(level: 1, numbering: none)[Supplementary material]
+#counter(heading).update(0)
+#counter(figure.where(kind: table)).update(0)
+#set figure(numbering: n => "S" + str(n))
+#set heading(numbering: (..n) => {
+  let ns = n.pos()
+  "S" + numbering("1.1.", ..if ns.len() > 1 { ns.slice(1) } else { ns })
+})
+
+== Evidence detail and control inventories <old-inventories>
 
 === Method <evidence-method>
 
