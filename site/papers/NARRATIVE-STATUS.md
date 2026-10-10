@@ -61,4 +61,10 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
   designated-verifier VOLE ZK (interactive, non-transferable, LPN); TEE attestation (TDX, SEV-SNP,
   Nitro, NVIDIA confidential computing). They will measure Q1-Q5 at n in {1, 4} for the paper's
   tables. Use for related work and the method comparison once the rewrite is done.
-- Spec mode names: `hidden`, `revealed` (spec draft #6786). Use these names in the paper.
+- Spec signature modes (spec #6786): `hidden`, `revealed`, `disclosed` (the last only for methods that
+  hand over credentials or derived bbs-2023 / ecdsa-sd-2023 presentations). Spec section 9 evidence
+  kinds: zero-knowledge proof; proof that is not zero-knowledge; attestation; disclosed credentials.
+  Use these names in the paper.
+- Revealed mode for zkVM eddsa-rdfc-2022 (#6787): discloses the verification method and the SHA-256
+  hashes of the canonical document and of the proof configuration. Unsalted, so presentations of one
+  credential are linkable and a low-entropy document can be confirmed by guessing.
