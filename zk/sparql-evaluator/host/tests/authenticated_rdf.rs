@@ -17,7 +17,7 @@ mod fixture;
 
 use fixture::{CountingNonces, Expect};
 use sparq_proved_evaluator::authenticated_rdf::{
-    prove_with_artifact, verify_revealed_with_artifact, verify_with_artifact,
+    check_query_profile, prove_with_artifact, verify_revealed_with_artifact, verify_with_artifact,
 };
 use sparq_proved_evaluator::{
     AcceptedGuest, ArtifactPin, Error, embedded_artifact, embedded_authrdf_artifact,
@@ -127,6 +127,45 @@ fn prove_rejects_invalid_requests_and_credentials_before_any_executor() {
             Error(expected)
         );
     }
+}
+
+#[test]
+fn describe_and_dataset_clauses_are_rejected_by_the_host_before_proving_and_verifying() {
+    // The relation evaluates these queries; the host rejects them on the
+    // request, before the executable, the receipt or the nonce store is used.
+    let absent = Path::new("/nonexistent/sparq-authrdf-host-test/r0vm");
+    let guest = auth_guest();
+    let cases = [
+        ("DESCRIBE ?s WHERE { ?s ?p ?o }", "DESCRIBE is outside the V5 query profile"),
+        (
+            "SELECT ?s FROM <urn:example:g> WHERE { ?s ?p ?o }",
+            "FROM and FROM NAMED are outside the V5 query profile",
+        ),
+        (
+            "ASK FROM NAMED <urn:example:g> { ?s ?p ?o }",
+            "FROM and FROM NAMED are outside the V5 query profile",
+        ),
+    ];
+    for (query, error) in cases {
+        let witness = fixture::witness(query, DatasetAuthority::HolderDeclared, NONCE);
+        let journal = auth::evaluate(&witness).expect("the relation itself evaluates the query");
+        assert_eq!(check_query_profile(&witness.request).unwrap_err(), Error(error));
+        assert_eq!(prove_with_artifact(&witness, absent, &guest).unwrap_err(), Error(error));
+        let bytes: Vec<u8> = risc0_zkvm::serde::to_vec(&journal)
+            .unwrap()
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        let fake = fixture::fake_receipt(guest.image_id(), bytes);
+        let mut nonces = CountingNonces::default();
+        assert_eq!(
+            verify_with_artifact(&fake, &witness.request, &mut nonces, &guest).unwrap_err(),
+            Error(error)
+        );
+        assert_eq!(nonces.calls, 0, "{query}: the nonce store was reached");
+    }
+    let select = fixture::witness("SELECT ?s WHERE { ?s ?p ?o }", agreed(), NONCE);
+    assert_eq!(check_query_profile(&select.request), Ok(()));
 }
 
 #[test]

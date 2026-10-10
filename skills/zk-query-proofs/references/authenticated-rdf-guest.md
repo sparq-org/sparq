@@ -218,6 +218,27 @@ matches nothing and `FROM` selects an empty default graph. `SERVICE`, `BNODE()`,
 `NOW()`, `RAND()`, nested `EXISTS`, triple terms and custom functions are
 rejected. The manifest records executions, not proofs.
 
+The host rejects `DESCRIBE`, `FROM` and `FROM NAMED` in the request
+(`authenticated_rdf::check_query_profile`) before proving and before both
+verification paths. The accepted image still evaluates them, so the check is
+the host's, not the guest's.
+
+A receipt shows that the pinned evaluator produced the journal's result. Where
+SPARQL 1.1 leaves a choice open, the result is the evaluator's choice, and no
+rule for it is published:
+
+- an unordered `SELECT` result is a bag, encoded with its rows sorted, so it is
+  unique up to row multiplicity;
+- with `ORDER BY`, the order of rows that tie on every sort key;
+- `LIMIT` and `OFFSET` without `ORDER BY`, which select rows from an order
+  SPARQL leaves unspecified;
+- the value `SAMPLE` returns;
+- the order of the values `GROUP_CONCAT` joins;
+- which duplicates `REDUCED` removes.
+
+A verifier can rely on a unique result only for queries that use none of these
+choices.
+
 ## Tests
 
 All three files compile only with `--features authenticated-rdf`. The fixture is
