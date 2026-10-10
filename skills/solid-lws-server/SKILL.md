@@ -261,17 +261,32 @@ What the server exposes, all discoverable from the storage description
 (`GET /` with `Accept: application/lws+cid`):
 
 - **Storage**: `application/lws+json` containers with paging links, data resources with
-  conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `DELETE` (with
-  `Depth: infinity` for non-empty containers), and read-only RFC 9264 linksets at
-  `{resource}.meta`.
+  conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH`
+  (`application/merge-patch+json` or `application/json-patch+json`), `DELETE` (with
+  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`.
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
   `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
   lines counts every line; an entity-tag list that cannot be read by the RFC 9110 grammar gets
   `412` (a comma inside a quoted tag is part of the tag; an empty list names no tag), and a date that is not one valid
   HTTP-date is ignored. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
-  taken it gets `409`. `livez` and `readyz` are never
-  given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
+  taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
+  patches as well as JSON Patch. Every JSON Patch operation, `move` included, is counted by its
+  full serialized size (keys and separators as well as values). A JSON Patch may hold at most
+  1,000 operations, and the bytes its operations copy, move, add, replace or test are charged
+  against a work budget of four times the body limit; past either it gets `413`. `livez` and `readyz` are never
+  given to a member of the root container, because the probes answer those paths. A linkset
+  `PATCH` whose result nests too deeply to store gets `422`. A linkset `PATCH` is measured against the
+  body limit as it will be served, with the server-managed links put back. Its relative `anchor`
+  and `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
+  absolute, and one that is not a URI reference gets `422`, as does a target attribute not
+  shaped as RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and
+  extension attributes arrays of strings; `name*` arrays of `{value, language}`). Before anything
+  is resolved, the result is held to 256 entries, 1024 targets and 4096 bytes per anchor,
+  relation and `href`, and its worst-case resolved size to the body limit; past any of these,
+  `413`. The links the type index matches are the stored linkset's own, never resolved again. JSON Patch paths are
+  RFC 6901 pointers read by one parser: an array index is `0` or digits without a leading zero
+  (`-` only where an add may append), and an escape other than `~0` or `~1` gets `400`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
 - **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
   `/.well-known/lws/jwks`, and RFC 8693 token exchange at `/.well-known/lws/token` for
@@ -280,8 +295,8 @@ What the server exposes, all discoverable from the storage description
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
 - **Authorization**: the owner may do anything, and the agent that created a resource may do
   anything with it.
-- Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
-  (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
+- Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
+  `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
   anything is removed. When putting back fails too, it is tried a few more times with the
