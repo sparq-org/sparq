@@ -227,6 +227,16 @@ impl KeySet {
         self
     }
 
+    /// The [`crate::SignatureMode`]s this key set accepts: always `Revealed` (clear
+    /// attestations), plus `Hidden` once [`Self::with_hidden_issuer_depth`] is set.
+    pub fn signature_modes(&self) -> Vec<crate::SignatureMode> {
+        let mut modes = vec![crate::SignatureMode::Revealed];
+        if self.hidden_issuer_depth.is_some() {
+            modes.insert(0, crate::SignatureMode::Hidden);
+        }
+        modes
+    }
+
     /// The hidden-issuer Merkle depth, if the relying party enabled the path.
     /// `None` => disabled (a `manifest.hidden_issuer_attestations` is not accepted).
     // [OPUS-4.8] sq-z9l.
@@ -8958,6 +8968,46 @@ mod tests {
             holder_set_proofs: vec![],
             fully_hidden_revocation: None,
         }
+    }
+
+    #[test]
+    fn signature_mode_names_the_issuer_attestation_path() {
+        use crate::manifest::{CommitmentAttestation, HiddenIssuerAttestation};
+        use crate::SignatureMode;
+        let clear = |c: &str| CommitmentAttestation {
+            commitment: fh(c),
+            issuer_public_key: String::new(),
+            signature: String::new(),
+            cryptosuite: String::new(),
+            salt: None,
+            status: None,
+            holder: None,
+        };
+        let hidden = |c: &str| HiddenIssuerAttestation {
+            commitment: fh(c),
+            depth: 4,
+            key_set_root: fh("0x1"),
+            message: fh("0x2"),
+            salt: None,
+            proof_hex: String::new(),
+        };
+        let mut m = minimal_manifest("ASK { ?s ?p ?o }");
+        assert_eq!(m.signature_mode(), None);
+        m.commitment_attestations = vec![clear("0x10")];
+        assert_eq!(m.signature_mode(), Some(SignatureMode::Revealed));
+        // A hidden proof over a clearly attested commitment is still revealed.
+        m.hidden_issuer_attestations = vec![hidden("0x10")];
+        assert_eq!(m.signature_mode(), Some(SignatureMode::Revealed));
+        m.hidden_issuer_attestations.push(hidden("0x11"));
+        assert_eq!(m.signature_mode(), None);
+        m.commitment_attestations.clear();
+        assert_eq!(m.signature_mode(), Some(SignatureMode::Hidden));
+        assert_eq!(SignatureMode::Hidden.as_str(), "hidden");
+        assert_eq!(KeySet::empty().signature_modes(), [SignatureMode::Revealed]);
+        assert_eq!(
+            KeySet::empty().with_hidden_issuer_depth(4).signature_modes(),
+            [SignatureMode::Hidden, SignatureMode::Revealed]
+        );
     }
 
     #[test]
