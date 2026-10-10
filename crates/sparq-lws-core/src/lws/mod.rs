@@ -1465,7 +1465,7 @@ pub(crate) async fn retype<S: Store>(
 /// - The writes and the registration run in a task of their own, holding the request's share of
 ///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
 ///   being registered.
-/// - With `mark` (a grant: what puts it in force grants access), a durable intent to remove
+/// - A durable intent to remove
 ///   the record is stored first (see the `intents` module), the record is created under
 ///   [`UNSETTLED_TYPE`], stored again under its own type, and only once the intent is cleared
 ///   put in force: a crash or restart before then leaves the next start removing the record, and
@@ -1487,7 +1487,6 @@ pub(crate) async fn create_record<S, F>(
     body: Bytes,
     admission: Option<crate::overload::AdmissionSlot>,
     held: Option<resources::IriGuard>,
-    mark: bool,
     register: F,
 ) -> Result<(), crate::error::ServerError>
 where
@@ -1520,24 +1519,20 @@ where
             drop(register);
             return Err(ServerError::Conflict("the record's name is taken".into()));
         };
-        // A grant's create first stores a durable intent to remove it: until the create is
+        // A create first stores a durable intent to remove the record: until the create is
         // known to have landed whole (the intent is cleared), a stop leaves the next start
-        // removing it, so it is never in force there unless it was here.
-        let intent = match mark {
-            true => {
-                let record = intents::mint(&state.cfg.storage());
-                let plan = Undo::Remove {
-                    iri: iri.clone(),
-                    parent: container.clone(),
-                };
-                if let Err(e) = intents::store(&state, &record, false, &[&plan], &[]).await {
-                    drop(register);
-                    return Err(e);
-                }
-                Some(record)
-            }
-            false => None,
+        // removing it, so a grant is never in force there, nor a request counted or served,
+        // unless it was here.
+        let record = intents::mint(&state.cfg.storage());
+        let plan = Undo::Remove {
+            iri: iri.clone(),
+            parent: container.clone(),
         };
+        if let Err(e) = intents::store(&state, &record, false, &[&plan], &[]).await {
+            drop(register);
+            return Err(e);
+        }
+        let intent = Some(record);
         // What removes the record, and then its intent.
         let removal = || {
             let mut undo = vec![Undo::Remove {
@@ -1550,17 +1545,13 @@ where
             }));
             undo
         };
-        let stored_as = if mark { UNSETTLED_TYPE } else { LWS_JSON };
         match state
             .store
-            .create_in_container(&container, &iri, body.clone(), stored_as)
+            .create_in_container(&container, &iri, body.clone(), UNSETTLED_TYPE)
             .await
         {
             Ok(_) => {
-                let settled = match mark {
-                    true => retype(&state.store, &iri, body, LWS_JSON).await,
-                    false => Ok(true),
-                };
+                let settled = retype(&state.store, &iri, body, LWS_JSON).await;
                 if let Ok(true) = settled {
                     let Some(record) = intent.clone() else {
                         register();
@@ -1577,7 +1568,7 @@ where
                             }
                             drop(register);
                             Err(ServerError::Storage(
-                                "the grant could not be put in force".into(),
+                                "the record could not be put in force".into(),
                             ))
                         }
                         // Whether the intent was cleared is not known: settled from it once it
@@ -1596,7 +1587,7 @@ where
                                 }
                             });
                             Err(ServerError::Storage(
-                                "whether the grant is in force is not known yet".into(),
+                                "whether the record is in force is not known yet".into(),
                             ))
                         }
                     };
@@ -1608,7 +1599,7 @@ where
                 }
                 drop(register);
                 Err(settled.err().unwrap_or_else(|| {
-                    ServerError::Storage("the grant could not be put in force".into())
+                    ServerError::Storage("the record could not be put in force".into())
                 }))
             }
             Err(e) => {

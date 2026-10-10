@@ -428,6 +428,10 @@ pub struct AccessStore {
     requests_etag: RwLock<String>,
     /// The share of the store access requests may take (see [`super::Quota`]).
     request_quota: super::Quota,
+    /// Stored requests the start did not load: unreadable, malformed, or still being removed.
+    /// Each is counted against the request quota until the next start, as it may still be
+    /// stored.
+    held_back: std::sync::atomic::AtomicUsize,
 }
 
 fn new_etag() -> String {
@@ -462,6 +466,7 @@ impl AccessStore {
             grants_etag: RwLock::new(new_etag()),
             requests_etag: RwLock::new(new_etag()),
             request_quota: super::Quota::new(MAX_REQUESTS, MAX_REQUESTS_PER_AUTHOR),
+            held_back: Default::default(),
         }
     }
 
@@ -491,29 +496,31 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
+                // A request the start does not load still counts against the quota (it may
+                // still be stored): one that cannot be read never stops the start, and never
+                // frees a place it may hold.
+                let hold_back = || {
+                    if !grants {
+                        me.held_back
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                };
                 // A record a change put back at start is still settling is not read at all: what
                 // it holds may be from before that change, and a withdrawn request must not come
-                // back (readable, and counted against the quota) while its removal lands.
+                // back (readable) while its removal lands.
                 if !visible(child.as_str()) {
+                    hold_back();
                     continue;
                 }
-                // Every stored request counts against the request quota, so one that cannot be read
-                // stops the server rather than leaving a place uncounted; a grant that cannot be
-                // read grants nothing.
                 let stored = match store.read(child.as_str()).await {
                     // A record stored as unsettled was being created or revoked when the server
                     // stopped, or its outcome was unknown (see [`super::UNSETTLED_TYPE`]): it is
-                    // never put in force, and it is removed. A request (which counts against the
-                    // quota) that cannot be removed stops the server.
+                    // never put in force, and it is removed, in the background when it cannot be
+                    // removed now.
                     Ok(r) if r.meta.content_type == super::UNSETTLED_TYPE => {
                         let removed = super::delete_record(store, child.as_str(), &container).await;
-                        if let Err(e) = removed {
-                            if !grants {
-                                return Err(format!(
-                                    "store: access request {}: {e}",
-                                    child.as_str()
-                                ));
-                            }
+                        if removed.is_err() {
+                            hold_back();
                             stuck.push(super::Undo::Remove {
                                 iri: child.as_str().to_string(),
                                 parent: container.clone(),
@@ -522,20 +529,18 @@ impl AccessStore {
                         continue;
                     }
                     Ok(r) => serde_json::from_slice::<Value>(&r.body).ok(),
-                    Err(e) if !grants => {
-                        return Err(format!("store: access request {}: {e}", child.as_str()))
-                    }
                     Err(_) => None,
                 };
-                let stored = match stored {
-                    Some(v) => v,
-                    None if !grants => {
-                        return Err(format!(
-                            "access request {} is not a stored record",
-                            child.as_str()
-                        ))
-                    }
-                    None => continue,
+                // A record that cannot be read or parsed is kept out: a grant grants nothing, and
+                // a request is held back.
+                let Some(stored) = stored else {
+                    eprintln!(
+                        "lws: access {} {} cannot be read; it is not loaded",
+                        if grants { "grant" } else { "request" },
+                        child.as_str()
+                    );
+                    hold_back();
+                    continue;
                 };
                 let id = child
                     .as_str()
@@ -575,6 +580,10 @@ impl AccessStore {
     pub(crate) fn replace(&self, loaded: AccessStore) {
         *self.grants.write().expect("lock") = loaded.grants.into_inner().expect("lock");
         *self.requests.write().expect("lock") = loaded.requests.into_inner().expect("lock");
+        self.held_back.store(
+            loaded.held_back.into_inner(),
+            std::sync::atomic::Ordering::SeqCst,
+        );
         self.bump(true);
         self.bump(false);
     }
@@ -1117,7 +1126,11 @@ async fn create<S: Store + 'static>(
                     .values()
                     .filter(|r| r.author == agent.subject)
                     .count();
-                (requests.len(), mine)
+                let held_back = state
+                    .access
+                    .held_back
+                    .load(std::sync::atomic::Ordering::SeqCst);
+                (requests.len() + held_back, mine)
             });
         match reserved {
             Ok(slot) => Some(slot),
@@ -1159,7 +1172,6 @@ async fn create<S: Store + 'static>(
         Bytes::from(stored.to_string()),
         req.admission.clone(),
         held,
-        grants,
         register,
     );
     if let Err(e) = created.await {
@@ -1408,11 +1420,13 @@ mod tests {
         }
     }
 
-    /// Review finding: a stored access request that could not be read at startup was skipped,
-    /// and so left out of the request quota while it stayed stored. A request that cannot be
-    /// accounted for stops the load.
+    /// Review findings: a stored access request that could not be read at startup was skipped,
+    /// and so left out of the request quota while it stayed stored; and then one that could not
+    /// be read (or parsed) stopped every start. It is held back: not loaded, never stopping the
+    /// start, and counted against the quota until the next start.
     #[tokio::test]
-    async fn requests_that_cannot_be_read_stop_the_load() {
+    async fn requests_that_cannot_be_read_are_held_back() {
+        use std::sync::atomic::Ordering;
         let (state, store) = test_store::state(100).await;
         let req = test_store::request(
             Method::POST,
@@ -1426,9 +1440,47 @@ mod tests {
             .to_str()
             .unwrap()
             .to_string();
-        assert!(AccessStore::load(&store, &state.cfg).await.is_ok());
+        let loaded = AccessStore::load(&store, &state.cfg).await.unwrap();
+        assert_eq!(loaded.requests.read().unwrap().len(), 1);
+        assert_eq!(loaded.held_back.load(Ordering::SeqCst), 0);
+        // Unreadable, and stored but not a record: neither stops the start.
         *store.fail_read_of.lock().unwrap() = Some(iri);
-        assert!(AccessStore::load(&store, &state.cfg).await.is_err());
+        let requests = state.cfg.absolute(REQUESTS_PATH);
+        state
+            .store
+            .create_in_container(
+                &requests,
+                &format!("{requests}garbled"),
+                Bytes::from_static(b"{not json"),
+                LWS_JSON,
+            )
+            .await
+            .unwrap();
+        let state = restart(&store).await;
+        assert!(state.access.requests.read().unwrap().is_empty());
+        assert_eq!(state.access.held_back.load(Ordering::SeqCst), 2);
+        // Both still count: the quota is full two places early.
+        let mut created = 0;
+        loop {
+            let doc = access_doc("AccessRequest", &format!("https://a/{created}"), None);
+            let post = test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &doc,
+            );
+            let who = Agent {
+                subject: Some(format!("https://agent{created}.example/#me")),
+                client: None,
+            };
+            let resp = handle(&state, &post, &who).await;
+            if resp.status() != StatusCode::CREATED {
+                assert_eq!(resp.status(), StatusCode::INSUFFICIENT_STORAGE);
+                break;
+            }
+            created += 1;
+        }
+        assert_eq!(created, MAX_REQUESTS - 2);
     }
 
     /// Review finding (atomicity): a request's store record, its registration and its place in
@@ -2354,6 +2406,49 @@ mod tests {
         assert!(!state.store.exists(&record).await.unwrap());
     }
 
+    /// Review finding: a request's create stored no intent, so one that committed and then
+    /// reported a failure, and whose removal failed too, answered 500 and came back at the next
+    /// start, readable and counted. A request is created as a grant is: the next start removes it.
+    #[tokio::test]
+    async fn a_refused_request_stays_out_after_a_restart() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(REQUESTS_PATH);
+        *store.fail_after_write_of.lock().unwrap() = Some(container.clone());
+        store.fail_meta.store(true, Ordering::SeqCst);
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let post = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        let resp = handle(&state, &post, &Agent::anonymous()).await;
+        assert!(resp.status().is_server_error(), "{}", resp.status());
+        assert!(state.access.requests.read().unwrap().is_empty());
+        let stored = state.store.list_children(&container).await.unwrap();
+        assert_eq!(stored.len(), 1, "stored, unremoved");
+        let record = stored[0].as_str().to_string();
+        // The process stops; the next start cannot remove it yet either, and keeps it out.
+        store.fail_meta.store(false, Ordering::SeqCst);
+        let state = restart(&store).await;
+        assert!(
+            state.access.requests.read().unwrap().is_empty(),
+            "came back"
+        );
+        let path = record.strip_prefix(&state.cfg.base_url).unwrap();
+        let get = test_store::request(Method::GET, path, &[], "");
+        assert_ne!(
+            handle(&state, &get, &Agent::anonymous()).await.status(),
+            StatusCode::OK
+        );
+        store.fail_delete.store(false, Ordering::SeqCst);
+        eventually("removed", || state.visible(&record)).await;
+        assert!(!state.store.exists(&record).await.unwrap());
+        let state = restart(&store).await;
+        assert!(state.access.requests.read().unwrap().is_empty());
+    }
+
     /// A grant whose intent could not be cleared once it landed, nor read back, is not known to
     /// be in force: the create fails, and it is settled from its intent once that can be read
     /// (still stored here: the grant is removed, never put in force).
@@ -2560,15 +2655,9 @@ mod tests {
             .unwrap();
         std::mem::forget(journal);
         *store.fail_restore_of.lock().unwrap() = Some(d.clone());
-        // And an access request that cannot be read.
+        // And the access requests container cannot be looked up.
         let requests = state.cfg.absolute(REQUESTS_PATH);
-        let request = format!("{requests}unreadable");
-        state
-            .store
-            .create_in_container(&requests, &request, Bytes::from_static(b"{}"), LWS_JSON)
-            .await
-            .unwrap();
-        *store.fail_read_of.lock().unwrap() = Some(request.clone());
+        *store.fail_exists_of.lock().unwrap() = Some(requests.clone());
         drop(state);
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.open = true;
@@ -2583,7 +2672,7 @@ mod tests {
         );
         // Repaired; the next start puts `/d` back, and a write after it stands, however long a
         // task of the failed start might wait.
-        *store.fail_read_of.lock().unwrap() = None;
+        *store.fail_exists_of.lock().unwrap() = None;
         *store.fail_restore_of.lock().unwrap() = None;
         let state = restart(&store).await;
         let put = test_store::request(Method::PUT, "/d", &[turtle], "<> a <urn:C> .");

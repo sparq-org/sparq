@@ -302,7 +302,11 @@ What the server exposes, all discoverable from the storage description
   background begins until every step of the start that can fail has succeeded. A revocation that can record neither removes the record
   at once or, failing that, leaves the grant in force and fails. Each record's own lock is
   held across its create and its revocation. A revocation whose removal fails takes the grant
-  out of force at once and keeps removing it in the background.
+  out of force at once and keeps removing it in the background. An access request is created
+  and withdrawn the same way, so one whose create or withdrawal was cut short never comes back
+  at the next start. A stored grant or request that cannot be read or parsed never stops a
+  start: a grant grants nothing, and a request is not loaded but still counts against the
+  request quota until the next start, as does one still being removed.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
