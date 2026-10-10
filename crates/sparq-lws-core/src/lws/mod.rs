@@ -12,7 +12,7 @@
 //! - **containers** (`application/lws+json`, paginated) and **data resources**, with ETag and date
 //!   validators, single byte ranges, JSON Patch, `Depth: infinity` deletes, and RFC 9457 problem
 //!   details;
-//! - a **linkset** (RFC 9264) per resource, read-only;
+//! - a **linkset** (RFC 9264) per resource, edited with JSON Patch;
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
 //!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
 //!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
