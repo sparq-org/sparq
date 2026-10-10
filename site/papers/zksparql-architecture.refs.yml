@@ -368,3 +368,97 @@ crescent:
     - Policharla
     - Zaverucha
   url: "https://github.com/microsoft/crescent-credentials"
+
+# [OPUS-5.5] Additions for the main-body rewrite to the language guide (sources listed in
+# site/papers/zksparql-language-guide.md §8 and the security comparison).
+rdf11mt:
+  type: reference
+  title: "RDF 1.1 Semantics"
+  author:
+    - Hayes, Patrick J.
+    - Patel-Schneider, Peter F.
+  date: 2014
+  publisher: W3C
+  url: "https://www.w3.org/TR/rdf11-mt/"
+
+vcdi:
+  type: reference
+  title: "Verifiable Credential Data Integrity 1.0"
+  author:
+    - Sporny, Manu
+    - Longley, Dave
+  date: 2025
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-data-integrity/"
+
+vcdiecdsa:
+  type: reference
+  title: "Data Integrity ECDSA Cryptosuites v1.0"
+  date: 2025
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-di-ecdsa/"
+
+vcdibbs:
+  type: reference
+  title: "Data Integrity BBS Cryptosuites v1.0 (Candidate Recommendation Draft)"
+  date: 2026
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-di-bbs/"
+
+vcdiqr:
+  type: reference
+  title: "Quantum-Resistant Cryptosuites v1.0 (First Public Working Draft, 16 June 2026)"
+  date: 2026
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-di-quantum-resistant/"
+
+fips204:
+  type: reference
+  title: "FIPS 204: Module-Lattice-Based Digital Signature Standard"
+  author: "National Institute of Standards and Technology"
+  date: 2024
+  publisher: NIST
+
+zkproof:
+  type: report
+  title: "ZKProof Community Reference, version 0.3"
+  author: "ZKProof"
+  date: 2022
+  url: "https://docs.zkproof.org/reference.pdf"
+
+li06:
+  type: article
+  title: "Dynamic Authenticated Index Structures for Outsourced Databases"
+  author:
+    - Li, Feifei
+    - Hadjieleftheriou, Marios
+    - Kollios, George
+    - Reyzin, Leonid
+  date: 2006
+  parent:
+    type: proceedings
+    title: "ACM SIGMOD International Conference on Management of Data"
+
+sdjwt:
+  type: reference
+  title: "Selective Disclosure for JWTs (SD-JWT)"
+  author:
+    - Fett, Daniel
+    - Yasuda, Kristina
+    - Campbell, Brian
+  date: 2025
+  publisher: IETF
+  url: "https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/"
+
+quicksilver21:
+  type: article
+  title: "QuickSilver: Efficient and Affordable Zero-Knowledge Proofs for Circuits and Polynomials over Any Field"
+  author:
+    - Yang, Kang
+    - Sarkar, Pratik
+    - Weng, Chenkai
+    - Wang, Xiao
+  date: 2021
+  parent:
+    type: proceedings
+    title: "ACM SIGSAC Conference on Computer and Communications Security (CCS)"
