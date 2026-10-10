@@ -34,6 +34,11 @@
 //! fits the ceiling nor that the other five declared tuples have retained
 //! proofs.
 //!
+//! [`check_query_profile`] rejects `DESCRIBE` and dataset clauses (`FROM`,
+//! `FROM NAMED`), which version 1 of the ZK SPARQL answers specification
+//! excludes but the relation evaluates. Proving and both verification paths
+//! apply it to the request before any other work; the guest does not.
+//!
 //! Experimental, not externally audited. Neither provenance establishes
 //! credential status, holder binding, or wallet or world completeness.
 
@@ -60,6 +65,7 @@ pub fn prove_with_artifact(
     r0vm: &Path,
     guest: &AcceptedGuest,
 ) -> Result<Presentation, Error> {
+    check_query_profile(&witness.request)?;
     validate_request(&witness.request).map_err(|_| Error("invalid V5 proof request"))?;
     dataset_commitment(&witness.dataset, &witness.request.policy)
         .map_err(|_| Error("V5 private credentials rejected"))?;
@@ -68,11 +74,36 @@ pub fn prove_with_artifact(
     Ok(presentation)
 }
 
+/// Rejects a request whose query uses `DESCRIBE` or a dataset clause (`FROM` or
+/// `FROM NAMED`).
+///
+/// Version 1 of the ZK SPARQL answers specification excludes these features, but
+/// the V5 relation evaluates them: `DESCRIBE` with the evaluator's own
+/// description, and dataset clauses against credentials that form only the
+/// default graph. The check runs on the host, on the verifier's own request, so
+/// the accepted V5 image is unchanged.
+///
+/// # Errors
+/// Rejects an unparsable query, `DESCRIBE` and any dataset clause.
+pub fn check_query_profile(request: &Request) -> Result<(), Error> {
+    let query = spargebra::SparqlParser::new()
+        .parse_query(&request.query)
+        .map_err(|_| Error("V5 query parse rejected"))?;
+    if matches!(query, spargebra::Query::Describe { .. }) {
+        return Err(Error("DESCRIBE is outside the V5 query profile"));
+    }
+    if query.dataset().is_some() {
+        return Err(Error("FROM and FROM NAMED are outside the V5 query profile"));
+    }
+    Ok(())
+}
+
 fn checked_journal(
     presentation: &Presentation,
     expected: &Request,
     image_id: [u32; 8],
 ) -> Result<Journal, Error> {
+    check_query_profile(expected)?;
     validate_request(expected).map_err(|_| Error("invalid V5 expected request"))?;
     verify_receipt(presentation, image_id)?;
     let journal: Journal = presentation

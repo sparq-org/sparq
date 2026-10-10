@@ -401,7 +401,7 @@ but not externally audited (gate sq-qhy4, section 17.1).
   [Binding], [A commitment identifies at most one canonical graph; the prover cannot open it
     to different data — the standard binding notion for commitment schemes
     #cite("PEDERSEN91").], [Poseidon2/BN254 sponge commitment over the RDFC-1.0 canonical form
-    (section 6.1).], [Claim (unaudited); fails against a quantum adversary (section 17.3).],
+    (section 6.1).], [Claim (unaudited); against a quantum adversary it rests on Poseidon2 collision resistance with a reduced margin, while proof soundness fails (section 17.3).],
   [Hiding / zero-knowledge], [The manifest reveals nothing about the committed graphs beyond
     the proven statement, the public inputs, and the leakage dimensions declared in
     section 12.], [ZK proof system (Noir circuits, backend proving; section 7.3); commitment
@@ -1344,9 +1344,11 @@ than on tests running in CI, and does #strong[not] replace external sign-off. Ac
 
 The post-quantum posture is a *settled negative*. The issuer signature suite in scope
 (Schnorr over Baby Jubjub) and the related credential suites (EdDSA, BBS+) rest on
-discrete-log hardness and fall to a Shor-capable adversary; commitment binding likewise breaks
-under a cryptographically relevant quantum computer, so *retrospective* soundness of previously
-accepted proofs fails as well. The vocabulary records this honestly as negative
+discrete-log hardness and fall to a Shor-capable adversary. The pairing-based proof system
+(KZG commitments over BN254) also rests on discrete-log hardness, so a Shor-capable adversary
+can produce accepting proofs of false statements, and *retrospective* soundness of previously
+accepted proofs fails as well. The graph commitment is a hash: its binding rests on Poseidon2
+collision resistance, which generic quantum collision search weakens but does not break. The vocabulary records this honestly as negative
 `PostQuantumForgery` / `PostQuantumSnooping` facts — these negatives are among the few
 annotations permitted to carry `Proven` (section 12.3). The scheme makes *no* FIPS or CMVP
 claim; it is deliberately built on ZK-friendly, non-FIPS-approved primitives (BN254,

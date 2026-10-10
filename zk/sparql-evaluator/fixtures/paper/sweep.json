@@ -218,6 +218,11 @@
       "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s FROM <http://ex/g> WHERE { ?s ex:name ?n }"
     },
     {
+      "id": "probe-from-named",
+      "class": "probe",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s FROM NAMED <http://ex/g> WHERE { GRAPH ?g { ?s ex:name ?n } }"
+    },
+    {
       "id": "probe-service",
       "class": "probe",
       "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { SERVICE <http://ex/sparql> { ?s ex:name ?n } }"
