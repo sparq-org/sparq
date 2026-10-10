@@ -1,0 +1,63 @@
+# Tests for the detached proof-methods workspace.
+name: proof-methods
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "proof-methods/**"
+      - "zk/sparql-evaluator/model/**"
+      - "vendor/spargebra-shim/**"
+      - ".github/workflows/proof-methods.yml"
+  push:
+    branches: [main]
+    paths:
+      - "proof-methods/**"
+      - "zk/sparql-evaluator/model/**"
+      - "vendor/spargebra-shim/**"
+      - ".github/workflows/proof-methods.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proof-methods-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  test:
+    name: proof-methods tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Activate pinned Rust
+        run: |
+          rustup show active-toolchain
+          rustup component add clippy rustfmt
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: proof-methods
+          workspaces: proof-methods
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Format
+        run: cargo fmt --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed --check
+
+      - name: Tests
+        run: cargo test --locked --release --manifest-path proof-methods/Cargo.toml --all-features
+
+      - name: Clippy
+        run: cargo clippy --locked --release --manifest-path proof-methods/Cargo.toml --all-features --all-targets -- -D warnings
+
+      - name: Measurement example runs
+        run: cargo run --locked --release --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed --example measure --features fixtures -- 3
