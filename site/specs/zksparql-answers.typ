@@ -199,8 +199,6 @@ Rules for the verifier service:
   value depends on when or where it is evaluated (`NOW`, `RAND`, `UUID`, `STRUUID`,
   `BNODE()` with no argument): the input dataset is the only data the query may read.
 + With `"answerKind": "supported"`, the query MUST be a monotone query (section 2).
-+ With `"answerKind": "exact"`, the query MUST NOT use REDUCED, whose number of duplicates
-  SPARQL 1.1 leaves open, or SAMPLE, GROUP_CONCAT or `BNODE` (section 6.1).
 + The verifier service MUST list a proof method only if it holds that method's verification
   key in its own configuration.
 + The verifier service MUST store the request and its request digest, and MUST NOT accept a
@@ -251,8 +249,9 @@ identity. What the verifier learns is listed in section 10.2.
 - A blank node in a SELECT result is given a label whose scope is this result. Two cells with
   the same label denote the same blank node. A result label has no relationship to any blank
   node label in a credential, even if the strings are equal.
-- In an Exact SELECT result, `results.bindings` keeps duplicate solutions. Its order is the
-  total order section 6.1 defines. Without ORDER BY the order carries no meaning.
+- In an Exact SELECT result, `results.bindings` keeps duplicate solutions. Its order is the order of the
+  proved solution sequence, which follows the query's ORDER BY as SPARQL 1.1 requires. Without
+  ORDER BY the order carries no meaning.
 - In a Supported SELECT result, `results.bindings` has no duplicate solutions.
 
 The proof is over the proof method's canonical encoding of the result, not over the JSON text.
@@ -275,34 +274,18 @@ contains $D$, so the answer stays true if the holder holds credentials it did no
 answer cannot be `false`, and a Supported SELECT answer with no rows MUST be rejected.
 
 An #emph[Exact] answer states that `result` is the complete result over $D$: for SELECT, the
-rows are exactly the solution sequence SPARQL 1.1 defines for $Q$ over $D$, with duplicates; for
+rows are exactly a solution sequence SPARQL 1.1 permits for $Q$ over $D$, with duplicates; for
 ASK, `result` is `true` if and only if $[| Q |]_D$ is not empty; for CONSTRUCT, `result` is the
-graph SPARQL 1.1 defines for $Q$ over $D$. If the result would exceed `limits.maxResultRows` or a
+graph SPARQL 1.1 permits for $Q$ over $D$. If the result would exceed `limits.maxResultRows` or a
 bound of the proof method, the holder service MUST NOT return a truncated result.
 
-SPARQL 1.1 leaves the order of solutions open wherever ORDER BY does not fix it: for solutions
-it leaves equal, for values it does not compare (such as two language-tagged strings), and for
-queries without ORDER BY. OFFSET and LIMIT then do not determine which solutions are kept. For
-an Exact answer this document fixes one total order. Before each OFFSET and LIMIT in the query,
-including in a subquery, solutions are compared by each ORDER BY condition in turn, with DESC
-reversing that condition:
-
-+ the condition's value, an error counting as unbound, in the order SPARQL 1.1 gives (unbound,
-  then blank nodes, then IRIs, then literals, and literals by the `<` operator where it
-  applies);
-+ where SPARQL 1.1 does not order two values, their #emph[term keys];
-+ if every condition leaves the solutions equal, or there is no ORDER BY, the solutions'
-  values for each variable in turn, in code point order of the variable names, unbound
-  first, then by term key.
-
-The term key of an RDF term is its N-Triples form compared as UTF-8 bytes, with blank nodes
-labelled as RDF Dataset Canonicalization (RDFC-1.0) #cite("RDF-CANON") labels them in the
-input dataset.
-
-An Exact query MUST NOT use SAMPLE or GROUP_CONCAT, whose results SPARQL 1.1 also leaves open,
-or `BNODE`, whose new blank nodes have no term key.
-The SAMPLE that SPARQL 1.1 applies to a GROUP BY variable in the projection is allowed: every
-solution in a group has the same value for it. With these rules the result is unique.
+For some queries SPARQL 1.1 permits more than one result over the same dataset: OFFSET and
+LIMIT where ORDER BY does not fix the order of solutions (no ORDER BY, solutions it leaves
+equal, or values it does not compare), REDUCED, SAMPLE, GROUP_CONCAT, aggregates over
+floating-point values, and blank nodes made by `BNODE`. An Exact answer to such a query is one
+of the permitted results, and the holder chooses which. A verifier that needs one particular
+result writes a query that determines it, for example with an ORDER BY over keys that SPARQL
+1.1 totally orders and that are unique among the solutions.
 
 An Exact answer never satisfies a request for a Supported answer, and the reverse; the kinds
 MUST be equal.
@@ -663,9 +646,6 @@ What differs or is missing:
   strings need a fixed conversion.
 + The RISC Zero methods' `imageId` is eight 32-bit words; the code encodes it as the words in
   order, each little-endian. A wire profile has to fix that encoding.
-+ It has not been checked that the RISC Zero methods use the total order of section 6.1
-  before OFFSET and LIMIT, or that they reject REDUCED, SAMPLE, GROUP_CONCAT and `BNODE` for Exact
-  answers.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
   (a verifier-agreed SELECT); its other five combinations have run only in tests without
   proving.
