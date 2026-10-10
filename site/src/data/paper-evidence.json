@@ -3214,6 +3214,16 @@
       "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/records" },
       "note": "[OPUS-5.5] Runs: every query case in each of sixteen configurations. Executor only; no proofs."
     },
+    "zkexec.sweep_reruns": {
+      "value": 80,
+      "unit": "runs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /reruns",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/reruns" },
+      "note": "[OPUS-5.5] Re-executions, on the same guest image with the executor's error kept, of the runs over four credentials that the evaluator rejected (paper-executor-sweep-reruns.jsonl.gz, digest in /reruns_sha256): every such run, ten in each of the eight four-credential configurations. The audit lists each rejected run in /configurations/*/rejected_runs with its rejection_cause, guest_abort or session_limit, taken from its own guest outcome or this re-execution; session_limit occurs only with four credentials. The audit records no count per cause. Executor only; no proofs."
+    },
     "zkexec.sweep_cases": {
       "value": 52,
       "unit": "query-cases",

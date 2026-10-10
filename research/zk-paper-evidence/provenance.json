@@ -84,12 +84,16 @@
       "sha256": "82c63a752949a1baf124d06a50deabe75cf859c0124dbc3fe3fb7a60b47588b2"
     },
     "paper-executor-sweep-audit.json": {
-      "source": "sparq-org/sparq branch claude/zk-executor-evidence commit ca906afa (draft #6793)",
-      "sha256": "23bc835dc5381035cfff3fc0c5fed4adc9244a39cc51ab948f2f9de77c925aea"
+      "source": "sparq-org/sparq branch claude/zk-executor-evidence commit f37f0688 (draft #6793)",
+      "sha256": "18f3ad1337ce7bf00388caf6ab0554a68b7bc4dc6c5e21b6be84fbc2425deab9"
     },
     "paper-executor-sweep-records.jsonl.gz": {
       "source": "sparq-org/sparq branch claude/zk-executor-evidence commit ca906afa (draft #6793)",
       "sha256": "7fbcfeb478495a1f1bf843311e94c7a07aea0426c4aeadcf8a05dc3bfe46ee8e"
+    },
+    "paper-executor-sweep-reruns.jsonl.gz": {
+      "source": "sparq-org/sparq branch claude/zk-executor-evidence commit f37f0688 (draft #6793)",
+      "sha256": "99311109d485279372e74eed85b2d2cc3e99353f0e9387768828a94db9dab95d"
     },
     "authenticated-vcq-payment-ask-holder-declared-audit.json": {
       "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit 6f756537",

@@ -884,8 +884,13 @@ configurations over generated credentials of #headline("zkexec.sweep_statements_
 prover stops an execution that reaches a session limit of #mcycles("zkexec.sweep_session_limit")
 million cycles, and then produces no proof. With `eddsa-rdfc-2022` in the hidden mode, four
 credentials of #headline("zkexec.sweep_statements_large") triples exceeded this limit in every case
-that the evaluator admitted. Every other configuration stayed within it, including the revealed mode
-and the Merkle-based cryptosuite over the same credentials.
+that the evaluator admitted. In every other configuration, including the revealed mode and the
+Merkle-based cryptosuite over the same credentials, every admitted case completed within it. The
+guest program also rejected every case that the evaluator rejected outside the zkVM, except in some
+runs over four credentials, which reached the session limit first.
+// Source: paper-executor-sweep-audit.json /configurations/*/rejected_runs, one rejection_cause per
+// rejected run (guest_abort or session_limit), and /reruns (zkexec.sweep_reruns). The audit records
+// no count per cause, so neither sentence on the rejected cases gives one.
 
 #todo-results[Proving time, memory and receipt size for each configuration and query, and the
 issuer, holder and verifier costs: signing and tree construction, and verification time split into
@@ -1494,9 +1499,10 @@ over generated credentials. Each describes a person with typed literals, a chain
 and one blank node, padded with further triples to the stated size. The counts of the two sets are
 never added. The executor runs had no internal check (§#ref(<prototype>, supplement: none)).
 
-The executor runs used our prover's session limit (§#ref(<cost>, supplement: none)), and a case
-that reached it counts as admitted but not as completed. The cycle counts, like the limit, cover the
-guest program's own cycles, without the overhead and padding that the prover adds to each segment.
+The executor runs used our prover's session limit (§#ref(<cost>, supplement: none)), and an
+admitted case that reached it does not count as completed. The cycle counts, like the limit, cover
+the guest program's own cycles, without the overhead and padding that the prover adds to each
+segment.
 
 For @phase-table, a separate build of the same guest program, used only for measurement, reads the
 cycle counter after decoding its input and at the end of each phase. It passes the readings to the
@@ -1514,7 +1520,10 @@ such as the generated credentials; `SERVICE`; the functions `BNODE`, `NOW` and `
 function; a triple term; and a nested `EXISTS`. With four credentials, it also rejected a
 zero-or-more property path whose result exceeded its limits. It admitted `DESCRIBE`, `FROM` and
 `FROM NAMED`, which the prover and verifier reject with signature checks
-(§#ref(<prototype>, supplement: none)). @sweep-table gives the counts and cycles per configuration.
+(§#ref(<prototype>, supplement: none)). The guest program also rejected every case that the
+evaluator rejected, except in some of the #headline("zkexec.sweep_reruns") rejected runs over four
+credentials, which reached the session limit first. @sweep-table gives the counts and cycles per
+configuration.
 
 #[
 #show figure: set block(breakable: false)
