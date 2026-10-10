@@ -20,6 +20,9 @@ authenticated-rdf = [
 # zkp-14.6: optional sparq-query-protocol adapter over the V5 relation.
 # Off by default; only combines the two features above and adds no dependency.
 vcq-authenticated = ["vcq", "authenticated-rdf"]
+# Measurement only: also build the V5 image that reports per-phase cycles, for
+# the `paper_sweep` example's `--phases`. Never a production image.
+phase-cycles = ["authenticated-rdf", "sparq-proved-evaluator-methods/phase-cycles"]
 
 [dependencies]
 sparq-proved-evaluator-model = { path = "../model" }
@@ -33,8 +36,14 @@ sha2.workspace = true
 [dev-dependencies]
 sparq-proved-evaluator-model = { path = "../model", features = ["graph-results"] }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc"] }
+sparq-canon = { path = "../../../crates/sparq-canon", default-features = false }
 
 # Exports the separate V5 guest; never overwrites an existing directory.
 [[example]]
 name = "export_authrdf_guest"
+required-features = ["authenticated-rdf"]
+
+# Paper measurements: issuer, holder and verifier costs per suite and mode.
+[[example]]
+name = "paper_sweep"
 required-features = ["authenticated-rdf"]

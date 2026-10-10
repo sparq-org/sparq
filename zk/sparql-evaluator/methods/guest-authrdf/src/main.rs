@@ -34,8 +34,23 @@ fn main() {
     );
     // Parsing, canonicalization, table and signature checks, the agreed-anchor
     // comparison and V3 evaluation all run here; no host verdict is an input.
+    #[cfg(not(feature = "phase-cycles"))]
     let journal = auth::evaluate(&witness).unwrap_or_else(|_| reject());
+    #[cfg(feature = "phase-cycles")]
+    let journal = observed(&witness);
     risc0_zkvm::guest::env::commit(&journal);
+}
+
+// Measurement image only: the cycle count after input decoding (`None`) and at
+// the end of each phase, written to the host's stdout, never to the journal.
+#[cfg(feature = "phase-cycles")]
+fn observed(witness: &auth::Witness) -> auth::Journal {
+    use risc0_zkvm::guest::env;
+    let mut marks: Vec<(Option<auth::Phase>, u64)> = vec![(None, env::cycle_count())];
+    let journal = auth::evaluate_observed(witness, &mut |phase| marks.push((Some(phase), env::cycle_count())))
+        .unwrap_or_else(|_| reject());
+    env::write(&marks);
+    journal
 }
 
 fn canonical_input(bytes: &[u8], words: Vec<u32>) {
