@@ -40,7 +40,7 @@ vcq:disclosed a vcq:SignatureMode ; rdfs:label "disclosed"@en ;
 
 vcq:query a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range xsd:string ; rdfs:label "query"@en ;
   rdfs:comment "The SPARQL 1.2 query text."@en .
-vcq:inputCommitment a rdf:Property ; rdfs:range xsd:string ; rdfs:label "input commitment"@en ;
+vcq:inputCommitment a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "input commitment"@en ;
   rdfs:comment "A multibase-encoded dataset commitment."@en .
 vcq:trustedIssuers a rdf:Property ; rdfs:domain vcq:QueryRequest ; rdfs:range vcq:TrustRequirement ; rdfs:label "trusted issuers"@en .
 vcq:issuer a rdf:Property ; rdfs:domain vcq:TrustRequirement ; rdfs:label "issuer"@en .
@@ -48,15 +48,15 @@ vcq:signatureMode a rdf:Property ; rdfs:range vcq:SignatureMode ; rdfs:label "si
 vcq:proofMethod a rdf:Property ; rdfs:label "proof method"@en .
 vcq:method a rdf:Property ; rdfs:label "method"@en ;
   rdfs:comment "The IRI of the proof method a request entry accepts."@en .
-vcq:verificationKey a rdf:Property ; rdfs:range xsd:string ; rdfs:label "verification key"@en ;
+vcq:verificationKey a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "verification key"@en ;
   rdfs:comment "The multibase-encoded verification key or image ID of a proof method."@en .
 vcq:parameters a rdf:Property ; rdfs:range rdf:JSON ; rdfs:label "parameters"@en .
 vcq:maxPresentationBytes a rdf:Property ; rdfs:range xsd:nonNegativeInteger ; rdfs:label "maximum presentation bytes"@en .
 vcq:maxResultSize a rdf:Property ; rdfs:range xsd:nonNegativeInteger ; rdfs:label "maximum result size"@en .
-vcq:requestDigest a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:range xsd:string ; rdfs:label "request digest"@en .
+vcq:requestDigest a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:range sec:multibase ; rdfs:label "request digest"@en .
 vcq:revealedSignature a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:label "revealed signature"@en .
-vcq:signedMessage a rdf:Property ; rdfs:range xsd:string ; rdfs:label "signed message"@en .
-vcq:signatureValue a rdf:Property ; rdfs:range xsd:string ; rdfs:label "signature value"@en .
+vcq:signedMessage a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "signed message"@en .
+vcq:signatureValue a rdf:Property ; rdfs:range sec:multibase ; rdfs:label "signature value"@en .
 vcq:result a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:range rdf:JSON ; rdfs:label "result"@en ;
   rdfs:comment "A SELECT or ASK result as a SPARQL 1.2 Query Results JSON document."@en .
 vcq:resultGraph a rdf:Property ; rdfs:domain vcq:QueryAnswerPresentation ; rdfs:label "result graph"@en ;

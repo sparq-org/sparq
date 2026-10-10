@@ -129,18 +129,28 @@ meaning needed:
   `cryptosuite`, `verificationMethod`, `Multikey` and `publicKeyMultibase`
   #cite("VC-DATA-INTEGRITY");
 - `rdf:JSON` for values that are JSON documents, such as SPARQL query results
-  #cite("JSON-LD11").
+  #cite("JSON-LD11"). The lexical form of an `rdf:JSON` literal is the JSON value serialized
+  under the JSON Canonicalization Scheme (JCS) #cite("RFC8785"), as JSON-LD 1.1 requires, so
+  equal JSON values give equal literals.
 
 Rules for both resources:
 
 + A JSON-LD document of either resource MUST use the context of @sec-context, after the VC
   base context `https://www.w3.org/ns/credentials/v2` where the resource is a verifiable
-  presentation. A receiver MUST reject a document in which any property or type does not
-  expand to an IRI defined by these contexts, as Data Integrity requires for signed documents
-  #cite("VC-DATA-INTEGRITY"). Ignoring an unknown term could make a verifier accept a weaker
-  answer than it asked for.
+  presentation. Outside the value of `resultGraph`, a receiver MUST reject a document in which
+  any property or type does not expand to an IRI defined by these contexts, as Data Integrity
+  requires for signed documents #cite("VC-DATA-INTEGRITY"). Ignoring an unknown term could make
+  a verifier accept a weaker answer than it asked for. The value of `resultGraph` is query
+  data and may use any IRI.
++ In the whole document, including `resultGraph`, a receiver MUST reject a document from which
+  JSON-LD expansion drops any key or value, for example a key that maps to no IRI.
++ Whether a resource has a property is decided on its RDF graph: it has the property if the
+  graph holds at least one triple with that resource as subject and that property as
+  predicate. A term whose value is a list MUST NOT be given as an empty array, since an empty
+  array produces no triple and so is the same as an absent term; a receiver MUST reject a
+  document that does so.
 + Byte strings are multibase-encoded base64url without padding (prefix `u`)
-  #cite("VC-DATA-INTEGRITY").
+  #cite("VC-DATA-INTEGRITY"), typed `sec:multibase` in RDF.
 + Digests are SHA-256 #cite("FIPS180-4") and are 32 bytes before encoding.
 + Times are `xsd:dateTimeStamp` values.
 + The #dfn[request digest] is SHA-256 over the canonical N-Quads of the query request's RDF
@@ -164,17 +174,18 @@ A query request is a resource of type `vcq:QueryRequest`. Its properties, by JSO
     exactly as given.],
   [`inputCommitment`], [byte string], [OPTIONAL. A dataset commitment the verifier agreed in
     advance (@sec-input). If present, the answer MUST be over the dataset it fixes.],
-  [`trustedIssuers`], [list of trust requirements], [OPTIONAL. Which issuers the verifier
-    trusts (@sec-trust). If absent, the credentials in the input dataset are not checked
-    against any issuer.],
-  [`cryptosuite`], [list of strings], [REQUIRED if `trustedIssuers` is present. The
+  [`trustedIssuers`], [list of trust requirements], [OPTIONAL; non-empty if present. Which
+    issuers the verifier trusts (@sec-trust). If absent, the credentials in the input dataset
+    are not checked against any issuer.],
+  [`cryptosuite`], [list of strings], [REQUIRED and non-empty if `trustedIssuers` is present. The
     cryptosuites the verifier accepts for credential proofs, for example
     `"eddsa-rdfc-2022"`.],
-  [`signatureMode`], [list of IRIs], [REQUIRED if `trustedIssuers` is present. The
-    signature modes the verifier accepts: one or more of `hidden`, `revealed` and
+  [`signatureMode`], [list of IRIs], [REQUIRED and non-empty if `trustedIssuers` is present.
+    The signature modes the verifier accepts: one or more of `hidden`, `revealed` and
     `disclosed` (@sec-modes).],
   [`proofMethod`], [list of objects], [REQUIRED, non-empty. The proof methods the verifier
-    accepts, in order of preference. Each has `method` (the method's IRI), `verificationKey`
+    accepts; the holder service uses any one of them. Each has `method` (the method's IRI),
+    `verificationKey`
     (byte string) and `parameters` (JSON). @sec-methods.],
   [`maxPresentationBytes`], [integer], [REQUIRED. Bounds the encoded presentation.],
   [`maxResultSize`], [integer], [REQUIRED. Bounds the solutions in a SELECT result or the
@@ -543,8 +554,10 @@ Each proof method MUST publish:
   verifier service SHOULD list only methods that support its query;
 - #strong[the results it can prove]: in particular, a method that proves only that the
   returned solutions are solutions, and not that none is missing, can answer only queries
-  for which that is a permitted result, such as an ASK whose answer is `true`, or a
-  `SELECT DISTINCT … LIMIT k` query for which it returns `k` solutions;
+  for which every such result is a permitted result, such as an ASK whose answer is `true`,
+  or a `SELECT DISTINCT … LIMIT k` query with no ORDER BY, OFFSET, GROUP BY, aggregate or
+  HAVING for which it returns `k` solutions. With ORDER BY or OFFSET, which rows are permitted
+  depends on solutions not returned, so membership alone is not enough;
 - #strong[what the verifier must trust] for an accepted proof to mean the statement holds: for
   example the proof system's soundness and any trusted setup, or for an attestation the
   hardware vendor's attestation key, the measured program and the TEE's resistance to physical
@@ -857,7 +870,7 @@ name. Terms reused from other vocabularies keep their own IRIs (@sec-vocab).
     `cred:VerifiablePresentation` (@sec-presentation).],
   [`vcq:QueryAnswerProof`], [class], [The proof of an answer presentation.],
   [`vcq:query`], [property], [The SPARQL query text (`xsd:string`).],
-  [`vcq:inputCommitment`], [property], [A dataset commitment (multibase string).],
+  [`vcq:inputCommitment`], [property], [A dataset commitment (`sec:multibase`).],
   [`vcq:trustedIssuers`], [property], [A trust requirement (@sec-trust).],
   [`vcq:IssuerKeys`], [class], [A trust requirement listing an issuer and its keys.],
   [`vcq:TrustedList`, `vcq:FederationTrustAnchor`, `vcq:RecognitionCredential`,
@@ -870,11 +883,11 @@ name. Terms reused from other vocabularies keep their own IRIs (@sec-vocab).
     method used (on a proof).],
   [`vcq:method`], [property], [The IRI of the proof method an entry accepts.],
   [`vcq:verificationKey`], [property], [The verification key or image ID of a proof method
-    (multibase string).],
+    (`sec:multibase`).],
   [`vcq:parameters`], [property], [A proof method's parameters (`rdf:JSON`).],
   [`vcq:maxPresentationBytes`, `vcq:maxResultSize`], [property], [Bounds
     (`xsd:nonNegativeInteger`).],
-  [`vcq:requestDigest`], [property], [The request digest (multibase string).],
+  [`vcq:requestDigest`], [property], [The request digest (`sec:multibase`).],
   [`vcq:revealedSignature`], [property], [A revealed signature, with `sec:verificationMethod`,
     `sec:cryptosuite`, `vcq:signedMessage` and `vcq:signatureValue`.],
   [`vcq:result`], [property], [A SELECT or ASK result (`rdf:JSON`).],
@@ -906,17 +919,17 @@ The context `https://w3id.org/sparq/vcq/v1` is:
     "revealed": "vcq:revealed",
     "disclosed": "vcq:disclosed",
     "query": "vcq:query",
-    "inputCommitment": "vcq:inputCommitment",
+    "inputCommitment": { "@id": "vcq:inputCommitment", "@type": "sec:multibase" },
     "trustedIssuers": { "@id": "vcq:trustedIssuers", "@container": "@set" },
     "issuer": { "@id": "vcq:issuer", "@type": "@id" },
     "verificationMethod": { "@id": "sec:verificationMethod", "@type": "@id" },
     "controller": { "@id": "sec:controller", "@type": "@id" },
-    "publicKeyMultibase": "sec:publicKeyMultibase",
-    "cryptosuite": "sec:cryptosuite",
+    "publicKeyMultibase": { "@id": "sec:publicKeyMultibase", "@type": "sec:multibase" },
+    "cryptosuite": { "@id": "sec:cryptosuite", "@type": "sec:cryptosuiteString" },
     "signatureMode": { "@id": "vcq:signatureMode", "@type": "@vocab" },
     "proofMethod": { "@id": "vcq:proofMethod", "@type": "@id" },
     "method": { "@id": "vcq:method", "@type": "@id" },
-    "verificationKey": "vcq:verificationKey",
+    "verificationKey": { "@id": "vcq:verificationKey", "@type": "sec:multibase" },
     "parameters": { "@id": "vcq:parameters", "@type": "@json" },
     "maxPresentationBytes": { "@id": "vcq:maxPresentationBytes",
                               "@type": "xsd:nonNegativeInteger" },
@@ -925,13 +938,13 @@ The context `https://w3id.org/sparq/vcq/v1` is:
     "domain": "sec:domain",
     "validFrom": { "@id": "cred:validFrom", "@type": "xsd:dateTime" },
     "validUntil": { "@id": "cred:validUntil", "@type": "xsd:dateTime" },
-    "requestDigest": "vcq:requestDigest",
+    "requestDigest": { "@id": "vcq:requestDigest", "@type": "sec:multibase" },
     "revealedSignature": { "@id": "vcq:revealedSignature", "@container": "@set" },
-    "signedMessage": "vcq:signedMessage",
-    "signatureValue": "vcq:signatureValue",
+    "signedMessage": { "@id": "vcq:signedMessage", "@type": "sec:multibase" },
+    "signatureValue": { "@id": "vcq:signatureValue", "@type": "sec:multibase" },
     "result": { "@id": "vcq:result", "@type": "@json" },
     "resultGraph": { "@id": "vcq:resultGraph", "@container": "@graph" },
-    "proofValue": "sec:proofValue"
+    "proofValue": { "@id": "sec:proofValue", "@type": "sec:multibase" }
   }
 }
 ```
@@ -949,6 +962,8 @@ method, not to the method; in a proof, `proofMethod` is the IRI of the method us
 = References <sec-refs>
 
 #references((
+  ("RFC8785", [Rundgren, A.; Jordan, B.; Erdtman, S. #emph[JSON Canonicalization Scheme
+    (JCS)]. RFC 8785, June 2020. https://www.rfc-editor.org/rfc/rfc8785.]),
   ("RFC2119", [Bradner, S. #emph[Key words for use in RFCs to Indicate Requirement Levels].
     RFC 2119, IETF, March 1997.]),
   ("RFC8174", [Leiba, B. #emph[Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words].

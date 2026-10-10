@@ -16,7 +16,10 @@
     "revealed": "vcq:revealed",
     "disclosed": "vcq:disclosed",
     "query": "vcq:query",
-    "inputCommitment": "vcq:inputCommitment",
+    "inputCommitment": {
+      "@id": "vcq:inputCommitment",
+      "@type": "sec:multibase"
+    },
     "trustedIssuers": {
       "@id": "vcq:trustedIssuers",
       "@container": "@set"
@@ -33,8 +36,14 @@
       "@id": "sec:controller",
       "@type": "@id"
     },
-    "publicKeyMultibase": "sec:publicKeyMultibase",
-    "cryptosuite": "sec:cryptosuite",
+    "publicKeyMultibase": {
+      "@id": "sec:publicKeyMultibase",
+      "@type": "sec:multibase"
+    },
+    "cryptosuite": {
+      "@id": "sec:cryptosuite",
+      "@type": "sec:cryptosuiteString"
+    },
     "signatureMode": {
       "@id": "vcq:signatureMode",
       "@type": "@vocab"
@@ -47,7 +56,10 @@
       "@id": "vcq:method",
       "@type": "@id"
     },
-    "verificationKey": "vcq:verificationKey",
+    "verificationKey": {
+      "@id": "vcq:verificationKey",
+      "@type": "sec:multibase"
+    },
     "parameters": {
       "@id": "vcq:parameters",
       "@type": "@json"
@@ -70,13 +82,22 @@
       "@id": "cred:validUntil",
       "@type": "xsd:dateTime"
     },
-    "requestDigest": "vcq:requestDigest",
+    "requestDigest": {
+      "@id": "vcq:requestDigest",
+      "@type": "sec:multibase"
+    },
     "revealedSignature": {
       "@id": "vcq:revealedSignature",
       "@container": "@set"
     },
-    "signedMessage": "vcq:signedMessage",
-    "signatureValue": "vcq:signatureValue",
+    "signedMessage": {
+      "@id": "vcq:signedMessage",
+      "@type": "sec:multibase"
+    },
+    "signatureValue": {
+      "@id": "vcq:signatureValue",
+      "@type": "sec:multibase"
+    },
     "result": {
       "@id": "vcq:result",
       "@type": "@json"
@@ -85,6 +106,9 @@
       "@id": "vcq:resultGraph",
       "@container": "@graph"
     },
-    "proofValue": "sec:proofValue"
+    "proofValue": {
+      "@id": "sec:proofValue",
+      "@type": "sec:multibase"
+    }
   }
 }
