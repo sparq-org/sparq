@@ -1,0 +1,2 @@
+PREFIX bank: <https://bank.example/vocab#>
+SELECT ?p WHERE { ?p bank:amount ?amount FILTER(?amount > 1300.00) }
