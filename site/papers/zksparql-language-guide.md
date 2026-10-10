@@ -184,11 +184,11 @@ Each appears in full once, in its home (rule 7).
 
 - **Coverage** (§7.1; the abstract may say "over synthetic credentials"): "We used only synthetic credentials signed with test keys."
 - **Development mode** (§7.1): "We generated all receipts with development mode disabled and verified them against the expected guest image ID."
-- **Internal check** (§7.1; never name the check): "For experiments without † in Table 2, we recomputed hashes of source files, guest binaries and receipts. We compared the hashes and recorded test outcomes with the archived records. We did not verify the proofs again."
-- **Audit** (§9.3): "The prototype has not undergone an external security audit."
+- **Internal check** (§7.1; never name the check): "For experiments without † in Table 3, we recomputed hashes of source files, guest binaries and receipts. We compared the hashes and recorded test outcomes with the archived records. We did not verify the proofs again."
+- **Audit** (§9.2): "The prototype has not undergone an external security audit."
 - **Disclosure timing** (§5.3): "We propose that a party receive these public inputs no earlier than the answer from which it can compute them. The prototype does not enforce this condition."
 - **Input chosen by the holder** (§3.3): "Over an input dataset chosen by the holder, a closed-world answer covers only the included credentials."
-- **Unchecked properties** (§9.3): "The SPARQL evaluator running in the zkVM does not check credential status, holder binding or credential validity periods."
+- **Unchecked properties** (§9.2): "The SPARQL evaluator running in the zkVM does not check credential status, holder binding or credential validity periods."
 
 ## 7. Decisions and open questions
 
