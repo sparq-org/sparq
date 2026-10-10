@@ -1933,74 +1933,6 @@ pub fn add_link(headers: &mut HeaderMap, target: &str, rel: &str, media_type: Op
 // helpers give their listings what [`resources`] gives a stored container: content negotiation,
 // paging, an entity tag and the container links.
 
-/// One media range of an Accept header: essence, q and profile.
-fn accept_ranges(accept: &str) -> Vec<(String, f32, Option<String>)> {
-    accept
-        .split(',')
-        .filter_map(|part| {
-            let mut pieces = part.split(';');
-            let essence = pieces.next()?.trim().to_ascii_lowercase();
-            if essence.is_empty() {
-                return None;
-            }
-            let (mut q, mut profile) = (1.0, None);
-            for p in pieces {
-                if let Some((k, v)) = p.split_once('=') {
-                    let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"'));
-                    if k == "q" {
-                        q = v.parse().unwrap_or(0.0);
-                    } else if k == "profile" {
-                        profile = Some(v.to_string());
-                    }
-                }
-            }
-            Some((essence, q, profile))
-        })
-        .collect()
-}
-
-/// The container media type for `accept`: `application/lws+json`, `application/ld+json` (lws+json
-/// when it names the LWS profile) or `application/json`, the earlier winning ties; lws+json when
-/// there is no Accept; `None` when none of them is acceptable.
-pub fn negotiate_container(accept: Option<&str>) -> Option<&'static str> {
-    const OFFERED: [&str; 3] = [LWS_JSON, LD_JSON, JSON];
-    let Some(accept) = accept.filter(|a| !a.trim().is_empty()) else {
-        return Some(LWS_JSON);
-    };
-    let ranges = accept_ranges(accept);
-    if ranges
-        .iter()
-        .any(|(e, q, p)| e == LD_JSON && p.as_deref() == Some(LWS_CONTEXT) && *q > 0.0)
-    {
-        return Some(LWS_JSON);
-    }
-    let mut best: Option<(f32, usize)> = None;
-    for (i, offer) in OFFERED.iter().enumerate() {
-        // The most specific range that matches the offer decides its q.
-        let mut q_for: Option<(f32, u8)> = None;
-        for (essence, q, _) in &ranges {
-            let spec = if essence == offer {
-                3
-            } else if essence == "application/*" {
-                2
-            } else if essence == "*/*" {
-                1
-            } else {
-                0
-            };
-            if spec > 0 && q_for.is_none_or(|(_, s)| spec > s) {
-                q_for = Some((*q, spec));
-            }
-        }
-        if let Some((q, _)) = q_for.filter(|(q, _)| *q > 0.0) {
-            if best.is_none_or(|(bq, _)| q > bq) {
-                best = Some((q, i));
-            }
-        }
-    }
-    best.map(|(_, i)| OFFERED[i])
-}
-
 /// The page a request asks for (`?page=`, 1 when absent), or `None` when it is not one of `pages`.
 pub fn requested_page(req: &LwsRequest, pages: usize) -> Option<usize> {
     let page = match req.query_param("page") {
@@ -2061,7 +1993,8 @@ pub fn service_listing(
     items: Vec<Value>,
     version: &str,
 ) -> Response {
-    let Some(media_type) = negotiate_container(req.header(header::ACCEPT)) else {
+    // Negotiated as a stored container's listing is.
+    let Some(media_type) = resources::negotiate_container(req.header(header::ACCEPT)) else {
         return problem(StatusCode::NOT_ACCEPTABLE, None);
     };
     let size = cfg.page_size.max(1);
@@ -2099,7 +2032,7 @@ pub fn service_listing(
             "totalItems": total,
             "items": shown,
         });
-        json_response(StatusCode::OK, media_type, &body)
+        json_response(StatusCode::OK, &media_type, &body)
     };
     let h = resp.headers_mut();
     set(h, header::ETAG, &etag);
@@ -3129,29 +3062,6 @@ mod tests {
     }
 
     #[test]
-    fn container_negotiation() {
-        assert_eq!(negotiate_container(None), Some(LWS_JSON));
-        assert_eq!(negotiate_container(Some("application/json")), Some(JSON));
-        assert_eq!(
-            negotiate_container(Some("application/ld+json")),
-            Some(LD_JSON)
-        );
-        assert_eq!(
-            negotiate_container(Some(
-                "application/ld+json; profile=\"https://www.w3.org/ns/lws/v1\""
-            )),
-            Some(LWS_JSON)
-        );
-        assert_eq!(negotiate_container(Some("*/*")), Some(LWS_JSON));
-        assert_eq!(
-            negotiate_container(Some("application/json, application/lws+json;q=0.5")),
-            Some(JSON)
-        );
-        assert_eq!(negotiate_container(Some("text/turtle")), None);
-        assert_eq!(negotiate_container(Some("application/json;q=0")), None);
-    }
-
-    #[test]
     fn lws_context_check() {
         assert!(has_lws_context(Some(&json!([LWS_CONTEXT]))));
         assert!(has_lws_context(Some(&json!(["https://x/", LWS_CONTEXT]))));
@@ -3207,6 +3117,20 @@ mod tests {
         assert_eq!(
             get("", &[("accept", "text/turtle")]).status(),
             StatusCode::NOT_ACCEPTABLE
+        );
+        // Review finding: a request for ld+json with the LWS profile, refusing lws+json, got
+        // lws+json. It gets what it asked for, as from a stored container.
+        let ld = get(
+            "",
+            &[(
+                "accept",
+                "application/ld+json; profile=\"https://www.w3.org/ns/lws/v1\", application/lws+json;q=0",
+            )],
+        );
+        assert_eq!(ld.status(), StatusCode::OK);
+        assert_eq!(
+            ld.headers()[header::CONTENT_TYPE],
+            "application/ld+json; profile=\"https://www.w3.org/ns/lws/v1\""
         );
         assert_eq!(
             get("", &[("if-none-match", &etag)]).status(),

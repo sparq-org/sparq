@@ -750,7 +750,7 @@ fn ld_json_lws_profile() -> String {
 /// The container media type for `accept`: lws+json, ld+json (with the LWS profile when the request
 /// names it), or json. "Servers MUST honor a request for any of these media types and MUST set the
 /// Content-Type response header to the requested media type."
-fn negotiate_container(accept: Option<&str>) -> Option<String> {
+pub(crate) fn negotiate_container(accept: Option<&str>) -> Option<String> {
     if let Some(a) = accept {
         if parse_accept(a)
             .iter()
