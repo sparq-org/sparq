@@ -244,9 +244,11 @@ as defined by the zkSPARQL draft #cite("ZKSPARQL") and Noir's standard library.
 - A leaf is `P(1, encF(s), encF(p), encF(o), encF(g))`, and an inner node is
   `P(2, left, right)`. The padding leaf is zero, and leaves are sorted as
   integers.
-- The signed message is `P(3, salt, n, root, c1, c0)`, where `salt` is the
-  32-byte salt reduced modulo the field order and `c1`, `c0` are the high and
-  low 128 bits of the configuration digest.
+- The signed message is `P(3, suite, salt, n, root, c1, c0)`, where `suite` is
+  `h("schnorr-poseidon2-merkle-2026")`, `salt` is the 32-byte salt reduced
+  modulo the field order and `c1`, `c0` are the high and low 128 bits of the
+  configuration digest. As in the SHA-256 members, the suite identifier is
+  signed, so a signature cannot be reused under another suite.
 - The signature is a Schnorr signature over Baby Jubjub with a Poseidon2
   challenge, as defined by the zkSPARQL draft's issuer attestation.
 
@@ -281,7 +283,9 @@ message layout may change when it is implemented and given fixed vectors.]
   can forge Ed25519 and Baby Jubjub signatures. Only the ML-DSA-44 member resists
   forgery by such an adversary. The hash-based tree and the salted message keep
   their binding and hiding against quantum adversaries, with security margins
-  reduced by generic quantum search.
+  reduced by generic quantum search. Whether a hidden-mode proof stays sound is
+  a property of the proof system: pairing-based proofs do not resist such an
+  adversary.
 - *Comparison keys.* Keys add no information beyond the lexical form. They are
   disclosed only where a proof discloses a leaf.
 - *Completeness.* A signature covers one credential. A holder can still choose
