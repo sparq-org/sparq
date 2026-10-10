@@ -2354,26 +2354,55 @@ fn is_json_number(token: &str) -> bool {
         && exp.is_none_or(|e| digits(e.strip_prefix(['+', '-']).unwrap_or(e)))
 }
 
+/// The longest number text a JSON Patch reads, in bytes. Every number is held to it, in the patch
+/// and in its target, so comparing two numbers costs at most this much whatever the document.
+const MAX_NUMBER_TEXT: usize = 1024;
+
+/// Why [`read_numbers_as_text`] refused a JSON text.
+#[derive(Debug, PartialEq)]
+enum Unreadable {
+    /// It is not JSON (RFC 8259).
+    NotJson,
+    /// It holds a number past [`MAX_NUMBER_TEXT`], or one whose power of ten does not fit 64 bits.
+    Number,
+}
+
+/// Parse the JSON text `body` with every number held as its text ([`numbers_as_text`]). The text
+/// is checked to be JSON as written first (numbers scanned, never converted), so the rewriting
+/// can neither make malformed text parse nor change what it holds.
+fn read_numbers_as_text(body: &[u8]) -> Result<Value, Unreadable> {
+    let text = std::str::from_utf8(body).map_err(|_| Unreadable::NotJson)?;
+    serde_json::from_str::<serde::de::IgnoredAny>(text).map_err(|_| Unreadable::NotJson)?;
+    let held = numbers_as_text(text).ok_or(Unreadable::Number)?;
+    serde_json::from_str(&held).map_err(|_| Unreadable::NotJson)
+}
+
 /// `json` with every number rewritten as a marked string ([`NUMBER_MARK`]), and every string
-/// value that starts with the mark with the mark doubled.
-fn numbers_as_text(json: &str) -> String {
+/// value that starts with the mark with the mark doubled. `None` when a number is past
+/// [`MAX_NUMBER_TEXT`] or its value cannot be read ([`decimal`]): such a number is refused, never
+/// compared as text.
+fn numbers_as_text(json: &str) -> Option<String> {
+    let refused = std::cell::Cell::new(false);
     let starts_marked = |content: &str| {
         content.starts_with(NUMBER_MARK)
             || content
                 .get(..6)
                 .is_some_and(|e| e.eq_ignore_ascii_case("\\ue000"))
     };
-    rewrite_json(
+    let held = rewrite_json(
         json,
         |content| starts_marked(content).then(|| format!("\"{NUMBER_MARK}{content}\"")),
         |token| {
-            if is_json_number(token) {
-                format!("\"{NUMBER_MARK}{token}\"")
-            } else {
-                token.to_string()
+            if !is_json_number(token) {
+                return token.to_string();
             }
+            if token.len() > MAX_NUMBER_TEXT || decimal(token).is_none() {
+                refused.set(true);
+            }
+            format!("\"{NUMBER_MARK}{token}\"")
         },
-    )
+    );
+    (!refused.get()).then_some(held)
 }
 
 /// The JSON `json` (as `serde_json` writes it) with each marked string written back as the
@@ -2406,27 +2435,30 @@ fn number_text(v: &Value) -> Option<std::borrow::Cow<'_, str>> {
 }
 
 /// A decimal number's value as (negative, significant digits, power of ten): `1.50e1` and `15`
-/// are both `(false, "15", 0)`, and every zero is `(false, "", 0)`.
+/// are both `(false, "15", 0)`, and every zero is `(false, "", 0)`. `None` when the power of ten
+/// does not fit 64 bits ([`numbers_as_text`] refuses such a number).
 fn decimal(s: &str) -> Option<(bool, String, i64)> {
     let (neg, s) = match s.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, s),
     };
     let (mantissa, exp) = match s.find(['e', 'E']) {
-        Some(i) => (&s[..i], s[i + 1..].parse::<i64>().ok()?),
-        None => (s, 0),
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
     };
     let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    let mut digits: String = format!("{int}{frac}").trim_start_matches('0').to_string();
-    let mut exp = exp.checked_sub(i64::try_from(frac.len()).ok()?)?;
-    while digits.ends_with('0') {
-        digits.pop();
-        exp = exp.checked_add(1)?;
-    }
+    let all = format!("{int}{frac}");
+    let digits = all.trim_start_matches('0').trim_end_matches('0');
+    // Zero is zero whatever its sign and power of ten.
     if digits.is_empty() {
-        return Some((false, digits, 0));
+        return Some((false, String::new(), 0));
     }
-    Some((neg, digits, exp))
+    let exp = exp.map_or(Some(0), |e| e.parse::<i64>().ok())?;
+    let trailing = all.len() - all.trim_end_matches('0').len();
+    let exp = exp
+        .checked_sub(i64::try_from(frac.len()).ok()?)?
+        .checked_add(i64::try_from(trailing).ok()?)?;
+    Some((neg, digits.to_string(), exp))
 }
 
 /// Whether some operation of the patch text `body` names a member twice (`{"op": "add", "op":
@@ -2507,8 +2539,30 @@ pub fn json_patch_reads(ops: &Value) -> bool {
     })
 }
 
-/// The serialized size of `v`, in bytes.
+/// The size of `v` as written, in bytes: a number held as text ([`NUMBER_MARK`]) counts as the
+/// number it is written back as, not as the marked string it is held as.
 fn json_size(v: &Value) -> usize {
+    serialized_size(v).saturating_sub(mark_overhead(v))
+}
+
+/// The bytes the marks of [`numbers_as_text`] add to `v` as `serde_json` writes it: the quotes and
+/// mark around each number, and each doubled mark.
+fn mark_overhead(v: &Value) -> usize {
+    let mark = NUMBER_MARK.len_utf8();
+    match v {
+        Value::String(s) => match s.strip_prefix(NUMBER_MARK) {
+            Some(rest) if rest.starts_with(NUMBER_MARK) => mark,
+            Some(_) => mark + 2,
+            None => 0,
+        },
+        Value::Array(a) => a.iter().map(mark_overhead).sum(),
+        Value::Object(m) => m.values().map(mark_overhead).sum(),
+        _ => 0,
+    }
+}
+
+/// The serialized size of `v`, in bytes.
+fn serialized_size(v: &Value) -> usize {
     struct Count(usize);
     impl std::io::Write for Count {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -2649,9 +2703,12 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "test" => {
-                // A comparison walks no more of the document than the value it is given.
-                charge(&mut work, json_size(&op["value"]))?;
-                if !json_equal(path.get(&doc).ok_or(Failed)?, &op["value"]) {
+                // A comparison is charged for what it reads of both sides as it reads it.
+                let target = path.get(&doc).ok_or(Failed)?;
+                let mut left = work_budget.saturating_sub(work);
+                let equal = json_equal(target, &op["value"], &mut left);
+                work = work_budget - left;
+                if !equal.ok_or(PatchError::TooLarge)? {
                     return Err(Failed);
                 }
             }
@@ -2718,29 +2775,63 @@ fn shift_cost(doc: &Value, path: &Pointer, adding: bool) -> usize {
 /// and literals when they are identical, arrays element by element, objects member by member
 /// whatever their order. Integers compare exactly (two distinct large integers never meet through
 /// a float), and an integer equals a float only when the float is exactly that integer.
-fn json_equal(a: &Value, b: &Value) -> bool {
+///
+/// `left` is the work the comparison may still do, in bytes read from either side; `None` once
+/// it would do more.
+fn json_equal(a: &Value, b: &Value, left: &mut usize) -> Option<bool> {
     // Numbers are equal when the decimal values their texts denote are.
     match (number_text(a), number_text(b)) {
         (Some(x), Some(y)) => {
-            return match (decimal(&x), decimal(&y)) {
+            spend(left, x.len() + y.len())?;
+            return Some(match (decimal(&x), decimal(&y)) {
                 (Some(x), Some(y)) => x == y,
-                _ => x == y,
-            }
+                // Never reached for numbers read through [`numbers_as_text`], which refuses
+                // these; and never decided by their text.
+                _ => false,
+            });
         }
         (None, None) => {}
-        _ => return false,
+        _ => return Some(false),
     }
     match (a, b) {
         (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| json_equal(x, y))
+            spend(left, 0)?;
+            if x.len() != y.len() {
+                return Some(false);
+            }
+            for (x, y) in x.iter().zip(y) {
+                if !json_equal(x, y, left)? {
+                    return Some(false);
+                }
+            }
+            Some(true)
         }
         (Value::Object(x), Value::Object(y)) => {
-            x.len() == y.len()
-                && x.iter()
-                    .all(|(k, v)| y.get(k).is_some_and(|w| json_equal(v, w)))
+            spend(left, 0)?;
+            if x.len() != y.len() {
+                return Some(false);
+            }
+            for (k, v) in x {
+                spend(left, k.len())?;
+                match y.get(k) {
+                    Some(w) if json_equal(v, w, left)? => {}
+                    _ => return Some(false),
+                }
+            }
+            Some(true)
         }
-        _ => a == b,
+        (Value::String(x), Value::String(y)) => {
+            spend(left, x.len().min(y.len()))?;
+            Some(x == y)
+        }
+        _ => Some(a == b),
     }
+}
+
+/// Take `bytes` (and one for the step) from the work `left`; `None` when there is not that much.
+fn spend(left: &mut usize, bytes: usize) -> Option<()> {
+    *left = left.checked_sub(bytes.saturating_add(1))?;
+    Some(())
 }
 
 /// An RFC 6901 JSON Pointer, parsed once: its reference tokens, unescaped. Every JSON Patch
@@ -2850,6 +2941,14 @@ fn pointer_remove(doc: &mut Value, path: &Pointer) -> Option<Value> {
     }
 }
 
+/// The answer to a patch, or a target, holding a number [`numbers_as_text`] refuses.
+fn number_refused() -> Response {
+    problem(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Some("a number is too long, or its power of ten too large, to compare"),
+    )
+}
+
 /// A patch document a request carries.
 enum Patch {
     /// RFC 6902 JSON Patch, already checked to be well-formed.
@@ -2870,14 +2969,15 @@ impl Patch {
             );
             return Err(r);
         }
-        let Some(patch) = std::str::from_utf8(&req.body)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&numbers_as_text(text)).ok())
-        else {
-            return Err(problem(
-                StatusCode::BAD_REQUEST,
-                Some("the patch is not JSON"),
-            ));
+        let patch = match read_numbers_as_text(&req.body) {
+            Ok(patch) => patch,
+            Err(Unreadable::Number) => return Err(number_refused()),
+            Err(Unreadable::NotJson) => {
+                return Err(problem(
+                    StatusCode::BAD_REQUEST,
+                    Some("the patch is not JSON"),
+                ))
+            }
         };
         if let Err(PatchError::Malformed(why)) = validate_json_patch(&patch) {
             return Err(problem(StatusCode::BAD_REQUEST, Some(why)));
@@ -2997,14 +3097,14 @@ async fn patch<S: Store + 'static>(
     // Its numbers are held as their text ([`NUMBER_MARK`]) while the patch applies, so the
     // content is written back with every number it does not touch as it was.
     let target = if body.is_empty() {
-        Some(Value::Object(Map::new()))
+        Ok(Value::Object(Map::new()))
     } else {
-        std::str::from_utf8(&body)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&numbers_as_text(text)).ok())
+        read_numbers_as_text(&body)
     };
-    let Some(target) = target else {
-        return not_json();
+    let target = match target {
+        Ok(target) => target,
+        Err(Unreadable::Number) => return number_refused(),
+        Err(Unreadable::NotJson) => return not_json(),
     };
     let patched = match patch.apply(&target, patch_budget(state)) {
         Ok(v) => v,
@@ -6940,6 +7040,108 @@ mod tests {
         assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
+    /// Review findings: a stored number of a million digits was normalized again by every
+    /// `test`, charged only for the patch's side; the size limits counted the marked form, so a
+    /// document of many small numbers outgrew the budget unchanged; a power of ten past 64 bits
+    /// was compared as text; and malformed text (`{1:2}`) was made JSON by the rewriting. Numbers
+    /// are bounded where they are read, zero is zero whatever its exponent, sizes are those
+    /// written, and the text is checked as written first.
+    #[tokio::test]
+    async fn json_patch_reads_numbers_within_bounds() {
+        let long = format!("1{}", "0".repeat(MAX_NUMBER_TEXT));
+        let longest = format!("1{}", "0".repeat(MAX_NUMBER_TEXT - 1));
+        assert_eq!(
+            read_numbers_as_text(format!("[{long}]").as_bytes()),
+            Err(Unreadable::Number)
+        );
+        assert!(read_numbers_as_text(format!("[{longest}]").as_bytes()).is_ok());
+        assert_eq!(
+            read_numbers_as_text(b"[1e9223372036854775808]"),
+            Err(Unreadable::Number)
+        );
+        assert_eq!(read_numbers_as_text(b"{1:2}"), Err(Unreadable::NotJson));
+        // A `test` is charged for both sides as it reads them: the long numbers it reads in the
+        // target count, not only the short ones the patch gives.
+        let one = format!("1.{}", "0".repeat(MAX_NUMBER_TEXT - 2));
+        let target = format!("{{\"a\":[{}]}}", vec![one.as_str(); 100].join(","));
+        let target = read_numbers_as_text(target.as_bytes()).unwrap();
+        let ones = vec!["1"; 100].join(",");
+        let test = format!(r#"{{"op":"test","path":"/a","value":[{ones}]}}"#);
+        let ops = |n: usize| {
+            read_numbers_as_text(format!("[{}]", vec![test.as_str(); n].join(",")).as_bytes())
+                .unwrap()
+        };
+        let budget = 2 * json_size(&target);
+        assert!(json_patch(&target, &ops(1), budget).is_ok());
+        assert_eq!(
+            json_patch(&target, &ops(20), budget),
+            Err(PatchError::TooLarge)
+        );
+        // Sizes are those written: the marks are not counted.
+        for text in ["[0,0,-1.5e3]", "{\"a\":\"\u{E000}x\",\"b\":[1,{\"c\":2}]}"] {
+            let held = read_numbers_as_text(text.as_bytes()).unwrap();
+            assert_eq!(json_size(&held), text.len(), "{text}");
+        }
+
+        let st = state().await;
+        let stored = r#"{"big":1e9223372036854775807,"z":0e9223372036854775808}"#;
+        let uri = post(&st, "n.json", JSON, stored, &[]).await;
+        let p = path_of(&uri);
+        for (ops, want) in [
+            (
+                r#"[{"op":"test","path":"/big","value":10e9223372036854775806}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/z","value":0}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/z","value":-0.0e-5}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/big","value":1e9223372036854775808}]"#,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], ops).await;
+            assert_eq!(r.status(), want, "{ops}");
+        }
+        assert_eq!(st.store.read(&uri).await.unwrap().body, Bytes::from(stored));
+        // A target holding a number past the bound is refused, and left as it was.
+        let refused = format!("{{\"n\":{long}}}");
+        let uri = post(&st, "long.json", JSON, &refused, &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from(refused)
+        );
+        // Malformed text stored as JSON is not rewritten into JSON.
+        let uri = post(&st, "bad.json", JSON, "{1:2}", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from("{1:2}")
+        );
+    }
+
     /// Review findings: numbers were parsed into `f64` and written back, so an integer past
     /// `u64` or a decimal with more digits than an `f64` holds was rewritten by a patch that
     /// never touched it; a `test` compared an integer with a float through a cast, so it matched
@@ -6951,7 +7153,7 @@ mod tests {
         // The text round trip, a string value or a member name that starts with the mark
         // included (members in the order a written document has them).
         let text = "{\"a\":[1e400,-0.9299999999999999,12345678901234567890123],\"e\":\"\\ue000w\",\"s\":\"1\",\"\u{E000}k\":\"\u{E000}v\"}";
-        let held = numbers_as_text(text);
+        let held = numbers_as_text(text).unwrap();
         let parsed: Value = serde_json::from_str(&held).unwrap();
         assert_eq!(parsed["a"][0], json!("\u{E000}1e400"));
         assert_eq!(parsed["\u{E000}k"], json!("\u{E000}\u{E000}v"));
@@ -6964,7 +7166,10 @@ mod tests {
         // Not a number: left for the parser to refuse.
         for bad in ["01", "1.", ".5", "1e", "--1", "1.2.3"] {
             assert!(!is_json_number(bad), "{bad}");
-            assert!(serde_json::from_str::<Value>(&numbers_as_text(&format!("[{bad}]"))).is_err());
+            assert_eq!(
+                read_numbers_as_text(format!("[{bad}]").as_bytes()),
+                Err(Unreadable::NotJson)
+            );
         }
 
         let st = state().await;

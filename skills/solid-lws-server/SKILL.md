@@ -279,7 +279,10 @@ What the server exposes, all discoverable from the storage description
   than 1,000 operations, or work past four times the body limit gets `413`. Numbers are never
   read as binary floats: each is kept as its text, so one a patch does not touch is written back
   as it was (members are written in name order), and `test` compares numbers as the decimal
-  values their texts denote. A patch that reads the content (`test`, `copy`, `move`) needs
+  values their texts denote (zero is zero whatever its sign or exponent). A number longer than
+  1,024 characters, or whose power of ten does not fit 64 bits, in the patch or the resource, gets
+  `422`; a resource whose text is not JSON as written gets `415`. Sizes are those of the JSON as
+  written, and a `test` is charged for what it reads of both sides. A patch that reads the content (`test`, `copy`, `move`) needs
   Read as well as Modify. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
