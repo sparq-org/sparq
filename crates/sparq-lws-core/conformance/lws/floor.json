@@ -1,7 +1,7 @@
 {
   "_doc": "Touchstone passes per module that CI must keep (check-floor.py). Raise with the change that earns it.",
   "passed": {
-    "core": 85,
+    "core": 87,
     "auth": 22
   }
 }

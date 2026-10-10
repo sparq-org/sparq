@@ -16,12 +16,13 @@ use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
     problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, JSON,
-    LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
+    JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
 };
 use crate::error::ServerError;
 use crate::store::Store;
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const ACCEPT_PATCH: &str = "application/json-patch+json";
 const LINKSET_ALLOW: &str = "GET, HEAD";
 
 /// Relations that are server-managed or protocol-level: never taken from a client's Link header
@@ -137,6 +138,7 @@ async fn handle_now<S: Store + 'static>(
             Some("a partial PUT (Content-Range) is not supported"),
         ),
         Method::PUT => update(state, req, agent, &uri).await,
+        Method::PATCH => patch(state, req, agent, &uri).await,
         Method::DELETE => delete(state, req, agent, &uri).await,
         Method::OPTIONS => options(state, &uri).await,
         _ => method_not_allowed(&allow_for(&uri, is_root)),
@@ -184,7 +186,7 @@ fn allow_for(uri: &str, is_root: bool) -> String {
     } else if uri.ends_with('/') {
         "GET, HEAD, OPTIONS, POST, DELETE".into()
     } else {
-        "GET, HEAD, OPTIONS, PUT, DELETE".into()
+        "GET, HEAD, OPTIONS, PUT, PATCH, DELETE".into()
     }
 }
 
@@ -200,6 +202,13 @@ async fn options<S: Store + 'static>(state: &LwsState<S>, uri: &str) -> Response
         header::ALLOW,
         &allow_for(uri, uri == state.cfg.storage()),
     );
+    if !uri.ends_with('/') {
+        set(
+            resp.headers_mut(),
+            header::HeaderName::from_static("accept-patch"),
+            ACCEPT_PATCH,
+        );
+    }
     resp
 }
 
@@ -2166,6 +2175,960 @@ async fn update<S: Store + 'static>(
             "set-linkset",
         );
     }
+    resp
+}
+
+// ---- patch ----
+
+/// The most a patched document may grow to, in serialized bytes, whatever the configured body
+/// limit. A JSON Patch `copy` doubles what it copies, so without a bound a few dozen operations
+/// exhaust memory. A server patches within the smaller of this and its request body limit
+/// (`patch_budget`).
+pub const PATCH_BUDGET: usize = 64 * 1024 * 1024;
+
+/// How far a patched document may grow on this server: no larger than a request body may be (a
+/// document a PUT could not store is no more acceptable from a PATCH), and never past
+/// [`PATCH_BUDGET`]. The work a JSON Patch may do follows from it.
+fn patch_budget<S: Store + 'static>(state: &LwsState<S>) -> usize {
+    state.cfg.max_body.min(PATCH_BUDGET)
+}
+
+/// How many operations a JSON Patch may have.
+pub const MAX_PATCH_OPS: usize = 1000;
+
+/// The work a JSON Patch may do, in bytes measured, cloned or compared, as a multiple of
+/// [`PATCH_BUDGET`].
+pub const PATCH_WORK_FACTOR: usize = 4;
+
+/// The least work any JSON Patch may do, however small its size budget.
+pub const MIN_PATCH_WORK: usize = 1 << 20;
+
+/// How deeply a patched document may nest, in arrays and objects: the deepest document
+/// `serde_json` parses back (its recursion limit). The parser bounds every document a request
+/// carries, but JSON Patch builds new ones: each `move` or `copy` may nest an existing value under
+/// another, so without this bound a patch could build a document deep enough to overflow the stack
+/// when it is serialized, compared, cloned or dropped.
+pub const MAX_JSON_DEPTH: usize = 127;
+
+/// How deeply `v` nests arrays and objects: 0 for a scalar, 1 for `[]` or `{}`. Iterative, so it is
+/// safe on a value of any depth.
+fn json_depth(v: &Value) -> usize {
+    let mut deepest = 0;
+    let mut stack = vec![(v, 0usize)];
+    while let Some((v, d)) = stack.pop() {
+        match v {
+            Value::Array(a) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(a.iter().map(|c| (c, d + 1)));
+            }
+            Value::Object(m) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(m.values().map(|c| (c, d + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
+/// Why a JSON Patch was not applied.
+#[derive(Debug, PartialEq)]
+pub enum PatchError {
+    /// The patch document is not an RFC 6902 patch: not an array, an unknown `op`, or a member an
+    /// operation requires missing or of the wrong type (400).
+    Malformed(&'static str),
+    /// A well-formed operation cannot be applied to the target: a path that does not exist, or a
+    /// failed `test` (RFC 5789 section 2.2).
+    Failed,
+    /// The result would outgrow [`PATCH_BUDGET`].
+    TooLarge,
+    /// The result would nest deeper than [`MAX_JSON_DEPTH`] (422).
+    TooDeep,
+}
+
+/// Whether `content_type` is JSON: `application/json`, or any `+json` structured syntax suffix
+/// (RFC 6839), parameters aside.
+fn is_json_type(content_type: &str) -> bool {
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    essence == "application/json" || essence.ends_with("+json")
+}
+
+/// What marks a number held as text while a JSON Patch is applied. A JSON Patch never reads a
+/// number as a binary float: before the patch and its target are parsed, every number in them is
+/// rewritten as a string holding this mark and the number's own text ([`numbers_as_text`]), and
+/// written back as that text once the patch is applied ([`numbers_from_text`]). So a number the
+/// patch does not touch is written back as it was, whatever its size or precision, and `test`
+/// compares numbers as the decimal values their texts denote ([`json_equal`]). A string value
+/// of the document that itself starts with the mark is kept apart by doubling it.
+const NUMBER_MARK: char = '\u{E000}';
+
+/// Rewrite the JSON text `json`, token by token: each string in a value position (never an
+/// object member's name) through `string` (given its raw content between the quotes; `None`
+/// keeps it), and each number through `number`. Everything else is copied. Text that is not
+/// JSON is copied as far as it can be scanned, for the parser to refuse.
+fn rewrite_json(
+    json: &str,
+    string: impl Fn(&str) -> Option<String>,
+    number: impl Fn(&str) -> String,
+) -> String {
+    let b = json.as_bytes();
+    let mut out = String::with_capacity(json.len() + json.len() / 8);
+    // Per open container, whether it is an object; and whether a member name comes next.
+    let mut stack: Vec<bool> = Vec::new();
+    let mut name = false;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'"' {
+                    j += if b[j] == b'\\' { 2 } else { 1 };
+                }
+                let end = j.min(b.len() - 1);
+                let raw = &json[i..=end];
+                let content = &json[i + 1..j.min(b.len())];
+                if name && stack.last() == Some(&true) {
+                    out.push_str(raw);
+                } else {
+                    match string(content) {
+                        Some(r) => out.push_str(&r),
+                        None => out.push_str(raw),
+                    }
+                }
+                i = end + 1;
+                continue;
+            }
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < b.len() && matches!(b[i], b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')
+                {
+                    i += 1;
+                }
+                out.push_str(&number(&json[start..i]));
+                continue;
+            }
+            b'{' => {
+                stack.push(true);
+                name = true;
+            }
+            b'[' => {
+                stack.push(false);
+                name = false;
+            }
+            b'}' | b']' => {
+                stack.pop();
+                name = false;
+            }
+            b',' => name = stack.last() == Some(&true),
+            b':' => name = false,
+            _ => {}
+        }
+        // Outside strings valid JSON is ASCII; anything else is copied whole, for the parser.
+        let len = json[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&json[i..i + len]);
+        i += len;
+    }
+    out
+}
+
+/// Whether `token` is a JSON number (RFC 8259 section 6).
+fn is_json_number(token: &str) -> bool {
+    let s = token.strip_prefix('-').unwrap_or(token);
+    let (mantissa, exp) = match s.find(['e', 'E']) {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
+    };
+    let (int, frac) = match mantissa.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (mantissa, None),
+    };
+    let digits = |d: &str| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit());
+    digits(int)
+        && (int == "0" || !int.starts_with('0'))
+        && frac.is_none_or(digits)
+        && exp.is_none_or(|e| digits(e.strip_prefix(['+', '-']).unwrap_or(e)))
+}
+
+/// The longest number text a JSON Patch reads, in bytes. Every number is held to it, in the patch
+/// and in its target, so comparing two numbers costs at most this much whatever the document.
+const MAX_NUMBER_TEXT: usize = 1024;
+
+/// Why [`read_numbers_as_text`] refused a JSON text.
+#[derive(Debug, PartialEq)]
+enum Unreadable {
+    /// It is not JSON (RFC 8259).
+    NotJson,
+    /// It holds a number past [`MAX_NUMBER_TEXT`], or one whose power of ten does not fit 64 bits.
+    Number,
+}
+
+/// Parse the JSON text `body` with every number held as its text ([`numbers_as_text`]). The text
+/// is checked to be JSON as written first (numbers scanned, never converted), so the rewriting
+/// can neither make malformed text parse nor change what it holds.
+fn read_numbers_as_text(body: &[u8]) -> Result<Value, Unreadable> {
+    let text = std::str::from_utf8(body).map_err(|_| Unreadable::NotJson)?;
+    serde_json::from_str::<serde::de::IgnoredAny>(text).map_err(|_| Unreadable::NotJson)?;
+    let held = numbers_as_text(text).ok_or(Unreadable::Number)?;
+    serde_json::from_str(&held).map_err(|_| Unreadable::NotJson)
+}
+
+/// `json` with every number rewritten as a marked string ([`NUMBER_MARK`]), and every string
+/// value that starts with the mark with the mark doubled. `None` when a number is past
+/// [`MAX_NUMBER_TEXT`] or its value cannot be read ([`decimal`]): such a number is refused, never
+/// compared as text.
+fn numbers_as_text(json: &str) -> Option<String> {
+    let refused = std::cell::Cell::new(false);
+    let starts_marked = |content: &str| {
+        content.starts_with(NUMBER_MARK)
+            || content
+                .get(..6)
+                .is_some_and(|e| e.eq_ignore_ascii_case("\\ue000"))
+    };
+    let held = rewrite_json(
+        json,
+        |content| starts_marked(content).then(|| format!("\"{NUMBER_MARK}{content}\"")),
+        |token| {
+            if !is_json_number(token) {
+                return token.to_string();
+            }
+            if token.len() > MAX_NUMBER_TEXT || decimal(token).is_none() {
+                refused.set(true);
+            }
+            format!("\"{NUMBER_MARK}{token}\"")
+        },
+    );
+    (!refused.get()).then_some(held)
+}
+
+/// The JSON `json` (as `serde_json` writes it) with each marked string written back as the
+/// number it holds, and each doubled mark undone: the inverse of [`numbers_as_text`].
+fn numbers_from_text(json: &str) -> String {
+    rewrite_json(
+        json,
+        |content| {
+            let rest = content.strip_prefix(NUMBER_MARK)?;
+            Some(if rest.starts_with(NUMBER_MARK) {
+                format!("\"{rest}\"")
+            } else {
+                rest.to_string()
+            })
+        },
+        str::to_string,
+    )
+}
+
+/// The number text a marked string holds ([`numbers_as_text`]), or a [`Value::Number`]'s.
+fn number_text(v: &Value) -> Option<std::borrow::Cow<'_, str>> {
+    match v {
+        Value::Number(n) => Some(n.to_string().into()),
+        Value::String(s) => s
+            .strip_prefix(NUMBER_MARK)
+            .filter(|rest| !rest.starts_with(NUMBER_MARK))
+            .map(Into::into),
+        _ => None,
+    }
+}
+
+/// A decimal number's value as (negative, significant digits, power of ten): `1.50e1` and `15`
+/// are both `(false, "15", 0)`, and every zero is `(false, "", 0)`. `None` when the power of ten
+/// does not fit 64 bits ([`numbers_as_text`] refuses such a number).
+fn decimal(s: &str) -> Option<(bool, String, i64)> {
+    let (neg, s) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s),
+    };
+    let (mantissa, exp) = match s.find(['e', 'E']) {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
+    };
+    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let all = format!("{int}{frac}");
+    let digits = all.trim_start_matches('0').trim_end_matches('0');
+    // Zero is zero whatever its sign and power of ten.
+    if digits.is_empty() {
+        return Some((false, String::new(), 0));
+    }
+    let exp = exp.map_or(Some(0), |e| e.parse::<i64>().ok())?;
+    let trailing = all.len() - all.trim_end_matches('0').len();
+    let exp = exp
+        .checked_sub(i64::try_from(frac.len()).ok()?)?
+        .checked_add(i64::try_from(trailing).ok()?)?;
+    Some((neg, digits.to_string(), exp))
+}
+
+/// Whether some operation of the patch text `body` names a member twice (`{"op": "add", "op":
+/// "remove"}`): a parsed [`Value`] keeps one of them silently, so the operation checked would not
+/// be the one the client wrote. `body` is a patch already checked to be an array of objects.
+fn repeats_a_member(body: &[u8]) -> bool {
+    struct Members;
+    impl<'de> serde::Deserialize<'de> for Members {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct Visit;
+            impl<'de> serde::de::Visitor<'de> for Visit {
+                type Value = Members;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("an operation")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<Members, A::Error> {
+                    let mut seen = std::collections::HashSet::new();
+                    while let Some(key) = map.next_key::<String>()? {
+                        if !seen.insert(key) {
+                            return Err(serde::de::Error::custom("a member is repeated"));
+                        }
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                    }
+                    Ok(Members)
+                }
+            }
+            d.deserialize_map(Visit)
+        }
+    }
+    serde_json::from_slice::<Vec<Members>>(body).is_err()
+}
+
+/// Check that `ops` is an RFC 6902 patch document, without applying it.
+pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
+    let ops = ops.as_array().ok_or(PatchError::Malformed(
+        "a JSON Patch is an array of operations",
+    ))?;
+    let pointer = |v: Option<&Value>| v.and_then(Value::as_str).and_then(Pointer::parse).is_some();
+    for op in ops {
+        let kind = op
+            .get("op")
+            .and_then(Value::as_str)
+            .ok_or(PatchError::Malformed("every operation needs an op"))?;
+        if !pointer(op.get("path")) {
+            return Err(PatchError::Malformed(
+                "every operation needs a JSON Pointer path",
+            ));
+        }
+        match kind {
+            "add" | "replace" | "test" if op.get("value").is_none() => {
+                return Err(PatchError::Malformed("add, replace and test need a value"));
+            }
+            "move" | "copy" if !pointer(op.get("from")) => {
+                return Err(PatchError::Malformed(
+                    "move and copy need a JSON Pointer from",
+                ));
+            }
+            "add" | "remove" | "replace" | "move" | "copy" | "test" => {}
+            _ => return Err(PatchError::Malformed("unknown JSON Patch operation")),
+        }
+    }
+    Ok(ops)
+}
+
+/// Whether a JSON Patch observes the target's content: `test` compares a value and `copy` / `move`
+/// read one, so applying it reveals what the patcher may not be allowed to read.
+pub fn json_patch_reads(ops: &Value) -> bool {
+    ops.as_array().is_some_and(|ops| {
+        ops.iter().any(|op| {
+            matches!(
+                op.get("op").and_then(Value::as_str),
+                Some("test" | "copy" | "move")
+            )
+        })
+    })
+}
+
+/// The size of `v` as written, in bytes: a number held as text ([`NUMBER_MARK`]) counts as the
+/// number it is written back as, not as the marked string it is held as.
+fn json_size(v: &Value) -> usize {
+    serialized_size(v).saturating_sub(mark_overhead(v))
+}
+
+/// The bytes the marks of [`numbers_as_text`] add to `v` as `serde_json` writes it: the quotes and
+/// mark around each number, and each doubled mark.
+fn mark_overhead(v: &Value) -> usize {
+    let mark = NUMBER_MARK.len_utf8();
+    match v {
+        Value::String(s) => match s.strip_prefix(NUMBER_MARK) {
+            Some(rest) if rest.starts_with(NUMBER_MARK) => mark,
+            Some(_) => mark + 2,
+            None => 0,
+        },
+        Value::Array(a) => a.iter().map(mark_overhead).sum(),
+        Value::Object(m) => m.values().map(mark_overhead).sum(),
+        _ => 0,
+    }
+}
+
+/// The serialized size of `v`, in bytes.
+fn serialized_size(v: &Value) -> usize {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut c = Count(0);
+    let _ = serde_json::to_writer(&mut c, v);
+    c.0
+}
+
+/// RFC 6902 JSON Patch, applied whole or not at all, within `budget` serialized bytes. `target`
+/// and `ops` hold their numbers as text ([`read_numbers_as_text`]): a string starting with
+/// [`NUMBER_MARK`] is a number here, so this is private to the module that reads them so.
+fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, PatchError> {
+    use PatchError::Failed;
+    let ops = validate_json_patch(ops)?;
+    if ops.len() > MAX_PATCH_OPS {
+        return Err(PatchError::TooLarge);
+    }
+    let mut doc = target.clone();
+    // The document's size, kept as an upper bound: every operation that adds checks the budget
+    // before it clones or inserts anything.
+    let mut size = json_size(&doc);
+    // The work done, in bytes measured, cloned or compared: a patch within the size budget can
+    // still repeat costly operations (a copy of a large value over itself, again and again), so
+    // the total is held to a budget of its own.
+    let work_budget = budget.saturating_mul(PATCH_WORK_FACTOR).max(MIN_PATCH_WORK);
+    let mut work = size;
+    let charge = |work: &mut usize, bytes: usize| {
+        *work = work.saturating_add(bytes);
+        if *work > work_budget {
+            return Err(PatchError::TooLarge);
+        }
+        Ok(())
+    };
+    // Every pointer was parsed when the patch was validated; it is parsed the same way here.
+    let pointer_of = |op: &Value, k: &str| {
+        op[k]
+            .as_str()
+            .and_then(Pointer::parse)
+            .ok_or(PatchError::Malformed("a JSON Pointer is malformed"))
+    };
+    for op in ops {
+        let path = pointer_of(op, "path")?;
+        // What an add at `path` would overwrite: an existing object member is replaced.
+        let replaced = |doc: &Value| -> usize {
+            let Some((parent, _)) = path.split() else {
+                return json_size(doc);
+            };
+            match (walk(doc, parent), path.get(doc)) {
+                (Some(Value::Object(_)), Some(old)) => json_size(old),
+                _ => 0,
+            }
+        };
+        // A value placed at `path` sits under one container per pointer segment.
+        let fits = |v: &Value| {
+            if path.0.len() + json_depth(v) > MAX_JSON_DEPTH {
+                return Err(PatchError::TooDeep);
+            }
+            Ok(())
+        };
+        let grow = |size: &mut usize, by: usize, minus: usize| {
+            let next = size.saturating_sub(minus).saturating_add(by);
+            if next > budget {
+                return Err(PatchError::TooLarge);
+            }
+            *size = next;
+            Ok(())
+        };
+        match op["op"].as_str().unwrap_or_default() {
+            "add" => {
+                let v = &op["value"];
+                fits(v)?;
+                let minus = replaced(&doc);
+                let value = json_size(v);
+                charge(&mut work, 2 * value + minus + shift_cost(&doc, &path, true))?;
+                let by = value + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
+                pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
+            }
+            "remove" => {
+                let overhead = member_overhead(&doc, &path, false);
+                charge(&mut work, shift_cost(&doc, &path, false))?;
+                let old = pointer_remove(&mut doc, &path).ok_or(Failed)?;
+                let gone = json_size(&old);
+                charge(&mut work, gone)?;
+                size = size.saturating_sub(gone + overhead);
+            }
+            "replace" => {
+                let v = &op["value"];
+                fits(v)?;
+                let old = path.get(&doc).ok_or(Failed)?;
+                let minus = json_size(old);
+                let value = json_size(v);
+                // Taken out and put back: an array member shifts the rest of its array twice.
+                let shifts = 2 * shift_cost(&doc, &path, false);
+                charge(&mut work, 2 * value + minus + shifts)?;
+                grow(&mut size, value, minus)?;
+                pointer_remove(&mut doc, &path).ok_or(Failed)?;
+                pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
+            }
+            "move" => {
+                let from = pointer_of(op, "from")?;
+                // A value cannot move into itself (RFC 6902 section 4.4).
+                if from.0.len() < path.0.len() && path.0.starts_with(&from.0) {
+                    return Err(Failed);
+                }
+                // The value moves; what changes is the member around it (its key, a separator), and
+                // what an add at `path` replaces.
+                let overhead = member_overhead(&doc, &from, false);
+                charge(&mut work, shift_cost(&doc, &from, false))?;
+                let v = pointer_remove(&mut doc, &from).ok_or(Failed)?;
+                fits(&v)?;
+                let moved = json_size(&v);
+                size = size.saturating_sub(moved + overhead);
+                let minus = replaced(&doc);
+                charge(&mut work, 2 * moved + minus + shift_cost(&doc, &path, true))?;
+                let by = moved + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
+                pointer_add(&mut doc, &path, v).ok_or(Failed)?;
+            }
+            "copy" => {
+                let from = pointer_of(op, "from")?;
+                let source = from.get(&doc).ok_or(Failed)?;
+                fits(source)?;
+                let copied = json_size(source);
+                let added = copied + member_overhead(&doc, &path, true);
+                let minus = replaced(&doc);
+                charge(
+                    &mut work,
+                    2 * copied + minus + shift_cost(&doc, &path, true),
+                )?;
+                grow(&mut size, added, minus)?;
+                let v = from.get(&doc).ok_or(Failed)?.clone();
+                pointer_add(&mut doc, &path, v).ok_or(Failed)?;
+            }
+            "test" => {
+                // A comparison is charged for what it reads of both sides as it reads it.
+                let target = path.get(&doc).ok_or(Failed)?;
+                let mut left = work_budget.saturating_sub(work);
+                let equal = json_equal(target, &op["value"], &mut left);
+                work = work_budget - left;
+                if !equal.ok_or(PatchError::TooLarge)? {
+                    return Err(Failed);
+                }
+            }
+            _ => unreachable!("validated"),
+        }
+    }
+    // The running size is an upper bound kept without serializing; the result itself is held to
+    // the budget too.
+    if json_size(&doc) > budget {
+        return Err(PatchError::TooLarge);
+    }
+    Ok(doc)
+}
+
+/// The bytes a member at `path` of `doc` takes beside its value: in an object its key (quoted and
+/// escaped) and colon, and in either container the comma between it and a sibling. `adding`: for a
+/// member about to be added (nothing for an object member that would be replaced); otherwise for
+/// the member there now.
+fn member_overhead(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
+        return 0;
+    };
+    let comma = |others: usize| usize::from(others > 0);
+    match walk(doc, parent) {
+        Some(Value::Object(m)) => {
+            let present = m.contains_key(key);
+            if adding && present {
+                return 0;
+            }
+            let others = m.len() - usize::from(present);
+            json_size(&Value::String(key.to_string())) + 1 + comma(others)
+        }
+        Some(Value::Array(a)) => comma(if adding {
+            a.len()
+        } else {
+            a.len().saturating_sub(1)
+        }),
+        _ => 0,
+    }
+}
+
+/// The work of the shift an insertion (`adding`) or a removal at `path` makes in the array that
+/// holds it, if one does: every member after the index moves, each counted as the bytes a `Value`
+/// takes in memory. An append, or a member of an object, moves nothing.
+fn shift_cost(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
+        return 0;
+    };
+    let Some(Value::Array(a)) = walk(doc, parent) else {
+        return 0;
+    };
+    let Some(i) = array_index(key, a.len(), adding) else {
+        return 0;
+    };
+    let moved = if adding {
+        a.len().saturating_sub(i)
+    } else {
+        a.len().saturating_sub(i + 1)
+    };
+    moved.saturating_mul(std::mem::size_of::<Value>())
+}
+
+/// RFC 6902 section 4.6 equality: numbers are equal when their values are (`1` and `1.0`), strings
+/// and literals when they are identical, arrays element by element, objects member by member
+/// whatever their order. Integers compare exactly (two distinct large integers never meet through
+/// a float), and an integer equals a float only when the float is exactly that integer.
+///
+/// `left` is the work the comparison may still do, in bytes read from either side; `None` once
+/// it would do more.
+fn json_equal(a: &Value, b: &Value, left: &mut usize) -> Option<bool> {
+    // Numbers are equal when the decimal values their texts denote are.
+    match (number_text(a), number_text(b)) {
+        (Some(x), Some(y)) => {
+            spend(left, x.len() + y.len())?;
+            return Some(match (decimal(&x), decimal(&y)) {
+                (Some(x), Some(y)) => x == y,
+                // Never reached for numbers read through [`numbers_as_text`], which refuses
+                // these; and never decided by their text.
+                _ => false,
+            });
+        }
+        (None, None) => {}
+        _ => return Some(false),
+    }
+    match (a, b) {
+        (Value::Array(x), Value::Array(y)) => {
+            spend(left, 0)?;
+            if x.len() != y.len() {
+                return Some(false);
+            }
+            for (x, y) in x.iter().zip(y) {
+                if !json_equal(x, y, left)? {
+                    return Some(false);
+                }
+            }
+            Some(true)
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            spend(left, 0)?;
+            if x.len() != y.len() {
+                return Some(false);
+            }
+            for (k, v) in x {
+                spend(left, k.len())?;
+                match y.get(k) {
+                    Some(w) if json_equal(v, w, left)? => {}
+                    _ => return Some(false),
+                }
+            }
+            Some(true)
+        }
+        (Value::String(x), Value::String(y)) => {
+            spend(left, x.len().min(y.len()))?;
+            Some(x == y)
+        }
+        _ => Some(a == b),
+    }
+}
+
+/// Take `bytes` (and one for the step) from the work `left`; `None` when there is not that much.
+fn spend(left: &mut usize, bytes: usize) -> Option<()> {
+    *left = left.checked_sub(bytes.saturating_add(1))?;
+    Some(())
+}
+
+/// An RFC 6901 JSON Pointer, parsed once: its reference tokens, unescaped. Every JSON Patch
+/// operation reads its paths through this one parser, so no operation accepts a pointer (or an
+/// array index) that another refuses.
+struct Pointer(Vec<String>);
+
+impl Pointer {
+    /// `None` for anything RFC 6901 does not allow: a non-empty pointer not starting with `/`,
+    /// or a `~` not followed by `0` or `1`.
+    fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() {
+            return Some(Pointer(Vec::new()));
+        }
+        let tokens = s.strip_prefix('/')?.split('/').map(|t| {
+            let mut out = String::with_capacity(t.len());
+            let mut chars = t.chars();
+            while let Some(c) = chars.next() {
+                out.push(if c != '~' {
+                    c
+                } else {
+                    match chars.next()? {
+                        '0' => '~',
+                        '1' => '/',
+                        _ => return None,
+                    }
+                });
+            }
+            Some(out)
+        });
+        tokens.collect::<Option<Vec<_>>>().map(Pointer)
+    }
+
+    /// The tokens of the container and the last token; `None` for the whole document.
+    fn split(&self) -> Option<(&[String], &str)> {
+        let (last, parent) = self.0.split_last()?;
+        Some((parent, last))
+    }
+
+    fn get<'a>(&self, doc: &'a Value) -> Option<&'a Value> {
+        walk(doc, &self.0)
+    }
+}
+
+/// The value `tokens` reference in `doc`.
+fn walk<'a>(doc: &'a Value, tokens: &[String]) -> Option<&'a Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get(t),
+        Value::Array(a) => a.get(array_index(t, a.len(), false)?),
+        _ => None,
+    })
+}
+
+fn walk_mut<'a>(doc: &'a mut Value, tokens: &[String]) -> Option<&'a mut Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get_mut(t),
+        Value::Array(a) => {
+            let i = array_index(t, a.len(), false)?;
+            a.get_mut(i)
+        }
+        _ => None,
+    })
+}
+
+/// An array index token (RFC 6901 section 4): `0`, or digits without a leading zero, below `len`;
+/// when `adding`, also `len` itself and `-` (the end). No sign, no leading zero, no overflow.
+fn array_index(token: &str, len: usize, adding: bool) -> Option<usize> {
+    if adding && token == "-" {
+        return Some(len);
+    }
+    let b = token.as_bytes();
+    let well_formed = token == "0"
+        || (matches!(b.first(), Some(b'1'..=b'9')) && b.iter().all(u8::is_ascii_digit));
+    let i: usize = token.parse().ok().filter(|_| well_formed)?;
+    (i < len || (adding && i == len)).then_some(i)
+}
+
+fn pointer_add(doc: &mut Value, path: &Pointer, value: Value) -> Option<()> {
+    let Some((parent, key)) = path.split() else {
+        *doc = value;
+        return Some(());
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => {
+            m.insert(key.to_string(), value);
+        }
+        Value::Array(a) => {
+            let i = array_index(key, a.len(), true)?;
+            a.insert(i, value);
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn pointer_remove(doc: &mut Value, path: &Pointer) -> Option<Value> {
+    let Some((parent, key)) = path.split() else {
+        return Some(std::mem::replace(doc, Value::Null));
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => m.remove(key),
+        Value::Array(a) => {
+            let i = array_index(key, a.len(), false)?;
+            Some(a.remove(i))
+        }
+        _ => None,
+    }
+}
+
+/// The answer to a patch, or a target, holding a number [`numbers_as_text`] refuses.
+fn number_refused() -> Response {
+    problem(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Some("a number is too long, or its power of ten too large, to compare"),
+    )
+}
+
+/// A patch document a request carries.
+enum Patch {
+    /// RFC 6902 JSON Patch, already checked to be well-formed.
+    Json(Value),
+}
+
+impl Patch {
+    /// Parse the request body by its Content-Type. `Err` carries the response: 415 for another
+    /// format, 400 for a body that is not JSON or not a well-formed patch.
+    fn parse(req: &LwsRequest) -> Result<Self, Response> {
+        let ct = req.content_type().unwrap_or_default();
+        if ct != JSON_PATCH {
+            let mut r = problem(StatusCode::UNSUPPORTED_MEDIA_TYPE, None);
+            set(
+                r.headers_mut(),
+                header::HeaderName::from_static("accept-patch"),
+                ACCEPT_PATCH,
+            );
+            return Err(r);
+        }
+        let patch = match read_numbers_as_text(&req.body) {
+            Ok(patch) => patch,
+            Err(Unreadable::Number) => return Err(number_refused()),
+            Err(Unreadable::NotJson) => {
+                return Err(problem(
+                    StatusCode::BAD_REQUEST,
+                    Some("the patch is not JSON"),
+                ))
+            }
+        };
+        if let Err(PatchError::Malformed(why)) = validate_json_patch(&patch) {
+            return Err(problem(StatusCode::BAD_REQUEST, Some(why)));
+        }
+        if repeats_a_member(&req.body) {
+            return Err(problem(
+                StatusCode::BAD_REQUEST,
+                Some("an operation repeats a member"),
+            ));
+        }
+        Ok(Patch::Json(patch))
+    }
+
+    /// Whether applying the patch observes the target's content (see [`json_patch_reads`]).
+    fn reads_content(&self) -> bool {
+        matches!(self, Patch::Json(ops) if json_patch_reads(ops))
+    }
+
+    /// Apply the patch to `target` within `budget` serialized bytes. `Err` carries the response.
+    fn apply(&self, target: &Value, budget: usize) -> Result<Value, Response> {
+        match self {
+            Patch::Json(ops) => json_patch(target, ops, budget),
+        }
+        .map_err(|e| match e {
+            PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
+            PatchError::Failed => problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the JSON Patch cannot be applied"),
+            ),
+            PatchError::TooLarge => problem(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Some("the patched document would be too large"),
+            ),
+            PatchError::TooDeep => problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the patched document would nest too deeply"),
+            ),
+        })
+    }
+}
+
+/// A patch that observes content (see [`Patch::reads_content`]) needs Read as well as Modify:
+/// otherwise 403, or the challenge for an anonymous caller.
+async fn patch_read_check<S: Store + 'static>(
+    state: &LwsState<S>,
+    patch: &Patch,
+    uri: &str,
+    agent: &Agent,
+) -> Result<(), Response> {
+    if patch.reads_content() {
+        return recheck(state, Action::Read, uri, agent).await;
+    }
+    Ok(())
+}
+
+async fn patch<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+) -> Response {
+    let Some(guard) = state.locks.lock(uri).await else {
+        return set_aside_meanwhile();
+    };
+    let listing = match listing_guard(state, uri).await {
+        Ok(listing) => listing,
+        Err(r) => return r,
+    };
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
+    if uri.ends_with('/') {
+        return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
+    }
+    // What the request is (its patch format, and the resource's) is settled before its
+    // preconditions: a patch that could never apply is a 415 whatever its validators.
+    let patch = match Patch::parse(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    // A JSON Patch applies to a JSON document only: a resource stored as another format is
+    // never rewritten as JSON.
+    let not_json = || {
+        let mut r = problem(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Some("the resource is not JSON"),
+        );
+        set(
+            r.headers_mut(),
+            header::HeaderName::from_static("accept-patch"),
+            ACCEPT_PATCH,
+        );
+        r
+    };
+    if !is_json_type(&meta.content_type) {
+        return not_json();
+    }
+    if let Precondition::Failed | Precondition::NotModified = evaluate(
+        &req.headers,
+        Some(&quoted(&meta.etag)),
+        meta.last_modified.map(|t| to_secs(epoch_ms(t))),
+        false,
+    ) {
+        return problem(StatusCode::PRECONDITION_FAILED, None);
+    }
+    if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
+        return r;
+    }
+    let body = match state.store.read_at(uri, &meta).await {
+        Ok(b) => b,
+        Err(e) => return store_error(e),
+    };
+    // Its numbers are held as their text ([`NUMBER_MARK`]) while the patch applies, so the
+    // content is written back with every number it does not touch as it was.
+    // An empty body is not JSON either.
+    let target = match read_numbers_as_text(&body) {
+        Ok(target) => target,
+        Err(Unreadable::Number) => return number_refused(),
+        Err(Unreadable::NotJson) => return not_json(),
+    };
+    let patched = match patch.apply(&target, patch_budget(state)) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
+    let ct = meta.content_type.clone();
+    // The linkset is left alone: a PATCH changes the content only.
+    // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
+    // which touches the container once they are over.
+    let (written, _guard, _) = write_with_meta(
+        state,
+        (guard, listing),
+        uri,
+        Bytes::from(patched),
+        &ct,
+        None,
+        req.admission.clone(),
+    )
+    .await;
+    let written = match written {
+        Ok(m) => m,
+        Err(e) => return store_error(e),
+    };
+    let mut resp = StatusCode::NO_CONTENT.into_response();
+    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
     resp
 }
 
@@ -5693,5 +6656,664 @@ mod tests {
             let r = call(&st, m, &p, &[("if-none-match", &tag)], "").await;
             assert_eq!(r.status(), StatusCode::NOT_MODIFIED, "{m}");
         }
+    }
+
+    /// Review finding: a JSON Patch `move` was not counted against the budget at all, and adds and
+    /// copies counted their values but not the keys and separators around them, so a patch could
+    /// build a document larger than the budget.
+    #[test]
+    fn json_patch_counts_keys_separators_and_moves() {
+        let long = "k".repeat(1000);
+        // Many members with long keys and empty values: the keys are most of the document.
+        let ops: Vec<Value> = (0..20)
+            .map(|i| json!({"op": "add", "path": format!("/{long}{i}"), "value": 0}))
+            .collect();
+        let ops = Value::Array(ops);
+        let built = json_patch(&json!({}), &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&built);
+        assert!(size > 20_000);
+        // Exact: the budget the result takes is enough, a byte less is not.
+        assert_eq!(json_patch(&json!({}), &ops, size), Ok(built));
+        assert_eq!(
+            json_patch(&json!({}), &ops, size - 1),
+            Err(PatchError::TooLarge)
+        );
+        // A move to a longer key grows the document by the difference.
+        let doc = json!({"a": [1, 2, 3], "b": {}});
+        let ops = json!([{"op": "move", "from": "/a", "path": format!("/b/{long}")}]);
+        let moved = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&moved);
+        assert_eq!(json_patch(&doc, &ops, size), Ok(moved));
+        assert_eq!(json_patch(&doc, &ops, size - 1), Err(PatchError::TooLarge));
+        // Moves, copies, removes and escaped keys, counted exactly along the way.
+        let ops = json!([
+            {"op": "add", "path": "/x", "value": {"q\"uote": [1, 2]}},
+            {"op": "copy", "from": "/x", "path": "/y~1z"},
+            {"op": "move", "from": "/x/q\"uote/0", "path": "/x/q\"uote/-"},
+            {"op": "remove", "path": "/b"},
+            {"op": "add", "path": "/arr", "value": []},
+            {"op": "move", "from": "/a", "path": "/arr/0"},
+        ]);
+        let out = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        // The largest the document gets along the way.
+        let peak = (1..=ops.as_array().unwrap().len())
+            .map(|n| {
+                let prefix = Value::Array(ops.as_array().unwrap()[..n].to_vec());
+                json_size(&json_patch(&doc, &prefix, PATCH_BUDGET).unwrap())
+            })
+            .max()
+            .unwrap();
+        assert_eq!(json_patch(&doc, &ops, peak).as_ref(), Ok(&out));
+        assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
+    }
+
+    /// Review finding: array indexes were parsed with `str::parse`, so `01` and `+1` named
+    /// member 1 in some operations, and escapes other than `~0` and `~1` passed. Every operation
+    /// now reads its pointers through one RFC 6901 parser.
+    #[test]
+    fn json_pointers_follow_rfc_6901() {
+        let doc = json!({"a": [10, 11, 12], "~/": 1});
+        let run = |ops: Value| json_patch(&doc, &ops, PATCH_BUDGET);
+        for index in [
+            "01",
+            "+1",
+            "1.0",
+            " 1",
+            "1 ",
+            "-1",
+            "3",
+            "18446744073709551616",
+            "-",
+        ] {
+            let path = format!("/a/{index}");
+            for op in [
+                json!({"op": "remove", "path": path}),
+                json!({"op": "replace", "path": path, "value": 0}),
+                json!({"op": "test", "path": path, "value": 11}),
+                json!({"op": "copy", "from": path, "path": "/b"}),
+                json!({"op": "move", "from": path, "path": "/b"}),
+            ] {
+                assert_eq!(run(json!([op])), Err(PatchError::Failed), "{op}");
+            }
+            if index != "3" && index != "-" {
+                let add = json!([{"op": "add", "path": path, "value": 0}]);
+                assert_eq!(run(add), Err(PatchError::Failed), "add at {index}");
+            }
+        }
+        for bad in ["a", "/~2", "/~", "/a~"] {
+            let op = json!([{"op": "test", "path": bad, "value": 1}]);
+            assert!(matches!(run(op), Err(PatchError::Malformed(_))), "{bad}");
+        }
+        let ops = json!([
+            {"op": "test", "path": "/a/0", "value": 10},
+            {"op": "test", "path": "/~0~1", "value": 1},
+            {"op": "add", "path": "/a/3", "value": 13},
+            {"op": "add", "path": "/a/-", "value": 14},
+            {"op": "move", "from": "/a/1", "path": "/a/1"},
+        ]);
+        assert_eq!(run(ops).unwrap()["a"], json!([10, 11, 12, 13, 14]));
+    }
+
+    /// Review finding: the work budget charged what an operation adds, not the array members an
+    /// insertion or a removal shifts. A thousand adds at the front of a long array passed both
+    /// budgets while moving the whole array each time.
+    #[test]
+    fn json_patch_charges_array_shifts() {
+        let long = Value::Array(vec![json!(0); 100_000]);
+        let budget = 8 << 20;
+        let at = |op: &str, path: &str| match op {
+            "remove" => json!({"op": "remove", "path": path}),
+            _ => json!({"op": op, "path": path, "value": 1}),
+        };
+        for (op, path) in [("add", "/0"), ("remove", "/0"), ("replace", "/0")] {
+            let few = Value::Array(vec![at(op, path); 3]);
+            assert!(json_patch(&long, &few, budget).is_ok(), "{op}");
+            let many = Value::Array(vec![at(op, path); MAX_PATCH_OPS]);
+            assert_eq!(
+                json_patch(&long, &many, budget),
+                Err(PatchError::TooLarge),
+                "{op}"
+            );
+        }
+        let moves = json!({"op": "move", "from": "/0", "path": "/1"});
+        let many = Value::Array(vec![moves; MAX_PATCH_OPS]);
+        assert_eq!(json_patch(&long, &many, budget), Err(PatchError::TooLarge));
+        // Appends and removals at the end move nothing.
+        let appends = Value::Array(vec![at("add", "/-"); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &appends, budget).is_ok());
+        let last = format!("/{}", 100_000 - 1);
+        let ops = Value::Array(vec![at("replace", &last); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &ops, budget).is_ok());
+    }
+
+    /// Review finding: a JSON Patch could repeat a costly operation without end within the size
+    /// budget (a copy of a large value over itself replaces it, so the document never grows). The
+    /// operations are counted, and the work they do is held to a budget of its own.
+    #[test]
+    fn json_patch_work_is_bounded() {
+        let big = json!({ "a": "x".repeat(1 << 20) });
+        let over_itself = json!({"op": "copy", "from": "/a", "path": "/a"});
+        // A few are fine; enough to do many times the budget's work are refused.
+        let few = Value::Array(vec![over_itself.clone(); 3]);
+        assert_eq!(json_patch(&big, &few, 8 << 20), Ok(big.clone()));
+        let many = Value::Array(vec![over_itself; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // Tests count too.
+        let probe = json!({"op": "test", "path": "/a", "value": "x".repeat(1 << 20)});
+        let many = Value::Array(vec![probe; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // And so do operations, however cheap.
+        let cheap = json!({"op": "test", "path": "/b", "value": 1});
+        let ops = Value::Array(vec![cheap.clone(); MAX_PATCH_OPS]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Ok(json!({"b": 1}))
+        );
+        let ops = Value::Array(vec![cheap; MAX_PATCH_OPS + 1]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn json_patch_copy_is_held_to_a_budget() {
+        let mut ops = Vec::new();
+        for _ in 0..40 {
+            ops.push(json!({"op": "copy", "from": "/a", "path": "/a/-"}));
+        }
+        let r = json_patch(&json!({"a": [1, 2, 3, 4]}), &Value::Array(ops), 4096);
+        assert_eq!(r, Err(PatchError::TooLarge));
+        // Within the budget, copies apply.
+        let ok = json_patch(
+            &json!({"a": [1]}),
+            &json!([{"op": "copy", "from": "/a", "path": "/b"}]),
+            4096,
+        );
+        assert_eq!(ok, Ok(json!({"a": [1], "b": [1]})));
+        // Replacing a member does not count the old value twice.
+        let mut ops = Vec::new();
+        for _ in 0..100 {
+            ops.push(json!({"op": "copy", "from": "/a", "path": "/b"}));
+        }
+        let big = json!({"a": "x".repeat(100)});
+        assert!(json_patch(&big, &Value::Array(ops), 1024).is_ok());
+    }
+
+    #[tokio::test]
+    async fn content_reading_patches_need_read() {
+        let st = state_with(false).await;
+        let anonymous = Agent::anonymous();
+        let reads = Patch::Json(json!([{"op": "test", "path": "/a", "value": 1}]));
+        let blind = Patch::Json(json!([{"op": "add", "path": "/a", "value": 1}]));
+        assert!(reads.reads_content());
+        assert!(!blind.reads_content());
+        for op in ["copy", "move"] {
+            assert!(json_patch_reads(
+                &json!([{"op": op, "from": "/a", "path": "/b"}])
+            ));
+        }
+        let uri = format!("{BASE}/");
+        let denied = patch_read_check(&st, &reads, &uri, &anonymous)
+            .await
+            .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let someone = Agent {
+            subject: Some("https://someone.example/#me".into()),
+            client: None,
+        };
+        let denied = patch_read_check(&st, &reads, &uri, &someone)
+            .await
+            .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        assert!(patch_read_check(&st, &blind, &uri, &anonymous)
+            .await
+            .is_ok());
+    }
+
+    /// `doc` with its `/d` wrapped in `n` more objects, by add and move alone.
+    fn nesting_ops(n: usize) -> Value {
+        let mut ops = Vec::new();
+        for _ in 0..n {
+            ops.push(json!({"op": "add", "path": "/w", "value": {}}));
+            ops.push(json!({"op": "move", "from": "/d", "path": "/w/d"}));
+            ops.push(json!({"op": "move", "from": "/w", "path": "/d"}));
+        }
+        Value::Array(ops)
+    }
+
+    /// Review finding: add and move can nest a document without bound (each op is small, so the
+    /// size budget never trips), deep enough to overflow the stack when it is serialized, cloned
+    /// or dropped.
+    #[tokio::test]
+    async fn json_patch_bounds_the_nesting_depth() {
+        let doc = json!({"d": 0});
+        // The root object and 126 wrappers: the deepest document serde_json parses back.
+        let ok = json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH - 1), PATCH_BUDGET).unwrap();
+        assert_eq!(json_depth(&ok), MAX_JSON_DEPTH);
+        let text = serde_json::to_string(&ok).unwrap();
+        assert!(serde_json::from_str::<Value>(&text).is_ok());
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Far past the bound: refused, not a stack overflow (by the operation count first, and by
+        // the depth bound for as many as are allowed).
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(100_000), PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_PATCH_OPS / 3), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // A copy into itself doubles the depth; add places a deep value under a deep path.
+        let deep = (0..100).fold(json!(0), |v, _| json!({ "d": v }));
+        let into = format!("/a{}", "/d".repeat(50));
+        let copy = json!([{"op": "copy", "from": "/a", "path": into}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep.clone() }), &copy, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        let path = format!("/a{}", "/d".repeat(99));
+        // 1 + 99 segments + a 30-deep value: over the bound, though each part alone parses.
+        let value = (0..30).fold(json!(1), |v, _| json!([v]));
+        let add = json!([{"op": "add", "path": path, "value": value}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep }), &add, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Over HTTP: 422, and the resource is untouched.
+        let st = state().await;
+        let uri = post(&st, "deep.json", "application/json", "{\"d\": 0}", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            &nesting_ops(MAX_JSON_DEPTH).to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = body_of(call(&st, "GET", path_of(&uri), &[], "").await).await;
+        assert_eq!(body, Bytes::from("{\"d\": 0}"));
+    }
+
+    /// Review finding: `test` compared with `Value` equality, so `1` and `1.0` differed; RFC 6902
+    /// section 4.6 compares numbers by value.
+    #[test]
+    fn json_patch_test_compares_numbers_by_value() {
+        let doc = json!({"n": 1, "f": 1.5, "big": u64::MAX, "a": [1, {"x": 2}], "o": {"p": 10, "q": [0]}});
+        let test = |path: &str, value: Value| {
+            json_patch(
+                &doc,
+                &json!([{"op": "test", "path": path, "value": value}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(test("/n", json!(1.0)));
+        assert!(test("/f", json!(1.5)));
+        assert!(test("/a", json!([1.0, {"x": 2.0}])));
+        assert!(test("/o", json!({"q": [0.0], "p": 1e1})));
+        assert!(test("/big", json!(u64::MAX)));
+        assert!(!test("/n", json!(1.5)));
+        assert!(!test("/n", json!("1")));
+        assert!(!test("/big", json!(u64::MAX - 1)));
+        // Distinct large integers never meet through a float.
+        let near = json!({"n": 9_007_199_254_740_993_i64});
+        let t = |v: Value| {
+            json_patch(
+                &near,
+                &json!([{"op": "test", "path": "/n", "value": v}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(!t(json!(9_007_199_254_740_992_i64)));
+        assert!(!t(json!(9_007_199_254_740_992.0)));
+        assert!(t(json!(9_007_199_254_740_993_i64)));
+    }
+
+    /// Review finding: a resource PATCH was held to the fixed [`PATCH_BUDGET`], so a
+    /// small patch could grow a document far past the configured body limit. Its result is now
+    /// held to `max_body`.
+    #[tokio::test]
+    async fn a_patch_is_held_to_the_body_limit() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        cfg.max_body = 64 << 10;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let doc = json!({ "a": "x".repeat(20 << 10) }).to_string();
+        let json = ("content-type", "application/json");
+        let r = call(&st, "POST", "/", &[json, ("slug", "d.json")], &doc).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let patch = ("content-type", "application/json-patch+json");
+        let copies = |n: usize| {
+            let ops: Vec<Value> = (0..n)
+                .map(|i| json!({"op": "copy", "from": "/a", "path": format!("/b{i}")}))
+                .collect();
+            Value::Array(ops).to_string()
+        };
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(1)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(4)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn malformed_json_patch_is_400_and_a_failing_one_422() {
+        let st = state().await;
+        let uri = post(&st, "k.json", JSON, r#"{"a":1}"#, &[]).await;
+        let p = path_of(&uri);
+        for bad in [
+            r#"{"op":"add"}"#,
+            r#"[{"op":"frobnicate","path":"/a"}]"#,
+            r#"[{"op":"add","path":"/b"}]"#,
+            r#"[{"op":"copy","path":"/b"}]"#,
+            r#"[{"path":"/a"}]"#,
+            r#"[{"op":"remove","path":"a"}]"#,
+        ] {
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], bad).await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{bad}");
+        }
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"remove","path":"/nope"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/a","value":2}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Review findings: a stored number of a million digits was normalized again by every
+    /// `test`, charged only for the patch's side; the size limits counted the marked form, so a
+    /// document of many small numbers outgrew the budget unchanged; a power of ten past 64 bits
+    /// was compared as text; and malformed text (`{1:2}`) was made JSON by the rewriting. Numbers
+    /// are bounded where they are read, zero is zero whatever its exponent, sizes are those
+    /// written, and the text is checked as written first.
+    #[tokio::test]
+    async fn json_patch_reads_numbers_within_bounds() {
+        let long = format!("1{}", "0".repeat(MAX_NUMBER_TEXT));
+        let longest = format!("1{}", "0".repeat(MAX_NUMBER_TEXT - 1));
+        assert_eq!(
+            read_numbers_as_text(format!("[{long}]").as_bytes()),
+            Err(Unreadable::Number)
+        );
+        assert!(read_numbers_as_text(format!("[{longest}]").as_bytes()).is_ok());
+        assert_eq!(
+            read_numbers_as_text(b"[1e9223372036854775808]"),
+            Err(Unreadable::Number)
+        );
+        assert_eq!(read_numbers_as_text(b"{1:2}"), Err(Unreadable::NotJson));
+        // A `test` is charged for both sides as it reads them: the long numbers it reads in the
+        // target count, not only the short ones the patch gives.
+        let one = format!("1.{}", "0".repeat(MAX_NUMBER_TEXT - 2));
+        let target = format!("{{\"a\":[{}]}}", vec![one.as_str(); 100].join(","));
+        let target = read_numbers_as_text(target.as_bytes()).unwrap();
+        let ones = vec!["1"; 100].join(",");
+        let test = format!(r#"{{"op":"test","path":"/a","value":[{ones}]}}"#);
+        let ops = |n: usize| {
+            read_numbers_as_text(format!("[{}]", vec![test.as_str(); n].join(",")).as_bytes())
+                .unwrap()
+        };
+        let budget = 2 * json_size(&target);
+        assert!(json_patch(&target, &ops(1), budget).is_ok());
+        assert_eq!(
+            json_patch(&target, &ops(20), budget),
+            Err(PatchError::TooLarge)
+        );
+        // Sizes are those written: the marks are not counted.
+        for text in ["[0,0,-1.5e3]", "{\"a\":\"\u{E000}x\",\"b\":[1,{\"c\":2}]}"] {
+            let held = read_numbers_as_text(text.as_bytes()).unwrap();
+            assert_eq!(json_size(&held), text.len(), "{text}");
+        }
+
+        let st = state().await;
+        let stored = r#"{"big":1e9223372036854775807,"z":0e9223372036854775808}"#;
+        let uri = post(&st, "n.json", JSON, stored, &[]).await;
+        let p = path_of(&uri);
+        for (ops, want) in [
+            (
+                r#"[{"op":"test","path":"/big","value":10e9223372036854775806}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/z","value":0}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/z","value":-0.0e-5}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/big","value":1e9223372036854775808}]"#,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], ops).await;
+            assert_eq!(r.status(), want, "{ops}");
+        }
+        assert_eq!(st.store.read(&uri).await.unwrap().body, Bytes::from(stored));
+        // A target holding a number past the bound is refused, and left as it was.
+        let refused = format!("{{\"n\":{long}}}");
+        let uri = post(&st, "long.json", JSON, &refused, &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from(refused)
+        );
+        // An empty body is not JSON: refused, and left as it was.
+        let uri = post(&st, "empty.json", JSON, "", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert!(st.store.read(&uri).await.unwrap().body.is_empty());
+        // Malformed text stored as JSON is not rewritten into JSON.
+        let uri = post(&st, "bad.json", JSON, "{1:2}", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from("{1:2}")
+        );
+    }
+
+    /// Review findings: numbers were parsed into `f64` and written back, so an integer past
+    /// `u64` or a decimal with more digits than an `f64` holds was rewritten by a patch that
+    /// never touched it; a `test` compared an integer with a float through a cast, so it matched
+    /// a number it does not equal; and a guard refusing such numbers read them with another
+    /// float parser than the patch did. A patch never reads a number as a float: each is kept as
+    /// its text, and compared as the decimal value it denotes.
+    #[tokio::test]
+    async fn json_patch_keeps_every_number_exactly() {
+        // The text round trip, a string value or a member name that starts with the mark
+        // included (members in the order a written document has them).
+        let text = "{\"a\":[1e400,-0.9299999999999999,12345678901234567890123],\"e\":\"\\ue000w\",\"s\":\"1\",\"\u{E000}k\":\"\u{E000}v\"}";
+        let held = numbers_as_text(text).unwrap();
+        let parsed: Value = serde_json::from_str(&held).unwrap();
+        assert_eq!(parsed["a"][0], json!("\u{E000}1e400"));
+        assert_eq!(parsed["\u{E000}k"], json!("\u{E000}\u{E000}v"));
+        assert_eq!(parsed["e"], json!("\u{E000}\u{E000}w"));
+        assert_eq!(parsed["s"], json!("1"));
+        assert_eq!(
+            numbers_from_text(&serde_json::to_string(&parsed).unwrap()),
+            "{\"a\":[1e400,-0.9299999999999999,12345678901234567890123],\"e\":\"\u{E000}w\",\"s\":\"1\",\"\u{E000}k\":\"\u{E000}v\"}"
+        );
+        // Not a number: left for the parser to refuse.
+        for bad in ["01", "1.", ".5", "1e", "--1", "1.2.3"] {
+            assert!(!is_json_number(bad), "{bad}");
+            assert_eq!(
+                read_numbers_as_text(format!("[{bad}]").as_bytes()),
+                Err(Unreadable::NotJson)
+            );
+        }
+
+        let st = state().await;
+        let stored = r#"{"big":1e400,"f":0.9299999999999999,"id":12345678901234567890123,"n":1000000000000001024}"#;
+        let uri = post(&st, "big.json", JSON, stored, &[]).await;
+        let p = path_of(&uri);
+        let body = || async { st.store.read(&uri).await.unwrap().body };
+        // An empty patch writes every number back as it was.
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(body().await, Bytes::from(stored));
+        // `test` compares decimal values: a float near an integer does not equal it, and the
+        // same value written another way does.
+        for (value, equal) in [
+            ("1.000000000000001e18", false),
+            ("1000000000000001024.0", true),
+            ("1.000000000000001024e18", true),
+        ] {
+            let patch = format!(r#"[{{"op":"test","path":"/n","value":{value}}}]"#);
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], &patch).await;
+            let want = if equal {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::UNPROCESSABLE_ENTITY
+            };
+            assert_eq!(r.status(), want, "{value}");
+        }
+        // A patch's numbers are stored as written, and 1e400 is just another number.
+        let patch = r#"[{"op":"add","path":"/x","value":1e400},{"op":"add","path":"/y","value":0.1000000000000000055511151231257827}]"#;
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], patch).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let written = String::from_utf8(body().await.to_vec()).unwrap();
+        assert!(
+            written.starts_with(&stored[..stored.len() - 1]),
+            "{written}"
+        );
+        assert!(
+            written.ends_with(r#""x":1e400,"y":0.1000000000000000055511151231257827}"#),
+            "{written}"
+        );
+        // A number is never equal to a string holding its text.
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/x","value":"1e400"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Review finding: a JSON Patch on a resource stored as another format rewrote it as JSON
+    /// when its content happened to parse. Only a JSON resource is patched; the format is checked
+    /// (415) before the preconditions (412), and an operation that names a member twice is a 400.
+    #[tokio::test]
+    async fn json_patch_applies_to_json_resources_only() {
+        let st = state().await;
+        let uri = post(&st, "n.txt", "text/plain", "{\"a\":1}", &[]).await;
+        let p = path_of(&uri);
+        let add = r#"[{"op":"add","path":"/b","value":2}]"#;
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], add).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(hdr(&r, "accept-patch"), JSON_PATCH);
+        let stored = st.store.read(&uri).await.unwrap();
+        assert_eq!(stored.body, Bytes::from("{\"a\":1}"));
+        assert_eq!(stored.meta.content_type, "text/plain");
+        // 415 before 412, for the patch format and for the resource's.
+        let stale = ("if-match", "\"stale\"");
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH), stale], add).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let json = post(&st, "j.json", "application/ld+json", "{\"a\":1}", &[]).await;
+        let jp = path_of(&json);
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", "text/plain"), stale],
+            add,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", JSON_PATCH), stale],
+            add,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        // A `+json` type is JSON, and keeps its type.
+        let r = call(&st, "PATCH", jp, &[("content-type", JSON_PATCH)], add).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            st.store.read(&json).await.unwrap().meta.content_type,
+            "application/ld+json"
+        );
+        // A repeated member is refused, whichever of its values would have been kept.
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/a","value":1,"op":"remove"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn patches() {
+        let t = json!({"title": "a", "keep": 1, "drop": true});
+        let p = json!([{"op": "add", "path": "/added", "value": 42}, {"op": "remove", "path": "/drop"},
+                       {"op": "replace", "path": "/title", "value": "b"}, {"op": "test", "path": "/keep", "value": 1}]);
+        assert_eq!(
+            json_patch(&t, &p, PATCH_BUDGET),
+            Ok(json!({"title": "b", "keep": 1, "added": 42}))
+        );
+        assert_eq!(
+            json_patch(
+                &t,
+                &json!([{"op": "test", "path": "/keep", "value": 2}]),
+                PATCH_BUDGET
+            ),
+            Err(PatchError::Failed)
+        );
+        assert_eq!(
+            json_patch(
+                &json!({"a": [1, 2]}),
+                &json!([{"op": "add", "path": "/a/-", "value": 3}]),
+                PATCH_BUDGET
+            ),
+            Ok(json!({"a": [1, 2, 3]}))
+        );
     }
 }

@@ -261,7 +261,8 @@ What the server exposes, all discoverable from the storage description
 (`GET /` with `Accept: application/lws+cid`):
 
 - **Storage**: `application/lws+json` containers with paging links, data resources with
-  conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `DELETE` (with
+  conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
+  data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
   `Depth: infinity` for non-empty containers), and read-only RFC 9264 linksets at
   `{resource}.meta`.
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
@@ -270,7 +271,19 @@ What the server exposes, all discoverable from the storage description
   `412` (a comma inside a quoted tag is part of the tag; an empty list names no tag), and a date that is not one valid
   HTTP-date is ignored. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
-  taken it gets `409`. `livez` and `readyz` are never
+  taken it gets `409`. A JSON Patch is applied whole or not at all: one that is not a valid
+  patch document (an operation naming a member twice included) gets `400`, one that cannot be
+  applied (a missing path, a failed `test`) gets `422`, another patch format or a resource not
+  stored as JSON (`application/json` or a `+json` type, which it keeps) gets `415` with
+  `Accept-Patch`, checked before the preconditions, and a result larger than the body limit, more
+  than 1,000 operations, or work past four times the body limit gets `413`. Numbers are never
+  read as binary floats: each is kept as its text, so one a patch does not touch is written back
+  as it was (members are written in name order), and `test` compares numbers as the decimal
+  values their texts denote (zero is zero whatever its sign or exponent). A number longer than
+  1,024 characters, or whose power of ten does not fit 64 bits, in the patch or the resource, gets
+  `422`; a resource whose text is not JSON as written gets `415`. Sizes are those of the JSON as
+  written, and a `test` is charged for what it reads of both sides. A patch that reads the content (`test`, `copy`, `move`) needs
+  Read as well as Modify. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
 - **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
