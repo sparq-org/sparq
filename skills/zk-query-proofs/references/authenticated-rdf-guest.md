@@ -30,6 +30,7 @@ its row-bound case have not run. The research registry lists
 |---|---|---|
 | `sparq-proved-evaluator-methods` | `authenticated-rdf` (off) | Also builds `methods/guest-authrdf` (package `sparq-authrdf-guest`) and generates `SPARQ_AUTHRDF_GUEST_ELF` / `SPARQ_AUTHRDF_GUEST_ID` in their own `authrdf_methods.rs` |
 | `sparq-proved-evaluator` (host) | `authenticated-rdf` (off) | Enables the model and methods features, the `authenticated_rdf` module, `embedded_authrdf_artifact()`, `embedded_authrdf_pin()` and the `export_authrdf_guest` example |
+| `sparq-proved-evaluator-methods` and host | `phase-cycles` (off) | Also builds a measurement image, `SPARQ_AUTHRDF_PHASES_GUEST_ELF`, whose guest writes the cycle count at each `model::authenticated_rdf::Phase` boundary to stdout. It is never the accepted image; the production V5 image is built without it |
 
 The V5 guest is an independent Cargo workspace with its own manifest and its
 own lock. It uses the model features `graph-results` and `authenticated-rdf`,
@@ -192,6 +193,30 @@ commitment, from verifier-owned configuration. Never take them from a
 presentation. For `VerifierAgreed`, the verifier computes the commitment with
 `authenticated_rdf::dataset_commitment` from its own copy of the credentials and
 salt.
+
+## Query coverage and measurement
+
+`host/examples/paper_sweep.rs` (feature `authenticated-rdf`) issues synthetic
+credentials under both cryptosuites, presents them in both signature modes and
+runs a query set through the accepted V5 image. `--set main` runs the paper's
+queries in `fixtures/paper/*.rq` over the payment credential; `--set sweep` runs
+the feature cases in `fixtures/paper/sweep.json`. `--execute` runs the RISC Zero
+executor and records cycles, segments and journal and witness sizes; `--prove N`
+also proves and verifies N times; `--phases` (feature `phase-cycles`) adds the
+per-phase cycle breakdown from the measurement image. `--blank-free` names the
+credential holder with an IRI so that the credential data has no blank node.
+Each case prints one JSON record.
+
+`zk/sparql-evaluator/coverage-authenticated-rdf.json` is generated from those
+records by `scripts/authenticated_rdf_coverage.py`. Each feature records whether
+the guest executed the case or aborted with an admission error, with credential
+data that contains a blank node and, where it differs, without one. Blank nodes
+in credential data are supported. `FILTER EXISTS` and `FILTER NOT EXISTS` are
+admitted only when no presented credential contains a blank node. The
+credentials form the default graph and there are no named graphs, so `GRAPH`
+matches nothing and `FROM` selects an empty default graph. `SERVICE`, `BNODE()`,
+`NOW()`, `RAND()`, nested `EXISTS`, triple terms and custom functions are
+rejected. The manifest records executions, not proofs.
 
 ## Tests
 

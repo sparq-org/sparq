@@ -1789,6 +1789,34 @@ pub struct BranchWitness {
     pub solution: Vec<SolutionBinding>,
 }
 
+/// What a proof hides about issuer signatures, named as the `signatureMode`
+/// values of the ZK SPARQL answers specification (`site/specs/zksparql-answers.typ`).
+///
+/// In this back end both modes disclose each graph commitment `C(G)`, its
+/// per-graph salt and the issuer-signed message, so presentations over the same
+/// graph are linkable in either mode. They differ in what is disclosed about the
+/// issuer:
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SignatureMode {
+    /// Every commitment is attested only by a `hidden_issuer` sub-proof: the proof
+    /// shows that some key in the relying party's key set signed the message,
+    /// without disclosing the key or the signature.
+    Hidden,
+    /// Every commitment carries a [`CommitmentAttestation`] that the verifier checks
+    /// outside the proofs: the issuer key and signature are disclosed.
+    Revealed,
+}
+
+impl SignatureMode {
+    /// The specification's string value: `"hidden"` or `"revealed"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hidden => "hidden",
+            Self::Revealed => "revealed",
+        }
+    }
+}
+
 /// The full query-result proof manifest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProofManifest {
@@ -2402,6 +2430,30 @@ fn default_type() -> String {
 }
 
 impl ProofManifest {
+    /// The [`SignatureMode`] this manifest realises: `Revealed` when every attested
+    /// commitment has a clear [`CommitmentAttestation`], `Hidden` when every one is
+    /// attested only by a hidden-issuer proof, and `None` when it mixes the two or
+    /// attests nothing.
+    ///
+    /// Descriptive only: acceptance is decided by the verifier's checks, which apply
+    /// a clear attestation's checks whenever one is present.
+    pub fn signature_mode(&self) -> Option<SignatureMode> {
+        // Compare parsed field elements, as the verifier does; a malformed
+        // commitment makes the mode undetermined.
+        let field = |c: &FieldHex| c.to_field().map(|f| FieldHex::from_field(&f).0);
+        let clear: Option<std::collections::BTreeSet<String>> =
+            self.commitment_attestations.iter().map(|a| field(&a.commitment)).collect();
+        let hidden: Option<Vec<String>> =
+            self.hidden_issuer_attestations.iter().map(|a| field(&a.commitment)).collect();
+        let (clear, hidden) = (clear?, hidden?);
+        let hidden_only = hidden.iter().filter(|c| !clear.contains(*c)).count();
+        match (clear.is_empty(), hidden_only) {
+            (false, 0) => Some(SignatureMode::Revealed),
+            (true, n) if n > 0 => Some(SignatureMode::Hidden),
+            _ => None,
+        }
+    }
+
     /// Canonicalise the edge vectors to a deterministic order ([OPUS-4.8]
     /// sq-y2wy). Sorts `binding_edges` ascending by `(from_proof, from_row,
     /// from_slot, to_proof)` and `join_edges` ascending by `(scan_a, graph_a,

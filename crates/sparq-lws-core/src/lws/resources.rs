@@ -2249,63 +2249,151 @@ fn is_json_type(content_type: &str) -> bool {
     essence == "application/json" || essence.ends_with("+json")
 }
 
-/// Whether every number in the JSON text `text` is kept exactly by [`Value`]: an integer within
-/// `i64` or `u64`, or one whose `f64` writes back as the same decimal value. Others (an integer
-/// past `u64`, more digits than an `f64` holds) would be rounded when parsed, so a patch would
-/// rewrite numbers it never touched, and a `test` could match a number it does not equal. A
-/// scan of the text, outside strings; `text` is JSON already parsed.
-fn numbers_exact(text: &[u8]) -> bool {
+/// What marks a number held as text while a JSON Patch is applied. A JSON Patch never reads a
+/// number as a binary float: before the patch and its target are parsed, every number in them is
+/// rewritten as a string holding this mark and the number's own text ([`numbers_as_text`]), and
+/// written back as that text once the patch is applied ([`numbers_from_text`]). So a number the
+/// patch does not touch is written back as it was, whatever its size or precision, and `test`
+/// compares numbers as the decimal values their texts denote ([`json_equal`]). A string value
+/// of the document that itself starts with the mark is kept apart by doubling it.
+const NUMBER_MARK: char = '\u{E000}';
+
+/// Rewrite the JSON text `json`, token by token: each string in a value position (never an
+/// object member's name) through `string` (given its raw content between the quotes; `None`
+/// keeps it), and each number through `number`. Everything else is copied. Text that is not
+/// JSON is copied as far as it can be scanned, for the parser to refuse.
+fn rewrite_json(
+    json: &str,
+    string: impl Fn(&str) -> Option<String>,
+    number: impl Fn(&str) -> String,
+) -> String {
+    let b = json.as_bytes();
+    let mut out = String::with_capacity(json.len() + json.len() / 8);
+    // Per open container, whether it is an object; and whether a member name comes next.
+    let mut stack: Vec<bool> = Vec::new();
+    let mut name = false;
     let mut i = 0;
-    let mut in_string = false;
-    while i < text.len() {
-        let c = text[i];
-        if in_string {
-            match c {
-                b'\\' => i += 1,
-                b'"' => in_string = false,
-                _ => {}
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'"' {
+                    j += if b[j] == b'\\' { 2 } else { 1 };
+                }
+                let end = j.min(b.len() - 1);
+                let raw = &json[i..=end];
+                let content = &json[i + 1..j.min(b.len())];
+                if name && stack.last() == Some(&true) {
+                    out.push_str(raw);
+                } else {
+                    match string(content) {
+                        Some(r) => out.push_str(&r),
+                        None => out.push_str(raw),
+                    }
+                }
+                i = end + 1;
+                continue;
             }
-            i += 1;
-            continue;
-        }
-        if c == b'"' {
-            in_string = true;
-            i += 1;
-            continue;
-        }
-        if c == b'-' || c.is_ascii_digit() {
-            let start = i;
-            while i < text.len()
-                && matches!(text[i], b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')
-            {
-                i += 1;
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < b.len() && matches!(b[i], b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')
+                {
+                    i += 1;
+                }
+                out.push_str(&number(&json[start..i]));
+                continue;
             }
-            let Ok(token) = std::str::from_utf8(&text[start..i]) else {
-                return false;
-            };
-            if !number_exact(token) {
-                return false;
+            b'{' => {
+                stack.push(true);
+                name = true;
             }
-            continue;
+            b'[' => {
+                stack.push(false);
+                name = false;
+            }
+            b'}' | b']' => {
+                stack.pop();
+                name = false;
+            }
+            b',' => name = stack.last() == Some(&true),
+            b':' => name = false,
+            _ => {}
         }
-        i += 1;
+        // Outside strings valid JSON is ASCII; anything else is copied whole, for the parser.
+        let len = json[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&json[i..i + len]);
+        i += len;
     }
-    true
+    out
 }
 
-/// Whether the JSON number `token` parses into a [`Value`] without losing anything of its value.
-fn number_exact(token: &str) -> bool {
-    if token.parse::<i64>().is_ok() || token.parse::<u64>().is_ok() {
-        return true;
-    }
-    let Some(n) = token
-        .parse::<f64>()
-        .ok()
-        .and_then(serde_json::Number::from_f64)
-    else {
-        return false;
+/// Whether `token` is a JSON number (RFC 8259 section 6).
+fn is_json_number(token: &str) -> bool {
+    let s = token.strip_prefix('-').unwrap_or(token);
+    let (mantissa, exp) = match s.find(['e', 'E']) {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
     };
-    decimal(token).is_some_and(|d| decimal(&n.to_string()) == Some(d))
+    let (int, frac) = match mantissa.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (mantissa, None),
+    };
+    let digits = |d: &str| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit());
+    digits(int)
+        && (int == "0" || !int.starts_with('0'))
+        && frac.is_none_or(digits)
+        && exp.is_none_or(|e| digits(e.strip_prefix(['+', '-']).unwrap_or(e)))
+}
+
+/// `json` with every number rewritten as a marked string ([`NUMBER_MARK`]), and every string
+/// value that starts with the mark with the mark doubled.
+fn numbers_as_text(json: &str) -> String {
+    let starts_marked = |content: &str| {
+        content.starts_with(NUMBER_MARK)
+            || content
+                .get(..6)
+                .is_some_and(|e| e.eq_ignore_ascii_case("\\ue000"))
+    };
+    rewrite_json(
+        json,
+        |content| starts_marked(content).then(|| format!("\"{NUMBER_MARK}{content}\"")),
+        |token| {
+            if is_json_number(token) {
+                format!("\"{NUMBER_MARK}{token}\"")
+            } else {
+                token.to_string()
+            }
+        },
+    )
+}
+
+/// The JSON `json` (as `serde_json` writes it) with each marked string written back as the
+/// number it holds, and each doubled mark undone: the inverse of [`numbers_as_text`].
+fn numbers_from_text(json: &str) -> String {
+    rewrite_json(
+        json,
+        |content| {
+            let rest = content.strip_prefix(NUMBER_MARK)?;
+            Some(if rest.starts_with(NUMBER_MARK) {
+                format!("\"{rest}\"")
+            } else {
+                rest.to_string()
+            })
+        },
+        str::to_string,
+    )
+}
+
+/// The number text a marked string holds ([`numbers_as_text`]), or a [`Value::Number`]'s.
+fn number_text(v: &Value) -> Option<std::borrow::Cow<'_, str>> {
+    match v {
+        Value::Number(n) => Some(n.to_string().into()),
+        Value::String(s) => s
+            .strip_prefix(NUMBER_MARK)
+            .filter(|rest| !rest.starts_with(NUMBER_MARK))
+            .map(Into::into),
+        _ => None,
+    }
 }
 
 /// A decimal number's value as (negative, significant digits, power of ten): `1.50e1` and `15`
@@ -2622,8 +2710,18 @@ fn shift_cost(doc: &Value, path: &Pointer, adding: bool) -> usize {
 /// whatever their order. Integers compare exactly (two distinct large integers never meet through
 /// a float), and an integer equals a float only when the float is exactly that integer.
 fn json_equal(a: &Value, b: &Value) -> bool {
+    // Numbers are equal when the decimal values their texts denote are.
+    match (number_text(a), number_text(b)) {
+        (Some(x), Some(y)) => {
+            return match (decimal(&x), decimal(&y)) {
+                (Some(x), Some(y)) => x == y,
+                _ => x == y,
+            }
+        }
+        (None, None) => {}
+        _ => return false,
+    }
     match (a, b) {
-        (Value::Number(x), Value::Number(y)) => numbers_equal(x, y),
         (Value::Array(x), Value::Array(y)) => {
             x.len() == y.len() && x.iter().zip(y).all(|(x, y)| json_equal(x, y))
         }
@@ -2633,23 +2731,6 @@ fn json_equal(a: &Value, b: &Value) -> bool {
                     .all(|(k, v)| y.get(k).is_some_and(|w| json_equal(v, w)))
         }
         _ => a == b,
-    }
-}
-
-fn numbers_equal(x: &serde_json::Number, y: &serde_json::Number) -> bool {
-    let int = |n: &serde_json::Number| {
-        n.as_i64()
-            .map(i128::from)
-            .or_else(|| n.as_u64().map(i128::from))
-    };
-    // An integral, finite float within range, as the integer it is exactly.
-    let integral =
-        |f: f64| (f.is_finite() && f.fract() == 0.0 && f.abs() < 1e38).then_some(f as i128);
-    match (int(x), int(y)) {
-        (Some(i), Some(j)) => i == j,
-        (Some(i), None) => y.as_f64().and_then(integral) == Some(i),
-        (None, Some(j)) => x.as_f64().and_then(integral) == Some(j),
-        (None, None) => x.as_f64().is_some_and(|f| y.as_f64() == Some(f)),
     }
 }
 
@@ -2780,7 +2861,10 @@ impl Patch {
             );
             return Err(r);
         }
-        let Ok(patch) = serde_json::from_slice::<Value>(&req.body) else {
+        let Some(patch) = std::str::from_utf8(&req.body)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&numbers_as_text(text)).ok())
+        else {
             return Err(problem(
                 StatusCode::BAD_REQUEST,
                 Some("the patch is not JSON"),
@@ -2793,12 +2877,6 @@ impl Patch {
             return Err(problem(
                 StatusCode::BAD_REQUEST,
                 Some("an operation repeats a member"),
-            ));
-        }
-        if !numbers_exact(&req.body) {
-            return Err(problem(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Some("the patch holds a number that cannot be kept exactly"),
             ));
         }
         Ok(Patch::Json(patch))
@@ -2907,26 +2985,23 @@ async fn patch<S: Store + 'static>(
         Ok(b) => b,
         Err(e) => return store_error(e),
     };
+    // Its numbers are held as their text ([`NUMBER_MARK`]) while the patch applies, so the
+    // content is written back with every number it does not touch as it was.
     let target = if body.is_empty() {
-        Value::Object(Map::new())
+        Some(Value::Object(Map::new()))
     } else {
-        match serde_json::from_slice::<Value>(&body) {
-            Ok(v) => v,
-            Err(_) => return not_json(),
-        }
+        std::str::from_utf8(&body)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&numbers_as_text(text)).ok())
     };
-    // The content is written back whole, so a number it holds that a [`Value`] cannot keep
-    // exactly would be changed although the patch never touched it.
-    if !numbers_exact(&body) {
-        return problem(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Some("the resource holds a number that cannot be kept exactly"),
-        );
-    }
+    let Some(target) = target else {
+        return not_json();
+    };
     let patched = match patch.apply(&target, patch_budget(state)) {
         Ok(v) => v,
         Err(r) => return r,
     };
+    let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
@@ -2935,7 +3010,7 @@ async fn patch<S: Store + 'static>(
         state,
         (guard, listing),
         uri,
-        Bytes::from(serde_json::to_vec(&patched).unwrap_or_default()),
+        Bytes::from(patched),
         &ct,
         None,
         req.admission.clone(),
@@ -7638,67 +7713,81 @@ mod tests {
         assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    /// Review finding: numbers were parsed into `f64` and written back, so an integer past
-    /// `u64` or a decimal with more digits than an `f64` holds was rewritten by a patch that never
-    /// touched it, and a `test` could match a number it does not equal. Numbers are kept exactly,
-    /// or the patch is refused and nothing changes.
+    /// Review findings: numbers were parsed into `f64` and written back, so an integer past
+    /// `u64` or a decimal with more digits than an `f64` holds was rewritten by a patch that
+    /// never touched it; a `test` compared an integer with a float through a cast, so it matched
+    /// a number it does not equal; and a guard refusing such numbers read them with another
+    /// float parser than the patch did. A patch never reads a number as a float: each is kept as
+    /// its text, and compared as the decimal value it denotes.
     #[tokio::test]
     async fn json_patch_keeps_every_number_exactly() {
-        for (token, exact) in [
-            ("0", true),
-            ("-0", true),
-            ("18446744073709551615", true),
-            ("-9223372036854775808", true),
-            ("0.1", true),
-            ("1.5e300", true),
-            ("1E2", true),
-            ("100000000000000000000", true),
-            ("18446744073709551616", false),
-            ("12345678901234567890123", false),
-            ("0.1000000000000000055511151231257827", false),
-            ("3.14159265358979323846", false),
-            ("1e400", false),
-        ] {
-            assert_eq!(number_exact(token), exact, "{token}");
+        // The text round trip, a string value or a member name that starts with the mark
+        // included (members in the order a written document has them).
+        let text = "{\"a\":[1e400,-0.9299999999999999,12345678901234567890123],\"e\":\"\\ue000w\",\"s\":\"1\",\"\u{E000}k\":\"\u{E000}v\"}";
+        let held = numbers_as_text(text);
+        let parsed: Value = serde_json::from_str(&held).unwrap();
+        assert_eq!(parsed["a"][0], json!("\u{E000}1e400"));
+        assert_eq!(parsed["\u{E000}k"], json!("\u{E000}\u{E000}v"));
+        assert_eq!(parsed["e"], json!("\u{E000}\u{E000}w"));
+        assert_eq!(parsed["s"], json!("1"));
+        assert_eq!(
+            numbers_from_text(&serde_json::to_string(&parsed).unwrap()),
+            "{\"a\":[1e400,-0.9299999999999999,12345678901234567890123],\"e\":\"\u{E000}w\",\"s\":\"1\",\"\u{E000}k\":\"\u{E000}v\"}"
+        );
+        // Not a number: left for the parser to refuse.
+        for bad in ["01", "1.", ".5", "1e", "--1", "1.2.3"] {
+            assert!(!is_json_number(bad), "{bad}");
+            assert!(serde_json::from_str::<Value>(&numbers_as_text(&format!("[{bad}]"))).is_err());
         }
-        assert!(numbers_exact(
-            br#"{"a":"12345678901234567890123","b":[1,2.5]}"#
-        ));
-        assert!(!numbers_exact(
-            br#"{"a":"x\"","b":12345678901234567890123}"#
-        ));
 
         let st = state().await;
-        let big = r#"{"id":12345678901234567890123,"n":1}"#;
-        let uri = post(&st, "big.json", JSON, big, &[]).await;
+        let stored = r#"{"big":1e400,"f":0.9299999999999999,"id":12345678901234567890123,"n":1000000000000001024}"#;
+        let uri = post(&st, "big.json", JSON, stored, &[]).await;
         let p = path_of(&uri);
-        let add = r#"[{"op":"add","path":"/x","value":1}]"#;
-        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], add).await;
-        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
-        assert_eq!(st.store.read(&uri).await.unwrap().body, Bytes::from(big));
-        // A patch carrying such a number is refused too, before it is compared or stored.
-        let uri = post(&st, "small.json", JSON, r#"{"n":1}"#, &[]).await;
-        let p = path_of(&uri);
-        for patch in [
-            r#"[{"op":"add","path":"/x","value":12345678901234567890123}]"#,
-            r#"[{"op":"test","path":"/n","value":1.00000000000000000001}]"#,
+        let body = || async { st.store.read(&uri).await.unwrap().body };
+        // An empty patch writes every number back as it was.
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(body().await, Bytes::from(stored));
+        // `test` compares decimal values: a float near an integer does not equal it, and the
+        // same value written another way does.
+        for (value, equal) in [
+            ("1.000000000000001e18", false),
+            ("1000000000000001024.0", true),
+            ("1.000000000000001024e18", true),
         ] {
-            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], patch).await;
-            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{patch}");
+            let patch = format!(r#"[{{"op":"test","path":"/n","value":{value}}}]"#);
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], &patch).await;
+            let want = if equal {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::UNPROCESSABLE_ENTITY
+            };
+            assert_eq!(r.status(), want, "{value}");
         }
-        assert_eq!(
-            st.store.read(&uri).await.unwrap().body,
-            Bytes::from(r#"{"n":1}"#)
-        );
-        // Numbers a value keeps exactly patch as before.
-        let patch = r#"[{"op":"add","path":"/x","value":0.1},{"op":"add","path":"/y","value":18446744073709551615}]"#;
+        // A patch's numbers are stored as written, and 1e400 is just another number.
+        let patch = r#"[{"op":"add","path":"/x","value":1e400},{"op":"add","path":"/y","value":0.1000000000000000055511151231257827}]"#;
         let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], patch).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
-        let body: Value = serde_json::from_slice(&st.store.read(&uri).await.unwrap().body).unwrap();
-        assert_eq!(
-            body,
-            json!({"n": 1, "x": 0.1, "y": 18446744073709551615u64})
+        let written = String::from_utf8(body().await.to_vec()).unwrap();
+        assert!(
+            written.starts_with(&stored[..stored.len() - 1]),
+            "{written}"
         );
+        assert!(
+            written.ends_with(r#""x":1e400,"y":0.1000000000000000055511151231257827}"#),
+            "{written}"
+        );
+        // A number is never equal to a string holding its text.
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/x","value":"1e400"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     /// Review finding: a JSON Patch on a resource stored as another format rewrote it as JSON

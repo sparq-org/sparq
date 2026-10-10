@@ -517,7 +517,7 @@ pub fn request_digest(request: &Request) -> Result<[u8; 32], Rejected> {
 /// violations, malformed or unsupported RDF or proof options, unauthorized
 /// methods or issuers, failed signatures and duplicate canonical documents.
 pub fn dataset_commitment(dataset: &PrivateCredentials, policy: &Policy) -> Result<[u8; 32], Rejected> {
-    authenticate(dataset, policy).map(|authenticated| authenticated.commitment)
+    authenticate(dataset, policy, &mut |_| {}).map(|authenticated| authenticated.commitment)
 }
 
 /// Authenticates the credentials and evaluates the V3 query on their mapped union.
@@ -526,9 +526,41 @@ pub fn dataset_commitment(dataset: &PrivateCredentials, policy: &Policy) -> Resu
 /// Rejects invalid requests, any authentication failure, an unequal
 /// verifier-agreed commitment, and every V3 evaluation or capacity rejection.
 pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
+    evaluate_observed(witness, &mut |_| {})
+}
+
+/// The end of one stage of [`evaluate_observed`], reported only to attribute cost.
+///
+/// Per-credential stages are reported once per credential.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Phase {
+    /// Request validation, the policy digest and size admission.
+    Request,
+    /// Parsing and canonicalizing one proof configuration and finding its key.
+    ProofConfig,
+    /// One document: RDFC-1.0 and SHA-256 for `eddsa-rdfc-2022`, or leaves, root
+    /// and signed message for the Merkle suite, then the issuer check.
+    Document,
+    /// One in-proof Ed25519 verification (hidden mode only).
+    Signature,
+    /// Sorting, the dataset commitment and the scoped union.
+    Mapping,
+    /// V3 evaluation of the query over the mapped dataset.
+    Query,
+    /// The request digest and the journal.
+    Journal,
+}
+
+/// [`evaluate`], calling `observe` at the end of each [`Phase`].
+///
+/// The result is identical to [`evaluate`]; `observe` cannot influence it.
+///
+/// # Errors
+/// As [`evaluate`].
+pub fn evaluate_observed(witness: &Witness, observe: &mut dyn FnMut(Phase)) -> Result<Journal, Rejected> {
     let request = &witness.request;
     validate_request(request)?;
-    let authenticated = authenticate(&witness.dataset, &request.policy)?;
+    let authenticated = authenticate(&witness.dataset, &request.policy, observe)?;
     let provenance = match &request.authority {
         DatasetAuthority::VerifierAgreed { commitment } if *commitment == authenticated.commitment => {
             Provenance::VerifierAgreedAuthenticated
@@ -551,14 +583,17 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     if inner.version != v3::VERSION || inner.provenance != crate::Provenance::HolderDeclaredOnly {
         return Err(Rejected("internal V3 provenance mismatch"));
     }
-    Ok(Journal {
+    observe(Phase::Query);
+    let journal = Journal {
         version: VERSION,
         request_digest: request_digest(request)?,
         dataset_commitment: authenticated.commitment,
         provenance,
         result: inner.result,
         signed_messages: authenticated.signed_messages,
-    })
+    };
+    observe(Phase::Journal);
+    Ok(journal)
 }
 
 /// Checks request and authority binding after cryptographic receipt verification.
@@ -653,7 +688,11 @@ struct Verified {
     message: Vec<u8>,
 }
 
-fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authenticated, Rejected> {
+fn authenticate(
+    dataset: &PrivateCredentials,
+    policy: &Policy,
+    observe: &mut dyn FnMut(Phase),
+) -> Result<Authenticated, Rejected> {
     // Same V3 program ceilings as `validate_request`, before any source work.
     v3::validate_policy(&policy.evaluation)?;
     let table = checked_table(&policy.authorization)?;
@@ -662,10 +701,11 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
         return Err(Rejected("authenticated dataset blinding rejected"));
     }
     admit_sizes(&dataset.credentials, policy.cryptosuite, policy.signature_mode)?;
+    observe(Phase::Request);
     let mut verified = dataset
         .credentials
         .iter()
-        .map(|credential| verify(credential, &table, policy.cryptosuite, policy.signature_mode))
+        .map(|credential| verify(credential, &table, policy.cryptosuite, policy.signature_mode, observe))
         .collect::<Result<Vec<_>, _>>()?;
     // Duplicates compare unsalted identities, so reissuing one document under a
     // fresh salt is still a duplicate. The published order uses the salted
@@ -695,11 +735,13 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
             });
         }
     }
-    Ok(Authenticated {
+    let authenticated = Authenticated {
         commitment: hash.finalize().into(),
         nquads,
         signed_messages,
-    })
+    };
+    observe(Phase::Mapping);
+    Ok(authenticated)
 }
 
 // N-Quads admits at most one statement per EOL-separated line, so this counts
@@ -788,11 +830,13 @@ fn verify(
     table: &[Entry<'_>],
     suite: Cryptosuite,
     mode: SignatureMode,
+    observe: &mut dyn FnMut(Phase),
 ) -> Result<Verified, Rejected> {
     let config = canonical(&parse(&credential.proof_config, MAX_PROOF_CONFIG_QUADS)?)?;
     let method = proof_method(&parse(&config, MAX_PROOF_CONFIG_QUADS)?, suite)?;
     let (entry, key) = lookup(table, &method)?;
     let config_hash: [u8; 32] = Sha256::digest(config.as_bytes()).into();
+    observe(Phase::ProofConfig);
     let (quads, document_hash, identity, message) = match suite {
         Cryptosuite::EddsaRdfc2022 => {
             let document = canonical(&parse(&credential.document, MAX_DOCUMENT_QUADS)?)?;
@@ -823,12 +867,14 @@ fn verify(
         }
     };
     check_document(&quads, &entry.issuer)?;
+    observe(Phase::Document);
     if mode == SignatureMode::Hidden {
         let signature: [u8; 64] = credential.signature[..64]
             .try_into()
             .map_err(|_| Rejected("Ed25519 signature must be 64 bytes"))?;
         key.verify_strict(&message, &Signature::from_bytes(&signature))
             .map_err(|_| Rejected("Ed25519 signature verification failed"))?;
+        observe(Phase::Signature);
     }
     Ok(Verified {
         document_hash,
