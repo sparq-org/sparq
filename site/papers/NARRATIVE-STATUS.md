@@ -1,0 +1,121 @@
+# Narrative restructure status (zksparql-architecture.typ)
+
+Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
+(credentials-first). Commits are local only and unsigned (no SSH agent identity was available).
+
+## Done
+- Title: "Answers Instead of Documents: Exact Private SPARQL Answers over Verifiable Credentials"
+  (manuscript and `site/src/data/papers.ts`; the papers.ts blurb was rewritten and no longer
+  claims that authenticated exact proofs have no guest execution or proof).
+- Main body restructured: 1 Introduction, 2 Background, 3 What an accepted answer means (RQ1),
+  4 Architecture (RQ2, one figure), 5 Revealing less (RQ3, release condition as a proposed design
+  requirement), 6 Prototype and evidence (one evidence-level table, pilot labelled indicative),
+  7 Related work, 8 Discussion, 9 Conclusion. Main body is about 6,900 words including the
+  abstract, one figure, three tables and one listing.
+- Appendix (lettered, after the references): A formal relation and design arguments; B evidence
+  detail and control inventories (hosted, adapter, controls, V5 native/guest/attempt/adapter/
+  genuine receipt, V4, reproduction); C registry and capability tuples; D legacy fixed circuits;
+  E native-composition experiment.
+- Label check by script: every `#ref(<x>)` and `@x` resolves to a label or bibliography key; no
+  duplicate labels. Honesty phrase patterns and `check-no-perf-numbers.py` pass on the .typ.
+
+## Remaining
+- Compile with `typst` (not installed here) and check page count against the venue limit.
+- Possibly trim main body by roughly 500 words if the LNCS render exceeds 15 pages.
+- Resolve the TODOs below.
+
+## Evidence filled
+- The authenticated false-ASK placeholder is replaced by the verifier-agreed payment receipt
+  (`zkvcq.vcqp_*`, record `research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json`,
+  from sparq-org/sparq#6651). It has not had a second internal evidence inspection; the text says so.
+- The six CI declared cases (`zkvcq.ci_*`, records `authenticated-vcq-genuine-<case>-audit.json`
+  from #6651, CI run 37340835239) are reported in section 6.3 and Appendix B, including why there
+  are three guest pins. Not second-party inspected; the text says so.
+- The holder-declared payment case (`zkvcq.vcqph_*`, from #6651 commit 6f756537) is reported too.
+
+## Other TODOs
+- `// TODO(citation)` (two places, intro and 2.4): the soundness-only interface is the
+  unpublished ISWC 2025 manuscript. Decide whether and how to cite it under double-blind review.
+
+## Open questions (from the narrative)
+- Is there a realistic source of verifier-agreed anchors? If not, narrow the exactness claim.
+- Is Braun a coauthor? This decides how zkRDF is framed.
+
+## Length and cut plan
+- Rendered at A4/11pt (Typst 0.15.0): main body about 15 pages, about 8,000 words; whole PDF 27 pages.
+  Estimated 18 to 20 LNCS pages, against last year's 15-page limit (ESWC 2027 limit not yet published).
+- Planned cuts, in order, to be confirmed against the real limit:
+  1. Section 6 (evidence): keep the evidence table and one paragraph per campaign; move run detail,
+     pins and control lists to the appendix or the website.
+  2. Section 5 (revealing less): shorten the counterexamples to a table and tighten the release
+     condition to its definition plus one example.
+  3. Section 4 (architecture): trim the contract-field prose that repeats Appendix A.
+  4. Background and related work: merge overlapping zkRDF and earlier-interface material.
+- Check whether ESWC allows an appendix or supplementary material; if not, the appendix moves to the
+  site page and an archived artifact.
+
+## Inputs from other threads (10 October)
+- Proof methods comparison (ten ways to show query results are correct): project file
+  `zk-proof-methods/comparison.md`. Methods being built: full-disclosure re-evaluation (baseline);
+  selective disclosure (bbs-2023 / ecdsa-sd-2023) plus re-evaluation, supported answers only;
+  designated-verifier VOLE ZK (interactive, non-transferable, LPN); TEE attestation (TDX, SEV-SNP,
+  Nitro, NVIDIA confidential computing). They will measure Q1-Q5 at n in {1, 4} for the paper's
+  tables. Use for related work and the method comparison once the rewrite is done.
+- Spec signature modes (spec #6786): `hidden`, `revealed`, `disclosed` (the last only for methods that
+  hand over credentials or derived bbs-2023 / ecdsa-sd-2023 presentations). Spec section 9 evidence
+  kinds: zero-knowledge proof; proof that is not zero-knowledge; attestation; disclosed credentials.
+  Use these names in the paper.
+- Revealed mode for zkVM eddsa-rdfc-2022 (#6787): discloses the verification method and the SHA-256
+  hashes of the canonical document and of the proof configuration. Unsalted, so presentations of one
+  credential are linkable and a low-entropy document can be confirmed by guessing.
+- Motivation for the Merkle-root suite (Proof methods thread, project file
+  `zk-proof-methods/ultrahonk-gate-breakdown.md`): in the current Noir u64/i64 result circuits about
+  87% of about 490k gates is the literal range check. Literals are committed as a BLAKE3 hash of
+  their text with a private digit count, so the circuit hashes all 20 possible lengths (about 54k
+  gates per filtered value). A field-native leaf does the same comparison in about 300 gates. Cite
+  only once frozen as an evidence record.
+- Merkle-root suite specification: sparq-org/sparq#6789 (rendered draft in the project file
+  `zk/zk-merkle-cryptosuite-draft.pdf`); its section 6 lists the security properties of each member,
+  for the security table. Canonical Q1-Q5 query files: `zk/sparql-evaluator/fixtures/paper/` in #6789.
+- Methods comparison input (project file `zk-proof-methods/quicksilver-vs-ultrahonk.md`, updated
+  after a review fix; raw jsonl beside it; draft #6790): same Noir-compiled ACIR circuits (K copies
+  of hidden_issuer_d4, K in {1, 4, 16, 32}) proved with UltraHonk and with QuickSilver (VOLE,
+  designated verifier). At K=32 the QuickSilver prover is 1.3 times faster than UltraHonk (11.4 s vs
+  14.4 s); the QuickSilver verifier uses 7.4 s of CPU (prover 9.8 s CPU) and stays online for the
+  whole proof; traffic 17.9/2.1 MB at K=1 and 63.0/6.7 MB at K=32; UltraHonk verifies in under 20 ms.
+  Plain re-evaluation over four disclosed credentials (#6788) about 1.5 ms; that baseline rejects
+  DESCRIBE, FROM and FROM NAMED, as the spec requires. Describe VOLE as "proposed, not built" (no
+  transcript binding). Cite only once frozen as evidence records.
+- Selective-disclosure baseline to be measured: the existing `native-rdf` feature in
+  `zk/native-composition` (SELECT DISTINCT over a BGP; per-triple Dock BBS+ signatures, slot
+  disclosure, verifier re-checks). It is not W3C `bbs-2023` (no JSON pointers, no HMAC blank-node
+  labels); cite it with that caveat. No `bbs-2023` implementation is planned.
+
+## First measurements and coverage (ZK code landing, 10 October, executor runs of the accepted V5 image)
+Records: project files `zk/paper-measurements/`; coverage manifest
+`zk/sparql-evaluator/coverage-authenticated-rdf.json` in draft #6791. Not yet evidence records in this
+branch: cite only after they are frozen under research/zk-paper-evidence/ and bound in
+paper-evidence.json.
+- Coverage: blank nodes in credential data supported. All 42 supported feature cases run in the
+  guest (BGPs, OPTIONAL, UNION, MINUS, BIND, VALUES, subqueries, comparisons on every literal type,
+  STRSTARTS, CONTAINS, REGEX, LANGMATCHES, COUNT, SUM, MIN, MAX, HAVING, DISTINCT, ORDER BY with
+  LIMIT/OFFSET, all property-path forms, all four query forms). FILTER EXISTS / NOT EXISTS only when
+  no presented credential contains a blank node, else rejected. GRAPH and FROM accepted but return
+  nothing (credentials form the default graph). Rejected: SERVICE, BNODE(), NOW(), RAND(), nested
+  EXISTS, triple terms, custom functions.
+- V5 limits: 4 credentials, 128 statements per credential, 256 in total, 8 KB per document. Sweep
+  uses n in {1, 4} and sizes 32 and 64 (not 16 credentials or 256 statements).
+- Q1, n=1, user cycles: eddsa-rdfc-2022 hidden 7.10M, revealed 3.83M; Merkle suite hidden 6.57M,
+  revealed 3.26M. In-guest signature verification is the largest phase in eddsa hidden mode (about
+  3.3M cycles). The Merkle suite cuts the document phase from 1.39M to 0.80M. Appendix sweep (816
+  configurations) running; proving on the m7i next.
+- Confirmed spec wording for Exact (#6786 at ecd614fa): "An Exact answer is a result SPARQL 1.1
+  permits for Q over D, with nothing added or omitted; where SPARQL leaves a choice open, the holder
+  makes it." The spec does not define when a query has only one permitted result; a method MAY fix the
+  open choices, and a verifier relies on that only where the method publishes them. Spec section 10:
+  the holder's choice can act as a covert channel (e.g. LIMIT 1 over {0, 1} encodes a hidden bit;
+  zero-knowledge does not prevent this because the result is public). This supersedes decision 2 in
+  the scratch spec-decisions note (canonical tie-break) for the paper's definition of Exact.
+- Corrections (ZK code landing): the main payment credential has 17 statements, not 16. Coverage
+  claims are guest-execution claims: all 42 supported cases ran in the guest; all 9 rejections were
+  guest aborts.
