@@ -52,8 +52,15 @@
   }
 }
 
-// Short commit / digest rendering for bound identity records (first twelve hex characters).
-#let short-id(key) = raw(headline(key).slice(0, 12))
+// [OPUS-5.5] The double-blind build (`--input anon=true`) shows a placeholder for every value that
+// identifies our repository: proof-method identifiers, commits, and the digests and image IDs of
+// guest binaries, which its public records list. The normal build shows the value unchanged.
+#let withheld = "[withheld for review]"
+#let repo-id(body) = if anon { withheld } else { body }
+
+// Short commit / digest rendering for bound identity records (first twelve hex characters). The
+// record is looked up in both builds, so the anonymous build still checks it.
+#let short-id(key) = repo-id(raw(headline(key).slice(0, 12)))
 
 // Fixed three-decimal rendering for the preliminary pilot values (a display helper; the value
 // itself always comes from the evidence file).
@@ -1704,7 +1711,7 @@ the binary; we obtained identical binaries only with a fixed build path and tool
       [Evaluator, CI build], [The evaluator, in all three request formats],
         [#short-id("zkvcq.exact_source_commit")], [#short-id("zkvcq.exact_guest_sha256")],
         [GitHub Actions runner],
-      [Evaluator with our services], [`urn:sparq:vcq:method:risc0-exact`, 3],
+      [Evaluator with our services], [#repo-id[`urn:sparq:vcq:method:risc0-exact`], 3],
         [#short-id("zkvcq.adapter_source_commit")], [#short-id("zkvcq.adapter_guest_sha256")],
         [EC2 instance],
       [With signature checks: tests], [–], [#short-id("zkvcq.v5_source_commit")], [–],
@@ -1712,7 +1719,7 @@ the binary; we obtained identical binaries only with a fixed build path and tool
       [With signature checks: executed directly], [–], [#short-id("zkvcq.v5g_source_commit")],
         [#short-id("zkvcq.v5g_guest_sha256")], [EC2 instance],
       [With signature checks and our services: tests; first test case],
-        [`urn:sparq:vcq:method:risc0-authenticated-rdf`, 5],
+        [#repo-id[`urn:sparq:vcq:method:risc0-authenticated-rdf`], 5],
         [#short-id("zkvcq.vcqg_source_commit")], [#short-id("zkvcq.vcqg_guest_sha256")],
         [EC2 instance],
       [Payment question †], [Same], [#short-id("zkvcq.vcqp_source_commit")],
@@ -1731,11 +1738,13 @@ the binary; we obtained identical binaries only with a fixed build path and tool
     )
   },
   caption: [
-    Software behind each experiment. Commits and SHA-256 digests of guest binaries show their
-    first twelve hexadecimal digits; the RISC Zero image ID is computed from the guest binary. The
-    zkVM experiments used the prover #raw(headline("zkvcq.exact_r0vm_version")), and the circuits
-    were compiled with `nargo 1.0.0-beta.21`. † No internal check. ‡ The RISC Zero image ID, not
-    the digest of the guest binary.
+    Software behind each experiment. #if anon [For double-blind review, we withhold the proof-method
+    identifiers, commits, digests of guest binaries and image IDs.] else [Commits and SHA-256
+    digests of guest binaries show their first twelve hexadecimal digits; the RISC Zero image ID is
+    computed from the guest binary.] The zkVM experiments used the prover
+    #raw(headline("zkvcq.exact_r0vm_version")), and the circuits were compiled with
+    `nargo 1.0.0-beta.21`. † No internal check. ‡ The RISC Zero image ID, not the digest of the
+    guest binary.
   ],
 ) <artifact-table>
 ]
