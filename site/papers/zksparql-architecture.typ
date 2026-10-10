@@ -10,9 +10,10 @@
 // paper-evidence.json through #headline(...) (canonical records) or #ev(...) (the preliminary
 // pilot timings, in the supplementary material); none is typed into prose, and counts from
 // different experiments are never added. Experiments without the internal re-check carry a dagger
-// in the evidence table. Facts not yet frozen as evidence records (guest coverage, cycle counts, the
-// proof-method comparison, Merkle-suite implementation status) appear only qualitatively, each
-// with a TODO(evidence) comment. Planned measurements are visible todo-results placeholders.
+// in the evidence table. Facts not yet frozen as evidence records (guest coverage, cryptosuite
+// implementation state, the gate breakdown, the proof-method comparison) appear only qualitatively,
+// each with a TODO(evidence) comment. Executor cycle counts are shown in millions through one
+// display helper (mcycles). Pending measurements are visible todo-results placeholders.
 
 #import "_lib/bench.typ": headline, ev, provenance, authors, anon, paper_heading_numbering
 
@@ -62,6 +63,14 @@
 }
 #let pilot(key) = fmt3(ev(key))
 
+// [OPUS-5.5] Executor cycle counts in millions, rounded to two decimals for display only (the
+// value itself always comes from the evidence file through headline, so it must be canonical).
+#let mcycles(key) = {
+  let s = str(calc.round(headline(key) / 1000000, digits: 2))
+  let parts = s.split(".")
+  if parts.len() == 1 { s + ".00" } else { s + "0" * calc.max(0, 2 - parts.at(1).len()) }
+}
+
 // A visible placeholder for a planned measurement that is not yet an evidence record.
 #let todo-results(body) = block(inset: 6pt, stroke: 0.8pt + red, width: 100%, breakable: false)[#text(fill: red)[*Results pending.* #body]]
 
@@ -77,8 +86,8 @@
 #authors()
 
 #align(center)[#text(style: "italic", size: 0.9em)[
-  Working draft. The measurements marked as pending in §#ref(<planned>, supplement: none) are
-  not yet available.
+  Working draft. The measurements marked as pending in §#ref(<cost>, supplement: none) are not
+  yet available.
 ]]
 
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
@@ -95,7 +104,10 @@ learns, and a public-input rule lets a proof make public any value that the veri
 from its request and the result alone. We also propose Merkle-based cryptosuites designed for
 proving. A SPARQL evaluator running in a zero-knowledge virtual machine has produced verified proofs
 of Exact answers with issuer signatures checked inside the proof, including an answer that no
-payment was returned, each over one synthetic credential. Cost measurements are pending.
+payment was returned, each over one synthetic credential. Cycle counts taken without proving show
+signature verification as the largest step inside the proof for the payment question, and fewer
+cycles when the holder reveals the signatures or the issuer uses a Merkle-based cryptosuite.
+Proving times are pending.
 
 == Introduction <intro>
 
@@ -125,9 +137,10 @@ guarantees.
 
 The proof must also show that the queried data is the data the issuers signed. Checking a signature
 inside the proof repeats, for every credential, the hashing and signature verification that the
-verifier would otherwise run itself, and we expect this work to dominate the cost of proving
-(§#ref(<planned>, supplement: none)). The holder can instead reveal the signatures for the verifier
-to check. This removes their verification from the proof, but lets the verifier link presentations
+verifier would otherwise run itself. For the payment question over one credential, signature
+verification was the largest step inside the proof in our cycle counts
+(§#ref(<cost>, supplement: none)). The holder can instead reveal the signatures for the verifier to
+check. This removes their verification from the proof, but lets the verifier link presentations
 of the same credential and, for the standard RDF cryptosuites, confirm a guess about its content.
 The request therefore lists the signature modes the verifier accepts, trading proving cost against
 disclosure.
@@ -145,11 +158,12 @@ Our contributions are:
 - *Merkle-based cryptosuites designed for proving* (§#ref(<cryptosuites>, supplement: none)), and a
   security and disclosure comparison of signature modes and cryptosuites.
 - *An evaluation* (§#ref(<evidence>, supplement: none)) of a SPARQL evaluator running in the RISC
-  Zero zkVM @risc0, with measurements planned across signature modes, cryptosuites and query types.
+  Zero zkVM @risc0, with cycle counts across signature modes, cryptosuites and query types; proving
+  times are pending.
 
 Our prototype has produced verified proofs of Exact answers that check issuer signatures inside the
-proof, including the payment question under both input kinds. Each covers one synthetic credential,
-and the cost measurements are pending.
+proof, including the payment question under both input kinds. Each covers one synthetic credential.
+Our cycle counts, taken without proving, cover one and four synthetic credentials.
 
 == Background <background>
 
@@ -423,8 +437,9 @@ it supports for each cryptosuite.
 - In the _revealed_ mode, the presentation carries each credential's signature and signed message,
   which the verifier checks itself. The proof then shows only that $D$ is exactly the data those
   messages cover and that the result is correct. Removing signature verification from the proof
-  should make it cheaper, but this mode discloses the signatures, the signed messages, the issuer
-  keys used and the number of credentials (§#ref(<security>, supplement: none)).
+  reduced the cycles of our guest program (§#ref(<cost>, supplement: none)), but this mode
+  discloses the signatures, the signed messages, the issuer keys used and the number of credentials
+  (§#ref(<security>, supplement: none)).
 - In the _disclosed_ mode, for proof methods whose evidence is disclosed credentials, the holder
   sends the credentials or presentations derived from them by a selective-disclosure cryptosuite.
   The verifier checks them, evaluates $Q$ itself and sees everything disclosed.
@@ -550,7 +565,8 @@ literal's encoding carries a comparison key: an order-preserving encoding of its
 date-times, booleans and strings.
 
 This design has three effects. First, a proof need not repeat canonicalisation: it rebuilds the
-signed tree from the credential's quads. Second, a proof compares values without parsing lexical
+signed tree from the credential's quads, which took fewer cycles in our measurements
+(§#ref(<cost>, supplement: none)). Second, a proof compares values without parsing lexical
 forms. In a circuit, comparing two integers or decimals that the key can represent takes one range
 check on the difference of their keys. By a preliminary gate count of our current Noir circuits for
 integer filters, the range checks on literals committed as hashed text account for most of the
@@ -562,9 +578,8 @@ is modelled as a random oracle, so that a verifier in the revealed mode cannot c
 credential.
 
 The family has three members. `eddsa-sha256-merkle-2026` uses a SHA-256 tree and Ed25519, for zkVMs;
-our zkVM guest can verify it, but no experiment in §#ref(<evidence>, supplement: none) uses it yet.
-// TODO(evidence): bind to the Merkle-suite implementation (sparq-org/sparq#6789) once it is
-// merged and frozen as an evidence record.
+our zkVM guest verifies it, and we measured its cycles without proving
+(§#ref(<cost>, supplement: none)).
 `schnorr-poseidon2-merkle-2026` uses a Poseidon2 tree and Schnorr signatures over Baby Jubjub, for
 circuits, and the post-quantum `mldsa44-sha256-merkle-2026` uses ML-DSA-44. These two are specified
 but not implemented.
@@ -665,17 +680,21 @@ against a snapshot that the verifier accepted. They publish no dataset commitmen
 yet produce the specification's presentations.
 
 The evaluator admits most SPARQL 1.1 query features, including `OPTIONAL`, `MINUS`, aggregates,
-subqueries and property paths, and rejects `SERVICE`, `NOW`, `RAND`, `DESCRIBE`, `FROM` and
-`FROM NAMED`.
+subqueries and property paths, and rejects `SERVICE`, `NOW` and `RAND`. It evaluates `DESCRIBE`,
+`FROM` and `FROM NAMED`, which version 1 of the specification excludes; with signature checks, our
+services reject them before proving and before verification.
 // TODO(evidence): bind to the coverage manifest of the evaluator with signature checks
-// (zk/sparql-evaluator/coverage-authenticated-rdf.json, draft sparq-org/sparq#6791) and the host
-// query profile, once frozen as evidence records.
+// (zk/sparql-evaluator/coverage-authenticated-rdf.json, draft sparq-org/sparq#6791) once frozen as
+// an evidence record. The executor sweep (paper-executor-sweep-*.json, §S4) already records, for
+// its own query cases, the evaluator's admission and the host query profile.
 
 We used only synthetic credentials signed with test keys. We generated all receipts with development
 mode disabled and verified them against the expected guest image ID. For experiments without † in
 @evidence-table, we recomputed hashes of source files, guest binaries and receipts. We compared the
 hashes and recorded test outcomes with the archived records. We did not verify the proofs again.
-Appendix #ref(<app-inventories>, supplement: none) details the records.
+Appendix #ref(<app-inventories>, supplement: none) lists the test cases, and the supplementary
+material details the records (§#ref(<supp-records>, supplement: none)) and the software behind
+them (§#ref(<repro>, supplement: none)).
 
 #[
 #show figure: set block(breakable: false)
@@ -717,7 +736,8 @@ Appendix #ref(<app-inventories>, supplement: none) details the records.
   },
   caption: [
     Strongest result per experiment: tests outside the zkVM, executed without proving, or proof
-    verified. Every zkVM experiment with signature checks used one credential per test case.
+    verified. Each zkVM experiment with signature checks in this table used one credential per test
+    case; §#ref(<cost>, supplement: none) reports cycle counts for up to four.
     Holder-declared cases have two fewer negative tests, because swapping the agreed commitment
     does not apply to them. † No internal check (§#ref(<prototype>, supplement: none)). Counts
     are per experiment and are never added across rows.
@@ -731,7 +751,8 @@ A CI job built the evaluator from source and produced #headline("zkvcq.exact_hos
 receipts. They cover a `SELECT` with duplicate rows, a false `ASK`, `CONSTRUCT` and `DESCRIBE`,
 under both input kinds, though not every form under each (Appendix
 #ref(<app-inventories>, supplement: none)). Some used `DESCRIBE` or `FROM NAMED`, which version 1 of
-the specification excludes and the current evaluator rejects before proving. Their `DESCRIBE` answer
+the specification excludes; with signature checks, our services now reject both before proving.
+Their `DESCRIBE` answer
 contained every default-graph triple whose subject was the described resource and, recursively,
 every triple whose subject was a blank node reached as an object. The same job ran
 #headline("zkvcq.exact_replay_cases") test cases outside the zkVM, in
@@ -787,33 +808,126 @@ runs per circuit and capacity, on a shared machine (@pilot-table). Prove and ver
 little relative to their totals. The runs are too few to show a material or general saving, and we
 did not measure memory or larger inputs.
 
-=== Planned measurements <planned>
+=== Cost by signature mode and cryptosuite <cost>
 
-We plan to compare the hidden and revealed modes with `eddsa-rdfc-2022` and
-`eddsa-sha256-merkle-2026`, at one and four credentials. The planned measurements use five queries
-over the payment credential: the payment `ASK`, a `SELECT` of amounts with duplicate rows, a
-`CONSTRUCT` over the same pattern, a numeric `FILTER` on `xsd:decimal` amounts, and a string
-`FILTER` on payment IRIs. We will report cycles, which the RISC Zero executor counts
-deterministically without proving, separately from proving times, measured with development mode
-disabled on one dedicated machine. First executor runs for the payment `ASK` over one credential,
-not yet archived as evidence, show in-guest signature verification as the largest phase in the
-hidden mode with `eddsa-rdfc-2022`.
-// TODO(evidence): bind to the first executor measurements (project files zk/paper-measurements/)
-// once frozen under research/zk-paper-evidence/ and bound in paper-evidence.json.
+We counted cycles with the RISC Zero executor, which runs the guest program without proving. A cycle
+count is deterministic for a given guest program and input, but it is not a proving time. The
+executor also splits each execution into segments, which a prover proves separately. We used a later
+version of the build with signature checks, which also supports the revealed mode and
+`eddsa-sha256-merkle-2026`.
 
-#todo-results[Cycles, proving time and receipt size for each signature mode, cryptosuite and
-query, at both input sizes.]
+We ran #headline("zkexec.main_queries") queries over the payment credential: the payment `ASK`, a
+`SELECT` of amounts with duplicate rows, a `CONSTRUCT` over the same pattern, a numeric `FILTER` on
+`xsd:decimal` amounts, and a string `FILTER` on payment IRIs. Each query ran over one credential and
+over four, each credential with #headline("zkexec.main_statements") statements. @cost-table gives
+the median over the queries. In every configuration, the revealed mode needed fewer cycles and
+segments than the hidden mode, and `eddsa-sha256-merkle-2026` needed fewer cycles than
+`eddsa-rdfc-2022`.
 
-#todo-results[Cycles per guest phase (signature verification, canonicalisation and hashing or
-Merkle path checks, dataset construction, evaluation and output), testing whether the signature
-check dominates the cost of proving.]
+#[
+#show figure: set block(breakable: false)
+// Median user cycles (in millions) and median segments over the five main-body queries.
+#let cost-cells(stem) = (
+  [#mcycles(stem + "_n1_user_median")], [#headline(stem + "_n1_segments_median")],
+  [#mcycles(stem + "_n4_user_median")], [#headline(stem + "_n4_segments_median")],
+)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1.5fr, 0.9fr, auto, auto, auto, auto),
+      align: (left, left, right, right, right, right),
+      table.header(
+        table.cell(rowspan: 2)[Cryptosuite], table.cell(rowspan: 2)[Signature mode],
+        table.cell(colspan: 2)[One credential], table.cell(colspan: 2)[Four credentials],
+        [Cycles, millions], [Segments], [Cycles, millions], [Segments],
+      ),
+      [`eddsa-rdfc-2022`], [Hidden], ..cost-cells("zkexec.main_rdfc_hidden"),
+      [`eddsa-rdfc-2022`], [Revealed], ..cost-cells("zkexec.main_rdfc_revealed"),
+      [`eddsa-sha256-merkle-2026`], [Hidden], ..cost-cells("zkexec.main_merkle_hidden"),
+      [`eddsa-sha256-merkle-2026`], [Revealed], ..cost-cells("zkexec.main_merkle_revealed"),
+    )
+  },
+  caption: [
+    Executor counts for the guest program with signature checks, as medians over the
+    #headline("zkexec.main_queries") queries: its cycles, without the prover's overhead and
+    padding per segment, and its segments. The counts are deterministic for a given guest program
+    and input; they are not proving times.
+  ],
+) <cost-table>
+]
 
-#todo-results[Issuer, holder and verifier costs: signing and tree construction; proving time,
-memory and presentation size; and verification time, split into receipt, signature and request
-checks.]
+We also executed an instrumented build of the same guest program, which reads the cycle counter at
+the end of each phase; its counts include this instrumentation.
+@phase-table shows the phases for the payment `ASK` over one credential. In the hidden mode,
+verifying the Ed25519 signature was the largest phase with both cryptosuites. Revealing the
+signatures removed this phase and left the others almost unchanged. The Merkle-based cryptosuite
+replaces canonicalising and hashing the document with building its Merkle tree, which took fewer
+cycles, but its signature verification took no fewer, because it also uses Ed25519. Evaluating the
+query took fewer cycles than processing the document or verifying the signature.
 
-#todo-results[Cycles by query type, one query per feature class, at increasing input sizes,
-with the full sweep in the appendix.]
+#[
+#show figure: set block(breakable: false)
+// Cycles (in millions) per phase of the instrumented build, payment ASK over one credential.
+#let phase-cell(suite, mode, phase) = [#mcycles("zkexec.q1_" + suite + "_" + mode + "_n1_" + phase)]
+#let phase-cells(phase) = (
+  phase-cell("rdfc", "hidden", phase), phase-cell("rdfc", "revealed", phase),
+  phase-cell("merkle", "hidden", phase), phase-cell("merkle", "revealed", phase),
+)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (2.2fr, auto, auto, auto, auto),
+      align: (left, right, right, right, right),
+      table.header(
+        table.cell(rowspan: 2)[Phase, in order of execution],
+        table.cell(colspan: 2)[`eddsa-rdfc-2022`],
+        table.cell(colspan: 2)[`eddsa-sha256-merkle-2026`],
+        [Hidden], [Revealed], [Hidden], [Revealed],
+      ),
+      [Reading and decoding the input], ..phase-cells("input"),
+      [Checking the request, its issuer keys and the input sizes], ..phase-cells("request"),
+      [Canonicalising and hashing the proof configuration], ..phase-cells("proof_config"),
+      [Canonicalising and hashing the document, or building its Merkle tree; checking its issuer],
+        ..phase-cells("document"),
+      [Verifying the signature], phase-cell("rdfc", "hidden", "signature"), [–],
+        phase-cell("merkle", "hidden", "signature"), [–],
+      [Building the input dataset and its commitment], ..phase-cells("mapping"),
+      [Evaluating the query], ..phase-cells("query"),
+      [Computing the request digest and the journal], ..phase-cells("journal"),
+    )
+  },
+  caption: [
+    Cycles in millions per phase for the payment `ASK` over one credential, by cryptosuite and
+    signature mode, from an instrumented build of the guest program. The counts include the
+    instrumentation and are not proving times.
+  ],
+) <phase-table>
+]
+
+A sweep of #headline("zkexec.sweep_cases") query cases, one per feature, ran in the same
+configurations over generated credentials of #headline("zkexec.sweep_statements_small") and
+#headline("zkexec.sweep_statements_large") statements each (@sweep-table). The evaluator admitted
+#headline("zkexec.sweep_rdfc_hidden_n1_s32_admitted") cases with one credential and
+#headline("zkexec.sweep_rdfc_hidden_n4_s32_admitted") with four, and rejected the others, such as
+`SERVICE`, `NOW` and `RAND`. With one credential of #headline("zkexec.sweep_statements_small")
+statements, in the hidden mode with `eddsa-rdfc-2022`, the admitted cases needed from
+#mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_min") to
+#mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_max") million cycles, with a median of
+#mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_median"). Our prover stops an execution that reaches
+a session limit of #mcycles("zkexec.sweep_session_limit") million cycles, and then produces no
+proof. With `eddsa-rdfc-2022` in the hidden mode, four credentials of
+#headline("zkexec.sweep_statements_large") statements exceeded this limit in every admitted case.
+Every other configuration stayed within it, including the revealed mode and the Merkle-based
+cryptosuite over the same credentials.
+
+#todo-results[Proving time, memory and receipt size for each configuration and query, and the
+issuer, holder and verifier costs: signing and tree construction, and verification time split into
+receipt, signature and request checks. These need a dedicated proving run with development mode
+disabled on one machine.]
 
 #todo-results[A comparison, over the same queries, with re-evaluation over disclosed
 credentials, selective disclosure with re-evaluation and, where built, designated-verifier proofs
@@ -891,8 +1005,9 @@ prototype has not undergone an external security audit. Our arguments for what a
 support some of these assumptions but do not establish them. Negative tests show that specific
 checks exist and fire; they cannot rule out substitutions we did not try. The evaluator is covered
 by tests, not by a conformance suite. Every zkVM proof with signature checks covers one synthetic
-credential, so we have no evidence yet about realistic credentials, larger inputs or the cost of
-Exact answers.
+credential. Our cycle counts, taken without proving, cover at most four synthetic credentials of
+#headline("zkexec.sweep_statements_large") statements each, so we have no evidence yet about
+realistic credentials, larger inputs or proving times.
 
 == Conclusion <conclusion>
 
@@ -903,8 +1018,11 @@ input that the holder declared or the verifier agreed in advance. One proof can 
 exactly the data the issuers signed, in a signature mode that trades proving cost against
 disclosure. A public-input rule lets the proof make public what the verifier can compute from its
 request and the result alone. A prototype zkVM evaluator has proved Exact answers with signature
-checks, including an answer that no payment was returned, each over one synthetic credential.
-Realistic credentials, the cost measurements and an external audit remain to be done.
+checks, including an answer that no payment was returned, each over one synthetic credential. Its
+cycle counts, taken without proving, show signature verification as the largest step inside the
+proof for the payment question, and fewer cycles when the holder reveals the signatures or the
+issuer uses a Merkle-based cryptosuite. Realistic credentials, proving times and an external audit
+remain to be done.
 
 #pagebreak(weak: true)
 #heading(level: 2, numbering: none)[References]
@@ -1083,8 +1201,9 @@ status or holder binding.
 *Request formats.* The CI build of the evaluator read requests in three formats, each extending the
 one before: the default-graph format; the named-graph format, which adds named graphs, `GRAPH`,
 `FROM` and `FROM NAMED`; and the graph-result format, which adds `CONSTRUCT`, `DESCRIBE` and blank
-nodes in the input and the result. Behind our services, both builds use the graph-result format, and
-the current evaluator rejects `FROM` and `FROM NAMED` (§#ref(<prototype>, supplement: none)). The
+nodes in the input and the result. Behind our services, both builds use the graph-result format;
+with signature checks, the services also reject `FROM` and `FROM NAMED`
+(§#ref(<prototype>, supplement: none)). The
 services encode the query request in binary rather than in the specification's JSON, compute the
 request digest over that encoding, and store times as Unix seconds.
 
@@ -1317,6 +1436,95 @@ cover a finite set of valid and absent matches and of adversarial witnesses.
   The verifying difference of largest magnitude came from one slow baseline run.
 ]
 
+== Executor cycle counts <supp-cost>
+
+The measurements of §#ref(<cost>, supplement: none) ran the guest program with signature checks in
+the RISC Zero executor, without proving, for each cryptosuite, signature mode and number of
+credentials and, in the sweep, each credential size. Every request used a holder-declared input,
+and the RFC 8032 test key signed every credential. For the #headline("zkexec.main_queries") queries,
+we executed #headline("zkexec.main_runs") runs over the payment credential and, with four
+credentials, copies issued to other customers. For the sweep, we executed
+#headline("zkexec.sweep_runs") runs over generated credentials. Each describes a person with typed
+literals, a chain of acquaintances and one blank node, padded with further statements to the stated
+size. The counts of the two sets are never added. The executor runs had no internal check
+(§#ref(<prototype>, supplement: none)).
+
+The executor runs used our prover's session limit (§#ref(<cost>, supplement: none)), and a case
+that reached it counts as admitted but not as completed. The cycle counts, like the limit, cover the
+guest program's own cycles, without the overhead and padding that the prover adds to each segment.
+
+For @phase-table, a separate build of the same guest program, used only for measurement, reads the
+cycle counter after decoding its input and at the end of each phase. It passes the readings to the
+host, not to the journal. A phase that runs once per credential is summed over the credentials, and
+the readings include the instrumentation.
+
+The sweep's query cases cover basic graph patterns of several sizes, as stars and chains;
+`OPTIONAL`, `UNION`, `MINUS`, `EXISTS`, `NOT EXISTS`, `BIND`, `VALUES` and a subquery; comparisons
+of IRIs, strings, language-tagged strings and numeric and date-time literals, and string functions;
+aggregates; `DISTINCT`, and `ORDER BY` with `LIMIT` and `OFFSET`; property paths; each query form;
+and probes of features that the evaluator should reject or that cannot match credential data. Run
+outside the zkVM on the same input, the evaluator decided which cases to admit. It rejected
+`EXISTS` and `NOT EXISTS`, which it does not admit over data with blank nodes such as the generated
+credentials; `SERVICE`; the functions `BNODE`, `NOW` and `RAND`; a custom function; a triple term;
+and a nested `EXISTS`. With four credentials, it also rejected a zero-or-more property path whose
+result exceeded its limits. It admitted `DESCRIBE`, `FROM` and `FROM NAMED`, which our services
+reject before proving (§#ref(<prototype>, supplement: none)). @sweep-table gives the counts and
+cycles per configuration.
+
+#[
+#show figure: set block(breakable: false)
+// One row per number of credentials and credential size. A configuration in which no admitted
+// case completed has no cycle or segment values.
+#let sweep-rows(suite, mode) = {
+  let rows = ()
+  for (suffix, credentials, size) in (
+    ("_n1_s32", [One], "zkexec.sweep_statements_small"),
+    ("_n1_s64", [One], "zkexec.sweep_statements_large"),
+    ("_n4_s32", [Four], "zkexec.sweep_statements_small"),
+    ("_n4_s64", [Four], "zkexec.sweep_statements_large"),
+  ) {
+    let stem = "zkexec.sweep_" + suite + "_" + mode + suffix
+    let completed = headline(stem + "_completed")
+    rows += (
+      credentials, [#headline(size)], [#headline(stem + "_admitted")],
+      [#headline(stem + "_rejected")], [#completed],
+      if completed == 0 { [–] } else {
+        let range = [#mcycles(stem + "_user_min")–#mcycles(stem + "_user_max")]
+        [#mcycles(stem + "_user_median") (#range)]
+      },
+      if completed == 0 { [–] } else { [#headline(stem + "_segments_median")] },
+    )
+  }
+  rows
+}
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (auto, auto, auto, auto, auto, 1fr, auto),
+      align: (left, right, right, right, right, right, right),
+      table.header[Credentials][Statements each][Admitted][Rejected][Completed][Cycles,
+        millions: median (range)][Segments, median],
+      table.cell(colspan: 7)[`eddsa-rdfc-2022`, hidden mode],
+      ..sweep-rows("rdfc", "hidden"),
+      table.cell(colspan: 7)[`eddsa-rdfc-2022`, revealed mode],
+      ..sweep-rows("rdfc", "revealed"),
+      table.cell(colspan: 7)[`eddsa-sha256-merkle-2026`, hidden mode],
+      ..sweep-rows("merkle", "hidden"),
+      table.cell(colspan: 7)[`eddsa-sha256-merkle-2026`, revealed mode],
+      ..sweep-rows("merkle", "revealed"),
+    )
+  },
+  caption: [
+    The sweep's #headline("zkexec.sweep_cases") query cases per configuration: cases the evaluator
+    admitted and rejected, admitted cases that completed within the session limit, and the cycles
+    and segments of the completed cases. Cycles exclude the prover's overhead and padding per
+    segment; they are executor counts, not proving times.
+  ],
+) <sweep-table>
+]
+
 == An earlier fixed-circuit design <legacy>
 
 Before the zkVM evaluator, we built a family of Noir circuits with one kind of circuit per operator.
@@ -1413,14 +1621,21 @@ prove the same statement with the same signature checks and disclosure.
 
 @artifact-table identifies the software behind each experiment. Each experiment's record lists the
 commands it ran, the versions and hashes of the compilers and the prover, the hashes of the guest
-binary and of each receipt, and every test outcome. The paper reads its numbers from these records
-when it is built. Re-running an experiment needs the recorded toolchains and, for proving, a machine
-that can run the RISC Zero or Barretenberg prover. Guest binaries built from the same source differ
-between experiments because the build path enters the binary; we obtained identical binaries only
-with a fixed build path and toolchain.
+binary and of each receipt, and every test outcome. The records of the executor runs list instead
+each run's configuration, admission and cycle counts, with the image IDs and the prover version.
+The paper reads its numbers from these records when it is built. Re-running an experiment needs the
+recorded toolchains and, for proving, a machine that can run the RISC Zero or Barretenberg prover.
+Guest binaries built from the same source differ between experiments because the build path enters
+the binary; we obtained identical binaries only with a fixed build path and toolchain.
 
 #[
 #show figure: set block(breakable: false)
+// The sweep ran the same source commit and guest image as the main queries, and both executor
+// sets used the prover version named in the caption.
+#assert(headline("zkexec.sweep_source_commit") == headline("zkexec.main_source_commit"))
+#assert(headline("zkexec.sweep_guest_image_id") == headline("zkexec.main_guest_image_id"))
+#assert(headline("zkexec.main_r0vm") == headline("zkvcq.exact_r0vm_version"))
+#assert(headline("zkexec.sweep_r0vm") == headline("zkvcq.exact_r0vm_version"))
 #figure(
   {
     set text(size: 0.8em)
@@ -1447,6 +1662,11 @@ with a fixed build path and toolchain.
         [#short-id("zkvcq.vcqp_guest_sha256")], [Cloud container],
       [Remaining test cases †], [Same], [#short-id("zkvcq.ci_source_commit")],
         [#short-id("zkvcq.ci_guest_sha256")], [GitHub Actions runners],
+      [With signature checks: executor runs (§#ref(<supp-cost>, supplement: none)) †], [–],
+        [#short-id("zkexec.main_source_commit")], [#short-id("zkexec.main_guest_image_id") ‡],
+        [Shared container],
+      [Same: instrumented build for phase counts †], [–], [Same],
+        [#short-id("zkexec.main_phase_image_id") ‡], [Shared container],
       [Public-triple circuit pilot], [Noir circuits], [#short-id("zkvcq.pp_source_commit")], [–],
         [EC2 instance],
       [BBS+ proofs (§#ref(<composition>, supplement: none))], [–],
@@ -1457,7 +1677,8 @@ with a fixed build path and toolchain.
     Software behind each experiment. Commits and SHA-256 digests of guest binaries show their
     first twelve hexadecimal digits; the RISC Zero image ID is computed from the guest binary. The
     zkVM experiments used the prover #raw(headline("zkvcq.exact_r0vm_version")), and the circuits
-    were compiled with `nargo 1.0.0-beta.21`. † No internal check.
+    were compiled with `nargo 1.0.0-beta.21`. † No internal check. ‡ The RISC Zero image ID, not
+    the digest of the guest binary.
   ],
 ) <artifact-table>
 ]
