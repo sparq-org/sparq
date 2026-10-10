@@ -271,12 +271,15 @@ What the server exposes, all discoverable from the storage description
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
   absolute; one that is not a URI reference gets `422`, as does a target attribute not shaped as
   RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and extension
-  attributes arrays of strings; `name*` arrays of `{value, language}`). Before anything is
-  resolved the result is held to 256 entries, 1024 targets and 4096 bytes per anchor, relation
-  and `href`, and its worst-case cost (every value it holds, its size twice, and each reference
-  grown by the base) to the body limit; past any of these, `413`. It is also measured as it will
-  be served, with the server-managed links put back, and one that nests too deeply to store
-  gets `422`. The links the type index matches are the stored linkset's own.
+  attributes arrays of strings; `name*` arrays of `{value, language}`). A linkset is stored in
+  its resource's metadata, so a linkset patch over 256 KiB is refused with `413` before it is
+  parsed, and it is applied within 256 KiB. Before anything is resolved the result is held to
+  256 entries, 1024 targets and 4096 bytes per anchor, relation and `href`, and its worst-case
+  cost (every value it holds, its size twice, and each reference grown by the base) to four
+  times that; past any of these, `413`. It is also measured as it will be served, with the
+  server-managed links put back: metadata past its size limit gets `413`, and one that nests too
+  deeply to store `422`. The links the type index matches are the stored linkset's own. A
+  `Link` header's `rel="anchor"` is never taken as a link (`anchor` names an entry's context).
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
   `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
   lines counts every line; an entity-tag list that cannot be read by the RFC 9110 grammar gets
