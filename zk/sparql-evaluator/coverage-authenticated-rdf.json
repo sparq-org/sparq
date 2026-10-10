@@ -1,0 +1,395 @@
+{
+  "schema_version": 1,
+  "relation": "authenticated RDF (V5): SPARQL over Data Integrity credentials",
+  "dialect": "SparqSparql11GraphResultsV3",
+  "evidence": {
+    "layer": "guest_execution",
+    "runner": "zk/sparql-evaluator/host/examples/paper_sweep.rs",
+    "cases": "zk/sparql-evaluator/fixtures/paper/sweep.json",
+    "command": "cargo run --release --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --example paper_sweep --features authenticated-rdf -- --set sweep --suite eddsa --mode hidden --n 1 --size 32 --execute [--blank-free]",
+    "generator": "zk/sparql-evaluator/scripts/authenticated_rdf_coverage.py",
+    "credential": "one eddsa-rdfc-2022 credential of 32 statements, hidden signature mode",
+    "guest_proof_coverage": "not_asserted",
+    "full_w3c_conformance": "not_asserted"
+  },
+  "conditions": [
+    "FILTER EXISTS and FILTER NOT EXISTS are admitted only when no credential in the presentation contains a blank node (model/src/v3/evaluate.rs).",
+    "Results are exact SPARQL 1.1 answers over the default graph formed by the presented credentials; there are no named graphs."
+  ],
+  "features": [
+    {
+      "id": "bgp-1",
+      "class": "bgp",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?s ex:name ?n }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "bgp-3-star",
+      "class": "bgp",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n ?a ?b WHERE { ?s ex:name ?n ; ex:age ?a ; ex:balance ?b }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "bgp-3-chain",
+      "class": "bgp",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?a ex:knows ?b . ?b ex:knows ?c . ?c ex:name ?n }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "bgp-6-star",
+      "class": "bgp",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?s ex:name ?n ; ex:age ?a ; ex:balance ?b ; ex:score ?c ; ex:since ?d ; ex:active ?e }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "bgp-6-chain",
+      "class": "bgp",
+      "spec": "https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?a ex:knows ?b . ?b ex:knows ?c . ?c ex:knows ?d . ?d ex:knows ?e . ?e ex:knows ?f . ?f ex:name ?n }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "optional",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#optionals",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n ?k WHERE { ?s ex:name ?n OPTIONAL { ?s ex:nickname ?k } }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "union",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#alternatives",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?v WHERE { { ?s ex:name ?v } UNION { ?s ex:label ?v } }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "minus",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-minus",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n MINUS { ?s ex:nickname ?k } }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "filter-exists",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-pattern",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER EXISTS { ?s ex:knows ?o } }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "V3 EXISTS blank-node correlation is not admitted",
+      "blank_node_free_data": "guest_executed"
+    },
+    {
+      "id": "filter-not-exists",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-pattern",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER NOT EXISTS { ?s ex:knows ?o } }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "V3 EXISTS blank-node correlation is not admitted",
+      "blank_node_free_data": "guest_executed"
+    },
+    {
+      "id": "bind",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#bind",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s ?d WHERE { ?s ex:age ?a BIND(?a * 2 AS ?d) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "values",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#inline-data",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { VALUES ?a { 30 31 } ?s ex:age ?a }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "subquery",
+      "class": "algebra",
+      "spec": "https://www.w3.org/TR/sparql11-query/#subqueries",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { { SELECT ?s WHERE { ?s ex:age ?a } ORDER BY DESC(?a) LIMIT 1 } }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "cmp-iri-eq",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?s ex:name ?n FILTER(?s = <did:example:person0>) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "cmp-string-eq",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER(?n = \"Alice0\") }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "cmp-langstring-eq",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:label ?l FILTER(?l = \"Bonjour\"@fr) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "cmp-integer",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:age ?a FILTER(?a > 30) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "cmp-decimal",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:balance ?b FILTER(?b >= 1251.50) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "cmp-double",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:score ?c FILTER(?c < 0.8e0) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "cmp-datetime",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#OperatorMapping",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:since ?d FILTER(?d > \"2020-01-01T12:00:00Z\"^^xsd:dateTime) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "fn-strstarts",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#SparqlOps",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER(STRSTARTS(?n, \"Ali\")) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "fn-contains",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#SparqlOps",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER(CONTAINS(?n, \"ice\")) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "fn-regex",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#SparqlOps",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER(REGEX(?n, \"^A.*0$\")) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "fn-langmatches",
+      "class": "comparison",
+      "spec": "https://www.w3.org/TR/sparql11-query/#SparqlOps",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:label ?l FILTER(LANGMATCHES(LANG(?l), \"fr\")) }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "agg-count-group",
+      "class": "aggregate",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?a (COUNT(?s) AS ?c) WHERE { ?s ex:age ?a } GROUP BY ?a",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "agg-sum",
+      "class": "aggregate",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (SUM(?b) AS ?t) WHERE { ?s ex:balance ?b }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "agg-min-max",
+      "class": "aggregate",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT (MIN(?a) AS ?lo) (MAX(?a) AS ?hi) WHERE { ?s ex:age ?a }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "agg-having",
+      "class": "aggregate",
+      "spec": "https://www.w3.org/TR/sparql11-query/#aggregates",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s (COUNT(?o) AS ?c) WHERE { ?s ex:knows ?o } GROUP BY ?s HAVING (COUNT(?o) >= 1)",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "distinct",
+      "class": "modifier",
+      "spec": "https://www.w3.org/TR/sparql11-query/#solutionModifiers",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT DISTINCT ?c WHERE { ?s ex:score ?c }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "order-limit-offset",
+      "class": "modifier",
+      "spec": "https://www.w3.org/TR/sparql11-query/#solutionModifiers",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?s ex:name ?n } ORDER BY ?n LIMIT 2 OFFSET 1",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "path-sequence",
+      "class": "path",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?a ex:knows/ex:knows/ex:name ?n }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "path-alternative",
+      "class": "path",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?v WHERE { ?s ex:name|ex:label ?v }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "path-inverse",
+      "class": "path",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?a WHERE { ?b ^ex:knows ?a }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "path-one-or-more",
+      "class": "path",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { ?s ex:knows+ ?o }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "path-zero-or-more",
+      "class": "path",
+      "spec": "https://www.w3.org/TR/sparql11-query/#propertypaths",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?o WHERE { ?s ex:knows* ?o }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "form-select",
+      "class": "form",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QueryForms",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT * WHERE { ?s ex:age ?a }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "form-ask-true",
+      "class": "form",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QueryForms",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { ?s ex:active true }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "form-ask-false",
+      "class": "form",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QueryForms",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ASK { ?s ex:active false }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "form-construct",
+      "class": "form",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QueryForms",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> CONSTRUCT { ?s ex:years ?a } WHERE { ?s ex:age ?a }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "form-describe",
+      "class": "form",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QueryForms",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> DESCRIBE ?s WHERE { ?s ex:name \"Alice0\" }",
+      "with_blank_node_data": "guest_executed"
+    },
+    {
+      "id": "blank-node-data",
+      "class": "data",
+      "spec": "https://www.w3.org/TR/rdf11-concepts/#section-blank-nodes",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { ?c <https://www.w3.org/2018/credentials#credentialSubject> ?s . ?s ex:nickname ?n }",
+      "with_blank_node_data": "guest_executed",
+      "note": "Credential data containing blank nodes is supported; blank-node labels are renamed per credential so credentials never share one."
+    },
+    {
+      "id": "probe-graph",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-query/#queryDataset",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { GRAPH ?g { ?s ex:name ?n } }",
+      "with_blank_node_data": "guest_executed",
+      "note": "Admitted and evaluated as specified: the credentials form the default graph and the dataset has no named graphs, so GRAPH matches nothing."
+    },
+    {
+      "id": "probe-from",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-query/#specifyingDataset",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s FROM <http://ex/g> WHERE { ?s ex:name ?n }",
+      "with_blank_node_data": "guest_executed",
+      "note": "Admitted and evaluated as specified: FROM names a graph the dataset does not hold, so the default graph is empty."
+    },
+    {
+      "id": "probe-service",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-federated-query/",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { SERVICE <http://ex/sparql> { ?s ex:name ?n } }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "GRAPH, SERVICE and LATERAL are not admitted"
+    },
+    {
+      "id": "probe-query-blank-node",
+      "class": "bgp",
+      "spec": "https://www.w3.org/TR/sparql11-query/#QSynBlankNodes",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?n WHERE { [] ex:name ?n }",
+      "with_blank_node_data": "guest_executed",
+      "note": "A blank node in a query pattern is an existential variable; this is an ordinary basic graph pattern."
+    },
+    {
+      "id": "probe-bnode-fn",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-bnode",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?b WHERE { ?s ex:name ?n BIND(BNODE() AS ?b) }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "nondeterministic or RDF 1.2 function is not admitted"
+    },
+    {
+      "id": "probe-now",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-now",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?t WHERE { ?s ex:name ?n BIND(NOW() AS ?t) }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "nondeterministic or RDF 1.2 function is not admitted"
+    },
+    {
+      "id": "probe-rand",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-query/#func-rand",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?r WHERE { ?s ex:name ?n BIND(RAND() AS ?r) }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "nondeterministic or RDF 1.2 function is not admitted"
+    },
+    {
+      "id": "probe-nested-exists",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-query/#neg-pattern",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER EXISTS { ?s ex:knows ?o FILTER EXISTS { ?o ex:name ?m } } }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "nested EXISTS is not admitted",
+      "blank_node_free_data": "rejected_in_guest",
+      "blank_node_free_data_rejection": "nested EXISTS is not admitted"
+    },
+    {
+      "id": "probe-triple-term",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql12-query/#rdf-triple-terms",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { <<( ?s ex:name ?n )>> ex:source ?x }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "query blank nodes and triple terms are not admitted"
+    },
+    {
+      "id": "probe-custom-function",
+      "class": "probe",
+      "spec": "https://www.w3.org/TR/sparql11-query/#extensionFunctions",
+      "query": "PREFIX ex: <http://ex/> PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?s WHERE { ?s ex:name ?n FILTER(<http://ex/fn>(?n)) }",
+      "with_blank_node_data": "rejected_in_guest",
+      "with_blank_node_data_rejection": "custom function is not admitted"
+    }
+  ]
+}
