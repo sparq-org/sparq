@@ -327,78 +327,88 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 fn date_time_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {
-    let Some(class_and_ms) = date_time_millis(lexical) else {
-        return if date_time_shape(lexical) { lane::UNREPRESENTABLE } else { lane::NONE };
-    };
-    let (class, millis) = class_and_ms;
-    let key = (millis as u64) ^ (1 << 63);
-    out[1..9].copy_from_slice(&key.to_be_bytes());
-    class
-}
-
-// A lexically valid dateTime outside the four-digit-year, millisecond profile.
-fn date_time_shape(lexical: &str) -> bool {
-    let body = lexical.strip_prefix('-').unwrap_or(lexical);
-    body.split_once('T').is_some_and(|(date, _)| {
-        date.len() >= 10 && date.split('-').count() == 3 && date.bytes().all(|b| b == b'-' || b.is_ascii_digit())
-    })
-}
-
-fn date_time_millis(lexical: &str) -> Option<(u8, i64)> {
-    let (date, time) = lexical.split_once('T')?;
-    let mut parts = date.split('-');
-    let (year, month, day) = (
-        number(parts.next()?, 4)?,
-        number(parts.next()?, 2)?,
-        number(parts.next()?, 2)?,
-    );
-    if parts.next().is_some() || year == 0 || !(1..=12).contains(&month) {
-        return None;
+    match date_time_millis(lexical) {
+        Ok((class, millis)) => {
+            let key = (millis as u64) ^ (1 << 63);
+            out[1..9].copy_from_slice(&key.to_be_bytes());
+            class
+        }
+        Err(class) => class,
     }
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
+// Parses an XSD 1.1 dateTime. Ill-typed input is `Err(NONE)`; a valid value
+// outside the four-digit-year, millisecond, before-24:00 profile is
+// `Err(UNREPRESENTABLE)`.
+fn date_time_millis(lexical: &str) -> Result<(u8, i64), u8> {
+    let invalid = lane::NONE;
+    let (date, time) = lexical.split_once('T').ok_or(invalid)?;
+    let (negative, date) = match date.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, date),
+    };
+    let mut parts = date.split('-');
+    let (year_text, month_text, day_text) = (
+        parts.next().ok_or(invalid)?,
+        parts.next().ok_or(invalid)?,
+        parts.next().ok_or(invalid)?,
+    );
+    if parts.next().is_some()
+        || year_text.len() < 4
+        || !digits(year_text)
+        || (year_text.len() > 4 && year_text.starts_with('0'))
+    {
+        return Err(invalid);
+    }
+    let (month, day) = (number(month_text, 2).ok_or(invalid)?, number(day_text, 2).ok_or(invalid)?);
+    // Years beyond i64 are still valid; any year above four digits is unrepresentable.
+    let year = if year_text.len() == 4 { year_text.parse::<i64>().map_err(|_| invalid)? } else { 10_000 };
+    let signed_year = if negative { -year } else { year };
+    let leap = signed_year % 4 == 0 && (signed_year % 100 != 0 || signed_year % 400 == 0);
     let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    if day < 1 || day > month_days[(month - 1) as usize] {
-        return None;
+    if !(1..=12).contains(&month) || day < 1 || day > month_days[(month - 1) as usize] {
+        return Err(invalid);
     }
     let (clock, zone) = match time.find(['Z', '+', '-']) {
         Some(at) => (&time[..at], Some(&time[at..])),
         None => (time, None),
     };
-    let (hms, fraction) = clock.split_once('.').unwrap_or((clock, ""));
+    let (hms, fraction) = match clock.split_once('.') {
+        Some((hms, fraction)) if digits(fraction) => (hms, fraction),
+        Some(_) => return Err(invalid),
+        None => (clock, ""),
+    };
     let mut fields = hms.split(':');
     let (hour, minute, second) = (
-        number(fields.next()?, 2)?,
-        number(fields.next()?, 2)?,
-        number(fields.next()?, 2)?,
+        number(fields.next().ok_or(invalid)?, 2).ok_or(invalid)?,
+        number(fields.next().ok_or(invalid)?, 2).ok_or(invalid)?,
+        number(fields.next().ok_or(invalid)?, 2).ok_or(invalid)?,
     );
-    if fields.next().is_some() || hour > 23 || minute > 59 || second > 59 {
-        return None;
-    }
-    if clock.contains('.') && !digits(fraction) {
-        return None;
-    }
     let fraction = fraction.trim_end_matches('0');
-    if fraction.len() > 3 {
-        return None;
+    let end_of_day = hour == 24 && minute == 0 && second == 0 && fraction.is_empty();
+    if fields.next().is_some() || (hour > 23 && !end_of_day) || minute > 59 || second > 59 {
+        return Err(invalid);
     }
-    let millis_part = format!("{fraction:0<3}").parse::<i64>().ok()?;
     let offset_minutes = match zone {
-        None => 0,
-        Some("Z") => 0,
+        None | Some("Z") => 0,
         Some(zone) => {
             let sign = if zone.starts_with('-') { -1 } else { 1 };
-            let (h, m) = zone[1..].split_once(':')?;
-            let (h, m) = (number(h, 2)?, number(m, 2)?);
+            let (h, m) = zone[1..].split_once(':').ok_or(invalid)?;
+            let (h, m) = (number(h, 2).ok_or(invalid)?, number(m, 2).ok_or(invalid)?);
             if m > 59 || h * 60 + m > 14 * 60 {
-                return None;
+                return Err(invalid);
             }
             sign * (h * 60 + m)
         }
     };
+    if negative || year == 0 || year_text.len() > 4 || end_of_day || fraction.len() > 3 {
+        return Err(lane::UNREPRESENTABLE);
+    }
+    let millis_part = format!("{fraction:0<3}").parse::<i64>().map_err(|_| invalid)?;
     let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second
         - offset_minutes * 60;
     let class = if zone.is_some() { lane::DATE_TIME } else { lane::LOCAL_DATE_TIME };
-    Some((class, seconds * 1_000 + millis_part))
+    Ok((class, seconds * 1_000 + millis_part))
 }
 
 fn string_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {

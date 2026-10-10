@@ -82,9 +82,21 @@ fn double_date_time_boolean_and_string_lanes_follow_sparql_order() {
     assert_eq!(typed("2026-01-01T00:00:00", "dateTime")[0], lane::LOCAL_DATE_TIME);
     assert_eq!(typed("2026-01-01T00:00:00.0001Z", "dateTime")[0], lane::UNREPRESENTABLE);
     assert_eq!(typed("12026-01-01T00:00:00Z", "dateTime")[0], lane::UNREPRESENTABLE);
-    for bad in ["2026-02-29T00:00:00Z", "2026-01-01T24:00:01Z", "2026-01-01", "2026-01-01T00:00:00+15:00"] {
-        assert_ne!(typed(bad, "dateTime")[0], lane::DATE_TIME, "{bad}");
+    for bad in [
+        "2026-02-29T00:00:00Z",
+        "2026-01-01T24:00:01Z",
+        "2026-01-01",
+        "2026-01-01T00:00:00+15:00",
+        "02026-01-01T00:00:00Z",
+        "2026-01-01T00:00:00.Z",
+        "2026-1-01T00:00:00Z",
+    ] {
+        assert_eq!(typed(bad, "dateTime"), [0; merkle::LANE_BYTES], "{bad}");
     }
+    for valid in ["0000-01-01T00:00:00Z", "-0044-03-15T12:00:00Z", "2024-02-29T24:00:00Z", "10000-01-01T00:00:00Z"] {
+        assert_eq!(typed(valid, "dateTime")[0], lane::UNREPRESENTABLE, "{valid}");
+    }
+    assert_eq!(typed("2024-02-29T23:59:59.9990Z", "dateTime")[0], lane::DATE_TIME);
 
     increasing(lane::BOOLEAN, &[typed("false", "boolean"), typed("true", "boolean")]);
     assert_eq!(typed("1", "boolean"), typed("true", "boolean"));
