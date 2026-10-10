@@ -85,14 +85,14 @@ Rules 1 to 6 are firm. Rules 7 to 16 are strong preferences, broken only where p
 ## 4. Notation
 
 - *Q*; *D*: the request's query; the input dataset.
-- `⟦Q⟧_D`: as spec §2 defines it, a multiset of solution mappings SPARQL 1.1 permits for *Q*'s pattern over *D* after its solution modifiers (for `ASK`, before it becomes a boolean); where several are permitted, the one the holder evaluated. The query form then gives the result. Say once that its algebra part is eval(D(G), P) (SPARQL 1.1 §18.6; *P*: the algebra expression of *Q*'s pattern; *G*: the default graph of *D*).
+- `⟦Q⟧_D`: as spec §2 defines it, a multiset of solution mappings SPARQL 1.1 permits for *Q*'s pattern over *D* after its solution modifiers (for `ASK`, before it becomes a boolean); where several are permitted, the one the holder evaluated. The query form then gives the result. Do not write its algebra form eval(D(G), P): the paper never uses it.
 - *Q'*: *Q* without its top-level `ORDER BY`, `OFFSET` and `LIMIT`; only in the Supported definition.
 - μ: a solution mapping.
 - μ(*t*): triple pattern *t* with each variable replaced by its value under μ (SPARQL 1.1 §18.3.1); only for a *t* without blank nodes whose variables μ all binds, and only if §5 cannot say it in words.
 
 Typst: `$[| Q |]_D$`, `$Q'$`, `$mu(t)$`.
 
-**Remove:** `⟦P⟧_D`, `C = ⟨m, o, q, f, a, s, e, d, b, t⟩`, `c`, `k`, `r`, `π`, `h(C)`, `E`, `K`, `ρ`, `p_C`, `σ`, `Com`, `Map`, `Anc`, `Src`, `Scp`, `Bnd`, `Ans`, `supp`, `⊑`, `tμ`, `V`; *n*, dom(μ) and `card` unless a formula needs them. No "Proposition" or "Design argument": each argument becomes short appendix prose with numbered assumptions (A1, A2, …), or goes.
+**Remove:** eval(D(G), P), `⟦P⟧_D`, `C = ⟨m, o, q, f, a, s, e, d, b, t⟩`, `c`, `k`, `r`, `π`, `h(C)`, `E`, `K`, `ρ`, `p_C`, `σ`, `Com`, `Map`, `Anc`, `Src`, `Scp`, `Bnd`, `Ans`, `supp`, `⊑`, `tμ`, `V`; *n*, dom(μ) and `card` unless a formula needs them. No "Proposition" or "Design argument": each argument becomes short appendix prose with numbered assumptions (A1, A2, …), or goes.
 
 **Adding a symbol:** only if used twice or more, clearer than words, and defined in words at first use.
 

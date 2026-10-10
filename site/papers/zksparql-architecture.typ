@@ -175,10 +175,9 @@ Our cycle counts, taken without proving, cover one and four synthetic credential
 An RDF dataset has one default graph and zero or more named graphs @sparql11. SPARQL has four query
 forms: `SELECT` returns a sequence of solution mappings (rows), `ASK` a boolean, and `CONSTRUCT` and
 `DESCRIBE` an RDF graph. We write $[| Q |]_D$ for a multiset of solution mappings that SPARQL 1.1
-permits for the pattern of query $Q$ over dataset $D$, after its solution modifiers (for `ASK`,
-before it becomes a boolean). Its algebra part is $"eval"(D(G), P)$ @sparql11, with $P$ the algebra
-expression of the pattern and $G$ the default graph of $D$. Where SPARQL permits several results,
-$[| Q |]_D$ is the one the holder evaluated. Pattern matching compares terms, whereas the `=`
+permits for query $Q$ over dataset $D$, after the solution modifiers of $Q$. For `ASK`, this is the
+multiset before it becomes a boolean. Where SPARQL permits several, $[| Q |]_D$ is the one the holder
+evaluated. Pattern matching compares terms, whereas the `=`
 operator compares values: `"1250.00"^^xsd:decimal` and `"1250.0"^^xsd:decimal` are different terms
 with equal values @rdf11. RDF is usually read under an open-world assumption: an absent triple is
 not thereby false.
@@ -264,8 +263,8 @@ Neither answer kind says who signed $D$ (§#ref(<linkage>, supplement: none)).
 For the payment question, a Supported answer can only be `true`, shown by one returned payment. The
 answer `false` must be Exact.
 
-We allow Supported answers only for monotone queries. Apart from a top-level `ORDER BY`, `OFFSET`
-and `LIMIT`, these are `SELECT` or `ASK` queries that use only basic graph patterns, group graph
+We allow Supported answers only for monotone queries. These are `SELECT` and `ASK` queries that,
+after removing a top-level `ORDER BY`, `OFFSET` and `LIMIT`, contain only basic or group graph
 patterns, `UNION`, `GRAPH`, `VALUES`, projection, `DISTINCT`, and `FILTER` or `BIND` without
 `EXISTS` or `NOT EXISTS`. The holder may leave credentials out of $D$, and a solution of a monotone
 query over $D$ is also a solution over any dataset that contains $D$. A Supported row therefore
@@ -421,9 +420,10 @@ such as a circuit's verification key or a zkVM image ID.
 
 === What the proof shows <linkage>
 
-The public inputs of the statement are the request digest, the answer kind, the input kind, the
-dataset commitment, the result, the signature mode and, in the revealed mode, the signed messages. A
-proof method may bind them all by one digest. The proof shows that:
+The public inputs of the statement identify the request, by its request digest, and the answer
+kind, the input kind and the signature mode. They also contain the dataset commitment, the result
+and, in the revealed mode, the signed messages. A proof method may bind them all by one digest. The
+proof shows that:
 
 + the dataset commitment fixes $D$;
 + if the request lists issuer keys, $D$ is built from exactly the data that signatures under those
@@ -434,9 +434,9 @@ proof method may bind them all by one digest. The proof shows that:
 Because the proof binds the request digest, a proof made for one request does not verify for
 another, or for another verifier or validity period, as long as SHA-256 is collision-resistant.
 
-The second point is easily lost. For an RDFC-1.0 cryptosuite, the signed message is computed from
-the credential's canonical N-Quads, so the input dataset can be built from those same quads, keeping
-their signed lexical forms and each credential's blank nodes apart. For a credential signed as JSON,
+The second point is easily lost. An RDFC-1.0 cryptosuite computes its signed message from the
+credential's canonical N-Quads. A proof method can build $D$ from those same quads, keeping their
+signed lexical forms and each credential's blank nodes apart. For a credential signed as JSON,
 building RDF needs JSON-LD processing with fixed contexts, which must then be part of the proof or a
 stated assumption.
 
@@ -816,8 +816,8 @@ version of the build with signature checks, which also supports the revealed mod
 `eddsa-sha256-merkle-2026`.
 
 We ran #headline("zkexec.main_queries") queries over the payment credential: the payment `ASK`, a
-`SELECT` of amounts with duplicate rows, a `CONSTRUCT` over the same pattern, a numeric `FILTER` on
-`xsd:decimal` amounts, and a string `FILTER` on payment IRIs. Each query ran over one credential and
+`SELECT` that keeps duplicate amounts, a `CONSTRUCT` over that pattern, a `FILTER` on `xsd:decimal`
+amounts, and a string `FILTER` on payment IRIs. Each query ran over one credential and
 over four, each credential with #headline("zkexec.main_statements") triples. @cost-table gives
 the median over the queries. In every configuration, the revealed mode needed fewer cycles and
 segments than the hidden mode, and `eddsa-sha256-merkle-2026` needed fewer cycles than
@@ -1056,9 +1056,9 @@ hidden mode, the credentials' signatures. Public inputs and witness satisfy the 
 
 *Assumptions.*
 
-/ A1: The proof system is knowledge-sound: from any prover whose receipt verifies under the
-  verifier's image ID, an efficient extractor obtains an input on which the guest program completes
-  and writes the receipt's journal. We accept only succinct receipts
+/ A1: The proof system is knowledge-sound for the verifier's image ID. From any prover whose
+  receipt verifies, an efficient extractor obtains an input on which the guest program completes
+  and writes that receipt's journal. We accept only succinct receipts
   (§#ref(<security>, supplement: none)).
 / A2: The guest program completes only on inputs that satisfy the relation for the values it
   writes to the journal; in particular, it evaluates $Q$ as SPARQL 1.1 specifies.
@@ -1252,8 +1252,8 @@ services encode the query request in binary rather than in the specification's J
 request digest over that encoding, and store times as Unix seconds.
 
 *How the stored request reaches the proof.* The holder service gives the guest program the query,
-the input kind, any agreed commitment, the evaluation limits and a SHA-256 hash of the stored
-request and its proof-method entry. The guest program writes a digest of these values to the
+the input kind, any agreed commitment and the evaluation limits. It also gives a SHA-256 hash of the
+stored request and its proof-method entry. The guest program writes a digest of these values to the
 journal, and the verifier service recomputes it from its own copies. The journal therefore binds
 every member of the stored request, including the challenge, audience and validity period. With
 signature checks, the proof-method entry contains a digest of the request's issuer keys and the
@@ -1263,8 +1263,8 @@ evaluation limits, so changing any key, issuer or verification method changes th
 its capacity limits, the salt, the names of any named graphs and the exact bytes of the N-Triples or
 N-Quads input. It does not canonicalise the input, so equivalent serialisations give different
 commitments. With signature checks, the commitment covers the digest of the request's issuer keys
-and the evaluation limits, the salt, the number of credentials and, for each credential, the hashes
-of the canonical document and proof configuration that the issuer signed. A commitment agreed under
+and evaluation limits, the salt and the number of credentials. For each credential, it also covers
+the signed hashes of the canonical document and proof configuration. A commitment agreed under
 one list of issuer keys therefore cannot serve another.
 
 == Experiment records <supp-records>
@@ -1502,12 +1502,12 @@ cycle counter after decoding its input and at the end of each phase. It passes t
 host, not to the journal. A phase that runs once per credential is summed over the credentials, and
 the readings include the instrumentation.
 
-The sweep's query cases cover basic graph patterns of several sizes, as stars and chains;
+The sweep's query cases cover star and chain basic graph patterns of several sizes; the operators
 `OPTIONAL`, `UNION`, `MINUS`, `EXISTS`, `NOT EXISTS`, `BIND`, `VALUES` and a subquery; comparisons
-of IRIs, strings, language-tagged strings and numeric and date-time literals, and string functions;
-aggregates; `DISTINCT`, and `ORDER BY` with `LIMIT` and `OFFSET`; property paths; each query form;
-and probes of features that the evaluator should reject or that cannot match credential data. Run
-outside the zkVM on the same input, the evaluator decided which cases to admit. It rejected
+of IRIs, strings, language-tagged strings, numbers and date-times; and string functions. They also
+cover aggregates, `DISTINCT`, `ORDER BY` with `LIMIT` and `OFFSET`, property paths and each query
+form. Further cases probe features that the evaluator should reject, or patterns that cannot match
+credential data. Run outside the zkVM on the same input, the evaluator decided which cases to admit. It rejected
 `EXISTS` and `NOT EXISTS`, which it does not admit over data with blank nodes such as the generated
 credentials; `SERVICE`; the functions `BNODE`, `NOW` and `RAND`; a custom function; a triple term;
 and a nested `EXISTS`. With four credentials, it also rejected a zero-or-more property path whose
@@ -1640,9 +1640,9 @@ have a different form, so the experimental parts below do not implement `bbs-202
 A tempting design verifies BBS+-signed credentials with BBS+ proofs, disclosing public terms, and
 passes hidden values to a circuit for conditions that BBS+ proofs cannot express. A shared challenge
 does not bind the two proofs: it shows that both belong to one exchange, not that they concern the
-same value. One way to bind them is to prove in both systems that the proofs use the same committed
-hidden value, with one encoding of bytes into field elements, range checks where the fields differ,
-and domain separation. This also needs an argument that knowledge soundness holds for the
+same value. One way to bind them is for both proofs to show that they use the same committed hidden
+value. This needs one encoding of bytes into field elements, range checks where the fields differ,
+and domain separation. It also needs an argument that knowledge soundness holds for the
 combination. We have not built this binding.
 
 We built two experimental parts. The first combines BBS+ signatures over BLS12-381 with Circom
