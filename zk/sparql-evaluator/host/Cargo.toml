@@ -14,6 +14,7 @@ vcq = ["dep:sparq-query-protocol", "sparq-proved-evaluator-model/graph-results"]
 # zkp-14.5: low-level V5 authenticated-RDF API over its own separately
 # pinned guest image. Off by default; the exact guest and its APIs are unchanged.
 authenticated-rdf = [
+    "dep:spargebra",
     "sparq-proved-evaluator-model/authenticated-rdf",
     "sparq-proved-evaluator-methods/authenticated-rdf",
 ]
@@ -32,6 +33,8 @@ risc0-zkvm = { workspace = true, features = ["client", "std", "disable-dev-mode"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+# Same version and features as the model's parser; used for the V5 host query profile check.
+spargebra = { version = "=0.4.6", features = ["sparql-12", "sep-0006", "sparq-deterministic-paths"], optional = true }
 
 [dev-dependencies]
 sparq-proved-evaluator-model = { path = "../model", features = ["graph-results"] }

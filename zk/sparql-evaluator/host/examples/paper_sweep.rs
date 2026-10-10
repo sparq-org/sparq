@@ -25,7 +25,9 @@ use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sparq_proved_evaluator::authenticated_rdf::{prove_with_artifact, verify_revealed_with_artifact, verify_with_artifact};
+use sparq_proved_evaluator::authenticated_rdf::{
+    check_query_profile, prove_with_artifact, verify_revealed_with_artifact, verify_with_artifact,
+};
 use sparq_proved_evaluator::{AcceptedGuest, Error, Nonces, embedded_authrdf_artifact, embedded_authrdf_pin};
 use sparq_proved_evaluator_model::DatasetAuthority;
 use sparq_proved_evaluator_model::authenticated_rdf::{
@@ -327,6 +329,10 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         "credential_bytes": credential_bytes,
         "signature_bytes": 64,
     });
+    // The host query profile check that proving and verification apply; the guest
+    // is still executed below so the record also shows what the image itself does.
+    let profile = check_query_profile(&request);
+    record["query_profile"] = json!(profile.as_ref().map_or_else(|e| e.0, |()| "accepted"));
     let start = Instant::now();
     let native = auth::evaluate(&witness);
     record["native_evaluate_ns"] = json!(start.elapsed().as_nanos());
@@ -378,7 +384,7 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
     if args.phases {
         record["phase_cycles"] = phases(&witness).unwrap_or_else(|e| json!({"error": e}));
     }
-    if args.prove > 0 {
+    if args.prove > 0 && profile.is_ok() {
         let r0vm = PathBuf::from(std::env::var_os("RISC0_SERVER_PATH").expect("RISC0_SERVER_PATH"));
         let mut runs = Vec::new();
         for attempt in 0..args.prove {

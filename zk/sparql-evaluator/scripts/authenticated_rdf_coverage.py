@@ -36,6 +36,7 @@ SPEC = {
     "data": "https://www.w3.org/TR/rdf11-concepts/#section-blank-nodes",
     "probe-graph": SPARQL + "#queryDataset",
     "probe-from": SPARQL + "#specifyingDataset",
+    "probe-from-named": SPARQL + "#specifyingDataset",
     "probe-service": "https://www.w3.org/TR/sparql11-federated-query/",
     "probe-query-blank-node": SPARQL + "#QSynBlankNodes",
     "probe-bnode-fn": SPARQL + "#func-bnode",
@@ -47,8 +48,10 @@ SPEC = {
 }
 
 NOTES = {
+    "form-describe": "The guest evaluates DESCRIBE, but the host rejects it in the request before proving and verification.",
     "probe-graph": "Admitted and evaluated as specified: the credentials form the default graph and the dataset has no named graphs, so GRAPH matches nothing.",
-    "probe-from": "Admitted and evaluated as specified: FROM names a graph the dataset does not hold, so the default graph is empty.",
+    "probe-from": "The guest evaluates it as specified (FROM names a graph the dataset does not hold, so the default graph is empty), but the host rejects dataset clauses in the request before proving and verification.",
+    "probe-from-named": "The guest evaluates it as specified (the named graph is absent, so GRAPH matches nothing), but the host rejects dataset clauses in the request before proving and verification.",
     "probe-query-blank-node": "A blank node in a query pattern is an existential variable; this is an ordinary basic graph pattern.",
     "blank-node-data": "Credential data containing blank nodes is supported; blank-node labels are renamed per credential so credentials never share one.",
 }
@@ -101,6 +104,13 @@ def main():
         }
         if record.get("rejection"):
             feature["with_blank_node_data_rejection"] = record["rejection"]
+        if "query_profile" not in record:
+            sys.exit(f"{case['id']}: record has no host query profile result")
+        if record["query_profile"] == "accepted":
+            feature["host_query_profile"] = "accepted"
+        else:
+            feature["host_query_profile"] = "rejected"
+            feature["host_query_profile_rejection"] = record["query_profile"]
         if case["id"] in blank_free:
             other = blank_free[case["id"]]
             feature["blank_node_free_data"] = status(other, False)
@@ -125,6 +135,7 @@ def main():
         },
         "conditions": [
             "FILTER EXISTS and FILTER NOT EXISTS are admitted only when no credential in the presentation contains a blank node (model/src/v3/evaluate.rs).",
+            "The host rejects DESCRIBE, FROM and FROM NAMED in the request before proving and before verification (check_query_profile in host/src/authenticated_rdf.rs); the guest itself evaluates them. host_query_profile records that check.",
             "Results are exact SPARQL 1.1 answers over the default graph formed by the presented credentials; there are no named graphs.",
         ],
         "features": features,
