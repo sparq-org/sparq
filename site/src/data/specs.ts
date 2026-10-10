@@ -61,6 +61,17 @@ export const SPECS: Spec[] = [
       "Proving SPARQL query answers over committed RDF graphs in zero knowledge, transcribed from the sparq codebase — an explicit threat model, the committed data model (RDFC-1.0 + Poseidon2/BN254 sponge, Schnorr/Baby-Jubjub attestation), a scoped query fragment and circuit family with a per-construct disposition table plus phase-gated property-path and expression extensions, the ProofManifest member schema, and the fail-closed verifier obligations and four audit gates. Research-grade and NOT externally audited (sq-qhy4).",
   },
   {
+    slug: "zksparql-answers",
+    source: "zksparql-answers.typ",
+    title: "Zero-Knowledge SPARQL Answers: Request and Presentation Data Model",
+    shortName: "zksparql-answers",
+    status: "unofficial",
+    date: "2026-10-10",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "The JSON query request a verifier service sends and the answer presentation a holder service returns: the query, Supported or Exact answers, holder-declared or verifier-agreed input, accepted issuer keys and proof systems, the result in SPARQL Query Results JSON, and the verifier's checks. Includes a check against OpenID for Verifiable Presentations 1.0. The proof systems are research prototypes without an external audit.",
+  },
+  {
     slug: "mpc-sparql",
     source: "mpc-sparql.typ",
     title:
