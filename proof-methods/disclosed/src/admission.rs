@@ -2,7 +2,8 @@
 
 use sparq_proved_evaluator_model::MAX_QUERY_BYTES;
 use sparq_proved_evaluator_model::authenticated_rdf::{
-    MAX_CREDENTIALS, MAX_DOCUMENT_BYTES, MAX_PROOF_CONFIG_BYTES, MAX_TOTAL_BYTES, SignedCredential,
+    MAX_AUTHORIZED_KEYS, MAX_CREDENTIALS, MAX_DOCUMENT_BYTES, MAX_IRI_BYTES,
+    MAX_PROOF_CONFIG_BYTES, MAX_TOTAL_BYTES, Request, SignedCredential,
 };
 
 use crate::Rejected;
@@ -33,11 +34,26 @@ pub(crate) fn admit_sizes(credentials: &[SignedCredential]) -> Result<(), Reject
     Ok(())
 }
 
+/// Rejects a request over the relation's capacities, from lengths alone, and
+/// a query form this method does not admit.
+pub(crate) fn admit_request(request: &Request) -> Result<(), Rejected> {
+    let keys = &request.policy.authorization;
+    if keys.is_empty()
+        || keys.len() > MAX_AUTHORIZED_KEYS
+        || keys.iter().any(|key| {
+            key.issuer.len() > MAX_IRI_BYTES || key.verification_method.len() > MAX_IRI_BYTES
+        })
+    {
+        return Err(Rejected("disclosed request key table capacity"));
+    }
+    admit_query_form(&request.query)
+}
+
 /// Rejects the query forms the answer specification excludes from version 1
 /// that the shared relation would otherwise evaluate: DESCRIBE, and FROM or
 /// FROM NAMED clauses. The relation itself rejects SERVICE and the functions
 /// whose value depends on when or where they are evaluated.
-pub(crate) fn admit_query_form(query: &str) -> Result<(), Rejected> {
+fn admit_query_form(query: &str) -> Result<(), Rejected> {
     if query.len() > MAX_QUERY_BYTES {
         return Err(Rejected("query capacity"));
     }

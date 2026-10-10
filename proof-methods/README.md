@@ -21,13 +21,16 @@ on credentials the holder discloses. Its dataset commitment is the one the
 zkVM method computes, so one verifier-agreed commitment serves both methods.
 It is the baseline for the cost of the zero-knowledge methods: the same
 statement, checked without a proof. It rejects DESCRIBE and FROM / FROM NAMED
-before evaluation, and checks credential counts and sizes before copying them.
+before evaluation, and checks the request's key table and the credentials'
+counts and sizes before copying either. Its evidence is publicly verifiable:
+anyone holding the request can check it, so it is transferable.
 
 Where SPARQL 1.1 permits more than one result (OFFSET or LIMIT without an
 ORDER BY that strictly orders the solutions, REDUCED, SAMPLE, GROUP_CONCAT,
 floating-point aggregates), `disclosed` fixes the choice as follows: the holder
-chooses through the credentials it sends and their order, and the verifier
-accepts only the result the shared evaluator computes for that input. The
+chooses through the set of credentials it sends (the relation orders them by
+document hash, so their order does not matter), and the verifier accepts only
+the result the shared evaluator computes for that set. The
 method publishes no rule for which permitted result that is, so a verifier must
 not rely on it.
 

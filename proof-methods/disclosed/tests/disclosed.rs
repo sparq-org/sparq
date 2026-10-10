@@ -257,3 +257,42 @@ fn oversized_evidence_is_rejected_before_evaluation() {
         "disclosed proof encoding capacity"
     );
 }
+
+#[test]
+fn holder_checks_capacities_before_evaluating() {
+    let request = fixtures::request(query("Q2"), DatasetAuthority::HolderDeclared, NONCE);
+    // The method's own messages show its check ran before the relation's.
+    assert_eq!(
+        present(
+            &request,
+            fixtures::credentials(auth::MAX_CREDENTIALS + 1),
+            SALT
+        )
+        .unwrap_err()
+        .0,
+        "disclosed credential count must be 1 to 4"
+    );
+    let mut large = fixtures::credentials(1);
+    large[0].document = "x".repeat(auth::MAX_DOCUMENT_BYTES + 1);
+    assert_eq!(
+        present(&request, large, SALT).unwrap_err().0,
+        "disclosed credential capacity"
+    );
+
+    let mut wide = request.clone();
+    let key = wide.policy.authorization[0].clone();
+    wide.policy.authorization = vec![key.clone(); auth::MAX_AUTHORIZED_KEYS + 1];
+    let mut long_iri = request.clone();
+    long_iri.policy.authorization[0].issuer = "x".repeat(auth::MAX_IRI_BYTES + 1);
+    let (statement, proof) = present(&request, fixtures::credentials(1), SALT).expect("presents");
+    for bad in [wide, long_iri] {
+        assert_eq!(
+            present(&bad, fixtures::credentials(1), SALT).unwrap_err().0,
+            "disclosed request key table capacity"
+        );
+        assert_eq!(
+            verify(&bad, &statement, &proof).unwrap_err().0,
+            "disclosed request key table capacity"
+        );
+    }
+}

@@ -21,9 +21,10 @@
 //!
 //! Where SPARQL 1.1 permits more than one result (OFFSET or LIMIT without a
 //! strict ORDER BY, REDUCED, SAMPLE, GROUP_CONCAT, floating-point aggregates),
-//! the holder makes the choice through the credentials it sends and their
-//! order, and the verifier accepts exactly the result the shared evaluator
-//! computes for that input. The method publishes no rule for which permitted
+//! the holder makes the choice through the set of credentials it sends (the
+//! relation orders them by document hash, so their order does not matter), and
+//! the verifier accepts exactly the result the shared evaluator computes for
+//! that set. The method publishes no rule for which permitted
 //! result that is, so a verifier that needs one particular result writes a
 //! query whose result is unique.
 //!
@@ -94,8 +95,9 @@ pub type Statement = Journal;
 /// discloses.
 ///
 /// # Errors
-/// A query this method does not admit, or any rejection of
-/// [`auth::evaluate`]: an invalid request, a credential whose
+/// A query this method does not admit, a request or credentials over the
+/// relation's capacities (checked before either is copied), or any rejection
+/// of [`auth::evaluate`]: an invalid request, a credential whose
 /// signature, issuer or key does not match the request's table, a commitment
 /// unequal to a verifier-agreed one, or exceeded capacities.
 pub fn present(
@@ -103,16 +105,17 @@ pub fn present(
     credentials: Vec<SignedCredential>,
     salt: [u8; 32],
 ) -> Result<(Statement, DisclosedProof), Rejected> {
-    admission::admit_query_form(&request.query)?;
-    let dataset = PrivateCredentials { credentials, salt };
-    let statement = auth::evaluate(&Witness {
+    admission::admit_request(request)?;
+    admission::admit_sizes(&credentials)?;
+    let witness = Witness {
         request: request.clone(),
-        dataset: dataset.clone(),
-    })?;
+        dataset: PrivateCredentials { credentials, salt },
+    };
+    let statement = auth::evaluate(&witness)?;
     let proof = DisclosedProof {
         version: METHOD_VERSION,
-        credentials: dataset.credentials,
-        salt: dataset.salt,
+        credentials: witness.dataset.credentials,
+        salt: witness.dataset.salt,
     };
     Ok((statement, proof))
 }
@@ -125,8 +128,9 @@ pub fn present(
 /// the caller's step after this returns `Ok`.
 ///
 /// # Errors
-/// Another proof version, a query this method does not admit, credentials
-/// over the relation's capacities (checked before they are copied), any
+/// Another proof version, a query this method does not admit, a request or
+/// credentials over the relation's capacities (checked before either is
+/// copied), any
 /// rejection of [`auth::evaluate`], or a stated result, commitment, provenance or request digest that differs from the
 /// verifier's own evaluation.
 pub fn verify(
@@ -137,7 +141,7 @@ pub fn verify(
     if proof.version != METHOD_VERSION {
         return Err(Rejected("unsupported disclosed proof version"));
     }
-    admission::admit_query_form(&request.query)?;
+    admission::admit_request(request)?;
     admission::admit_sizes(&proof.credentials)?;
     let dataset = PrivateCredentials {
         credentials: proof.credentials.clone(),
