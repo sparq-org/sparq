@@ -4,7 +4,7 @@ use sparq_proved_evaluator_model::DatasetAuthority;
 use sparq_proved_evaluator_model::authenticated_rdf::{self as auth, PrivateCredentials};
 use sparq_proved_evaluator_model::v3::CanonicalResult;
 use sparq_vcq_disclosed::fixtures::{self, QUERIES};
-use sparq_vcq_disclosed::{present, verify};
+use sparq_vcq_disclosed::{MAX_PROOF_JSON_BYTES, decode_proof, present, verify};
 
 const SALT: [u8; 32] = [0xa5; 32];
 const NONCE: [u8; 32] = [7; 32];
@@ -150,4 +150,110 @@ fn verifier_agreed_rejects_other_credentials() {
         NONCE,
     );
     assert!(present(&request, fixtures::credentials(2), SALT).is_err());
+}
+
+#[test]
+fn describe_and_dataset_clauses_are_rejected() {
+    let (statement, proof) = present(
+        &fixtures::request(query("Q2"), DatasetAuthority::HolderDeclared, NONCE),
+        fixtures::credentials(1),
+        SALT,
+    )
+    .expect("presents");
+    for text in [
+        "DESCRIBE <https://bank.example/payments/2026-06>",
+        "SELECT ?s FROM <https://bank.example/g> WHERE { ?s ?p ?o }",
+        "SELECT ?s FROM NAMED <https://bank.example/g> WHERE { ?s ?p ?o }",
+    ] {
+        let request = fixtures::request(text, DatasetAuthority::HolderDeclared, NONCE);
+        assert!(
+            present(&request, fixtures::credentials(1), SALT).is_err(),
+            "present admitted {text}"
+        );
+        // The verifier checks the query form itself, even for a statement the
+        // shared relation computes for that query.
+        let own = auth::evaluate(&auth::Witness {
+            request: request.clone(),
+            dataset: PrivateCredentials {
+                credentials: proof.credentials.clone(),
+                salt: SALT,
+            },
+        });
+        let stated = own.as_ref().unwrap_or(&statement);
+        assert!(
+            verify(&request, stated, &proof).is_err(),
+            "verify admitted {text}"
+        );
+    }
+}
+
+#[test]
+fn a_query_with_more_than_one_permitted_result_verifies_only_the_evaluators_choice() {
+    let text = "PREFIX bank: <https://bank.example/vocab#>\n\
+                SELECT ?p WHERE { ?p a bank:Payment } LIMIT 1\n";
+    let request = fixtures::request(text, DatasetAuthority::HolderDeclared, NONCE);
+    let (statement, proof) = present(&request, fixtures::credentials(1), SALT).expect("presents");
+    assert_eq!(
+        verify(&request, &statement, &proof).expect("verifies"),
+        statement
+    );
+    // Another permitted solution for the same request is not accepted.
+    let mut other = statement.clone();
+    let sparq_proved_evaluator_model::v3::CanonicalResult::Select { rows, .. } = &mut other.result
+    else {
+        panic!("select result")
+    };
+    assert_eq!(rows.len(), 1);
+    let other_row = present(
+        &fixtures::request(
+            "PREFIX bank: <https://bank.example/vocab#>\n\
+             SELECT ?p WHERE { ?p a bank:Payment }\n",
+            DatasetAuthority::HolderDeclared,
+            NONCE,
+        ),
+        fixtures::credentials(1),
+        SALT,
+    )
+    .expect("presents");
+    let CanonicalResult::Select { rows: all, .. } = other_row.0.result else {
+        panic!("select result")
+    };
+    let replacement = all
+        .into_iter()
+        .find(|r| *r != rows[0])
+        .expect("another payment");
+    rows[0] = replacement;
+    assert!(verify(&request, &other, &proof).is_err());
+}
+
+#[test]
+fn oversized_evidence_is_rejected_before_evaluation() {
+    let request = fixtures::request(query("Q2"), DatasetAuthority::HolderDeclared, NONCE);
+    let (statement, proof) = present(&request, fixtures::credentials(1), SALT).expect("presents");
+
+    let mut many = proof.clone();
+    many.credentials = vec![proof.credentials[0].clone(); auth::MAX_CREDENTIALS + 1];
+    assert_eq!(
+        verify(&request, &statement, &many).unwrap_err().0,
+        "disclosed credential count must be 1 to 4"
+    );
+
+    let mut large = proof.clone();
+    large.credentials[0].document = "x".repeat(auth::MAX_DOCUMENT_BYTES + 1);
+    assert_eq!(
+        verify(&request, &statement, &large).unwrap_err().0,
+        "disclosed credential capacity"
+    );
+
+    let encoded = serde_json::to_vec(&proof).expect("serializes");
+    let decoded = decode_proof(&encoded).expect("decodes");
+    assert_eq!(
+        verify(&request, &statement, &decoded).expect("verifies"),
+        statement
+    );
+    let oversized = vec![b' '; MAX_PROOF_JSON_BYTES + 1];
+    assert_eq!(
+        decode_proof(&oversized).unwrap_err().0,
+        "disclosed proof encoding capacity"
+    );
 }

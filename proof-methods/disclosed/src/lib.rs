@@ -19,6 +19,20 @@
 //! verifier-agreed commitment can be answered by either method. The input
 //! commitment of a presentation is that value.
 //!
+//! Where SPARQL 1.1 permits more than one result (OFFSET or LIMIT without a
+//! strict ORDER BY, REDUCED, SAMPLE, GROUP_CONCAT, floating-point aggregates),
+//! the holder makes the choice through the credentials it sends and their
+//! order, and the verifier accepts exactly the result the shared evaluator
+//! computes for that input. The method publishes no rule for which permitted
+//! result that is, so a verifier that needs one particular result writes a
+//! query whose result is unique.
+//!
+//! This crate is an evaluation baseline over the internal v5 [`Request`] and
+//! [`Journal`]. It does not yet implement the full proof-method profile of the
+//! answer specification: the protocol request (audience, acceptance window,
+//! accepted methods, signature mode) is not bound into the statement, and the
+//! canonical statement and proof encodings are not defined.
+//!
 //! Research prototype, not externally audited. The bounded canonical RDF
 //! profile and its limits are those of [`auth`]: no JSON-LD processing, no
 //! credential status, no holder binding and no validity-period check.
@@ -30,8 +44,11 @@ use sparq_proved_evaluator_model::authenticated_rdf::{
 
 pub use sparq_proved_evaluator_model::Rejected;
 
+mod admission;
 #[cfg(feature = "fixtures")]
 pub mod fixtures;
+
+pub use admission::MAX_PROOF_JSON_BYTES;
 
 /// Proof-method identifier.
 pub const METHOD_ID: &str = "urn:sparq:vcq:method:disclosed-reevaluation";
@@ -54,6 +71,18 @@ pub struct DisclosedProof {
     pub salt: [u8; 32],
 }
 
+/// Decodes a JSON `proof` member, rejecting an encoding longer than
+/// [`MAX_PROOF_JSON_BYTES`] before parsing it.
+///
+/// # Errors
+/// An oversized or malformed encoding, or an unknown field.
+pub fn decode_proof(bytes: &[u8]) -> Result<DisclosedProof, Rejected> {
+    if bytes.len() > MAX_PROOF_JSON_BYTES {
+        return Err(Rejected("disclosed proof encoding capacity"));
+    }
+    serde_json::from_slice(bytes).map_err(|_| Rejected("malformed disclosed proof"))
+}
+
 /// What a presentation states: the evaluation result and its input commitment.
 pub type Statement = Journal;
 
@@ -65,7 +94,8 @@ pub type Statement = Journal;
 /// discloses.
 ///
 /// # Errors
-/// Any rejection of [`auth::evaluate`]: an invalid request, a credential whose
+/// A query this method does not admit, or any rejection of
+/// [`auth::evaluate`]: an invalid request, a credential whose
 /// signature, issuer or key does not match the request's table, a commitment
 /// unequal to a verifier-agreed one, or exceeded capacities.
 pub fn present(
@@ -73,6 +103,7 @@ pub fn present(
     credentials: Vec<SignedCredential>,
     salt: [u8; 32],
 ) -> Result<(Statement, DisclosedProof), Rejected> {
+    admission::admit_query_form(&request.query)?;
     let dataset = PrivateCredentials { credentials, salt };
     let statement = auth::evaluate(&Witness {
         request: request.clone(),
@@ -94,8 +125,9 @@ pub fn present(
 /// the caller's step after this returns `Ok`.
 ///
 /// # Errors
-/// Another proof version, any rejection of [`auth::evaluate`], or a stated
-/// result, commitment, provenance or request digest that differs from the
+/// Another proof version, a query this method does not admit, credentials
+/// over the relation's capacities (checked before they are copied), any
+/// rejection of [`auth::evaluate`], or a stated result, commitment, provenance or request digest that differs from the
 /// verifier's own evaluation.
 pub fn verify(
     request: &Request,
@@ -105,6 +137,8 @@ pub fn verify(
     if proof.version != METHOD_VERSION {
         return Err(Rejected("unsupported disclosed proof version"));
     }
+    admission::admit_query_form(&request.query)?;
+    admission::admit_sizes(&proof.credentials)?;
     let dataset = PrivateCredentials {
         credentials: proof.credentials.clone(),
         salt: proof.salt,
