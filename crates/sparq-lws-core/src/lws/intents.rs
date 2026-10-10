@@ -24,12 +24,15 @@ use crate::store::Store;
 
 const JSON: &str = "application/json";
 
+/// What the IRI of every intents container starts with.
+pub(crate) const PREFIX: &str = "urn:x-sparq-lws:intents:";
+
 /// The container the intents of the storage `storage` are kept in.
 pub(crate) fn container(storage: &str) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(storage.as_bytes());
     let id: String = digest[..12].iter().map(|b| format!("{b:02x}")).collect();
-    format!("urn:x-sparq-lws:intents:{id}/")
+    format!("{PREFIX}{id}/")
 }
 
 /// A record as it is to be put back: its bytes and the validators [`Store::restore`] keeps.
@@ -197,9 +200,12 @@ pub(crate) async fn clear<S: Store>(store: &S, record: &str) -> Result<(), Serve
 /// anything: a change cut short is put back, and a kept change's container is touched. Every
 /// intent is read first: one that cannot be read is an error, and then nothing has been changed
 /// or started (the server does not start over a change it cannot put back). Only then is each
-/// settled; what cannot be put back after a few tries is set aside (its resources answer `503`)
-/// and put back in the background, once every intent has been read and settling cannot fail.
-pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(), String> {
+/// settled; what cannot be put back after a few tries is set aside: hidden (its resources answer
+/// `503`), and returned, for the caller to put back in the background
+/// ([`LwsState::settle_hidden`]) once nothing else in its start can fail.
+pub(crate) async fn recover<S: Store + 'static>(
+    state: &LwsState<S>,
+) -> Result<super::Hidden, String> {
     let container = container(&state.cfg.storage());
     let store = &state.store;
     if !store
@@ -275,8 +281,7 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
             }
         }
     }
-    state.set_aside_all(set_aside);
-    Ok(())
+    Ok(state.hide_all(set_aside))
 }
 
 #[cfg(test)]

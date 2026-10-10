@@ -230,11 +230,14 @@ visible.
 
 Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 (tracking `w3c/lws-protocol` main) instead of the Solid/LDP surface. The mode is
-self-contained in `src/lws/`: its own authorization server, over the same `Store` backend.
-It runs over the
+self-contained in `src/lws/`: its own authorization server and access grants, over the
+same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
 because a remote write reported as failed may still commit later and nothing fences it yet.
-A request's Link headers may declare at most 128 relations holding
+Anyone authenticated may hold at most 16 access requests (429 past that), the server at most
+512 (507), and an access request body is at most 16 KiB (413) and an access grant at most
+256 KiB; these limits apply while the body is read. An access document nested too deeply to
+store and read back gets 400. A request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
 A resource's types, links and linkset are at most 256 KiB together, as stored: a write that would
@@ -249,7 +252,7 @@ cargo run -p sparq-lws-core
 
 | Variable | Meaning |
 |---|---|
-| `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage. Everyone else may act only on the resources they created. |
+| `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
 | `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
 | `SOLID_SERVER_LWS_PAGE_SIZE` | Container page size (default 100). |
 | `SOLID_SERVER_LWS_AS_KEY_FILE` | P-256 private JWK for access tokens. A missing file is created with a fresh key (mode 0600) whose `kid` is its RFC 7638 thumbprint. Without a file the key lives only for the process. |
@@ -291,8 +294,34 @@ What the server exposes, all discoverable from the storage description
   self-issued did:key and controlled identifier JWTs.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
-- **Authorization**: the owner may do anything, and the agent that created a resource may do
-  anything with it.
+- **Access grants and requests** (Access Profile) under `/.lws/grants/` and
+  `/.lws/requests/`. Documents need an `@context` that includes
+  `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
+  client, format, type, purpose and dateTime constraints. A target's `type` is
+  `DataResource`, `Container` or `StorageResource`, and its values name single resources,
+  not their members. A policy with no `target` covers every resource of the grant's
+  `storage`. A `purpose` constraint never holds, because the draft does not say how a
+  request states its purpose. A `format` constraint compares media types as RFC 9110 does
+  (case-insensitive type, subtype and parameter names, quoted or bare values, any parameter
+  order). The owner and a resource's creator are always allowed. Grants and access requests
+  are created and removed in one store step each, and memory follows the store: what the
+  container lists is what a start puts in force. A create takes the container (waiting at most
+  two seconds, then `503` with `Retry-After`) and the record's own lock, refuses a name already
+  stored, and writes the record. A write that reports a failure is checked against the listing:
+  listed, the create answers `201` and the record is in force; not listed, `500`; not known
+  (the listing cannot be read), `500` "not known" with the request open to retry, and the
+  record is put in force once the listing shows it. A revocation (or a request's withdrawal)
+  takes the record's lock and the container's the same way (at most two seconds, then `503`),
+  and takes the grant out of force while the removal runs, and keeps it out only once the removal
+  is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
+  revoked; `500` "still in force" when the record is still listed; `500` "not known" when it
+  cannot be read again, with the grant left in force. A record holds its place in the request
+  quota until the store confirms it is gone: while its create's outcome is not known and while
+  its withdrawal runs. Nothing a start puts back in the background begins until every step of
+  the start that can fail has succeeded. A stored grant or request that cannot be read stops
+  the start (a later start reads it again); one listed but gone is skipped; one whose stored
+  body is not a record is quarantined at every start until the owner deletes it: it grants
+  nothing, is listed and counts against its quota, and answers `500` to a read.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
@@ -343,6 +372,11 @@ What the server exposes, all discoverable from the storage description
   relations change only with `Prefer: set-linkset`.
 - Every write and delete runs its store calls in a task that holds the resource's locks until
   the store answers, so a client that disconnects cannot release them early.
+- A grant or request `DELETE` takes effect once its stored record is gone, even if cleaning
+  up its bytes then fails.
+- The grant and request services are containers: their listings are
+  negotiated (`lws+json`, `ld+json` or `json`), paged at the page size, and carry an ETag
+  and `up`/`type`/`linkset` links. The linksets are read-only.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
