@@ -64,7 +64,7 @@ pub use dtype::{d_value_eq, d_value_key, materialize_d, DValue, Recognized};
 #[cfg(feature = "explain")]
 pub use explain::{ExplainOpts, ProofNode, ProofTree};
 pub use incremental::{
-    MaterializedGraph, MaterializedN3Graph, MaterializedOwlGraph, N3Mode, OwlMode,
+    MaterializedGraph, MaterializedN3Graph, MaterializedOwlGraph, N3Mode, OwlMode, N3_GRAPH_BLANK,
 };
 pub use n3::{
     reason_n3, reason_n3_pass_all, reason_n3_proof, reason_n3_proof_run, reason_n3_query,

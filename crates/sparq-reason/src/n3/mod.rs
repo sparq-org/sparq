@@ -195,7 +195,32 @@ pub type Resolver = dyn Fn(&str) -> Option<String>;
 /// Keying on formula CONTENT (not the document IRI) means the guard needs no extra plumbing
 /// through the lazy `log:semantics` → `log:supports` evaluation hand-off, and is exact for
 /// the recursion that actually loops (a formula closing itself, transitively).
-type VisitedDocs = std::rc::Rc<std::cell::RefCell<FxHashSet<u64>>>;
+///
+/// The same shared state carries the run's [`ParsedBlanks`] allocator, so every nested
+/// closure draws runtime-parse blank labels from ONE allocator.
+type VisitedDocs = std::rc::Rc<std::cell::RefCell<RunShared>>;
+
+/// State one top-level run shares with all of its nested closures ([`VisitedDocs`]).
+#[derive(Default)]
+struct RunShared {
+    /// Content keys of the formulas whose closure is in progress (the import-cycle guard).
+    docs: FxHashSet<u64>,
+    /// Blank labels for documents parsed at run time.
+    parsed: ParsedBlanks,
+}
+
+/// The ONE allocator of blank labels for documents parsed at run time (`log:parsedAsN3`,
+/// `log:semantics`). Such a document's blanks are its own: they are standardized apart
+/// into `{prefix}{n}_{label}`, `n` numbering each distinct `(text, base)` the run parses,
+/// so the same text always parses to the same formula, two texts never share a blank,
+/// and no runtime text can spell a label of the run's source or of a caller's namespace
+/// (`MaterializedN3Graph`'s `__bs{k}_`): `prefix` is the smallest `__rp{k}_` no blank of
+/// the top-level source starts with.
+#[derive(Default)]
+struct ParsedBlanks {
+    prefix: String,
+    ids: FxHashMap<(String, String), usize>,
+}
 
 /// A stable structural key for a quoted formula, used by the import-cycle guard
 /// ([`VisitedDocs`]) to recognise a closure that is already in progress up the stack.
@@ -227,6 +252,19 @@ struct BwCtx<'a> {
 }
 
 impl BwCtx<'_> {
+    /// The statements of a document parsed at run time from `text` (under `base`), with
+    /// its blanks standardized apart through the run's [`ParsedBlanks`] allocator.
+    fn standardize_parsed(&self, text: &str, base: &str, ts: Vec<[Term; 3]>) -> Vec<[Term; 3]> {
+        let prefix = {
+            let mut shared = self.visited.borrow_mut();
+            let pb = &mut shared.parsed;
+            let next = pb.ids.len();
+            let n = *pb.ids.entry((text.to_string(), base.to_string())).or_insert(next);
+            format!("{}{}_", pb.prefix, n)
+        };
+        ts.iter().map(|t| stratum_blanks(t, &prefix)).collect()
+    }
+
     /// Use a budgeted or fallible step's result, recording a cut on the run
     /// ([`bounded::settle`]).
     fn settle<T>(&self, b: Bounded<T>) -> T {
@@ -805,6 +843,15 @@ fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
     fresh_blank_prefix(&seen, "__st")
 }
 
+/// The namespace [`MaterializedN3Graph`](crate::MaterializedN3Graph) gives its caller's
+/// blank labels (GH #6775): the smallest `__bs{k}_` prefix no blank label of the rules
+/// document starts with. The parser's own labels (`_b<n>` for `[]`, `_:x` as written,
+/// `__path<n>`, `__ex_<local>`) are all in `parsed`, so none starts with it, and the
+/// `__sk…`/`__st…`/`__rp…` labels the engine mints are other families.
+pub(crate) fn fresh_base_blank_prefix(parsed: &parser::Parsed) -> String {
+    fresh_blank_prefix(&document_blank_labels(parsed), "__bs")
+}
+
 /// Every blank label reachable in `t`, including nested list members, formula
 /// rows and quoted-triple components.
 fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
@@ -1122,7 +1169,10 @@ fn run_closure(
     // from being captured by a minted conclusion blank. Labels ingested later
     // through document builtins or nested closure evaluation are outside this
     // initial-source guarantee.
-    let sk_prefix = fresh_blank_prefix(&document_blank_labels(&parsed), "__sk");
+    let (sk_prefix, rp_prefix) = {
+        let labels = document_blank_labels(&parsed);
+        (fresh_blank_prefix(&labels, "__sk"), fresh_blank_prefix(&labels, "__rp"))
+    };
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
     // Premises evaluate left-to-right with no coroutining — reorder each
     // premise so a builtin runs only after the atoms that produce its inputs
@@ -1146,6 +1196,13 @@ fn run_closure(
     let read_further = inherit.is_some();
     if let Some(v) = inherit {
         bw.visited = v;
+    }
+    {
+        // A nested run keeps the allocator its top-level run set up.
+        let mut shared = bw.visited.borrow_mut();
+        if shared.parsed.prefix.is_empty() {
+            shared.parsed.prefix = rp_prefix;
+        }
     }
     // Derivation steps at the term level (interned to ids once at the end).
     let mut steps: Vec<DerivationStep> = Vec::new();
@@ -3014,7 +3071,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // lost that a finite closure would have added, and reasoning terminates. (No resolver, no
     // cycle: with `bw.resolver` `None` the set stays empty and this is a no-op.)
     let key = formula_key(ts);
-    if !bw.visited.borrow_mut().insert(key) {
+    if !bw.visited.borrow_mut().docs.insert(key) {
         return bw.settle(Bounded::cut(
             ts.to_vec(),
             "a nested closure re-entered a document already being closed and was left unclosed",
@@ -3061,7 +3118,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
             bw.nested_error
                 .borrow_mut()
                 .get_or_insert(format!("in a nested closure: {e}"));
-            bw.visited.borrow_mut().remove(&key);
+            bw.visited.borrow_mut().docs.remove(&key);
             return ts.to_vec();
         }
     };
@@ -3074,7 +3131,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
             result.push(f);
         }
     }
-    bw.visited.borrow_mut().remove(&key);
+    bw.visited.borrow_mut().docs.remove(&key);
     result
 }
 
@@ -3988,7 +4045,7 @@ fn eval_functional_inner(
                     // recursion, so no marking is needed here.
                     // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                     let parsed = bounded::parse_n3(&text, doc, pending).ok()?;
-                    Term::Formula(reencode_statements(parsed))
+                    Term::Formula(bw.standardize_parsed(&text, doc, reencode_statements(parsed)))
                 }
             }
             _ => return None,
@@ -3997,7 +4054,7 @@ fn eval_functional_inner(
             [Term::Lit(src, _, _)] => {
                 // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                 let parsed = bounded::parse_n3(src, &bw.base, pending).ok()?;
-                Term::Formula(reencode_statements(parsed))
+                Term::Formula(bw.standardize_parsed(src, &bw.base, reencode_statements(parsed)))
             }
             _ => return None,
         },

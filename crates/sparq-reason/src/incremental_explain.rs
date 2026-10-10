@@ -1126,11 +1126,16 @@ impl MaterializedN3Graph {
         if !self.contains(fact) {
             return None;
         }
+        // The graph holds the caller's blank labels in its own namespace (GH #6775); the
+        // proof shows them as the caller wrote them.
+        let inner = self.inward(fact)?;
+        let fact = inner.as_ref();
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
+            let shown = self.outward(fact);
             let root = b.push_keyed(
-                crate::n3::serialize::statement_display_lossy(fact),
-                crate::n3::serialize::statement_keys(fact),
+                crate::n3::serialize::statement_display_lossy(&shown),
+                crate::n3::serialize::statement_keys(&shown),
                 "asserted",
                 vec![],
             )?;
@@ -1150,6 +1155,7 @@ impl MaterializedN3Graph {
             step_map.entry(conclusion).or_insert((*rule, premises.as_slice()));
         }
         let mut p = N3Prover {
+            g: self,
             base: &self.base,
             step_map,
             b,
@@ -1162,6 +1168,7 @@ impl MaterializedN3Graph {
 }
 
 struct N3Prover<'a> {
+    g: &'a MaterializedN3Graph,
     base: &'a FxHashSet<[N3Term; 3]>,
     step_map: FxHashMap<&'a [N3Term; 3], (usize, &'a [[N3Term; 3]])>,
     b: ProofBuilder,
@@ -1186,8 +1193,9 @@ impl N3Prover<'_> {
         // Display strings for reading, and a lossless key per fact for identity: two
         // different facts can render alike, and `sparq-prov` addresses facts by `key`
         // (GH #6701 review round 6).
-        let rendered = crate::n3::serialize::statement_display_lossy(f);
-        let key = crate::n3::serialize::statement_keys(f);
+        let shown = self.g.outward(f);
+        let rendered = crate::n3::serialize::statement_display_lossy(&shown);
+        let key = crate::n3::serialize::statement_keys(&shown);
         if self.base.contains(f) {
             let ix = self.b.push_keyed(rendered, key, "asserted", vec![])?;
             self.memo.insert(f.clone(), ix);

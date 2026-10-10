@@ -1612,6 +1612,59 @@ pub struct MaterializedN3Graph {
     /// leaves it here; incremental inserts record into it. So a cut lasts only while the
     /// facts that caused it are present.
     cuts: crate::n3::bounded::Truncation,
+    /// The namespace of the caller's blank labels inside the graph (GH #6775): a caller
+    /// label `l` is held as `{base_ns}{l}`, fresh against every blank label of the rules
+    /// document and never minted by the engine, so a caller's `_b1` never aliases the
+    /// parser's `_b1` for a `[]`. Every other blank (the document's, the engine's) is shown
+    /// to the caller as `{N3_GRAPH_BLANK}{label}`. Facts cross the API boundary through
+    /// [`Self::inward`] and [`Self::outward`] only.
+    base_ns: String,
+}
+
+/// The reserved label space in which [`MaterializedN3Graph`] shows the blank nodes that
+/// are not the caller's (the rules document's, the engine's): `_:x` in the rules is
+/// `__d.x` to the caller, so it never reads as the caller's own `x`.
+pub const N3_GRAPH_BLANK: &str = "__d.";
+
+/// `t` with `f` applied to every blank label (recursing into lists, formulae and quoted
+/// triples), or `None` when `f` changes none: a term without blank nodes costs no
+/// allocation.
+fn map_blank_labels(t: &N3Term, f: &impl Fn(&str) -> Option<String>) -> Option<N3Term> {
+    fn row(r: &[N3Term; 3], f: &impl Fn(&str) -> Option<String>) -> Option<[N3Term; 3]> {
+        let m: [Option<N3Term>; 3] = [0, 1, 2].map(|i| map_blank_labels(&r[i], f));
+        if m.iter().all(Option::is_none) {
+            return None;
+        }
+        let [a, b, c] = m;
+        Some([
+            a.unwrap_or_else(|| r[0].clone()),
+            b.unwrap_or_else(|| r[1].clone()),
+            c.unwrap_or_else(|| r[2].clone()),
+        ])
+    }
+    match t {
+        N3Term::Blank(l) => f(l).map(N3Term::Blank),
+        N3Term::List(ms) => {
+            let m: Vec<Option<N3Term>> = ms.iter().map(|x| map_blank_labels(x, f)).collect();
+            if m.iter().all(Option::is_none) {
+                return None;
+            }
+            Some(N3Term::List(
+                m.into_iter().zip(ms).map(|(n, o)| n.unwrap_or_else(|| o.clone())).collect(),
+            ))
+        }
+        N3Term::Formula(ts) => {
+            let m: Vec<Option<[N3Term; 3]>> = ts.iter().map(|r| row(r, f)).collect();
+            if m.iter().all(Option::is_none) {
+                return None;
+            }
+            Some(N3Term::Formula(
+                m.into_iter().zip(ts).map(|(n, o)| n.unwrap_or_else(|| o.clone())).collect(),
+            ))
+        }
+        N3Term::Triple(tr) => row(tr, f).map(|r| N3Term::Triple(Box::new(r))),
+        _ => None,
+    }
 }
 
 /// Evaluation phase of a non-seed plain atom relative to the delta seed (the counting
@@ -2399,12 +2452,12 @@ impl MaterializedN3Graph {
     pub fn new(rules_src: &str, base_facts: &[[N3Term; 3]]) -> Result<Self, String> {
         let cuts = crate::n3::bounded::Truncation::top_level();
         let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
+        let base_ns = crate::n3::fresh_base_blank_prefix(&parsed);
         let (compiled, disqualified) = match n3_compile(&parsed) {
             Ok(c) => (Some(Rc::new(c)), None),
             Err(reason) => (None, Some(reason)),
         };
-        let mut base: FxHashSet<[N3Term; 3]> = parsed.facts.iter().cloned().collect();
-        base.extend(base_facts.iter().cloned());
+        let base: FxHashSet<[N3Term; 3]> = parsed.facts.iter().cloned().collect();
         let n_layers = compiled.as_ref().map_or(0, |c| c.layers.len());
         let mut g = MaterializedN3Graph {
             rules_src: rules_src.to_string(),
@@ -2422,7 +2475,19 @@ impl MaterializedN3Graph {
             rebuilds: 0,
             strat_warning: None,
             cuts: cuts.clone(),
+            base_ns,
         };
+        let mut caller = Vec::with_capacity(base_facts.len());
+        for f in base_facts {
+            let Some(f) = g.inward(f) else {
+                return Err(format!(
+                    "base blank label in {N3_GRAPH_BLANK}{}… names no node of the graph",
+                    g.base_ns
+                ));
+            };
+            caller.push(f.into_owned());
+        }
+        g.base.extend(caller);
         // The rules parse's record is the counting run's; the checked run re-parses.
         g.rematerialize(cuts, crate::n3::bounded::Truncation::top_level());
         g.rebuilds = 0;
@@ -2430,6 +2495,51 @@ impl MaterializedN3Graph {
             return Err(format!("{w} The rules document is rejected."));
         }
         Ok(g)
+    }
+
+    /// A caller's fact as the graph holds it, the inverse of [`Self::outward`]: a label
+    /// `l` is the caller's node `{base_ns}{l}`, and `{N3_GRAPH_BLANK}{label}` names the
+    /// graph's own node `label`. `None` for `{N3_GRAPH_BLANK}{base_ns}…`, which
+    /// [`Self::outward`] never produces. Borrowed (no allocation) when the fact has no
+    /// blank node.
+    fn inward<'a>(&self, t: &'a [N3Term; 3]) -> Option<std::borrow::Cow<'a, [N3Term; 3]>> {
+        let ns = self.base_ns.as_str();
+        let invalid = Cell::new(false);
+        let to_ns = |l: &str| match l.strip_prefix(N3_GRAPH_BLANK) {
+            Some(own) => {
+                invalid.set(invalid.get() || own.starts_with(ns));
+                Some(own.to_string())
+            }
+            None => Some(format!("{ns}{l}")),
+        };
+        let m: [Option<N3Term>; 3] = [0, 1, 2].map(|i| map_blank_labels(&t[i], &to_ns));
+        if invalid.get() {
+            return None;
+        }
+        if m.iter().all(Option::is_none) {
+            return Some(std::borrow::Cow::Borrowed(t));
+        }
+        let [a, b, c] = m;
+        Some(std::borrow::Cow::Owned([
+            a.unwrap_or_else(|| t[0].clone()),
+            b.unwrap_or_else(|| t[1].clone()),
+            c.unwrap_or_else(|| t[2].clone()),
+        ]))
+    }
+
+    /// A closure fact as the caller sees it: labels in [`Self::base_ns`] get the caller's
+    /// own label back, every other blank (the rules document's, the engine's: none starts
+    /// with `base_ns`) is shown as `{N3_GRAPH_BLANK}{label}`. Injective: a caller label is
+    /// never in the reserved space, since [`Self::inward`] reads that space as the graph's.
+    fn outward(&self, t: &[N3Term; 3]) -> [N3Term; 3] {
+        let ns = self.base_ns.as_str();
+        let from_ns = |l: &str| {
+            Some(match l.strip_prefix(ns) {
+                Some(caller) => caller.to_string(),
+                None => format!("{N3_GRAPH_BLANK}{l}"),
+            })
+        };
+        [0, 1, 2].map(|i| map_blank_labels(&t[i], &from_ns).unwrap_or_else(|| t[i].clone()))
     }
 
     /// Does mutating `t` require a full rebuild? (Guard predicates — their truth is baked
@@ -2812,9 +2922,12 @@ impl MaterializedN3Graph {
             if !f.iter().all(N3Term::is_ground) {
                 continue;
             }
+            // A label `outward` never produces names no node: ignored like a non-ground fact.
+            let Some(f) = self.inward(f) else { continue };
+            let f = f.into_owned();
             if self.base.insert(f.clone()) {
-                rebuild |= self.triggers_rebuild(f);
-                added.push(f.clone());
+                rebuild |= self.triggers_rebuild(&f);
+                added.push(f);
             }
         }
         if added.is_empty() {
@@ -2850,9 +2963,10 @@ impl MaterializedN3Graph {
         let mut removed = Vec::new();
         let mut rebuild = false;
         for f in facts {
-            if self.base.remove(f) {
-                rebuild |= self.triggers_rebuild(f);
-                removed.push(f.clone());
+            let Some(f) = self.inward(f) else { continue };
+            if self.base.remove(f.as_ref()) {
+                rebuild |= self.triggers_rebuild(&f);
+                removed.push(f.into_owned());
             }
         }
         if removed.is_empty() {
@@ -2884,17 +2998,18 @@ impl MaterializedN3Graph {
 
     /// Is `t` in the materialized closure (asserted or derived)?
     pub fn contains(&self, t: &[N3Term; 3]) -> bool {
+        let Some(t) = self.inward(t) else { return false };
         match self.mode {
-            N3Mode::Counting => self.index.contains(t),
-            N3Mode::Fallback => self.fallback_closure.contains(t),
+            N3Mode::Counting => self.index.contains(&t),
+            N3Mode::Fallback => self.fallback_closure.contains(t.as_ref()),
         }
     }
 
     /// The full materialized closure (unordered; [`Term`](crate::n3::Term) has no ordering).
     pub fn closure(&self) -> Vec<[N3Term; 3]> {
         match self.mode {
-            N3Mode::Counting => self.index.all.iter().cloned().collect(),
-            N3Mode::Fallback => self.fallback_closure.iter().cloned().collect(),
+            N3Mode::Counting => self.index.all.iter().map(|t| self.outward(t)).collect(),
+            N3Mode::Fallback => self.fallback_closure.iter().map(|t| self.outward(t)).collect(),
         }
     }
 
