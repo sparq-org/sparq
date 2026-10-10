@@ -14,6 +14,7 @@ bundle.
 | Crate | Method | Evidence kind |
 |---|---|---|
 | `disclosed` | `urn:sparq:vcq:method:disclosed-reevaluation` v1 | disclosed credentials |
+| `vole` (scripts, not a crate) | prototype for `urn:sparq:vcq:method:vole-designated-verifier` | zero-knowledge proof, interactive, designated verifier |
 
 `disclosed` runs the relation that the `risc0-authenticated-rdf` v5 guest
 proves (`zk/sparql-evaluator/model`, `authenticated_rdf::evaluate`) natively,
@@ -33,6 +34,10 @@ document hash, so their order does not matter), and the verifier accepts only
 the result the shared evaluator computes for that set. The
 method publishes no rule for which permitted result that is, so a verifier must
 not rely on it.
+
+`vole` proves the ACIR of the `zk/compose` circuits with QuickSilver instead
+of UltraHonk, so both proof systems can be compared on the same statement; see
+[`vole/README.md`](vole/README.md).
 
 Research prototypes, not externally audited.
 

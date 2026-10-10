@@ -59,5 +59,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --locked --release --manifest-path proof-methods/Cargo.toml --all-features --all-targets -- -D warnings
 
+      - name: VOLE scripts parse and translator tests
+        run: |
+          python3 -m py_compile proof-methods/vole/acir_to_sieve.py proof-methods/vole/circuits/gen.py proof-methods/vole/quicksilver_run.py
+          bash -n proof-methods/vole/bench.sh
+          python3 -m unittest proof-methods/vole/test_acir_to_sieve.py
+
       - name: Measurement example runs
         run: cargo run --locked --release --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed --example measure --features fixtures -- 3
