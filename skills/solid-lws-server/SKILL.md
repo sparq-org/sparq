@@ -274,17 +274,18 @@ What the server exposes, all discoverable from the storage description
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
   absolute; one that is not a URI reference gets `422`, as does a target attribute not shaped as
   RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and extension
-  attributes arrays of strings; `name*` arrays of `{value, language}`). A linkset is stored in
-  its resource's metadata, so a linkset patch over 256 KiB is refused with `413` before it is
-  parsed, as is one whose bytes could make more than 2 MiB of parsed values. Values are charged
-  what they allocate at most (64 bytes each, plus 704 per object and 160 per member, since an
-  object allocates a whole map node), and the patch is applied within 2 MiB so charged, checked
-  before each value is copied. Before anything is resolved the result is held to 256 entries,
-  1024 targets and 4096 bytes per anchor, relation and `href`, and its worst-case cost (every
-  value it holds, its size twice, and each relative reference grown by the base) to 2 MiB; past
-  any of these, `413`. A document with members besides `linkset` gets `422`. A `Link` header on
-  a create or replace is held to the same target and length caps (`431` past them), and a write
-  whose types and links together pass them (counting the links the server adds) gets `413`, so
+  attributes arrays of strings; `name*` arrays of `{value, language}`). A linkset `PATCH` body
+  is at most 10,485 bytes (`413` past it, before it is parsed): parsing JSON allocates at most a
+  measured, doubled 200 bytes per byte of text whatever its shape, so the parsed patch stays
+  within 2 MiB. The patch is applied with every value charged what it allocates (64 bytes each,
+  plus 704 per object and 160 per member, since an object allocates a whole map node), within
+  2 MiB, checked before each value is copied. Before anything is resolved the result is held to
+  256 entries, 1024 targets and 4096 bytes per anchor, relation and `href`, and its worst-case
+  cost (every value it holds, its size twice, and each relative reference grown by the base) to
+  2 MiB; past any of these, `413`. A document with members besides `linkset` gets `422`. A
+  `Link` header on a create or replace is held to the same target and length caps (`431` past
+  them), and a write whose types and links together pass them (counting the links the server
+  adds), or would make a linkset larger than the metadata may hold, gets `413`, so
   whatever is stored can be patched. It is also measured as it will be served, with the
   server-managed links put back: metadata past its size limit gets `413`, and one that nests too
   deeply to store `422`. The links the type index matches are the stored linkset's own. A
