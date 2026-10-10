@@ -74,3 +74,6 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
   their text with a private digit count, so the circuit hashes all 20 possible lengths (about 54k
   gates per filtered value). A field-native leaf does the same comparison in about 300 gates. Cite
   only once frozen as an evidence record.
+- Merkle-root suite specification: sparq-org/sparq#6789 (rendered draft in the project file
+  `zk/zk-merkle-cryptosuite-draft.pdf`); its section 6 lists the security properties of each member,
+  for the security table. Canonical Q1-Q5 query files: `zk/sparql-evaluator/fixtures/paper/` in #6789.
