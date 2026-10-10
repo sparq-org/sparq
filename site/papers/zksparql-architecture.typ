@@ -2,15 +2,15 @@
 // (site/papers/zksparql-language-guide.md) and the companion specification of zero-knowledge
 // SPARQL answers (sparq-org/sparq#6786): query request and answer presentation, Supported and
 // Exact answers, holder-declared and verifier-agreed inputs, the hidden, revealed and disclosed
-// signature modes, the public-input rule and the verifier's processing order. The appendix keeps
-// its earlier wording until its own rewrite.
+// signature modes, the public-input rule and the verifier's processing order. The appendix (at
+// most two LNCS pages) and the supplementary material after it follow the same guide.
 //
 // HONESTY FRAME (empirical-honesty mandate; external-audit gate sq-qhy4): the paper asserts no
 // proven security, privacy or integrity property for any implementation. Every number comes from
 // paper-evidence.json through #headline(...) (canonical records) or #ev(...) (the preliminary
-// pilot timings, in the appendix); none is typed into prose, and counts from different
-// experiments are never added. Experiments without the internal re-check carry a dagger in the
-// evidence table. Facts not yet frozen as evidence records (guest coverage, cycle counts, the
+// pilot timings, in the supplementary material); none is typed into prose, and counts from
+// different experiments are never added. Experiments without the internal re-check carry a dagger
+// in the evidence table. Facts not yet frozen as evidence records (guest coverage, cycle counts, the
 // proof-method comparison, Merkle-suite implementation status) appear only qualitatively, each
 // with a TODO(evidence) comment. Planned measurements are visible todo-results placeholders.
 
@@ -932,13 +932,13 @@ We argue informally that, under assumptions A1 to A5 below, an accepted presenta
 hidden mode, the credentials' signatures. Public inputs and witness satisfy the relation if:
 
 + the dataset commitment is the proof method's commitment to these credentials under this salt;
-+ $D$ is built from these credentials as the proof method states
++ the input dataset $D$ is built from these credentials as the proof method states
   (§#ref(<meaning>, supplement: none)); with issuer keys, from their signed canonical N-Quads, so
   that every term keeps its signed lexical form;
-+ if the request lists issuer keys, each credential carries a signature that verifies under a
-  listed key whose entry matches the credential's issuer, verification method and cryptosuite. The
-  proof verifies these signatures in the hidden mode. In the revealed mode, the signed messages
-  are public inputs computed from the credentials, and the verifier checks the signatures;
++ if the request lists issuer keys, each credential carries a signature that verifies under a listed
+  key whose entry matches the credential's issuer, verification method and cryptosuite. The proof
+  verifies these signatures in the hidden mode. In the revealed mode, the signed messages are public
+  inputs computed from the credentials, and the verifier checks the signatures;
 + the result is an answer of the requested kind for $Q$ over $D$
   (§#ref(<semantics>, supplement: none)).
 
@@ -965,32 +965,33 @@ the proof system, the hash function and the issuers.
 verifier's image ID for a journal that holds the stored request's digest, its answer and input
 kinds, and the presented commitment and result. By A1, an input exists on which the guest program
 writes this journal; by A2, that input satisfies the relation. By A3, except with negligible
-probability, $Q$ is the stored request's query and the commitment fixes $D$. The result is
-therefore an answer of the requested kind for $Q$ over $D$, and for a verifier-agreed input, $D$ is
-the dataset whose commitment the verifier agreed to. If the request lists issuer keys, each
-credential in $D$ carries a signature under a listed key, which by A5 only that key's issuer could
-have made. For a Supported answer, each returned row $mu$ is in $[| Q' |]_D$. As $Q'$ is a monotone
-query, $mu$ is also in $[| Q' |]_(D')$ for every dataset $D'$ that contains $D$ graph by graph, so
-the row stays a solution when the holder's other credentials are added.
+probability, $Q$ is the stored request's query and the commitment fixes $D$. The result is therefore
+an answer of the requested kind for $Q$ over $D$, and for a verifier-agreed input, $D$ is the
+dataset whose commitment the verifier agreed to. If the request lists issuer keys, each credential
+in $D$ carries a signature under a listed key, which by A5 only that key's issuer could have made.
+For a Supported answer, each returned row $mu$ is in $[| Q' |]_D$. As $Q'$ is a monotone query, $mu$
+is also in $[| Q' |]_(D')$ for every dataset $D'$ that contains $D$ graph by graph, so the row stays
+a solution when the holder's other credentials are added.
 
 In the prototype, the guest program's request holds a SHA-256 hash of the stored request and its
-proof-method entry (§#ref(<prototype>, supplement: none)). Under A3, the journal therefore also
+proof-method entry (§#ref(<capabilities>, supplement: none)). Under A3, the journal therefore also
 binds the challenge, audience and validity period.
 
 *Public inputs computable from the result.* Suppose the pattern of $Q$ is a single basic graph
 pattern without blank nodes, and a returned row $mu$ binds all its variables. Then $mu$ is a
-solution over $D$ exactly when, for each triple pattern $t$, $mu(t)$ is in the default graph of
-$D$. A circuit that takes each $mu(t)$ as a public input, and checks that it is in $D$ and signed,
+solution over $D$ exactly when, for each triple pattern $t$, $mu(t)$ is in the default graph of $D$.
+A circuit that takes each $mu(t)$ as a public input, and checks that it is in $D$ and signed,
 therefore shows the same statement as one that finds these triples in its witness. It discloses
 nothing that the verifier cannot compute from $mu$. The baseline and public-triple circuits of
 §#ref(<pilot-evidence>, supplement: none) differ in exactly this way.
 
-== Test cases behind Table 3 <app-inventories>
+== Test cases per experiment <app-inventories>
 
 @test-cases-table shows the Exact answers that each zkVM experiment of @evidence-table proved, by
 input kind. The inputs were small synthetic graphs or, with signature checks, the W3C test vector
 for `eddsa-rdfc-2022` and the payment credential of §#ref(<v5-evidence>, supplement: none). The
-supplementary material lists every test, negative test, source commit and guest binary.
+supplementary material lists every test and negative test (§#ref(<supp-records>, supplement: none))
+and every source commit and guest binary (§#ref(<repro>, supplement: none)).
 
 #[
 #show figure: set block(breakable: false)
@@ -1040,510 +1041,418 @@ supplementary material lists every test, negative test, source commit and guest 
   "S" + numbering("1.1.", ..if ns.len() > 1 { ns.slice(1) } else { ns })
 })
 
-== Evidence detail and control inventories <old-inventories>
+== Proof methods and request formats <capabilities>
 
-=== Method <evidence-method>
-
-All new-path evidence comes from frozen JSON snapshots under `research/zk-paper-evidence/`, each
-listed with its SHA-256 digest in `provenance.json`. Every snapshot except those of the payment
-and CI authenticated runs (§#ref(<v5-evidence>, supplement: none)) summarises a second internal
-evidence inspection of a completed run (source trees re-hashed against the stated commit,
-artifacts and receipts re-hashed, recorded outcomes compared) rather than a new execution. The
-payment and CI snapshots are the runs' own audit records and have had no such inspection. None is
-an external security review. Every number in this paper is read from `paper-evidence.json`
-records whose values are machine-checked against those snapshots by JSON pointer. The inspections
-did not re-run cryptographic verification locally; genuine-receipt verification and refusal of
-development mode are exercised by the source-bound tests whose outcomes the snapshots record.
-Campaigns are reported separately and never summed; in particular, the hosted campaign and the EC2
-adapter campaign used different guest binaries (#short-id("zkvcq.exact_guest_sha256") and
-#short-id("zkvcq.adapter_guest_sha256")).
-
-=== Hosted exact-evaluator campaign <exact-detail>
-
-A GitHub-hosted CI job built the guest from source #short-id("zkvcq.exact_source_commit") with
-locked dependency graphs, ran the native model tests, then ran the host suite that executes the
-actual guest and produces genuine receipts serially.
-
-#figure(
-  table(
-    columns: (1fr, auto),
-    align: (left, right),
-    table.header[Hosted campaign fact][Count],
-    [Genuine receipts (Succinct, halted with exit 0, no assumptions, image pin matched)], [#headline("zkvcq.exact_hosted_receipts")],
-    [Native model test functions passed], [#headline("zkvcq.exact_hosted_model_tests")],
-    [Host guest-and-proof test functions passed], [#headline("zkvcq.exact_hosted_host_tests")],
-    [Host test functions explicitly ignored], [#headline("zkvcq.exact_hosted_ignored")],
-    [Typed native replay cases], [#headline("zkvcq.exact_replay_cases")],
-    [Native replay jobs (cases × request versions × authorities)], [#headline("zkvcq.exact_replay_jobs")],
-    [of which expected and observed accepted], [#headline("zkvcq.exact_replay_expected_positive")],
-    [of which expected and observed rejected], [#headline("zkvcq.exact_replay_expected_negative")],
-    [Proofs produced by the native replay], [#headline("zkvcq.exact_replay_proofs")],
-  ),
-  caption: [
-    Hosted exact-evaluator evidence at #short-id("zkvcq.exact_source_commit"). Test functions and
-    replay jobs are not W3C conformance cases, and the replay is native execution only. The two
-    ignored functions are the engine-replay proof functions; they are not counted as executed.
-  ],
-) <exact-table>
-
-#provenance("zkvcq.exact_hosted_receipts")
-
-The receipts are `v1-holder-bag`, `v1-verifier-select`, `v1-verifier-false-ask`,
-`v2-holder-false-ask`, `v2-verifier-catalog`, `v3-holder-bag`, `v3-holder-describe` and
-`v3-verifier-construct`. The genuine-proof test functions that produced them assert that a
-holder-declared bag preserves duplicates, unbound values and provenance; that a false `ASK` proves
-absence from the accepted complete graph and a holder-declared absence respects `FROM NAMED` scope;
-that catalog and nested graph results bind every public expectation; that `DESCRIBE` binds its
-explicit blank-node closure policy; that `CONSTRUCT` mints fresh nodes with graph set semantics;
-and that tampering with or replaying any public binding is rejected. This run completed the legacy
-genuine-proof functions that earlier campaigns had left unfinished. It does not show whole-SPARQL
-conformance, any issuer authentication, performance, or anything about the historical EC2
-receipts, which remain attributed to their own guest binary.
-
-=== Protocol adapter campaign <adapter-evidence>
-
-Receipts were produced on an EC2 host from frozen source #short-id("zkvcq.adapter_source_commit").
-
-#figure(
-  table(
-    columns: (1.6fr, 0.9fr, 1fr, 1.3fr),
-    align: (left, left, left, left),
-    table.header[Case][Form][Authority][Protocol outcome],
-    [`select-bag-verifier-agreed`], [bag `SELECT`], [VerifierAgreed], [accepted],
-    [`select-bag-holder-declared`], [bag `SELECT`], [HolderDeclared], [accepted],
-    [`ask-true-verifier-agreed`], [`ASK` (true)], [VerifierAgreed], [accepted],
-    [`ask-false-holder-declared`], [`ASK` (false)], [HolderDeclared], [accepted],
-    [`construct-verifier-agreed`], [`CONSTRUCT`], [VerifierAgreed], [accepted],
-    [`construct-holder-declared`], [`CONSTRUCT`], [HolderDeclared], [accepted],
-    [`select-bag-row-bound`], [bag `SELECT`], [n/a], [rejected: result exceeds row bound],
-  ),
-  caption: [
-    The #headline("zkvcq.adapter_receipts") genuine adapter receipts:
-    #headline("zkvcq.adapter_accepted") accepted and #headline("zkvcq.adapter_row_bound_rejected")
-    genuine receipt rejected at the contract's row bound. Every case has source evidence `None`,
-    status `NotRequested` and a bearer holder.
-  ],
-) <adapter-table>
+The verifier service lists the proof methods it accepts in each query request, with a verification
+key for each from its own configuration (§#ref(<request>, supplement: none)). @methods-table shows
+what our proof methods support, and §#ref(<repro>, supplement: none) gives their identifiers. Our
+services reject a request outside these limits before proving and before marking it as answered.
+They also reject a base IRI, an ordered `SELECT`, `DESCRIBE`, and a request that requires credential
+status or holder binding.
 
 #[
 #show figure: set block(breakable: false)
 #figure(
-  table(
-    columns: (auto, 1fr, auto),
-    align: (left, left, right),
-    table.header[Validation step][Control class][Records],
-    [Method, contract], [Changed query of the same form], [#headline("zkvcq.ctl_changed_query_same_form")],
-    [Method, contract], [Wrong method descriptor digest], [#headline("zkvcq.ctl_wrong_descriptor_digest")],
-    [Journal binding], [Altered journal result], [#headline("zkvcq.ctl_altered_journal_result")],
-    [Session], [Wrong challenge], [#headline("zkvcq.ctl_wrong_challenge")],
-    [Session], [Wrong verifier audience], [#headline("zkvcq.ctl_wrong_verifier_audience")],
-    [Session], [Stored audience changed to match the supplied one], [#headline("zkvcq.ctl_changed_stored_audience")],
-    [Session], [Expired], [#headline("zkvcq.ctl_expired")],
-    [Session], [Not yet valid], [#headline("zkvcq.ctl_not_yet_valid")],
-    [Session], [Substituted window still containing now], [#headline("zkvcq.ctl_changed_window")],
-    [Authority, scope], [HolderDeclared proof against VerifierAgreed request], [#headline("zkvcq.ctl_scope_holder_to_agreed")],
-    [Authority, scope], [VerifierAgreed proof against HolderDeclared request], [#headline("zkvcq.ctl_scope_agreed_to_holder")],
-    [Authority, scope], [Commitment other than the agreed anchor], [#headline("zkvcq.ctl_wrong_agreed_anchor")],
-    [Consumption], [Replay against the same store], [#headline("zkvcq.ctl_replay_same_store")],
-    [Consumption], [Concurrent verifications of one challenge], [#headline("zkvcq.ctl_concurrent_verifications")],
-    [Consumption], [Broken challenge store], [#headline("zkvcq.ctl_broken_store")],
-  ),
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1fr, 1.3fr, 1.3fr, 1.3fr),
+      align: (left, left, left, left),
+      table.header[][Evaluator][Evaluator with signature checks][Noir circuits],
+      [Evidence], [Succinct RISC Zero receipt, publicly verifiable], [Same],
+        [UltraHonk proof, publicly verifiable],
+      [Answers], [Exact `SELECT`, `ASK` and `CONSTRUCT`], [Same],
+        [Supported `SELECT DISTINCT` over one basic graph pattern],
+      [Input kinds], [Holder-declared, verifier-agreed], [Same], [Holder-declared],
+      [Input dataset], [Parsed from the committed N-Quads], [RDF merge of the signed canonical
+        N-Quads], [Credentials in the circuits' own commitment format],
+      [Issuer checks], [None: the request lists no issuer keys], [`eddsa-rdfc-2022`, in the hidden
+        mode], [Schnorr signatures over Baby Jubjub, inside the proof],
+      [Credential status], [Not checked], [Not checked], [Checked against a snapshot that the
+        verifier accepted],
+      [Presentations of the specification], [Through our services, in a binary encoding], [Same],
+        [Not yet: no dataset commitment],
+    )
+  },
+  caption: [What our proof methods support.],
+) <methods-table>
+]
+
+*Request formats.* The evaluator reads requests in three formats, each extending the one before: the
+default-graph format; the named-graph format, which adds named graphs, `GRAPH`, `FROM` and
+`FROM NAMED`; and the graph-result format, which adds `CONSTRUCT`, `DESCRIBE` and blank nodes in the
+input and the result. Both builds use the graph-result format behind our services. The services
+encode the query request in binary rather than in the specification's JSON, compute the request
+digest over that encoding, and store times as Unix seconds.
+
+*How the stored request reaches the proof.* The holder service puts a SHA-256 hash of the stored
+request and of its proof-method entry into the request it gives the guest program. That request also
+carries the query, the input kind and any agreed commitment. The guest program writes the digest of
+this request to the journal, and the verifier service recomputes the digest from its own copies. The
+journal therefore binds every member of the stored request, including the challenge, audience and
+validity period. With signature checks, the proof-method entry contains a digest of the accepted
+issuer keys and evaluation limits, so changing any key, issuer or verification method changes the
+entry.
+
+*Dataset commitments.* Without signature checks, the evaluator commits with SHA-256 to a format tag,
+its capacity limits, the salt, the names of any named graphs and the exact bytes of the N-Triples or
+N-Quads input. It does not canonicalise the input, so equivalent serialisations give different
+commitments. With signature checks, the commitment covers the digest of the accepted issuer keys and
+evaluation limits, the salt, the number of credentials and, for each credential, the hashes of the
+canonical document and proof configuration that the issuer signed. A commitment agreed under one
+list of issuer keys therefore cannot serve another.
+
+== Experiment records <supp-records>
+
+@tests-table lists the tests and executions without proving, by run. Appendix
+#ref(<app-inventories>, supplement: none) lists the receipts, and @controls-table the negative
+tests.
+
+#[
+#show figure: set block(breakable: false)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1fr, auto),
+      align: (left, right),
+      table.header[Test or execution][Count],
+      table.cell(colspan: 2)[_Evaluator, CI build_],
+      [Evaluator tests passed, outside the zkVM], [#headline("zkvcq.exact_hosted_model_tests")],
+      [Tests of the guest program passed], [#headline("zkvcq.exact_hosted_host_tests")],
+      [Tests not run: proofs of re-executed test cases], [#headline("zkvcq.exact_hosted_ignored")],
+      [Test cases re-executed outside the zkVM], [#headline("zkvcq.exact_replay_cases")],
+      [Runs: test cases × request formats × input kinds], [#headline("zkvcq.exact_replay_jobs")],
+      [Runs expected and observed to accept], [#headline("zkvcq.exact_replay_expected_positive")],
+      [Runs expected and observed to reject], [#headline("zkvcq.exact_replay_expected_negative")],
+      [Proofs from re-execution], [#headline("zkvcq.exact_replay_proofs")],
+      table.cell(colspan: 2)[_Evaluator with signature checks: tests_],
+      [Tests passed, outside the zkVM], [#headline("zkvcq.v5_auth_tests_passed")],
+      [Of these, new integration tests], [#headline("zkvcq.v5_new_integration_tests")],
+      [Of these, new unit tests], [#headline("zkvcq.v5_new_unit_tests")],
+      [Proofs], [#headline("zkvcq.v5_proofs")],
+      table.cell(colspan: 2)[_Evaluator with signature checks: executed directly_],
+      [Tests passed, outside the zkVM], [#headline("zkvcq.v5g_native_tests_passed")],
+      [Proving test, compiled but not run], [#headline("zkvcq.v5g_genuine_driver_ignored")],
+      [Tests of direct execution passed], [#headline("zkvcq.v5g_direct_sdk_tests_passed")],
+      [Executions accepting a valid input], [#headline("zkvcq.v5g_direct_v5_positive")],
+      [Executions rejecting an altered input with the expected error],
+        [#headline("zkvcq.v5g_direct_v5_aborts")],
+      [Evaluator without signature checks, accepting its own input],
+        [#headline("zkvcq.v5g_direct_legacy_positive")],
+      [Evaluator without signature checks, rejecting input for the other build],
+        [#headline("zkvcq.v5g_direct_legacy_aborts")],
+      [Executions in total], [#headline("zkvcq.v5g_direct_executions")],
+      [Proofs], [#headline("zkvcq.v5g_proofs")],
+      table.cell(colspan: 2)[_Our services with signature checks_],
+      [Tests passed, outside the zkVM], [#headline("zkvcq.vcqa_distinct_tests_passed")],
+      [Proofs], [#headline("zkvcq.vcqa_genuine_proofs")],
+    )
+  },
+  caption: [Tests and executions without proving, by run. Counts are per run.],
+) <tests-table>
+]
+
+=== The evaluator without signature checks <supp-exact>
+
+A CI job built the evaluator and its guest program from source with locked dependencies. It ran the
+evaluator's tests, then the tests that run the guest program, one at a time. These produced
+#headline("zkvcq.exact_hosted_receipts") receipts, for these queries:
+
+- in the default-graph format, a `SELECT` with `UNION` and `VALUES` whose result keeps duplicate
+  rows and an unbound value (holder-declared); a `SELECT` with a counting subquery, `OPTIONAL`,
+  `MINUS`, `EXISTS`, property paths, `ORDER BY` and `LIMIT` (verifier-agreed); and a false `ASK`
+  whose branches use property paths, `MINUS`, `NOT EXISTS` and numeric edge cases (verifier-agreed);
+- in the named-graph format, a false `ASK` over graphs named with `FROM NAMED` (holder-declared),
+  and a `SELECT` that counts the matches in each named graph, an empty one included
+  (verifier-agreed);
+- in the graph-result format, a `SELECT` whose result keeps duplicate rows, unbound values and a
+  blank node shared across rows (holder-declared); a `DESCRIBE` (holder-declared); and a `CONSTRUCT`
+  that creates fresh blank nodes (verifier-agreed).
+
+Each test compares the journal with the result of the evaluator run outside the zkVM. Some also
+check that verification fails after a change to the query, the request's limits, the input kind or
+the agreed commitment, after a journal byte is flipped, under another image ID and for a fake
+receipt, and that a second verification of the same receipt fails as a replay.
+
+Our services ran a separately built guest program of the same evaluator on another machine
+(§#ref(<repro>, supplement: none)). Their test cases query a small synthetic graph in which triples
+share an object, so the `SELECT` result has duplicate rows.
+
+=== The evaluator with signature checks <supp-signed>
+
+Three runs tested this build without proving (@tests-table). Its tests outside the zkVM use the W3C
+test vector and synthetic keys. They cover valid signatures under the wrong issuer, verification
+method, proof purpose or cryptosuite, the signed lexical forms, each credential's blank-node scope,
+the binding of the accepted issuer keys into the request and the commitment, and `SELECT`, `ASK` and
+`CONSTRUCT` under both input kinds. Executed directly, the guest program accepted the test vector
+under both input kinds. Besides the altered credentials of §#ref(<v5-evidence>, supplement: none),
+it rejected input that was not in canonical form or used another encoding. A positive control
+preceded each group of negative tests. The evaluator without signature checks rejected input meant
+for this build and still accepted its own. The tests of our services check that changing any
+accepted key, issuer, verification method or limit changes every digest, while reordering the keys
+does not. They also check that a mismatched proof-method entry, guest program or image ID, and a
+fake or foreign receipt, are rejected before the request is marked as answered.
+
+The receipts came from three experiments (Appendix #ref(<app-inventories>, supplement: none)), with
+different machines and guest binaries (§#ref(<repro>, supplement: none)). The internal check of the
+first test case found #headline("zkvcq.vcqg_source_files_verified") source files unchanged during
+the run and equal to the repository's. It recomputed the hashes of the receipt, the journal and
+#headline("zkvcq.vcqg_archive_verified_files") archived files.
+
+=== Negative tests <supp-negative>
+
+@controls-table lists the negative tests by what they change. Each reused the receipt of an accepted
+test case, so none produced a proof. A store in memory recorded which requests were answered.
+
+#[
+#show figure: set block(breakable: false)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1fr, auto, auto),
+      align: (left, right, left),
+      table.header[Negative test][Without signature checks][With signature checks],
+      table.cell(colspan: 3)[_Stored request_],
+      [Another query of the same form], [#headline("zkvcq.ctl_changed_query_same_form")], [Yes],
+      [Another challenge], [#headline("zkvcq.ctl_wrong_challenge")], [Yes],
+      [Another audience presented], [#headline("zkvcq.ctl_wrong_verifier_audience")], [Yes],
+      [Stored audience changed to the presented one],
+        [#headline("zkvcq.ctl_changed_stored_audience")], [Yes],
+      [Expired], [#headline("zkvcq.ctl_expired")], [Yes],
+      [Not yet valid], [#headline("zkvcq.ctl_not_yet_valid")], [Yes],
+      [Another validity period that contains the current time],
+        [#headline("zkvcq.ctl_changed_window")], [Yes],
+      table.cell(colspan: 3)[_Proof method_],
+      [Another proof-method entry digest], [#headline("zkvcq.ctl_wrong_descriptor_digest")], [Yes],
+      [Receipt checked against the other build's image ID], [–], [Yes],
+      table.cell(colspan: 3)[_Issuer keys and limits held by the verifier_],
+      [Another key, issuer or verification method, an added key, or a lower row capacity; each with
+        the presentation unchanged, and with its proof-method entry digest replaced to match], [–],
+        [Yes],
+      table.cell(colspan: 3)[_Input kind and commitment_],
+      [Holder-declared proof for a verifier-agreed request],
+        [#headline("zkvcq.ctl_scope_holder_to_agreed")], [Holder-declared receipts],
+      [Verifier-agreed proof for a holder-declared request],
+        [#headline("zkvcq.ctl_scope_agreed_to_holder")], [Verifier-agreed receipts],
+      [Another agreed commitment], [#headline("zkvcq.ctl_wrong_agreed_anchor")],
+        [Verifier-agreed receipts],
+      [Agreed commitment computed with another salt], [–], [Verifier-agreed receipts],
+      table.cell(colspan: 3)[_Receipt_],
+      [Result in the journal altered], [#headline("zkvcq.ctl_altered_journal_result")], [Yes],
+      [One journal byte flipped], [–], [Yes],
+      [Fake receipt], [–], [Yes],
+      table.cell(colspan: 3)[_Marking the request as answered_],
+      [Replay of an accepted presentation], [#headline("zkvcq.ctl_replay_same_store")], [Yes],
+      [Concurrent presentations: all but one rejected as replays],
+        [#headline("zkvcq.ctl_concurrent_verifications")], [Yes],
+      [Failing store: presentation rejected], [#headline("zkvcq.ctl_broken_store")], [Yes],
+      [Total], [#headline("zkvcq.adapter_controls")],
+        [#headline("zkvcq.vcqg_controls") per verifier-agreed, #headline("zkvcq.vcqph_controls")
+          per holder-declared receipt],
+    )
+  },
   caption: [
-    Inventory of the #headline("zkvcq.adapter_controls") retained control records, grouped by the
-    validation step of §#ref(<validation>, supplement: none) they exercise. Stores are in-memory
-    test doubles, not durable production stores; the controls show the checks exist and fire in
-    these cases, not that no other substitution succeeds.
+    Negative tests, by what they change. Without signature checks: records across the
+    #headline("zkvcq.adapter_accepted") accepted receipts of the evaluator with our services. With
+    signature checks: tests run with each accepted receipt; "Yes" means with every receipt.
   ],
 ) <controls-table>
 ]
 
-The audit wrapper for this campaign itself reported failure: a mutation check expected a test
-failure line that `--nocapture` output had split across lines, although the intended assertion
-mutant was killed, and the post-restore gates were not reached in that wrapper. The receipts and
-controls above were verified from retained files before the mutation step. A later, separate
-continuation at the same source (#short-id("zkvcq.post_restore_head")) closed the two skipped
-gates: a verify-only replay of the retained row-bound presentation passed
-(#headline("zkvcq.post_restore_row_bound_passed") test function, none failed) and the adapter's
-all-target host Clippy passed with warnings denied. It generated
-#headline("zkvcq.post_restore_new_proofs") new proofs, and the original wrapper failure remains on
-record unchanged. The adapter campaign did not complete the unfinished legacy proof functions; the
-hosted campaign did.
+== The public-triple circuit pilot <supp-pilot>
 
-=== Authenticated extension V5 and its adapter <v5-detail>
+The baseline and public-triple circuits give Supported answers to `SELECT DISTINCT` queries over one
+basic graph pattern without `FILTER`, and reject a result that repeats a row. Each exists for one
+and for two credentials. Inside the circuit, both check each credential's Schnorr signature, that
+each matched triple is in a signed credential, and each credential's status against a status list
+and policy that the verifier accepted. The status roots, salts and positions stay hidden. How the
+verifier obtains the status snapshot, and how fresh it is, are left to the deployment. Their tests
+cover a finite set of valid and absent matches and of adversarial witnesses.
 
-*Native model run.* At source #short-id("zkvcq.v5_source_commit"), a scoped native run of the
-evaluator model passed in three feature configurations with no failed or ignored test functions:
-#headline("zkvcq.v5_auth_tests_passed") with the `authenticated-rdf` feature,
-#headline("zkvcq.v5_default_off_tests_passed") with default features off, and
-#headline("zkvcq.v5_graph_results_tests_passed") with `graph-results`. The configurations overlap
-and are not added: the `authenticated-rdf` count consists of
-#headline("zkvcq.v5_new_integration_tests") new integration and
-#headline("zkvcq.v5_new_unit_tests") new unit test functions plus existing model functions that
-also run under `graph-results`. The new functions cover, among other things, the W3C vector,
-rejection of valid signatures under the wrong issuer, method, purpose or suite, preservation of
-signed lexical forms, per-credential blank-node scope, binding of the authorisation table into
-request and commitment, and `SELECT`, `ASK` and `CONSTRUCT` under both authorities. Scoped Clippy
-with warnings denied passed in all three configurations. That run made
-#headline("zkvcq.v5_guest_executions") guest executions and produced #headline("zkvcq.v5_proofs")
-proofs.
-
-*Guest build and direct execution.* At source #short-id("zkvcq.v5g_source_commit"), a scoped gate
-built the separate V5 guest (#short-id("zkvcq.v5g_guest_sha256")), pinned independently of the
-exact guest, and executed it directly in the zkVM executor (@v5-guest-table). Direct execution
-runs the guest without generating a proof: a positive execution shows that the guest accepts and
-evaluates an input, and an abort shows that it refuses one; neither yields a receipt a verifier
-could check. A positive control precedes each negative family, and each abort must match the exact
-expected guest panic. The negative inputs include forged, spliced and unauthorised credentials and
-noncanonical or foreign wire forms; the cross-version cases show the exact (V3) guest aborting on
-V5 input while still accepting its own. All #headline("zkvcq.v5g_source_files_verified") source
-files matched Git, #headline("zkvcq.v5g_locks_unchanged") lock files were unchanged, and all-target
-Clippy with warnings denied passed. With the authenticated feature off and on, the exact guest was
-byte-identical (#short-id("zkvcq.v5g_exact_off_sha256") and #short-id("zkvcq.v5g_exact_on_sha256"))
-and equal to controlled earlier builds made at the same absolute build path; these bytes are not
-the guests of the hosted or EC2 receipt campaigns. An earlier comparison across different build
-paths failed and is retained, so we claim artifact identity only for a fixed build path and
-toolchain.
-
-#[
-#show figure: set block(breakable: false)
-#figure(
-  table(
-    columns: (1fr, auto),
-    align: (left, right),
-    table.header[V5 guest-gate fact][Count],
-    [Native harness test functions passed], [#headline("zkvcq.v5g_native_tests_passed")],
-    [Genuine-proof driver compiled but explicitly ignored], [#headline("zkvcq.v5g_genuine_driver_ignored")],
-    [Direct-execution test functions passed], [#headline("zkvcq.v5g_direct_sdk_tests_passed")],
-    [V5 guest: positive direct executions], [#headline("zkvcq.v5g_direct_v5_positive")],
-    [V5 guest: aborts with the expected guest panic], [#headline("zkvcq.v5g_direct_v5_aborts")],
-    [Exact (V3) guest: positive direct execution], [#headline("zkvcq.v5g_direct_legacy_positive")],
-    [Exact (V3) guest: aborts on V5 input], [#headline("zkvcq.v5g_direct_legacy_aborts")],
-    [Direct guest executions in total], [#headline("zkvcq.v5g_direct_executions")],
-    [Proofs / receipts generated], [#headline("zkvcq.v5g_proofs") / #headline("zkvcq.v5g_receipts")],
-  ),
-  caption: [
-    Scoped V5 guest gate at #short-id("zkvcq.v5g_source_commit"). Direct executions run the guest
-    without proving, so this is executed-guest evidence, not receipt evidence. No count here is
-    added to the earlier native model run.
-  ],
-) <v5-guest-table>
-]
-
-*First genuine-proof attempt.* At the same source, one bounded attempt of the low-level V5 driver
-targeted a single declared case, `select-bag-verifier-agreed`, over the published fixture with the
-pinned V5 artifact (#short-id("zkvcq.v5p_guest_sha256")). The command reached its time limit
-before any receipt existed: it completed #headline("zkvcq.v5p_proofs_completed") of
-#headline("zkvcq.v5p_proofs_planned") planned proof and #headline("zkvcq.v5p_controls_completed")
-of #headline("zkvcq.v5p_controls_planned") planned controls, and produced no presentation. We
-retain it unchanged as an incomplete execution, neither a semantic rejection nor evidence about
-soundness; it was not retried automatically.
-
-*Generic authenticated adapter gate.* At source #short-id("zkvcq.vcqa_source_commit"), a generic
-adapter wraps V5 in the typed request, descriptor and verification routine of the protocol
-adapter, for bag `SELECT`, `ASK` and `CONSTRUCT` under both authorities. Its binding chain starts
-from the verifier: the verifier's own canonically ordered copy of its issuer, verification-method
-and key policy is hashed into a policy digest; that digest enters the V5 method descriptor; the
-descriptor and the stored request determine the nonce; the nonce enters the V5 request whose
-digest the V5 journal carries; the result claimed in the response must equal the journal result;
-and the original challenge is consumed last. A scoped native gate passed
-#headline("zkvcq.vcqa_distinct_tests_passed") distinct test functions
-(#headline("zkvcq.vcqa_new_unit_tests") new unit, #headline("zkvcq.vcqa_new_integration_tests")
-new integration and #headline("zkvcq.vcqa_new_job_parser_tests") new job-parser functions,
-#headline("zkvcq.vcqa_existing_v5_tests") existing low-level V5 functions and
-#headline("zkvcq.vcqa_legacy_tests") legacy adapter functions, whose repeat under the legacy-only
-configuration is not counted again), and all-target Clippy passed in both configurations. The new
-tests check, among other things, that every policy field changes every binding while key-table
-order does not, that mismatched descriptors, guests and pins and fake or foreign receipts are
-rejected without consuming the challenge, and that stronger, weaker and foreign requests fail
-admission. The V5 guest exported at this source has the same bytes as in the guest gate
-(#short-id("zkvcq.vcqa_guest_sha256")), and the exact guest is again unchanged with the feature off
-and on (#short-id("zkvcq.vcqa_exact_off_sha256"), #short-id("zkvcq.vcqa_exact_on_sha256")) at the
-fixed build path. In that gate the genuine-proof driver compiled but stayed ignored: it made
-#headline("zkvcq.vcqa_direct_executions") direct guest executions and
-#headline("zkvcq.vcqa_genuine_proofs") proofs.
-
-*Genuine adapter receipt for one case.* At the same source (#short-id("zkvcq.vcqg_source_commit")),
-a separately bounded run executed that driver for #raw(headline("zkvcq.vcqg_case")) only. It
-produced #headline("zkvcq.vcqg_genuine_receipts") genuine receipt
-(#raw(headline("zkvcq.vcqg_receipt_inner")), #raw(headline("zkvcq.vcqg_exit_code")), `dev_mode` =
-#raw(repr(headline("zkvcq.vcqg_dev_mode")))), of which #headline("zkvcq.vcqg_protocol_accepted")
-was accepted by the protocol verifier. The test verified the receipt through the SDK under the
-accepted V5 pin, whose artifact (#short-id("zkvcq.vcqg_guest_sha256")) matches the V5 guest of the
-two gates above, compared the result with the native oracle and the hand-written expectation, and
-ran the adapter's protocol checks. The binding controls substitute the request (query, challenge,
-audience, validity window), the verifier policy (key, issuer, method, table rows; each caught at the
-descriptor digest and, when spliced past it, at the proof binding), the descriptor, the journal,
-the receipt, the scope or anchor, and the image, presenting the same V5 receipt under the exact
-guest's independently pinned image. Each was refused with its exact typed code before the
-challenge was consumed, with #headline("zkvcq.vcqg_binding_store_calls") challenge-store calls. Of
-the challenge controls, a replay against the same store was refused as replayed, a broken store
-failed closed as an infrastructure error, and of concurrent verifications of one challenge
-#headline("zkvcq.vcqg_concurrent_accepted") was accepted and
-#headline("zkvcq.vcqg_concurrent_replayed") reported replay; the stores are in-memory test doubles.
-Its second internal evidence inspection confirmed #headline("zkvcq.vcqg_source_files_verified")
-source files unchanged across the run and matching Git, re-hashed the receipt
-(#short-id("zkvcq.vcqg_receipt_sha256")), the journal (#short-id("zkvcq.vcqg_journal_sha256")) and
-#headline("zkvcq.vcqg_archive_verified_files") retained files, and checked the recorded
-assertions; it launched no verification process of its own.
-
-The run did not cover the other declared cases (`all_defined_cases_run` =
-#raw(repr(headline("zkvcq.vcqg_all_cases_run")))). None of these gates or attempts was a
-full-workspace gate or a security audit. The authentication they exercise covers the verifier's
-issuer table and the signed canonical RDF bytes inside the relation; neither V5 nor its adapter
-checks credential status, holder binding or a credential validity period, performs full JSON-LD or
-Data Integrity processing, provides a JSON, JCS or JOSE-to-RDF relation, or establishes wallet or
-world completeness.
-
-*Genuine adapter receipt for the payment false `ASK`.* At source
-#short-id("zkvcq.vcqp_source_commit"), a separate run executed the same driver for
-#raw(headline("zkvcq.vcqp_case")) only (`all_defined_cases_run` =
-#raw(repr(headline("zkvcq.vcqp_all_cases_run")))). The input is a synthetic payment-history
-credential of three settled payments, signed with the RFC 8032 section 7.1 test key, whose secret
-key is public. The run produced #headline("zkvcq.vcqp_genuine_receipts") genuine receipt
-(#raw(headline("zkvcq.vcqp_receipt_inner")), #raw(headline("zkvcq.vcqp_exit_code")), `dev_mode` =
-#raw(repr(headline("zkvcq.vcqp_dev_mode")))) with #raw(headline("zkvcq.vcqp_r0vm_version")), of
-which #headline("zkvcq.vcqp_protocol_accepted") was accepted by the protocol verifier. Its journal
-reports `ASK` = #raw(repr(headline("zkvcq.vcqp_result_ask"))) with provenance
-#raw(headline("zkvcq.vcqp_provenance")). The guest was rebuilt for this run, so its pinned artifact
-(#short-id("zkvcq.vcqp_guest_sha256")) differs from the bag `SELECT` run's
-(#short-id("zkvcq.vcqg_guest_sha256")); the image-splice control presents the receipt under the
-other pin. The #headline("zkvcq.vcqp_controls") controls are the same groups as above, adapted to
-the payment fixture, and each behaved as the test asserts. The retained receipt is
-#short-id("zkvcq.vcqp_receipt_sha256"). This run's record has not had a second internal evidence
-inspection, and it carries the same authentication limits as the bag `SELECT` run. A second job
-at the same source and pin proved #raw(headline("zkvcq.vcqph_case")) with
-#headline("zkvcq.vcqph_genuine_receipts") genuine receipt, of which
-#headline("zkvcq.vcqph_protocol_accepted") was accepted, reporting `ASK` =
-#raw(repr(headline("zkvcq.vcqph_result_ask"))) with #headline("zkvcq.vcqph_controls") controls.
-
-*Genuine adapter receipts for the remaining declared cases (CI).* At source
-#short-id("zkvcq.ci_source_commit"), one hosted workflow run proved six declared cases in parallel
-jobs over the synthetic W3C test vector, with #raw(headline("zkvcq.ci_r0vm_version")) and one V5
-guest artifact (#short-id("zkvcq.ci_guest_sha256")) identical across jobs. The cases are
-#raw(headline("zkvcq.ci_selhd_case")), #raw(headline("zkvcq.ci_askfhd_case")),
-#raw(headline("zkvcq.ci_conhd_case")), #raw(headline("zkvcq.ci_asktva_case")),
-#raw(headline("zkvcq.ci_conva_case")) and #raw(headline("zkvcq.ci_rowb_case")). Each job produced
-one genuine receipt (#raw(headline("zkvcq.ci_asktva_exit_code")), `dev_mode` =
-#raw(repr(headline("zkvcq.ci_asktva_dev_mode")))). The five answer cases were accepted by the
-protocol verifier and ran the same control groups as above, without the two anchor controls in the
-holder-declared cases. The row-bound case's receipt verifies under the V5 pin with test nonces, but
-the protocol verifier refused it with #raw(headline("zkvcq.ci_rowb_rejection")) before consuming
-the original challenge, so it is evidence of the rejection, not of an accepted answer. Wall times
-are recorded but non-canonical, and runner size and peak memory were not captured. The three
-authenticated runs therefore have three guest pins: #short-id("zkvcq.vcqg_guest_sha256") for the
-bag `SELECT` run, #short-id("zkvcq.vcqp_guest_sha256") for the payment run and
-#short-id("zkvcq.ci_guest_sha256") for the CI run. All are built from V5 source, and they differ
-because the image identifier depends on the build path.
-
-=== The public-pattern relation V4 <v4>
-
-V4 is an opt-in Noir relation specialised for the first fully public BGP pattern in a bounded
-profile: the pattern's triple is a public input, while issuer-signature verification and credential
-membership remain constraints of the relation (one signature check per selected credential in the
-K1 and K2 profiles). Credential status is also checked inside the relation: status references,
-status-policy paths and status-leaf membership are constraints, while roots, salts and status
-indices remain private witnesses, so V4 enforces a bounded status snapshot and policy that the
-verifier accepted. The profile is restricted to the filter-free form F0 (no hidden filter), status
-depth 10 and K1/K2. How the verifier acquires that snapshot and how fresh it is are deployment
-policy. Its answer mode is the supported mode in the set sense: the method admits only
-`SELECT DISTINCT` queries and rejects a released result that repeats a row. Its tests replay a
-finite set of valid and absent bindings and adversarial witnesses. In the pilot,
-#headline("zkvcq.pp_positive_verifications") backend verifications succeeded and
-#headline("zkvcq.pp_measured_samples") samples in #headline("zkvcq.pp_measured_pairs") pairs were
-measured after warmups. The pilot snapshot records every sample, the paired differences, the
-executable and tool hashes, the resource limits and the hardware record (Linux
-`7.0.0-1013-aws`; instance type not recorded; `nargo 1.0.0-beta.21` with a pinned `bb` nightly; OS
-and dependency caches uncontrolled; heavy-job locks held). A cost-based planner that chooses
-between public checks, native proofs, specialised circuits and the exact evaluator, fusion of native
-and circuit work, and expansion to JSON-signed suites are not established.
-
-The preliminary pilot timings follow (moved from the main body; §#ref(<pilot-evidence>, supplement: none)).
-
-#let prove-diffs = range(1, headline("zkvcq.pp_measured_pairs") + 1).map(i => ev("zkvcq.pilot_pair" + str(i) + "_prove_diff"))
-#let verify-diffs = range(1, headline("zkvcq.pp_measured_pairs") + 1).map(i => ev("zkvcq.pilot_pair" + str(i) + "_verify_diff"))
+// Paired differences (public-triple minus baseline) and "median (range)" cells of the pilot.
+#let pairs = range(1, headline("zkvcq.pp_measured_pairs") + 1)
+#let prove-diffs = pairs.map(i => ev("zkvcq.pilot_pair" + str(i) + "_prove_diff"))
+#let verify-diffs = pairs.map(i => ev("zkvcq.pilot_pair" + str(i) + "_verify_diff"))
+#let pilot-cell(stem) = [#pilot(stem + "_median") (#pilot(stem + "_min")–#pilot(stem + "_max"))]
 
 #block(inset: 8pt, stroke: 0.5pt + gray, width: 100%, breakable: false)[
-  *Indicative development measurement, not the basis of any claim.* Paired sequential runs on a
-  shared EC2 KVM guest (Intel Xeon Platinum 8488C, eight vCPUs) under a two-CPU quota and an
-  eight-GiB memory cap, with caches uncontrolled. Times are inclusive prove and verify API timers
-  that nest compilation, key and I/O stages; #headline("zkvcq.pp_warmups") warmups were excluded.
+  *Preliminary timings.* We timed #headline("zkvcq.pp_n_per_cell") runs per circuit and number of
+  credentials, after #headline("zkvcq.pp_warmups") warm-up runs that we excluded. The runs
+  alternated the two circuits in pairs on a shared cloud machine (Intel Xeon Platinum 8488C, eight
+  vCPUs) limited to two CPUs and eight GiB of memory, with caches uncontrolled. Prove and verify
+  times include compilation, key and I/O stages.
 
   #figure(
     table(
       columns: (auto, auto, 1fr, 1fr),
       align: (left, left, right, right),
-      table.header[Profile][Arm][Prove, s: median (min–max)][Verify, s: median (min–max)],
-      [K1], [baseline V1],
-      [#pilot("zkvcq.pilot_k1_v1_prove_median") (#pilot("zkvcq.pilot_k1_v1_prove_min")–#pilot("zkvcq.pilot_k1_v1_prove_max"))],
-      [#pilot("zkvcq.pilot_k1_v1_verify_median") (#pilot("zkvcq.pilot_k1_v1_verify_min")–#pilot("zkvcq.pilot_k1_v1_verify_max"))],
-      [K1], [public pattern V4],
-      [#pilot("zkvcq.pilot_k1_v4_prove_median") (#pilot("zkvcq.pilot_k1_v4_prove_min")–#pilot("zkvcq.pilot_k1_v4_prove_max"))],
-      [#pilot("zkvcq.pilot_k1_v4_verify_median") (#pilot("zkvcq.pilot_k1_v4_verify_min")–#pilot("zkvcq.pilot_k1_v4_verify_max"))],
-      [K2], [baseline V1],
-      [#pilot("zkvcq.pilot_k2_v1_prove_median") (#pilot("zkvcq.pilot_k2_v1_prove_min")–#pilot("zkvcq.pilot_k2_v1_prove_max"))],
-      [#pilot("zkvcq.pilot_k2_v1_verify_median") (#pilot("zkvcq.pilot_k2_v1_verify_min")–#pilot("zkvcq.pilot_k2_v1_verify_max"))],
-      [K2], [public pattern V4],
-      [#pilot("zkvcq.pilot_k2_v4_prove_median") (#pilot("zkvcq.pilot_k2_v4_prove_min")–#pilot("zkvcq.pilot_k2_v4_prove_max"))],
-      [#pilot("zkvcq.pilot_k2_v4_verify_median") (#pilot("zkvcq.pilot_k2_v4_verify_min")–#pilot("zkvcq.pilot_k2_v4_verify_max"))],
+      table.header[Credentials][Circuit][Prove, s: median (range)][Verify, s: median (range)],
+      [One], [Baseline], pilot-cell("zkvcq.pilot_k1_v1_prove"),
+        pilot-cell("zkvcq.pilot_k1_v1_verify"),
+      [One], [Public-triple], pilot-cell("zkvcq.pilot_k1_v4_prove"),
+        pilot-cell("zkvcq.pilot_k1_v4_verify"),
+      [Two], [Baseline], pilot-cell("zkvcq.pilot_k2_v1_prove"),
+        pilot-cell("zkvcq.pilot_k2_v1_verify"),
+      [Two], [Public-triple], pilot-cell("zkvcq.pilot_k2_v4_prove"),
+        pilot-cell("zkvcq.pilot_k2_v4_verify"),
     ),
-    caption: [
-      Indicative development pilot, #headline("zkvcq.pp_n_per_cell") measured samples per cell.
-      Descriptive only: no significance test, no general speedup, no scaling claim.
-    ],
+    caption: [Preliminary prove and verify times of the circuit pilot
+      (§#ref(<pilot-evidence>, supplement: none)).],
   ) <pilot-table>
 
-  In #prove-diffs.filter(x => x < 0).len() of #prove-diffs.len() pairs the V4 inclusive prove time
-  was lower, with paired differences (V4 minus V1) between #fmt3(calc.min(..prove-diffs)) and
-  #fmt3(calc.max(..prove-diffs)) s; verify differences were lower in
-  #verify-diffs.filter(x => x < 0).len() of #verify-diffs.len() pairs and ranged from
-  #fmt3(calc.min(..verify-diffs)) to #fmt3(calc.max(..verify-diffs)) s, the largest driven by a
-  single slow baseline sample.
+  Paired differences, public-triple minus baseline, ranged from #fmt3(calc.min(..prove-diffs)) to
+  #fmt3(calc.max(..prove-diffs)) s for proving, negative in
+  #prove-diffs.filter(x => x < 0).len() of #prove-diffs.len() pairs, and from
+  #fmt3(calc.min(..verify-diffs)) to #fmt3(calc.max(..verify-diffs)) s for verifying, negative in
+  #verify-diffs.filter(x => x < 0).len() of #verify-diffs.len() pairs. The largest verifying
+  difference came from one slow baseline run.
 ]
 
-=== Reproducing the evidence <repro>
+== An earlier fixed-circuit design <legacy>
 
-The hosted snapshot records the exact commands, including
-`cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator -- --nocapture --test-threads=1`
-for the guest and proof suite and the `graph-results` feature for the native model; toolchain
-versions and hashes of the host compiler, guest compiler and prover binary; the guest ELF digest and
-image identifier; and the digest of every receipt. The adapter snapshot records per-receipt,
-presentation and journal digests and the control inventory, and its continuation records the
-replayed presentation digest. The V5 native snapshot records each native command, per-configuration
-test inventories, lock-file and toolchain hashes; the V5 guest, proof-attempt and
-authenticated-adapter snapshots record commands or test inventories, guest digests and image
-identifiers, and job and archive digests; the authenticated-adapter genuine snapshot adds the test
-executable, prover, runner and job digests, the receipt, journal, presentation and transport
-digests, the per-control codes and the retained archive digest; the native-composition snapshot
-records plan, report, source and executable hashes and the artifact digests. Re-running the
-campaigns requires the pinned toolchains and, for the proofs, hardware able to run the RISC Zero
-and Barretenberg provers.
+Before the zkVM evaluator, we built a family of Noir circuits with one kind of circuit per operator.
+It proves that each returned solution is a solution, as a Supported answer does, for `SELECT` and
+`ASK` queries built from basic graph patterns, joins and numeric `FILTER`s, with projection,
+`DISTINCT`, `REDUCED`, `LIMIT` and `OFFSET`. It excludes `OPTIONAL`, `MINUS`, `NOT EXISTS`,
+aggregates and `ORDER BY`, because more data could change their results. It also rejects a join that
+binds a shared variable to blank nodes from two credentials, because a blank node is scoped to its
+graph. The baseline and public-triple circuits of §#ref(<supp-pilot>, supplement: none) are later
+members of this family.
 
-== Registry and capability tuples <capabilities>
+The issuer canonicalises each credential's graph with RDFC-1.0, commits to it with Poseidon2 over
+the BN254 scalar field, and signs the commitment with a Schnorr signature over Baby Jubjub.
+Credentials signed with Ed25519 or ECDSA are checked outside the circuit and committed again, which
+a verifier cannot rely on if the holder is dishonest. The commitments are public and unsalted, so a
+verifier can confirm a guessed graph and link repeated commitments; the later circuits keep them
+hidden. A JSON manifest combines one proof per operator. The verifier derives each circuit from the
+manifest and recomputes its verification key instead of accepting one from the prover. It also
+reconstructs the public inputs, requires issuer signatures under its own key list, and accepts each
+challenge once. @legacy-table gives the sizes of the circuits.
 
-The verifier, not the holder, decides what it will accept. Each signature suite and query-proof
-method is identified by a versioned identifier and a descriptor digest in a verifier-side registry.
-The verifier's policy is a set of _capability tuples_ $(m, o, f, a, e, "status", "holder")$: a
-method, answer mode, result form, authority, source-evidence class, status-checking requirement and
-holder-binding requirement. A request is valid only if its contract instantiates an accepted tuple,
-and a method advertises only tuples it implements and tests.
-
-The protocol adapter currently implements the tuples with $o$ = `Exact`, $f$ in bag `SELECT`, `ASK`
-and `CONSTRUCT`, $a$ in HolderDeclared and VerifierAgreed, source evidence `None`, status
-`NotRequested` and a bearer holder (@adapter-table). These tuples say what was proved about
-evaluation; they say nothing about who issued the data. The generic authenticated adapter declares
-the same forms and authorities with source evidence restricted to strict, bounded canonical-RDF
-EdDSA under a verifier-owned policy. It has passed native tests and has genuine receipts for all its declared
-cases, each over a single synthetic credential. Its
-registry entry still conservatively does not offer these tuples as available
-(Appendix #ref(<v5-detail>, supplement: none)). The registry is an integration design, not a new
-cryptographic primitive.
-
-== The legacy fixed-circuit architecture <legacy>
-
-The earlier architecture remains the project's most complete circuit-based design and a baseline
-for the new paths. It proves _result membership_ for a monotone fragment (basic graph pattern scans
-over one committed graph, datatype-bucketed value `FILTER`, a hidden-credential equality `JOIN`
-across distinct graphs, and membership-indifferent modifiers) under the algebra of @pag09.
-Non-monotone operators, aggregation and `ORDER BY` are excluded because extra undisclosed data could
-falsify them; a join binding a shared variable to blank nodes in two committed graphs is rejected,
-since blank-node identity is graph-scoped @rdf11.
-
-Each graph is canonicalised with RDFC-1.0 @rdfc10 and committed with Poseidon2 @poseidon2 over the
-BN254 scalar field; the commitment is bound to an issuer key by a Schnorr signature @schnorr91 over
-Baby Jubjub @eip2494, accepted only if the key is in the relying party's external key set. This
-requires the issuer to adopt that representation; conventional Ed25519 or ECDSA credentials are
-checked outside the circuit at ingestion and recommitted, which a verifier cannot rely on against a
-dishonest holder. The commitments are public and unblinded, so low-entropy graphs can be guessed
-and repeated commitments linked. Every sub-proof uses one circuit of a fixed, named family, so the
-verifier can re-derive the circuit identity and recompute its verification key rather than trust a
-prover-supplied key. A JSON manifest composes sub-proofs through binding edges, and the verifier
-binds the query nonce into every sub-proof's public inputs.
-
+#[
+#show figure: set block(breakable: false)
 #figure(
-  table(
-    columns: (1fr, auto),
-    align: (left, right),
-    table.header[Committed structural fact or circuit size][Value],
-    [Circuit identifier kinds], [#headline("zkarch.circuit_kinds")],
-    [Compiled circuit members], [#headline("zkarch.circuit_members")],
-    [Fail-closed verifier binding obligations], [#headline("zkarch.binding_obligations")],
-    [Cross-cutting audit gates], [#headline("zkarch.audit_gates")],
-    [`Scan`, smallest member (UltraHonk gates)], [#headline("zkarch.gates_scan_min")],
-    [`Scan`, largest member], [#headline("zkarch.gates_scan_max")],
-    [Composable string-canonical filter lane], [#headline("zkarch.gates_filter_lane")],
-    [Opt-in dual-leaf integer value lane], [#headline("zkarch.gates_filter_value_dl_int")],
-    [`JoinEq`, smallest / largest], [#headline("zkarch.gates_join_min") / #headline("zkarch.gates_join_max")],
-    [`RevokeUnset` (depth 10)], [#headline("zkarch.gates_revoke")],
-    [`HiddenIssuer` (in-circuit Schnorr and key-set membership)], [#headline("zkarch.gates_hidden_issuer")],
-    [`HolderPok` (hidden holder; explicitly not yet sound)], [#headline("zkarch.gates_holder_pok")],
-  ),
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1fr, auto),
+      align: (left, right),
+      table.header[Circuit][UltraHonk gates],
+      [Basic graph pattern match: smallest, largest],
+        [#headline("zkarch.gates_scan_min"), #headline("zkarch.gates_scan_max")],
+      [Value `FILTER`, literal committed as hashed text], [#headline("zkarch.gates_filter_lane")],
+      [Integer `FILTER`, value committed with the literal; off by default],
+        [#headline("zkarch.gates_filter_value_dl_int")],
+      [Join on a hidden term: smallest, largest],
+        [#headline("zkarch.gates_join_min"), #headline("zkarch.gates_join_max")],
+      [Credential not revoked], [#headline("zkarch.gates_revoke")],
+      [Hidden issuer: Schnorr signature and key-list membership],
+        [#headline("zkarch.gates_hidden_issuer")],
+      [Hidden holder; not yet sound], [#headline("zkarch.gates_holder_pok")],
+    )
+  },
   caption: [
-    Deterministic facts of the legacy family from the regression-gated gate-count snapshot and
-    committed verifier source (`bb gates -s ultra_honk`, pinned `nargo 1.0.0-beta.21`). They are
-    constraint counts, not timings, and describe the main-branch family only; they say nothing
-    about the new paths.
+    Sizes of the earlier circuits, from #headline("zkarch.circuit_members") compiled circuits of
+    #headline("zkarch.circuit_kinds") kinds. These are constraint counts, not timings. In the
+    integer `FILTER` with a committed value, the issuer must ensure that the value matches the
+    literal.
   ],
 ) <legacy-table>
+]
 
-#provenance("zkarch.gates_scan_max")
+An internal review of an earlier version of this verifier found
+#headline("cozk.single_prover_audit_issues") issues. Among them were public inputs it did not
+reconstruct, verification keys taken from the prover, unsigned commitments, replayable manifests and
+`FILTER` operators not bound to the query. For #headline("zkarch.forge_findings_mapped") of them, a
+regression test now builds the forgery and expects rejection. The circuits for a hidden holder are
+not yet sound and are off by default. The design cannot prove Exact answers, checks the standard
+cryptosuites only outside the circuit, and hides every term that an operator uses. Exact answers,
+signature checks inside the proof and the public-input rule address these limits.
 
-The verifier's four audit gates reconstruct public inputs from the declared statement, recompute
-canonical verification keys, require issuer signatures under the external key set, and enforce a
-single-use nonce. An internal adversarial audit of an earlier verifier found
-#headline("cozk.single_prover_audit_issues") confirmed issues, among them unreconstructed public
-inputs, trusted prover-supplied keys, unsigned commitments, replayable manifests and filter
-operators not bound to the query, and #headline("zkarch.forge_findings_mapped") of them now carry a
-standing forge-and-verify regression test. That evidence pins known attacks closed; it does not
-find unknown ones. The hidden-holder tiers are explicitly not yet sound and off by default; the
-dual-leaf value lane carries an accepted invariant downgrade; lexical/value agreement of
-value-bearing leaves relies on the issuer. The path's limits motivate the new work: it cannot state
-exact results, it authenticates conventional credentials only off-circuit, and it proves every
-retained operator in secret.
+== Combining BBS+ proofs with circuits <composition>
 
-== The native-composition experiment <composition>
+A tempting design verifies BBS+-signed credentials with BBS+ proofs, disclosing public terms, and
+passes hidden values to a circuit for conditions that BBS+ proofs cannot express. A shared challenge
+does not bind the two proofs: it shows that both belong to one exchange, not that they concern the
+same value. Binding them needs a commitment to each hidden value that both proof systems open
+consistently, a fixed encoding of bytes into field elements, range checks where the fields differ,
+domain separation, and an argument that knowledge soundness holds for the combination. We have not
+built this binding.
 
-A tempting design verifies BBS-signed credentials natively, disclosing public terms, and hands
-hidden values to a Noir circuit for predicates that native proofs do not support. The session
-challenge alone cannot bind the two: it shows both proofs belong to one exchange, not that they
-talk about the same income. Such composition would need an explicit linkage relation: a commitment
-to the hidden value in one system opened consistently in the other, a canonical byte and field
-encoding, range constraints for cross-field representation, domain separation, and a composition
-argument whose extraction assumptions hold jointly for both proof systems. That linkage is not
-implemented.
+We built two experimental parts. The first combines BBS+ signatures over BLS12-381 with Circom
+circuits proved with LegoGroth16 over the same field. The second uses BBS+ proofs alone to show that
+the triples of one basic graph pattern, rebuilt from public terms, are signed by an issuer that the
+verifier lists and are not revoked. It discloses which signed messages it uses and their status
+references, supports no condition on hidden values, has no link to the Noir circuits and evaluates
+no other SPARQL.
 
-A separate, experimental native path exists with two distinct parts. Its tuple composition combines
-BBS+ signatures over BLS12-381 with Circom circuits proved with LegoGroth16 in the same field. Its
-opt-in native-RDF interface (`issue_rdf`, `prove_public_bgp`, `verify_public_bgp`) uses BBS+ proofs
-alone to authenticate reconstructed public BGP triples under a verifier-owned issuer and status
-policy. The native-RDF interface discloses signed-slot indices and status references, supports no
-hidden RDF predicate, has no linkage to the Noir relations, does not evaluate full exact SPARQL and
-is unaudited.
+In one CI run over a finite set of test cases, the second part produced
+#headline("zkvcq.nc_distinct_proofs") distinct BBS+ proofs under
+#headline("zkvcq.nc_distinct_nonces") distinct challenges. The required verifier configuration
+accepted #headline("zkvcq.nc_required_accepted") of them and rejected
+#headline("zkvcq.nc_weaker_rejected") that verify under a weaker configuration. The run rejected
+#headline("zkvcq.nc_empty_graph_admission") further cases with an empty graph before proving, and
+excluded #headline("zkvcq.nc_other_exclusions") others. Separately, a proof made with the
+command-line tool verified, and was rejected after we substituted the issuer, query, result or
+challenge, replayed it, revoked the credential or changed the status epoch. These are neither Exact
+answers nor combined proofs. A comparison of BBS+ proofs, circuits and zkVMs would need methods that
+prove the same statement with the same signature checks and disclosure.
 
-At source #short-id("zkvcq.nc_source_commit"), a hosted CI run exercised a declared finite
-native-RDF domain with #headline("zkvcq.nc_distinct_proofs") distinct BBS+ proofs under
-#headline("zkvcq.nc_distinct_nonces") distinct nonces: #headline("zkvcq.nc_required_accepted")
-proofs accepted by the required verifier policy, and #headline("zkvcq.nc_weaker_rejected") proofs
-that verified under a weaker policy and were rejected by the required verifier. A further
-#headline("zkvcq.nc_empty_graph_admission") empty-graph cells were refused at admission and
-#headline("zkvcq.nc_other_exclusions") other cases were explicitly excluded; neither group produced
-a proof. Separately, #headline("zkvcq.nc_cli_proofs") retained command-line proof verified
-positively and was rejected under substituted issuer, query, result and nonce, replay, revocation
-and status-epoch controls; proofs made inside the native test functions are not enumerated. These
-are native BBS+ public-BGP proofs within one finite domain, not composition proofs and not exact
-SPARQL proofs, and they share no counts with any other campaign. Tuple composition was executed by
-two legacy test functions, whose internal proof count is not enumerated. We therefore draw no
-conclusion about the relative merit of native proofs, circuits and zkVMs; such a comparison is
-meaningful only between relations with matched statements, authentication and disclosure.
+== Artifacts and reproduction <repro>
 
-#if not anon [
-  #line(length: 100%)
-  #text(size: 0.8em, fill: gray)[
-    sparq project. Working paper under the open external-audit gate `sq-qhy4`; it asserts no
-    proven security, privacy, integrity or attestation property. New-path evidence traces to the
-    frozen snapshots in `research/zk-paper-evidence/` (digests in `provenance.json`), bound to
-    `site/src/data/paper-evidence.json` by JSON pointer. Legacy-path evidence traces to
-    `crates/sparq-zk-compose/tests/gate_count_snapshot.json`,
-    `crates/sparq-zk-compose/src/verifier.rs`, `research/zk-soundness-audit.md` and
-    `crates/sparq-zk-compose/tests/audit_forge_map.rs`. Numbers are injected at build time.
-  ]
+@artifact-table identifies the software behind each experiment. Each experiment's record lists the
+commands it ran, the versions and hashes of the compilers and the prover, the hashes of the guest
+binary and of each receipt, and every test outcome. The paper reads its numbers from these records
+when it is built. Re-running an experiment needs the recorded toolchains and, for proving, a machine
+that can run the RISC Zero or Barretenberg prover. Guest binaries built from the same source differ
+between experiments because the build path enters the binary; we obtained identical binaries only
+with a fixed build path and toolchain.
+
+#[
+#show figure: set block(breakable: false)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1.3fr, 1.5fr, auto, auto, 0.9fr),
+      align: (left, left, left, left, left),
+      table.header[Experiment][Proof method and version][Source commit][Guest binary][Machine],
+      [Evaluator, CI build], [The evaluator, in all three request formats],
+        [#short-id("zkvcq.exact_source_commit")], [#short-id("zkvcq.exact_guest_sha256")],
+        [GitHub Actions runner],
+      [Evaluator with our services], [`urn:sparq:vcq:method:risc0-exact`, 3],
+        [#short-id("zkvcq.adapter_source_commit")], [#short-id("zkvcq.adapter_guest_sha256")],
+        [EC2 instance],
+      [With signature checks: tests], [–], [#short-id("zkvcq.v5_source_commit")], [–],
+        [EC2 instance],
+      [With signature checks: executed directly], [–], [#short-id("zkvcq.v5g_source_commit")],
+        [#short-id("zkvcq.v5g_guest_sha256")], [EC2 instance],
+      [With signature checks and our services: tests; first test case],
+        [`urn:sparq:vcq:method:risc0-authenticated-rdf`, 5],
+        [#short-id("zkvcq.vcqg_source_commit")], [#short-id("zkvcq.vcqg_guest_sha256")],
+        [EC2 instance],
+      [Payment question †], [Same], [#short-id("zkvcq.vcqp_source_commit")],
+        [#short-id("zkvcq.vcqp_guest_sha256")], [Cloud container],
+      [Remaining test cases †], [Same], [#short-id("zkvcq.ci_source_commit")],
+        [#short-id("zkvcq.ci_guest_sha256")], [GitHub Actions runners],
+      [Public-triple circuit pilot], [Noir circuits], [#short-id("zkvcq.pp_source_commit")], [–],
+        [EC2 instance],
+      [BBS+ proofs (§#ref(<composition>, supplement: none))], [–],
+        [#short-id("zkvcq.nc_source_commit")], [–], [GitHub Actions runner],
+    )
+  },
+  caption: [
+    Software behind each experiment. Commits and SHA-256 digests of guest binaries show their
+    first twelve hexadecimal digits; the RISC Zero image ID is computed from the guest binary. The
+    zkVM experiments used the prover #raw(headline("zkvcq.exact_r0vm_version")), and the circuits
+    were compiled with `nargo 1.0.0-beta.21`. † No internal check.
+  ],
+) <artifact-table>
 ]
