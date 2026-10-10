@@ -16,7 +16,9 @@
 mod fixture;
 
 use fixture::{CountingNonces, Expect};
-use sparq_proved_evaluator::authenticated_rdf::{prove_with_artifact, verify_with_artifact};
+use sparq_proved_evaluator::authenticated_rdf::{
+    prove_with_artifact, verify_revealed_with_artifact, verify_with_artifact,
+};
 use sparq_proved_evaluator::{
     AcceptedGuest, ArtifactPin, Error, embedded_artifact, embedded_authrdf_artifact,
     embedded_authrdf_pin, embedded_pin,
@@ -152,5 +154,107 @@ fn verification_failures_never_consume_the_nonce() {
             Error(error)
         );
         assert_eq!(nonces.calls, 0, "{error}: the nonce store was reached");
+    }
+}
+
+/// The published vector in revealed mode: the witness carries no signature and
+/// the verifier checks the W3C signature over the journal's signed message.
+fn revealed_witness() -> auth::Witness {
+    let mut witness = fixture::witness(fixture::ASK_ISSUER, DatasetAuthority::HolderDeclared, NONCE);
+    witness.request.policy = fixture::policy().with_signature_mode(auth::SignatureMode::Revealed);
+    witness.dataset.credentials[0].signature.clear();
+    witness
+}
+
+#[test]
+fn revealed_mode_reveals_the_published_signed_message_and_checks_it_outside_the_proof() {
+    let witness = revealed_witness();
+    let journal = auth::evaluate(&witness).expect("native oracle");
+    assert_eq!(journal.result, Expect::Ask(true).result());
+    let [entry] = journal.signed_messages.as_slice() else { panic!("one credential") };
+    assert_eq!(entry.verification_method, fixture::W3C_VM);
+    let expected: Vec<u8> = [
+        fixture::hex::<32>(fixture::W3C_PROOF_SHA256),
+        fixture::hex::<32>(fixture::W3C_DOCUMENT_SHA256),
+    ]
+    .concat();
+    assert_eq!(entry.message, expected);
+    let signature = fixture::hex::<64>(fixture::W3C_SIGNATURE).to_vec();
+    auth::check_revealed_signatures(&journal, &witness.request, std::slice::from_ref(&signature)).unwrap();
+
+    let guest = auth_guest();
+    let bytes: Vec<u8> = risc0_zkvm::serde::to_vec(&journal)
+        .unwrap()
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    let fake = fixture::fake_receipt(guest.image_id(), bytes);
+    let hidden = fixture::request(fixture::ASK_ISSUER, DatasetAuthority::HolderDeclared, NONCE);
+    let mut nonces = CountingNonces::default();
+    // Each entry point refuses the other mode, and a fake receipt fails first.
+    assert_eq!(
+        verify_with_artifact(&fake, &witness.request, &mut nonces, &guest).unwrap_err(),
+        Error("revealed-mode V5 requests use verify_revealed_with_artifact")
+    );
+    assert_eq!(
+        verify_revealed_with_artifact(&fake, &hidden, std::slice::from_ref(&signature), &mut nonces, &guest)
+            .unwrap_err(),
+        Error("hidden-mode V5 requests use verify_with_artifact")
+    );
+    assert_eq!(
+        verify_revealed_with_artifact(&fake, &witness.request, &[signature], &mut nonces, &guest)
+            .unwrap_err(),
+        Error("only succinct receipts are accepted")
+    );
+    assert_eq!(nonces.calls, 0);
+}
+
+/// The paper's Q1–Q5 over the payment credential, under both suites and modes.
+#[test]
+fn paper_queries_run_on_the_payment_credential_under_both_suites() {
+    use sparq_proved_evaluator_model::merkle_suite;
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/paper");
+    let mut names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.ends_with(".rq"))
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 5);
+    // RFC 8032 section 7.1 TEST 1 secret key; public test material.
+    let key = ed25519_dalek::SigningKey::from_bytes(&fixture::hex(
+        "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+    ));
+    let eddsa = fixture::payment_credential();
+    let merkle_config = fixture::PAYMENT_PROOF.replace("\"eddsa-rdfc-2022\"", "\"eddsa-sha256-merkle-2026\"");
+    let merkle = merkle_suite::issue(fixture::PAYMENT_DOCUMENT, &merkle_config, &key, [0x5c; 32]).unwrap();
+    let suites = [(auth::Cryptosuite::EddsaRdfc2022, eddsa), (auth::Cryptosuite::EddsaSha256Merkle2026, merkle)];
+    let expected = ["false", "1250.00", "1250.00", "2026-08", "2026-07"];
+    for (name, needle) in names.iter().zip(expected) {
+        let query = std::fs::read_to_string(dir.join(name)).unwrap();
+        let mut results = Vec::new();
+        for (suite, credential) in &suites {
+            for mode in [auth::SignatureMode::Hidden, auth::SignatureMode::Revealed] {
+                let mut credential = credential.clone();
+                if mode == auth::SignatureMode::Revealed {
+                    credential.signature.drain(..64);
+                }
+                let witness = auth::Witness {
+                    request: auth::Request {
+                        version: auth::VERSION,
+                        query: query.clone(),
+                        authority: DatasetAuthority::HolderDeclared,
+                        policy: fixture::payment_policy().with_cryptosuite(*suite).with_signature_mode(mode),
+                        nonce: NONCE,
+                    },
+                    dataset: fixture::credentials(vec![credential], fixture::SALT),
+                };
+                let journal = auth::evaluate(&witness).unwrap_or_else(|e| panic!("{name} {suite:?} {mode:?}: {e:?}"));
+                results.push(journal.result);
+            }
+        }
+        assert!(results.windows(2).all(|pair| pair[0] == pair[1]), "{name}");
+        let shown = format!("{:?}", results[0]);
+        assert!(shown.contains(needle) || (needle == "false" && shown.contains("false")), "{name}: {shown}");
     }
 }

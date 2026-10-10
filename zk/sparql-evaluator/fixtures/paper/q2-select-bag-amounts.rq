@@ -1,0 +1,2 @@
+PREFIX bank: <https://bank.example/vocab#>
+SELECT ?amount WHERE { ?p a bank:Payment ; bank:amount ?amount }

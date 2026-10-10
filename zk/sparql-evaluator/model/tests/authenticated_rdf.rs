@@ -7,6 +7,7 @@ use sparq_proved_evaluator_model::authenticated_rdf::{
     MAX_PROOF_CONFIG_BYTES, Policy, PrivateCredentials, Provenance, Request, SignedCredential,
     Witness,
 };
+use sparq_proved_evaluator_model::merkle_suite as merkle;
 use sparq_proved_evaluator_model::{DatasetAuthority, MAX_ROWS, ProofContract, Rejected, RowOrder, v3};
 
 // Published W3C vector: vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 representation,
@@ -369,12 +370,12 @@ fn valid_signatures_do_not_authorize_wrong_issuer_method_purpose_or_suite() {
         ),
         (
             sign(&alice, &config(VM_A).replace("\"eddsa-rdfc-2022\"", "\"ecdsa-rdfc-2019\""), 1),
-            "cryptosuite must be the typed eddsa-rdfc-2022 value",
+            "cryptosuite must be the policy's typed cryptosuite value",
         ),
         // The plain-literal form is not the standard cryptosuiteString value.
         (
             sign(&alice, &config(VM_A).replace(&typed_suite, "\"eddsa-rdfc-2022\""), 1),
-            "cryptosuite must be the typed eddsa-rdfc-2022 value",
+            "cryptosuite must be the policy's typed cryptosuite value",
         ),
         (
             sign(&alice, &config(VM_A).replace("#DataIntegrityProof", "#Ed25519Signature2020"), 1),
@@ -821,4 +822,280 @@ fn journal_version_request_and_result_substitutions_reject() {
         nonce: expected.nonce,
     };
     assert_ne!(v3::request_digest(&inner).unwrap(), journal.request_digest);
+}
+
+// Revealed mode: the witness carries no signature; the verifier checks it.
+fn strip(credential: SignedCredential) -> (SignedCredential, Vec<u8>) {
+    let signature = credential.signature.clone();
+    (SignedCredential { signature: Vec::new(), ..credential }, signature)
+}
+
+fn revealed() -> Policy {
+    Policy::new(table()).with_signature_mode(auth::SignatureMode::Revealed)
+}
+
+#[test]
+fn revealed_mode_publishes_exact_signed_messages_and_hidden_digests_are_unchanged() {
+    assert_eq!(Policy::new(table()).signature_mode, auth::SignatureMode::Hidden);
+    assert_eq!(auth::SignatureMode::Hidden.as_str(), "hidden");
+    assert_eq!(auth::SignatureMode::Revealed.as_str(), "revealed");
+    // A hidden policy serialized before the field existed decodes to Hidden.
+    let mut json = serde_json::to_value(Policy::new(table())).unwrap();
+    json.as_object_mut().unwrap().remove("signature_mode");
+    assert_eq!(serde_json::from_value::<Policy>(json).unwrap(), Policy::new(table()));
+
+    let query = "SELECT ?n WHERE { ?s ex:name ?n }";
+    let hidden = holder(query, vec![alice(), bob()]).unwrap();
+    assert!(hidden.signed_messages.is_empty());
+    let (a, sig_a) = strip(alice());
+    let (b, sig_b) = strip(bob());
+    let journal = run(query, DatasetAuthority::HolderDeclared, revealed(), vec![a.clone(), b.clone()]).unwrap();
+    assert_eq!(journal.result, hidden.result);
+    // The policy digest, and so the commitment and request digest, bind the mode.
+    assert_ne!(journal.dataset_commitment, hidden.dataset_commitment);
+    assert_ne!(journal.request_digest, hidden.request_digest);
+    assert_eq!(journal.signed_messages.len(), 2);
+    let mut expected = Vec::new();
+    for (credential, method) in [(&alice(), VM_A), (&bob(), VM_B)] {
+        let config_hash = Sha256::digest(sparq_canon::canonicalize_nquads(&credential.proof_config).unwrap());
+        let document_hash = Sha256::digest(sparq_canon::canonicalize_nquads(&credential.document).unwrap());
+        expected.push((document_hash.to_vec(), method, [config_hash.as_slice(), document_hash.as_slice()].concat()));
+    }
+    expected.sort();
+    for (entry, (_, method, message)) in journal.signed_messages.iter().zip(&expected) {
+        assert_eq!(entry.verification_method, *method);
+        assert_eq!(&entry.message, message);
+    }
+    let req = request(query, DatasetAuthority::HolderDeclared, revealed());
+    auth::bind_journal(&journal, &req).unwrap();
+    // Signatures go in journal order (sorted by document hash).
+    let ordered: Vec<Vec<u8>> = journal
+        .signed_messages
+        .iter()
+        .map(|m| if m.verification_method == VM_A { sig_a.clone() } else { sig_b.clone() })
+        .collect();
+    auth::check_revealed_signatures(&journal, &req, &ordered).unwrap();
+    let swapped: Vec<Vec<u8>> = ordered.iter().rev().cloned().collect();
+    assert_eq!(reason(auth::check_revealed_signatures(&journal, &req, &swapped)), "Ed25519 signature verification failed");
+    assert_eq!(reason(auth::check_revealed_signatures(&journal, &req, &ordered[..1])), "revealed signature count mismatch");
+    let mut forged = ordered.clone();
+    forged[0][0] ^= 1;
+    assert!(auth::check_revealed_signatures(&journal, &req, &forged).is_err());
+    assert_eq!(reason(auth::check_revealed_signatures(&journal, &req, &[vec![0; 63], ordered[1].clone()])), "Ed25519 signature must be 64 bytes");
+    // A hidden request never accepts a revealed journal, and the reverse.
+    let hidden_req = request(query, DatasetAuthority::HolderDeclared, Policy::new(table()));
+    assert!(auth::bind_journal(&journal, &hidden_req).is_err());
+    assert!(auth::bind_journal(&hidden, &req).is_err());
+    assert_eq!(reason(auth::check_revealed_signatures(&hidden, &hidden_req, &[])), "revealed signature count mismatch");
+    let mut emptied = journal.clone();
+    emptied.signed_messages.clear();
+    assert_eq!(reason(auth::bind_journal(&emptied, &req)), "authenticated journal signature mode mismatch");
+}
+
+#[test]
+fn revealed_mode_rejects_witness_signatures_and_still_enforces_the_table() {
+    let query = "ASK { ?s ex:name ?n }";
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, revealed(), vec![alice()])),
+        "revealed mode carries no witness signature"
+    );
+    let (a, _) = strip(alice());
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, Policy::new(table()), vec![a])),
+        "Ed25519 signature must be 64 bytes"
+    );
+    // Unlisted methods and issuer mismatches still reject inside the proof.
+    let (unlisted, _) = strip(sign(&alice_document(), &config(VM_UNLISTED), 1));
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, revealed(), vec![unlisted])),
+        "verification method is not authorized"
+    );
+    // A verifier-agreed anchor binds the mode it was computed under.
+    let (a, _) = strip(alice());
+    let anchor = auth::dataset_commitment(&credentials(vec![a.clone()]), &revealed()).unwrap();
+    let journal =
+        run(query, DatasetAuthority::VerifierAgreed { commitment: anchor }, revealed(), vec![a.clone()]).unwrap();
+    assert_eq!(journal.provenance, Provenance::VerifierAgreedAuthenticated);
+    let hidden_anchor = authenticate(vec![alice()]).unwrap();
+    assert_eq!(
+        reason(run(query, DatasetAuthority::VerifierAgreed { commitment: hidden_anchor }, revealed(), vec![a])),
+        "authenticated dataset anchor mismatch"
+    );
+}
+
+// eddsa-sha256-merkle-2026: issue by ordering the parsed quads by leaf.
+fn merkle_config(method: &str) -> String {
+    config(method).replace("\"eddsa-rdfc-2022\"", "\"eddsa-sha256-merkle-2026\"")
+}
+
+fn merkle_parts(document: &str, config: &str, salt: [u8; 32]) -> (String, [u8; 32]) {
+    use oxrdf::Quad;
+    let quads: Vec<Quad> = oxttl::NQuadsParser::new()
+        .for_slice(document.as_bytes())
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let mut leaves: Vec<([u8; 32], &Quad)> = quads.iter().map(|q| (merkle::leaf(q).unwrap(), q)).collect();
+    leaves.sort_by_key(|(leaf, _)| *leaf);
+    leaves.dedup_by_key(|(leaf, _)| *leaf);
+    let ordered: String = leaves.iter().map(|(_, q)| format!("{q} .\n")).collect();
+    let row: Vec<[u8; 32]> = leaves.iter().map(|(leaf, _)| *leaf).collect();
+    let root = merkle::root(&row).unwrap();
+    let config_hash: [u8; 32] = Sha256::digest(sparq_canon::canonicalize_nquads(config).unwrap()).into();
+    (ordered, merkle::signed_message(&salt, row.len() as u32, &root, &config_hash))
+}
+
+fn merkle_sign(document: &str, config: &str, seed: u8, salt: [u8; 32]) -> SignedCredential {
+    let (ordered, message) = merkle_parts(document, config, salt);
+    let mut proof_value = key(seed).sign(&message).to_bytes().to_vec();
+    proof_value.extend_from_slice(&salt);
+    SignedCredential {
+        document: ordered,
+        proof_config: config.into(),
+        signature: proof_value,
+    }
+}
+
+fn merkle_policy() -> Policy {
+    Policy::new(table()).with_cryptosuite(auth::Cryptosuite::EddsaSha256Merkle2026)
+}
+
+fn merkle_alice() -> SignedCredential {
+    let claims = format!(
+        "<urn:vc:m-alice> <{CRED}credentialSubject> _:subject .\n\
+         _:subject <http://ex/name> \"Alice\" .\n\
+         _:subject <http://ex/balance> \"1250.50\"^^<{XSD}decimal> .\n"
+    );
+    merkle_sign(&document("urn:vc:m-alice", ISSUER_A, &claims), &merkle_config(VM_A), 1, [0x41; 32])
+}
+
+fn merkle_bob() -> SignedCredential {
+    let claims = format!("<did:example:bob> <http://ex/balance> \"99\"^^<{XSD}integer> .\n");
+    merkle_sign(&document("urn:vc:m-bob", ISSUER_B, &claims), &merkle_config(VM_B), 2, [0x42; 32])
+}
+
+#[test]
+fn merkle_suite_answers_with_blank_nodes_in_both_modes() {
+    let query = "SELECT ?b WHERE { ?s ex:balance ?b FILTER(?b > 100) }";
+    let hidden = run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![merkle_alice(), merkle_bob()]).unwrap();
+    assert!(hidden.signed_messages.is_empty());
+    let rows = format!("{:?}", hidden.result);
+    assert!(rows.contains("1250.50") && !rows.contains("\"99\""), "{rows}");
+    // The eddsa-rdfc-2022 policy never accepts Merkle credentials, nor the reverse.
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, Policy::new(table()), vec![merkle_bob()])),
+        "Ed25519 signature must be 64 bytes"
+    );
+    let mut eddsa = bob();
+    eddsa.signature.extend_from_slice(&[0x42; 32]);
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![eddsa])),
+        "cryptosuite must be the policy's typed cryptosuite value"
+    );
+
+    // Revealed: the witness keeps only the salt; the message is salted.
+    let revealed_policy = merkle_policy().with_signature_mode(auth::SignatureMode::Revealed);
+    let (alice, bob) = (merkle_alice(), merkle_bob());
+    let signatures: Vec<Vec<u8>> = [&alice, &bob].iter().map(|c| c.signature[..64].to_vec()).collect();
+    let strip = |c: &SignedCredential| SignedCredential { signature: c.signature[64..].to_vec(), ..c.clone() };
+    let journal = run(
+        query,
+        DatasetAuthority::HolderDeclared,
+        revealed_policy.clone(),
+        vec![strip(&alice), strip(&bob)],
+    )
+    .unwrap();
+    assert_eq!(journal.result, hidden.result);
+    assert_eq!(journal.signed_messages.len(), 2);
+    let req = request(query, DatasetAuthority::HolderDeclared, revealed_policy.clone());
+    let mut ordered = signatures.clone();
+    let alice_message = merkle_parts(&alice.document, &alice.proof_config, [0x41; 32]).1;
+    if journal.signed_messages[0].message != alice_message {
+        ordered.reverse();
+    }
+    for entry in &journal.signed_messages {
+        assert_eq!(entry.message.len(), 32);
+    }
+    auth::check_revealed_signatures(&journal, &req, &ordered).unwrap();
+    ordered.reverse();
+    assert!(auth::check_revealed_signatures(&journal, &req, &ordered).is_err());
+    // A witness that still carries the signature in revealed mode rejects.
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, revealed_policy, vec![alice])),
+        "Merkle proof value must be the signature (hidden mode only) and salt"
+    );
+}
+
+#[test]
+fn merkle_credential_order_depends_only_on_salted_messages() {
+    // A known reference credential next to a private one: the published order must
+    // follow the salted messages, never the unsalted roots.
+    let query = "ASK { ?s ex:balance ?b }";
+    let policy = merkle_policy().with_signature_mode(auth::SignatureMode::Revealed);
+    let reference = merkle_bob();
+    let (_, reference_message) = merkle_parts(&reference.document, &reference.proof_config, [0x42; 32]);
+    let identity = |c: &SignedCredential| {
+        let (_, root, n) = {
+            let quads: Vec<oxrdf::Quad> = oxttl::NQuadsParser::new()
+                .for_slice(c.document.as_bytes())
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let leaves: Vec<[u8; 32]> = quads.iter().map(|q| merkle::leaf(q).unwrap()).collect();
+            ((), merkle::root(&leaves).unwrap(), leaves.len() as u32)
+        };
+        let mut hash = Sha256::new();
+        hash.update(n.to_be_bytes());
+        hash.update(root);
+        <[u8; 32]>::from(hash.finalize())
+    };
+    let mut disagreements = 0;
+    for amount in 100..140 {
+        let claims = format!("<did:example:carol> <http://ex/balance> \"{amount}\"^^<{XSD}integer> .\n");
+        let private = merkle_sign(&document("urn:vc:m-carol", ISSUER_A, &claims), &merkle_config(VM_A), 1, [0x44; 32]);
+        let (_, private_message) = merkle_parts(&private.document, &private.proof_config, [0x44; 32]);
+        let strip = |c: &SignedCredential| SignedCredential { signature: c.signature[64..].to_vec(), ..c.clone() };
+        let journal =
+            run(query, DatasetAuthority::HolderDeclared, policy.clone(), vec![strip(&reference), strip(&private)]).unwrap();
+        let by_message = private_message < reference_message;
+        let by_identity = identity(&private) < identity(&reference);
+        disagreements += usize::from(by_message != by_identity);
+        let first = &journal.signed_messages[0].message;
+        assert_eq!(first == &private_message.to_vec(), by_message, "amount {amount}");
+    }
+    // The loop exercises cases where the two orders differ.
+    assert!(disagreements > 0);
+}
+
+#[test]
+fn merkle_suite_rejects_reordered_tampered_or_resalted_credentials() {
+    let query = "ASK { ?s ex:balance ?b }";
+    let run_one = |credential: SignedCredential| {
+        run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![credential])
+    };
+    run_one(merkle_bob()).unwrap();
+    let mut reordered = merkle_bob();
+    let mut lines: Vec<&str> = reordered.document.lines().collect();
+    lines.reverse();
+    reordered.document = lines.join("\n") + "\n";
+    assert_eq!(reason(run_one(reordered)), "Merkle leaves must be non-empty and strictly increasing");
+    let mut duplicated = merkle_bob();
+    let first = duplicated.document.lines().next().unwrap().to_owned();
+    duplicated.document = format!("{first}\n{}", duplicated.document);
+    assert_eq!(reason(run_one(duplicated)), "Merkle leaves must be non-empty and strictly increasing");
+    let mut tampered = merkle_bob();
+    tampered.document = tampered.document.replace("\"99\"", "\"990\"");
+    // Changing a leaf may also break the order; either way it never verifies.
+    assert!(run_one(tampered).is_err());
+    let mut resalted = merkle_bob();
+    resalted.signature[64] ^= 1;
+    assert_eq!(reason(run_one(resalted)), "Ed25519 signature verification failed");
+    // The same document reissued under a fresh salt is still a duplicate.
+    let claims = format!("<did:example:bob> <http://ex/balance> \"99\"^^<{XSD}integer> .\n");
+    let reissued = merkle_sign(&document("urn:vc:m-bob", ISSUER_B, &claims), &merkle_config(VM_B), 2, [0x43; 32]);
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![merkle_bob(), reissued])),
+        "duplicate authenticated credential document"
+    );
+    let mut short = merkle_bob();
+    short.signature.truncate(64);
+    assert_eq!(reason(run_one(short)), "Merkle proof value must be the signature (hidden mode only) and salt");
 }

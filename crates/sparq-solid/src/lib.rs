@@ -30,6 +30,10 @@ mod provenance;
 // default, so the core sparq-solid build carries zero ODRL/sparq-policy code.
 #[cfg(feature = "odrl-bridge")]
 pub mod odrl_bridge;
+// Request-time ODRL decisions (issue #6743): attached policies evaluated through
+// `sparq_policy::decide` for the accessing session.
+#[cfg(feature = "odrl-bridge")]
+pub mod odrl_enforce;
 // [OPUS-4.8] sq-pfae PoC (issue #940): trust-graph admission → AUTH_GRAPH wiring —
 // opt-in (`trust-graph` feature), OFF by default, so the core sparq-solid build carries
 // zero trust-graph/sparq-trust code and is byte-identical to WAC/ACP today (G6).
@@ -86,6 +90,8 @@ pub use odrl_bridge::{
 };
 #[cfg(feature = "odrl-bridge")]
 pub use odrl_bridge::{BridgeEntry, BridgeKind, BridgeLedger};
+#[cfg(feature = "odrl-bridge")]
+pub use odrl_enforce::OdrlEnforcement;
 // [OPUS-4.8] sq-pfae PoC: the trust-graph admission outcome types (feature-gated).
 // `TrustStaticOutcome` is the materialise-time (static/dynamic split, sq-xc4y) result.
 #[cfg(feature = "trust-graph")]
@@ -276,6 +282,13 @@ pub struct PodStore {
     /// carries zero ODRL state).
     #[cfg(feature = "odrl-bridge")]
     bridge_ledger: odrl_bridge::BridgeLedger,
+    /// The auth view was dropped (see [`PodStore::drop_auth_view`]) and no static
+    /// materialization has succeeded since: no other grant source may install grants.
+    view_dropped: bool,
+    /// The ODRL policies evaluated per request (issue #6743). Applied on top of the
+    /// cached static view, so attaching or detaching needs no cache invalidation.
+    #[cfg(feature = "odrl-bridge")]
+    odrl: odrl_enforce::OdrlEnforcement,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -438,6 +451,9 @@ impl PodStore {
             cache: session_cache::SessionCache::new(), // [FABLE-5] sq-cnuqd: bounded + sharded
             #[cfg(feature = "odrl-bridge")]
             bridge_ledger: odrl_bridge::BridgeLedger::new(),
+            view_dropped: false,
+            #[cfg(feature = "odrl-bridge")]
+            odrl: odrl_enforce::OdrlEnforcement::default(),
         }
     }
 
@@ -465,6 +481,7 @@ impl PodStore {
     /// [OPUS-4.8] sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
         let stats = materialize_wac(&mut self.graph)?;
+        self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
         Ok(stats)
@@ -481,8 +498,9 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     fn reconcile_bridged_after_static(&mut self) {
         self.bridge_ledger.capture_static_baseline(&self.graph);
-        // refresh() rebuilds from the just-captured baseline and replays the ledger.
-        self.bridge_ledger.refresh(&mut self.graph);
+        // refresh() rebuilds from the just-captured baseline and replays the ledger. A static
+        // materialization clears the drop first, so this always runs.
+        let _ = self.refresh_bridged();
     }
 
     /// No-op stub when the bridge is compiled out — the core build has no bridged state.
@@ -626,6 +644,7 @@ impl PodStore {
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
         let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
         Ok(stats)
@@ -800,7 +819,12 @@ impl PodStore {
         let user = self.modes_held(session, resource);
         // The `public` field is what an anonymous caller (no WebID) holds — `acl:Read`
         // granted to `foaf:Agent` etc. — independent of the authenticated session.
-        let public = self.modes_held(&Session::default(), resource);
+        // It keeps the request clock, so a time-bound rule reads the same for both fields.
+        let anon = Session {
+            now: session.now,
+            ..Session::default()
+        };
+        let public = self.modes_held(&anon, resource);
         format!(r#"user="{}",public="{}""#, user, public)
     }
 
@@ -886,7 +910,30 @@ impl PodStore {
     pub fn decide(&self, session: &Session, resource: &str, mode: Mode) -> WacDecision {
         // [OPUS-4.8] sq-j8qtt: reuse the persistent per-generation index (built once,
         // dropped on `reindex`) instead of rebuilding it on every call.
-        decide::decide_one(self.acl_index(), &self.auth, session, resource, mode)
+        let d = decide::decide_one(self.acl_index(), &self.auth, session, resource, mode);
+        self.apply_odrl(d, session, resource, mode)
+    }
+
+    /// Remove the modes an attached ODRL prohibition denies (issue #6743) from a point
+    /// decision. Deny-only: it never grants, so the status and governing-ACL provenance
+    /// are unchanged. The identity when no policy is attached.
+    fn apply_odrl(&self, mut d: WacDecision, session: &Session, resource: &str, mode: Mode) -> WacDecision {
+        d.granted_modes.retain(|m| !self.odrl_denies(session, *m, resource));
+        d.allow = d.allow && !self.odrl_denies(session, mode, resource);
+        d
+    }
+
+    /// Whether an attached ODRL prohibition removes `mode` on `target` for `session`:
+    /// the one request-time gate every authorizing entry point goes through.
+    #[cfg(feature = "odrl-bridge")]
+    fn odrl_denies(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        self.odrl.denies(session, mode, target)
+    }
+
+    /// Feature-off twin of the gate above: nothing is attached, nothing is denied.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn odrl_denies(&self, _: &Session, _: Mode, _: &str) -> bool {
+        false
     }
 
     /// [OPUS-4.8] issue #992 FR-1 (sq-snopa.1) — [`PodStore::decide`] for a BATCH of
@@ -902,7 +949,10 @@ impl PodStore {
         let index = self.acl_index();
         requests
             .iter()
-            .map(|(resource, mode)| decide::decide_one(index, &self.auth, session, resource, *mode))
+            .map(|(resource, mode)| {
+                let d = decide::decide_one(index, &self.auth, session, resource, *mode);
+                self.apply_odrl(d, session, resource, *mode)
+            })
             .collect()
     }
 
@@ -978,14 +1028,18 @@ impl PodStore {
         child_name: &str,
         mode: Mode,
     ) -> WacDecision {
-        decide::decide_create_one(
+        let d = decide::decide_create_one(
             self.acl_index(),
             &self.auth,
             session,
             container,
             child_name,
             mode,
-        )
+        );
+        // The child-name refusal above stays first; a prohibition on the container or on
+        // the child it would mint can only narrow what is left.
+        let d = self.apply_odrl(d, session, container, mode);
+        self.apply_odrl(d, session, &format!("{container}{child_name}"), mode)
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
@@ -1054,7 +1108,13 @@ impl PodStore {
             mode,
         );
         let auth = Arc::clone(&self.auth);
-        self.cache.get_or_compute(&key, |entry| entry.fill(&auth, s, mode))
+        let sets = self.cache.get_or_compute(&key, |entry| entry.fill(&auth, s, mode));
+        // Attached ODRL prohibitions only narrow the cached static set (issue #6743).
+        #[cfg(feature = "odrl-bridge")]
+        if !self.odrl.is_empty() {
+            return SessionEntry::sets_from(self.odrl.filter(s, mode, &sets.sorted));
+        }
+        sets
     }
 
     /// The session's zero-copy [`DatasetView`] over this store (mode-checked graph
@@ -1336,7 +1396,8 @@ impl PodStore {
         acp: bool,
         budget: &QueryBudget,
     ) -> Result<(), String> {
-        // Authorize against the CURRENT auth view before mutating anything (fail-closed).
+        // Every update takes this one path. Authorize against the CURRENT auth view before
+        // anything is applied (fail-closed); this static check fails fast.
         let auth = Arc::clone(&self.auth);
         let upd = sparq_engine::parse_update_rec2013(sparql)?;
         // Every pattern the update evaluates runs under the session's read view, the same
@@ -1346,39 +1407,147 @@ impl PodStore {
         if let Some(reads) = &reads {
             update::scope_reads(&upd, reads)?;
         }
-        let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs())?;
-        // Authorized: apply the checked algebra through the engine's in-place delta path,
-        // under the same read view and budget. A `GRAPH ?var` template's destinations are
-        // authorized as the engine instantiates them, from its one evaluation of the WHERE,
-        // before the operation changes anything (`check` admits such an operation only on
-        // its own, so a denial leaves the store untouched).
+        let veto = |mode: Mode, g: &str| self.odrl_denies(s, mode, g);
+        let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs(), &veto)?;
+        // An update made only of INSERT DATA / DELETE DATA has effects its text alone gives,
+        // on exactly the graphs the static check just authorized (with the same needs). When it
+        // leaves the rules alone there is nothing to try out first: commit it, with no fork.
+        if !permit.rematerialize && !permit.var_graphs {
+            if let Some(effects) = sparq_engine::data_update_effects(sparql, budget)? {
+                debug_assert_eq!(
+                    update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &veto),
+                    Ok(false),
+                    "the static check covers a data-only update's effects"
+                );
+                return sparq_engine::apply_effects(&mut self.graph, &effects)
+                    .map_err(|e| format!("the update could not be committed: {e}"));
+            }
+        }
+        // Run the checked algebra on a fork, under the same read view and budget, capturing
+        // what it actually did. An error (a failing operation, a denied `GRAPH ?var`
+        // destination, a budget overrun) discards the fork: nothing is applied. A `GRAPH ?var`
+        // template's destinations are authorized as the engine instantiates them, from its one
+        // evaluation of the WHERE, before the operation changes anything.
+        let mut candidate = self.graph.fork();
         let mut auth_input = false;
-        if permit.var_graphs {
-            // Borrow the (now initialized) field itself, disjoint from `self.graph`.
-            self.group_docs();
-            let group_docs = self.group_docs.get().expect("initialized above");
+        let effects = if permit.var_graphs {
+            let group_docs = self.group_docs();
             let mut authorize = |dels: &[Option<Term>], ins: &[Option<Term>]| {
-                update::authorize_writes(&auth, s, group_docs, dels, ins, &mut auth_input)
+                update::authorize_writes(&auth, s, group_docs, dels, ins, &mut auth_input, &veto)
             };
-            sparq_engine::update_in_place_algebra_with_budget(
-                &mut self.graph,
+            sparq_engine::update_in_place_algebra_capturing(
+                &mut candidate,
                 &upd,
                 reads.as_ref(),
                 Some(&mut authorize),
                 budget,
-            )?;
+            )?
         } else {
-            sparq_engine::update_in_place_algebra_with_budget(&mut self.graph, &upd, reads.as_ref(), None, budget)?;
-        }
-        // A change to the access-control rules invalidates the auth view.
-        if permit.rematerialize || auth_input {
-            if acp {
-                self.materialize_acp()?;
+            sparq_engine::update_in_place_algebra_capturing(
+                &mut candidate,
+                &upd,
+                reads.as_ref(),
+                None,
+                budget,
+            )?
+        };
+        // Authorize what it did, however each operation reached its targets, against the view
+        // in force before it.
+        let wrote_rules =
+            update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &veto)?;
+        let rules_changed = permit.rematerialize || auth_input || wrote_rules;
+        // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
+        // update, and nothing is changed, so no writer of one access-control document can take
+        // the whole store's view down.
+        if rules_changed {
+            let rebuilt = if acp {
+                materialize_acp_with_credentials(
+                    &mut candidate,
+                    &AccessProvenance::new(),
+                    &VerifiedCredentials::new(),
+                )
             } else {
-                self.materialize_wac()?;
+                materialize_wac(&mut candidate)
+            };
+            if let Err(e) = rebuilt {
+                return Err(format!(
+                    "update denied: the access-control rules it leaves cannot be materialized \
+                     ({e}); nothing was changed"
+                ));
+            }
+        }
+        drop(candidate);
+        // Commit: the effects to the store itself (one journaled, durable commit for a
+        // directory-backed graph), then the view rebuilt from the rules now stored.
+        if let Err(e) = sparq_engine::apply_effects(&mut self.graph, &effects) {
+            // Part of it may be applied in memory: the rules may no longer match the view.
+            if rules_changed {
+                self.drop_auth_view();
+            }
+            return Err(format!("the update could not be committed: {e}"));
+        }
+        if rules_changed {
+            let rebuilt = if acp {
+                self.materialize_acp().map(drop)
+            } else {
+                self.materialize_wac().map(drop)
+            };
+            // The same rules materialized on the fork; should this rebuild fail anyway, the
+            // view no longer describes the rules, and it goes.
+            if let Err(e) = rebuilt {
+                self.drop_auth_view();
+                return Err(format!(
+                    "the update was applied but the authorization view could not be rebuilt \
+                     ({e}); every request is denied until it is re-materialized"
+                ));
             }
         }
         Ok(())
+    }
+
+    /// Drop the materialized auth view, so every decision fails closed (an un-materialized
+    /// store denies, retryably) until a `materialize_*` call succeeds. The fail-closed answer
+    /// to rules that changed without a view rebuilt from them: the previous view would keep
+    /// granting what the change revoked.
+    pub(crate) fn drop_auth_view(&mut self) {
+        loader::strip_reserved_graphs(&mut self.graph);
+        // No other grant source (the ODRL bridge, the trust graph) rebuilds it either, until a
+        // static materialization succeeds (see [`PodStore::may_install_grants`]).
+        self.view_dropped = true;
+        self.reindex_with(ReindexScope::Full);
+    }
+
+    /// Whether a grant source other than the static WAC/ACP rules (the ODRL bridge, its
+    /// refresh, the trust graph) may install grants: not while the view is dropped, since what
+    /// it would install on, or rebuild from, no longer describes the rules. Every such source
+    /// asks here before it touches the view.
+    #[cfg_attr(
+        not(any(feature = "odrl-bridge", feature = "trust-graph")),
+        allow(dead_code)
+    )]
+    pub(crate) fn may_install_grants(&self) -> bool {
+        !self.view_dropped
+    }
+
+    /// The auth view a grant source other than the static WAC/ACP rules writes its grants
+    /// into: `None` while the view is dropped (see [`PodStore::may_install_grants`]). Every
+    /// such source takes the graph from here (or [`PodStore::refresh_bridged`]) rather than
+    /// from `self.graph`, so none can install onto a dropped view; `dropped_view_tests`
+    /// drives every grant and refresh entry point against a dropped view.
+    #[cfg_attr(
+        not(any(feature = "odrl-bridge", feature = "trust-graph")),
+        allow(dead_code)
+    )]
+    pub(crate) fn grant_view(&mut self) -> Option<&mut Graph> {
+        self.may_install_grants().then_some(&mut self.graph)
+    }
+
+    /// Rebuild the bridged grants from the ledger's baseline, as [`PodStore::grant_view`]
+    /// allows: `None` (nothing touched) while the view is dropped, else the number retracted.
+    #[cfg(feature = "odrl-bridge")]
+    fn refresh_bridged(&mut self) -> Option<usize> {
+        let Self { graph, bridge_ledger, view_dropped, .. } = self;
+        (!*view_dropped).then(|| bridge_ledger.refresh(graph))
     }
 
     /// [OPUS-4.8] sq-h3uk — evaluate an ODRL `policy` against `request` and, on a
@@ -1409,7 +1578,11 @@ impl PodStore {
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
-        let outcome = odrl_bridge::materialize_permission(&mut self.graph, policy, request);
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return odrl_bridge::BridgeOutcome::default();
+        };
+        let outcome = odrl_bridge::materialize_permission(view, policy, request);
         if outcome.granted {
             // Track for refresh/retraction (sq-dpk4), then rebuild index + drop cache.
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Permission);
@@ -1438,7 +1611,11 @@ impl PodStore {
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
-        let outcome = odrl_bridge::materialize_prohibition(&mut self.graph, policy, request);
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return odrl_bridge::BridgeOutcome::default();
+        };
+        let outcome = odrl_bridge::materialize_prohibition(view, policy, request);
         if outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Prohibition);
             self.reindex_with(ReindexScope::Full);
@@ -1461,12 +1638,51 @@ impl PodStore {
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
-        let outcome = odrl_bridge::materialize_policy(&mut self.graph, policy, request);
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return odrl_bridge::BridgeOutcome::default();
+        };
+        let outcome = odrl_bridge::materialize_policy(view, policy, request);
         if outcome.granted || outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Policy);
             self.reindex_with(ReindexScope::Full);
         }
         outcome
+    }
+
+    /// [`PodStore::materialize_odrl_policy`] for every request in `requests`, writing the
+    /// auth view and rebuilding the session index once for the whole batch instead of
+    /// once per request. Outcomes are parallel to `requests`.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn materialize_odrl_policy_for_each(
+        &mut self,
+        policy: &sparq_policy::ValidatedPolicy,
+        requests: &[sparq_policy::Request],
+    ) -> Vec<odrl_bridge::BridgeOutcome> {
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return vec![odrl_bridge::BridgeOutcome::default(); requests.len()];
+        };
+        let outcomes = odrl_bridge::materialize_policy_for_each(view, policy, requests);
+        let materialized: Vec<&sparq_policy::Request> = requests
+            .iter()
+            .zip(&outcomes)
+            .filter(|(_, o)| o.granted || o.prohibited)
+            .map(|(r, _)| r)
+            .collect();
+        if !materialized.is_empty() {
+            self.bridge_ledger
+                .record_each(policy, materialized, odrl_bridge::BridgeKind::Policy);
+            self.reindex_with(ReindexScope::Full);
+        }
+        outcomes
+    }
+
+    /// How many times the authorization index has been rebuilt since this store was
+    /// created. Every materialization or access-control change that alters the auth view
+    /// increments it.
+    pub fn auth_generation(&self) -> u64 {
+        self.epoch
     }
 
     /// The same one-shot grant as [`PodStore::materialize_odrl_permission`], tracked as
@@ -1479,8 +1695,12 @@ impl PodStore {
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return odrl_bridge::BridgeOutcome::default();
+        };
         let outcome =
-            odrl_bridge::materialize_permission_conditional(&mut self.graph, policy, request);
+            odrl_bridge::materialize_permission_conditional(view, policy, request);
         if outcome.granted {
             self.bridge_ledger.record(
                 policy,
@@ -1506,8 +1726,12 @@ impl PodStore {
         policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return odrl_bridge::BridgeOutcome::default();
+        };
         let outcome =
-            odrl_bridge::materialize_prohibition_conditional(&mut self.graph, policy, request);
+            odrl_bridge::materialize_prohibition_conditional(view, policy, request);
         if outcome.prohibited {
             self.bridge_ledger.record(
                 policy,
@@ -1550,8 +1774,12 @@ impl PodStore {
         request: &sparq_policy::Request,
         store: &Arc<dyn sparq_policy::UsageCounterStore + Send + Sync>,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return odrl_bridge::BridgeOutcome::default();
+        };
         let outcome = odrl_bridge::count::materialize_permission_counted(
-            &mut self.graph,
+            view,
             policy,
             request,
             store.as_ref(),
@@ -1607,7 +1835,10 @@ impl PodStore {
     ///   bridge entry point again with the new policy first.
     #[cfg(feature = "odrl-bridge")]
     pub fn refresh_odrl_grants(&mut self) -> usize {
-        let retracted = self.bridge_ledger.refresh(&mut self.graph);
+        // A dropped view is not rebuilt from the baseline captured before the drop.
+        let Some(retracted) = self.refresh_bridged() else {
+            return 0;
+        };
         self.reindex_with(ReindexScope::Full);
         retracted
     }
@@ -1638,12 +1869,45 @@ impl PodStore {
         kind: odrl_bridge::BridgeKind,
     ) -> (bool, usize) {
         let matched = self.bridge_ledger.update(policy, request, kind);
-        let retracted = self.bridge_ledger.refresh(&mut self.graph);
+        let Some(retracted) = self.refresh_bridged() else {
+            return (matched, 0);
+        };
         self.reindex_with(ReindexScope::Full);
         (matched, retracted)
     }
 
-    /// [OPUS-4.8] sq-dpk4 — the bridge ledger (tracked bridged grants + static
+    /// Attach an ODRL `policy` whose prohibitions are evaluated per request for the
+    /// accessing session (issue #6743), with the session's agent as party and its clock
+    /// as request time. Every authorizing entry point (the reads, views and queries,
+    /// [`PodStore::wac_allow`], [`PodStore::decide`], [`PodStore::decide_batch`],
+    /// [`PodStore::decide_create`] and every update) then refuses a mode some attached
+    /// prohibition applies to. Deny-only: the policy's permissions grant nothing here.
+    /// See [`odrl_enforce`] for the action-to-mode mapping and the graphs it never
+    /// touches.
+    ///
+    /// # Errors
+    ///
+    /// A policy whose `odrl:conflict` strategy `decide` cannot honour is refused, as is
+    /// one with prohibitions that names more than four `odrl:PartyCollection`s.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn attach_odrl_policy(&mut self, policy: sparq_policy::ValidatedPolicy) -> Result<(), String> {
+        self.odrl.attach(policy)
+    }
+
+    /// Record `asset odrl:partOf collection` as evidence on every request the attached
+    /// policies evaluate, so a rule targeting the collection covers the asset.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn add_odrl_asset_membership(&mut self, asset: impl Into<String>, collection: impl Into<String>) {
+        self.odrl.add_asset_membership(asset.into(), collection.into());
+    }
+
+    /// Detach every attached ODRL policy and its membership evidence.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn detach_odrl_policies(&mut self) {
+        self.odrl.clear();
+    }
+
+    /// The bridge ledger (tracked bridged grants + static
     /// baseline), for inspection/audit. Only present under the `odrl-bridge` feature.
     #[cfg(feature = "odrl-bridge")]
     pub fn bridge_ledger(&self) -> &odrl_bridge::BridgeLedger {
@@ -1660,6 +1924,9 @@ impl PodStore {
         &self.auth
     }
 }
+
+#[cfg(all(test, any(feature = "odrl-bridge", feature = "trust-graph")))]
+mod dropped_view_tests;
 
 #[cfg(test)]
 mod scoped_cache_tests {
@@ -1691,6 +1958,27 @@ mod scoped_cache_tests {
         let mut store = PodStore::new(Graph::load_dataset(nq, "nquads").expect("loads"));
         store.materialize_wac().expect("materializes");
         store
+    }
+
+    /// Review finding: a dropped auth view (rules that could not be materialized) was rebuilt
+    /// by the next bridge refresh from the static baseline captured before the drop, granting
+    /// again what the drop withdrew. The ledger is suspended until a static materialization
+    /// captures a new baseline.
+    #[cfg(feature = "odrl-bridge")]
+    #[test]
+    fn a_bridge_refresh_does_not_resurrect_a_dropped_view() {
+        let mut store = two_pod_store();
+        let alice = sess(ALICE);
+        assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
+        store.drop_auth_view();
+        assert!(store.accessible(&alice, Mode::Read).is_empty());
+        assert_eq!(store.refresh_odrl_grants(), 0);
+        assert!(store.accessible(&alice, Mode::Read).is_empty(), "the refresh resurrected the view");
+        assert!(!store.may_install_grants());
+        // A static materialization rebuilds the view, and grant sources resume.
+        store.materialize_wac().expect("materializes");
+        assert!(store.may_install_grants());
+        assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
     }
 
     fn key_for(s: &Session) -> SessionKey {

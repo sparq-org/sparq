@@ -201,6 +201,8 @@ const POLICY_INVALID: &str = "vcq-authrdf-policy-invalid";
 fn profile_ids(policy: &Policy) -> (&'static str, &'static str) {
     let suite = match policy.cryptosuite {
         Cryptosuite::EddsaRdfc2022 => SUITE,
+        // Never offered: `policy_digest_at` rejects it first.
+        Cryptosuite::EddsaSha256Merkle2026 => "urn:sparq:vcq:suite:di-eddsa-sha256-merkle-2026:unsupported",
     };
     let mapping = match policy.mapping {
         Mapping::ScopedCanonicalUnion => MAPPING_PROFILE,
@@ -219,6 +221,13 @@ fn sentinel_request(policy: &Policy) -> auth::Request {
 }
 
 fn policy_digest_at(policy: &Policy, phase: Phase) -> Result<[u8; 32], ProtocolError> {
+    // This adapter verifies no presented signature, so only hidden mode is offered,
+    // and it exposes only the `eddsa-rdfc-2022` suite identifiers.
+    if policy.signature_mode != auth::SignatureMode::Hidden
+        || policy.cryptosuite != Cryptosuite::EddsaRdfc2022
+    {
+        return Err(invalid(phase, POLICY_INVALID));
+    }
     // The model diagnostic is never classified; every rejection is one code.
     let inner = auth::request_digest(&sentinel_request(policy))
         .map_err(|_| invalid(phase, POLICY_INVALID))?;
@@ -859,6 +868,7 @@ mod tests {
             dataset_commitment: commitment,
             provenance,
             result,
+            signed_messages: Vec::new(),
         }
     }
 
@@ -1020,6 +1030,15 @@ mod tests {
         let empty = Policy::new(Vec::new());
         assert_eq!(
             code(expected_v5_request(&request, descriptor, &empty, Phase::Verify)),
+            ErrorCode::Backend(POLICY_INVALID)
+        );
+        // Revealed mode needs presented signatures this adapter never checks.
+        let revealed = policy().with_signature_mode(auth::SignatureMode::Revealed);
+        assert_eq!(code(policy_digest(&revealed)), ErrorCode::Backend(POLICY_INVALID));
+        let merkle = policy().with_cryptosuite(Cryptosuite::EddsaSha256Merkle2026);
+        assert_eq!(code(policy_digest(&merkle)), ErrorCode::Backend(POLICY_INVALID));
+        assert_eq!(
+            code(expected_v5_request(&request, descriptor, &revealed, Phase::Verify)),
             ErrorCode::Backend(POLICY_INVALID)
         );
     }

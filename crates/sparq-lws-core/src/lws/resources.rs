@@ -578,12 +578,25 @@ async fn listing_lock<S: Store + 'static>(
 /// The container's own container lists its modification time, so the touch also holds that
 /// listing shared ([`listing_guard`]): a conditional create there sees no touch between its
 /// check and its create.
-async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
+pub(crate) async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
     // Until a touch lands, the container's listing has no Last-Modified (see
     // [`read_container`]): its own time, and its members', may all be from before the change,
     // and an If-Modified-Since would pass on a listing that changed.
+    // The intents of kept changes waiting on a touch are taken before it starts, so only those
+    // committed before it began are cleared by it; they go back when it does not land.
+    let owed = state.take_owed_touches(container);
     let landed = touch(state, container).await;
     state.touched(container, landed);
+    if !landed {
+        for record in owed {
+            state.owe_touch(container, record);
+        }
+        return;
+    }
+    for record in owed {
+        // A failure leaves the intent, and the next start touches the container again.
+        let _ = super::intents::clear(&state.store, &record).await;
+    }
 }
 
 /// Release `locks`, held through a change to the container's listing, and touch the container
@@ -2002,10 +2015,13 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
         };
     };
     let writes = {
-        let state = state.clone();
+        let (state, parent) = (state.clone(), parent.clone());
         async move {
             let mut journal = state.journal();
             let steps = async {
+                // Both are staged first, so one intent is stored before the first step.
+                journal.stage(&meta_key(&uri)).await?;
+                journal.stage(&uri).await?;
                 let mut closed = old.clone().unwrap_or_default();
                 closed.pending = true;
                 journal.write_meta(&uri, &closed).await?;
@@ -2015,10 +2031,10 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
             }
             .await;
             match steps {
-                Ok(written) => {
-                    journal.commit();
-                    ((Ok(written), false), None)
-                }
+                Ok(written) => match journal.commit(parent.as_deref()).await {
+                    Ok(()) => ((Ok(written), false), None),
+                    Err((e, left)) => ((Err(e), left.is_none()), left),
+                },
                 Err(e) => match journal.rollback().await {
                     None => ((Err(e), true), None),
                     left => ((Err(e), false), left),
@@ -2346,8 +2362,8 @@ async fn remove_in<S: Store + 'static>(
 ) {
     // Everything the removal could need to put back is read first: a subtree too large to
     // remove atomically is refused before any of it is removed.
-    for (node, _) in doomed {
-        let staged = match journal.stage(node).await {
+    for (node, parent) in doomed {
+        let staged = match journal.stage_member(node, parent.as_deref()).await {
             Ok(()) => journal.stage(&meta_key(node)).await,
             Err(e) => Err(e),
         };
@@ -2373,23 +2389,28 @@ async fn remove_in<S: Store + 'static>(
         }
     }
     let all = || doomed.iter().map(|(n, _)| n.clone()).collect();
+    // What the delete had not reached is locked too, and is set aside with the rest: a request
+    // or a walk skips it rather than waits on its lock.
+    let locked = |mut left: super::Unsettled| {
+        left.0.extend(
+            doomed
+                .iter()
+                .map(|(node, _)| super::Undo::Locked { iri: node.clone() }),
+        );
+        left
+    };
     match failed {
-        None => {
-            journal.commit();
-            (all(), Ok(()), None)
-        }
+        None => match journal
+            .commit(doomed.last().and_then(|(_, p)| p.as_deref()))
+            .await
+        {
+            Ok(()) => (all(), Ok(()), None),
+            Err((e, None)) => (Vec::new(), Err(e), None),
+            Err((e, Some(left))) => (all(), Err(e), Some(locked(left))),
+        },
         Some(e) => match journal.rollback().await {
             None => (Vec::new(), Err(e), None),
-            // What the delete had not reached is locked too, and is set aside with the rest: a
-            // request or a walk skips it rather than waits on its lock.
-            Some(mut left) => {
-                left.0.extend(
-                    doomed
-                        .iter()
-                        .map(|(node, _)| super::Undo::Locked { iri: node.clone() }),
-                );
-                (all(), Err(e), Some(left))
-            }
+            Some(left) => (all(), Err(e), Some(locked(left))),
         },
     }
 }

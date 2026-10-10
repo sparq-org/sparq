@@ -84,7 +84,7 @@ const ALLOWED: &[(&str, &str)] = &[
     // whole and below 2^53).
     ("not-a-cut", "exact-cast"),
     // The builtin is defined over f64 values (the trig/log family, double arithmetic,
-    // the math: comparisons until GH #6745), so the f64 image is its value.
+    // the float/double tier of the math: comparisons), so the f64 image is its value.
     ("not-a-cut", "defined-float"),
     // A data value that is named like a limit (an ontology cardinality).
     ("not-a-limit", "data-value"),

@@ -198,9 +198,17 @@ Materialize the authorization view from the access-control documents, then enfor
   default-graph pattern with no `USING`/`WITH` is refused. A conditional write needs read
   access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none. The WHERE is
   evaluated once: a `GRAPH ?var` write target is authorized against the graphs that
-  evaluation instantiates, before anything is written, and a refused update leaves the
-  store untouched. Such an operation must be sent on its own: a multi-operation request
-  that includes one is refused.
+  evaluation instantiates, before anything is written. Such an operation must be sent on its
+  own: a multi-operation request that includes one is refused. Every update entry point
+  takes one path: the update runs on a fork, what it actually wrote is authorized against
+  the view in force (so a later operation cannot reach a graph an earlier one named), rules
+  it leaves are materialized on the fork first (rules that cannot be **refuse the update**),
+  and only then is it committed to the store itself (journaled and durable for a
+  directory-backed graph) and the view rebuilt; a refused update leaves the store
+  untouched. A `put_acl`/`delete_acl` that cannot put its prior rules back in force
+  **drops** the view: every request is denied (retryably, as an un-materialized store), and
+  no ODRL bridge refresh, bridged grant or trust grant rebuilds it, until a `materialize_*`,
+  `put_acl` or `delete_acl` succeeds; the error says so.
 - `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
   `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
   `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an
@@ -378,6 +386,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `principal auth:deny<Mode> graph` triple, honoured by this enforcement under **deny-overrides**
   (`∪ allow ∖ ∪ deny` — a deny beats any allow for the same principal+target+mode). `…_policy`
   does both sides at once. Same fail-closed rules; no new enforcement engine.
+- `store.materialize_odrl_policy_for_each(&Policy, &[Request])` — `materialize_odrl_policy` for a
+  batch of requests with one auth-view write and one index rebuild for the whole batch (outcomes
+  parallel to the requests). `store.auth_generation()` counts index rebuilds.
 - **Loud refusal of an unimplementable `odrl:conflict` strategy** (sq-ihqbl): the bridge
   implements only `odrl:conflict odrl:prohibit` (deny-overrides). A policy declaring `odrl:perm`,
   `odrl:invalid` **with** a detected conflict, or an unknown strategy IRI is **REFUSED** — every

@@ -51,6 +51,21 @@ impl ActiveContext {
         loader: &dyn DocumentLoader,
         options: &JsonLdOptions,
     ) -> Result<ActiveContext, JsonLdError> {
+        // A self-contained context processed over a fresh active context always yields the
+        // same result, so the last one is reused: framing processes the frame's context
+        // for expansion and again for compaction.
+        let cacheable = self.is_initial() && crate::compact::self_contained(local_context);
+        let key = |e: &LastProcessed| {
+            e.base == self.base_iri
+                && e.base_url.as_deref() == base_url
+                && e.mode == options.processing_mode
+                && e.local == *local_context
+        };
+        if cacheable {
+            if let Some(hit) = LAST_PROCESSED.with(|last| last.borrow().as_ref().filter(|e| key(e)).map(|e| e.result.clone())) {
+                return Ok(hit);
+            }
+        }
         let mut env = Env {
             loader,
             mode: options.processing_mode,
@@ -58,7 +73,29 @@ impl ActiveContext {
             remote_contexts: Vec::new(),
             validate_scoped: true,
         };
-        super::budget::with_budget(|| process_inner(self, local_context, false, true, &mut env))
+        let result = super::budget::with_budget(|| process_inner(self, local_context, false, true, &mut env))?;
+        if cacheable {
+            LAST_PROCESSED.with(|last| {
+                *last.borrow_mut() = Some(LastProcessed {
+                    base: self.base_iri.clone(),
+                    base_url: base_url.map(str::to_string),
+                    mode: options.processing_mode,
+                    local: local_context.clone(),
+                    result: result.clone(),
+                });
+            });
+        }
+        Ok(result)
+    }
+
+    /// True iff this is a fresh context from [`ActiveContext::new`].
+    fn is_initial(&self) -> bool {
+        self.term_definitions.is_empty()
+            && self.base_iri == self.original_base_url
+            && self.vocabulary_mapping.is_none()
+            && self.default_language.is_none()
+            && self.default_base_direction.is_none()
+            && self.previous_context.is_none()
     }
 
     /// Applies a **scoped** context (a property-scoped or type-scoped `@context`) during
@@ -90,6 +127,20 @@ impl ActiveContext {
         };
         process_inner(self, local_context, override_protected, propagate, &mut env)
     }
+}
+
+/// The last self-contained context processed over a fresh active context on this thread
+/// ([`ActiveContext::process`]).
+struct LastProcessed {
+    base: Option<String>,
+    base_url: Option<String>,
+    mode: ProcessingMode,
+    local: Json,
+    result: ActiveContext,
+}
+
+thread_local! {
+    static LAST_PROCESSED: std::cell::RefCell<Option<LastProcessed>> = const { std::cell::RefCell::new(None) };
 }
 
 /// The recursive core of Context Processing (§4.1.2). `override_protected` disables the
