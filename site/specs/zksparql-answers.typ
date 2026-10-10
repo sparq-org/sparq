@@ -95,14 +95,23 @@ $[| Q |]_D$ for the multiset of solution mappings of query $Q$ over RDF dataset 
 SPARQL 1.1 semantics. It also uses:
 
 / Input dataset: The RDF dataset a holder evaluates the query over, built from credentials as
-  the proof method states (for example, the union of the credentials' graphs in the default
-  graph, with blank nodes kept apart per credential).
+  the proof method states. The methods in this document use the RDF merge #cite("RDF11-MT") of
+  the credentials' graphs as the default graph, which keeps each credential's blank nodes
+  apart. A method could instead put each credential in its own named graph, as a verifiable
+  presentation does #cite("VC-DATA-MODEL-2.0"); a query written for one layout does not
+  match the other, so the method states which it uses.
+/ Monotone query: In this document, a SELECT or ASK query that, apart from a top-level ORDER
+  BY, OFFSET and LIMIT, uses only basic graph patterns, group graph patterns, UNION, GRAPH,
+  VALUES, projection, DISTINCT, and FILTER and BIND whose expressions do not use EXISTS or
+  NOT EXISTS. A solution of a monotone query over an RDF dataset is also a solution over
+  any dataset that contains it. OPTIONAL, MINUS, EXISTS, NOT EXISTS, subqueries and
+  aggregates do not have this property in general.
 / Dataset commitment: A digest that fixes the input dataset without revealing it. It includes
   a random salt chosen by the holder, so equal datasets do not give equal commitments unless
   the same salt is reused.
 / Proof method: A way of producing and checking evidence for a SPARQL result, named by an
-  identifier and a version, together with the artifact that checks it (a verification key, a
-  program image or an attestation root). Section 9 defines what a method states.
+  identifier and a version, together with the verification key that checks its evidence: a
+  circuit's verification key, a zkVM program's image ID, or the root key of an attestation. Section 9 defines what a method states.
 / Proof: The evidence a proof method produces, carried in the presentation's `proof` member.
   Depending on the method, it is a zero-knowledge proof, a proof that is not zero-knowledge, or
   a signed attestation.
@@ -113,9 +122,9 @@ SPARQL 1.1 semantics. It also uses:
   them. For `eddsa-rdfc-2022` #cite("VC-DI-EDDSA") it is the SHA-256 hash of the canonical
   proof configuration followed by the SHA-256 hash of the canonical credential document. The
   Merkle-root cryptosuites #cite("ZK-MERKLE-CRYPTOSUITE") (`eddsa-sha256-merkle-2026`,
-  `schnorr-poseidon2-merkle-2026` and `mldsa44-sha256-merkle-2026`) sign a salted digest of the
-  root of a Merkle tree over the credential's canonical quads, the number of quads and the
-  proof configuration.
+  `schnorr-poseidon2-merkle-2026` and `mldsa44-sha256-merkle-2026`) sign a digest of the suite
+  identifier, a 32-byte salt, the number of quads, the root of a Merkle tree with one leaf per
+  canonical quad of the credential, and the digest of the canonical proof configuration.
 
 = Data model conventions
 
@@ -166,12 +175,12 @@ anything the holder returns.
     `"disclosed"`.
     Section 6.3.],
   [`proofMethods`], [array of objects], [REQUIRED, non-empty. The proof methods the verifier
-    accepts, in order of preference. Each entry has `id`, `version`, `artifact` and
+    accepts, in order of preference. Each entry has `id`, `version`, `verificationKey` and
     `parameters`: the proof method's settings that the statement depends on, such as its
     capacity bounds, in the encoding the proof method publishes (section 9). An empty
     object means the proof method's published defaults. Two entries MUST NOT have the same
-    `id` and `version`, so that the pair identifies one entry, artifact and parameters
-    included.],
+    `id` and `version`, so that the pair identifies one entry, verification key and
+    parameters included.],
   [`limits`], [object], [REQUIRED. `maxPresentationBytes` (integer) bounds the encoded
     presentation; `maxResultRows` (integer) bounds the solutions in a SELECT result or the
     triples in a CONSTRUCT result.],
@@ -189,9 +198,11 @@ Rules for the verifier service:
 + The query MUST NOT use a FROM or FROM NAMED clause, a SERVICE pattern, or a function whose
   value depends on when or where it is evaluated (`NOW`, `RAND`, `UUID`, `STRUUID`,
   `BNODE()` with no argument): the input dataset is the only data the query may read.
-+ With `"answerKind": "supported"`, the form MUST be SELECT or ASK.
-+ The verifier service MUST list a proof method only if it holds that system's verification
-  artifact in its own configuration.
++ With `"answerKind": "supported"`, the query MUST be a monotone query (section 2).
++ With `"answerKind": "exact"`, the query MUST NOT use REDUCED, whose number of duplicates
+  SPARQL 1.1 leaves open.
++ The verifier service MUST list a proof method only if it holds that method's verification
+  key in its own configuration.
 + The verifier service MUST store the request and its request digest, and MUST NOT accept a
   presentation for it after `notAfter` or after one presentation has been accepted.
 
@@ -241,8 +252,9 @@ identity. What the verifier learns is listed in section 10.2.
   the same label denote the same blank node. A result label has no relationship to any blank
   node label in a credential, even if the strings are equal.
 - In an Exact SELECT result, `results.bindings` keeps duplicate solutions. Its order is the
-  query's order if the query has ORDER BY; otherwise it is sorted by the proof method's
-  canonical encoding of each solution and the order carries no meaning.
+  order section 6.1 defines: the query's ORDER BY, with ties ordered by the proof method's
+  canonical encoding of each solution, or that encoding alone if there is no ORDER BY, in which
+  case the order carries no meaning.
 - In a Supported SELECT result, `results.bindings` has no duplicate solutions.
 
 The proof is over the proof method's canonical encoding of the result, not over the JSON text.
@@ -257,15 +269,25 @@ is about.
 == Answer kinds
 
 A #emph[Supported] answer states that every returned solution is a solution:
-for SELECT, every row of `result` is in $[| Q |]_D$, and for ASK, `result` is `true` and
-$[| Q |]_D$ is not empty. It says nothing about solutions it does not return. A Supported ASK
+for SELECT, every row of `result` is in $[| Q' |]_D$, where $Q'$ is $Q$ without its top-level
+ORDER BY, OFFSET and LIMIT (which only bound how many rows the holder returns), and for ASK,
+`result` is `true` and $[| Q |]_D$ is not empty. It says nothing about solutions it does not
+return. Because $Q$ is monotone, each returned row is also a solution over every dataset that
+contains $D$, so the answer stays true if the holder holds credentials it did not include. A Supported ASK
 answer cannot be `false`, and a Supported SELECT answer with no rows MUST be rejected.
 
 An #emph[Exact] answer states that `result` is the complete result over $D$: for SELECT, the
-rows are exactly the multiset $[| Q |]_D$ (after LIMIT and OFFSET, if the query has them); for
+rows are exactly the solution sequence SPARQL 1.1 defines for $Q$ over $D$, with duplicates; for
 ASK, `result` is `true` if and only if $[| Q |]_D$ is not empty; for CONSTRUCT, `result` is the
 graph SPARQL 1.1 defines for $Q$ over $D$. If the result would exceed `limits.maxResultRows` or a
 bound of the proof method, the holder service MUST NOT return a truncated result.
+
+SPARQL 1.1 leaves the order of solutions open wherever ORDER BY does not fix it, so OFFSET and
+LIMIT alone do not determine which solutions are kept. For an Exact answer this document fixes
+the choice: before each OFFSET and LIMIT in the query, including in a subquery, the solutions
+are put in the order of the ORDER BY at that level, and solutions that ORDER BY leaves equal,
+or all solutions where there is no ORDER BY, are ordered by the proof method's canonical
+encoding of each solution. The result is then unique.
 
 An Exact answer never satisfies a request for a Supported answer, and the reverse; the kinds
 MUST be equal.
@@ -288,7 +310,8 @@ verifier-agreed commitment is then valid only for the mode it was computed under
 request that carries it MUST list only that mode in `signatureModes`.
 
 Input kind is separate from issuer checking. If the request's `issuers` is not empty, the
-proof MUST show that every credential in $D$ carries a valid proof from one of the listed keys,
+proof MUST show that every credential in $D$ carries a Data Integrity proof (a signature) that verifies under one
+of the listed keys,
 whichever input kind is used. Checking issuers never turns a holder-declared input into a
 verifier-agreed one.
 
@@ -347,7 +370,7 @@ Exact answer over an input it agreed earlier:
   "proofMethods": [{
     "id": "urn:sparq:vcq:method:risc0-authenticated-rdf",
     "version": 5,
-    "artifact": { "imageId": "Yc9B…", "sha256": "1mE0…" },
+    "verificationKey": { "imageId": "Yc9B…", "sha256": "1mE0…" },
     "parameters": {}
   }],
   "limits": { "maxPresentationBytes": 2000000, "maxResultRows": 1 },
@@ -393,12 +416,15 @@ proof for one statement does not verify for another. In particular:
 + The signature mode MUST be bound. In the revealed mode, every signed message MUST be bound,
   and the proof MUST show that $D$ is built from exactly the data those messages cover, so that
   a verifier who checks the signatures outside the proof knows they cover $D$.
-+ The proof method identifier and version MUST select the verification artifact. A verifier
++ The proof method identifier and version MUST select the verification key. A verifier
   MUST NOT take a verification key or program from the presentation.
 
 A proof method MAY bind these values directly as public inputs, or bind a single digest over
 them, as long as the verifier can recompute every bound value from its stored request and the
-presentation.
+presentation. A proof method MAY also make public any value the verifier can compute from its
+stored request and the result alone, for example the triples obtained by substituting a
+returned solution into a query that is a single basic graph pattern: such a value tells the
+verifier nothing the result does not.
 
 = Verifier processing
 
@@ -416,8 +442,8 @@ check that fails. It returns no partial result and no warning instead of a rejec
   Reject if the encoded presentation is larger than that request's
   `limits.maxPresentationBytes`.
 + Reject unless `proofMethod` names an entry of the request's `proofMethods`. Load that
-  entry's verification artifact from the verifier's own configuration, and reject unless it
-  matches the entry's `artifact` (for example, its digest or image identifier).
+  method's verification key from the verifier's own configuration, and reject unless it
+  equals the entry's `verificationKey` (for example, the same image ID).
 + Reject unless `answerKind` and `input.kind` equal the request's. For a verifier-agreed input,
   reject unless `input.commitment` equals the request's.
 + If the request has `signatureModes`, reject unless `signatureMode` is one of them. In the
@@ -456,8 +482,8 @@ Each proof method MUST publish:
 - its identifier (an IRI) and version (a positive integer);
 - the #strong[kind of evidence]: a zero-knowledge proof, a proof that is not zero-knowledge,
   an attestation, or disclosed credentials;
-- whether the evidence is #strong[transferable] (anyone holding it and the request can check
-  it) or #strong[designated-verifier] (it convinces only the verifier that took part);
+- whether the evidence is #strong[publicly verifiable] (anyone holding it and the request can
+  check it) or #strong[designated-verifier] (it convinces only the verifier that took part);
 - #strong[what it shows]: the statement it binds (section 7), and the query forms, answer
   kinds, input kinds and SPARQL fragment it supports (a method MAY support only part of
   SPARQL 1.1);
@@ -470,8 +496,8 @@ Each proof method MUST publish:
   such as a platform identity in a TEE attestation;
 - the cryptosuites it can check, how it builds the input dataset from credentials, and the
   signature modes it supports for each cryptosuite;
-- the form of the `artifact` member that pins its verification key, program or attestation
-  root, including byte order where the identifier is a sequence of words;
+- the form of the `verificationKey` member, including byte order where the key or image ID is
+  a sequence of words;
 - the form of its `parameters` member and its defaults;
 - the canonical encoding of the statement and how the evidence binds it (section 7); for an
   attestation, the statement digest MUST be in the signed report;
@@ -487,8 +513,8 @@ A new version of a proof method is a new proof method: a verifier that accepts v
 not thereby accept version 6. A method is defined by what the verifier checks, not by how the
 evidence is produced: the same proof produced on a CPU or on a GPU or other proving
 accelerator uses the same method. A new circuit or program for the same method, for example a
-circuit compiled directly to ACIR instead of from Noir, has a new verification artifact, and
-the verifier pins that artifact in `artifact`.
+circuit compiled directly to ACIR instead of from Noir, has a new verification key, and
+the verifier names that key in `verificationKey`.
 
 The proof methods currently in the sparq repository are below. This table is informative and
 records what the code does, not what is assured: none of them has had an external
@@ -504,7 +530,7 @@ cryptographic audit.
     ASK, CONSTRUCT], [holder-declared, verifier-agreed], [`eddsa-rdfc-2022` against the
     request's keys, inside the proof],
   [`urn:sparq:vcq:method:` \ `noir-selected-support-unsigned` v2 (Noir circuits)], [Supported:
-    SELECT (positive basic graph patterns with integer FILTERs)], [holder-declared; not usable
+    SELECT (monotone queries: basic graph patterns with integer FILTERs)], [holder-declared; not usable
     with version 1 of this document yet (section 11)], [Schnorr signatures over the sparq
     commitment format, inside the proof],
 )
@@ -525,9 +551,8 @@ version 1.
     discloses, with `bbs-2023` or `ecdsa-sd-2023`, the claims each returned solution uses,
     together with any claims the issuer made mandatory to disclose and the structure the
     cryptosuite needs; the verifier checks them and evaluates the query over them. The holder
-    service must check everything a derived presentation discloses before sending it. Supported answers only,
-    for queries whose solutions remain solutions when data is added (no negation, OPTIONAL or
-    aggregation).],
+    service must check everything a derived presentation discloses before sending it. Supported answers only, which
+    are for monotone queries (section 2).],
   [`vole-designated-verifier`], [zero-knowledge proof, interactive, designated-verifier],
   [An interactive proof based on vector oblivious linear evaluation (VOLE), as in QuickSilver.
     It convinces only the verifier that took part.],
@@ -623,6 +648,9 @@ What differs or is missing:
   strings need a fixed conversion.
 + The RISC Zero methods' `imageId` is eight 32-bit words; the code encodes it as the words in
   order, each little-endian. A wire profile has to fix that encoding.
++ It has not been checked that the RISC Zero methods order solutions by their canonical
+  encoding before OFFSET and LIMIT, as section 6.1 requires for Exact answers, or that they
+  reject REDUCED.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
   (a verifier-agreed SELECT); its other five combinations have run only in tests without
   proving.
@@ -729,6 +757,8 @@ presents and agrees inputs, not what the holder sends.
     W3C Recommendation, 21 March 2013. https://www.w3.org/TR/sparql11-query/.]),
   ("SPARQL11-RESULTS-JSON", [Seaborne, A. (ed). #emph[SPARQL 1.1 Query Results JSON Format].
     W3C Recommendation, 21 March 2013. https://www.w3.org/TR/sparql11-results-json/.]),
+  ("RDF11-MT", [Hayes, P. J.; Patel-Schneider, P. F. (eds). #emph[RDF 1.1 Semantics]. W3C
+    Recommendation, 25 February 2014. https://www.w3.org/TR/rdf11-mt/.]),
   ("RDF-CANON", [Longley, D.; Kellogg, G.; Yamamoto, D.; Sporny, M. (eds). #emph[RDF Dataset
     Canonicalization]. W3C Recommendation, 21 May 2024. https://www.w3.org/TR/rdf-canon/.]),
   ("VC-DATA-MODEL-2.0", [Sporny, M.; et al. (eds). #emph[Verifiable Credentials Data Model
