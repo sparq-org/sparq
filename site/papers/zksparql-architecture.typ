@@ -170,14 +170,15 @@ triple is not thereby false.
 
 === Credentials and Data Integrity proofs <bg-vc>
 
-A verifiable credential @vcdm2 is a set of claims about a subject, made by an issuer, which a
-holder presents to a verifier. Its Data Integrity proof @vcdi is, in this paper, a signature with
+A verifiable credential @vcdm2 is a set of claims that an issuer makes about a subject, secured
+so that its authorship can be verified; a holder presents it to a verifier. Its Data Integrity proof @vcdi is, in this paper, a signature with
 its proof configuration; a cryptosuite specifies how to create and verify it. The cryptosuite
 `eddsa-rdfc-2022` @vcdieddsa canonicalises the credential with RDF Dataset Canonicalization
 (RDFC-1.0) @rdfc10, then signs with Ed25519 the SHA-256 hashes of the canonical proof
 configuration and of the canonical document. A valid signature shows only that someone with the
 signing key signed these bytes. The verifier must still check that the issuer authorised the
-key, which Data Integrity expresses in the issuer's controlled identifier document @vcdi. It may
+key, through a verification relationship in the issuer's controlled identifier document @vcdi.
+It may
 also check credential status (revocation or suspension), the validity period, and holder
 binding: that the presenter is the subject or controls a key bound to the credential. None of
 these checks makes the claims true. Selective-disclosure cryptosuites such as `bbs-2023`
@@ -202,9 +203,8 @@ that the program ran over the bytes it received, not who signed them.
 
 zkRDF @braun26, building on RDF-based semantics for selective disclosure @braunkaefer25, proves
 the soundness of SPARQL results: every returned solution is a solution over signed data. It
-discloses query constants and projected terms, hides the other terms, and proves signatures,
-equality of hidden terms and numeric bounds with BBS and range proofs. The verifier evaluates a
-rewritten query over what is disclosed. Its authors state that it cannot prove non-existence, so
+discloses query constants and projected terms, hides the rest, and proves signatures,
+equalities and numeric bounds with BBS and range proofs. Its authors state that it cannot prove non-existence, so
 it supports neither `MINUS` nor a false `ASK`. An earlier interface for zero-knowledge SPARQL
 over credentials made the same choice deliberately: it certified each returned result as
 following from data signed under listed keys, and required no proof of an empty result.
@@ -224,15 +224,17 @@ graph. It states which layout it uses, because a query written for one does not 
 
 Let $Q$ be the request's query. A _Supported_ answer states that every returned solution is a
 solution. For `SELECT`, the result is non-empty and has no duplicate rows, and each row is in
-$[| Q' |]_D$, where $Q'$ is $Q$ without its top-level `ORDER BY`, `OFFSET` and `LIMIT`. For `ASK`,
-the result is `true`. A Supported answer says nothing about the solutions it does not return.
+$[| Q' |]_D$, where $Q'$ is $Q$ without its top-level `ORDER BY`, `OFFSET` and `LIMIT`, which only
+bound how many rows the holder returns. For `ASK`, the result is `true`. A Supported answer says nothing about the solutions it does not return.
 
 An _Exact_ answer is a result SPARQL 1.1 permits for $Q$ over $D$, with nothing added or
 omitted: a `SELECT` result keeps its duplicates, an `ASK` result is `true` exactly when
 $[| Q |]_D$ is non-empty, and a `CONSTRUCT` graph is compared up to isomorphism. Where SPARQL
 leaves a choice open, the holder makes it. Such choices include `OFFSET` and `LIMIT` where
 `ORDER BY` does not fix the order, the order of tied rows, `REDUCED`, `SAMPLE` and
-`GROUP_CONCAT`; a result that depends on them is not uniquely determined by SPARQL. A proof
+`GROUP_CONCAT`; a result that depends on them is not uniquely determined by SPARQL. Without
+`ORDER BY`, the order of rows carries no meaning, so a `SELECT` result is compared as a
+multiset. A proof
 method may fix these choices, and a verifier can rely on that only where the method publishes
 them. Our evaluator does not yet publish its choices, so a verifier can rely on a unique result
 only for queries that leave SPARQL no choice.
@@ -406,9 +408,9 @@ dataset commitment, the result, the signature mode and, in the revealed mode, th
 messages; a proof method may bind them by one digest. The proof shows that:
 
 + the dataset commitment fixes $D$;
-+ $D$ is built from exactly the data the issuers signed;
-+ if the request lists issuer keys, every credential in $D$ carries a signature that verifies
-  under one of them;
++ if the request lists issuer keys, $D$ is built from exactly the data that signatures under
+  those keys cover, and in the hidden mode the proof also verifies those signatures
+  (§#ref(<modes>, supplement: none));
 + the result is an answer of the requested kind for $Q$ over $D$.
 
 Because the request digest is a public input, a proof made for one request fails for any other,
@@ -560,8 +562,8 @@ for numbers, date-times, booleans and strings.
 This design has three effects. First, canonicalisation moves to the issuer: a proof hashes only
 the quads it is given and checks that they form the signed tree. Second, a proof compares values
 without parsing lexical forms. In a circuit, comparing two numbers takes one range check on the
-difference of their keys; in our current Noir circuits, range checks on literals encoded as
-hashed text account for most of the gates.
+difference of their keys. In our current Noir circuits for integer filters, the range check on
+literals committed as hashed text accounts for most of the gates.
 // TODO(evidence): bind to the UltraHonk gate breakdown (project file
 // zk-proof-methods/ultrahonk-gate-breakdown.md) once it is frozen as an evidence record.
 Third, a fresh, secret salt makes the signed message hiding, if the hash is modelled as a random
@@ -669,7 +671,7 @@ Integrity proofs.
 
 The evaluator admits most SPARQL 1.1 query features, including `OPTIONAL`, `MINUS`, aggregates,
 subqueries and property paths, and rejects `SERVICE`, `NOW`, `RAND`, `DESCRIBE`, `FROM` and
-`FROM NAMED` before proving.
+`FROM NAMED`.
 // TODO(evidence): bind to the coverage manifest of the evaluator with signature checks
 // (zk/sparql-evaluator/coverage-authenticated-rdf.json, draft sparq-org/sparq#6791) and the host
 // query profile, once frozen as evidence records.
@@ -708,10 +710,10 @@ the proofs again. Appendix #ref(<app-inventories>, supplement: none) details the
         one receipt per input kind; #headline("zkvcq.vcqp_controls") (verifier-agreed) and
         #headline("zkvcq.vcqph_controls") (holder-declared) negative tests],
       [Same: remaining test cases †], [Exact `SELECT`, true and false `ASK`, `CONSTRUCT`; both
-        input kinds; row limit], [Yes], [Proof verified: one receipt per test case, with
-        #headline("zkvcq.ci_asktva_controls") (verifier-agreed) or
-        #headline("zkvcq.ci_askfhd_controls") (holder-declared) negative tests each; the row-limit
-        case rejected],
+        input kinds; row limit], [Yes], [Proof verified: one receipt per test case; each accepted one
+        with #headline("zkvcq.ci_asktva_controls") (verifier-agreed) or
+        #headline("zkvcq.ci_askfhd_controls") (holder-declared) negative tests; the row-limit case
+        rejected],
       [Public-triple circuit pilot], [Supported `SELECT DISTINCT`, one basic graph pattern],
         [Schnorr, own format], [Proof verified: #headline("zkvcq.pp_genuine_proofs") proofs;
         #headline("zkvcq.pp_tamper_controls") tampering and
@@ -752,8 +754,8 @@ These receipts show Exact evaluation bound to a request, not who issued the data
 === Exact answers with signature checks <v5-evidence>
 
 The build with signature checks passed #headline("zkvcq.v5_auth_tests_passed") tests outside the
-zkVM, including the W3C test vector for `eddsa-rdfc-2022` and the rejection of valid signatures
-under the wrong issuer, verification method, proof purpose or cryptosuite. Executed without
+zkVM, including the rejection of valid signatures under the wrong issuer, verification method,
+proof purpose or cryptosuite. Executed without
 proving, its guest accepted #headline("zkvcq.v5g_direct_v5_positive") valid inputs and rejected
 #headline("zkvcq.v5g_direct_v5_aborts") altered ones, such as forged, spliced or unauthorised
 credentials, each with its expected error.
@@ -761,7 +763,8 @@ credentials, each with its expected error.
 With our holder and verifier services, the build then produced one receipt per test case, each
 over a single credential, in three experiments:
 
-- a verifier-agreed `SELECT` over the W3C test vector, whose result keeps a duplicated row
+- a verifier-agreed `SELECT` over the W3C test vector for `eddsa-rdfc-2022`, whose result keeps a
+  duplicated row
   (#raw("?" + headline("zkvcq.vcqg_result_variable")) is #raw(headline("zkvcq.vcqg_result_row1"))
   twice);
 - the payment question of §#ref(<intro>, supplement: none), over a synthetic credential that
@@ -835,8 +838,8 @@ every returned record is in the owner's database unmodified, from completeness, 
 answer is omitted @li06. In these terms a Supported answer is correct, and an Exact answer is
 correct and complete over $D$. IntegriDB @integridb, vSQL @vsql and ZKSQL @zksql prove SQL
 results, ZKSQL in zero knowledge with explicit leakage of schema and cardinalities; ZKGraph
-proves graph queries @zkgraph25; VeriDKG returns complete SPARQL results over a decentralised
-knowledge graph @veridkg23. Their completeness is over a published database, the
+proves graph queries @zkgraph25; VeriDKG verifies that SPARQL results over a decentralised
+knowledge graph are complete @veridkg23. Their completeness is over a published database, the
 counterpart of our verifier-agreed input, not over a holder's private credentials. Wright
 @wright25dc evaluated SPARQL over Ed25519-signed credentials in RISC Zero; zkRDF later reduced the
 proving cost substantially with a data-centric design under a different signature scheme
@@ -880,9 +883,8 @@ records. The receiving agent cannot pause to ask a person what an accepted answe
 query request that states the answer kind, the input kind and the accepted issuer keys records
 that guarantee where software can check it. We have not evaluated agents or agent protocols.
 
-This paper concerns a single holder. A query over records held by several parties, each
-unwilling to reveal its records to the others, needs multi-party computation combined with
-proofs, which we leave to separate work.
+We consider a single holder. Queries over records held by several parties that do not trust one
+another need multi-party computation combined with proofs, which we leave to separate work.
 
 === Limitations <limitations>
 
