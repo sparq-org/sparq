@@ -77,3 +77,11 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
 - Merkle-root suite specification: sparq-org/sparq#6789 (rendered draft in the project file
   `zk/zk-merkle-cryptosuite-draft.pdf`); its section 6 lists the security properties of each member,
   for the security table. Canonical Q1-Q5 query files: `zk/sparql-evaluator/fixtures/paper/` in #6789.
+- Methods comparison input (project file `zk-proof-methods/quicksilver-vs-ultrahonk.md`, draft
+  #6790): same Noir-compiled ACIR circuits (K copies of hidden_issuer_d4, K in {1, 4, 16, 32}) proved
+  with UltraHonk and with QuickSilver (VOLE, designated verifier). At K=32: QuickSilver prover 8.8 s
+  single-threaded vs UltraHonk 14.3 s on four threads; QuickSilver needs the verifier online and
+  sends about 70 MB; UltraHonk proof 14.6 kB, verifies in 19 ms. QuickSilver is slower below about
+  100k constraints (fixed setup about 0.8 s, 18 MB). Plain re-evaluation over four disclosed
+  credentials (#6788) about 1.5 ms. Describe VOLE as "proposed, not built" (no transcript binding).
+  Cite only once frozen as evidence records.
