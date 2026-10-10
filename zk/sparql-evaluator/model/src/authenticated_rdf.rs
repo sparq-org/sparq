@@ -30,13 +30,30 @@
 //!    or `sec:proofValue`, one `VerifiableCredential` node and one IRI issuer;
 //! 4. require the verification method to be in the table and the document issuer
 //!    to equal that entry's pinned issuer;
-//! 5. verify strict Ed25519 over `SHA-256(config) || SHA-256(document)`.
+//! 5. in [`SignatureMode::Hidden`], verify strict Ed25519 over the signed message
+//!    `SHA-256(config) || SHA-256(document)`; in [`SignatureMode::Revealed`],
+//!    publish that signed message in the journal instead (see below).
 //!
 //! Verified credentials are sorted by document hash, and duplicates reject. The
 //! exact hashed canonical document quads are unioned into one default graph,
 //! with blank nodes renamed `k{index}_{label}` so that credentials never share a
 //! blank node. Literal lexical forms are copied unchanged. V3 then evaluates that
 //! graph under an internal `HolderDeclared` authority; only its result is kept.
+//!
+//! # Signature modes
+//!
+//! [`SignatureMode::Hidden`] (the default) keeps signatures, signed messages and
+//! the key-to-credential mapping private: the proof shows a valid signature from a
+//! table key on every credential. [`SignatureMode::Revealed`] moves only the
+//! Ed25519 check out of the proof. The witness then carries no signatures, and the
+//! journal lists one [`SignedMessage`] per credential, sorted by document hash:
+//! the verification method and the exact 64 signed bytes derived in-proof from
+//! the canonical inputs that were mapped into the queried dataset. The verifier
+//! checks the presented `proofValue`s against those messages and table keys with
+//! [`check_revealed_signatures`]. Revealed mode publishes each credential's
+//! document and configuration hashes and its verification method, so
+//! presentations become linkable and low-entropy documents can be guessed.
+//! Hidden-mode policy digests and commitments are unchanged by the mode field.
 //!
 //! # Commitment
 //!
@@ -136,6 +153,26 @@ pub enum Cryptosuite {
     EddsaRdfc2022,
 }
 
+/// Whether issuer signatures are verified inside the proof or by the verifier.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignatureMode {
+    /// The proof checks every signature; signatures and signed messages stay private.
+    #[default]
+    Hidden,
+    /// The journal publishes every signed message; the verifier checks signatures.
+    Revealed,
+}
+
+impl SignatureMode {
+    /// The data-model identifier: `"hidden"` or `"revealed"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hidden => "hidden",
+            Self::Revealed => "revealed",
+        }
+    }
+}
+
 /// Fixed mapping from verified credentials to the private V3 dataset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Mapping {
@@ -165,6 +202,9 @@ pub struct Policy {
     pub authorization: Vec<AuthorizedKey>,
     pub cryptosuite: Cryptosuite,
     pub mapping: Mapping,
+    /// Defaults to [`SignatureMode::Hidden`].
+    #[serde(default)]
+    pub signature_mode: SignatureMode,
 }
 
 impl Policy {
@@ -175,7 +215,15 @@ impl Policy {
             authorization,
             cryptosuite: Cryptosuite::EddsaRdfc2022,
             mapping: Mapping::ScopedCanonicalUnion,
+            signature_mode: SignatureMode::Hidden,
         }
+    }
+
+    /// The same policy with the given signature mode.
+    #[must_use]
+    pub fn with_signature_mode(mut self, mode: SignatureMode) -> Self {
+        self.signature_mode = mode;
+        self
     }
 }
 
@@ -199,7 +247,8 @@ pub struct SignedCredential {
     pub document: String,
     /// N-Quads of the proof configuration, without `proofValue`.
     pub proof_config: String,
-    /// The 64 raw Ed25519 signature bytes decoded from `proofValue`.
+    /// The 64 raw Ed25519 signature bytes decoded from `proofValue`; empty in
+    /// [`SignatureMode::Revealed`], where the verifier receives them instead.
     pub signature: Vec<u8>,
 }
 
@@ -251,6 +300,19 @@ pub struct Journal {
     pub dataset_commitment: [u8; 32],
     pub provenance: Provenance,
     pub result: v3::CanonicalResult,
+    /// Empty in [`SignatureMode::Hidden`]; one entry per credential, sorted by
+    /// document hash, in [`SignatureMode::Revealed`].
+    pub signed_messages: Vec<SignedMessage>,
+}
+
+/// One credential's signed bytes, published only in [`SignatureMode::Revealed`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignedMessage {
+    /// The verification method named by the credential's proof configuration.
+    pub verification_method: String,
+    /// `SHA-256(canonical config) || SHA-256(canonical document)`, the bytes signed.
+    pub message: Vec<u8>,
 }
 
 impl Cryptosuite {
@@ -311,6 +373,10 @@ fn policy_digest(policy: &Policy, table: &[Entry<'_>]) -> Result<[u8; 32], Rejec
     hash.update(b"sparq:proved-evaluator:authenticated-rdf:policy:v5\0");
     frame(&mut hash, policy.cryptosuite.profile().as_bytes());
     frame(&mut hash, policy.mapping.profile().as_bytes());
+    // Hidden adds nothing, so digests from before the mode field are unchanged.
+    if policy.signature_mode == SignatureMode::Revealed {
+        frame(&mut hash, b"signature-mode:revealed");
+    }
     for bound in [
         MAX_CREDENTIALS,
         MAX_AUTHORIZED_KEYS,
@@ -440,6 +506,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         dataset_commitment: authenticated.commitment,
         provenance,
         result: inner.result,
+        signed_messages: authenticated.signed_messages,
     })
 }
 
@@ -455,6 +522,10 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
 pub fn bind_journal(journal: &Journal, expected: &Request) -> Result<(), Rejected> {
     if journal.version != VERSION || journal.request_digest != request_digest(expected)? {
         return Err(Rejected("authenticated journal request mismatch"));
+    }
+    let revealed = expected.policy.signature_mode == SignatureMode::Revealed;
+    if revealed == journal.signed_messages.is_empty() {
+        return Err(Rejected("authenticated journal signature mode mismatch"));
     }
     match &expected.authority {
         DatasetAuthority::VerifierAgreed { commitment } => {
@@ -473,15 +544,57 @@ pub fn bind_journal(journal: &Journal, expected: &Request) -> Result<(), Rejecte
     Ok(())
 }
 
+/// Verifies presented signatures against a bound revealed-mode journal.
+///
+/// Call after [`bind_journal`]. `signatures` holds one 64-byte `proofValue` per
+/// journal entry, in journal order. Each is checked with strict Ed25519 under the
+/// request table key for that entry's verification method.
+///
+/// # Errors
+/// Rejects hidden-mode requests, a count or length mismatch, methods outside the
+/// table and failed signatures.
+pub fn check_revealed_signatures(
+    journal: &Journal,
+    expected: &Request,
+    signatures: &[Vec<u8>],
+) -> Result<(), Rejected> {
+    if expected.policy.signature_mode != SignatureMode::Revealed
+        || journal.signed_messages.is_empty()
+        || journal.signed_messages.len() != signatures.len()
+    {
+        return Err(Rejected("revealed signature count mismatch"));
+    }
+    let table = checked_table(&expected.policy.authorization)?;
+    for (entry, signature) in journal.signed_messages.iter().zip(signatures) {
+        let key = lookup(&table, &entry.verification_method)?;
+        let signature: [u8; 64] = signature
+            .as_slice()
+            .try_into()
+            .map_err(|_| Rejected("Ed25519 signature must be 64 bytes"))?;
+        key.1.verify_strict(&entry.message, &Signature::from_bytes(&signature))
+            .map_err(|_| Rejected("Ed25519 signature verification failed"))?;
+    }
+    Ok(())
+}
+
+fn lookup<'t>(table: &'t [Entry<'_>], method: &str) -> Result<&'t Entry<'t>, Rejected> {
+    table
+        .binary_search_by(|(entry, _)| entry.verification_method.as_str().cmp(method))
+        .map(|index| &table[index])
+        .map_err(|_| Rejected("verification method is not authorized"))
+}
+
 struct Authenticated {
     commitment: [u8; 32],
     nquads: String,
+    signed_messages: Vec<SignedMessage>,
 }
 
 struct Verified {
     document_hash: [u8; 32],
     config_hash: [u8; 32],
     quads: Vec<Quad>,
+    method: String,
 }
 
 fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authenticated, Rejected> {
@@ -492,11 +605,11 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
     if dataset.salt == [0; 32] {
         return Err(Rejected("authenticated dataset blinding rejected"));
     }
-    admit_sizes(&dataset.credentials)?;
+    admit_sizes(&dataset.credentials, policy.signature_mode)?;
     let mut verified = dataset
         .credentials
         .iter()
-        .map(|credential| verify(credential, &table))
+        .map(|credential| verify(credential, &table, policy.signature_mode))
         .collect::<Result<Vec<_>, _>>()?;
     verified.sort_unstable_by_key(|a| a.document_hash);
     if verified
@@ -511,14 +624,22 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
     hash.update(dataset.salt);
     hash.update((verified.len() as u32).to_le_bytes());
     let mut nquads = String::new();
+    let mut signed_messages = Vec::new();
     for (scope, credential) in verified.iter().enumerate() {
         hash.update(credential.document_hash);
         hash.update(credential.config_hash);
         map_scoped(&mut nquads, scope, &credential.quads)?;
+        if policy.signature_mode == SignatureMode::Revealed {
+            signed_messages.push(SignedMessage {
+                verification_method: credential.method.clone(),
+                message: signed_bytes(&credential.config_hash, &credential.document_hash).to_vec(),
+            });
+        }
     }
     Ok(Authenticated {
         commitment: hash.finalize().into(),
         nquads,
+        signed_messages,
     })
 }
 
@@ -530,14 +651,20 @@ fn statement_bound(text: &str) -> usize {
         .count()
 }
 
-fn admit_sizes(credentials: &[SignedCredential]) -> Result<(), Rejected> {
+fn admit_sizes(credentials: &[SignedCredential], mode: SignatureMode) -> Result<(), Rejected> {
     if credentials.is_empty() || credentials.len() > MAX_CREDENTIALS {
         return Err(Rejected("authenticated credential count must be 1 to 4"));
     }
     let (mut bytes, mut quads) = (0, 0);
     for credential in credentials {
-        if credential.signature.len() != 64 {
-            return Err(Rejected("Ed25519 signature must be 64 bytes"));
+        match mode {
+            SignatureMode::Hidden if credential.signature.len() != 64 => {
+                return Err(Rejected("Ed25519 signature must be 64 bytes"));
+            }
+            SignatureMode::Revealed if !credential.signature.is_empty() => {
+                return Err(Rejected("revealed mode carries no witness signature"));
+            }
+            _ => {}
         }
         if credential.document.len() > MAX_DOCUMENT_BYTES
             || credential.proof_config.len() > MAX_PROOF_CONFIG_BYTES
@@ -586,33 +713,37 @@ fn canonical(quads: &[Quad]) -> Result<String, Rejected> {
         .map_err(|_| Rejected("bounded RDFC-1.0 canonicalization rejected"))
 }
 
-fn verify(credential: &SignedCredential, table: &[Entry<'_>]) -> Result<Verified, Rejected> {
+fn signed_bytes(config_hash: &[u8; 32], document_hash: &[u8; 32]) -> [u8; 64] {
+    let mut bytes = [0; 64];
+    bytes[..32].copy_from_slice(config_hash);
+    bytes[32..].copy_from_slice(document_hash);
+    bytes
+}
+
+fn verify(credential: &SignedCredential, table: &[Entry<'_>], mode: SignatureMode) -> Result<Verified, Rejected> {
     let document = canonical(&parse(&credential.document, MAX_DOCUMENT_QUADS)?)?;
     let config = canonical(&parse(&credential.proof_config, MAX_PROOF_CONFIG_QUADS)?)?;
     // Every later check reads the exact canonical bytes that are hashed and signed.
     let quads = parse(&document, MAX_DOCUMENT_QUADS)?;
     let method = proof_method(&parse(&config, MAX_PROOF_CONFIG_QUADS)?)?;
-    let (entry, key) = table
-        .binary_search_by(|(entry, _)| entry.verification_method.as_str().cmp(method.as_str()))
-        .map(|index| &table[index])
-        .map_err(|_| Rejected("verification method is not authorized"))?;
+    let (entry, key) = lookup(table, &method)?;
     check_document(&quads, &entry.issuer)?;
     let config_hash: [u8; 32] = Sha256::digest(config.as_bytes()).into();
     let document_hash: [u8; 32] = Sha256::digest(document.as_bytes()).into();
-    let mut hash_data = [0; 64];
-    hash_data[..32].copy_from_slice(&config_hash);
-    hash_data[32..].copy_from_slice(&document_hash);
-    let signature: [u8; 64] = credential
-        .signature
-        .as_slice()
-        .try_into()
-        .map_err(|_| Rejected("Ed25519 signature must be 64 bytes"))?;
-    key.verify_strict(&hash_data, &Signature::from_bytes(&signature))
-        .map_err(|_| Rejected("Ed25519 signature verification failed"))?;
+    if mode == SignatureMode::Hidden {
+        let signature: [u8; 64] = credential
+            .signature
+            .as_slice()
+            .try_into()
+            .map_err(|_| Rejected("Ed25519 signature must be 64 bytes"))?;
+        key.verify_strict(&signed_bytes(&config_hash, &document_hash), &Signature::from_bytes(&signature))
+            .map_err(|_| Rejected("Ed25519 signature verification failed"))?;
+    }
     Ok(Verified {
         document_hash,
         config_hash,
         quads,
+        method,
     })
 }
 
