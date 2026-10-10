@@ -2578,8 +2578,10 @@ fn serialized_size(v: &Value) -> usize {
     c.0
 }
 
-/// RFC 6902 JSON Patch, applied whole or not at all, within `budget` serialized bytes.
-pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, PatchError> {
+/// RFC 6902 JSON Patch, applied whole or not at all, within `budget` serialized bytes. `target`
+/// and `ops` hold their numbers as text ([`read_numbers_as_text`]): a string starting with
+/// [`NUMBER_MARK`] is a number here, so this is private to the module that reads them so.
+fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, PatchError> {
     use PatchError::Failed;
     let ops = validate_json_patch(ops)?;
     if ops.len() > MAX_PATCH_OPS {
@@ -3096,12 +3098,8 @@ async fn patch<S: Store + 'static>(
     };
     // Its numbers are held as their text ([`NUMBER_MARK`]) while the patch applies, so the
     // content is written back with every number it does not touch as it was.
-    let target = if body.is_empty() {
-        Ok(Value::Object(Map::new()))
-    } else {
-        read_numbers_as_text(&body)
-    };
-    let target = match target {
+    // An empty body is not JSON either.
+    let target = match read_numbers_as_text(&body) {
         Ok(target) => target,
         Err(Unreadable::Number) => return number_refused(),
         Err(Unreadable::NotJson) => return not_json(),
@@ -7125,6 +7123,18 @@ mod tests {
             st.store.read(&uri).await.unwrap().body,
             Bytes::from(refused)
         );
+        // An empty body is not JSON: refused, and left as it was.
+        let uri = post(&st, "empty.json", JSON, "", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert!(st.store.read(&uri).await.unwrap().body.is_empty());
         // Malformed text stored as JSON is not rewritten into JSON.
         let uri = post(&st, "bad.json", JSON, "{1:2}", &[]).await;
         let r = call(
