@@ -208,3 +208,53 @@ fn revealed_mode_reveals_the_published_signed_message_and_checks_it_outside_the_
     );
     assert_eq!(nonces.calls, 0);
 }
+
+/// The paper's Q1–Q5 over the payment credential, under both suites and modes.
+#[test]
+fn paper_queries_run_on_the_payment_credential_under_both_suites() {
+    use sparq_proved_evaluator_model::merkle_suite;
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/paper");
+    let mut names: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.ends_with(".rq"))
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 5);
+    // RFC 8032 section 7.1 TEST 1 secret key; public test material.
+    let key = ed25519_dalek::SigningKey::from_bytes(&fixture::hex(
+        "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+    ));
+    let eddsa = fixture::payment_credential();
+    let merkle_config = fixture::PAYMENT_PROOF.replace("\"eddsa-rdfc-2022\"", "\"eddsa-sha256-merkle-2026\"");
+    let merkle = merkle_suite::issue(fixture::PAYMENT_DOCUMENT, &merkle_config, &key, [0x5c; 32]).unwrap();
+    let suites = [(auth::Cryptosuite::EddsaRdfc2022, eddsa), (auth::Cryptosuite::EddsaSha256Merkle2026, merkle)];
+    let expected = ["false", "1250.00", "1250.00", "2026-08", "2026-07"];
+    for (name, needle) in names.iter().zip(expected) {
+        let query = std::fs::read_to_string(dir.join(name)).unwrap();
+        let mut results = Vec::new();
+        for (suite, credential) in &suites {
+            for mode in [auth::SignatureMode::Hidden, auth::SignatureMode::Revealed] {
+                let mut credential = credential.clone();
+                if mode == auth::SignatureMode::Revealed {
+                    credential.signature.drain(..64);
+                }
+                let witness = auth::Witness {
+                    request: auth::Request {
+                        version: auth::VERSION,
+                        query: query.clone(),
+                        authority: DatasetAuthority::HolderDeclared,
+                        policy: fixture::payment_policy().with_cryptosuite(*suite).with_signature_mode(mode),
+                        nonce: NONCE,
+                    },
+                    dataset: fixture::credentials(vec![credential], fixture::SALT),
+                };
+                let journal = auth::evaluate(&witness).unwrap_or_else(|e| panic!("{name} {suite:?} {mode:?}: {e:?}"));
+                results.push(journal.result);
+            }
+        }
+        assert!(results.windows(2).all(|pair| pair[0] == pair[1]), "{name}");
+        let shown = format!("{:?}", results[0]);
+        assert!(shown.contains(needle) || (needle == "false" && shown.contains("false")), "{name}: {shown}");
+    }
+}

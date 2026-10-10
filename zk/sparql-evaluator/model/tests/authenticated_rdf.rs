@@ -7,6 +7,7 @@ use sparq_proved_evaluator_model::authenticated_rdf::{
     MAX_PROOF_CONFIG_BYTES, Policy, PrivateCredentials, Provenance, Request, SignedCredential,
     Witness,
 };
+use sparq_proved_evaluator_model::merkle_suite as merkle;
 use sparq_proved_evaluator_model::{DatasetAuthority, MAX_ROWS, ProofContract, Rejected, RowOrder, v3};
 
 // Published W3C vector: vc-di-eddsa REC 2025-05-15, eddsa-rdfc-2022 representation,
@@ -369,12 +370,12 @@ fn valid_signatures_do_not_authorize_wrong_issuer_method_purpose_or_suite() {
         ),
         (
             sign(&alice, &config(VM_A).replace("\"eddsa-rdfc-2022\"", "\"ecdsa-rdfc-2019\""), 1),
-            "cryptosuite must be the typed eddsa-rdfc-2022 value",
+            "cryptosuite must be the policy's typed cryptosuite value",
         ),
         // The plain-literal form is not the standard cryptosuiteString value.
         (
             sign(&alice, &config(VM_A).replace(&typed_suite, "\"eddsa-rdfc-2022\""), 1),
-            "cryptosuite must be the typed eddsa-rdfc-2022 value",
+            "cryptosuite must be the policy's typed cryptosuite value",
         ),
         (
             sign(&alice, &config(VM_A).replace("#DataIntegrityProof", "#Ed25519Signature2020"), 1),
@@ -920,4 +921,134 @@ fn revealed_mode_rejects_witness_signatures_and_still_enforces_the_table() {
         reason(run(query, DatasetAuthority::VerifierAgreed { commitment: hidden_anchor }, revealed(), vec![a])),
         "authenticated dataset anchor mismatch"
     );
+}
+
+// eddsa-sha256-merkle-2026: issue by ordering the parsed quads by leaf.
+fn merkle_config(method: &str) -> String {
+    config(method).replace("\"eddsa-rdfc-2022\"", "\"eddsa-sha256-merkle-2026\"")
+}
+
+fn merkle_parts(document: &str, config: &str, salt: [u8; 32]) -> (String, [u8; 32]) {
+    use oxrdf::Quad;
+    let quads: Vec<Quad> = oxttl::NQuadsParser::new()
+        .for_slice(document.as_bytes())
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let mut leaves: Vec<([u8; 32], &Quad)> = quads.iter().map(|q| (merkle::leaf(q).unwrap(), q)).collect();
+    leaves.sort_by_key(|(leaf, _)| *leaf);
+    leaves.dedup_by_key(|(leaf, _)| *leaf);
+    let ordered: String = leaves.iter().map(|(_, q)| format!("{q} .\n")).collect();
+    let row: Vec<[u8; 32]> = leaves.iter().map(|(leaf, _)| *leaf).collect();
+    let root = merkle::root(&row).unwrap();
+    let config_hash: [u8; 32] = Sha256::digest(sparq_canon::canonicalize_nquads(config).unwrap()).into();
+    (ordered, merkle::signed_message(&salt, row.len() as u32, &root, &config_hash))
+}
+
+fn merkle_sign(document: &str, config: &str, seed: u8, salt: [u8; 32]) -> SignedCredential {
+    let (ordered, message) = merkle_parts(document, config, salt);
+    let mut proof_value = key(seed).sign(&message).to_bytes().to_vec();
+    proof_value.extend_from_slice(&salt);
+    SignedCredential {
+        document: ordered,
+        proof_config: config.into(),
+        signature: proof_value,
+    }
+}
+
+fn merkle_policy() -> Policy {
+    Policy::new(table()).with_cryptosuite(auth::Cryptosuite::EddsaSha256Merkle2026)
+}
+
+fn merkle_alice() -> SignedCredential {
+    let claims = format!(
+        "<urn:vc:m-alice> <{CRED}credentialSubject> _:subject .\n\
+         _:subject <http://ex/name> \"Alice\" .\n\
+         _:subject <http://ex/balance> \"1250.50\"^^<{XSD}decimal> .\n"
+    );
+    merkle_sign(&document("urn:vc:m-alice", ISSUER_A, &claims), &merkle_config(VM_A), 1, [0x41; 32])
+}
+
+fn merkle_bob() -> SignedCredential {
+    let claims = format!("<did:example:bob> <http://ex/balance> \"99\"^^<{XSD}integer> .\n");
+    merkle_sign(&document("urn:vc:m-bob", ISSUER_B, &claims), &merkle_config(VM_B), 2, [0x42; 32])
+}
+
+#[test]
+fn merkle_suite_answers_with_blank_nodes_in_both_modes() {
+    let query = "SELECT ?b WHERE { ?s ex:balance ?b FILTER(?b > 100) }";
+    let hidden = run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![merkle_alice(), merkle_bob()]).unwrap();
+    assert!(hidden.signed_messages.is_empty());
+    let rows = format!("{:?}", hidden.result);
+    assert!(rows.contains("1250.50") && !rows.contains("\"99\""), "{rows}");
+    // The eddsa-rdfc-2022 policy never accepts Merkle credentials, nor the reverse.
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, Policy::new(table()), vec![merkle_bob()])),
+        "Ed25519 signature must be 64 bytes"
+    );
+    let mut eddsa = bob();
+    eddsa.signature.extend_from_slice(&[0x42; 32]);
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![eddsa])),
+        "cryptosuite must be the policy's typed cryptosuite value"
+    );
+
+    // Revealed: the witness keeps only the salt; the message is salted.
+    let revealed_policy = merkle_policy().with_signature_mode(auth::SignatureMode::Revealed);
+    let (alice, bob) = (merkle_alice(), merkle_bob());
+    let signatures: Vec<Vec<u8>> = [&alice, &bob].iter().map(|c| c.signature[..64].to_vec()).collect();
+    let strip = |c: &SignedCredential| SignedCredential { signature: c.signature[64..].to_vec(), ..c.clone() };
+    let journal = run(
+        query,
+        DatasetAuthority::HolderDeclared,
+        revealed_policy.clone(),
+        vec![strip(&alice), strip(&bob)],
+    )
+    .unwrap();
+    assert_eq!(journal.result, hidden.result);
+    assert_eq!(journal.signed_messages.len(), 2);
+    let req = request(query, DatasetAuthority::HolderDeclared, revealed_policy.clone());
+    let mut ordered = signatures.clone();
+    let alice_message = merkle_parts(&alice.document, &alice.proof_config, [0x41; 32]).1;
+    if journal.signed_messages[0].message != alice_message {
+        ordered.reverse();
+    }
+    for entry in &journal.signed_messages {
+        assert_eq!(entry.message.len(), 32);
+    }
+    auth::check_revealed_signatures(&journal, &req, &ordered).unwrap();
+    ordered.reverse();
+    assert!(auth::check_revealed_signatures(&journal, &req, &ordered).is_err());
+    // A witness that still carries the signature in revealed mode rejects.
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, revealed_policy, vec![alice])),
+        "Merkle proof value must be the signature (hidden mode only) and salt"
+    );
+}
+
+#[test]
+fn merkle_suite_rejects_reordered_tampered_or_resalted_credentials() {
+    let query = "ASK { ?s ex:balance ?b }";
+    let run_one = |credential: SignedCredential| {
+        run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![credential])
+    };
+    run_one(merkle_bob()).unwrap();
+    let mut reordered = merkle_bob();
+    let mut lines: Vec<&str> = reordered.document.lines().collect();
+    lines.reverse();
+    reordered.document = lines.join("\n") + "\n";
+    assert_eq!(reason(run_one(reordered)), "Merkle leaves must be non-empty and strictly increasing");
+    let mut duplicated = merkle_bob();
+    let first = duplicated.document.lines().next().unwrap().to_owned();
+    duplicated.document = format!("{first}\n{}", duplicated.document);
+    assert_eq!(reason(run_one(duplicated)), "Merkle leaves must be non-empty and strictly increasing");
+    let mut tampered = merkle_bob();
+    tampered.document = tampered.document.replace("\"99\"", "\"990\"");
+    // Changing a leaf may also break the order; either way it never verifies.
+    assert!(run_one(tampered).is_err());
+    let mut resalted = merkle_bob();
+    resalted.signature[64] ^= 1;
+    assert_eq!(reason(run_one(resalted)), "Ed25519 signature verification failed");
+    let mut short = merkle_bob();
+    short.signature.truncate(64);
+    assert_eq!(reason(run_one(short)), "Merkle proof value must be the signature (hidden mode only) and salt");
 }
