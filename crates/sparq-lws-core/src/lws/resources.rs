@@ -1622,9 +1622,6 @@ async fn create<S: Store + 'static>(
         }
     };
     let types = all_types(&declared_types, stated);
-    if let Err(refused) = linkset_fits(&types, &links) {
-        return refused;
-    }
     let meta = ResourceMeta {
         creator: agent.subject.clone(),
         linkset: initial_linkset(&child, &links),
@@ -1634,6 +1631,10 @@ async fn create<S: Store + 'static>(
         modified_ms: is_container.then(now_ms),
         ..Default::default()
     };
+    let format = (!is_container).then_some(content_type.as_str());
+    if let Err(refused) = admissible_meta(&child, &state.cfg.storage(), &meta, format) {
+        return refused;
+    }
     // The new member's metadata is written before its content, replacing whatever an earlier
     // resource at the IRI left behind (a delete whose metadata removal failed): content never
     // exists under metadata that is not its own. When the content cannot be created the metadata
@@ -2195,7 +2196,9 @@ async fn update<S: Store + 'static>(
     };
     rmeta.types = all_types(&declared, stated);
     rmeta.declared_types = Some(declared);
-    if let Err(refused) = linkset_fits(&rmeta.types, &rmeta.links) {
+    // The linkset as it would be served, the stored one's links and attributes with it.
+    let format = (!uri.ends_with('/')).then_some(content_type.as_str());
+    if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
         return refused;
     }
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
@@ -2400,6 +2403,41 @@ fn is_json_number(token: &str) -> bool {
         && (int == "0" || !int.starts_with('0'))
         && frac.is_none_or(digits)
         && exp.is_none_or(|e| digits(e.strip_prefix(['+', '-']).unwrap_or(e)))
+}
+
+/// A JSON Patch body read as every PATCH reads it: its numbers held as text
+/// ([`read_numbers_as_text`]), checked to be a JSON Patch with no member repeated. `400` (or
+/// what a refused number gives) otherwise.
+#[allow(clippy::result_large_err)]
+fn read_json_patch(body: &[u8]) -> Result<Value, Response> {
+    let patch = match read_numbers_as_text(body) {
+        Ok(patch) => patch,
+        Err(Unreadable::Number) => return Err(number_refused()),
+        Err(Unreadable::NotJson) => {
+            return Err(problem(
+                StatusCode::BAD_REQUEST,
+                Some("the patch is not JSON"),
+            ))
+        }
+    };
+    if let Err(PatchError::Malformed(why)) = validate_json_patch(&patch) {
+        return Err(problem(StatusCode::BAD_REQUEST, Some(why)));
+    }
+    if repeats_a_member(body) {
+        return Err(problem(
+            StatusCode::BAD_REQUEST,
+            Some("an operation repeats a member"),
+        ));
+    }
+    Ok(patch)
+}
+
+/// Read `body` as a PATCH reads it ([`read_json_patch`]), keeping nothing: whether it is a
+/// JSON Patch. Public only so the measured bound [`LINKSET_PARSE_AMPLIFICATION`] is tested on
+/// the parsing a linkset PATCH does.
+#[doc(hidden)]
+pub fn reads_as_json_patch(body: &[u8]) -> bool {
+    read_json_patch(body).is_ok()
 }
 
 /// The longest number text a JSON Patch reads, in bytes. Every number is held to it, in the patch
@@ -3042,26 +3080,7 @@ impl Patch {
             );
             return Err(r);
         }
-        let patch = match read_numbers_as_text(&req.body) {
-            Ok(patch) => patch,
-            Err(Unreadable::Number) => return Err(number_refused()),
-            Err(Unreadable::NotJson) => {
-                return Err(problem(
-                    StatusCode::BAD_REQUEST,
-                    Some("the patch is not JSON"),
-                ))
-            }
-        };
-        if let Err(PatchError::Malformed(why)) = validate_json_patch(&patch) {
-            return Err(problem(StatusCode::BAD_REQUEST, Some(why)));
-        }
-        if repeats_a_member(&req.body) {
-            return Err(problem(
-                StatusCode::BAD_REQUEST,
-                Some("an operation repeats a member"),
-            ));
-        }
-        Ok(Patch::Json(patch))
+        read_json_patch(&req.body).map(Patch::Json)
     }
 
     /// Whether applying the patch observes the target's content (see [`json_patch_reads`]).
@@ -3512,11 +3531,12 @@ enum Unresolved {
 /// metadata, which stores the linkset, may hold.
 const LINKSET_SERVED_BYTES: usize = super::MAX_META_BYTES;
 
-/// The most memory parsing a JSON text allocates per byte of it, at most: measured with a
-/// counting allocator over the smallest syntactic units, repeated (`""`, `[]`, `{}`, `[""]`,
-/// `[[]]`, `{"":""}`, `{"":0}`, `{"":[]}` and others), whose worst is an object of one member
-/// (about 96 bytes allocated per byte read, its map's node), and doubled.
-pub const LINKSET_PARSE_AMPLIFICATION: usize = 200;
+/// The most memory reading a JSON Patch body ([`read_json_patch`]) holds at once per byte of
+/// it, at most: measured as peak live bytes with a counting allocator over the smallest
+/// syntactic units, numbers, escapes, long keys, deep nesting and mixes of them, repeated
+/// (`tests/linkset_parse_amplification.rs`), whose worst is objects nested in objects (about
+/// 128 bytes per byte read, a map node each), and doubled.
+pub const LINKSET_PARSE_AMPLIFICATION: usize = 256;
 
 /// The most a linkset PATCH body may be: what parsing it, whatever its shape, can allocate
 /// within [`LINKSET_COST_BUDGET`] ([`LINKSET_PARSE_AMPLIFICATION`]). Ample for a patch to a
@@ -3557,46 +3577,6 @@ fn strings_without_numbers(v: &mut Value) -> bool {
         }
     }
     true
-}
-
-/// How many links the server adds to a resource's linkset of its own (`up`, `self`, `linkset`
-/// and the LWS type), at most.
-const SERVER_LINKS: usize = 8;
-
-/// The most the links the server adds take in a served linkset document, in bytes: each holds
-/// at most an IRI as long as [`MAX_LINKSET_FIELD`], with its attributes.
-const SERVER_LINKS_BYTES: usize = SERVER_LINKS * (MAX_LINKSET_FIELD + 256);
-
-/// What each link target adds to a served linkset document beyond its href, at most: the
-/// object around it (`{"href":""}`), a separator, and for a relation, its key and array.
-const TARGET_BYTES: usize = 32;
-
-/// Whether a resource's types and links make a linkset a PATCH may change: held to the caps
-/// a patched linkset is held to ([`MAX_LINKSET_TARGETS`], counting the links the server adds,
-/// and [`MAX_LINKSET_FIELD`]), and the document they make, as served, to
-/// [`LINKSET_SERVED_BYTES`], so whatever a write stores can be patched. `413` otherwise.
-#[allow(clippy::result_large_err)]
-fn linkset_fits(types: &[String], links: &Links) -> Result<(), Response> {
-    let targets = links.values().map(Vec::len).sum::<usize>() + types.len() + SERVER_LINKS;
-    let too_long = types
-        .iter()
-        .chain(links.keys())
-        .chain(links.values().flatten())
-        .any(|s| s.len() > MAX_LINKSET_FIELD);
-    let served = types
-        .iter()
-        .chain(links.keys())
-        .chain(links.values().flatten())
-        .map(|s| s.len() + TARGET_BYTES)
-        .sum::<usize>()
-        + SERVER_LINKS_BYTES;
-    if targets > MAX_LINKSET_TARGETS || too_long || served > LINKSET_SERVED_BYTES {
-        return Err(problem(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Some("the resource's types and links are more than its linkset may hold"),
-        ));
-    }
-    Ok(())
 }
 
 /// How many entries a linkset document a client writes may hold.
@@ -3729,8 +3709,13 @@ fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, 
     let resolve = |v: &Value| -> Result<Value, Unresolved> {
         let resolved = base
             .resolve(v.as_str().ok_or(Invalid)?)
-            .map_err(|_| Invalid)?;
-        Ok(Value::String(resolved.into_inner()))
+            .map_err(|_| Invalid)?
+            .into_inner();
+        // Resolving may lengthen a reference past the cap a stored linkset is held to.
+        if resolved.len() > MAX_LINKSET_FIELD {
+            return Err(Unresolved::TooLarge);
+        }
+        Ok(Value::String(resolved))
     };
     let mut entries = Vec::new();
     for entry in doc
@@ -3830,6 +3815,28 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
     links
 }
 
+/// A data resource's representation, as its linkset describes it (`self`): its format, size
+/// and modification time.
+struct Representation<'a> {
+    format: &'a str,
+    size: String,
+    modified: String,
+}
+
+impl<'a> Representation<'a> {
+    /// The longest a representation of `format` is described as: the largest size, and a
+    /// modification time (whose text is always as long). What a write checks a linkset with
+    /// ([`admissible_meta`]), so that a later change to the content, which grows the size it
+    /// gives but checks no linkset, never makes a stored linkset one a PATCH refuses.
+    fn longest(format: &'a str) -> Self {
+        Self {
+            format,
+            size: u64::MAX.to_string(),
+            modified: format_rfc3339(0),
+        }
+    }
+}
+
 /// A resource's whole linkset document: the server-managed metadata (its container, its types, and
 /// for a data resource its representation's format, size and modification time) merged into the
 /// entry about it, with the user-managed links beside them.
@@ -3838,28 +3845,56 @@ async fn linkset_document<S: Store + 'static>(
     uri: &str,
     meta: &ResourceMeta,
 ) -> Result<Value, ServerError> {
+    let stored = if uri.ends_with('/') {
+        None
+    } else {
+        state.store.meta(uri).await?
+    };
+    let representation = match &stored {
+        Some(stored) => {
+            let size = state.store.read_at(uri, stored).await?.len();
+            let modified = stored.last_modified.map(epoch_ms).unwrap_or_default();
+            Some(Representation {
+                format: &stored.content_type,
+                size: size.to_string(),
+                modified: format_rfc3339(to_secs(modified) as i64),
+            })
+        }
+        None => None,
+    };
+    Ok(served_linkset(
+        uri,
+        &state.cfg.storage(),
+        meta,
+        representation,
+    ))
+}
+
+/// [`linkset_document`], given the representation it describes.
+fn served_linkset(
+    uri: &str,
+    storage: &str,
+    meta: &ResourceMeta,
+    representation: Option<Representation<'_>>,
+) -> Value {
     let mut server = Map::new();
     server.insert("anchor".into(), Value::String(uri.into()));
-    if let Some(parent) = parent_of(uri, &state.cfg.storage()) {
+    if let Some(parent) = parent_of(uri, storage) {
         server.insert("up".into(), json!([{"href": parent}]));
     }
     let mut types = vec![json!({"href": lws_type(uri)})];
     types.extend(meta.types.iter().map(|t| json!({"href": t})));
     server.insert("type".into(), Value::Array(types));
-    if !uri.ends_with('/') {
-        if let Some(stored) = state.store.meta(uri).await? {
-            let size = state.store.read_at(uri, &stored).await?.len();
-            let modified = stored.last_modified.map(epoch_ms).unwrap_or_default();
-            server.insert(
-                "self".into(),
-                json!([{
-                    "href": uri,
-                    "format": [stored.content_type],
-                    "size": [size.to_string()],
-                    "modified": [format_rfc3339(to_secs(modified) as i64)],
-                }]),
-            );
-        }
+    if let Some(r) = representation {
+        server.insert(
+            "self".into(),
+            json!([{
+                "href": uri,
+                "format": [r.format],
+                "size": [r.size],
+                "modified": [r.modified],
+            }]),
+        );
     }
     let user = meta
         .linkset
@@ -3879,7 +3914,45 @@ async fn linkset_document<S: Store + 'static>(
         }
         None => entries.insert(0, Value::Object(server)),
     }
-    Ok(json!({"linkset": entries}))
+    json!({"linkset": entries})
+}
+
+/// Whether a linkset document, as served, is one a PATCH may change: what a PATCH checks its
+/// target against before it applies anything, and what applying none of it (`[]`) and resolving
+/// the result against the linkset's own URI (`base_len` bytes long) then costs and is capped by
+/// ([`linkset_cost`], which charges at least the target's size and [`value_cost`]), with the
+/// document within what the metadata holds ([`LINKSET_SERVED_BYTES`]). Every write that changes
+/// a linkset (POST, PUT and PATCH) checks the document it would serve with this, and a PATCH
+/// checks its target with it, so whatever is stored can be patched.
+fn admissible(served: &Value, base_len: usize) -> bool {
+    valid_linkset(served)
+        && serialized_size(served) <= LINKSET_SERVED_BYTES
+        && linkset_cost(served, base_len).is_some_and(|cost| cost <= LINKSET_COST_BUDGET)
+}
+
+/// [`admissible`], for the linkset `meta` makes for `uri`, describing a representation of
+/// `format` (none for a container) at its longest ([`Representation::longest`]). `413`
+/// otherwise.
+#[allow(clippy::result_large_err)]
+fn admissible_meta(
+    uri: &str,
+    storage: &str,
+    meta: &ResourceMeta,
+    format: Option<&str>,
+) -> Result<(), Response> {
+    let served = served_linkset(uri, storage, meta, format.map(Representation::longest));
+    if !admissible(&served, linkset_base(uri).len()) {
+        return Err(problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some("the resource's linkset would be more than a linkset may hold"),
+        ));
+    }
+    Ok(())
+}
+
+/// The URI a resource's linkset is served at, against which its relative references resolve.
+fn linkset_base(uri: &str) -> String {
+    format!("{uri}{META_SUFFIX}")
 }
 
 /// A linkset document's entity tag: a digest of the document, server-managed metadata included, so
@@ -3998,6 +4071,15 @@ async fn linkset<S: Store + 'static>(
             if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
                 return r;
             }
+            // The target is held to what every write that stores a linkset checks the document
+            // it would serve with ([`admissible`]), so a linkset this server stored passes.
+            let base = linkset_base(uri);
+            if !admissible(&document, base.len()) {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some("the resource's linkset is more than a linkset may hold"),
+                );
+            }
             // The patch holds its numbers as their text, so the linkset is read the same way,
             // and written back with every number restored. A linkset holds no numbers, so one a
             // patch adds is refused below, whatever its size.
@@ -4029,7 +4111,6 @@ async fn linkset<S: Store + 'static>(
             };
             // Relative references are resolved once, here, against the linkset's own URI: what
             // is stored, served and indexed is then the same absolute link.
-            let base = format!("{uri}{META_SUFFIX}");
             let patched = match absolute_linkset(&patched, &base, LINKSET_COST_BUDGET) {
                 Ok(p) => p,
                 Err(Unresolved::Invalid) => return problem(
@@ -4047,17 +4128,25 @@ async fn linkset<S: Store + 'static>(
             meta.links = links_of(&user, uri);
             meta.linkset = Some(user.into_value());
             meta.linkset_etag = None;
-            // The size is checked on the document as it will be served: the server-managed links
-            // (`up`, `type`, `self`) a patch may strip are put back, and they count too.
+            // The result is checked as it will be served, with the server-managed links (`up`,
+            // `type`, `self`) a patch may strip put back, with what the next PATCH checks its
+            // target with ([`admissible`]): a linkset is stored only if it can be patched again.
             let rebuilt = match linkset_document(state, uri, &meta).await {
                 Ok(d) => d,
                 Err(e) => return store_error(e),
             };
-            if serialized_size(&rebuilt) > LINKSET_SERVED_BYTES {
-                return problem(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    Some("the patched document would be too large"),
-                );
+            let format = if uri.ends_with('/') {
+                None
+            } else {
+                match state.store.meta(uri).await {
+                    Ok(stored) => stored.map(|m| m.content_type),
+                    Err(e) => return store_error(e),
+                }
+            };
+            if let Err(refused) =
+                admissible_meta(uri, &state.cfg.storage(), &meta, format.as_deref())
+            {
+                return refused;
             }
             // The linkset is checked whole, as it will be stored: inside the metadata it nests a
             // level deeper than in the patched document, and metadata that does not read back
@@ -4684,7 +4773,7 @@ mod tests {
             .collect();
         let r = call(&st, "POST", "/", &[("content-type", "text/turtle")], &many).await;
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        let most: String = (0..MAX_LINKSET_TARGETS - SERVER_LINKS)
+        let most: String = (0..MAX_LINKSET_TARGETS - 8)
             .map(|i| format!("<> a <https://ex.org/T{i}> .\n"))
             .collect();
         let uri = post(&st, "t.ttl", "text/turtle", &most, &[]).await;
@@ -6089,8 +6178,11 @@ mod tests {
         let past = "r".repeat(MAX_LINKSET_FIELD + 1);
         assert!(ok(&doc(1, 1, &format!("x:{}", &at[2..]), "x")));
         assert!(large(&doc(1, 1, &format!("x:{}", &past[2..]), "x")));
-        assert!(ok(&doc(1, 1, "license", &at)));
+        assert!(ok(&doc(1, 1, "license", &format!("x:{}", &at[2..]))));
         assert!(large(&doc(1, 1, "license", &past)));
+        // A relative reference at the cap is past it once resolved, and is refused rather
+        // than stored past it.
+        assert!(large(&doc(1, 1, "license", &at)));
         let mut anchored = doc(1, 1, "license", "x");
         anchored["linkset"][0]["anchor"] = json!(format!("http://h/{}", &at[9..]));
         assert!(ok(&anchored));
@@ -6202,6 +6294,79 @@ mod tests {
         // One that keeps within the cap applies.
         let r = call(&st, "PATCH", &path, &[patch], "[]").await;
         assert!(r.status().is_success(), "{}", r.status());
+    }
+
+    /// Review findings: a patched linkset was checked, with the server's links put back, only
+    /// for its size, so one could be stored whose cost the next PATCH refused, every PATCH after
+    /// it then refused, even one shrinking it; a PUT adding types to a patched linkset was checked
+    /// without it; and a relative href at the cap was stored past it once resolved. Every write
+    /// that stores a linkset checks it as the next PATCH checks its target, so a PATCH applying
+    /// nothing always succeeds afterwards.
+    #[tokio::test]
+    async fn every_stored_linkset_takes_a_patch() {
+        let st = state().await;
+        let patch = ("content-type", JSON_PATCH);
+        let turtle = |n: usize| -> String {
+            (0..n)
+                .map(|i| format!("<> a <https://ex.org/T{i}> .\n"))
+                .collect()
+        };
+        // Many types, then a target with many attribute values, copied over and over.
+        let uri = post(&st, "t.ttl", "text/turtle", &turtle(900), &[]).await;
+        let path = format!("{}{META_SUFFIX}", path_of(&uri));
+        let mut ops = vec![json!({
+            "op": "add",
+            "path": "/linkset/0/license",
+            "value": [{"href": "https://ex.org/l", "ext": vec![""; 2048]}],
+        })];
+        ops.extend((0..13).map(|_| {
+            json!({"op": "copy", "from": "/linkset/0/license/0", "path": "/linkset/0/license/-"})
+        }));
+        let ops = Value::Array(ops).to_string();
+        assert!(ops.len() <= LINKSET_PATCH_BODY);
+        let r = call(&st, "PATCH", &path, &[patch], &ops).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        // A linkset grown as far as PATCH takes it, then a PUT adding types to it.
+        let uri = post(&st, "u.ttl", "text/turtle", &turtle(1), &[]).await;
+        let path = format!("{}{META_SUFFIX}", path_of(&uri));
+        let one = json!([{
+            "op": "add",
+            "path": "/linkset/0/license/-",
+            "value": {"href": "https://ex.org/l", "ext": vec![""; 2048]},
+        }])
+        .to_string();
+        let first = json!([{"op": "add", "path": "/linkset/0/license", "value": []}]).to_string();
+        let r = call(&st, "PATCH", &path, &[patch], &first).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let mut grown = 0;
+        loop {
+            let r = call(&st, "PATCH", &path, &[patch], &one).await;
+            if r.status() != StatusCode::NO_CONTENT {
+                assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+                break;
+            }
+            grown += 1;
+            assert!(grown < 1000);
+        }
+        assert!(grown > 0);
+        let put = ("content-type", "text/turtle");
+        let r = call(&st, "PUT", path_of(&uri), &[put], &turtle(900)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        // A relative href at the cap is past it once resolved.
+        let long = json!([{
+            "op": "add",
+            "path": "/linkset/0/describedby",
+            "value": [{"href": "r".repeat(MAX_LINKSET_FIELD)}],
+        }])
+        .to_string();
+        let r = call(&st, "PATCH", &path, &[patch], &long).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
     }
 
     /// Review finding: a conditional create in a service container checked the listing without
