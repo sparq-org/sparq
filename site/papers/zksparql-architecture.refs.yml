@@ -360,6 +360,12 @@ risc0:
   author: "RISC Zero"
   url: "https://dev.risczero.com/"
 
+risc0sec:
+  type: reference
+  title: "Security Model (RISC Zero zkVM Developer Documentation, version 3.0)"
+  author: "RISC Zero"
+  url: "https://dev.risczero.com/api/security-model"
+
 crescent:
   type: repository
   title: "Crescent: credential presentations over existing credentials (project repository)"

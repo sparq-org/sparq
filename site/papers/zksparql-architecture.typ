@@ -114,8 +114,8 @@ Proving times are pending.
 
 A lender assessing a mortgage application asks the applicant one question: was any payment from the
 applicant's account returned unpaid? The usual answer is a bank statement, which also discloses
-every payment, balance and payee that the lender did not ask about. If the bank issued the statement
-as a verifiable credential @vcdm2, the lender could check that the bank signed it, but the
+every payment, balance and payee that the lender did not ask about. If the bank issued it as a
+verifiable credential @vcdm2, the lender could check that the bank signed it, but the
 credential would still disclose everything in it.
 
 A zero-knowledge proof lets the applicant, as holder, return only the answer, with a proof that it
@@ -187,11 +187,13 @@ not thereby false.
 
 A verifiable credential @vcdm2 is a set of claims that an issuer makes about a subject, secured so
 that its authorship can be verified; a holder presents it to a verifier. Its Data Integrity proof
-@vcdi is, in this paper, a signature with its proof configuration; a cryptosuite specifies how to
-create and verify it. The cryptosuite `eddsa-rdfc-2022` @vcdieddsa canonicalises the credential with
-RDF Dataset Canonicalization (RDFC-1.0) @rdfc10, then signs with Ed25519 the SHA-256 hashes of the
-canonical proof configuration and of the canonical document. A valid signature shows only that
-someone with the signing key signed these bytes. The verifier must still check that the issuer
+@vcdi is, in this paper, a signature with its proof configuration: the proof without its proof value
+(`proofValue`), which holds the signature. A cryptosuite specifies how to create and verify the
+proof, and the proof names its verification method, here a public key, by an identifier
+(`verificationMethod`). The cryptosuite `eddsa-rdfc-2022` @vcdieddsa canonicalises the credential
+and the proof configuration with RDF Dataset Canonicalization (RDFC-1.0) @rdfc10. Ed25519 then
+signs the SHA-256 hash of the canonical proof configuration followed by that of the canonical
+document. A valid signature shows only that someone with the signing key signed these bytes. The verifier must still check that the issuer
 authorised the key, through a verification relationship in the issuer's controlled identifier
 document @vcdi. It may also check credential status (revocation or suspension), the validity period,
 and holder binding: that the presenter is the subject or controls a key bound to the credential.
@@ -233,6 +235,12 @@ graphs of the credentials the holder includes, as the default graph; the merge k
 credential's blank nodes apart. A proof method may instead put each credential in its own named
 graph. It states which layout it uses, because a query written for one does not match the other.
 
+The proof fixes $D$ through a _dataset commitment_: a digest of the included credentials and of a
+random salt that the holder chooses. The commitment is binding if the hash is collision-resistant,
+so the holder cannot later claim a different $D$ for it. While the salt stays secret, it is also
+hiding, computationally and if the hash is modelled as a random oracle: on its own, it reveals
+nothing about $D$.
+
 === Supported and Exact answers <semantics>
 
 Let $Q$ be the request's query. A _Supported_ answer states that every returned solution is a
@@ -265,7 +273,7 @@ stays a solution when the omitted credentials are added. With `OPTIONAL`, `MINUS
 subqueries or aggregates, one more credential can remove a row, change a count or displace the
 latest payment.
 
-=== Counting returned rows is not a count <counting>
+=== Counting Supported rows does not count all solutions <counting>
 
 A tempting shortcut lets the holder return Supported rows and the verifier compute `COUNT`,
 `ORDER BY` or `LIMIT` over them. This works only if the returned rows are the complete result;
@@ -370,7 +378,9 @@ presentation.
 @request-table lists the members of a query request. The verifier service stores the request and its
 request digest, the SHA-256 hash of its JSON canonical form. It checks each presentation against
 this stored copy, never against anything the holder returns. The request lists the accepted issuer
-keys rather than resolving them, so that both sides prove and verify against the same keys.
+keys rather than resolving them, so that both sides prove and verify against the same keys. The list
+states the verifier's policy; it does not itself show that the issuer authorised a key
+(§#ref(<bg-vc>, supplement: none)).
 
 A proof method is a way of producing and checking the proof, named by an IRI and a version, as a
 cryptosuite is for Data Integrity proofs. Its evidence may be a zero-knowledge proof, a proof that
@@ -390,8 +400,9 @@ such as a circuit's verification key or a zkVM image ID.
     [`answerKind`], [Supported or Exact (§#ref(<semantics>, supplement: none))],
     [`input`], [Holder-declared, or verifier-agreed with the agreed dataset commitment
       (§#ref(<input-kinds>, supplement: none))],
-    [`issuers`], [The accepted issuer keys, each with its issuer, verification method and
-      cryptosuite; an empty list accepts credentials without checking any signature],
+    [`issuers`], [The accepted issuer keys. Each entry gives an issuer, the identifier of a
+      verification method (`verificationMethod`), that method's public key (`publicKeyMultibase`)
+      and a cryptosuite. An empty list accepts credentials without checking any signature],
     [`signatureModes`], [The accepted signature modes: hidden, revealed or disclosed
       (§#ref(<modes>, supplement: none))],
     [`proofMethods`], [The accepted proof methods, each with its version, verification key and
@@ -543,7 +554,7 @@ A sequence of queries can also reveal together what no single query reveals.
 === Existing cryptosuites <existing-suites>
 
 Three RDF cryptosuites sign the same structure: hashes of the canonical proof configuration and of
-the canonical document. `eddsa-rdfc-2022` uses Ed25519 with SHA-256 @vcdieddsa; our zkVM guest
+the canonical document. `eddsa-rdfc-2022` uses Ed25519 with SHA-256 @vcdieddsa; our guest program
 verifies it, and every zkVM experiment with signature checks in §#ref(<evidence>, supplement: none)
 uses it. `ecdsa-rdfc-2019` uses ECDSA, with P-256 and SHA-256 or P-384 and SHA-384 @vcdiecdsa; we
 verify it only outside the zkVM.
@@ -552,7 +563,7 @@ verify it only outside the zkVM.
 `mldsa44-rdfc-2024` uses ML-DSA-44 @fips204 with SHA-256 and is designed to resist forgery by a
 quantum adversary; it is in a W3C First Public Working Draft @vcdiqr, and we have not implemented
 it. None of the three salts its signed message, so whoever sees the hashes can test a guessed
-document. To check such a signature inside a proof, the guest hashes each credential's whole
+document. To check such a signature inside a proof, the prover hashes each credential's whole
 canonical document, and to compare typed values it must parse their lexical forms. The
 selective-disclosure cryptosuites `bbs-2023` @vcdibbs and `ecdsa-sd-2023` @vcdiecdsa fit the
 disclosed mode; only `bbs-2023` derived proofs are unlinkable.
@@ -582,7 +593,7 @@ is modelled as a random oracle, so that a verifier in the revealed mode cannot c
 credential.
 
 The family has three members. `eddsa-sha256-merkle-2026` uses a SHA-256 tree and Ed25519, for zkVMs;
-our zkVM guest verifies it, and we measured its cycles without proving
+a later build of our guest program verifies it, and we measured its cycles without proving
 (§#ref(<cost>, supplement: none)).
 `schnorr-poseidon2-merkle-2026` uses a Poseidon2 tree and Schnorr signatures over Baby Jubjub, for
 circuits, and the post-quantum `mldsa44-sha256-merkle-2026` uses ML-DSA-44. These two are specified
@@ -590,7 +601,8 @@ but not implemented.
 
 === Security and disclosure <security>
 
-@security-table compares signature modes, signature schemes and proof systems. In the hidden mode,
+@security-table compares what the verifier learns in each signature mode, and supplementary
+@assumptions-table lists the assumptions behind each signature scheme and proof system. In the hidden mode,
 the cryptosuite does not change what the verifier learns, which depends on the public inputs and on
 the zero-knowledge of the proof system. In the revealed mode, a credential's repeated signature
 links its presentations, and with an RDFC cryptosuite the verifier can also confirm a guessed
@@ -626,32 +638,15 @@ classical adversary.
       [Revealed (Merkle-based)], [As above, without the salt], [Yes],
         [No, while the salt is fresh and private],
       [Disclosed (whole credentials)], [The signed credentials], [Yes], [Not applicable],
-      [Disclosed (`ecdsa-sd-2023`)], [Disclosed and mandatory statements, the base signature],
+      [Disclosed (`ecdsa-sd-2023`)], [Disclosed and mandatory quads, the base signature],
         [Yes], [No],
-      [Disclosed (`bbs-2023`)], [Disclosed and mandatory statements, a BBS proof],
+      [Disclosed (`bbs-2023`)], [Disclosed and mandatory quads, a BBS proof],
         [Only through what is disclosed], [No],
-      table.cell(fill: luma(235))[*Component (used by)*], table.cell(fill: luma(235))[*Assumption*],
-        table.cell(fill: luma(235))[*Classical adversary*], table.cell(fill: luma(235))[*Quantum adversary*],
-      [Ed25519 (`eddsa-rdfc-2022`, `eddsa-sha256-merkle-2026`); ECDSA P-256 (`ecdsa-rdfc-2019`,
-        `ecdsa-sd-2023`)], [Elliptic-curve discrete logarithm], [Unforgeable], [Forgeable],
-      [ML-DSA-44 (`mldsa44-rdfc-2024`, `mldsa44-sha256-merkle-2026`)],
-        [Module lattice problems (MLWE, SelfTargetMSIS)], [Unforgeable], [Believed unforgeable],
-      [Schnorr over Baby Jubjub (`schnorr-poseidon2-merkle-2026`)],
-        [Discrete logarithm; Poseidon2 as a random oracle],
-        [Unforgeable: argued, inferred for this instantiation], [Forgeable],
-      [BBS (`bbs-2023`)], [A pairing assumption (q-SDH)], [Unforgeable], [Forgeable],
-      [SHA-256 and Poseidon2 Merkle trees], [Collision resistance], [Binding],
-        [Binding, with a reduced margin],
-      [RISC Zero succinct receipt (STARK)], [Random oracle model and a conjecture],
-        [Knowledge-sound, under the conjecture], [Inferred: Shor's algorithm does not apply],
-      [UltraHonk with zero-knowledge (KZG over BN254)],
-        [Pairings over BN254 (q-SDH, algebraic group model); random oracle; trusted setup],
-        [Knowledge-sound], [Not knowledge-sound, also for earlier proofs],
     )
   },
   caption: [
-    Security and disclosure by signature mode, cryptosuite and proof system. "Links
-    presentations" means through a value the verifier receives, without breaking any assumption.
+    What the verifier learns, by signature mode and cryptosuite. "Links presentations" means
+    through a value the verifier receives, without breaking any assumption.
     RISC Zero claims, but has not established, that its receipts are zero-knowledge. The
     zero-knowledge variant of UltraHonk that we use is designed to be statistically
     zero-knowledge; its documentation cites no proof. In every mode, the result and its size can
@@ -667,13 +662,13 @@ classical adversary.
 
 === Prototype and method <prototype>
 
-The SPARQL evaluator running in the RISC Zero zkVM (our guest program, or "the evaluator") evaluates
-a query over its input and writes an Exact result, the dataset commitment and the input kind to the
-journal. A second build adds signature checks in front of the same evaluator: it verifies each
-credential's `eddsa-rdfc-2022` signature in the hidden mode, checks the key against the request's
-issuer keys, and evaluates the query over the signed canonical N-Quads. Our holder and verifier
-services wrap both builds in query requests and the checks of §#ref(<validation>, supplement: none),
-with a binary encoding rather than the specification's JSON. The challenge, audience and validity
+Our guest program runs a SPARQL evaluator inside the RISC Zero zkVM and writes the Exact result, the
+dataset commitment and the input kind to the journal. A second build adds signature checks in front of the
+same evaluator: it verifies each credential's `eddsa-rdfc-2022` signature in the hidden mode, checks
+the key against the request's issuer keys, and evaluates the query over the signed canonical
+N-Quads. Our holder and verifier services wrap both builds with query requests and the checks of
+§#ref(<validation>, supplement: none). They use a binary encoding rather than the specification's
+JSON. The challenge, audience and validity
 period reach the proof indirectly: the journal binds a value derived from the stored request. We
 have not confirmed that the verifier service performs its checks in exactly the order of
 §#ref(<validation>, supplement: none). Separately, two Noir circuits produce Supported answers to
@@ -823,7 +818,7 @@ version of the build with signature checks, which also supports the revealed mod
 We ran #headline("zkexec.main_queries") queries over the payment credential: the payment `ASK`, a
 `SELECT` of amounts with duplicate rows, a `CONSTRUCT` over the same pattern, a numeric `FILTER` on
 `xsd:decimal` amounts, and a string `FILTER` on payment IRIs. Each query ran over one credential and
-over four, each credential with #headline("zkexec.main_statements") statements. @cost-table gives
+over four, each credential with #headline("zkexec.main_statements") triples. @cost-table gives
 the median over the queries. In every configuration, the revealed mode needed fewer cycles and
 segments than the hidden mode, and `eddsa-sha256-merkle-2026` needed fewer cycles than
 `eddsa-rdfc-2022`.
@@ -914,17 +909,17 @@ query took fewer cycles than processing the document or verifying the signature.
 
 A sweep of #headline("zkexec.sweep_cases") query cases, one per feature, ran in the same
 configurations over generated credentials of #headline("zkexec.sweep_statements_small") and
-#headline("zkexec.sweep_statements_large") statements each (@sweep-table). The evaluator admitted
+#headline("zkexec.sweep_statements_large") triples each (@sweep-table). The evaluator admitted
 #headline("zkexec.sweep_rdfc_hidden_n1_s32_admitted") cases with one credential and
 #headline("zkexec.sweep_rdfc_hidden_n4_s32_admitted") with four, and rejected the others, such as
 `SERVICE`, `NOW` and `RAND`. With one credential of #headline("zkexec.sweep_statements_small")
-statements, in the hidden mode with `eddsa-rdfc-2022`, the admitted cases needed from
+triples, in the hidden mode with `eddsa-rdfc-2022`, the admitted cases needed from
 #mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_min") to
 #mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_max") million cycles, with a median of
 #mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_median"). Our prover stops an execution that reaches
 a session limit of #mcycles("zkexec.sweep_session_limit") million cycles, and then produces no
 proof. With `eddsa-rdfc-2022` in the hidden mode, four credentials of
-#headline("zkexec.sweep_statements_large") statements exceeded this limit in every admitted case.
+#headline("zkexec.sweep_statements_large") triples exceeded this limit in every admitted case.
 Every other configuration stayed within it, including the revealed mode and the Merkle-based
 cryptosuite over the same credentials.
 
@@ -960,8 +955,8 @@ support non-monotone queries, and inherits the cost question.
 _Credentials and presentation protocols._ CL signatures @cl01, BBS @bbs, zk-creds @zkcreds and
 Crescent @crescent let a holder prove statements about signed attributes, and SD-JWT @sdjwt lets a
 holder disclose selected claims of a signed JSON token. OpenID for Verifiable Presentations
-@openid4vp requests credentials with DCQL queries, which select credentials and the claims to
-disclose. A query request could travel in it as a new credential format, but the protocol has no
+@openid4vp requests credentials with queries in its Digital Credentials Query Language (DCQL), which
+select credentials and the claims to disclose. A query request could travel in it as a new credential format, but the protocol has no
 step in which a verifier agrees an input in advance.
 
 _Other proof methods._ A proof method need not produce a zero-knowledge proof. The companion
@@ -977,8 +972,8 @@ method.
 
 Reading a verifier-agreed Exact answer as evidence about all the relevant records rests on an
 assumption we do not discharge: that a party the verifier trusts fixed an input that covers them.
-For the payment question, the bank could sign a dataset commitment that covers its statement
-credentials for a period. Alternatively, the verifier could agree a commitment in an earlier
+For the payment question, the bank could sign a dataset commitment that covers the credentials it
+issued to the applicant for a period. Alternatively, the verifier could agree a commitment in an earlier
 exchange in which it learned which credentials the dataset holds. We do not claim that such
 infrastructure exists. Without it, a deployment can offer only holder-declared inputs.
 
@@ -1005,7 +1000,7 @@ support some of these assumptions but do not establish them. Negative tests show
 checks exist and fire; they cannot rule out substitutions we did not try. The evaluator is covered
 by tests, not by a conformance suite. Every zkVM proof with signature checks covers one synthetic
 credential. Our cycle counts, taken without proving, cover at most four synthetic credentials of
-#headline("zkexec.sweep_statements_large") statements each, so we have no evidence yet about
+#headline("zkexec.sweep_statements_large") triples each, so we have no evidence yet about
 realistic credentials, larger inputs or proving times.
 
 == Conclusion <conclusion>
@@ -1158,6 +1153,56 @@ and the source commits and guest binaries (§#ref(<repro>, supplement: none)).
   let ns = n.pos()
   "S" + numbering("1.1.", ..if ns.len() > 1 { ns.slice(1) } else { ns })
 })
+
+== Security assumptions <supp-security>
+
+@assumptions-table lists the assumptions behind the signature schemes and proof systems of
+§#ref(<security>, supplement: none), and whether each property holds against a classical and a
+quantum adversary.
+
+#[
+#show figure: set block(breakable: false)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1.3fr, 1.6fr, 1fr, 1fr),
+      align: (left, left, left, left),
+      table.header(
+        table.cell(fill: luma(235))[*Component (used by)*], table.cell(fill: luma(235))[*Assumption*],
+        table.cell(fill: luma(235))[*Classical adversary*],
+        table.cell(fill: luma(235))[*Quantum adversary*],
+      ),
+      [Ed25519 (`eddsa-rdfc-2022`, `eddsa-sha256-merkle-2026`); ECDSA P-256 (`ecdsa-rdfc-2019`,
+        `ecdsa-sd-2023`)], [Elliptic-curve discrete logarithm], [Unforgeable], [Forgeable],
+      [ML-DSA-44 (`mldsa44-rdfc-2024`, `mldsa44-sha256-merkle-2026`)],
+        [Module lattice problems (MLWE, SelfTargetMSIS)], [Unforgeable], [Believed unforgeable],
+      [Schnorr over Baby Jubjub (`schnorr-poseidon2-merkle-2026`)],
+        [Discrete logarithm; Poseidon2 as a random oracle],
+        [Unforgeable: argued, inferred for this instantiation], [Forgeable],
+      [BBS (`bbs-2023`)], [A pairing assumption (q-SDH)], [Unforgeable], [Forgeable],
+      [SHA-256 and Poseidon2 Merkle trees], [Collision resistance], [Binding],
+        [Binding, with a reduced margin],
+      [RISC Zero succinct receipt (STARK)], [Random oracle model and the Toy Problem conjecture
+        @risc0sec], [Knowledge-sound, under the conjecture],
+        [Inferred: Shor's algorithm does not apply],
+      [UltraHonk with zero-knowledge (KZG over BN254)],
+        [Pairings over BN254 (q-SDH, algebraic group model); random oracle; trusted setup],
+        [Knowledge-sound], [Not knowledge-sound, also for earlier proofs],
+    )
+  },
+  caption: [
+    Assumptions behind each signature scheme and proof system. MLWE and SelfTargetMSIS are the
+    module learning-with-errors and self-target module short-integer-solution problems on
+    lattices @fips204. q-SDH is the q-strong Diffie–Hellman assumption in pairing groups. KZG is
+    the polynomial commitment of Kate, Zaverucha and Goldberg, which needs a trusted setup. The
+    algebraic group model assumes that an adversary computes each group element it outputs from
+    group elements it has seen. RISC Zero's security model states the knowledge soundness of its
+    receipts under the Toy Problem conjecture about its STARK protocol @risc0sec.
+  ],
+) <assumptions-table>
+]
 
 == Proof methods and request formats <capabilities>
 
@@ -1444,7 +1489,7 @@ and the RFC 8032 test key signed every credential. For the #headline("zkexec.mai
 we executed #headline("zkexec.main_runs") runs over the payment credential and, with four
 credentials, copies issued to other customers. For the sweep, we executed
 #headline("zkexec.sweep_runs") runs over generated credentials. Each describes a person with typed
-literals, a chain of acquaintances and one blank node, padded with further statements to the stated
+literals, a chain of acquaintances and one blank node, padded with further triples to the stated
 size. The counts of the two sets are never added. The executor runs had no internal check
 (§#ref(<prototype>, supplement: none)).
 
@@ -1503,7 +1548,7 @@ cycles per configuration.
     table(
       columns: (auto, auto, auto, auto, auto, 1fr, auto),
       align: (left, right, right, right, right, right, right),
-      table.header[Credentials][Statements each][Admitted][Rejected][Completed][Cycles,
+      table.header[Credentials][Triples each][Admitted][Rejected][Completed][Cycles,
         millions: median (range)][Segments, median],
       table.cell(colspan: 7)[`eddsa-rdfc-2022`, hidden mode],
       ..sweep-rows("rdfc", "hidden"),
@@ -1588,6 +1633,9 @@ operator uses. Exact answers, signature checks inside the proof and the public-i
 these limits.
 
 == Combining BBS+ proofs with circuits <composition>
+
+BBS+ is an earlier variant of the BBS signature scheme @bbs that `bbs-2023` uses. Its signatures
+have a different form, so the experimental parts below do not implement `bbs-2023`.
 
 A tempting design verifies BBS+-signed credentials with BBS+ proofs, disclosing public terms, and
 passes hidden values to a circuit for conditions that BBS+ proofs cannot express. A shared challenge
