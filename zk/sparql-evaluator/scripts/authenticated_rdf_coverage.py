@@ -66,9 +66,10 @@ def load(path):
 CONFIGURATION = {"set": "sweep", "suite": "eddsa-rdfc-2022", "mode": "hidden", "n": 1, "statements_per_credential": 32}
 
 
-def status(record):
+def status(record, blank_nodes):
     """Classify one record, refusing anything that is not guest-execution evidence."""
-    for key, value in CONFIGURATION.items():
+    expected = dict(CONFIGURATION, credential_blank_nodes=blank_nodes)
+    for key, value in expected.items():
         if record.get(key) != value:
             sys.exit(f"{record['id']}: {key} is {record.get(key)!r}, expected {value!r}")
     if record["admitted"]:
@@ -88,19 +89,21 @@ def main():
     data, blank_free = load(coverage_path), load(blank_free_path)
     features = []
     for case in cases:
+        if case["id"] not in data:
+            sys.exit(f"{case['id']}: no record in {coverage_path}")
         record = data[case["id"]]
         feature = {
             "id": case["id"],
             "class": case["class"],
             "spec": spec(case),
             "query": case["query"],
-            "with_blank_node_data": status(record),
+            "with_blank_node_data": status(record, True),
         }
         if record.get("rejection"):
             feature["with_blank_node_data_rejection"] = record["rejection"]
         if case["id"] in blank_free:
             other = blank_free[case["id"]]
-            feature["blank_node_free_data"] = status(other)
+            feature["blank_node_free_data"] = status(other, False)
             if other.get("rejection"):
                 feature["blank_node_free_data_rejection"] = other["rejection"]
         if case["id"] in NOTES:
