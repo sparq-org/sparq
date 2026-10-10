@@ -288,7 +288,9 @@ What the server exposes, all discoverable from the storage description
   replace, a linkset `PATCH`) checks the document it would serve, with the server-managed links
   put back and the representation's size at its longest, against exactly what a linkset `PATCH`
   checks its target with (those caps, that cost, and the metadata's size limit), and gets `413`
-  past it, so whatever is stored can be patched. Metadata that nests too deeply to store gets
+  past it, so whatever is stored can be patched. A linkset stored before these checks that
+  passes them takes only `remove` and `test` operations (others get `413`) until it is within
+  them again. Metadata that nests too deeply to store gets
   `422`. The links the type index matches are the stored linkset's own. A
   `Link` header's `rel="anchor"` is never taken as a link (`anchor` names an entry's context).
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a

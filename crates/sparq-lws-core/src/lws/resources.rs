@@ -3097,6 +3097,17 @@ impl Patch {
     }
 
     /// [`Patch::apply`], charging each value what it allocates too ([`json_patch_within`]).
+    /// Whether every operation is a `remove` or a `test`: a patch that adds, copies and
+    /// replaces nothing.
+    fn only_removes(&self) -> bool {
+        match self {
+            Patch::Json(ops) => ops.as_array().is_some_and(|ops| {
+                ops.iter()
+                    .all(|op| matches!(op["op"].as_str(), Some("remove" | "test")))
+            }),
+        }
+    }
+
     fn apply_in_memory(&self, target: &Value, budget: usize) -> Result<Value, Response> {
         match self {
             Patch::Json(ops) => json_patch_within(target, ops, budget, true),
@@ -4092,11 +4103,24 @@ async fn linkset<S: Store + 'static>(
             };
             // Applied within the cost budget with every value charged as `linkset_cost` charges
             // it, so no clone the patch makes is past what resolving the result may cost. A
-            // linkset this server stored is within it ([`admissible`]); one stored before that
-            // was checked may not be, and is patched within its own cost (already paid to load
-            // it, and bounded by the metadata's size), so a patch can shrink it: the result is
-            // held to the budget and every cap below whatever the target was.
-            let budget = LINKSET_COST_BUDGET.max(patch_cost(&held));
+            // linkset this server stored is [`admissible`]. One stored before that was checked
+            // may not be: it may only shrink, by a patch of `remove` and `test` operations alone
+            // (which add and copy nothing), applied within its own cost (already paid to load
+            // it, and bounded by the metadata's size), until it is admissible again; the result
+            // is held to the budget and every cap below. Nothing a patch adds is ever funded by
+            // what a target past the budget costs.
+            let legacy = !admissible(&document, base.len());
+            if legacy && !patch.only_removes() {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some("the linkset is more than a linkset may hold: only remove and test operations apply to it until it is within"),
+                );
+            }
+            let budget = if legacy {
+                LINKSET_COST_BUDGET.max(patch_cost(&held))
+            } else {
+                LINKSET_COST_BUDGET
+            };
             let mut patched = match patch.apply_in_memory(&held, budget) {
                 Ok(v) => v,
                 Err(r) => return r,
@@ -6304,8 +6328,9 @@ mod tests {
 
     /// Review finding: metadata stored before linksets were held to their caps (an href past
     /// the field cap, more targets than a linkset may hold) could not be patched at all, not even
-    /// to remove what passes the caps. A PATCH of it is applied within its own cost, and the result
-    /// is held to every cap: one that removes the excess succeeds, one that keeps it is refused.
+    /// to remove what passes the caps. Until it is admissible again it takes only remove and test
+    /// operations (nothing its cost could fund), and the result is held to every cap: one that
+    /// removes the excess succeeds, one that keeps it or adds anything is refused.
     #[tokio::test]
     async fn a_linkset_stored_past_the_caps_can_be_patched_back_within_them() {
         let st = state().await;
@@ -6325,12 +6350,19 @@ mod tests {
             let keep = r#"[{"op":"add","path":"/linkset/0/describedby","value":[{"href":"https://ex.org/d"}]}]"#;
             let r = call(&st, "PATCH", &path, &[patch], keep).await;
             assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            // Until it is admissible, only remove and test apply: removing it funds no copy.
+            let copy = r#"[{"op":"remove","path":"/linkset/0/license"},{"op":"add","path":"/x","value":[{}]},{"op":"copy","from":"/x","path":"/x/-"}]"#;
+            let r = call(&st, "PATCH", &path, &[patch], copy).await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
             let remove = r#"[{"op":"remove","path":"/linkset/0/license"}]"#;
             let r = call(&st, "PATCH", &path, &[patch], remove).await;
             assert_eq!(r.status(), StatusCode::NO_CONTENT);
             let served = json_of(call(&st, "GET", &path, &[], "").await).await;
             assert!(served["linkset"][0].get("license").is_none());
             let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            // Admissible again, it takes any patch.
+            let r = call(&st, "PATCH", &path, &[patch], keep).await;
             assert_eq!(r.status(), StatusCode::NO_CONTENT);
         }
     }
