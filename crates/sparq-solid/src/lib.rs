@@ -498,8 +498,9 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     fn reconcile_bridged_after_static(&mut self) {
         self.bridge_ledger.capture_static_baseline(&self.graph);
-        // refresh() rebuilds from the just-captured baseline and replays the ledger.
-        self.bridge_ledger.refresh(&mut self.graph);
+        // refresh() rebuilds from the just-captured baseline and replays the ledger. A static
+        // materialization clears the drop first, so this always runs.
+        let _ = self.refresh_bridged();
     }
 
     /// No-op stub when the bridge is compiled out — the core build has no bridged state.
@@ -1528,6 +1529,27 @@ impl PodStore {
         !self.view_dropped
     }
 
+    /// The auth view a grant source other than the static WAC/ACP rules writes its grants
+    /// into: `None` while the view is dropped (see [`PodStore::may_install_grants`]). Every
+    /// such source takes the graph from here (or [`PodStore::refresh_bridged`]) rather than
+    /// from `self.graph`, so none can install onto a dropped view; the
+    /// `grant_sources_take_the_guarded_view` test holds every installer call to that.
+    #[cfg_attr(
+        not(any(feature = "odrl-bridge", feature = "trust-graph")),
+        allow(dead_code)
+    )]
+    pub(crate) fn grant_view(&mut self) -> Option<&mut Graph> {
+        self.may_install_grants().then_some(&mut self.graph)
+    }
+
+    /// Rebuild the bridged grants from the ledger's baseline, as [`PodStore::grant_view`]
+    /// allows: `None` (nothing touched) while the view is dropped, else the number retracted.
+    #[cfg(feature = "odrl-bridge")]
+    fn refresh_bridged(&mut self) -> Option<usize> {
+        let Self { graph, bridge_ledger, view_dropped, .. } = self;
+        (!*view_dropped).then(|| bridge_ledger.refresh(graph))
+    }
+
     /// [OPUS-4.8] sq-h3uk — evaluate an ODRL `policy` against `request` and, on a
     /// definite Permit, materialize the equivalent WAC/ACP grant into this store's
     /// `<urn:sparq:auth>` view, then rebuild the session index so the grant takes
@@ -1557,10 +1579,10 @@ impl PodStore {
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         // A dropped view is not rebuilt by bridging onto it.
-        if !self.may_install_grants() {
+        let Some(view) = self.grant_view() else {
             return odrl_bridge::BridgeOutcome::default();
-        }
-        let outcome = odrl_bridge::materialize_permission(&mut self.graph, policy, request);
+        };
+        let outcome = odrl_bridge::materialize_permission(view, policy, request);
         if outcome.granted {
             // Track for refresh/retraction (sq-dpk4), then rebuild index + drop cache.
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Permission);
@@ -1590,10 +1612,10 @@ impl PodStore {
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         // A dropped view is not rebuilt by bridging onto it.
-        if !self.may_install_grants() {
+        let Some(view) = self.grant_view() else {
             return odrl_bridge::BridgeOutcome::default();
-        }
-        let outcome = odrl_bridge::materialize_prohibition(&mut self.graph, policy, request);
+        };
+        let outcome = odrl_bridge::materialize_prohibition(view, policy, request);
         if outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Prohibition);
             self.reindex_with(ReindexScope::Full);
@@ -1617,10 +1639,10 @@ impl PodStore {
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         // A dropped view is not rebuilt by bridging onto it.
-        if !self.may_install_grants() {
+        let Some(view) = self.grant_view() else {
             return odrl_bridge::BridgeOutcome::default();
-        }
-        let outcome = odrl_bridge::materialize_policy(&mut self.graph, policy, request);
+        };
+        let outcome = odrl_bridge::materialize_policy(view, policy, request);
         if outcome.granted || outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Policy);
             self.reindex_with(ReindexScope::Full);
@@ -1637,7 +1659,11 @@ impl PodStore {
         policy: &sparq_policy::ValidatedPolicy,
         requests: &[sparq_policy::Request],
     ) -> Vec<odrl_bridge::BridgeOutcome> {
-        let outcomes = odrl_bridge::materialize_policy_for_each(&mut self.graph, policy, requests);
+        // A dropped view is not rebuilt by bridging onto it.
+        let Some(view) = self.grant_view() else {
+            return vec![odrl_bridge::BridgeOutcome::default(); requests.len()];
+        };
+        let outcomes = odrl_bridge::materialize_policy_for_each(view, policy, requests);
         let materialized: Vec<&sparq_policy::Request> = requests
             .iter()
             .zip(&outcomes)
@@ -1670,11 +1696,11 @@ impl PodStore {
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         // A dropped view is not rebuilt by bridging onto it.
-        if !self.may_install_grants() {
+        let Some(view) = self.grant_view() else {
             return odrl_bridge::BridgeOutcome::default();
-        }
+        };
         let outcome =
-            odrl_bridge::materialize_permission_conditional(&mut self.graph, policy, request);
+            odrl_bridge::materialize_permission_conditional(view, policy, request);
         if outcome.granted {
             self.bridge_ledger.record(
                 policy,
@@ -1701,11 +1727,11 @@ impl PodStore {
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         // A dropped view is not rebuilt by bridging onto it.
-        if !self.may_install_grants() {
+        let Some(view) = self.grant_view() else {
             return odrl_bridge::BridgeOutcome::default();
-        }
+        };
         let outcome =
-            odrl_bridge::materialize_prohibition_conditional(&mut self.graph, policy, request);
+            odrl_bridge::materialize_prohibition_conditional(view, policy, request);
         if outcome.prohibited {
             self.bridge_ledger.record(
                 policy,
@@ -1749,11 +1775,11 @@ impl PodStore {
         store: &Arc<dyn sparq_policy::UsageCounterStore + Send + Sync>,
     ) -> odrl_bridge::BridgeOutcome {
         // A dropped view is not rebuilt by bridging onto it.
-        if !self.may_install_grants() {
+        let Some(view) = self.grant_view() else {
             return odrl_bridge::BridgeOutcome::default();
-        }
+        };
         let outcome = odrl_bridge::count::materialize_permission_counted(
-            &mut self.graph,
+            view,
             policy,
             request,
             store.as_ref(),
@@ -1810,10 +1836,9 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn refresh_odrl_grants(&mut self) -> usize {
         // A dropped view is not rebuilt from the baseline captured before the drop.
-        if !self.may_install_grants() {
+        let Some(retracted) = self.refresh_bridged() else {
             return 0;
-        }
-        let retracted = self.bridge_ledger.refresh(&mut self.graph);
+        };
         self.reindex_with(ReindexScope::Full);
         retracted
     }
@@ -1844,10 +1869,9 @@ impl PodStore {
         kind: odrl_bridge::BridgeKind,
     ) -> (bool, usize) {
         let matched = self.bridge_ledger.update(policy, request, kind);
-        if !self.may_install_grants() {
+        let Some(retracted) = self.refresh_bridged() else {
             return (matched, 0);
-        }
-        let retracted = self.bridge_ledger.refresh(&mut self.graph);
+        };
         self.reindex_with(ReindexScope::Full);
         (matched, retracted)
     }
@@ -1952,6 +1976,104 @@ mod scoped_cache_tests {
         store.materialize_wac().expect("materializes");
         assert!(store.may_install_grants());
         assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
+    }
+
+    /// Review finding: the batch bridge installed grants onto a dropped view, so access
+    /// resumed before any static materialization succeeded.
+    #[cfg(feature = "odrl-bridge")]
+    #[test]
+    fn a_batch_bridge_does_not_install_onto_a_dropped_view() {
+        let policy = sparq_policy::parse_policy_str(
+            r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/read> a odrl:Set ; odrl:permission [
+    odrl:action odrl:read ;
+    odrl:target <https://a.ex/doc> ;
+    odrl:assignee <https://alice.ex/card#me> ] .
+"#,
+            "turtle",
+        )
+        .expect("parses");
+        let request = sparq_policy::Request::new("http://www.w3.org/ns/odrl/2/read")
+            .on("https://a.ex/doc")
+            .by(ALICE);
+        // The same batch grants on a live view.
+        let mut live = two_pod_store();
+        assert!(live.materialize_odrl_policy_for_each(&policy, std::slice::from_ref(&request))[0].granted);
+
+        let mut store = two_pod_store();
+        let alice = sess(ALICE);
+        store.drop_auth_view();
+        let outcomes = store.materialize_odrl_policy_for_each(&policy, &[request]);
+        assert_eq!(outcomes.len(), 1);
+        assert!(!outcomes[0].granted);
+        assert!(store.accessible(&alice, Mode::Read).is_empty(), "the batch bridge resurrected access");
+        assert!(!store.may_install_grants());
+    }
+
+    /// Every call that installs grants into the auth view (the ODRL bridge's materializers,
+    /// its ledger refresh, the trust graph's installers) takes the graph from
+    /// [`PodStore::grant_view`] / [`PodStore::refresh_bridged`], never `&mut self.graph`
+    /// directly, so none can install onto a dropped view. A new installer call that bypasses
+    /// the guard fails here.
+    #[test]
+    fn grant_sources_take_the_guarded_view() {
+        const INSTALLERS: &[&str] = &[
+            "materialize_permission",
+            "materialize_prohibition",
+            "materialize_policy",
+            "materialize_odrl_n3",
+            "bridge_ledger.refresh(",
+            "install_auth_grants(",
+            "install_conditional_grant(",
+        ];
+        let mut calls = 0;
+        for (file, src) in [("lib.rs", include_str!("lib.rs")), ("trust_wire.rs", include_str!("trust_wire.rs"))] {
+            // Production code only: the test modules call installers on bare graphs.
+            let prod = src.split("#[cfg(test)]\nmod ").next().expect("non-empty");
+            for name in INSTALLERS {
+                for (at, _) in prod.match_indices(name) {
+                    let rest = &prod[at + name.len()..];
+                    let Some(open) = rest.find('(').filter(|&i| rest[..i].chars().all(|c| c.is_alphanumeric() || c == '_')) else {
+                        continue;
+                    };
+                    let first_arg: String = rest[open + 1..]
+                        .chars()
+                        .take_while(|&c| c != ',' && c != ')')
+                        .filter(|c| !c.is_whitespace())
+                        .collect();
+                    if first_arg.is_empty() {
+                        continue; // a declaration or doc mention, not a call into the view
+                    }
+                    calls += 1;
+                    assert!(
+                        !first_arg.contains("self.graph"),
+                        "{file}: `{name}…({first_arg}, …)` installs grants without the dropped-view guard"
+                    );
+                }
+            }
+        }
+        assert!(calls > 0, "the scan found no installer calls: its patterns are stale");
+        // Every bridge function that writes a graph and is called from the store is one of
+        // the scanned installers.
+        let store = include_str!("lib.rs").split("#[cfg(test)]\nmod ").next().expect("non-empty");
+        let bridge = include_str!("odrl_bridge.rs");
+        for (at, _) in bridge.match_indices("pub fn ").chain(bridge.match_indices("pub(crate) fn ")) {
+            let sig = &bridge[at..];
+            let sig = &sig[..sig.find('{').unwrap_or(sig.len())];
+            if !sig.contains("graph: &mut Graph") {
+                continue;
+            }
+            let name = sig.split("fn ").nth(1).and_then(|r| r.split('(').next()).unwrap_or_default();
+            if !store.contains(&format!("{name}(")) {
+                continue;
+            }
+            assert!(
+                INSTALLERS.iter().any(|p| name.contains(p.trim_end_matches('('))
+                    || p.trim_end_matches('(').ends_with(name)),
+                "odrl_bridge::{name} writes the auth view but is not among the scanned installers"
+            );
+        }
     }
 
     fn key_for(s: &Session) -> SessionKey {
