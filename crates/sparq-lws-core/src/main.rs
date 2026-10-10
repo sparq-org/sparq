@@ -80,7 +80,9 @@ use solid_oidc_verifier::replay::{InMemoryReplayStore, ReplayStore};
 use solid_oidc_verifier::verifier::Verifier;
 use solid_oidc_verifier::webid::{BidirectionalMode, NetworkWebIdResolver};
 use sparq_lws_core::acl_cache::{AclCache, DEFAULT_ACL_CACHE_CAPACITY};
-use sparq_lws_core::app::{build_router_with_overload, AppState, OverloadConfig};
+use sparq_lws_core::app::{
+    build_router_with_overload, with_overload_layers, AppState, OverloadConfig,
+};
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::auth_cache::{
     ProofPolicy, SharedReplay, VerifiedTokenCache, DEFAULT_CACHE_CAPACITY,
@@ -163,6 +165,9 @@ const ENV_SEED_BENCH_OWNER: &str = "SOLID_SERVER_SEED_BENCH_OWNER";
 /// startup seed-guard fails closed like the other seed flags. Purely additive seeding — it changes
 /// no request-handling behaviour. See [`sparq_lws_core::seed::seed_demo`].
 const ENV_SEED_DEMO: &str = "SOLID_SERVER_SEED_DEMO";
+/// Which protocol the server speaks: `solid` (the default) or `lws` (W3C Linked Web Storage, see
+/// [`sparq_lws_core::lws`]).
+const ENV_PROTOCOL: &str = "SOLID_SERVER_PROTOCOL";
 /// Dev/conformance ESCAPE HATCH: explicitly permit the dev seed flags
 /// ([`ENV_SEED_CONFORMANCE`] / [`ENV_SEED_BENCH`] / [`ENV_SEED_DEMO`]) against a NON-`memory`
 /// backend. UNSET (the default)
@@ -740,6 +745,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "PSS_SPARQ_BACKEND=http requires {ENV_SPARQ_ENDPOINT} (the SPARQ /sparql URL)"
                 )
             })?;
+            // A remote store can report a write as failed (a timeout, a lost reply) while it still
+            // commits later. The LWS surface keeps a resource whose write is in doubt closed to
+            // everyone but its owner and creator, but nothing fences that late commit against a
+            // later write, so LWS runs only over stores whose calls are settled when they return.
+            if std::env::var(ENV_PROTOCOL).is_ok_and(|v| v.trim().eq_ignore_ascii_case("lws")) {
+                return Err("SOLID_SERVER_PROTOCOL=lws needs the memory or embedded SPARQ backend: \
+                     writes to a remote store are not yet fenced"
+                    .into());
+            }
             eprintln!("  STORAGE: SPARQ backend = HTTP (live SPARQL endpoint {endpoint}).");
             build_app_for_backend(
                 HttpSparqClient::new(endpoint),
@@ -1133,6 +1147,25 @@ where
     J: JwksProvider + Send + Sync + 'static,
     R: ReplayStore + Send + Sync + 'static,
 {
+    // Linked Web Storage (`SOLID_SERVER_PROTOCOL=lws`): the LWS 1.0 surface replaces the Solid
+    // router on the same store. Its own `SOLID_SERVER_LWS_*` settings configure it.
+    if std::env::var(ENV_PROTOCOL).is_ok_and(|v| v.trim().eq_ignore_ascii_case("lws")) {
+        let mut cfg = sparq_lws_core::lws::LwsConfig::from_env(base_url)?;
+        // One body ceiling for both surfaces: the LWS dispatcher reads the body itself, so it is
+        // handed the configured limit rather than relying on the `DefaultBodyLimit` layer.
+        cfg.max_body = overload_config.body_limit_bytes;
+        eprintln!(
+            "  PROTOCOL: Linked Web Storage — storage {} owner {} {}",
+            cfg.storage(),
+            cfg.owner.as_deref().unwrap_or("(none)"),
+            if cfg.open { "OPEN MODE (no authentication, DEV ONLY)" } else { "" }
+        );
+        let _ = (issuer, jwks_cache_ttl, auth, identity);
+        // The same overload stack the Solid router carries: the per-IP rate limiter, admission
+        // control, the request timeout and the body ceiling, with /livez and /readyz outside it.
+        let lws = sparq_lws_core::lws::router(store, cfg).await?;
+        return Ok(with_overload_layers(lws, overload_config));
+    }
     // Dev/conformance seeding (gated): write the test users' WebID profiles + the container tree the
     // Solid CTH dereferences to bootstrap. Done BEFORE the store is moved into the LDP state; a seeding
     // failure aborts boot (better than a half-seeded store). In identity mode the seed mints id-host

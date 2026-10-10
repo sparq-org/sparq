@@ -1593,3 +1593,156 @@ fn per_statement_override_on_sh_property_does_not_govern_nested_results() {
         r.to_text()
     );
 }
+
+/// #3526: `sh:in` and `sh:hasValue` are RDF-term membership (SHACL 1.0 §4.8.1–4.8.2).
+/// A distinct literal with the same value is not a member, for numerics and for two
+/// dateTime lexicals that denote one instant.
+#[test]
+fn in_and_has_value_use_rdf_term_membership() {
+    let shapes = r#"
+        ex:S a sh:NodeShape ; sh:targetNode ex:a ;
+            sh:property [ sh:path ex:n ; sh:in ( 1 ) ] ;
+            sh:property [ sh:path ex:t ; sh:hasValue "2000-01-01T00:00:59.99999999999999999999Z"^^xsd:dateTime ] .
+    "#;
+    let data = r#"
+        ex:a ex:n "01"^^xsd:integer ;
+             ex:t "2000-01-01T00:00:59.999999999999999999990Z"^^xsd:dateTime .
+    "#;
+    let r = run(data, shapes);
+    assert_eq!(count_component(&r, "InConstraintComponent"), 1, "{r:?}");
+    assert_eq!(count_component(&r, "HasValueConstraintComponent"), 1, "{r:?}");
+    // The identical terms are members.
+    let same = r#"
+        ex:a ex:n 1 ;
+             ex:t "2000-01-01T00:00:59.99999999999999999999Z"^^xsd:dateTime .
+    "#;
+    assert!(run(same, shapes).conforms);
+}
+
+// ---- every comparison constraint over every pair of temporal families ----
+
+/// One value per temporal family: a date, a dateTime, a dateTimeStamp (the dateTime
+/// family), and a time. The earlier of each same-family pair is first.
+const TEMPORALS: [(&str, &str); 4] = [
+    ("date", "\"2000-01-01\"^^xsd:date"),
+    ("dateTime", "\"2000-01-01T00:00:00Z\"^^xsd:dateTime"),
+    ("dateTimeStamp", "\"2000-01-02T00:00:00Z\"^^xsd:dateTimeStamp"),
+    ("time", "\"01:00:00Z\"^^xsd:time"),
+];
+
+fn family(name: &str) -> &str {
+    if name == "dateTimeStamp" {
+        "dateTime"
+    } else {
+        name
+    }
+}
+
+/// `value` against `other` under each comparison constraint; `true` = conforms.
+fn comparisons(value: &str, other: &str) -> [(&'static str, bool); 6] {
+    let pair = |c: &str| {
+        let shapes = format!(
+            "ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:property [ sh:path ex:v ; sh:{c} ex:w ] ."
+        );
+        run(&format!("ex:n ex:v {value} ; ex:w {other} ."), &shapes).conforms
+    };
+    let range = |c: &str| {
+        let shapes = format!(
+            "ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:property [ sh:path ex:v ; sh:{c} {other} ] ."
+        );
+        run(&format!("ex:n ex:v {value} ."), &shapes).conforms
+    };
+    [
+        ("lessThan", pair("lessThan")),
+        ("lessThanOrEquals", pair("lessThanOrEquals")),
+        ("minInclusive", range("minInclusive")),
+        ("maxInclusive", range("maxInclusive")),
+        ("minExclusive", range("minExclusive")),
+        ("maxExclusive", range("maxExclusive")),
+    ]
+}
+
+/// A temporal compared with another family is incomparable, so every comparison
+/// constraint reports it (SHACL 1.0 §4.5, §4.4): a date against a dateTime, and either
+/// against an xsd:time (which the old fallback anchored to 2000-01-01).
+#[test]
+fn every_comparison_rejects_every_mixed_temporal_pair() {
+    for (na, a) in TEMPORALS {
+        for (nb, b) in TEMPORALS {
+            if family(na) == family(nb) {
+                continue;
+            }
+            for (c, conforms) in comparisons(a, b) {
+                assert!(!conforms, "{c}: {na} {a} vs {nb} {b} must be incomparable");
+            }
+        }
+    }
+}
+
+/// The control: a same-family pair still compares, both ways round.
+#[test]
+fn every_comparison_orders_a_same_family_temporal_pair() {
+    let (_, dt) = TEMPORALS[1];
+    let (_, stamp) = TEMPORALS[2];
+    let earlier_than_later = [true, true, false, true, false, true];
+    for ((c, got), want) in comparisons(dt, stamp).into_iter().zip(earlier_than_later) {
+        assert_eq!(got, want, "{c}: dateTime vs later dateTimeStamp");
+    }
+    let times = comparisons("\"00:30:00Z\"^^xsd:time", "\"24:00:00Z\"^^xsd:time");
+    // 24:00:00 is 00:00:00, so 00:30 is after it.
+    let later_than_earlier = [false, false, true, false, true, false];
+    for ((c, got), want) in times.into_iter().zip(later_than_earlier) {
+        assert_eq!(got, want, "{c}: 00:30 vs 24:00 times");
+    }
+}
+
+/// An invalid xsd:time lexical compares with nothing, so every comparison constraint
+/// reports it. Hour 24 is valid only as 24:00:00 with a zero fraction, and is midnight.
+#[test]
+fn only_a_valid_time_lexical_compares() {
+    let later_than_earlier = [false, false, true, false, true, false];
+    let zero = comparisons("\"00:30:00Z\"^^xsd:time", "\"24:00:00.000Z\"^^xsd:time");
+    for ((c, got), want) in zero.into_iter().zip(later_than_earlier) {
+        assert_eq!(got, want, "{c}: 00:30 vs 24:00:00.000");
+    }
+    for bad in [
+        "24:00:00.5Z",
+        "24:00:00.0.0",
+        "24:00:00.0.5Z",
+        "24:00:00.0Z.5",
+        "24:00:01",
+        "24:01:00",
+        "23:59:60",
+        "12:00Z",
+        "12:00:00+14:01",
+        "12:00:00+15:00",
+        "12:00:00+1:00",
+        "12:00:00Z+01:00",
+        "24:00:00.0+01:00:00",
+    ] {
+        let bad = format!("\"{bad}\"^^xsd:time");
+        for (value, other) in [("\"00:30:00Z\"^^xsd:time", bad.as_str()), (bad.as_str(), "\"00:30:00Z\"^^xsd:time")] {
+            for (c, conforms) in comparisons(value, other) {
+                assert!(!conforms, "{c}: {value} vs {other} must be incomparable");
+            }
+        }
+    }
+}
+
+/// XSD 1.1 year zero is 1 BCE: `0000` (and its `-0000` spelling) sits after `-0001`
+/// and before `0001`, and the two spellings of one date are equal, never incomparable.
+#[test]
+fn year_zero_orders_between_2_bce_and_1_ce() {
+    let date = |y: &str| format!("\"{y}-06-01\"^^xsd:date");
+    let zero = date("0000");
+    for (value, other, expect) in [
+        (date("-0001"), zero.clone(), [true, true, false, true, false, true]),
+        (zero.clone(), date("0001"), [true, true, false, true, false, true]),
+        (date("-0000"), zero.clone(), [false, true, true, true, false, false]),
+    ] {
+        let got = comparisons(&value, &other);
+        for ((name, conforms), want) in got.iter().zip(expect) {
+            assert_eq!(*conforms, want, "{value} {name} {other}");
+        }
+    }
+}

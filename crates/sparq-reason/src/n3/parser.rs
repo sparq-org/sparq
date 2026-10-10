@@ -25,7 +25,7 @@
 //! (the TurtleTests suite passes 297/297 in this mode).
 
 use super::model::{Rule, Term};
-use super::serialize::PREMISE_BLANK_VAR;
+use super::serialize::{PREMISE_BLANK_VAR, UNIVERSAL_VAR};
 
 pub const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 pub const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
@@ -76,9 +76,53 @@ pub fn parse_turtle_with_base(src: &str, base: &str) -> Result<Parsed, String> {
 /// directives) against `base` — the document's own location, RFC 3986-style.
 /// An empty `base` keeps relative IRIs as written (the historical behavior).
 pub fn parse_with_base(src: &str, base: &str) -> Result<Parsed, String> {
+    parse_with_base_checked(src, base).map_err(|e| match e {
+        ParseFailure::Syntax(m) => m,
+        ParseFailure::Resource(e) => e.message().to_string(),
+    })
+}
+
+/// Why [`parse_with_base_checked`] failed.
+pub(crate) enum ParseFailure {
+    /// The text is not N3.
+    Syntax(String),
+    /// A parser limit (nesting depth, [`super::bounded::enter_nesting`]): a resource
+    /// limit, not a syntax error.
+    Resource(super::bounded::LimitError),
+}
+
+/// As [`parse_with_base`], telling a syntax error from the nesting limit.
+pub(crate) fn parse_with_base_checked(src: &str, base: &str) -> Result<Parsed, ParseFailure> {
+    parse_with_extra_checked(src, base, std::iter::empty())
+}
+
+/// As [`parse_with_base_checked`], with `extra` statements appended AS TERMS after the
+/// document's own — classified (facts / forward rules / backward rules) and
+/// premise-blank-rewritten exactly as if they had been written at the end of `src`, but
+/// never put through text.
+///
+/// This is the lossless path for a caller that holds parsed terms and must reason over
+/// them again with a rules document (the incremental N3 fallback and its `why`): a term
+/// carrying an `@forAll` universal (`?__ua.<iri>`) has no surface spelling that re-parses
+/// to the same variable, so a serialize-then-parse round trip would rename it — and a
+/// rename can merge it with another variable (GH #6701 review).
+pub(crate) fn parse_with_extra_checked(
+    src: &str,
+    base: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
+) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
     p.base = base.to_string();
-    let stmts = p.document()?;
+    let r = parse_document(&mut p, base, extra);
+    r.map_err(|m| match p.stopped.take() {
+        Some(e) => ParseFailure::Resource(e),
+        None => ParseFailure::Syntax(m),
+    })
+}
+
+fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item = [Term; 3]>) -> Result<Parsed, String> {
+    let mut stmts = p.document()?;
+    stmts.extend(extra);
     let mut facts = Vec::new();
     let mut rules = Vec::new();
     let mut backward_rules = Vec::new();
@@ -261,10 +305,10 @@ struct Parser<'a> {
     /// produce a parse ERROR instead of exhausting the stack (the recursive-
     /// descent parser recurses per nesting level).
     depth: usize,
+    /// The limit the parse stopped on, if it did ([`ParseFailure::Resource`]).
+    stopped: Option<super::bounded::LimitError>,
 }
 
-/// Maximum bracket-nesting depth (see `Parser::depth`).
-const MAX_DEPTH: usize = 4096;
 
 impl<'a> Parser<'a> {
     fn new(src: &'a str) -> Parser<'a> {
@@ -279,6 +323,7 @@ impl<'a> Parser<'a> {
             bnode: 0,
             pathvar: 0,
             depth: 0,
+            stopped: None,
         }
     }
 
@@ -359,6 +404,11 @@ impl<'a> Parser<'a> {
     /// declared IRI thereafter reads as a variable (forAll) or an existential
     /// blank (forSome) within that scope. Names derive from the IRI so the
     /// same declaration in two documents (action vs reference) compares equal.
+    ///
+    /// Every `@forAll` of one IRI — at document level or inside any formula — reads as the
+    /// SAME variable, `__ua.<iri>`: a formula-level declaration is treated as document-scoped
+    /// (which mentions become the variable is still lexical). This is a known limitation
+    /// (GH #6754), unchanged from before the name carried the full IRI.
     fn directive_quantifier(&mut self) -> Result<(), String> {
         let universal = self.starts_with("@forAll");
         self.i += if universal { 7 } else { 8 };
@@ -368,13 +418,17 @@ impl<'a> Parser<'a> {
                 Some(b'<') => self.read_iriref()?,
                 _ => match self.read_prefixed_name()? {
                     Term::Iri(i) => i,
-                    other => return Err(format!("expected IRI in quantifier, got {other:?}")),
+                    other => return Err(format!("expected IRI in quantifier, got {}", super::serialize::display_lossy(&other))),
                 },
             };
-            let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri).to_string();
+            // A universal is keyed by its FULL IRI under an unforgeable prefix (GH #5391):
+            // two `@forAll` IRIs sharing a local name stay two variables, and no source
+            // quickvar can spell it (a `.` cannot occur in a VARNAME), so none can collide
+            // with or capture it. One IRI is one variable in every scope (GH #6754).
             let term = if universal {
-                Term::Var(format!("__ua_{local}"))
+                Term::Var(format!("{UNIVERSAL_VAR}{iri}"))
             } else {
+                let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri);
                 Term::Blank(format!("__ex_{local}"))
             };
             self.quants.last_mut().expect("scope stack").insert(iri, term);
@@ -1093,8 +1147,10 @@ impl<'a> Parser<'a> {
 
     fn enter(&mut self) -> Result<(), String> {
         self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            return Err(format!("nesting deeper than {MAX_DEPTH}"));
+        if let Err(e) = super::bounded::enter_nesting(self.depth) {
+            let message = e.message().to_string();
+            self.stopped = Some(e);
+            return Err(message);
         }
         Ok(())
     }
@@ -1190,7 +1246,7 @@ impl<'a> Parser<'a> {
         let node = if !self.strict && self.keyword("id") {
             let named = self.term(out)?;
             if !matches!(named, Term::Iri(_)) {
-                return Err(format!("iriPropertyList id must be an IRI, got {named:?}"));
+                return Err(format!("iriPropertyList id must be an IRI, got {}", super::serialize::display_lossy(&named)));
             }
             named
         } else {

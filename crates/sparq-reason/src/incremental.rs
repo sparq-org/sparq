@@ -582,8 +582,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality,
-            ow.o.max_qual_card,
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -667,8 +667,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality,
-            ow.o.max_qual_card,
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -1012,7 +1012,7 @@ impl MaterializedOwlGraph {
     #[cfg(feature = "parallel")]
     fn count_sweep(&self, triples: &[[Id; 3]]) -> Vec<[Id; 3]> {
         use rayon::prelude::*;
-        const PAR_THRESHOLD: usize = 4096;
+        const PAR_THRESHOLD: usize = 4096; // not-a-limit: parallelism (a threshold, no cut)
         if triples.len() < PAR_THRESHOLD {
             let mut out = Vec::new();
             for &t in triples {
@@ -1513,6 +1513,12 @@ struct N3Compiled {
 /// deletes — the N3 sibling of [`MaterializedGraph`] / [`MaterializedOwlGraph`], operating at
 /// the [`Term`](crate::n3::Term) level. The closure always equals a from-scratch
 /// [`crate::reason_n3_terms`] run over the rules document plus the current base.
+///
+/// A rules document that negates through a dependency cycle is refused by
+/// [`new`](Self::new). When base data makes the batch engine refuse the document later
+/// (a negation cycle inside a nested `log:conclusion` / `log:supports` closure over base
+/// formulas), the closure fails closed to the base facts alone and
+/// [`stratification_warning`](Self::stratification_warning) says why.
 pub struct MaterializedN3Graph {
     rules_src: String,
     compiled: Option<Rc<N3Compiled>>,
@@ -1527,6 +1533,10 @@ pub struct MaterializedN3Graph {
     /// implies-data is removed and counting resumes. Keeps `fallback_reason()`'s
     /// `None ⇔ counting active` contract exact for this cause. See review 1868.
     data_rule_fallback: Option<String>,
+    /// NON-sticky fallback cause: the last counting run recorded a cut and the rules
+    /// negate, so the checkpoint ([`cut_gate`]) handed the rebuild to the checked engine.
+    /// Recomputed every `rematerialize`.
+    cut_fallback: Option<String>,
     base: FxHashSet<[N3Term; 3]>,
     mode: N3Mode,
     counts: FxHashMap<[N3Term; 3], u32>,
@@ -1536,6 +1546,13 @@ pub struct MaterializedN3Graph {
     layer_derived: Vec<FxHashSet<[N3Term; 3]>>,
     fallback_closure: FxHashSet<[N3Term; 3]>,
     rebuilds: usize,
+    /// The batch engine's stratification diagnostic from the last fallback rebuild.
+    strat_warning: Option<String>,
+    /// The cut record of the current closure ([`crate::n3::bounded`]). Every full
+    /// rematerialization starts a fresh one, shared by all of its nested evaluations, and
+    /// leaves it here; incremental inserts record into it. So a cut lasts only while the
+    /// facts that caused it are present.
+    cuts: crate::n3::bounded::Truncation,
 }
 
 /// Evaluation phase of a non-seed plain atom relative to the delta seed (the counting
@@ -1558,6 +1575,9 @@ struct N3Cx<'a> {
     delta: Option<(&'a FxHashSet<[N3Term; 3]>, bool)>,
     /// Set when evaluation meets data the parity whitelist does not cover.
     unsupported: &'a Cell<bool>,
+    /// The graph's cut record ([`crate::n3::bounded::Truncation`]). Kept apart from
+    /// `unsupported`: a cut changes no result, so it never switches the evaluation path.
+    cuts: &'a crate::n3::bounded::Truncation,
 }
 
 impl N3Cx<'_> {
@@ -1658,6 +1678,7 @@ fn eval_n3_builtin(
     o: &N3Term,
     b: &NB,
     unsupported: &Cell<bool>,
+    cuts: &crate::n3::bounded::Truncation,
 ) -> Option<NB> {
     let sv = n3_apply(s, b);
     match op {
@@ -1694,7 +1715,14 @@ fn eval_n3_builtin(
                                 .push_str(if v == "0" || v == "false" { "false" } else { "true" }),
                             Some("integer") => match v.trim().parse::<i128>() {
                                 Ok(i) => out.push_str(&i.to_string()),
-                                Err(_) => out.push_str(v),
+                                // Past i128: the canonical value string, computed on the
+                                // digits (exact); an unparsable integer keeps its lexical
+                                // form, as the engine's concatenation does.
+                                // not-a-cut: exact-on-digits
+                                Err(_) => out.push_str(
+                                    &crate::n3::big_numeral_canonical(v)
+                                        .unwrap_or_else(|| v.clone()),
+                                ),
                             },
                             Some("decimal" | "float" | "double") => {
                                 // Engine: canonical numeric value string (scaled-decimal
@@ -1726,7 +1754,9 @@ fn eval_n3_builtin(
             let (N3Term::Lit(text, _, _), N3Term::Lit(pat, _, _)) = (&ms[0], &ms[1]) else {
                 return None;
             };
-            let re = regex::Regex::new(pat).ok()?;
+            // A pattern the regex engine refuses is no match, as on the checked engine; the
+            // cut is recorded on the graph's record and does not change the path.
+            let re = crate::n3::bounded::settle(cuts, crate::n3::bounded::regex(pat))?;
             let cap = re.captures(text)?.get(1)?.as_str().to_string();
             let lit = N3Term::Lit(cap, N3_XSD_STRING.into(), None);
             let mut nb = b.clone();
@@ -1849,7 +1879,7 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
             N3Atom::Builtin { op, s, o } => {
                 binds = binds
                     .into_iter()
-                    .filter_map(|b| eval_n3_builtin(*op, s, o, &b, cx.unsupported))
+                    .filter_map(|b| eval_n3_builtin(*op, s, o, &b, cx.unsupported, cx.cuts))
                     .collect();
                 n3_term_vars(s, &mut bound);
                 n3_term_vars(o, &mut bound);
@@ -2073,7 +2103,10 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
                 })
                 .sum();
             if occurrences > 1 {
-                return Err(format!("rule {rix}: notIncludes subject ?{sv} is used elsewhere"));
+                return Err(format!(
+                    "rule {rix}: notIncludes subject {} is used elsewhere",
+                    crate::n3::serialize::display_lossy(&N3Term::Var(sv.clone()))
+                ));
             }
         }
         // Conclusions: simple ground-predicate atoms, no blanks (existentials).
@@ -2184,7 +2217,7 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
 }
 
 /// Iterative Tarjan SCC; emitted in DEPENDENCY-FIRST (topological) order of the condensation.
-fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> Vec<Vec<usize>> {
+pub(crate) fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> Vec<Vec<usize>> {
     let succ: Vec<Vec<usize>> = (0..n)
         .map(|i| edges.get(&i).map(|s| s.iter().copied().collect()).unwrap_or_default())
         .collect();
@@ -2238,12 +2271,61 @@ fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> Vec<Vec<usiz
     out
 }
 
-// ---- serialization (the fallback / oracle path) --------------------------------------------
-//
-// [OPUS-5] sq-xqchl.2 — the writer itself now lives in `n3::serialize`, shared with the
-// rule writer that echoes rules back into an EYE `--pass-all` document. One definition, so
-// a serializer and its parser cannot drift apart.
-pub(crate) use crate::n3::serialize::serialize_facts as n3_serialize;
+// ---- the cut checkpoint ----------------------------------------------------------------------
+
+/// The ONE checkpoint between the counting engine and a published closure.
+///
+/// The counting engine evaluates guards over input-only predicates, so a cut (a search
+/// cut short, [`crate::n3::bounded`]) does not change what its guards read. The batch
+/// engine refuses a negation over any run that recorded a cut, though, and the graph must
+/// end in exactly the state a batch run over the current facts would produce. So no
+/// counting result may stand while its run carries a cut and the rules negate.
+///
+/// [`CountingOk`] has a private constructor: only [`checkpoint`] makes one. Every
+/// counting step takes one, and `propagate` returns its result only through
+/// [`checkpoint`], so no counting path can publish a closure the checkpoint did not pass.
+mod cut_gate {
+    use crate::n3::bounded::Truncation;
+
+    /// Evidence that the run's cut record allows a counting result.
+    pub(super) struct CountingOk(());
+
+    /// The counting result cannot stand: rebuild through the checked engine.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(super) enum FullRebuild {
+        /// A search was cut short. The batch engine decides a negation over it.
+        Cut(&'static str),
+        /// The delta cannot be settled incrementally: evaluation met data outside the
+        /// builtin-parity whitelist, a layer diff had the opposite sign, or the mutation
+        /// itself requires a rebuild.
+        Diverged,
+    }
+
+    /// Which counting operation the checkpoint guards.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    pub(super) enum Op {
+        /// A full counting run or an insert delta. A cut whose cause is present stands
+        /// only when no rule negates.
+        Grow,
+        /// A delete delta. It cannot tell whether a cut's cause left with the deleted
+        /// facts, so any cut rebuilds and is recomputed from the remaining facts.
+        Shrink,
+    }
+
+    /// Read the run's cut record: `Ok` iff a counting result may stand.
+    pub(super) fn checkpoint(
+        cuts: &Truncation,
+        negates: bool,
+        op: Op,
+    ) -> Result<CountingOk, FullRebuild> {
+        match cuts.get() {
+            Some(why) if negates || op == Op::Shrink => Err(FullRebuild::Cut(why)),
+            _ => Ok(CountingOk(())),
+        }
+    }
+}
+
+use cut_gate::{checkpoint, CountingOk, FullRebuild, Op};
 
 // ---- the graph -----------------------------------------------------------------------------
 
@@ -2256,7 +2338,8 @@ impl MaterializedN3Graph {
     ///
     /// Errors only on rules-document parse failure.
     pub fn new(rules_src: &str, base_facts: &[[N3Term; 3]]) -> Result<Self, String> {
-        let parsed = n3p::parse(rules_src)?;
+        let cuts = crate::n3::bounded::Truncation::top_level();
+        let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
         let (compiled, disqualified) = match n3_compile(&parsed) {
             Ok(c) => (Some(Rc::new(c)), None),
             Err(reason) => (None, Some(reason)),
@@ -2270,6 +2353,7 @@ impl MaterializedN3Graph {
             disqualified,
             data_fallback: None,
             data_rule_fallback: None,
+            cut_fallback: None,
             base,
             mode: N3Mode::Fallback,
             counts: FxHashMap::default(),
@@ -2277,9 +2361,15 @@ impl MaterializedN3Graph {
             layer_derived: vec![FxHashSet::default(); n_layers],
             fallback_closure: FxHashSet::default(),
             rebuilds: 0,
+            strat_warning: None,
+            cuts: cuts.clone(),
         };
-        g.rematerialize();
+        // The rules parse's record is the counting run's; the checked run re-parses.
+        g.rematerialize(cuts, crate::n3::bounded::Truncation::top_level());
         g.rebuilds = 0;
+        if let Some(w) = g.strat_warning.take() {
+            return Err(format!("{w} The rules document is rejected."));
+        }
         Ok(g)
     }
 
@@ -2297,14 +2387,44 @@ impl MaterializedN3Graph {
         self.compiled.as_ref().is_some_and(|c| c.guard_preds.contains(p))
     }
 
-    fn rematerialize(&mut self) {
-        self.rebuilds += 1;
+    /// Does any rule negate (a `log:notIncludes` guard)? Then a cut makes the batch engine
+    /// refuse, and a counting result over a cut run cannot stand.
+    fn negates(&self) -> bool {
+        self.compiled
+            .as_ref()
+            .is_some_and(|c| !c.guard_preds.is_empty())
+    }
+
+    /// The cut checkpoint over the graph's current run record ([`cut_gate::checkpoint`]).
+    fn gate(&self, op: Op) -> Result<CountingOk, FullRebuild> {
+        checkpoint(&self.cuts, self.negates(), op)
+    }
+
+    /// Clear every derived structure (counts, closure index, layers, fallback closure).
+    fn clear_derived(&mut self) {
         self.counts.clear();
         self.index = N3Index::default();
         for d in &mut self.layer_derived {
             d.clear();
         }
         self.fallback_closure.clear();
+    }
+
+    /// Recompute the whole closure from the base: counting when the rules and data qualify
+    /// and the result passes the cut checkpoint, the checked batch engine otherwise.
+    /// `counting_run` and `checked_run` are fresh cut records made by the calling entry
+    /// point, one per attempt: each replaces the graph's record before its evaluation, so
+    /// the checked run starts clean exactly as a batch run over the current facts does, and
+    /// a cut from an earlier rebuild whose cause is gone does not survive.
+    fn rematerialize(
+        &mut self,
+        counting_run: crate::n3::bounded::Truncation,
+        checked_run: crate::n3::bounded::Truncation,
+    ) {
+        self.strat_warning = None;
+        self.cut_fallback = None;
+        self.rebuilds += 1;
+        self.clear_derived();
         let implies = [
             n3_iri(N3_LOG, "implies"),
             n3_iri(N3_LOG, "isImpliedBy"),
@@ -2322,34 +2442,82 @@ impl MaterializedN3Graph {
                 .to_string()
         });
         if self.compiled.is_some() && self.data_fallback.is_none() && !data_rules {
+            self.cuts = counting_run;
             self.mode = N3Mode::Counting;
             let pending: Vec<[N3Term; 3]> = self.base.iter().cloned().collect();
-            if self.propagate(pending, true) {
-                return;
+            let outcome = match self.gate(Op::Grow) {
+                Ok(ok) => self.propagate(ok, pending, true),
+                Err(rebuild) => Err(rebuild),
+            };
+            match outcome {
+                Ok(_published) => return,
+                Err(FullRebuild::Cut(why)) => {
+                    self.cut_fallback = Some(format!(
+                        "the counting run was cut short ({why}) and the rules negate; the \
+                         checked engine decides the negation"
+                    ));
+                }
+                // Runtime disqualification (unsupported data) — fall through to the engine.
+                Err(FullRebuild::Diverged) => {}
             }
-            // Runtime disqualification (unsupported data) — fall through to the engine.
-            self.counts.clear();
-            self.index = N3Index::default();
-            for d in &mut self.layer_derived {
-                d.clear();
-            }
+            self.clear_derived();
         }
         self.mode = N3Mode::Fallback;
-        let src = format!("{}\n{}", self.rules_src, n3_serialize(self.base.iter()));
-        let closure = crate::n3::reason_n3_terms(&src, None)
-            .expect("re-serialized base must re-parse (serializer bug)");
-        self.fallback_closure = closure.facts.into_iter().collect();
+        self.cuts = checked_run;
+        // The base goes in AS TERMS, not re-serialized text: an `@forAll` universal has no
+        // surface spelling that re-parses to the same variable, and a rename could merge it
+        // with another variable of the same formula (GH #6701 review round 2).
+        // The graph's own run record: a cut in the fallback reaches it.
+        match crate::n3::reason_n3_terms_with_facts(
+            &self.rules_src,
+            self.base.iter().cloned(),
+            crate::NegationCycles::Reject,
+            &self.cuts,
+        ) {
+            Ok(closure) => self.fallback_closure = closure.facts.into_iter().collect(),
+            // The rules cannot be stratified (a negation cycle, possibly inside a nested
+            // closure over base data), or a negation read a cut run. Fail closed: no
+            // derivation at all.
+            Err(e) => {
+                self.strat_warning = Some(e);
+                self.fallback_closure = self.base.iter().cloned().collect();
+            }
+        }
     }
 
     fn in_any_layer(&self, f: &[N3Term; 3]) -> bool {
         self.layer_derived.iter().any(|d| d.contains(f))
     }
 
-    /// Round-based delta propagation (sign-homogeneous; see the module notes). Returns false
-    /// if evaluation met unsupported data — the caller re-materializes via the engine.
-    fn propagate(&mut self, mut pending: Vec<[N3Term; 3]>, inserting: bool) -> bool {
-        let Some(compiled) = self.compiled.clone() else { return false };
+    /// Round-based delta propagation (sign-homogeneous; see the module notes). Takes the
+    /// checkpoint's evidence that the run may count, and returns its result only through
+    /// the checkpoint again: `Err` (a cut the rules' negation cannot stand, or a delta the
+    /// counting engine could not settle) means the caller re-materializes.
+    fn propagate(
+        &mut self,
+        ok: CountingOk,
+        pending: Vec<[N3Term; 3]>,
+        inserting: bool,
+    ) -> Result<CountingOk, FullRebuild> {
+        if !self.propagate_rounds(&ok, pending, inserting) {
+            return Err(FullRebuild::Diverged);
+        }
+        self.gate(if inserting { Op::Grow } else { Op::Shrink })
+    }
+
+    /// The rounds of [`propagate`](Self::propagate). Returns false if evaluation met
+    /// unsupported data or an opposite-sign layer diff.
+    fn propagate_rounds(
+        &mut self,
+        ok: &CountingOk,
+        mut pending: Vec<[N3Term; 3]>,
+        inserting: bool,
+    ) -> bool {
+        let Some(compiled) = self.compiled.clone() else {
+            return false;
+        };
         let unsupported = Cell::new(false);
+        let cuts = self.cuts.clone();
         while !pending.is_empty() {
             let mut pend_set: FxHashSet<[N3Term; 3]> = pending.iter().cloned().collect();
             for f in &pending {
@@ -2375,7 +2543,7 @@ impl MaterializedN3Graph {
                 if !pending.iter().any(relevant) {
                     continue;
                 }
-                let (added, removed) = self.recompute_layer(&compiled, li, &unsupported);
+                let (added, removed) = self.recompute_layer(ok, &compiled, li, &unsupported);
                 if unsupported.get() {
                     self.data_fallback =
                         Some("evaluation met data outside the builtin-parity whitelist".into());
@@ -2442,6 +2610,7 @@ impl MaterializedN3Graph {
                     guards: &self.index,
                     delta: Some((&pend_set, inserting)),
                     unsupported: &unsupported,
+                    cuts: &cuts,
                 };
                 for rule in &compiled.counted {
                     for atom in &rule.atoms {
@@ -2501,11 +2670,13 @@ impl MaterializedN3Graph {
     /// extents; returns the (added, removed) diff of the layer's derived contribution.
     fn recompute_layer(
         &mut self,
+        _ok: &CountingOk,
         compiled: &N3Compiled,
         li: usize,
         unsupported: &Cell<bool>,
     ) -> (Vec<[N3Term; 3]>, Vec<[N3Term; 3]>) {
         let def = &compiled.layers[li];
+        let cuts = self.cuts.clone();
         // Seed: relevant facts of the closure, minus the layer's own (possibly stale)
         // contribution — unless a fact is independently present (base / counted).
         let mut seed: Vec<[N3Term; 3]> = Vec::new();
@@ -2530,8 +2701,13 @@ impl MaterializedN3Graph {
         while !pending.is_empty() {
             let mut emissions = Vec::new();
             {
-                let cx =
-                    N3Cx { facts: &local, guards: &self.index, delta: None, unsupported };
+                let cx = N3Cx {
+                    facts: &local,
+                    guards: &self.index,
+                    delta: None,
+                    unsupported,
+                    cuts: &cuts,
+                };
                 for rule in &def.rules {
                     for atom in &rule.atoms {
                         let N3Atom::Plain { pat, plain_ix } = atom else { continue };
@@ -2586,13 +2762,24 @@ impl MaterializedN3Graph {
             return 0;
         }
         if rebuild || self.mode == N3Mode::Fallback {
-            self.rematerialize();
+            use crate::n3::bounded::Truncation;
+            self.rematerialize(Truncation::top_level(), Truncation::top_level());
             return added.len();
         }
-        let pending: Vec<[N3Term; 3]> =
-            added.iter().filter(|f| !self.index.contains(f)).cloned().collect();
-        if !self.propagate(pending, true) {
-            self.rematerialize();
+        let pending: Vec<[N3Term; 3]> = added
+            .iter()
+            .filter(|f| !self.index.contains(f))
+            .cloned()
+            .collect();
+        // An insert only adds facts, so a cut it records has its cause present: it joins
+        // the graph's record, and the checkpoint decides whether the counting result stands.
+        let outcome = match self.gate(Op::Grow) {
+            Ok(ok) => self.propagate(ok, pending, true),
+            Err(rebuild) => Err(rebuild),
+        };
+        if let Err(_rebuild) = outcome {
+            use crate::n3::bounded::Truncation;
+            self.rematerialize(Truncation::top_level(), Truncation::top_level());
         }
         added.len()
     }
@@ -2612,17 +2799,26 @@ impl MaterializedN3Graph {
         if removed.is_empty() {
             return 0;
         }
-        if rebuild || self.mode == N3Mode::Fallback {
-            self.rematerialize();
-            return removed.len();
-        }
-        let pending: Vec<[N3Term; 3]> = removed
-            .iter()
-            .filter(|f| !self.counts.contains_key(*f) && !self.in_any_layer(f))
-            .cloned()
-            .collect();
-        if !self.propagate(pending, false) {
-            self.rematerialize();
+        // A delta cannot tell whether a recorded cut's cause is among the removed facts,
+        // so a graph that carries a cut (or meets one during the delta) rebuilds and
+        // recomputes it from the remaining facts: the checkpoint's `Op::Shrink` refuses
+        // any cut.
+        let outcome = if rebuild || self.mode == N3Mode::Fallback {
+            Err(FullRebuild::Diverged)
+        } else {
+            let pending: Vec<[N3Term; 3]> = removed
+                .iter()
+                .filter(|f| !self.counts.contains_key(*f) && !self.in_any_layer(f))
+                .cloned()
+                .collect();
+            match self.gate(Op::Shrink) {
+                Ok(ok) => self.propagate(ok, pending, false),
+                Err(rebuild) => Err(rebuild),
+            }
+        };
+        if let Err(_rebuild) = outcome {
+            use crate::n3::bounded::Truncation;
+            self.rematerialize(Truncation::top_level(), Truncation::top_level());
         }
         removed.len()
     }
@@ -2666,9 +2862,16 @@ impl MaterializedN3Graph {
         self.mode
     }
 
+    /// Set while the batch engine refuses the rules over the current base (a negation
+    /// cycle): the closure is then the base facts alone (fail closed).
+    pub fn stratification_warning(&self) -> Option<&str> {
+        self.strat_warning.as_deref()
+    }
+
     /// Why the graph is (or would be) in fallback mode: the rule-analysis disqualification, the
     /// sticky runtime data disqualification, or the (non-sticky) presence of `log:implies`-family
-    /// rules-as-data in the base. `None` ⇔ the counting path is active. See review 1868.
+    /// rules-as-data in the base, or (also non-sticky) a counting run that was cut short while
+    /// the rules negate. `None` ⇔ the counting path is active. See review 1868.
     pub fn fallback_reason(&self) -> Option<&str> {
         // [OPUS-4.8] Include the data-rule cause so the documented `None ⇔ counting` contract
         // holds even when fallback is forced by implies-as-data rather than rule analysis.
@@ -2676,6 +2879,7 @@ impl MaterializedN3Graph {
             .as_deref()
             .or(self.disqualified.as_deref())
             .or(self.data_rule_fallback.as_deref())
+            .or(self.cut_fallback.as_deref())
     }
 
     /// How many times a mutation re-materialized from scratch (guard-predicate deltas,
@@ -2689,6 +2893,371 @@ impl MaterializedN3Graph {
 mod tests {
     use super::*;
     use crate::materialize_rdfs;
+
+    /// A limit met only on the batch fallback (here a regex the engine refuses, inside a
+    /// rule set the counting engine disqualifies) is recorded on the graph's own run
+    /// record, not a throwaway one.
+    #[test]
+    fn a_fallback_only_cut_reaches_the_graphs_record() {
+        let rules = "@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+                     @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+                     { ?s <http://ex/p> ?v . (1 2) math:sum ?o . \"a\" string:matches \"(\" }\n\
+                       => { ?s <http://ex/q> ?o } .";
+        let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+        let g = MaterializedN3Graph::new(rules, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+        assert!(
+            g.cuts.get().is_some(),
+            "the fallback's cut must reach the graph's record"
+        );
+        let clean = "{ ?s <http://ex/p> ?v } => { ?s <http://ex/q> ?v } .";
+        let g = MaterializedN3Graph::new(clean, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
+        assert!(g.cuts.get().is_none());
+    }
+
+    /// A cut lasts only while the facts that caused it are present. An invalid regex
+    /// under `string:scrape` cuts the rebuild and the negation over `:blocked` is refused;
+    /// once that fact is deleted (or replaced by a clean one) the next rebuild records no
+    /// cut and equals a fresh graph over the remaining facts.
+    #[test]
+    fn a_cut_is_recomputed_on_every_rebuild_and_clears_with_its_cause() {
+        let rules = "@prefix : <http://ex/> .\n\
+             @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             { ?s :text ?t . ?s :pat ?p . (?t ?p) string:scrape ?m } => { ?s :blocked ?m } .\n\
+             { ?s :kind :Item . ?SCOPE log:notIncludes { ?s :blocked ?any } } \
+               => { ?s :allowed :yes } .";
+        let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+        let lit = |s: &str| N3Term::Lit(s.to_string(), N3_XSD_STRING.into(), None);
+        let base = vec![
+            [iri("a"), iri("kind"), iri("Item")],
+            [iri("a"), iri("text"), lit("hello")],
+            [iri("a"), iri("pat"), lit("(h)")],
+            [iri("b"), iri("kind"), iri("Item")],
+            [iri("b"), iri("text"), lit("xyz")],
+        ];
+        let allowed_b = [iri("b"), iri("allowed"), iri("yes")];
+        let sorted = |mut v: Vec<[N3Term; 3]>| {
+            v.sort_unstable_by_key(|t| format!("{t:?}"));
+            v
+        };
+        // Incremental state must equal a fresh graph over the same base, cut included.
+        let matches_fresh = |g: &MaterializedN3Graph, base: &[[N3Term; 3]]| {
+            let fresh = MaterializedN3Graph::new(rules, base).expect("rules");
+            assert_eq!(sorted(g.closure()), sorted(fresh.closure()));
+            assert_eq!(g.cuts.get(), fresh.cuts.get());
+        };
+
+        let mut g = MaterializedN3Graph::new(rules, &base).expect("rules");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+        assert!(g.contains(&allowed_b) && g.cuts.get().is_none());
+
+        // The invalid regex cuts the rebuild; the negation is refused (fail closed).
+        let bad = [iri("b"), iri("pat"), lit("(")];
+        g.insert(std::slice::from_ref(&bad));
+        assert!(g.cuts.get().is_some(), "the invalid regex is a cut");
+        assert!(
+            !g.contains(&allowed_b),
+            "the negation is refused over a cut run"
+        );
+
+        // Deleting the cause clears the cut and the negation evaluates again.
+        g.delete(std::slice::from_ref(&bad));
+        assert!(g.cuts.get().is_none(), "the cut left with its cause");
+        assert!(g.contains(&allowed_b));
+        matches_fresh(&g, &base);
+
+        // Re-insert path: cut, delete, then a clean pattern for the same subject.
+        g.insert(std::slice::from_ref(&bad));
+        assert!(g.cuts.get().is_some());
+        g.delete(std::slice::from_ref(&bad));
+        let clean = [iri("b"), iri("pat"), lit("(q)")];
+        g.insert(std::slice::from_ref(&clean));
+        let mut with_clean = base.clone();
+        with_clean.push(clean);
+        assert!(g.cuts.get().is_none());
+        assert!(g.contains(&allowed_b), "no match, so :b is still allowed");
+        matches_fresh(&g, &with_clean);
+    }
+
+    const CUT_RULES: &str = "@prefix : <http://ex/> .\n\
+         @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+         @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+         { ?s :text ?t . ?s :pat ?p . (?t ?p) string:scrape ?m } => { ?s :blocked ?m } .\n";
+    /// A guard over `:denied`, which only the input asserts, so the rules qualify for
+    /// counting.
+    const INPUT_ONLY_GUARD: &str = "{ ?s <http://ex/kind> <http://ex/Item> . \
+         ?scope <http://www.w3.org/2000/10/swap/log#notIncludes> { ?s <http://ex/denied> <http://ex/yes> } } \
+         => { ?s <http://ex/allowed> <http://ex/yes> } .\n";
+    /// A rule that never fires but whose builtin takes the rules out of the counting
+    /// profile, so the same document runs in fallback.
+    const DISQUALIFY: &str =
+        "{ ?s <http://ex/never> ?x . (1 2) <http://www.w3.org/2000/10/swap/math#sum> ?y } \
+         => { ?s <http://ex/neverOut> ?y } .\n";
+
+    fn nx(s: &str) -> N3Term {
+        N3Term::Iri(format!("http://ex/{s}"))
+    }
+    fn nlit(s: &str) -> N3Term {
+        N3Term::Lit(s.to_string(), N3_XSD_STRING.into(), None)
+    }
+    /// The document with `facts` written out as N3 text, for the batch entry points.
+    fn with_facts(rules: &str, facts: &[[N3Term; 3]]) -> String {
+        let mut doc = rules.to_string();
+        for f in facts {
+            crate::n3::serialize::write_statement(f, &mut doc).expect("representable");
+        }
+        doc
+    }
+
+    /// The graph's state against a fresh batch `reason_n3_terms` over the same facts: the
+    /// same refusal (as `stratification_warning`, closure = base alone) or the same
+    /// closure with no warning.
+    fn assert_matches_batch(g: &MaterializedN3Graph, rules: &str, at: &str) {
+        let base: Vec<[N3Term; 3]> = g.base.iter().cloned().collect();
+        let batch = crate::reason_n3_terms(&with_facts(rules, &base), None);
+        let closure: FxHashSet<[N3Term; 3]> = g.closure().into_iter().collect();
+        match batch {
+            Err(e) => {
+                assert_eq!(
+                    g.stratification_warning(),
+                    Some(e.as_str()),
+                    "{at}: warning"
+                );
+                assert_eq!(closure, g.base, "{at}: a refusal fails closed to the base");
+            }
+            Ok(c) => {
+                assert_eq!(g.stratification_warning(), None, "{at}: no warning");
+                let want: FxHashSet<[N3Term; 3]> = c.facts.into_iter().collect();
+                assert_eq!(closure, want, "{at}: closure");
+            }
+        }
+    }
+
+    /// Codex finding on #6705: a cut recorded by a COUNTING run (an invalid regex under
+    /// `string:scrape`) must not leave the input-only guard's permit standing, since the
+    /// batch engine refuses the same document. `new` refuses it; an `insert` that brings
+    /// the cut in ends in the batch run's fail-closed state.
+    #[test]
+    fn a_counting_run_that_is_cut_does_not_keep_a_negations_permit() {
+        let rules = format!("{CUT_RULES}{INPUT_ONLY_GUARD}");
+        let item = [nx("a"), nx("kind"), nx("Item")];
+        let text = [nx("a"), nx("text"), nlit("x")];
+        let bad = [nx("a"), nx("pat"), nlit("(")];
+        let allowed = [nx("a"), nx("allowed"), nx("yes")];
+        let doc = with_facts(&rules, &[item.clone(), text.clone(), bad.clone()]);
+        let batch = crate::reason_n3_terms(&doc, None);
+        let Err(refusal) = batch else {
+            panic!("the batch engine must refuse the document")
+        };
+
+        // `new`: the same refusal (the document is rejected, as `new` rejects any refusal).
+        let new = MaterializedN3Graph::new(&rules, &[item.clone(), text.clone(), bad.clone()]);
+        let Err(e) = new else {
+            panic!("new must not return a closure over a cut negation")
+        };
+        assert_eq!(e, format!("{refusal} The rules document is rejected."));
+        // The whole document as the rules source takes the same path.
+        assert!(MaterializedN3Graph::new(&doc, &[]).is_err());
+
+        // `insert`: the graph counts before the cut...
+        let mut g = MaterializedN3Graph::new(&rules, &[item.clone(), text.clone()]).expect("rules");
+        assert_eq!(
+            g.mode(),
+            N3Mode::Counting,
+            "the input-only guard qualifies for counting"
+        );
+        assert!(g.contains(&allowed) && g.cuts.get().is_none());
+        // ...and the insert that records the cut hands the rebuild to the checked engine.
+        g.insert(std::slice::from_ref(&bad));
+        assert!(g.cuts.get().is_some(), "the checked run records the cut");
+        assert!(!g.contains(&allowed), "the permit does not survive the cut");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+        assert!(
+            g.fallback_reason().is_some_and(|r| r.contains("cut short")),
+            "the counting run met the cut: {:?}",
+            g.fallback_reason()
+        );
+        assert_eq!(g.stratification_warning(), Some(refusal.as_str()));
+        assert_matches_batch(&g, &rules, "insert of the cut");
+
+        // Deleting the cause returns to counting with the permit back.
+        g.delete(std::slice::from_ref(&bad));
+        assert_eq!(g.mode(), N3Mode::Counting);
+        assert!(g.contains(&allowed) && g.cuts.get().is_none());
+        assert_eq!(g.fallback_reason(), None);
+        assert_matches_batch(&g, &rules, "delete of the cut");
+    }
+
+    /// Every evaluation mode, with and without a cut, against the batch run. Batch modes
+    /// (`reason_n3_terms`, `reason_n3_stratified`, `reason_n3_proof_run`) agree with each
+    /// other; every incremental entry point (`new`, `insert`, `delete`), in both counting
+    /// and fallback qualification, ends in the batch run's state; and `why` explains only
+    /// what that state contains.
+    #[test]
+    fn every_entry_point_matches_the_batch_run_with_and_without_a_cut() {
+        let item = |s: &str| [nx(s), nx("kind"), nx("Item")];
+        let text = |s: &str| [nx(s), nx("text"), nlit("x")];
+        let pat = |s: &str, p: &str| [nx(s), nx("pat"), nlit(p)];
+        let other = [nx("z"), nx("kind"), nx("Other")];
+        let guarded = format!("{CUT_RULES}{INPUT_ONLY_GUARD}");
+        // (name, counting rules, facts, a cut is present, the batch refuses)
+        type Case = (&'static str, String, Vec<[N3Term; 3]>, bool, bool);
+        let cases: Vec<Case> = vec![
+            (
+                "cut with guard",
+                guarded.clone(),
+                vec![item("a"), text("a"), pat("a", "(")],
+                true,
+                true,
+            ),
+            (
+                "cut-free with guard",
+                guarded.clone(),
+                vec![item("a"), text("a"), pat("a", "(x)")],
+                false,
+                false,
+            ),
+            (
+                "cut-free, guard denied",
+                guarded.clone(),
+                vec![
+                    item("a"),
+                    [nx("a"), nx("denied"), nx("yes")],
+                    text("a"),
+                    pat("a", "x"),
+                ],
+                false,
+                false,
+            ),
+            (
+                "cut without guard",
+                CUT_RULES.to_string(),
+                vec![item("a"), text("a"), pat("a", "(")],
+                true,
+                false,
+            ),
+        ];
+        for (name, counting_rules, facts, cut, refused) in cases {
+            for (qual, rules) in [
+                (N3Mode::Counting, counting_rules.clone()),
+                (N3Mode::Fallback, format!("{counting_rules}{DISQUALIFY}")),
+            ] {
+                let at = format!("{name} / {qual:?}");
+                let doc = with_facts(&rules, &facts);
+
+                // Batch modes: all refuse, or all return the same closure.
+                let terms = crate::reason_n3_terms(&doc, None);
+                assert_eq!(terms.is_err(), refused, "{at}: reason_n3_terms");
+                let mut dict = Dict::new();
+                let plain = crate::reason_n3(&mut dict, &doc);
+                let strat = crate::reason_n3_stratified(&mut dict, &[doc.as_str()]);
+                let proof = crate::reason_n3_proof_run(&mut dict, &doc);
+                match (&plain, &strat, &proof) {
+                    (Ok(p), Ok(s), Ok(r)) => {
+                        assert!(!refused, "{at}: batch modes disagree on refusal");
+                        let set = |v: &[[Id; 3]]| v.iter().copied().collect::<FxHashSet<_>>();
+                        assert_eq!(set(p), set(&s.facts), "{at}: stratified closure");
+                        assert_eq!(set(p), set(&r.closure), "{at}: proof-run closure");
+                    }
+                    (Err(_), Err(_), Err(_)) => assert!(refused, "{at}: batch modes refuse"),
+                    _ => panic!(
+                        "{at}: batch modes disagree: {plain:?} / {} / {}",
+                        strat.is_ok(),
+                        proof.is_ok()
+                    ),
+                }
+
+                // `new` over every fact.
+                match MaterializedN3Graph::new(&rules, &facts) {
+                    Ok(g) => {
+                        assert!(!refused, "{at}: new returned a closure the batch refuses");
+                        assert_eq!(
+                            g.mode() == N3Mode::Counting,
+                            qual == N3Mode::Counting && !(cut && refused),
+                            "{at}: mode"
+                        );
+                        assert_eq!(g.cuts.get().is_some(), cut, "{at}: new's cut record");
+                        assert_matches_batch(&g, &rules, &format!("{at} / new"));
+                        // A proof run explains only what the closure holds.
+                        #[cfg(feature = "explain")]
+                        for f in g.closure() {
+                            assert!(g.why(&f).is_some(), "{at}: why {f:?}");
+                        }
+                    }
+                    Err(e) => {
+                        let Err(r) = &terms else {
+                            panic!("{at}: new refused: {e}")
+                        };
+                        assert_eq!(e, format!("{r} The rules document is rejected."), "{at}");
+                    }
+                }
+
+                // `insert` of each fact into a graph over the others.
+                for i in 0..facts.len() {
+                    let mut rest = facts.clone();
+                    let f = rest.remove(i);
+                    let Ok(mut g) = MaterializedN3Graph::new(&rules, &rest) else {
+                        continue;
+                    };
+                    g.insert(std::slice::from_ref(&f));
+                    assert_eq!(g.cuts.get().is_some(), cut, "{at}: insert's cut record");
+                    assert_matches_batch(&g, &rules, &format!("{at} / insert #{i}"));
+                    // `delete` of the same fact restores the state over the rest.
+                    g.delete(std::slice::from_ref(&f));
+                    assert_matches_batch(&g, &rules, &format!("{at} / insert+delete #{i}"));
+                    // And re-inserting it lands in the batch state again.
+                    g.insert(std::slice::from_ref(&f));
+                    assert_matches_batch(&g, &rules, &format!("{at} / reinsert #{i}"));
+                }
+
+                // `delete` of an unrelated fact from a graph over every fact plus it.
+                let mut more = facts.clone();
+                more.push(other.clone());
+                if let Ok(mut g) = MaterializedN3Graph::new(&rules, &more) {
+                    assert!(!refused, "{at}: new over a refused document");
+                    g.delete(std::slice::from_ref(&other));
+                    assert_eq!(g.cuts.get().is_some(), cut, "{at}: delete's cut record");
+                    assert_matches_batch(&g, &rules, &format!("{at} / delete"));
+                }
+            }
+        }
+    }
+
+    /// `why` re-derives with the base handed over as TERMS, never re-parsed from text. A
+    /// base fact built in code can nest deeper than the parser accepts; it still gets its
+    /// explanation, and no parser limit is hit, so the graph's record shows no cut.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn an_explanation_of_a_base_fact_past_the_parse_nesting_limit_is_not_cut() {
+        let out = std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(|| {
+                let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+                let mut deep = iri("leaf");
+                for _ in 0..5000 {
+                    deep = N3Term::List(vec![deep]);
+                }
+                let rules = "{ ?s <http://ex/p> ?o } => { ?s <http://ex/q> ?o } .";
+                let g = MaterializedN3Graph::new(rules, &[[iri("b"), iri("p"), deep.clone()]])
+                    .expect("rules");
+                let derived = [iri("b"), iri("q"), deep];
+                (
+                    g.contains(&derived),
+                    g.cuts.get().is_none(),
+                    g.why(&derived).is_some(),
+                    g.cuts.get().is_none(),
+                )
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+        assert_eq!(
+            out,
+            (true, true, true, true),
+            "(derived, no cut before, a proof, no cut after)"
+        );
+    }
     use oxrdf::vocab::{rdf, rdfs};
 
     struct V {

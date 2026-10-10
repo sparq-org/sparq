@@ -312,6 +312,14 @@ fn sparq_solid_wac_and_acp_rules_qualification_matrix() {
         ("acp-c.n3", N3Mode::Fallback), // variable conclusion predicate (?p ?pred ?r)
     ] {
         let src = format!("{common}\n{}", read(stratum));
+        if stratum == "acp-c.n3" {
+            // acp-c.n3 concludes `{ ?p ?pred ?r }` next to store-scoped negation: the batch
+            // engine's automatic stratification must assume that conclusion can derive a
+            // negated predicate, so it refuses the document (GH #6201).
+            let e = MaterializedN3Graph::new(&src, &[]).err().expect("refused");
+            assert!(e.contains("cycle"), "{e}");
+            continue;
+        }
         let g = MaterializedN3Graph::new(&src, &[]).expect("parse");
         assert_eq!(
             g.mode(),
@@ -637,4 +645,64 @@ fn data_rule_fallback_reports_reason_and_clears() {
     g.delete(&[[ex("r1"), implies, ex("r2")]]);
     assert_eq!(g.mode(), N3Mode::Counting, "removing the data rule resumes counting");
     assert!(g.fallback_reason().is_none(), "reason must clear when counting resumes");
+}
+
+/// GH #6701 review round 2: the fallback re-reasons the base. It used to re-serialize the
+/// base to N3 text, which wrote the `@forAll` universal `:x` as `?x` and merged it with the
+/// source `?x` of the same formula — so the variable-predicate rule saw an extra, wrong
+/// fact `:a :p { ?x :q ?x }` and derived `:a :r` of it. The base now goes in as terms.
+#[test]
+fn fallback_keeps_a_for_all_universal_distinct_from_a_source_variable() {
+    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.
+{ ?s ?p ?o } => { ?s :r ?o }.
+";
+    let oracle = |extra: &[[Term; 3]]| -> FxHashSet<[Term; 3]> {
+        let mut s: FxHashSet<[Term; 3]> =
+            reason_n3_terms(src, None).expect("oracle").facts.into_iter().collect();
+        s.extend(extra.iter().cloned());
+        s
+    };
+    let mut g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    assert_eq!(g.mode(), N3Mode::Fallback, "a variable-predicate rule is outside the counting profile");
+    let closure: FxHashSet<[Term; 3]> = g.closure().into_iter().collect();
+    assert_eq!(closure, oracle(&[]), "{closure:?}");
+    for f in &closure {
+        if let Term::Formula(ts) = &f[2] {
+            assert!(ts.iter().all(|t| t[0] != t[2]), "two distinct variables merged: {f:?}");
+        }
+    }
+    // A mutation re-runs the fallback over the held base: still exact.
+    let extra = [ex("c"), ex("p"), ex("d")];
+    g.insert(std::slice::from_ref(&extra));
+    let mut want = oracle(&[]);
+    want.insert(extra.clone());
+    want.insert([ex("c"), ex("r"), ex("d")]);
+    assert_eq!(g.closure().into_iter().collect::<FxHashSet<_>>(), want);
+}
+
+/// A scrape regex the engine refuses is no match on the counting path, exactly as on
+/// main: recording its cut must not switch the graph to the serialize-and-reparse
+/// fallback (which re-reads base triples under the rules' `@forAll` and so would lose
+/// the asserted `<http://ex/a> <http://ex/p> <http://ex/v>`).
+#[test]
+fn a_refused_scrape_regex_keeps_the_counting_path_and_the_asserted_triple() {
+    let rules = "@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+                 @forAll <http://ex/a> .\n\
+                 { ?s <http://ex/p> ?v . (\"x\" \"(\") string:scrape ?o } => { ?s <http://ex/q> ?o } .";
+    let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+    let asserted = [iri("a"), iri("p"), iri("v")];
+    let mut g = MaterializedN3Graph::new(rules, std::slice::from_ref(&asserted)).expect("rules");
+    assert_eq!(g.mode(), N3Mode::Counting);
+    assert!(g.contains(&asserted), "the asserted base triple must stay");
+    g.insert(&[[iri("b"), iri("p"), iri("w")]]);
+    assert_eq!(
+        g.mode(),
+        N3Mode::Counting,
+        "a regex cut must not switch the path"
+    );
+    assert!(g.contains(&asserted), "the asserted base triple must stay");
+    assert!(
+        !g.closure().iter().any(|t| t[1] == iri("q")),
+        "a refused regex matches nothing"
+    );
 }

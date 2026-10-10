@@ -90,9 +90,11 @@ impl Reasoner {
     /// emits, so a UI can let the user click an entailed triple and ask "why?".
     ///
     /// The JSON is `sparq-reason`'s [`ProofTree::to_json`] shape:
-    /// `{"root":R,"nodes":[{"id":i,"conclusion":[s,p,o],"rule":"…","premises":[…]},…]}` — a
-    /// flat, premises-before-conclusion DAG (leaves are `"asserted"` base facts; internal
-    /// nodes name the rule that fired). `JSON.parse` it on the JS side and render the tree.
+    /// `{"root":R,"nodes":[{"id":i,"conclusion":[s,p,o],"key":[ks,kp,ko],"rule":"…","premises":[…]},…]}`
+    /// — a flat, premises-before-conclusion DAG (leaves are `"asserted"` base facts; internal
+    /// nodes name the rule that fired). `conclusion` is for display; `key` is the node's
+    /// lossless identity (two different N3 facts can display alike) — dedupe or address
+    /// facts by `key`. `JSON.parse` it on the JS side and render the tree.
     /// Only available when this bundle is built with the `explain` feature.
     ///
     /// Errors if the document fails to parse or the profile name is unknown.
@@ -315,4 +317,26 @@ mod tests {
         let err = why_n3_impl(REACHES_N3, "not a term", "<http://ex/p>", "<http://ex/o>");
         assert!(err.is_err(), "a junk subject term must be a parse error");
     }
+
+    /// GH #6701 review round 8: two different facts that DISPLAY alike — an `@forAll`
+    /// universal written out bare and a source `?x` — stay distinguishable in the `whyN3`
+    /// JSON through each node's `key`. (The queried line is parsed as an N3 document, so a
+    /// declaration can precede the term that names the universal.)
+    #[test]
+    fn why_n3_json_keeps_facts_that_display_alike_apart() {
+        let doc = "@prefix : <http://ex/>.\n@forAll :x.\n:x :p :o.\n?x :p :o.\n";
+        let source_var = why_n3_impl(doc, "?x", "<http://ex/p>", "<http://ex/o>").unwrap();
+        let universal =
+            why_n3_impl(doc, "@forAll <http://ex/x> . <http://ex/x>", "<http://ex/p>", "<http://ex/o>").unwrap();
+        let field = |j: &str, from: &str, to: &str| j[j.find(from).unwrap()..j.find(to).unwrap()].to_string();
+        assert_eq!(
+            field(&source_var, "\"conclusion\"", "\"key\""),
+            field(&universal, "\"conclusion\"", "\"key\""),
+            "the two facts display alike"
+        );
+        let (k1, k2) = (field(&source_var, "\"key\"", "\"rule\""), field(&universal, "\"key\"", "\"rule\""));
+        assert_ne!(k1, k2, "their keys must differ: {source_var} / {universal}");
+        assert!(k1.contains("V\\\"x\\\"") && k2.contains("V\\\"__ua.http://ex/x\\\""), "{k1} / {k2}");
+    }
+
 }

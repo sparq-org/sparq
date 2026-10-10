@@ -192,23 +192,28 @@ Materialize the authorization view from the access-control documents, then enfor
   spec-conformant surface).
 - `store.update_as(&Session, sparql)` / `store.update_as_acp(...)` — **write-path
   gating**: check every graph an update could mutate *before* applying, and
-  auto-re-materialize on `.acl`/`.acr` writes. Every update entry point takes one path: the
-  update runs on a fork, what it actually wrote is authorized against the view in force
-  (so a later operation cannot reach a graph an earlier one named), rules it leaves are
-  materialized on the fork first (rules that cannot be **refuse the update**, which changes
-  nothing), and only then is it committed to the store itself (journaled and durable for a
-  directory-backed graph) and the view rebuilt. A `put_acl`/`delete_acl` that cannot put
-  its prior rules back in force **drops** the view: every request is denied (retryably, as
-  an un-materialized store), and no ODRL bridge refresh, bridged grant or trust grant
-  rebuilds it, until a `materialize_*`, `put_acl` or `delete_acl` succeeds; the error says
-  so.
+  auto-re-materialize on `.acl`/`.acr` writes. The WHERE of a `DELETE`/`INSERT … WHERE`
+  sees only the session's read view: a `GRAPH <g>`, a `USING NAMED` graph, or a `USING`/`WITH` graph
+  cannot read refuses the update, `GRAPH ?var` ranges over readable graphs only, and a
+  default-graph pattern with no `USING`/`WITH` is refused. A conditional write needs read
+  access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none. The WHERE is
+  evaluated once: a `GRAPH ?var` write target is authorized against the graphs that
+  evaluation instantiates, before anything is written. Such an operation must be sent on its
+  own: a multi-operation request that includes one is refused. Every update entry point
+  takes one path: the update runs on a fork, what it actually wrote is authorized against
+  the view in force (so a later operation cannot reach a graph an earlier one named), rules
+  it leaves are materialized on the fork first (rules that cannot be **refuse the update**),
+  and only then is it committed to the store itself (journaled and durable for a
+  directory-backed graph) and the view rebuilt; a refused update leaves the store
+  untouched. A `put_acl`/`delete_acl` that cannot put its prior rules back in force
+  **drops** the view: every request is denied (retryably, as an un-materialized store), and
+  no ODRL bridge refresh, bridged grant or trust grant rebuilds it, until a `materialize_*`,
+  `put_acl` or `delete_acl` succeeds; the error says so.
 - `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
   `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
   `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an
   agent tool surface, an HTTP handler). sq-yhlf0. The budget reaches both places an
-  update evaluates SPARQL — the authorization check's `GRAPH ?var` binding SELECT (an
-  exhausted budget there is a **deny**, nothing mutated) and the apply's
-  `DELETE`/`INSERT … WHERE`. It does **not** bound the remaining operations, and a
+  update evaluates SPARQL — the `DELETE`/`INSERT … WHERE`, evaluated once. It does **not** bound the remaining operations, and a
   request-size cap does not cover all of them: `INSERT`/`DELETE DATA` carry their triples
   inline (a text cap *does* bound those; `CREATE` adds one empty-graph entry), but
   `CLEAR`/`DROP` cost whatever
@@ -381,6 +386,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `principal auth:deny<Mode> graph` triple, honoured by this enforcement under **deny-overrides**
   (`∪ allow ∖ ∪ deny` — a deny beats any allow for the same principal+target+mode). `…_policy`
   does both sides at once. Same fail-closed rules; no new enforcement engine.
+- `store.materialize_odrl_policy_for_each(&Policy, &[Request])` — `materialize_odrl_policy` for a
+  batch of requests with one auth-view write and one index rebuild for the whole batch (outcomes
+  parallel to the requests). `store.auth_generation()` counts index rebuilds.
 - **Loud refusal of an unimplementable `odrl:conflict` strategy** (sq-ihqbl): the bridge
   implements only `odrl:conflict odrl:prohibit` (deny-overrides). A policy declaring `odrl:perm`,
   `odrl:invalid` **with** a detected conflict, or an unknown strategy IRI is **REFUSED** — every
@@ -391,26 +399,11 @@ Materialize the authorization view from the access-control documents, then enfor
   following (the ODRL Formal Semantics CG report supplies no conflict default either — its
   conflict-resolution machinery is explicitly pending). See the `usage-control-policy` skill.
 - `store.materialize_odrl_permission_conditional(&Policy, &Request) -> BridgeOutcome` —
-  **opt-in** (`odrl-bridge`; sq-hiz4): persists a *faithfully-mappable* ODRL
-  constraint as a re-checked ACP `auth:ConditionalGrant` (agent matcher) instead of a
-  one-shot allow — so the granted agent is verified **per session**, not frozen to the
-  materializing party. `odrl:recipient`/`odrl:assignee`
-  (`eq`/`isA`/`isPartOf`/`isAnyOf`/`neq`/`isNoneOf` — the set operators one head /
-  exception per member, sq-5fkpp) maps
-  faithfully (recipient-of-data = session agent); an `odrl:dateTime` **inclusive** bound
-  (`lteq` → `auth:notAfter`, `gteq` → `auth:notBefore`) maps to a **live-clock window**
-  re-checked against `Session::now` per request (sq-0q7n — a lapsed window denies
-  immediately, no `refresh_odrl_grant` needed); `odrl:purpose`/`count`/a *strict* `dateTime`
-  bound, **and any compound `odrl:LogicalConstraint`** (`odrl:and`/`odrl:or`/`odrl:xone` —
-  no faithful single-head analogue; sq-izzak) have no faithful analogue and STAY
-  one-shot; a rule mixing mappable + unmappable
-  constraints falls back **entirely** to one-shot (fail-safe — never drops a bound). A
-  dateTime window is mapped only on an **allow** (a lapsed *deny* would fail open). A bare
-  `odrl:assignee` **rule PROPERTY** (with zero constraints) scopes the grant head to that ONE
-  assignee — **not** `auth:Public` (sq-9n1q4; the deny dual likewise scopes to the
-  assignee, never an over-broad public deny). Only a rule with **no** recipient constraint AND
-  **no** assignee grants `auth:Public`. Mapping
-  table in the [`usage-control-policy`](../usage-control-policy/SKILL.md) skill.
+  **opt-in** (`odrl-bridge`): the same one-shot grant as `materialize_odrl_permission`. It
+  no longer persists recipient/assignee/`dateTime` constraints as re-checked
+  `auth:ConditionalGrant` heads, which could grant a session `decide` denies; a
+  clock-bounded permission stores nothing (per-request evaluation: #6743). See the
+  `usage-control-policy` skill.
 - `odrl_bridge::materialize_odrl_n3(&mut Graph, policy_ttl: &str, &Request) -> Result<BridgeOutcome, String>`
   — **opt-in** (`odrl-bridge`; sq-zgbso.2, sq-zgbso.2): an alternative
   materialization path that runs the stateless ODRL core as **five stratified `reason_n3` calls**

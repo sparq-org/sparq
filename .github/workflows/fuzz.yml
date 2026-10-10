@@ -49,7 +49,8 @@ env:
   # Per-target wall-clock budgets by trigger (seconds); libFuzzer's `-max_total_time`
   # caps each target hard.
   MAIN_SECS: "120"
-  NIGHTLY_SECS: "600"
+  # 240s keeps the nightly sweep (13 targets today) inside the job ceiling below.
+  NIGHTLY_SECS: "240"
   # Build the fuzz targets for the GNU triple. On x86_64 Linux cargo-fuzz defaults to
   # the MUSL target (static libc), which the address sanitizer rejects; the gnu target
   # links libc dynamically and is sanitizer-compatible. (On the runner this is the host
@@ -63,9 +64,10 @@ jobs:
     # LEAST-PRIVILEGE: this job compiles and executes the fuzz targets, so it holds no
     # elevated scope (top-level `contents: read`). The issue/bead filer that needs write
     # scopes is the separate `file-demoted-fuzz-finding` job below.
-    # Generous ceiling above the worst case (nightly: 4 targets × 600s + build) so a
-    # hung target fails with a clear timeout rather than running away.
-    timeout-minutes: 60
+    # Ceiling above the worst case (nightly: 13 targets × 240s ≈ 52 min + build) so a
+    # hung target fails with a clear timeout rather than running away. Revisit
+    # NIGHTLY_SECS when targets are added: `cargo fuzz list` picks them up automatically.
+    timeout-minutes: 90
     # PINNED-TOOLCHAIN ESCAPE. The repo root carries a `rust-toolchain.toml`
     # pinning STABLE, and rustup resolves that file (precedence 4) ABOVE the `rustup
     # default <toolchain>` that `dtolnay/rust-toolchain` performs (precedence 5). The

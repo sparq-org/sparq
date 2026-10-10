@@ -15,9 +15,9 @@ use common::{
     ALICE, APP, BOB, CAROL, IDP, POD,
 };
 use sparq_core::dict::Dict;
-use sparq_reason::n3::compiled::{compile, eval, intern_facts};
+use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval, intern_facts};
 use sparq_reason::n3::encode_for_uri;
-use sparq_reason::reason_n3;
+use sparq_reason::{reason_n3, reason_n3_with_cycles, NegationCycles};
 use std::collections::BTreeSet;
 
 const AUTH: &str = "https://sparq.dev/ns/auth#";
@@ -37,6 +37,39 @@ fn small() -> Scale {
 fn text_closure(src: &str) -> (Dict, Vec<[sparq_core::dict::Id; 3]>) {
     let mut dict = Dict::new();
     let ids = reason_n3(&mut dict, src).expect("reason_n3");
+    (dict, ids)
+}
+
+/// Rule files that conclude a VARIABLE predicate next to a store-scoped negation
+/// (acp-c.n3, odrl-spike.n3) are a negation cycle to the automatic stratification, which
+/// must assume such a conclusion can derive the negated predicate; both engines refuse
+/// them by default. Their caller runs each as its own explicit stratum, so the parity
+/// check below opts both engines in to the legacy single-pass evaluation for them.
+const LEGACY: NegationCycles = NegationCycles::SinglePass;
+
+/// The sparq-solid rule files the automatic stratification refuses by default.
+const REFUSED_CORPUS_FILES: &[&str] = &[
+    "acp-c.n3",
+    "odrl-b.n3",
+    "odrl-c.n3",
+    "odrl-d.n3",
+    "odrl-spike.n3",
+];
+
+fn text_closure_legacy(src: &str) -> (Dict, Vec<[sparq_core::dict::Id; 3]>) {
+    let mut dict = Dict::new();
+    let ids = reason_n3_with_cycles(&mut dict, src, LEGACY).expect("reason_n3_with_cycles");
+    (dict, ids)
+}
+
+fn compiled_closure_legacy(
+    facts_src: &str,
+    rules_src: &str,
+) -> (Dict, Vec<[sparq_core::dict::Id; 3]>) {
+    let rules = compile_with_cycles(rules_src, LEGACY).expect("compile_with_cycles");
+    let mut dict = Dict::new();
+    let facts = intern_facts(&mut dict, facts_src).expect("intern_facts");
+    let ids = eval(&mut dict, &facts, &rules);
     (dict, ids)
 }
 
@@ -135,14 +168,14 @@ fn acp_corpus_closure_is_identical_across_all_three_strata() {
     let f1 = closure_to_n3(&d1, &c1);
     let (d2, c2) = text_closure(&format!("{f1}\n{b}"));
     let f2 = closure_to_n3(&d2, &c2);
-    let (d3, c3) = text_closure(&format!("{f2}\n{c}"));
+    let (d3, c3) = text_closure_legacy(&format!("{f2}\n{c}"));
     let text = triples_as_strings(&d3, &c3);
 
     // COMPILED path — the same three strata chained ENTIRELY at the id level, one
     // dictionary, no text between strata.
     let ra = compile(&format!("{common_rules}\n{a}")).expect("compile stratum A");
     let rb = compile(&b).expect("compile stratum B");
-    let rc = compile(&c).expect("compile stratum C");
+    let rc = compile_with_cycles(&c, LEGACY).expect("compile stratum C");
     let mut dict = Dict::new();
     let f0 = intern_facts(&mut dict, &facts).expect("intern facts");
     let s1 = eval(&mut dict, &f0, &ra);
@@ -277,9 +310,9 @@ ex:req5 a odrl:Request . ex:req5 odrl:action odrl:read . ex:req5 odrl:target ex:
 ex:req5 odrl:assignee ex:bob .
 "#;
 
-    let (td, tc) = text_closure(&format!("{facts}\n{rules}"));
+    let (td, tc) = text_closure_legacy(&format!("{facts}\n{rules}"));
     let text = triples_as_strings(&td, &tc);
-    let (cd, cc) = compiled_closure(facts, &rules);
+    let (cd, cc) = compiled_closure_legacy(facts, &rules);
     let compiled = triples_as_strings(&cd, &cc);
     assert_set_equal(&text, &compiled, "ODRL spike (odrl-spike.n3)");
 
@@ -334,11 +367,167 @@ fn every_corpus_rules_file_compiles() {
         ("acp-c.n3", 10),
         ("odrl-spike.n3", 3),
     ] {
-        let compiled = compile(&solid_rules(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let compiled = compile_with_cycles(&solid_rules(name), LEGACY)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(
             compiled.n_rules() >= min_rules,
             "{name}: expected at least {min_rules} rules, compiled {}",
             compiled.n_rules()
         );
     }
+}
+
+/// GH #6201 / #5756: store-scoped `log:notIncludes` over a predicate the SAME rule set
+/// derives. Both engines stratify automatically, so the negating rule waits for the
+/// deriving rule's fixpoint and the closures stay set-equal; both refuse a negation cycle.
+#[test]
+fn auto_stratified_negation_is_identical() {
+    const PRE: &str = "@prefix : <http://ex/> .\n\
+        @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
+    let cases: [(&str, &str, &str, usize); 2] = [
+        (
+            "notIncludes probe (#6201)",
+            ":r :target :g . :p :prohibits :g . :s :target :h .",
+            "{ ?r :target ?g . ?p :prohibits ?g } => { ?r :prohibitedIn ?g } .\n\
+             { ?r :target ?g . ?scope log:notIncludes { ?r :prohibitedIn ?g } }\n\
+               => { ?r :allowedBy ?g } .",
+            2,
+        ),
+        (
+            "three-stratum chain",
+            ":x :item :t . :y :item :t . :x :flag :t .",
+            "{ ?i :flag :t } => { ?i :flagged :t } .\n\
+             { ?i :item :t . ?s log:notIncludes { ?i :flagged :t } } => { ?i :clean :t } .\n\
+             { ?i :item :t . ?s log:notIncludes { ?i :clean :t } } => { ?i :suspect :t } .\n\
+             { ?a :suspect :t . ?b :clean :t } => { ?a :contrast ?b } .",
+            3,
+        ),
+    ];
+    for (what, facts, rules, n_strata) in cases {
+        let (facts, rules) = (format!("{PRE}{facts}"), format!("{PRE}{rules}"));
+        let (td, tc) = text_closure(&format!("{facts}\n{rules}"));
+        let text = triples_as_strings(&td, &tc);
+        let (cd, cc) = compiled_closure(&facts, &rules);
+        let compiled = triples_as_strings(&cd, &cc);
+        assert_set_equal(&text, &compiled, what);
+        let set = compile(&rules).expect("compile");
+        assert_eq!(set.n_strata(), n_strata, "{what}");
+    }
+    // A negation cycle: both engines refuse it.
+    let cyclic = format!(
+        "{PRE}:a :p :b .\n\
+         {{ :a :p :b . ?s log:notIncludes {{ :a :q :b }} }} => {{ :a :r :b }} .\n\
+         {{ :a :r :b }} => {{ :a :q :b }} ."
+    );
+    assert!(reason_n3(&mut Dict::new(), &cyclic).is_err());
+    let e = compile(&cyclic).expect_err("compile refuses a negation cycle");
+    assert!(e.contains("cycle"), "{e}");
+    // Spot asserts: the prohibited request is NOT allowed, the free one is.
+    let facts = format!("{PRE}:r :target :g . :p :prohibits :g . :s :target :h .");
+    let rules = format!("{PRE}{}", cases[0].2);
+    let (cd, cc) = compiled_closure(&facts, &rules);
+    let compiled = triples_as_strings(&cd, &cc);
+    assert!(!has(
+        &compiled,
+        "http://ex/r",
+        "http://ex/allowedBy",
+        "http://ex/g"
+    ));
+    assert!(has(
+        &compiled,
+        "http://ex/s",
+        "http://ex/allowedBy",
+        "http://ex/h"
+    ));
+}
+
+/// The access-control corpus under the automatic stratification. A rule file that
+/// concludes a variable predicate next to a store-scoped negation is refused by default
+/// (see [`LEGACY`]); every other rules file compiles.
+#[test]
+fn corpus_rules_files_stratification() {
+    let rules_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../sparq-solid/rules");
+    let mut refused: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(rules_dir).expect("rules dir") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_some_and(|e| e == "n3") {
+            let src = std::fs::read_to_string(&path).expect("read");
+            if let Err(e) = compile(&src) {
+                if e.contains("cycle") {
+                    assert!(e.contains("variable predicate"), "{}: {e}", path.display());
+                    refused.push(path.file_name().unwrap().to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    refused.sort();
+    assert_eq!(refused, REFUSED_CORPUS_FILES, "refused rule files changed");
+}
+
+/// A variable conclusion predicate may derive anything, including the predicate its own
+/// premise negates: both engines refuse the rule set.
+#[test]
+fn variable_predicate_negation_cycle_is_refused_by_both_engines() {
+    const PRE: &str = "@prefix : <http://ex/> .\n\
+        @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
+    let rules = format!(
+        "{PRE}{{ ?m :pred ?p . ?x :item :t . ?s log:notIncludes {{ ?x :blocked :t }} }}\n\
+           => {{ ?x ?p :t }} ."
+    );
+    let e = compile(&rules).expect_err("compile refuses the cycle");
+    assert!(e.contains("cycle"), "{e}");
+    assert!(reason_n3(&mut Dict::new(), &format!("{PRE}:m :pred :ok .\n{rules}")).is_err());
+}
+
+/// The compiled anti-join always reads the store, so the compiled subset admits only a
+/// `log:notIncludes` subject that the text engine also reads as the store. `{}` (the empty
+/// formula, parsed as the literal `true`) and a subject a premise atom can bind are
+/// refused rather than evaluated differently.
+#[test]
+fn not_includes_scope_forms_agree_or_are_refused() {
+    const PRE: &str = "@prefix : <http://ex/> .\n\
+        @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
+    let facts = format!("{PRE}:seed :p :x .");
+    let rules = |scope: &str| {
+        format!(
+            "{PRE}{{ :seed :p :x }} => {{ :r :blocked :g }} .\n\
+             {{ :missing :p :x }} => {{ :r :other :g }} .\n\
+             {{ :seed :p :x .\n\
+                ?s log:notIncludes {{ :r :other :g }} .\n\
+                {scope} log:notIncludes {{ :r :blocked :g }}\n\
+             }} => {{ :r :allowed :g }} ."
+        )
+    };
+    // `{}`: the text engine checks the empty formula (so `:allowed` holds); the compiled
+    // subset refuses the rule instead of reading the store.
+    let empty = rules("{}");
+    let (td, tc) = text_closure(&format!("{facts}\n{empty}"));
+    let text = triples_as_strings(&td, &tc);
+    assert!(has(
+        &text,
+        "http://ex/r",
+        "http://ex/allowed",
+        "http://ex/g"
+    ));
+    let e = compile(&empty).expect_err("`{}` scope is outside the compiled subset");
+    assert!(e.contains("empty formula"), "{e}");
+    // A store scope: both engines agree (the blocked fact suppresses `:allowed`).
+    for scope in ["?u", "?s", "_:b", "<http://ex/doc>"] {
+        let store = rules(scope);
+        let (td, tc) = text_closure(&format!("{facts}\n{store}"));
+        let text = triples_as_strings(&td, &tc);
+        let (cd, cc) = compiled_closure(&facts, &store);
+        let compiled = triples_as_strings(&cd, &cc);
+        assert_set_equal(&text, &compiled, scope);
+        assert!(
+            !has(&compiled, "http://ex/r", "http://ex/allowed", "http://ex/g"),
+            "{scope}"
+        );
+    }
+    // A scope variable a premise atom binds could be bound to `true` (the empty formula)
+    // by the data: refused.
+    let bound = format!(
+        "{PRE}{{ ?x :scope ?s . ?s log:notIncludes {{ ?x :blocked :g }} }} => {{ ?x :ok :g }} ."
+    );
+    assert!(compile(&bound).is_err());
 }

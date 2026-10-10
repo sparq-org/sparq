@@ -28,9 +28,9 @@
 use oxrdf::Term;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
-use sparq_policy::{evaluate, parse_policy_str, Policy, Request};
+use sparq_policy::{evaluate, parse_policy_str, Request, ValidatedPolicy};
 use sparq_reason::n3::parser;
-use sparq_reason::reason_n3;
+use sparq_reason::{reason_n3, reason_n3_with_cycles, NegationCycles};
 use sparq_solid::odrl_bridge::materialize_policy;
 use sparq_solid::{acp_fixture, wac_fixture, PodStore, AUTH_NS};
 use std::time::Instant;
@@ -70,7 +70,7 @@ struct Scenario {
 // ── the RUST path (real: parse -> evaluate -> materialize_policy into a Graph) ─────────
 
 fn rust_auth_set(s: &Scenario) -> AuthSet {
-    let policy: Policy = parse_policy_str(s.policy_ttl, "turtle").expect("policy parses");
+    let policy: ValidatedPolicy = parse_policy_str(s.policy_ttl, "turtle").expect("policy parses");
     let mut req = Request::new(format!("{}{}", ODRL, s.action_local))
         .on(s.target)
         .by(s.party);
@@ -113,7 +113,11 @@ fn n3_source(s: &Scenario) -> String {
 
 fn n3_auth_set(s: &Scenario) -> AuthSet {
     let mut dict = Dict::new();
-    let closure = reason_n3(&mut dict, &n3_source(s)).expect("N3 reasons");
+    // odrl-spike.n3 concludes a variable predicate next to store-scoped negation, so it
+    // cannot be stratified yet: keep single-pass semantics by explicit opt-in. Follow-up:
+    // rewrite it with one concrete conclusion per mode and drop the opt-in.
+    let closure = reason_n3_with_cycles(&mut dict, &n3_source(s), NegationCycles::SinglePass)
+        .expect("N3 reasons");
     let mut set: AuthSet = Vec::new();
     for t in &closure {
         let p = dict.term(t[1]);
@@ -291,7 +295,8 @@ fn main() {
     });
     let t_n3 = best_ns(20, 200, || {
         let mut d = Dict::new();
-        let _ = reason_n3(&mut d, &src).unwrap();
+        // Same single-pass opt-in as `n3_auth_set`.
+        let _ = reason_n3_with_cycles(&mut d, &src, NegationCycles::SinglePass).unwrap();
     });
     let t_n3_parse = best_ns(20, 400, || {
         let _ = parser::parse(&src).unwrap();

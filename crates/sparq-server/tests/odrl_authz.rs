@@ -19,7 +19,7 @@
 #![cfg(feature = "odrl-authz")]
 
 use sparq_core::Graph;
-use sparq_policy::{evaluate, parse_policy_str, Request, Value, ODRL_RECIPIENT};
+use sparq_policy::{decide, evaluate, parse_policy_str, Request, Value, ODRL_RECIPIENT};
 use sparq_server::{router, AppState, ServerConfig};
 use tokio::net::TcpListener;
 
@@ -207,9 +207,13 @@ fn matrix() -> Vec<MatrixRow> {
     ]
 }
 
-/// The library-side oracle: `sparq_policy::evaluate` over the SAME `(policy, request)` the
+/// The library-side oracle: `sparq_policy::decide` over the SAME `(policy, request)` the
 /// HTTP lane materialises — party = the session agent, action = `odrl:read`, target = n1,
 /// recipient = the requesting agent (the delivery recipient of the results), `at` = session now.
+/// The lane goes through the ODRL bridge, which stores only a lasting grant (an
+/// unconstrained grant to the named party, in a policy with no prohibitions), so a grant
+/// that `evaluate` allows but that is not lasting is denied (#6743 tracks per-request
+/// decisions). It is never wider than `evaluate`.
 fn oracle_allows(row: &MatrixRow) -> bool {
     let policy = parse_policy_str(&row.policy_nq, "ntriples").expect("row policy parses");
     let mut request = Request::new(format!("{ODRL}read"))
@@ -219,7 +223,9 @@ fn oracle_allows(row: &MatrixRow) -> bool {
     if let Some(now) = row.now {
         request = request.at(now);
     }
-    evaluate(&policy, &request).allow
+    let stored = decide(&policy, &request).permit.is_some_and(|p| p.lasting());
+    assert!(stored <= evaluate(&policy, &request).allow, "{}: wider than evaluate", row.name);
+    stored
 }
 
 #[tokio::test]
@@ -233,7 +239,7 @@ async fn http_lane_decision_equals_library_evaluate_over_the_matrix() {
         assert_eq!(
             visible, expected,
             "row '{}': HTTP-lane visibility ({visible}) diverged from \
-             sparq_policy::evaluate ({expected})",
+             a lasting sparq_policy::decide grant ({expected})",
             row.name
         );
     }
@@ -617,4 +623,82 @@ async fn stateful_lane_still_serves_a_plain_server_store_under_odrl_authz() {
         .unwrap();
     assert_eq!(resp.status(), 200, "a plain WAC server store is not refused");
     assert_eq!(row_count(resp).await, 1, "alice's static WAC grant still admits her");
+}
+
+// ---------------------------------------------------------------------------
+// Collection targets: a rule on an asset collection matches the collection's members.
+// ---------------------------------------------------------------------------
+
+const N2: &str = "https://pod.ex/notes/n2";
+const NOTES_COLL: &str = "https://pod.ex/collections/notes";
+
+/// n1 and n2 content graphs readable by alice through the root `.acl`, n1 stated
+/// `odrl:partOf` the notes collection, plus `rules`.
+fn collection_dataset(rules: &str) -> String {
+    format!(
+        "{}\
+         <{N2}#it> <https://ex.dev/ns#title> \"other\" <{N2}> .\n\
+         <{N1}> <{ODRL}partOf> <{NOTES_COLL}> .\n\
+         {rules}",
+        wac_dataset("")
+    )
+}
+
+/// A read rule of `kind` on `target` for `assignee`.
+fn rule(kind: &str, id: &str, target: &str, assignee: &str) -> String {
+    format!(
+        "<urn:pol/p> <{ODRL}{kind}> _:{id} .\n\
+         _:{id} <{ODRL}action> <{ODRL}read> .\n\
+         _:{id} <{ODRL}target> <{target}> .\n\
+         _:{id} <{ODRL}assignee> <{assignee}> .\n"
+    )
+}
+
+/// The titles a session sees, sorted.
+async fn titles(resp: reqwest::Response) -> Vec<String> {
+    assert_eq!(resp.status(), 200);
+    let v: serde_json::Value = resp.json().await.unwrap();
+    let mut out: Vec<String> = v["results"]["bindings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["o"]["value"].as_str().unwrap().to_owned())
+        .collect();
+    out.sort();
+    out
+}
+
+#[tokio::test]
+async fn collection_targets_match_their_members() {
+    let base = spawn().await;
+    let ds = collection_dataset("");
+    assert_eq!(titles(query_as(&base, &ds, Some(ALICE), None, None).await).await, ["hello", "other"]);
+
+    // A prohibition on the collection reaches its member n1 for its assignee; n2 is
+    // outside the collection and stays readable.
+    let ds = collection_dataset(&rule("prohibition", "pr", NOTES_COLL, ALICE));
+    assert_eq!(titles(query_as(&base, &ds, Some(ALICE), None, None).await).await, ["other"]);
+
+    // The same prohibition scoped to bob leaves alice's reads alone.
+    let ds = collection_dataset(&rule("prohibition", "pr", NOTES_COLL, BOB));
+    assert_eq!(titles(query_as(&base, &ds, Some(ALICE), None, None).await).await, ["hello", "other"]);
+}
+
+/// The lane's evaluation bound: (rule targets + their stated members) x rules may be at
+/// most 10 000. One rule on a collection with 9 999 members (10 000 evaluated targets) is
+/// served and governs every member; one more member is refused before any evaluation.
+#[tokio::test]
+async fn collection_member_evaluations_are_bounded() {
+    let base = spawn().await;
+    let with_members = |n: usize| {
+        let edges: String = (0..n)
+            .map(|i| format!("<https://pod.ex/notes/m{i}> <{ODRL}partOf> <{NOTES_COLL}> .\n"))
+            .collect();
+        collection_dataset(&format!("{}{edges}", rule("prohibition", "pr", NOTES_COLL, ALICE)))
+    };
+    // n1 is one of the members, so the at-cap request still hides it.
+    let at_cap = with_members(9_998);
+    assert_eq!(titles(query_as(&base, &at_cap, Some(ALICE), None, None).await).await, ["other"]);
+    let over = with_members(9_999);
+    assert_eq!(query_as(&base, &over, Some(ALICE), None, None).await.status(), 400);
 }

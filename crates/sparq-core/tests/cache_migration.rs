@@ -144,8 +144,8 @@ fn legacy_caches_are_recomputed_without_modifying_the_archive() {
             let mut numeric = std::fs::read(archive.join("numerics-v3.bin"))
                 .or_else(|_| std::fs::read(archive.join("numerics.bin")))
                 .unwrap();
-            let temporal_file = if archive.join("temporals-v3.bin").is_file() {
-                "temporals-v3.bin"
+            let temporal_file = if archive.join("temporals-v4.bin").is_file() {
+                "temporals-v4.bin"
             } else {
                 "temporals-v2.bin"
             };
@@ -222,6 +222,52 @@ fn legacy_caches_are_recomputed_without_modifying_the_archive() {
             assert_eq!(dump(&reopened), expected);
             assert_eq!(reopened.numeric_value(bad_num), None);
             assert!(reopened.temporal_value(bad_time).is_none());
+        }
+    }
+}
+
+#[test]
+fn a_v3_temporal_cache_is_recomputed_for_year_zero() {
+    let graph = Graph::load_str(
+        "@prefix xsd:<http://www.w3.org/2001/XMLSchema#> .
+         <http://ex/a> <http://ex/t> \"0000-01-01T00:00:00Z\"^^xsd:dateTime .
+         <http://ex/b> <http://ex/t> \"2024-02-29T00:00:00Z\"^^xsd:dateTime .",
+        "turtle",
+    )
+    .unwrap();
+    let year_zero = graph
+        .id_of(&Term::Literal(Literal::new_typed_literal(
+            "0000-01-01T00:00:00Z",
+            xsd::DATE_TIME,
+        )))
+        .unwrap();
+    assert!(graph.temporal_value(year_zero).is_some(), "XSD 1.1 year zero parses");
+    for compressed in [false, true] {
+        let scratch = Scratch::new();
+        let archive = scratch.0.join("v3");
+        if compressed {
+            graph.save_compressed(&archive).unwrap();
+        } else {
+            graph.save(&archive).unwrap();
+        }
+        // A v3 writer rejected year zero: its cell held no value.
+        let mut old = std::fs::read(archive.join("temporals-v4.bin")).unwrap();
+        let i = (year_zero as usize - 1) * 8;
+        old[i..i + 8].copy_from_slice(&0_f64.to_le_bytes());
+        old[graph.dict.len() * 8 + year_zero as usize - 1] = 0;
+        std::fs::write(archive.join("temporals-v3.bin"), old).unwrap();
+        std::fs::remove_file(archive.join("temporals-v4.bin")).unwrap();
+        let before = files(&archive);
+        let opened = Graph::open(&archive).unwrap();
+        for id in 1..=graph.dict.len() as u32 {
+            assert_eq!(
+                opened.temporal_value(id).map(|t| (t.instant, t.has_tz)),
+                graph.temporal_value(id).map(|t| (t.instant, t.has_tz)),
+                "compressed={compressed}"
+            );
+        }
+        for (name, bytes) in before {
+            assert_eq!(std::fs::read(archive.join(name)).unwrap(), bytes);
         }
     }
 }
