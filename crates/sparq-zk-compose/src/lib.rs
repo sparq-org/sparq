@@ -61,7 +61,7 @@ pub mod verifier;
 pub use manifest::{
     AttestedStatusRef, BindingEdge, BindingMode, CircuitId, EntailmentRegime, FieldHex, FilterOp,
     FullyHiddenRevocation, HiddenIndexRevocation, HolderPokProof, HolderSetProof, ProofInputs,
-    ProofManifest, RevocationStatus, StatusListSnapshot, SubProof,
+    ProofManifest, RevocationStatus, SignatureMode, StatusListSnapshot, SubProof,
 };
 // [OPUS-4.8] sq-1s2.3 (FL1 follow-up): browser-shippable captured-manifest packaging.
 pub use capture::{
