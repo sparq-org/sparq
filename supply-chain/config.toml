@@ -296,6 +296,11 @@ version = "0.45.0"
 criteria = "safe-to-deploy"
 notes = "Exact-version continuation of the existing solid-server-rs trust decision for the aws-lc-rs -sys crate. This update vendors AWS-LC commit 02561621ffa4cf17c0c4f70bc11a82df36b42ae9 and retains the established cc/cmake build-time execution model; the large upstream C/asm delta is not represented as a local full audit and is explicitly accepted under the existing AWS-maintained vendored-core policy. Required by aws-lc-rs 1.18.1 for the rustls 0.23.45 security remediation. [GPT-6 Astra]"
 
+[[exemptions.aws-nitro-enclaves-nsm-api]]
+version = "0.5.2"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
 [[exemptions.axum]]
 version = "0.8.9"
 criteria = "safe-to-deploy"
@@ -468,6 +473,21 @@ notes = "RustCrypto/dalek AEAD+X25519 stack pulled in by the opt-in, publish=fal
 [[exemptions.chrono]]
 version = "0.4.45"
 criteria = "safe-to-deploy"
+
+[[exemptions.ciborium]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
+[[exemptions.ciborium-io]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
+[[exemptions.ciborium-ll]]
+version = "0.2.2"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
 
 [[exemptions.cipher]]
 version = "0.4.4"
@@ -685,6 +705,11 @@ notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-
 version = "10.0.0"
 criteria = "safe-to-run"
 
+[[exemptions.der_derive]]
+version = "0.7.3"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
 [[exemptions.deranged]]
 version = "0.5.8"
 criteria = "safe-to-deploy"
@@ -844,6 +869,11 @@ version = "0.1.12"
 criteria = "safe-to-deploy"
 notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d. Windows registry/COM tool discovery supports native compiler invocation. Preserve its target and build-host boundary even though the local machine does not exercise it. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
+[[exemptions.flagset]]
+version = "0.4.7"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
 [[exemptions.flatbuffers]]
 version = "25.12.19"
 criteria = "safe-to-deploy"
@@ -992,6 +1022,11 @@ version = "0.0.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.half]]
+version = "1.8.3"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
+[[exemptions.half]]
 version = "2.7.1"
 criteria = "safe-to-deploy"
 
@@ -1041,6 +1076,11 @@ criteria = "safe-to-deploy"
 version = "0.26.3"
 criteria = "safe-to-deploy"
 notes = "solid-server-rs import pre-flight (sq-gg0qq.1): transitive of solid-oidc-verifier — its DNS-pinned SSRF-guarded async resolver (0.26.1 carries the GHSA-q2qq-hmj6-3wpp hickory-proto fix). [FABLE-5]"
+
+[[exemptions.hkdf]]
+version = "0.12.4"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
 
 [[exemptions.http]]
 version = "1.5.0"
@@ -1387,6 +1427,11 @@ notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-
 [[exemptions.memmap2]]
 version = "0.9.11"
 criteria = "safe-to-deploy"
+
+[[exemptions.memoffset]]
+version = "0.9.1"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
 
 [[exemptions.merlin]]
 version = "3.0.0"
@@ -2113,6 +2158,16 @@ criteria = "safe-to-deploy"
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde_bytes]]
+version = "0.11.19"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
+[[exemptions.serde_cbor]]
+version = "0.11.2"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
 [[exemptions.serde_core]]
 version = "1.0.229"
 criteria = "safe-to-deploy"
@@ -2157,6 +2212,11 @@ notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-
 version = "0.2.0"
 criteria = "safe-to-deploy"
 notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge feature (p256 path); no upstream audit covers this exact version [OPUS-4.8]"
+
+[[exemptions.sha1]]
+version = "0.10.7"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
 
 [[exemptions.sha1]]
 version = "0.11.0"
@@ -2204,6 +2264,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.slotmap]]
 version = "1.1.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.smallvec]]
+version = "1.16.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.smallvec]]
@@ -2364,6 +2428,16 @@ version = "1.13.2"
 criteria = "safe-to-deploy"
 notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 4cf0ded5c4e56918d8f8a339e1bb67d038d3bc6d144ac407904015ba2e4cde9b. Small-vector allocation/index behavior supports encoding helpers. Upstream claims of safe source do not amount to independent source coverage for this exact version. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
+[[exemptions.tls_codec]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
+[[exemptions.tls_codec_derive]]
+version = "0.4.2"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
+
 [[exemptions.tokio]]
 version = "1.53.2"
 criteria = "safe-to-deploy"
@@ -2517,6 +2591,11 @@ criteria = "safe-to-deploy"
 [[exemptions.version_check]]
 version = "0.9.5"
 criteria = "safe-to-deploy"
+
+[[exemptions.vsock]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
 
 [[exemptions.walkdir]]
 version = "2.5.0"
@@ -2798,6 +2877,11 @@ criteria = "safe-to-deploy"
 version = "2.0.1"
 criteria = "safe-to-deploy"
 notes = "RustCrypto/dalek AEAD+X25519 stack pulled in by the opt-in, publish=false sparq-e2ee-ng crate (XChaCha20-Poly1305 + X25519 wrap); no trusted-import audit available upstream. [SONNET-4.6]"
+
+[[exemptions.x509-cert]]
+version = "0.2.5"
+criteria = "safe-to-deploy"
+notes = "Detached proof-methods workspace (publish=false research crates: TEE attestation verifier, CBOR/COSE and X.509 parsing, Nitro Secure Module and vsock on the enclave side); no trusted-import audit available upstream."
 
 [[exemptions.x509-parser]]
 version = "0.18.1"
