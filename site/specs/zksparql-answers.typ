@@ -526,8 +526,9 @@ order, and rejects it at the first check that fails:
   before the request's `validUntil` and that the challenge has not been consumed, and record
   it as consumed; reject the presentation if either check fails. The record MUST be shared by
   every proof method and every instance of the verifier service that accepts presentations
-  for the request, and MUST last until the request's `validUntil`. Only then is the
-  presentation accepted.
+  for the request, and MUST last until every instance's clock has passed the request's
+  `validUntil`, that is, until `validUntil` plus the largest clock difference between the
+  instances. Only then is the presentation accepted.
 
 On acceptance the verifier has the query, the result, the dataset commitment and whether it
 agreed that commitment, and the trust requirements its credentials met.
