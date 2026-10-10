@@ -361,6 +361,17 @@ sparql12:
   publisher: W3C
   url: "https://www.w3.org/TR/sparql12-query/"
 
+jsonld11:
+  type: reference
+  title: "JSON-LD 1.1"
+  author:
+    - Kellogg, Gregg
+    - Champin, Pierre-Antoine
+    - Longley, Dave
+  date: 2020
+  publisher: W3C
+  url: "https://www.w3.org/TR/json-ld11/"
+
 # [OPUS-5.5] RDF 1.2, on which the companion specification depends (editors and status as its
 # reference list gives them).
 rdf12:

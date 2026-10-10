@@ -315,8 +315,8 @@ Signatures show who made the statements in $D$, not that no other statement exis
 @fig-architecture shows the three parties. The verifier service sends a query request and stores its
 own copy. The holder service builds the input dataset from some of the holder's credentials,
 evaluates the query, and returns an answer presentation: the result with one proof. A companion
-specification @zksparqlspec defines both objects in JSON; an answer presentation is not a W3C
-verifiable presentation.
+specification @zksparqlspec defines both as RDF, serialised as JSON-LD @jsonld11. The answer
+presentation is a verifiable presentation @vcdm2 that carries a proof instead of credentials.
 
 #[
 #show figure: set block(breakable: false)
@@ -342,7 +342,7 @@ verifiable presentation.
       Receives the query request.
       #rect(width: 100%, inset: 5pt, stroke: (thickness: 0.6pt, dash: "dashed"))[
         *Inside the proof* \
-        1. In the hidden mode, check each signature against the request's issuer keys.
+        1. In the hidden mode, check each signature against the trusted issuers' keys.
         2. Build $D$ from exactly the signed data.
         3. Evaluate $Q$ over $D$ within the request's limits.
         4. Output the result, the dataset commitment and the request digest.
@@ -354,9 +354,9 @@ verifiable presentation.
       #set par(justify: false)
       #set text(size: 0.85em)
       *Verifier* \
-      *Outside the proof:* check the presentation against the stored request, the proof with its
-      own verification key and, in the revealed mode, each signature; then mark the request as
-      answered; then accept the result.
+      *Outside the proof:* check the presentation against the stored request, the proof with the
+      verification key that the request gives and, in the revealed mode, each signature; then mark
+      the request as answered; then accept the result.
     ],
   )
 #let arch-html = [
@@ -364,12 +364,12 @@ verifiable presentation.
     / Issuers: Sign credentials, for example with `eddsa-rdfc-2022`. May vouch for a dataset
       commitment that a verifier agrees in advance.
     / Holder: Receives the query request. Inside the proof: (1) in the hidden mode, check each
-      signature against the request's issuer keys; (2) build $D$ from exactly the signed data;
+      signature against the trusted issuers' keys; (2) build $D$ from exactly the signed data;
       (3) evaluate $Q$ over $D$ within the request's limits; (4) output the result, the dataset
       commitment and the request digest.
     / Verifier: Outside the proof: check the presentation against the stored request, the proof
-      with its own verification key and, in the revealed mode, each signature; then mark the
-      request as answered; then accept the result.
+      with the verification key that the request gives and, in the revealed mode, each signature;
+      then mark the request as answered; then accept the result.
   ]
 #figure(
   context if target() == "html" { arch-html } else { arch-paged },
@@ -385,17 +385,22 @@ verifiable presentation.
 === The query request <request>
 
 @request-table lists the members of a query request. The verifier service stores the request and its
-request digest, the SHA-256 hash of its JSON canonical form. It checks each presentation against
-this stored copy, never against anything the holder returns. The request lists the accepted issuer
-keys rather than resolving them, so that both sides prove and verify against the same keys. The list
-states the verifier's policy; it does not itself show that the issuer authorised a key
-(§#ref(<bg-vc>, supplement: none)).
+request digest: the SHA-256 hash of the request's canonical N-Quads under RDFC-1.0, so that two
+JSON-LD documents with the same RDF content have the same digest. It checks each presentation
+against this stored copy, never against anything the holder returns.
 
-A proof method is a way of producing and checking the proof, named by an IRI and a version, as a
-cryptosuite is for Data Integrity proofs. Its evidence may be a zero-knowledge proof, a proof that
-is not zero-knowledge, an attestation from a trusted execution environment (TEE), or disclosed
-credentials. The verifier checks the evidence with a verification key from its own configuration,
-such as a circuit's verification key or a zkVM image ID.
+The trust requirements say which issuers the verifier trusts. The one type defined so far gives an
+issuer and its verification methods with their public keys, rather than resolving them, so that both
+sides prove and verify against the same keys; types for trusted lists and other sources are
+reserved. A trust requirement states the verifier's policy; it does not itself show that the issuer
+authorised a key (§#ref(<bg-vc>, supplement: none)).
+
+A proof method is a way of producing and checking the proof, named by an IRI, as a cryptosuite is for
+Data Integrity proofs; a new version is a new method with a new IRI. Its evidence may be a
+zero-knowledge proof, a proof that is not zero-knowledge, an attestation from a trusted execution
+environment (TEE), or disclosed credentials. The verifier checks the evidence with the verification
+key and parameters that its request gives for the method, such as a circuit's verification key or a
+zkVM image ID, never with a key from the presentation.
 
 #[
 #show figure: set block(breakable: false)
@@ -404,43 +409,53 @@ such as a circuit's verification key or a zkVM image ID.
     columns: (auto, 1fr),
     align: (left, left),
     table.header[Member][Meaning],
-    [`query`], [The query $Q$: a SPARQL 1.1 `SELECT`, `ASK` or `CONSTRUCT` query, without `FROM`,
-      `FROM NAMED`, `SERVICE` or functions such as `NOW` and `RAND`],
-    [`input`], [Chosen by the holder, or agreed with the agreed dataset commitment
+    [`query`], [The query $Q$: a SPARQL 1.2 `SELECT`, `ASK` or `CONSTRUCT` query that reads only the
+      input dataset: no `FROM`, `FROM NAMED` or `SERVICE`, and no function whose value depends on
+      when or where it is evaluated, such as `NOW` or `RAND`],
+    [`inputCommitment`], [Optional. A dataset commitment that the verifier agreed in advance
       (§#ref(<who-fixed>, supplement: none))],
-    [`issuers`], [The accepted issuer keys. Each entry gives an issuer, the identifier of a
-      verification method (`verificationMethod`), that method's public key (`publicKeyMultibase`)
-      and a cryptosuite. An empty list accepts credentials without checking any signature],
-    [`signatureModes`], [The accepted signature modes: hidden, revealed or disclosed
-      (§#ref(<modes>, supplement: none))],
-    [`proofMethods`], [The accepted proof methods, each with its version, verification key and
-      parameters],
-    [`limits`], [The largest presentation, in bytes, and the most result rows or triples
-      (`maxResultRows`)],
-    [`challenge`, `audience`], [Fresh random bytes, and the verifier's identifier],
-    [`notBefore`, `notAfter`], [The period in which the verifier accepts a presentation],
+    [`trustedIssuers`], [Optional. Trust requirements: which issuers the verifier trusts. The defined
+      type gives an issuer and its verification methods, each with its public key
+      (`publicKeyMultibase`). Without them, no credential is checked against an issuer],
+    [`cryptosuite`], [With trust requirements: the cryptosuites accepted for the issuers'
+      signatures, such as `eddsa-rdfc-2022`],
+    [`signatureMode`], [With trust requirements: the accepted signature modes, hidden, revealed or
+      disclosed (§#ref(<modes>, supplement: none))],
+    [`proofMethod`], [The accepted proof methods, in order of preference: each an IRI (`method`)
+      with a verification key (`verificationKey`) and parameters],
+    [`maxPresentationBytes`], [The largest presentation, in bytes],
+    [`maxResultSize`], [The most solutions, or triples, in the result],
+    [`challenge`, `domain`], [Fresh randomness, and the verifier's identifier],
+    [`validFrom`, `validUntil`], [The period in which the verifier accepts a presentation],
   ),
   caption: [
-    Members of a query request, apart from its type, version and optional base IRI. The request
-    digest covers all of them.
+    Members of a query request, by JSON-LD term, apart from its type and optional identifier. The
+    request digest covers all of them.
   ],
 ) <request-table>
 ]
 
-=== What the proof shows <linkage>
+=== The answer presentation and its proof <linkage>
 
-The statement's public inputs are the request digest, whether the input was agreed, and the
-signature mode. They also include the dataset commitment, the result and, in the revealed mode, the
-signed messages. A proof method may bind them all by one digest. The proof shows that:
+The answer presentation carries the request digest, the dataset commitment, the signature mode and
+the result: a SPARQL Query Results JSON document for `SELECT` and `ASK`, or a graph for
+`CONSTRUCT`. In the revealed mode, it also carries each credential's signature and signed message.
+Its proof names a proof method by IRI, repeats the request's challenge and domain, and holds the
+evidence.
+
+The statement's public inputs are the request digest, the dataset commitment, the result, the
+signature mode and, in the revealed mode, the signed messages. A proof method may bind them all by
+one digest. The proof shows that:
 
 + the dataset commitment fixes $D$;
-+ if the request lists issuer keys, $D$ is built from exactly the data that signatures under those
-  keys cover, and in the hidden mode the proof also verifies those signatures
++ if the request has trust requirements, $D$ is built from exactly the data that signatures from
+  trusted issuers cover, and in the hidden mode the proof also verifies those signatures
   (§#ref(<modes>, supplement: none));
 + the result is an answer for $Q$ over $D$ (§#ref(<answers>, supplement: none)).
 
-Because the proof binds the request digest, a proof made for one request does not verify for
-another, or for another verifier or validity period, as long as SHA-256 is collision-resistant.
+Because the proof binds the request digest, it binds every member of the request, the agreed
+commitment included. A proof made for one request therefore does not verify for another, or for
+another verifier or validity period, as long as SHA-256 is collision-resistant.
 
 For the second point, an RDFC-1.0 cryptosuite computes its signed message from the credential's
 canonical N-Quads. A proof method can build $D$ from those same quads, keeping their signed lexical
@@ -452,16 +467,16 @@ JSON-LD processing with fixed contexts, which must then be part of the proof or 
 The request lists the signature modes the verifier accepts, and each proof method states which modes
 it supports for each cryptosuite.
 
-- In the _hidden_ mode, the proof shows that the holder knows a valid signature from a listed key on
-  every credential in $D$. The signatures, the signed messages and which key signed which credential
-  are part of the witness. They stay hidden as far as the proof system is zero-knowledge and the
-  public inputs do not disclose them (§#ref(<leakage>, supplement: none)).
+- In the _hidden_ mode, the proof shows that the holder knows a valid signature from a trusted issuer
+  on every credential in $D$. The signatures, the signed messages and which key signed which
+  credential are part of the witness. They stay hidden as far as the proof system is zero-knowledge
+  and the public inputs do not disclose them (§#ref(<leakage>, supplement: none)).
 - In the _revealed_ mode, the presentation carries each credential's signature and signed message,
   which the verifier checks itself. The proof then shows only that $D$ is exactly the data those
   messages cover and that the result is correct. Removing signature verification from the proof
   reduced the cycles of our guest program (§#ref(<cost>, supplement: none)), but this mode
-  discloses the signatures, the signed messages, the issuer keys used and the number of credentials
-  (§#ref(<security>, supplement: none)).
+  discloses the signatures, the signed messages, the issuers' keys used and the number of
+  credentials (§#ref(<security>, supplement: none)).
 - In the _disclosed_ mode, for proof methods whose evidence is disclosed credentials, the holder
   sends the credentials or presentations derived from them by a selective-disclosure cryptosuite.
   The verifier checks them, builds $D$ from what they disclose and evaluates $Q$ itself, seeing
@@ -471,26 +486,27 @@ it supports for each cryptosuite.
 
 === Verifier processing <validation>
 
-The verifier service processes a presentation in this order, and rejects it at the first check that
-fails:
+The verifier service checks a presentation against the request it sent, in this order, and rejects
+it at the first check that fails @zksparqlspec:
 
-+ Before parsing, reject a presentation larger than the service's size ceiling.
-+ Find the stored request with the presentation's request digest. Reject if there is none, if the
-  time is outside its validity period, if it is already answered, or if the presentation exceeds its
-  size limit.
-+ Reject unless the presentation names a listed proof method whose verification key, loaded from the
-  verifier's own configuration, equals the one in the stored request.
-+ For an agreed input, reject unless the commitment equals the request's.
-+ If the request lists signature modes, reject any other mode. In the revealed mode, verify each
-  signature under a listed issuer key.
-+ Reject a result of the wrong form or over the limits.
-+ Verify the proof against the statement recomputed from the stored request and the presentation.
-+ Mark the request as answered, in one atomic step that fails if it is already marked. Only then
-  accept.
++ Before parsing, reject a presentation larger than `maxPresentationBytes`.
++ Reject it unless it is a JSON-LD document that uses only the specification's terms.
++ Reject it unless its request digest is that of the stored request, the time is within the
+  request's validity period, the proof's challenge and domain equal the request's, and no
+  presentation with this challenge has been accepted.
++ Reject it unless it names one of the request's proof methods, whose entry gives the verification
+  key.
++ If the request has an `inputCommitment`, reject it unless the presentation's commitment equals it.
++ If the request has trust requirements, reject a signature mode that the request does not list. In
+  the revealed mode, verify each signature under a trusted issuer's key and a listed cryptosuite.
++ Reject a result of the wrong form for the query, or larger than `maxResultSize`.
++ Verify the proof against the statement computed from the stored request and the presentation.
 
-Checking everything first stops a malformed presentation from using up a legitimate request, and the
-atomic step makes a replay, or the second of two concurrent presentations, fail. Sending a
-presentation discloses its answer, even if the verifier then rejects it.
+To accept at most one presentation per challenge, the verifier service then marks the request as
+answered, in one atomic step that fails if it is already marked, and only then accepts. Checking
+everything first stops a malformed presentation from using up a legitimate request, and the atomic
+step makes a replay, or the second of two concurrent presentations, fail. Sending a presentation
+discloses its answer, even if the verifier then rejects it.
 
 == Revealing less <minimize>
 
@@ -549,8 +565,9 @@ Beyond its result, an accepted answer reveals:
   credentials; an agreed commitment links them by design, to the verifier that agreed it;
 - the proof method the holder chose, whose capacity limits reveal an upper limit on the size of the
   input;
-- the issuers: in the hidden mode, only that a listed key signed each credential, which identifies
-  the issuer if only one is listed; in the revealed mode, each key and the number of credentials;
+- the issuers: in the hidden mode, only that a trusted issuer signed each credential, which
+  identifies the issuer if the request trusts only one; in the revealed mode, each key and the
+  number of credentials;
 - the size of the result, such as how many payments matched;
 - from a RISC Zero receipt, part of the shape of the execution. The zero-knowledge of these receipts
   is RISC Zero's claim, not an established property;
@@ -643,7 +660,7 @@ receipts, which are cheaper to verify but knowledge-sound only against a classic
         execution's shape; no signature, signed message or issuer key],
         [Only through a commitment repeated by reusing a salt, or an agreed commitment], [No],
       [Revealed (`eddsa-rdfc-2022`, `ecdsa-rdfc-2019`, `mldsa44-rdfc-2024`)], [Per credential:
-        signature, signed message and verification method; so the issuer keys and the number of
+        signature, signed message and verification method; so the issuers' keys and the number of
         credentials], [Yes], [Yes: the document hash is unsalted],
       [Revealed (Merkle-based)], [As above, without the salt], [Yes],
         [No, while the salt is fresh and private],
@@ -673,7 +690,7 @@ receipts, which are cheaper to verify but knowledge-sound only against a classic
 === Prototype and method <prototype>
 
 The prototype implements part of the architecture of §#ref(<architecture>, supplement: none). Our
-services encode query requests in binary, not in the specification's JSON, and accept a different
+services encode query requests in binary, not as the specification's JSON-LD, and accept a different
 set of query features from version 1 of the specification. Our Noir circuits publish no dataset
 commitment, so they cannot yet produce the specification's presentations, and no proof method for
 the disclosed mode is built. In the zkVM, the revealed mode and our Merkle-based cryptosuite exist
@@ -683,7 +700,7 @@ proving times.
 Our guest program runs a SPARQL evaluator inside the RISC Zero zkVM and writes the result, the
 dataset commitment and whether the input was agreed to the journal. A second build adds signature checks in front
 of the same evaluator: it verifies each credential's `eddsa-rdfc-2022` signature in the hidden mode,
-checks the key against the request's issuer keys, and evaluates the query over the signed canonical
+checks the key against the request's trusted issuers, and evaluates the query over the signed canonical
 N-Quads. Our holder and verifier services wrap both builds with query requests and the checks of
 §#ref(<validation>, supplement: none), and the journal binds the stored request through a digest
 (§#ref(<capabilities>, supplement: none)). We have not confirmed that the verifier service performs
@@ -875,7 +892,8 @@ query took fewer cycles than processing the document or verifying the signature.
         [Hidden], [Revealed], [Hidden], [Revealed],
       ),
       [Reading and decoding the input], ..phase-cells("input"),
-      [Checking the request, its issuer keys and the input sizes], ..phase-cells("request"),
+      [Checking the request, the trusted issuers' keys and the input sizes],
+        ..phase-cells("request"),
       [Canonicalising and hashing the proof configuration], ..phase-cells("proof_config"),
       [Canonicalising and hashing the document, or building its Merkle tree; checking its issuer],
         ..phase-cells("document"),
@@ -1053,11 +1071,11 @@ hidden mode, the credentials' signatures. Public inputs and witness satisfy the 
 
 + the dataset commitment is the proof method's commitment to these credentials under this salt;
 + the input dataset $D$ is built from these credentials as the proof method states
-  (§#ref(<meaning>, supplement: none)); with issuer keys, from their signed canonical N-Quads, so
-  that every term keeps its signed lexical form;
-+ if the request lists issuer keys, each credential carries a signature that verifies under a listed
-  key whose entry matches the credential's issuer, verification method and cryptosuite. The proof
-  verifies these signatures in the hidden mode. In the revealed mode, the signed messages are public
+  (§#ref(<meaning>, supplement: none)); with trust requirements, from their signed canonical
+  N-Quads, so that every term keeps its signed lexical form;
++ if the request has trust requirements, each credential carries a signature that verifies under a
+  trusted issuer's key, and the credential's issuer, verification method and cryptosuite match that
+  key's entry and the request. The proof verifies these signatures in the hidden mode. In the revealed mode, the signed messages are public
   inputs computed from the credentials, and the verifier checks the signatures;
 + the result is an answer for $Q$ over $D$ (§#ref(<answers>, supplement: none)).
 
@@ -1072,10 +1090,10 @@ hidden mode, the credentials' signatures. Public inputs and witness satisfy the 
 / A3: SHA-256 is collision-resistant, so the request digest determines the request and the dataset
   commitment is binding.
 / A4: The verifier service performs the checks of §#ref(<validation>, supplement: none) against its
-  stored request, with the image ID from its own configuration, and takes the result only from the
-  journal.
-/ A5: The cryptosuite's signatures are unforgeable, each listed key belongs to the issuer that its
-  entry names, and that issuer keeps the private key secret.
+  stored request, with the image ID that the stored request gives, and takes the result only from
+  the journal.
+/ A5: The cryptosuite's signatures are unforgeable, each key in the trust requirements belongs to
+  the issuer that its entry names, and that issuer keeps the private key secret.
 
 Tests support A2 and A4 (supplementary §#ref(<supp-records>, supplement: none)); A1, A3 and A5
 concern the proof system, the hash function and the issuers.
@@ -1086,15 +1104,15 @@ agreed, and the presented commitment and result. By A1, an input exists on which
 writes this journal; by A2, that input satisfies the relation. By A3, except with negligible
 probability, $Q$ is the stored request's query and the commitment fixes $D$. The result is therefore
 an answer for $Q$ over $D$, and for an agreed input, $D$ is the dataset whose commitment the
-verifier agreed to. If the request lists issuer keys, each credential
-in $D$ carries a signature under a listed key, which by A5 only that key's issuer could have made.
+verifier agreed to. If the request has trust requirements, each credential in $D$ carries a
+signature under a trusted issuer's key, which by A5 only that issuer could have made.
 If $Q$ is a monotone query, every solution of $Q$ over $D$, before its top-level `ORDER BY`,
 `OFFSET` and `LIMIT`, is also a solution over every dataset that contains $D$ graph by graph. A true
 `ASK` and each returned row therefore stay true when the holder's other credentials are added.
 
 In the prototype, the journal binds the stored request through a SHA-256 hash
-(§#ref(<capabilities>, supplement: none)), so under A3 it also binds the challenge, audience and
-validity period.
+(§#ref(<capabilities>, supplement: none)), so under A3 it also binds the challenge, the verifier's
+identifier and the validity period.
 
 *Public inputs computable from the result.* Suppose the pattern of $Q$ is a single basic graph
 pattern without blank nodes, and a returned row binds each of its variables to an IRI or a literal.
@@ -1197,7 +1215,7 @@ credential status or holder binding.
       [Inputs], [Chosen by the holder or agreed], [Same], [Chosen by the holder],
       [Input dataset], [Parsed from the committed N-Quads], [RDF merge of the signed canonical
         N-Quads], [Credentials in the circuits' own commitment format],
-      [Issuer checks], [None: the request lists no issuer keys], [`eddsa-rdfc-2022`, in the hidden
+      [Issuer checks], [None: the request has no trust requirements], [`eddsa-rdfc-2022`, in the hidden
         mode], [Schnorr signatures over Baby Jubjub, inside the proof],
       [Credential status], [Not checked], [Not checked], [Checked against a snapshot that the
         verifier accepted],
@@ -1214,14 +1232,16 @@ one before: the default-graph format; the named-graph format, which adds named g
 `FROM` and `FROM NAMED`; and the graph-result format, which adds `CONSTRUCT`, `DESCRIBE` and blank
 nodes in the input and the result. Behind our services, both builds use the graph-result format,
 with the exclusions of §#ref(<prototype>, supplement: none). The services encode the query request
-in binary rather than in the specification's JSON, compute the request digest over that encoding,
-and store times as Unix seconds.
+in binary rather than as the specification's JSON-LD, compute the request digest over that
+encoding, and store times as Unix seconds. Their requests list issuer keys, the prototype's form of
+an `IssuerKeys` trust requirement, and name the verifier in an audience field, the counterpart of
+`domain`.
 
 *How the stored request reaches the proof.* The holder service gives the guest program the query,
 whether the input is agreed, any agreed commitment and the evaluation limits. It also gives a SHA-256 hash of the
 stored request and its proof-method entry. The guest program writes a digest of these values to the
 journal, and the verifier service recomputes it from its own copies. The journal therefore binds
-every member of the stored request, including the challenge, audience and validity period. With
+every member of the stored request, including the challenge, the audience and the validity period. With
 signature checks, the proof-method entry contains a digest of the request's issuer keys and the
 evaluation limits, so changing any key, issuer or verification method changes the entry.
 
@@ -1411,8 +1431,9 @@ test case, so none produced a proof. A store in memory recorded which requests w
       table.cell(colspan: 3)[_Stored request_],
       [Another query of the same form], [#headline("zkvcq.ctl_changed_query_same_form")], [Yes],
       [Another challenge], [#headline("zkvcq.ctl_wrong_challenge")], [Yes],
-      [Another audience presented], [#headline("zkvcq.ctl_wrong_verifier_audience")], [Yes],
-      [Stored audience changed to the presented one],
+      [Another verifier identifier (audience) presented],
+        [#headline("zkvcq.ctl_wrong_verifier_audience")], [Yes],
+      [Stored verifier identifier changed to the presented one],
         [#headline("zkvcq.ctl_changed_stored_audience")], [Yes],
       [Expired], [#headline("zkvcq.ctl_expired")], [Yes],
       [Not yet valid], [#headline("zkvcq.ctl_not_yet_valid")], [Yes],
