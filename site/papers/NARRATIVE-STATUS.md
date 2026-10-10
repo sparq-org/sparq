@@ -53,3 +53,12 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
   4. Background and related work: merge overlapping zkRDF and earlier-interface material.
 - Check whether ESWC allows an appendix or supplementary material; if not, the appendix moves to the
   site page and an archived artifact.
+
+## Inputs from other threads (10 October)
+- Proof methods comparison (ten ways to show query results are correct): project file
+  `zk-proof-methods/comparison.md`. Methods being built: full-disclosure re-evaluation (baseline);
+  selective disclosure (bbs-2023 / ecdsa-sd-2023) plus re-evaluation, supported answers only;
+  designated-verifier VOLE ZK (interactive, non-transferable, LPN); TEE attestation (TDX, SEV-SNP,
+  Nitro, NVIDIA confidential computing). They will measure Q1-Q5 at n in {1, 4} for the paper's
+  tables. Use for related work and the method comparison once the rewrite is done.
+- Spec mode names: `hidden`, `revealed` (spec draft #6786). Use these names in the paper.
