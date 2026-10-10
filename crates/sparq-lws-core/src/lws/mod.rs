@@ -1419,6 +1419,28 @@ pub(crate) async fn delete_record<S: Store>(
     }
 }
 
+/// Whether the record `iri` is stored as a start would load it: listed in `container`, there to
+/// read, and not stored as unsettled ([`UNSETTLED_TYPE`]). An error when that cannot be told.
+pub(crate) async fn still_listed<S: Store>(
+    store: &S,
+    iri: &str,
+    container: &str,
+) -> Result<bool, crate::error::ServerError> {
+    let listed = store
+        .list_children(container)
+        .await?
+        .iter()
+        .any(|child| child.as_str() == iri);
+    if !listed {
+        return Ok(false);
+    }
+    match store.read(iri).await {
+        Ok(r) => Ok(r.meta.content_type != UNSETTLED_TYPE),
+        Err(crate::error::ServerError::NotFound) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// The content type a service record (a grant or a request) is stored under while it is not
 /// settled: a grant from when it is created until it is in force, and any record from when its
 /// revocation starts. A record stored so is never put in force at boot, and the boot removes it
@@ -2453,8 +2475,8 @@ pub(crate) mod test_store {
         /// commits, then reports a backend failure, as when a remote store's reply is lost after
         /// the update landed.
         pub fail_after_create: Arc<AtomicBool>,
-        /// The next `create_in_container` of an intent commits, then reports a backend failure.
-        pub lose_next_intent_create: Arc<AtomicBool>,
+        /// `list_children` fails, as in a backend outage.
+        pub fail_list: Arc<AtomicBool>,
         /// `write` of this IRI is refused before anything is written, as by a full store.
         pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `delete` of this IRI detaches it from its parent, then fails with the record still
@@ -2502,7 +2524,7 @@ pub(crate) mod test_store {
                 fail_read_of_any: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
-                lose_next_intent_create: Default::default(),
+                fail_list: Default::default(),
                 fail_meta: Default::default(),
                 exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
@@ -2693,12 +2715,6 @@ pub(crate) mod test_store {
                 created?;
                 return Err(ServerError::Storage("the reply was lost".into()));
             }
-            if container.starts_with(super::intents::PREFIX)
-                && self.lose_next_intent_create.swap(false, Ordering::SeqCst)
-            {
-                created?;
-                return Err(ServerError::Storage("the reply was lost".into()));
-            }
             created
         }
         async fn restore(
@@ -2785,6 +2801,9 @@ pub(crate) mod test_store {
             Ok(outcome)
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+            if self.fail_list.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.list_children(container).await
         }
     }

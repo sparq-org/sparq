@@ -294,25 +294,23 @@ What the server exposes, all discoverable from the storage description
   boot only when its create was known to land: a create first stores a durable intent to
   remove the record, creates it under an unsettled content type, stores it again under its
   own, and puts it in force only once that intent is cleared (read back when clearing fails;
-  while it cannot be read, the create fails and the grant is settled from it later); a
-  revocation first stores a durable intent to remove the record and marks it unsettled. So a
-  crash or a store failure with an unknown outcome leaves the grant out of force, and the next
+  while it cannot be read, the create fails and the grant is settled from it later). So a
+  crash or a store failure with an unknown outcome leaves a new grant out of force, and the next
   start removes it (before loading grants; a grant whose removal fails then is not read at all,
   and is removed in the background, out of force meanwhile). Nothing a start puts back in the
-  background begins until every step of the start that can fail has succeeded. A revocation that can record neither removes the record
-  at once or, failing that, leaves the grant in force and fails. Each record's own lock is
-  held across its create and its revocation. A revocation whose removal fails takes the grant
-  out of force at once and keeps removing it in the background. An access request is created
-  and withdrawn the same way, so one whose create or withdrawal was cut short never comes back
-  at the next start. A create refuses a name already stored. A stored grant or request that
-  cannot be read stops the start (a later start reads it again); one whose stored body is not a
-  record is quarantined at every start until the owner deletes it: it grants nothing, is listed
-  and counts against its quota, and answers `500` to a read. A request still being removed
-  counts against the quota too. An intent whose write failed but may have landed is withdrawn,
-  or set aside and withdrawn in the background. A revocation or withdrawal that cannot tell
-  whether anything durable records it is answered `500` saying its outcome is not known: the
-  record is out of force meanwhile, its removal goes on in the background, and a start may find
-  it either way; only one known to have left nothing durable is answered "still in force".
+  background begins until every step of the start that can fail has succeeded. A revocation
+  removes the record in one step, and memory follows the store: the grant is out of force while
+  the removal runs, and stays out only once the removal is confirmed (it succeeded, or the store,
+  read again, no longer lists the record). The answer says only what is confirmed: `204` once
+  revoked; `500` "still in force" when, read again, the record is listed as it was; `500` "not
+  known" when it cannot be read again, with the grant left in force and the request open to
+  retry. Each record's own lock is held across its create and its revocation. An access request
+  is created and withdrawn the same way. A create refuses a name already stored. A stored grant
+  or request that cannot be read stops the start (a later start reads it again); one listed but
+  gone is skipped; one whose stored body is not a record is quarantined at every start until the
+  owner deletes it: it grants nothing, is listed and counts against its quota, and answers `500`
+  to a read. A request still being removed counts against the quota too. A create intent whose
+  write failed but may have landed is withdrawn, or set aside and withdrawn in the background.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
