@@ -1,26 +1,28 @@
 #![cfg(feature = "decision-report")]
 
-use sparq_policy::{report::DecisionReport, Decision};
+use sparq_policy::{decide, parse_policy_str, report::DecisionReport, Request};
 
 // [GPT-5.6] sq-mu4au: every input exercises a distinct aggregation branch. Removing
 // any counter update, conflict recognition, or BTreeMap ordering makes this test fail.
 #[test]
 fn fixed_decision_batch_has_stable_complete_report() {
-    let permitted = Decision {
-        allow: true,
-        matched_rules: vec!["permission-read".into()],
-        unmet_constraints: Vec::new(),
-    };
-    let denied = Decision {
-        allow: false,
-        matched_rules: Vec::new(),
-        unmet_constraints: vec!["no permission matches the request".into()],
-    };
-    let conflict = Decision {
-        allow: false,
-        matched_rules: vec!["prohibition-write".into()],
-        unmet_constraints: vec!["prohibition prohibition-write matches the request".into()],
-    };
+    // Decisions come only from `decide`: a grant, a plain no-match deny, and a deny by
+    // an overriding prohibition.
+    let policy = parse_policy_str(
+        r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/r> a odrl:Set ;
+  odrl:permission <urn:rule/permission-read> ;
+  odrl:prohibition <urn:rule/prohibition-write> .
+<urn:rule/permission-read> odrl:action odrl:read ; odrl:target <urn:asset/x> .
+<urn:rule/prohibition-write> odrl:action odrl:write ; odrl:target <urn:asset/x> ."#,
+        "turtle",
+    )
+    .unwrap();
+    let on_x = |a: &str| Request::new(format!("http://www.w3.org/ns/odrl/2/{a}")).on("urn:asset/x");
+    let permitted = decide(&policy, &on_x("read"));
+    let denied = decide(&policy, &Request::new("http://www.w3.org/ns/odrl/2/read"));
+    let conflict = decide(&policy, &on_x("write"));
+    assert!(permitted.allow && !denied.allow && !conflict.allow);
     let escaped_action = "urn:action/a\"\\\n";
     let inputs = [
         ("urn:action/read", &permitted),

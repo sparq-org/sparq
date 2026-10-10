@@ -31,8 +31,18 @@ use rustc_hash::FxHashMap;
 /// spec-table premise order (schema/TBox premises first, data premises after).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProofNode {
-    /// The derived (or asserted) fact, as self-contained N-Triples/N3-style term strings.
+    /// The derived (or asserted) fact, as self-contained N-Triples/N3-style term strings —
+    /// for READING. Two different N3 facts can render alike (a written-out `@forAll`
+    /// universal and a source variable of the same name), so do not address a fact by
+    /// these; use [`key`](Self::key).
     pub conclusion: [String; 3],
+    /// The fact's lossless identity, one key per term: equal exactly when the facts are
+    /// equal, across every proof. For an RDFS/OWL proof it is the same as
+    /// [`conclusion`](Self::conclusion); an N3 proof's key is a structural, tagged encoding
+    /// of every field of the term (`n3::serialize::statement_keys`), never its rendering —
+    /// a rendering drops a language-tagged literal's datatype and spells different variables
+    /// alike. Content-address facts (e.g. provenance entities) by this.
+    pub key: [String; 3],
     /// Rule identifier (see the module docs for the vocabulary).
     pub rule: String,
     /// Indices of the premise nodes — each strictly less than this node's own index.
@@ -79,7 +89,8 @@ impl ProofTree {
     }
 
     /// JSON rendering (hand-built, house style — no serde):
-    /// `{"root":R,"nodes":[{"id":0,"conclusion":[s,p,o],"rule":"…","premises":[…]},…]}`.
+    /// `{"root":R,"nodes":[{"id":0,"conclusion":[s,p,o],"key":[ks,kp,ko],"rule":"…","premises":[…]},…]}`
+    /// — `conclusion` for reading, `key` the node's lossless identity ([`ProofNode::key`]).
     pub fn to_json(&self) -> String {
         let mut out = String::with_capacity(self.nodes.len() * 96);
         out.push_str("{\"root\":");
@@ -93,6 +104,15 @@ impl ProofTree {
             out.push_str(&i.to_string());
             out.push_str(",\"conclusion\":[");
             for (k, t) in n.conclusion.iter().enumerate() {
+                if k > 0 {
+                    out.push(',');
+                }
+                out.push('"');
+                json_escape_into(t, &mut out);
+                out.push('"');
+            }
+            out.push_str("],\"key\":[");
+            for (k, t) in n.key.iter().enumerate() {
                 if k > 0 {
                     out.push(',');
                 }
@@ -182,11 +202,24 @@ impl ProofBuilder {
         rule: &str,
         premises: Vec<u32>,
     ) -> Option<u32> {
+        let key = conclusion.clone();
+        self.push_keyed(conclusion, key, rule, premises)
+    }
+
+    /// [`push`](Self::push) with an identity `key` that differs from the display strings
+    /// (see [`ProofNode::key`]).
+    pub(crate) fn push_keyed(
+        &mut self,
+        conclusion: [String; 3],
+        key: [String; 3],
+        rule: &str,
+        premises: Vec<u32>,
+    ) -> Option<u32> {
         if self.nodes.len() >= self.opts.max_nodes {
             return None;
         }
         debug_assert!(premises.iter().all(|&p| (p as usize) < self.nodes.len()));
-        self.nodes.push(ProofNode { conclusion, rule: rule.to_string(), premises });
+        self.nodes.push(ProofNode { conclusion, key, rule: rule.to_string(), premises });
         Some((self.nodes.len() - 1) as u32)
     }
 
@@ -257,60 +290,117 @@ where
     None
 }
 
-/// Build a [`ProofTree`] for `target` from a [`reason_n3_proof`](crate::reason_n3_proof)
-/// run (the id-level batch N3 entry point): `steps` is that call's derivation record.
-/// A fact with no derivation step of its own is treated as an asserted input (`steps`
-/// covers every NEWLY-derived triple, so inputs are exactly the step-less facts).
-/// Returns `None` if `target` has no step and so is not derived (explain it as asserted
-/// yourself), or if a cap is exceeded.
+/// The id triple handed to [`n3_proof_tree`] is MORE than one structurally distinct N3 fact
+/// of the closure — asserted or derived — e.g. `:a :p ()` and `:a :p ?i` with
+/// `?i log:uri "…rdf-syntax-ns#nil"` both intern as `:a :p rdf:nil`. Ids cannot say which
+/// fact is meant, so no proof is chosen; pick one of `keys` and call
+/// [`n3_proof_tree_for_key`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AmbiguousN3Target {
+    /// The distinct N3 identity keys (`N3ProofRun::closure_keys`) whose facts intern to the
+    /// target, sorted.
+    pub keys: Vec<[String; 3]>,
+}
+
+impl std::fmt::Display for AmbiguousN3Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the target id triple is {} structurally distinct N3 facts of the closure; \
+             select one by its key (n3_proof_tree_for_key)",
+            self.keys.len()
+        )
+    }
+}
+
+impl std::error::Error for AmbiguousN3Target {}
+
+/// Build a [`ProofTree`] for `target` from a
+/// [`reason_n3_proof_run`](crate::reason_n3_proof_run) (the id-level batch N3 entry point).
+///
+/// Several distinct N3 facts can intern to one id triple (`()` and `rdf:nil`, say). The
+/// ambiguity check runs over the WHOLE closure — asserted facts as well as derived ones,
+/// each with its identity key from the N3 terms — so if `target` is more than one fact,
+/// this never picks one: it returns [`AmbiguousN3Target`] listing their keys, for
+/// [`n3_proof_tree_for_key`]. Otherwise: `Ok(None)` if `target` is not in the closure, if
+/// its one fact has no derivation step (it is asserted; explain it as such yourself), or if
+/// a cap is exceeded.
 pub fn n3_proof_tree(
     dict: &sparq_core::dict::Dict,
-    steps: &[crate::n3::ProofStep],
+    run: &crate::n3::N3ProofRun,
     target: [sparq_core::dict::Id; 3],
     opts: ExplainOpts,
+) -> Result<Option<ProofTree>, AmbiguousN3Target> {
+    let closure = run.closure.iter().zip(&run.closure_keys).filter(|(ids, _)| **ids == target).map(|(_, k)| k);
+    let derived = run.steps.iter().filter(|s| s.conclusion == target).map(|s| &s.conclusion_key);
+    let mut keys: Vec<&[String; 3]> = closure.chain(derived).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    match keys.as_slice() {
+        [] => Ok(None),
+        [key] => Ok(n3_proof_tree_for_key(dict, &run.steps, key, opts)),
+        _ => Err(AmbiguousN3Target { keys: keys.into_iter().cloned().collect() }),
+    }
+}
+
+/// [`n3_proof_tree`] with the root chosen STRUCTURALLY: the derived fact whose N3 identity
+/// key ([`crate::n3::serialize::statement_keys`], `ProofStep::conclusion_key`) is `key`.
+/// `None` if no step concludes that fact (it is an input, or not in the closure) or a cap
+/// is exceeded.
+pub fn n3_proof_tree_for_key(
+    dict: &sparq_core::dict::Dict,
+    steps: &[crate::n3::ProofStep],
+    key: &[String; 3],
+    opts: ExplainOpts,
 ) -> Option<ProofTree> {
-    type Id3 = [sparq_core::dict::Id; 3];
-    let mut step_map: FxHashMap<Id3, &crate::n3::ProofStep> = FxHashMap::default();
+    // Nodes are identified by the N3 identity KEY each step carries (taken from the N3
+    // terms before list expansion and interning — `ProofStep::conclusion_key`), never
+    // rebuilt from dictionary ids: two different N3 facts can intern to one id triple
+    // (`()` and `rdf:nil`), and a dictionary term cannot give back the N3 term's fields.
+    type Key = [String; 3];
+    let mut step_map: FxHashMap<&Key, &crate::n3::ProofStep> = FxHashMap::default();
     for s in steps {
-        step_map.entry(s.conclusion).or_insert(s);
+        step_map.entry(&s.conclusion_key).or_insert(s);
     }
-    if !step_map.contains_key(&target) {
-        return None;
-    }
+    let (target, root_key) = {
+        let root = step_map.get(key)?;
+        (root.conclusion, root.conclusion_key.clone())
+    };
     struct P<'a> {
         dict: &'a sparq_core::dict::Dict,
-        step_map: FxHashMap<[sparq_core::dict::Id; 3], &'a crate::n3::ProofStep>,
+        step_map: FxHashMap<&'a [String; 3], &'a crate::n3::ProofStep>,
         b: ProofBuilder,
-        memo: FxHashMap<[sparq_core::dict::Id; 3], u32>,
-        stack: rustc_hash::FxHashSet<[sparq_core::dict::Id; 3]>,
+        memo: FxHashMap<[String; 3], u32>,
+        stack: rustc_hash::FxHashSet<[String; 3]>,
     }
     impl P<'_> {
-        fn prove(&mut self, t: [sparq_core::dict::Id; 3], depth: usize) -> Option<u32> {
-            if let Some(&ix) = self.memo.get(&t) {
+        fn prove(&mut self, t: [sparq_core::dict::Id; 3], key: &[String; 3], depth: usize) -> Option<u32> {
+            if let Some(&ix) = self.memo.get(key) {
                 return Some(ix);
             }
-            if depth > self.b.opts.max_depth || !self.stack.insert(t) {
+            if depth > self.b.opts.max_depth || !self.stack.insert(key.clone()) {
                 return None;
             }
             let r = (|| {
-                let Some(&step) = self.step_map.get(&t) else {
-                    let ix = self.b.push(id_triple_strings(self.dict, t), "asserted", vec![])?;
-                    self.memo.insert(t, ix);
+                let Some(&step) = self.step_map.get(key) else {
+                    let ix = self.b.push_keyed(id_triple_strings(self.dict, t), key.clone(), "asserted", vec![])?;
+                    self.memo.insert(key.clone(), ix);
                     return Some(ix);
                 };
                 let mut prem = Vec::with_capacity(step.premises.len());
-                for &p in &step.premises {
-                    prem.push(self.prove(p, depth + 1)?);
+                for (&p, pk) in step.premises.iter().zip(&step.premise_keys) {
+                    prem.push(self.prove(p, pk, depth + 1)?);
                 }
-                let ix = self.b.push(
+                let ix = self.b.push_keyed(
                     id_triple_strings(self.dict, t),
+                    key.clone(),
                     &format!("n3-rule-{}", step.rule),
                     prem,
                 )?;
-                self.memo.insert(t, ix);
+                self.memo.insert(key.clone(), ix);
                 Some(ix)
             })();
-            self.stack.remove(&t);
+            self.stack.remove(key);
             r
         }
     }
@@ -321,7 +411,7 @@ pub fn n3_proof_tree(
         memo: FxHashMap::default(),
         stack: rustc_hash::FxHashSet::default(),
     };
-    let root = p.prove(target, 0)?;
+    let root = p.prove(target, &root_key, 0)?;
     Some(p.b.finish(root))
 }
 
@@ -360,9 +450,9 @@ mod tests {
         assert_eq!(
             json,
             "{\"root\":2,\"nodes\":[\
-             {\"id\":0,\"conclusion\":[\"<http://ex/Dog>\",\"<sc>\",\"<http://ex/Animal>\"],\"rule\":\"asserted\",\"premises\":[]},\
-             {\"id\":1,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Dog>\"],\"rule\":\"asserted\",\"premises\":[]},\
-             {\"id\":2,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Animal>\"],\"rule\":\"rdfs9\",\"premises\":[0,1]}]}"
+             {\"id\":0,\"conclusion\":[\"<http://ex/Dog>\",\"<sc>\",\"<http://ex/Animal>\"],\"key\":[\"<http://ex/Dog>\",\"<sc>\",\"<http://ex/Animal>\"],\"rule\":\"asserted\",\"premises\":[]},\
+             {\"id\":1,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Dog>\"],\"key\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Dog>\"],\"rule\":\"asserted\",\"premises\":[]},\
+             {\"id\":2,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Animal>\"],\"key\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Animal>\"],\"rule\":\"rdfs9\",\"premises\":[0,1]}]}"
         );
         let text = tree.to_text();
         assert!(text.starts_with("#2 <http://ex/rex> <ty> <http://ex/Animal>  [rdfs9]\n"));

@@ -1,0 +1,110 @@
+# Linked Web Storage conformance for sparq-lws-core in LWS mode (SOLID_SERVER_PROTOCOL=lws).
+#
+# - touchstone: the Touchstone suite (ebremer/touchstone) against a secured sparq: the harness holds
+#   the authorization server key, serves alice's and bob's identity documents and webhook inboxes,
+#   and alice owns the storage. A ratchet: the run fails when any module passes fewer tests than
+#   crates/sparq-lws-core/conformance/lws/floor.json records.
+# - lws-net: the LWS.net harness (langsamu/LWS.net) with the elf-pavlik/lws-test-suite YAML-LD
+#   definition, as lws-contrib/dagger-workspace runs it, against sparq in LWS open mode.
+#
+# Both harnesses are pinned to a commit; bump the pins deliberately and re-baseline floor.json.
+name: lws-conformance
+
+on:
+  pull_request:
+    paths:
+      - "crates/sparq-lws-core/**"
+      - ".github/workflows/lws-conformance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/sparq-lws-core/**"
+      - ".github/workflows/lws-conformance.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: lws-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TOUCHSTONE_REF: 971dc8def56200c3eb0f08348295ca545cf92a00
+  LWS_NET_REF: eca99a4a5beb949561a9989a183dd3216712bb79
+  LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
+
+jobs:
+  touchstone:
+    name: lws touchstone
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ebremer/touchstone
+          ref: ${{ env.TOUCHSTONE_REF }}
+          path: touchstone
+          persist-credentials: false
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: lws-conformance
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: build touchstone
+        working-directory: touchstone
+        run: ./mvnw -q -B -ntp -pl harness-cli -am -Dmaven.test.skip=true package
+      - name: build sparq-lws-core
+        run: cargo build -p sparq-lws-core
+      - name: run touchstone
+        env:
+          TOUCHSTONE: ${{ github.workspace }}/touchstone
+        run: crates/sparq-lws-core/conformance/lws/touchstone.sh all || true
+      - name: check the floor
+        run: python3 crates/sparq-lws-core/conformance/lws/check-floor.py target/lws-touchstone/runs
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: lws-touchstone-report
+          path: |
+            target/lws-touchstone/runs
+            target/lws-touchstone/server.log
+          retention-days: 14
+
+  lws-net:
+    name: lws lws-net
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: langsamu/LWS.net
+          ref: ${{ env.LWS_NET_REF }}
+          path: LWS.net
+          persist-credentials: false
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: elf-pavlik/lws-test-suite
+          ref: ${{ env.LWS_TESTS_REF }}
+          path: lws-test-suite
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: lws-conformance
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: build sparq-lws-core
+        run: cargo build -p sparq-lws-core
+      - name: run lws-net
+        env:
+          LWS_NET: ${{ github.workspace }}/LWS.net
+          LWS_TESTS: ${{ github.workspace }}/lws-test-suite/lws10/tests.yaml
+        run: crates/sparq-lws-core/conformance/lws/lws-net.sh

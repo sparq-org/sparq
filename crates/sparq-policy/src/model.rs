@@ -259,9 +259,8 @@ pub struct LogicalConstraint {
     /// The logical combinator over the operands.
     pub operator: LogicalOperator,
     /// The operand (sub-)constraints the combinator ranges over — each atomic or itself
-    /// compound ([`ConstraintNode`]). An **empty** operand set is treated fail-closed (an
-    /// `or`/`xone` with no operand can never be satisfied; an `and` with no operand is
-    /// vacuously *not asserted* — see eval).
+    /// compound ([`ConstraintNode`]). An **empty** operand set is refused by
+    /// [`Policy::validate`] (it asserts nothing decidable).
     pub operands: Vec<ConstraintNode>,
 }
 

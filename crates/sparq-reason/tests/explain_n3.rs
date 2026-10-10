@@ -10,7 +10,7 @@ use explain_common::{check_proof, proof_leaves};
 use rustc_hash::FxHashSet;
 use sparq_reason::n3::Term;
 use sparq_reason::{
-    explain::n3_proof_tree, reason_n3_proof, reason_n3_terms, ExplainOpts, MaterializedN3Graph,
+    explain::{n3_proof_tree, n3_proof_tree_for_key}, reason_n3_proof_run, reason_n3_terms, ExplainOpts, MaterializedN3Graph,
     N3Mode, ProofTree,
 };
 
@@ -182,7 +182,8 @@ fn id_level_bridge_from_reason_n3_proof() {
 { ?x :ancestor ?y . ?y :ancestor ?z } => { ?x :ancestor ?z } .
 "#;
     let mut dict = Dict::new();
-    let (facts, steps) = reason_n3_proof(&mut dict, src).expect("reasoning succeeds");
+    let run = reason_n3_proof_run(&mut dict, src).expect("reasoning succeeds");
+    let (facts, steps) = (&run.closure, &run.steps);
     let (a, anc, c) = (
         dict.lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/a"))),
         dict.lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/ancestor"))),
@@ -190,7 +191,8 @@ fn id_level_bridge_from_reason_n3_proof() {
     );
     let target = [a, anc, c];
     assert!(facts.contains(&target));
-    let tree = n3_proof_tree(&dict, &steps, target, ExplainOpts::default())
+    let tree = n3_proof_tree(&dict, &run, target, ExplainOpts::default())
+        .expect("one N3 fact interns to the target")
         .expect("derived triple bridges to a proof tree");
     let asserted: FxHashSet<[String; 3]> = facts
         .iter()
@@ -205,5 +207,150 @@ fn id_level_bridge_from_reason_n3_proof() {
     let b = dict.lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/b")));
     let par = dict
         .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/parent")));
-    assert!(n3_proof_tree(&dict, &steps, [a, par, b], ExplainOpts::default()).is_none());
+    assert!(n3_proof_tree(&dict, &run, [a, par, b], ExplainOpts::default()).expect("unambiguous").is_none());
+}
+
+/// GH #6701 review rounds 3–4: a proof never renders an `@forAll` universal by its bare
+/// local name — that wrote `{ :x :q ?x }` as `{ ?x :q ?x }`, a formula requiring the two to
+/// be equal. The display has no document line to declare it under, so it spells the
+/// universal as a plain variable that differs from every variable of the fact (`?x_2`);
+/// the KEY carries the universal itself. Declared at document level or in the formula, it
+/// is the same one variable (GH #6754), so both read the same.
+#[test]
+fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
+    // The variable predicate keeps the graph on the fallback path, whose `why` re-derives
+    // through the batch engine (the counting path does not currently derive through a
+    // formula that carries a variable — a separate issue).
+    for src in [
+        "@prefix : <http://ex/>. :a :p { @forAll :x. :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
+        "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
+    ] {
+        let formula = "{ ?x_2 <http://ex/q> ?x . }";
+        let closure = reason_n3_terms(src, None).expect("oracle").facts;
+        let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
+        let derived = closure.iter().find(|f| f[0] == ex("b")).expect("the derived fact");
+        let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+
+        let proof = g.why(asserted).expect("asserted fact explains");
+        assert_eq!(proof.conclusion()[2], formula, "{}", proof.to_text());
+        assert!(proof.nodes()[0].key[2].contains("__ua.http://ex/x"), "{:?}", proof.nodes()[0].key);
+
+        let proof = g.why(derived).expect("derived fact explains");
+        let nodes = proof.nodes();
+        assert_eq!(nodes.len(), 2, "{}", proof.to_text());
+        // The premise and the conclusion carry the same formula, named the same way.
+        for n in nodes {
+            assert_eq!(n.conclusion[2], formula, "{}", proof.to_text());
+        }
+        assert_eq!(nodes[1].premises, vec![0]);
+    }
+}
+
+/// GH #6701 review round 4 (3): a fact renders the SAME in every proof it appears in.
+/// `sparq-prov` hashes these strings into the fact's identity, so per-proof naming (`?x` in
+/// one proof, `?x_2` in another) split one fact into two entities.
+#[test]
+fn a_fact_renders_the_same_in_every_proof() {
+    let src = "@prefix : <http://ex/>. @forAll :x.
+:a :p { :x :q :z }.
+:b :p { ?x :q :z }.
+{ :a ?p ?f. :b :p ?g } => { :c :r ?f }.
+";
+    let closure = reason_n3_terms(src, None).expect("oracle").facts;
+    let a = closure.iter().find(|f| f[0] == ex("a")).expect(":a fact");
+    let c = closure.iter().find(|f| f[0] == ex("c")).expect(":c fact");
+    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    let alone = g.why(a).expect(":a explains").conclusion().clone();
+    let proof = g.why(c).expect(":c explains");
+    let inside = proof
+        .nodes()
+        .iter()
+        .find(|n| n.conclusion[0] == "<http://ex/a>")
+        .expect("the :a premise")
+        .conclusion
+        .clone();
+    assert_eq!(alone, inside, "{}", proof.to_text());
+}
+
+/// #6735 review: two structurally distinct derived facts — `:a :value ()` and
+/// `:a :value <rdf:nil>` (an IRI from `log:uri`) — intern to ONE id triple. The id-level
+/// bridge must not pick one: it reports the ambiguity, and the structural selector
+/// explains each fact with its own key and its own derivation.
+#[test]
+fn colliding_id_triples_are_ambiguous_not_first_match() {
+    let src = r#"@prefix : <http://ex/> . @prefix log: <http://www.w3.org/2000/10/swap/log#> .
+:go :go :go .
+{ :go :go :go } => { :a :value () } .
+{ ?i log:uri "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil" } => { :a :value ?i } .
+"#;
+    let mut dict = sparq_core::dict::Dict::new();
+    let run = reason_n3_proof_run(&mut dict, src).expect("reasoning succeeds");
+    let steps = &run.steps;
+    let ex = |l: &str| Term::Iri(format!("http://ex/{l}"));
+    let list = [ex("a"), ex("value"), Term::List(vec![])];
+    let nil = [ex("a"), ex("value"), Term::Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil".into())];
+    let (kl, kn) = (sparq_reason::n3::serialize::statement_keys(&list), sparq_reason::n3::serialize::statement_keys(&nil));
+    assert_ne!(kl, kn);
+    let target = steps.iter().find(|s| s.conclusion_key == kl).expect("the () step").conclusion;
+    assert_eq!(steps.iter().find(|s| s.conclusion_key == kn).expect("the rdf:nil step").conclusion, target, "both intern alike");
+    let err = n3_proof_tree(&dict, &run, target, ExplainOpts::default()).expect_err("ambiguous");
+    let mut want = vec![kl.clone(), kn.clone()];
+    want.sort();
+    assert_eq!(err.keys, want);
+    let tl = n3_proof_tree_for_key(&dict, steps, &kl, ExplainOpts::default()).expect("() explains");
+    let tn = n3_proof_tree_for_key(&dict, steps, &kn, ExplainOpts::default()).expect("rdf:nil explains");
+    assert_eq!(tl.nodes().last().unwrap().key, kl);
+    assert_eq!(tn.nodes().last().unwrap().key, kn);
+    assert_eq!(tl.nodes().last().unwrap().rule, "n3-rule-0");
+    assert_eq!(tn.nodes().last().unwrap().rule, "n3-rule-1");
+}
+
+/// #6735 review round 2: ambiguity is decided over the WHOLE closure, asserted facts
+/// included. Two structurally distinct facts that intern to one id triple — one ASSERTED,
+/// one DERIVED — are ambiguous for the id-level bridge whichever of them the caller means,
+/// whether the caller asks by the ids (ambiguous) or by either key (resolved, the derived
+/// one to its proof and the asserted one to none). The asserted side is `()`: the reverse
+/// pairing, an ASSERTED rdf:nil IRI, cannot be written in N3 text (the parser reads a
+/// written rdf:nil as `()`, and rejects a written directional tag such as `en--ltr`, the
+/// other lossy field), so a derived-vs-derived collision is covered by
+/// `colliding_id_triples_are_ambiguous_not_first_match` instead.
+#[test]
+fn an_asserted_fact_and_a_derived_one_that_intern_alike_are_ambiguous() {
+    const PRE: &str = "@prefix : <http://ex/> . @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
+    let nil_iri = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
+    let ex = |l: &str| Term::Iri(format!("http://ex/{l}"));
+    let key = |o: Term| sparq_reason::n3::serialize::statement_keys(&[ex("a"), ex("value"), o]);
+    let cases = [
+        (
+            format!("{PRE}:a :value () .\n{{ ?i log:uri \"{nil_iri}\" }} => {{ :a :value ?i }} .\n"),
+            key(Term::List(vec![])),
+            key(Term::Iri(nil_iri.into())),
+        ),
+        // The same with the asserted fact written AFTER the rule (document order is not
+        // what decides).
+        (
+            format!("{PRE}{{ ?i log:uri \"{nil_iri}\" }} => {{ :a :value ?i }} .\n:a :value () .\n"),
+            key(Term::List(vec![])),
+            key(Term::Iri(nil_iri.into())),
+        ),
+    ];
+    for (src, asserted, derived) in &cases {
+        let mut dict = sparq_core::dict::Dict::new();
+        let run = reason_n3_proof_run(&mut dict, src).expect("reasoning succeeds");
+        assert!(run.closure_keys.contains(asserted), "asserted fact keyed:\n{src}\n{:#?}", run.closure_keys);
+        assert!(run.closure_keys.contains(derived), "derived fact keyed:\n{src}\n{:#?}", run.closure_keys);
+        assert!(!run.steps.iter().any(|s| &s.conclusion_key == asserted), "asserted, not derived: {src}");
+        let step = run.steps.iter().find(|s| &s.conclusion_key == derived).expect("the derived fact has a step");
+        let at = run.closure_keys.iter().position(|k| k == asserted).unwrap();
+        assert_eq!(run.closure[at], step.conclusion, "they intern alike: {src}");
+        let err = n3_proof_tree(&dict, &run, step.conclusion, ExplainOpts::default()).expect_err("ambiguous");
+        let mut want = vec![asserted.clone(), derived.clone()];
+        want.sort();
+        assert_eq!(err.keys, want, "{src}");
+        // By key, each resolves to what it is: the derived one has a proof, the asserted none.
+        let t = n3_proof_tree_for_key(&dict, &run.steps, derived, ExplainOpts::default()).expect("derived explains");
+        assert_eq!(&t.nodes().last().unwrap().key, derived);
+        assert!(n3_proof_tree_for_key(&dict, &run.steps, asserted, ExplainOpts::default()).is_none(), "{src}");
+    }
 }

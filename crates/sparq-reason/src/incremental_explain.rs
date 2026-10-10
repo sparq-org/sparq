@@ -1106,13 +1106,6 @@ impl OwlProver<'_> {
 // N3 — MaterializedN3Graph
 // ════════════════════════════════════════════════════════════════════════════════════════
 
-/// Render an N3 term as its serialized form (the engine's own writer).
-fn n3_term_string(t: &N3Term) -> String {
-    let mut s = String::new();
-    crate::n3::serialize::write_term(t, &mut s);
-    s
-}
-
 impl MaterializedN3Graph {
     /// One derivation of `fact` from the current asserted base under the graph's rules, or
     /// `None` if `fact` is not in the closure (or cannot be matched to a derivation — e.g.
@@ -1135,15 +1128,22 @@ impl MaterializedN3Graph {
         }
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
-            let root = b.push(fact.clone().map(|t| n3_term_string(&t)), "asserted", vec![])?;
+            let root = b.push_keyed(
+                crate::n3::serialize::statement_display_lossy(fact),
+                crate::n3::serialize::statement_keys(fact),
+                "asserted",
+                vec![],
+            )?;
             return Some(b.finish(root));
         }
-        // Deterministic re-derivation: serialize the base SORTED so rule-firing order (and
-        // therefore the chosen witness) is stable across calls.
-        let mut lines: Vec<String> = self.base.iter().map(|f| n3_serialize(std::iter::once(f))).collect();
-        lines.sort_unstable();
-        let src = format!("{}\n{}", self.rules_src, lines.concat());
-        let (_facts, steps) = crate::n3::reason_n3_terms_proof(&src).ok()?;
+        // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
+        // therefore the chosen witness) is stable across calls — as terms, not re-parsed
+        // text (see `rematerialize`).
+        let mut keyed: Vec<([String; 3], &[N3Term; 3])> =
+            self.base.iter().map(|f| (crate::n3::serialize::statement_keys(f), f)).collect();
+        keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let (_facts, steps) =
+            crate::n3::reason_n3_terms_proof(&self.rules_src, keyed.into_iter().map(|(_, f)| f.clone()), &self.cuts).ok()?;
         // One step per derived fact (first derivation wins).
         let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
         for (conclusion, rule, premises) in &steps {
@@ -1183,9 +1183,13 @@ impl N3Prover<'_> {
     }
 
     fn prove_inner(&mut self, f: &[N3Term; 3], depth: usize) -> Option<u32> {
-        let rendered = f.clone().map(|t| n3_term_string(&t));
+        // Display strings for reading, and a lossless key per fact for identity: two
+        // different facts can render alike, and `sparq-prov` addresses facts by `key`
+        // (GH #6701 review round 6).
+        let rendered = crate::n3::serialize::statement_display_lossy(f);
+        let key = crate::n3::serialize::statement_keys(f);
         if self.base.contains(f) {
-            let ix = self.b.push(rendered, "asserted", vec![])?;
+            let ix = self.b.push_keyed(rendered, key, "asserted", vec![])?;
             self.memo.insert(f.clone(), ix);
             return Some(ix);
         }
@@ -1194,7 +1198,7 @@ impl N3Prover<'_> {
         for p in premises {
             prem_nodes.push(self.prove(p, depth + 1)?);
         }
-        let ix = self.b.push(rendered, &format!("n3-rule-{rule}"), prem_nodes)?;
+        let ix = self.b.push_keyed(rendered, key, &format!("n3-rule-{rule}"), prem_nodes)?;
         self.memo.insert(f.clone(), ix);
         Some(ix)
     }

@@ -41,7 +41,7 @@ Raw RDF temporal literals undergo no XML preprocessing; string casts are separat
 `Graph::open` ignores legacy `numerics.bin`/`temporals.bin` and both v2 caches,
 which could contain padded raw literals, and recomputes values from the dictionary.
 It does not rewrite old caches or drop ill-typed RDF terms. Current writers use
-`numerics-v3.bin` and `temporals-v3.bin` across ordinary, compressed and external
+`numerics-v3.bin` and `temporals-v4.bin` across ordinary, compressed and external
 builds; absent or wrong-sized current caches are rebuilt in memory. To persist a
 migrated archive, call `Graph::open(old)?.save(new)?` with a separate destination.
 Until saved, legacy opens repeat the dictionary scan and cache allocation.
@@ -132,8 +132,13 @@ pub fn load_reader<R: std::io::Read>(reader: R, format: &str) -> Result<Graph, S
 // is a separate, opt-in mechanism that covers N-Triples AND N-Quads.)
 pub fn load_reader_parallel<R: std::io::Read + Send>(reader: R, format: &str) -> Result<Graph, String>
 
-// sq-7d3dj.18 — the byte-level N-Triples/N-Quads fast path does NOT validate IRIs
-// against RFC-3987 by default (it trusts input; the serial oxttl path DOES validate). The
+// sq-7d3dj.18 — the byte-level N-Triples/N-Quads fast path does NOT validate IRIs against
+// RFC-3987 by default (the serial oxttl path DOES). It does enforce the N-Triples grammar
+// (#2716): IRIREF characters, UCHAR-only IRI escapes, an absolute scheme, BLANK_NODE_LABEL
+// (full PN_CHARS ranges; a label may abut the next term, `_:s<p>`), string ECHAR/UCHAR and
+// no raw line breaks, LANGTAG (direction ltr/rtl), IRI-only predicates and no literal
+// subjects, one statement per line (no line break inside a statement; only WS and a comment
+// after its `.`), and it accepts RDF 1.2 `VERSION "..."` directives. The
 // OPT-IN `iri-fast` feature on `sparq-core` (OFF by default) turns that validation on for the
 // byte parser via a prefix-memoized fast path IN FRONT of `oxiri` — a last-N validated
 // `scheme://authority/` memo + a one-pass ASCII `iunreserved`/sub-delims suffix scan, falling

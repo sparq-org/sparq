@@ -166,6 +166,12 @@ Update (data lives in the default + named graphs):
   delta-overlay: forks, applies, and commits back ONLY if every op succeeds (else `graph` is left at
   its pre-request state). Use this for SPARQL-1.1 all-or-nothing semantics from a direct library
   consumer without writing your own fork/seal recovery.
+- `update_in_place_algebra_with_budget(&mut Graph, &spargebra::Update, reads, authorize, &QueryBudget)`
+  — apply an already-parsed update without re-parsing text, so an authorizer applies exactly the
+  algebra it checked. `reads: Option<&Arc<FxHashSet<Term>>>` evaluates every WHERE under a read view
+  of those graphs (empty default graph). `authorize: Option<&mut WriteAuthorizer>` is called per
+  `DELETE`/`INSERT … WHERE` with the graphs its instantiated templates delete from and insert into,
+  before that operation is applied; an `Err` aborts, leaving earlier operations applied.
 - `update_in_place_capturing(&mut Graph, &str, &QueryBudget) -> Result<Vec<UpdateEffect>, String>`
   + `apply_effects(&mut Graph, &[UpdateEffect])` — apply once, capturing the RESOLVED delta, then
   replay it onto a second (e.g. durable mirror) graph WITHOUT re-executing the text. Use this when
@@ -878,7 +884,7 @@ SPARQL Update `USING` identity behavior.
   are byte-identical to the row `FILTER` operator over the *same batch*, order-exact — a Phase-1
   finding: cross-query byte-identity is unsound because a sargable filter re-plans the scan, so the
   invariant is operator-level not full-query), the seam-level differential in
-  `crates/sparq-engine/src/exec.rs` (`mod columnar_filter_seam`), plus the native FILTER/aggregate
+  `crates/sparq-engine/src/exec/columnar_filter_seam.rs`, plus the native FILTER/aggregate
   baseline bench `crates/sparq-engine/examples/bench_vectorized.rs` (`metric_us`, registered
   `vectorized-eval-micro`, `featured = false`) later phases measure their speedup against.
   **Phase 5 (`sq-pntvh.5`) adds the shared dispatcher seam** (`src/vec_dispatch.rs`): a single module

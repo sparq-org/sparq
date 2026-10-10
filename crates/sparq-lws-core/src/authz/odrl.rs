@@ -37,7 +37,11 @@
 //! the shipped default evaluates the SAME `sparq-policy` primitives that bridge builds on,
 //! in-process, with no HTTP round-trip.
 
-use sparq_policy::{conflict_admissibility, evaluate, parse_policy_str, Policy, Request, Value};
+use sparq_policy::{
+    conflict_admissibility, evaluate, parse_policy_str_with_memberships, Request, ValidatedPolicy,
+    Value,
+};
+use std::collections::BTreeMap;
 
 /// The ODRL action a read/query exercises (`odrl:read`) — the only action this gate evidences
 /// (the full query-action contract is sq-lrtc3.2, matching the server lane's scope).
@@ -72,9 +76,15 @@ pub trait OdrlGate: Send + Sync {
 /// in-process with `sparq_policy::evaluate` for `(party = requester WebID, action = odrl:read,
 /// target = the graph)` — the requester is also supplied as the `odrl:recipient` evidence (the
 /// read's results are delivered to the requester), matching the server lane's request shape.
+///
+/// A rule whose target is a collection also governs each member of it: the
+/// `member odrl:partOf collection` edges the policy document states, plus any added with
+/// [`PolicyOdrlGate::with_asset_membership`], are evaluated as that member's asset evidence.
 #[derive(Debug)]
 pub struct PolicyOdrlGate {
-    policy: Policy,
+    policy: ValidatedPolicy,
+    /// `member -> collections` among the policy's rule targets.
+    members: BTreeMap<String, Vec<String>>,
 }
 
 impl PolicyOdrlGate {
@@ -83,7 +93,7 @@ impl PolicyOdrlGate {
     /// or a rule without a concrete target graph IRI. The error is for the OPERATOR (router
     /// assembly / config load) — it is never surfaced to a requester.
     pub fn from_turtle(turtle: &str) -> Result<PolicyOdrlGate, String> {
-        let policy = parse_policy_str(turtle, "turtle")?;
+        let (policy, edges) = parse_policy_str_with_memberships(turtle, "turtle")?;
         conflict_admissibility(&policy)
             .map_err(|e| format!("inadmissible odrl:conflict strategy: {:?}", e))?;
         for rule in policy.permissions.iter().chain(policy.prohibitions.iter()) {
@@ -95,7 +105,26 @@ impl PolicyOdrlGate {
                 ));
             }
         }
-        Ok(PolicyOdrlGate { policy })
+        let mut gate = PolicyOdrlGate { policy, members: BTreeMap::new() };
+        for (member, collection) in edges {
+            gate = gate.with_asset_membership(member, collection);
+        }
+        Ok(gate)
+    }
+
+    /// Record that `member` is part of `collection` (`member odrl:partOf collection`), so a
+    /// rule targeting `collection` also governs reads of `member`. For membership the pod
+    /// states outside the policy document. An edge into a collection no rule targets is
+    /// ignored.
+    pub fn with_asset_membership(mut self, member: impl Into<String>, collection: impl Into<String>) -> Self {
+        let collection = collection.into();
+        if self.targets(&collection) {
+            let of = self.members.entry(member.into()).or_default();
+            if !of.contains(&collection) {
+                of.push(collection);
+            }
+        }
+        self
     }
 
     /// Does any rule of the policy target `graph`? Concrete-IRI equality only — the same
@@ -111,7 +140,8 @@ impl PolicyOdrlGate {
 
 impl OdrlGate for PolicyOdrlGate {
     fn decide_read(&self, target_graph: &str, web_id: Option<&str>) -> OdrlVerdict {
-        if !self.targets(target_graph) {
+        let collections = self.members.get(target_graph);
+        if !self.targets(target_graph) && collections.is_none() {
             return OdrlVerdict::NotApplicable;
         }
         // A targeted graph + no principal: principal-scoped grants/denies cannot be evaluated
@@ -126,6 +156,9 @@ impl OdrlGate for PolicyOdrlGate {
             .with(
                 sparq_policy::ODRL_RECIPIENT,
                 Value::Iri(agent.to_owned()),
+            )
+            .with_asset_memberships(
+                collections.into_iter().flatten().map(|c| (target_graph, c.as_str())),
             );
         if evaluate(&self.policy, &request).allow {
             OdrlVerdict::Permit
@@ -212,6 +245,31 @@ mod tests {
     fn anonymous_on_targeted_graph_is_denied() {
         let gate = permit_alice_prohibit_bob();
         assert_eq!(gate.decide_read(DOC, None), OdrlVerdict::Deny);
+    }
+
+    #[test]
+    fn collection_rules_govern_their_members() {
+        let coll = "https://pod.example/alice/c/";
+        let member = "https://pod.example/alice/c/member";
+        let other = "https://pod.example/alice/c/other";
+        let gate = PolicyOdrlGate::from_turtle(&format!(
+            r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol> a odrl:Set ;
+  odrl:permission [ odrl:action odrl:read ; odrl:target <{coll}> ; odrl:assignee <{ALICE}> ] ;
+  odrl:prohibition [ odrl:action odrl:read ; odrl:target <{coll}> ; odrl:assignee <{BOB}> ] .
+<{DOC}> odrl:partOf <{coll}> .
+"#
+        ))
+        .expect("admissible policy");
+        assert_eq!(gate.decide_read(DOC, Some(ALICE)), OdrlVerdict::Permit);
+        assert_eq!(gate.decide_read(DOC, Some(BOB)), OdrlVerdict::Deny);
+        assert_eq!(gate.decide_read(DOC, None), OdrlVerdict::Deny);
+        assert_eq!(gate.decide_read(member, Some(BOB)), OdrlVerdict::NotApplicable);
+        let gate = gate
+            .with_asset_membership(member, coll)
+            .with_asset_membership(other, "https://pod.example/untargeted/");
+        assert_eq!(gate.decide_read(member, Some(BOB)), OdrlVerdict::Deny);
+        assert_eq!(gate.decide_read(other, Some(BOB)), OdrlVerdict::NotApplicable);
     }
 
     #[test]

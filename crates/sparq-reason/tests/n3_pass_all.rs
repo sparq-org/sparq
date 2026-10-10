@@ -7,8 +7,16 @@
 //! (whose output can derive nothing further) and it is what the eye-js `…_plus_rules`
 //! output modes buy.
 
-use sparq_reason::n3::Term;
-use sparq_reason::{reason_n3_pass_all, reason_n3_terms, RuleVars};
+use sparq_reason::n3::{parser, Term};
+use sparq_reason::{reason_n3_pass_all, reason_n3_query_terms, reason_n3_terms, RuleVars};
+
+type Stmts = Vec<[Term; 3]>;
+
+/// Each parsed rule as `(premise, conclusion)` — what "the same rule" means term-for-term.
+fn rule_terms(doc: &str) -> Vec<(Stmts, Stmts)> {
+    let p = parser::parse(doc).expect("re-parses");
+    p.rules.into_iter().map(|r| (r.premise, r.conclusion)).collect()
+}
 
 const S: &str = "http://example.org/socrates#";
 const TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
@@ -165,6 +173,153 @@ fn a_source_variable_spelled_like_the_rewrite_stays_a_variable() {
     // tries to write it does not parse, and no legal `?…` can ever decode to a blank node.
     let forged = "@prefix : <http://ex/>.\n{ ?__bn.0.x a :Human } => { :a a :Mortal }.\n";
     assert!(reason_n3_pass_all(forged, RuleVars::N3).is_err(), "{forged}");
+}
+
+/// GH #5391: the parser rewrites an `@forAll :x` universal to an engine-internal rule
+/// variable. That name must never reach the output. `--pass-all` writes the universal back
+/// as its own IRI under ONE `@forAll` declaration that scopes both sides — a document-level
+/// line before the rules that share a universal across premise and conclusion (GH #6701
+/// round 10: a declaration per side would be two quantifiers) — so the document re-parses
+/// to the SAME rule; `--pass-all-ground` grounds it to its `var:x` IRI.
+#[test]
+fn a_for_all_universal_is_echoed_under_its_declared_iri() {
+    let src = "@prefix : <http://ex/>. @forAll :x.
+{ :x a :Human } => { :x a :Mortal }. :a a :Human.
+";
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!doc.contains("__ua"), "no engine-internal variable name: {doc}");
+    let rule = format!(
+        "\n@forAll <http://ex/x> .\n{{ <http://ex/x> <{TYPE}> <http://ex/Human> . }} => \
+         {{ <http://ex/x> <{TYPE}> <http://ex/Mortal> . }} .\n"
+    );
+    assert_eq!(doc.matches("@forAll").count(), 1, "{doc}");
+    assert!(doc.ends_with(&rule), "the shared-universal rule is the trailer: {doc}");
+    assert!(doc.contains(&rule), "{doc}");
+    assert_eq!(rule_terms(&doc), rule_terms(src), "{doc}");
+    assert!(doc.contains(&format!("<http://ex/a> <{TYPE}> <http://ex/Mortal> .")), "{doc}");
+    assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
+
+    let ground = reason_n3_pass_all(src, RuleVars::VarIris).expect("pass-all-ground");
+    assert!(!ground.contains("__ua"), "{ground}");
+    assert!(ground.contains("<http://www.w3.org/2000/10/swap/var#x>"), "{ground}");
+}
+
+/// GH #5391: a universal must not be captured by a source variable of the same name, nor
+/// merge with another universal sharing its local name across namespaces — either would
+/// change which positions must bind equal terms. The echoed rule re-parses to the very
+/// same rule terms.
+#[test]
+fn a_for_all_universal_never_collides_with_another_variable() {
+    let src = r#"@prefix : <http://ex/>. @prefix o: <http://other/>.
+@forAll :x, o:x.
+{ :x :p ?x . o:x :q :x } => { :x :r ?x , o:x }.
+:a :p :b . :c :q :a .
+"#;
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!doc.contains("__ua"), "{doc}");
+    assert_eq!(rule_terms(&doc), rule_terms(src), "{doc}");
+    assert!(doc.contains("<http://ex/a> <http://ex/r> <http://ex/b> ."), "{doc}");
+    assert!(doc.contains("<http://ex/a> <http://ex/r> <http://ex/c> ."), "{doc}");
+    assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
+    // Grounded: three distinct `var:` names.
+    let ground = reason_n3_pass_all(src, RuleVars::VarIris).expect("pass-all-ground");
+    let rule = ground.lines().find(|l| l.contains("=>")).expect("the rule line");
+    let mut names: Vec<&str> = rule.split_whitespace().filter(|w| w.contains("swap/var#")).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 3, "{rule}");
+}
+
+/// GH #5391 review: a universal inside a formula-valued FACT must not merge with a source
+/// variable of the same name either — `{ :x :q ?x }` holds two distinct variables — and
+/// the fact must re-parse to the same term.
+#[test]
+fn a_for_all_universal_in_a_formula_fact_never_collides() {
+    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n";
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!doc.contains("__ua"), "{doc}");
+    // Declared once, at document level (GH #6701).
+    assert!(doc.contains("@forAll <http://ex/x> .\n<http://ex/a> <http://ex/p> { <http://ex/x> <http://ex/q> ?x . }"), "{doc}");
+    assert_eq!(parser::parse(&doc).expect("re-parses").facts, parser::parse(src).unwrap().facts);
+    assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
+}
+
+/// GH #6701 review round 2: facts and echoed rules must write one universal the SAME way —
+/// here both declare it by its IRI. Were the fact and the rule to spell it differently,
+/// the two formulae the rule compares would stop being equal and re-reasoning would derive
+/// `:bad :is true`.
+#[test]
+fn a_for_all_universal_gets_one_name_across_facts_and_rules() {
+    let src = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
+@forAll :x.
+:a :p { :x :q :z }.
+:b :p { ?x :q :z }.
+{ :a :p ?f. ?f log:notEqualTo { :x :q :z } } => { :bad :is true }.
+";
+    // The echoed rule mentions `:bad` too — only a closure LINE starting with it is a
+    // derivation.
+    let derives_bad = |doc: &str| doc.lines().any(|l| l.starts_with("<http://ex/bad> "));
+    let first = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!derives_bad(&first), "the source does not derive :bad: {first}");
+    assert!(!first.contains("__ua"), "{first}");
+    let again = reason_n3_pass_all(&first, RuleVars::N3).expect("round two");
+    assert!(!derives_bad(&again), "re-reasoning the output changed its meaning: {again}");
+    assert_eq!(first, again);
+}
+
+/// GH #6701 review round 4 (1): a formula re-created from TEXT by `log:parsedAsN3` holds
+/// the parser's own `__ua.<iri>` universal. The pass-all output must hold that same term,
+/// or re-reasoning flips `log:notEqualTo` and derives `:bad`.
+#[test]
+fn a_universal_compares_equal_to_one_parsed_from_a_literal_after_a_round_trip() {
+    let src = r#"@prefix : <http://ex/>.
+@prefix log: <http://www.w3.org/2000/10/swap/log#>.
+@forAll :x.
+:a :p { :x :q :z }.
+{
+  :a :p ?f.
+  "@prefix : <http://ex/>. @forAll :x. :x :q :z." log:parsedAsN3 ?g.
+  ?f log:notEqualTo ?g
+} => { :bad :is true }.
+"#;
+    let derives_bad = |doc: &str| doc.lines().any(|l| l.starts_with("<http://ex/bad> "));
+    let first = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!derives_bad(&first), "the source does not derive :bad: {first}");
+    let again = reason_n3_pass_all(&first, RuleVars::N3).expect("round two");
+    assert!(!derives_bad(&again), "re-reasoning the output changed its meaning: {again}");
+    assert_eq!(first, again);
+}
+
+/// GH #6701 review round 13 (HIGH): a backward-chaining query answer carries a FRESHENED
+/// universal (`__bw<n>___ua.<iri>`). N3 text can only spell it as `<iri>`, which reads
+/// back as the universal itself — and `log:equalTo` tells the two apart, so writing it
+/// would change what a re-reasoned document derives. Every exact writer refuses it.
+#[test]
+fn a_freshened_backward_rule_universal_is_refused() {
+    let data = "@prefix : <http://ex/>. @forAll :x.\n{ :a :p { :x :q :z } } <= true.\n";
+    let query = "@prefix : <http://ex/>.\n{ :a :p ?f } => { :result :is ?f }.\n";
+    let answers = reason_n3_query_terms(data, query).expect("query");
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    match sparq_reason::n3::serialize::serialize_facts(answers.iter()) {
+        Err(sparq_reason::n3::serialize::NotRepresentable::Unspellable(e)) => assert!(e.contains("backward-chaining copy"), "{e}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// Codex's equality example (round 13): `log:equalTo` compares exact terms, and the
+/// backward answer is NOT equal to `{ :x :q :z }` parsed under `@forAll :x` — while its
+/// only N3 spelling reads back as exactly that formula. So writing it would flip the
+/// comparison for any document that re-reads it; the writers refuse instead.
+#[test]
+fn a_freshened_universal_keeps_its_formula_inequality() {
+    let data = "@prefix : <http://ex/>. @forAll :x.\n{ :a :p { :x :q :z } } <= true.\n";
+    let query = "@prefix : <http://ex/>.\n{ :a :p ?f } => { :result :is ?f }.\n";
+    let answer = reason_n3_query_terms(data, query).expect("query").remove(0);
+    let parsed = parser::parse("@prefix : <http://ex/>. @forAll :x. :result :is { :x :q :z }.").unwrap().facts.remove(0);
+    assert_ne!(answer, parsed, "the copy is a different term to log:equalTo");
+    // What the only spelling would read back as: the universal, i.e. `parsed` — refused.
+    let mut out = String::new();
+    assert!(sparq_reason::n3::serialize::write_statement(&answer, &mut out).is_err() && out.is_empty());
 }
 
 #[test]

@@ -5,9 +5,10 @@
 //
 //   Lane A — policy MATERIALIZATION cost sweep: kind × count over the bridge entry
 //     points (bare permission / permission+prohibition / conditional recipient
-//     re-check / counted `odrl:count`). Each materialization is asserted `granted`
-//     (a non-granting call would mean the lane times nothing) and a post-sweep
-//     access probe asserts the grants are real and scoped (stranger denied).
+//     re-check / counted `odrl:count`). The bare permission must grant; every other
+//     kind must be refused (the bridge stores only grants nothing can withdraw), so the
+//     lane times the refusal. A post-sweep access probe asserts grants are real and
+//     scoped, refusals give no access, and the stranger is denied.
 //
 //   Lane B — STEADY-STATE per-query overhead: `PodStore::query_as` over an
 //     ODRL-materialized <urn:sparq:auth> vs the SAME query unguarded
@@ -15,7 +16,7 @@
 //     subset is physically the whole store. Result-set EQUALITY is asserted per query
 //     BEFORE timing (identical result sets ⇒ honest apples-to-apples), and a
 //     no-grants stranger must see 0 rows through the gated path (anti-vacuity).
-//     Two gate regimes: one-shot grants vs conditional (per-session-recheck) grants.
+//     One gate regime: one-shot grants (conditional grants are no longer stored).
 //     Resource universes come from the sparq-acbench U1–U4 use-case intent tables at
 //     ≥2 scale factors.
 //
@@ -45,7 +46,7 @@ use std::sync::Arc;
 use sparq_acbench::{consortium, financial, personal, project_mgmt, GenParams, IntentRow};
 use sparq_core::Graph;
 use sparq_engine::QueryResult;
-use sparq_policy::{parse_policy_str, InMemoryCounterStore, Policy, Request};
+use sparq_policy::{parse_policy_str, InMemoryCounterStore, Request, ValidatedPolicy};
 use sparq_solid::{BridgeKind, Mode, PodStore, Session};
 
 // ── Constants ─────────────────────────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ fn load_graph(nquads: &str) -> Result<Graph, String> {
 // ── ODRL policy builders (parsed OUTSIDE any timed section — parse cost is the
 //    `policy-odrl-eval` suite's axis, not this one's) ─────────────────────────────────
 
-fn parse(ttl: &str) -> Result<Policy, String> {
+fn parse(ttl: &str) -> Result<ValidatedPolicy, String> {
     parse_policy_str(ttl, "turtle").map_err(|e| format!("policy parse: {e}"))
 }
 
@@ -274,6 +275,13 @@ impl PolicyKind {
             PolicyKind::Counted => "counted",
         }
     }
+    /// Whether the bridge stores a grant for this kind. Only an unconstrained grant to
+    /// the named party in a policy with no prohibitions can be stored: a constraint
+    /// (recipient, count) or a prohibition can change while a stored grant stands, so
+    /// those kinds are refused and the lane times the refusal instead.
+    fn stores_grant(self) -> bool {
+        matches!(self, PolicyKind::Permission)
+    }
 }
 
 /// Materialize `n` pre-parsed policies of one kind into a fresh store, timing ONLY the
@@ -315,15 +323,15 @@ fn lane_a_config(kind: PolicyKind, n: usize) -> Result<String, String> {
                     store.materialize_odrl_permission_counted(p, q, &counter)
                 }
             };
-            all &= out.granted;
+            all &= out.granted == kind.stores_grant();
         }
         all
     });
     if !granted_all {
         return Err(format!(
-            "lane A {}/{n}: a materialization did NOT grant — the sweep would time \
-             nothing (fail-closed)",
-            kind.label()
+            "lane A {}/{n}: a materialization did not {} (fail-closed)",
+            kind.label(),
+            if kind.stores_grant() { "grant" } else { "refuse" }
         ));
     }
 
@@ -339,9 +347,16 @@ fn lane_a_config(kind: PolicyKind, n: usize) -> Result<String, String> {
             .map(|r| r.rows.len())
             .map_err(|e| format!("lane A probe query: {e}"))
     };
-    if probe(&a0, &resources[0])? == 0 {
+    let seen = probe(&a0, &resources[0])?;
+    if kind.stores_grant() && seen == 0 {
         return Err(format!(
             "lane A {}/{n}: granted agent sees 0 rows — vacuous grant (fail-closed)",
+            kind.label()
+        ));
+    }
+    if !kind.stores_grant() && seen != 0 {
+        return Err(format!(
+            "lane A {}/{n}: a refused policy still gives agent_0 {seen} rows (over-share)",
             kind.label()
         ));
     }
@@ -383,17 +398,15 @@ fn lane_a(counts: &[usize], records: &mut Vec<String>) -> Result<(), String> {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GateRegime {
-    /// One-shot bridged grants (`materialize_odrl_permission`).
+    /// One-shot bridged grants (`materialize_odrl_permission`). Conditional grants are
+    /// no longer stored by the bridge, so there is no per-session-recheck regime.
     OneShot,
-    /// Conditional grants re-checked per session (`materialize_odrl_permission_conditional`).
-    Conditional,
 }
 
 impl GateRegime {
     fn label(self) -> &'static str {
         match self {
             GateRegime::OneShot => "oneshot",
-            GateRegime::Conditional => "conditional",
         }
     }
 }
@@ -463,14 +476,6 @@ fn lane_b_usecase(
                 let ttl = permission_ttl(i, BENCH_AGENT, r);
                 let out =
                     store.materialize_odrl_permission(&parse(&ttl)?, &read_request(r, BENCH_AGENT));
-                (ttl, out.granted)
-            }
-            GateRegime::Conditional => {
-                let ttl = conditional_ttl(i, BENCH_AGENT, r);
-                let out = store.materialize_odrl_permission_conditional(
-                    &parse(&ttl)?,
-                    &read_request(r, BENCH_AGENT),
-                );
                 (ttl, out.granted)
             }
         };
@@ -733,7 +738,7 @@ fn main() -> ExitCode {
                 skipped.push(format!("{{\"usecase\":\"{uc}\",\"sf\":{sfi},\"reason\":\"{}\"}}", json_escape(&reason)));
                 continue;
             };
-            for regime in [GateRegime::OneShot, GateRegime::Conditional] {
+            for regime in [GateRegime::OneShot] {
                 if let Err(e) = lane_b_usecase(
                     uc,
                     &intents,
@@ -812,9 +817,9 @@ fn fail(msg: &str) -> ! {
 mod tests {
     use super::*;
 
-    /// Every policy-kind TTL parses AND materializes a real, scoped grant.
-    /// Non-vacuous: corrupting any builder (action, assignee, constraint operand)
-    /// flips `granted` or the access probes.
+    /// Every policy-kind TTL parses; the storable kind materializes a real, scoped grant
+    /// and every other kind is refused with no access. Non-vacuous: corrupting any
+    /// builder (action, assignee, constraint operand) flips `granted` or the probes.
     #[test]
     fn all_policy_kinds_grant_and_scope() {
         for kind in PolicyKind::ALL {
@@ -844,7 +849,7 @@ mod tests {
                     store.materialize_odrl_permission_counted(&pol, &req, &counter)
                 }
             };
-            assert!(out.granted, "{} must grant", kind.label());
+            assert_eq!(out.granted, kind.stores_grant(), "{}: {:?}", kind.label(), out.reasons);
 
             let q0 = format!(
                 "SELECT ?s ?p ?o WHERE {{ GRAPH <{}> {{ ?s ?p ?o }} }}",
@@ -854,9 +859,10 @@ mod tests {
                 "SELECT ?s ?p ?o WHERE {{ GRAPH <{}> {{ ?s ?p ?o }} }}",
                 resources[1]
             );
-            assert!(
+            assert_eq!(
                 !store.query_as(&session(&a0), Mode::Read, &q0).expect("q0").rows.is_empty(),
-                "{}: granted agent must see rows",
+                kind.stores_grant(),
+                "{}: only a stored grant gives the agent rows",
                 kind.label()
             );
             assert!(

@@ -571,6 +571,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
 
 [[package]]
+name = "base16ct"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1447,7 +1453,7 @@ version = "0.13.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
 dependencies = [
- "base16ct",
+ "base16ct 0.2.0",
  "base64ct",
  "crypto-bigint",
  "digest 0.10.7",
@@ -4121,7 +4127,7 @@ version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6783be73f4fa73010f249412ad8f0bb1ac9cdb22b2310bf20a967d80d5906dd0"
 dependencies = [
- "base16ct",
+ "base16ct 0.2.0",
  "digest 0.10.7",
  "itertools 0.14.0",
  "oxrdf 0.2.4",
@@ -4479,7 +4485,7 @@ version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc"
 dependencies = [
- "base16ct",
+ "base16ct 0.2.0",
  "der",
  "generic-array",
  "pkcs8",
@@ -4604,7 +4610,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177"
 dependencies = [
- "base16ct",
+ "base16ct 0.2.0",
  "serde",
 ]
 
@@ -4904,9 +4910,9 @@ dependencies = [
 name = "sparq-canon"
 version = "0.1.4"
 dependencies = [
- "base16ct",
+ "base16ct 1.0.0",
  "digest 0.10.7",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "oxrdf 0.2.4",
  "oxrdf 0.3.3",
  "oxttl 0.1.8",
@@ -5259,6 +5265,7 @@ dependencies = [
  "axum",
  "axum-server",
  "base64 0.22.1",
+ "bs58",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -5269,12 +5276,14 @@ dependencies = [
  "h3-quinn",
  "http",
  "http-body-util",
+ "httpdate",
  "hyper",
  "hyper-util",
  "itoa",
  "js-sys",
  "mimalloc",
  "object_store",
+ "oxiri",
  "oxjsonld",
  "oxrdf 0.3.3",
  "oxttl 0.2.3",
@@ -6152,9 +6161,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
 dependencies = [
  "bytes",
  "libc",

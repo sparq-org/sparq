@@ -135,8 +135,8 @@ fn mark_fails_closed_when_redis_errors() {
     // connect-time handshake (a pipelined `CLIENT SETINFO` ×2, then our own `PING`); each must get one
     // reply so the stream stays in sync. The rule: a command whose bytes contain the jti key prefix
     // (`dpop:jti:`) — i.e. the `mark` `SET` — gets a Redis ERROR reply (`-ERR`), which the client
-    // surfaces as `Err` → `mark` fails closed. Every other command (SETINFO, PING) gets a benign `+OK`,
-    // which the handshake + our `PING` (queried as `()`) accept. Replies are emitted ONE PER COMMAND
+    // surfaces as `Err` → `mark` fails closed. A `PING` gets `+PONG` (the pool's connection check
+    // requires it); every other command (SETINFO) gets a benign `+OK`. Replies are emitted ONE PER COMMAND
     // (counted by the RESP array `*` headers), so a pipelined batch doesn't desync the stream.
     let server = std::thread::spawn(move || {
         for incoming in listener.incoming() {
@@ -148,19 +148,30 @@ fn mark_fails_closed_when_redis_errors() {
                         Ok(0) | Err(_) => break, // peer closed / error
                         Ok(n) => {
                             let bytes = &buf[..n];
-                            // Count commands in this read = number of RESP array headers (`*` at the
-                            // start of a line). Reply once per command so a pipelined handshake batch
-                            // gets the right number of replies (no stream desync).
-                            let cmd_count = bytes.iter().filter(|&&b| b == b'*').count().max(1);
-                            // If this read carries the jti SET, that one must ERROR (fail-closed). The
-                            // handshake/PING reads never contain the jti prefix.
-                            let has_set =
-                                bytes.windows(b"dpop:jti:".len()).any(|w| w == b"dpop:jti:");
+                            // One reply per command (each starts at a RESP array `*` header), so a
+                            // pipelined handshake batch gets the right number of replies (no stream
+                            // desync). The jti `SET` gets an ERROR (fail-closed); a `PING` gets
+                            // `+PONG`, which the pool's connection check requires; the rest get `+OK`.
+                            let mut starts: Vec<usize> = bytes
+                                .iter()
+                                .enumerate()
+                                .filter(|&(_, &b)| b == b'*')
+                                .map(|(i, _)| i)
+                                .collect();
+                            if starts.first() != Some(&0) {
+                                starts.insert(0, 0);
+                            }
                             let mut ok = true;
-                            for i in 0..cmd_count {
-                                // Error the command carrying the jti SET; benign +OK for the rest.
-                                let reply: &[u8] = if has_set && i + 1 == cmd_count {
+                            for (k, &start) in starts.iter().enumerate() {
+                                let end = starts.get(k + 1).copied().unwrap_or(bytes.len());
+                                let cmd = &bytes[start..end];
+                                let reply: &[u8] = if cmd
+                                    .windows(b"dpop:jti:".len())
+                                    .any(|w| w == b"dpop:jti:")
+                                {
                                     b"-ERR simulated redis outage\r\n"
+                                } else if cmd.windows(4).any(|w| w.eq_ignore_ascii_case(b"PING")) {
+                                    b"+PONG\r\n"
                                 } else {
                                     b"+OK\r\n"
                                 };

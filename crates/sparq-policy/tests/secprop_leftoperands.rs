@@ -94,7 +94,7 @@ fn secprop_constraint_evaluates_fail_closed_unchanged() {
         prohibitions: vec![],
         conflict: None,
         ..Policy::default()
-    };
+    }.validate().unwrap();
 
     // Request supplies NO evidence for the secx: dimension → fail-closed DENY.
     let req_no_evidence = Request::new(format!("{ODRL_NS}read")).on(asset).by(party);

@@ -22,7 +22,8 @@ use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
-use sparq_reason::n3::compiled::{compile, eval, CompiledRuleSet};
+use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval, CompiledRuleSet};
+use sparq_reason::NegationCycles;
 use std::sync::OnceLock;
 // `std::time::Instant` is unusable on `wasm32-unknown-unknown` — `Instant::now()`
 // panics there (no monotonic clock). The wall-clock plumbing for `stats.millis` is
@@ -58,7 +59,11 @@ fn acp_rules() -> Result<&'static [CompiledRuleSet; 3], String> {
             Ok([
                 compile(&format!("{COMMON_RULES}\n{ACP_A}"))?,
                 compile(ACP_B)?,
-                compile(ACP_C)?,
+                // acp-c.n3 concludes a variable predicate (`{ ?p ?pred ?r }`) next to
+                // store-scoped negation, so it cannot be stratified yet: keep single-pass
+                // semantics by explicit opt-in. Follow-up: rewrite it with one concrete
+                // conclusion per mode and drop the opt-in.
+                compile_with_cycles(ACP_C, NegationCycles::SinglePass)?,
             ])
         })
         .as_ref()
@@ -348,7 +353,7 @@ fn install_auth_view(graph: &mut Graph, dict: &Dict, closure: &[[sparq_core::dic
 mod tests {
     use super::*;
     use crate::loader::assemble_input;
-    use sparq_reason::{reason_n3, reason_n3_stratified};
+    use sparq_reason::{reason_n3, reason_n3_stratified_with_cycles};
     use std::collections::BTreeSet;
 
     /// The WAC auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
@@ -371,7 +376,12 @@ mod tests {
         let input = assemble_input(graph, System::Acp, provenance, credentials)?;
         let accepts = format!("{}\n{}\n{}", input, COMMON_RULES, ACP_A);
         let mut dict = Dict::new();
-        let closure = reason_n3_stratified(&mut dict, &[&accepts, ACP_B, ACP_C])?;
+        // acp-c.n3 keeps single-pass semantics by explicit opt-in, as in `acp_rules`.
+        let closure = reason_n3_stratified_with_cycles(
+            &mut dict,
+            &[&accepts, ACP_B, ACP_C],
+            NegationCycles::SinglePass,
+        )?;
         Ok(install_auth_view(graph, &dict, &closure.facts))
     }
 

@@ -89,6 +89,11 @@ pub mod error;
 /// apply), served GET/HEAD-only by a Host-keyed route with no authorization.
 pub mod identity;
 pub mod ldp;
+/// The W3C Linked Web Storage protocol (LWS 1.0): storage description, LWS containers and
+/// linksets, and the LWS authorization server and access tokens. Selected at boot with
+/// `SOLID_SERVER_PROTOCOL=lws`.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod lws;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod nodelay;
 #[cfg(not(target_arch = "wasm32"))]

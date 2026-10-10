@@ -186,7 +186,9 @@ strip = "symbols"
 # Cold, run-once RDF/SPARQL parse crates only (spargebra = SPARQL query parser, oxiri = IRI
 # parser, oxttl = Turtle/N-Triples parser). They are reached once at load/parse time, never on
 # the hot query-eval loop, so size-optimising them costs no measurable runtime perf.
-[profile.release-wasm.package.spargebra]
+# Keyed by PACKAGE name: the vendored parser is published as `sparq-spargebra` (#6663), and
+# a stale `spargebra` key matches nothing, silently dropping this override.
+[profile.release-wasm.package.sparq-spargebra]
 opt-level = "z"
 [profile.release-wasm.package.oxiri]
 opt-level = "z"

@@ -86,19 +86,80 @@ pub fn inconsistencies(dict: &Dict, triples: &[[Id;3]]) -> Vec<String>;
 // Notation3 / EYE-style forward rules (`{ premise } => { conclusion }` + builtins).
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_proof(dict: &mut Dict, src: &str)
-    -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue
+    -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue; each step also carries conclusion_key / premise_keys (N3 statement_keys, taken before list expansion + interning)
+pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, String>; // { closure, closure_keys (every fact, asserted too), steps } — for explain::n3_proof_tree
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String>; // term-level, no Dict
+// N3Closure { facts, derived, n_rules, n_backward_rules, warnings: Vec<String> } — `warnings`
+// carries the stratification diagnostic of an opted-in negation cycle (see below).
+// Every N3 entry point STRATIFIES store-scoped negation automatically (GH #6201): a rule whose
+// log:notIncludes / log:collectAllIn / log:forAllIn negates a predicate the same document
+// derives runs after that predicate's fixpoint. Per-PREDICATE analysis (per CLASS for
+// `rdf:type` with a constant class; a variable class overlaps every class), fail-closed by
+// construction: a `{ … }` literal scope reads its own atoms; anything not pinned to one IRI
+// predicate (variable premise/conclusion predicate, clause given by a variable, nested
+// log:conclusion / log:supports closure) counts as EVERY predicate; list builtins depend on
+// rdf:first/rdf:rest. Every negation/aggregation evaluation also passes ONE gate that refuses
+// a store some search cut short (backward depth limit, containment budget, list-walk cap,
+// a regex the engine cannot compile, import-cycle-unclosed nested closure, a log:semantics /
+// log:parsedAsN3 document past the parser's nesting limit, a log:semantics / log:content IRI
+// with no resolver or one that returns nothing, a date field that overflows, exact math:
+// arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
+// shared across nested closures, explicit strata and a query's data closure): the run errors
+// unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
+// time: builtins return exact integers (time:inSeconds both ways; a fraction or a
+// value past i64 it would drop is a cut), and string:format's %f renders exact numbers
+// from their digits. Every builtin and virtual relation declares
+// what it reads from the store (`StoreRead`, exhaustive per registry entry); rules whose
+// premise reads outside its joins (scopes, list walks over a stored list, virtual
+// rdf:first/rest over a variable subject, a variable predicate, backward rules) re-run in
+// full each round, and a stratum that a later negation/aggregation (or a caller: query,
+// next explicit stratum) reads closes with a full naive round. A cycle through
+// negation (e.g. `a ?c` concluded beside a negated `a :Flagged`, or a variable-predicate
+// conclusion beside store-scoped negation) is an ERROR by
+// default at every entry point, nested closures included; only the rules on/after the cycle
+// are affected by an opt-in:
+pub fn reason_n3_terms_with_cycles(src, base, resolver, cycles: NegationCycles)
+    -> Result<N3Closure, String>;
+pub fn reason_n3_with_cycles(dict: &mut Dict, src: &str, cycles: NegationCycles)
+    -> Result<Vec<[Id;3]>, String>;
+pub enum NegationCycles { Reject /* default */, FailClosed /* skip them + warning */,
+                          SinglePass /* legacy, may fail open + warning */ }
 pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>; // n3:: only
+// Every forward closure has an ITERATION allowance (see Gotchas). These two take the
+// caller's; every other N3 entry point uses ClosureLimits::default().
+pub struct ClosureLimits { pub max_rounds: usize /* 1_000_000 */, pub max_facts: usize /* 50_000_000 */ }
+pub fn reason_n3_terms_with_limits(src, base, resolver, cycles: NegationCycles, limits: ClosureLimits)
+    -> Result<N3Closure, String>;
+pub fn reason_n3_with_limits(dict: &mut Dict, src: &str, cycles: NegationCycles, limits: ClosureLimits)
+    -> Result<Vec<[Id;3]>, String>;
 // EYE --pass-all / --pass-all-ground: the closure PLUS the document's own rules, echoed
 // back as ONE N3 document (the chainer consumes rules, so --pass output alone can derive
 // nothing further). Closure statements are sorted (deterministic), then rules in document
 // order — full <…> IRIs, no @prefix reconstruction, so NOT byte-identical to EYE's writer.
+// Each @forAll universal (one variable per IRI, ?__ua.<iri>) is declared ONCE, on a document
+// @forAll line before the first fact/rule using it; units are ordered so every plain mention of
+// the IRI comes first. Err (besides a parse error) when the document could not re-reason exactly
+// as the input: a unit mixing a plain mention and the universal (or a cycle of such units), a
+// backward-chaining copy of a universal (__bw<n>___ua.<iri>: its only spelling reads back as
+// the universal, which log:equalTo tells apart), or any term the parser would normalize (the
+// WHOLE document is re-parsed and compared, universals by exact name). No fallback spelling.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String>;
+// n3::serialize — EXACT writers (output parses back to the same terms, or Err; never lossy):
+pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable>;      // + write_statement(&[Term;3], out)
+pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) -> Result<(), NotRepresentable>;
+pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> Result<String, NotRepresentable>; // whole text verified at once
+// write_rule / write_term refuse any @forAll universal (only a document can declare it).
+pub enum NotRepresentable { UnrepresentableScope(String), MergesVariables(String), Unspellable(String), Reparse(String) } // Display + Error
+pub fn display_lossy(t: &Term) -> String;                 // DISPLAY only (diagnostics); never re-parse it
+pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3]; // proof-node strings; display only
+pub fn statement_keys(f: &[Term; 3]) -> [String; 3];      // structural identity key per term (injective)
 // EYE --query: every INSTANTIATED conclusion of the query document's forward rules over the
 // deductive closure of `data` — a PROJECTION, so a conclusion already in the closure is still
 // an answer (unlike --pass-only-new). The premise uses the chainer's own matcher, so builtins,
 // quoted `{ … }` formulae and `( … )` lists all work. The query document's FACTS are not loaded
 // as data; its `<=` rules ARE available to the premise. No forward rule => error, not "".
+// Stratification covers the evaluated set (data rules + both documents' `<=` rules + query
+// premises): a negation cycle a query-supplied `<=` rule closes is an error.
 pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term;3]>, String>; // term-level
 pub enum RuleVars { N3, VarIris }  // `?x` (re-parses as the same rule, so re-running is a
@@ -107,8 +168,15 @@ pub enum RuleVars { N3, VarIris }  // `?x` (re-parses as the same rule, so re-ru
     // form is for RDF consumers, not re-reasoning)
 pub fn reason_n3_stratified(dict: &mut Dict, strata: &[&str])   // stratum-by-stratum closure; carries
     -> Result<StratifiedN3Closure, String>;  // each closure in memory (no re-serialize); the sound
-    // driver for the non-monotonic ops (store-scoped log:notIncludes, log:collectAllIn/forAllIn);
-    // per-stratum blank scope. Fields: facts (final interned closure), strata_facts (sizes).
+    // driver for pipelines shipped as separate documents; each stratum is still checked on
+    // its own, so a stratum that negates through its own conclusions needs
+    // reason_n3_stratified_with_cycles(.., SinglePass) and caller-guaranteed completeness;
+    // per-stratum blank scope. Fields: facts (final interned closure), strata_facts (sizes),
+    // warnings (each stratum's cycle diagnostic).
+pub fn reason_n3_stratified_with_cycles(dict, strata, cycles: NegationCycles)
+    -> Result<StratifiedN3Closure, String>;  // same, with the per-stratum cycle opt-in;
+    // under FailClosed a stratum that skipped rules carries an INCOMPLETE closure, so any
+    // negation/aggregation in a later stratum refuses it and the run errors.
 
 // Incremental closure maintenance (closure stays == from-scratch materialize on the current base).
 pub struct MaterializedGraph;     // RDFS;     mutations are dictionary-free
@@ -141,7 +209,15 @@ pub enum N3Mode { Counting, Fallback }
 pub fn why(&self, dict: &Dict, t: [Id;3]) -> Option<ProofTree>;          // RDFS / OWL graphs
 pub fn why(&self, fact: &[Term;3])        -> Option<ProofTree>;          // N3 graph
 pub struct ProofTree;  // .nodes() -> &[ProofNode], .root(), .conclusion(), .to_json(), .to_text()
-pub struct ProofNode { pub conclusion: [String;3], pub rule: String, pub premises: Vec<u32> }
+pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule: String, pub premises: Vec<u32> }  // conclusion = display; key = lossless fact identity (N3: two facts can render alike; the same key from why() and n3_proof_tree) — address facts by key
+// explain::n3_proof_tree(dict, &run /* N3ProofRun */, target_ids, opts) -> Result<Option<ProofTree>, AmbiguousN3Target>
+//   — Err when several structurally distinct closure facts (asserted OR derived) intern to target_ids
+//   (e.g. () and an rdf:nil IRI); explain::n3_proof_tree_for_key(dict, &run.steps, &key, opts) roots by key.
+// statement_keys is injective w.r.t. Term's own Eq: formula rows keep their order and duplicates (as the
+// engine compares them); blank labels and __bw copies are not normalized. So a key is only as
+// reproducible as the engine's terms: skolem labels (__sk<n>_e) are allocated in hash-set traversal
+// order, so a fact carrying one (or a log:conclusion formula built from such rules) can key
+// differently across runs/platforms, exactly like its why() strings (pre-existing; GH #6749).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
@@ -156,11 +232,14 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String>;   // parse + lower
 pub fn eval(dict: &mut Dict, facts: &[[Id;3]], rules: &CompiledRuleSet) -> Vec<[Id;3]>;
 pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>; // test/harness fact loader
 impl CompiledRuleSet { pub fn bind(&self, dict: &mut Dict) -> BoundRuleSet<'_>; // intern the symbol table
-                       pub fn n_rules(&self) -> usize; pub fn n_facts(&self) -> usize; }
+                       pub fn n_rules(&self) -> usize; pub fn n_facts(&self) -> usize;
+                       pub fn n_strata(&self) -> usize; } // automatic stratification, as reason_n3;
+                       // compile() errors on a negation cycle
+pub fn compile_with_cycles(src: &str, cycles: NegationCycles) -> Result<CompiledRuleSet, String>;
 impl BoundRuleSet<'_> { pub fn eval(&self, dict: &mut Dict, facts: &[[Id;3]]) -> Vec<[Id;3]>; }
 ```
 
-Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (scoped `log:notIncludes` over stratum-complete predicates, `log:uri`, `log:(not)equalTo`, `string:` concatenation / encodeForUri / scrape / notGreaterThan) **plus RDF 1.2 triple terms in premises** (`sq-6d43t`); anything else is a loud `compile` error — full N3 stays with `reason_n3`. Closure set-equality vs `reason_n3` is pinned by `crates/sparq-reason/tests/compiled_equivalence.rs`.
+Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (store-scoped `log:notIncludes`, stratified automatically like `reason_n3`, whose subject must be an IRI, a non-`true` literal, or a variable used only as a `log:notIncludes` subject — `{}` (the empty formula) or a bindable subject is a `compile` error, `log:uri`, `log:(not)equalTo`, `string:` concatenation / encodeForUri / scrape (a regex that cannot compile is a `compile` error) / notGreaterThan) **plus RDF 1.2 triple terms in premises** (`sq-6d43t`); anything else is a loud `compile` error — full N3 stays with `reason_n3`. Closure set-equality vs `reason_n3` is pinned by `crates/sparq-reason/tests/compiled_equivalence.rs`.
 
 **Compiled-rules triple terms (`sq-6d43t`).** A GROUND `<< s p o >>` is an ordinary symbol-table constant anywhere (fact, pattern position, builtin argument, conclusion): `bind` interns it through the Dict's content-addressed RDF 1.2 triple-term path, so it resolves to the SAME id a store-loaded `<<( s p o )>>` carries. A quotation that still contains VARIABLES is admitted in PREMISE positions and compiles to a component-indexed unpack step — the enclosing join binds the candidate's triple-term id, then the unpack reads its three component ids straight out of the dictionary record (no term reconstruction, no allocation) and binds first occurrences / filters already-bound variables and constants, left to right, nesting through the OBJECT. Three shapes are deliberately loud `compile` errors instead: a quotation with variables inside a `log:notIncludes` body (the anti-join runs a flat list of plain patterns), a quotation with variables in a CONCLUSION (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which `eval` has no channel to report), and a nested quotation in SUBJECT position (no dictionary triple term can have a triple-term subject, so such a pattern could only ever fire zero times). Each falls back to `reason_n3`, which handles all three.
 
@@ -657,11 +736,11 @@ use sparq_reason::MaterializedGraph;
 let g = MaterializedGraph::new(&mut dict, &base);
 if let Some(tree) = g.why(&dict, [alice, ty, agent]) {
     println!("{}", tree.to_text());   // indented, root first; rule ids like cax-sco / rdfs9 / prp-trp
-    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"rule":..,"premises":[..]}]}
+    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"key":[ks,kp,ko],"rule":..,"premises":[..]}]} — "key" = lossless identity (whyN3 wire field too)
 }
 ```
 
-**6. `log:semantics` / `log:content` document access.** The engine does NO I/O of its own; supply a `Resolver` closure to decide what an IRI may dereference to (otherwise those builtins simply don't fire):
+**6. `log:semantics` / `log:content` document access.** The engine does NO I/O of its own; supply a `Resolver` closure to decide what an IRI may dereference to (without one, an evaluation of those builtins counts as a cut, so a later negation or aggregation is refused):
 
 ```rust
 use sparq_reason::n3::reason_n3_terms_with_resolver;
@@ -702,9 +781,12 @@ the profile.
 - **OWL 2 RL is sound but INCOMPLETE for class classification.** Running `Profile::OwlRl` / `--reason owl` over an EL ontology returns a `rdfs:subClassOf` hierarchy that silently omits derivable subsumptions: the RL/RDF rule set's completeness theorem is scoped to *assertional* conclusions, and class classification is a TBox-conclusion task. Two mechanisms, stated precisely — (a) RL has **no TBox conjunction-composition rule**: `B ⊑ C`, `B ⊑ E` ⊬ `B ⊑ C ⊓ E` (`scm-int` only decomposes; `cls-int1` composes only over *individuals*), so `C ⊓ E ⊑ D ⊬ B ⊑ D`; (b) RL never **introduces or reasons through a fresh existential successor**, and `ObjectSomeValuesFrom` in *superclass* position is outside the RL grammar entirely. Caveat worth knowing so you calibrate correctly: sparq implements `scm-svf1/2`, so an existential bridge whose *both* restriction nodes already appear syntactically (`A ⊑ ∃r.B`, `B ⊑ C`, `∃r.C ⊑ D`) **is** in fact derived by this repo's RL — the gap is real but narrower than "RL misses every existential subsumption". Mechanism (a) is the one pinned by an in-repo differential (`crates/sparq-cli/tests/el_cli.rs::el_derives_what_rl_cannot`). For the **complete** class hierarchy use `sparq-reason-el` (above) — via the library, or the CLI's `classify` / `--reason el` under the opt-in `el` feature — not more RL rules.
 - **The RL materializer is COMPLETE for the assertion-style RL/RDF rules — the W3C OWL-RL conformance row is at the RL ceiling (sq-350ms).** Every rule with a positive-assertion head in Profiles §4.3 Tables 5/6/9 is implemented (the `owl.rs` per-rule status table + `research/inference-completeness-audit.md` §2/§2b are the per-rule proof). The 13 documented OWL-RL conformance divergences are PROVABLY outside the RL profile, **not** missing rules: TBox-axiom conclusions, invented class expressions (`owl:complementOf`/`unionOf`), reified `owl:AllDifferent` structures, the `prp-pdw`/`prp-fp`/`prp-ifp` **contrapositives** (RL has NO rule producing `owl:differentFrom` between INDIVIDUALS — `dt-diff` emits it only between unequal-value literals, otherwise it appears only in clash bodies), `owl:ReflexiveObjectProperty` (EXCLUDED from the RL grammar — there is no `prp-rfx`), and datatype-range INTERSECTION. They stay documented divergences (closing them would be unsound or beyond-profile); the inference ratchet HOLDS — see `inference-conformance-report.md` and the central scoreboard (`scoreboard::SUITES`, CI job `inference-conformance`) for the current pinned count. Multi-round assertion-rule completeness and the prp-pdw/prp-fp soundness boundary are pinned by in-crate guards in `owl.rs::tests`; the per-divergence disposition pass (sq-pbz04.1.3) re-audited all 13 from the raw export premises/conclusions (verdict: 13/13 PERMANENT, zero in-profile fixes), tagged every report-facing rationale `PERMANENT — …` with its rule-level grounding, and pinned tag+grounding with an in-crate disposition test in `owl_suite.rs`.
 - **OWL incremental fallback is silent.** `MaterializedOwlGraph` drops to `OwlMode::Fallback` (re-materializes via `materialize_owl_rl` every mutation, still correct) when the base uses `owl:sameAs`, Functional/InverseFunctional, property chains, restrictions, cardinality, hasKey, oneOf, intersection/union — and on any TBox mutation. Check `.mode()` / `.full_rebuilds()` if incremental cost matters. These usually live in a static TBox, so the mode is decided once at load.
-- **N3 incremental qualification is narrow.** `MaterializedN3Graph` only runs `N3Mode::Counting` (truly incremental) for a monotone, input-stratified rule fragment: forward rules with ground-IRI predicates, no conclusion blank nodes, builtins limited to the parity whitelist (`log:uri`, `log:equalTo`/`notEqualTo`, `string:concatenation`/`scrape`/`encodeForUri`), and negation only via the store-scoped `?x log:notIncludes { … }` idiom over input-only predicates. Anything else → `N3Mode::Fallback`; always consult `.fallback_reason()` (`None` ⇔ counting active). The full *batch* N3 engine (`reason_n3`) supports the much larger `math:`/`string:`/`list:`/`time:`/`log:` builtin set and goal-directed `<=` rules.
+- **N3 incremental qualification is narrow.** `MaterializedN3Graph` only runs `N3Mode::Counting` (truly incremental) for a monotone, input-stratified rule fragment: forward rules with ground-IRI predicates, no conclusion blank nodes, builtins limited to the parity whitelist (`log:uri`, `log:equalTo`/`notEqualTo`, `string:concatenation`/`scrape`/`encodeForUri`), and negation only via the store-scoped `?x log:notIncludes { … }` idiom over input-only predicates. Anything else → `N3Mode::Fallback`; always consult `.fallback_reason()` (`None` ⇔ counting active). `MaterializedN3Graph::new` refuses a rules document that negates through a dependency cycle; if a later rematerialization is refused (e.g. a nested closure over a cyclic formula), the closure fails closed to the base facts and `.stratification_warning()` says why. The full *batch* N3 engine (`reason_n3`) supports the much larger `math:`/`string:`/`list:`/`time:`/`log:` builtin set and goal-directed `<=` rules.
+- **N3 `math:` comparisons follow XPath numeric type promotion by DATATYPE (GH #6745).** `math:greaterThan` / `lessThan` / `notGreaterThan` / `notLessThan` / `equalTo` / `notEqualTo`, and the check a functional `math:` builtin runs against an already-bound object (`(1 2) math:sum 3`), promote both operands as XPath `op:numeric-*` does: an integer (any derived integer type) or `xsd:decimal` pair compares EXACTLY on its digits via the substrate's `cmp_plain_decimal` (arbitrary precision — `9007199254740993 math:equalTo 9007199254740992` does NOT fire, nor do values past `i128`); with an `xsd:float` and no `xsd:double` both sides are promoted to `xsd:float` (`0.1 math:equalTo "0.1"^^xsd:float` fires); with an `xsd:double` both are promoted to `xsd:double`. `NaN` is unordered, so every comparison but `notEqualTo` is false. A bare N3 numeral takes its datatype from its lexical form (`1` integer, `1.0` decimal, `1e0` double); a literal of a non-numeric datatype (a string) is still coerced by lexical shape, as EYE does; an ill-typed operand (`"1.5"^^xsd:integer`, `"-1"^^xsd:positiveInteger`) never matches. A typed numeric literal gets XSD `whiteSpace=collapse` (`" 3"^^xsd:integer` is 3; `"3 4"^^xsd:integer` stays ill-typed); a string operand is trimmed in the bound-object check (`(1 2) math:sum " 3"` fires) but not in the six comparisons. The one non-XSD form read is `"inf"` / `"-inf"` / `"NaN"`^^xsd:decimal — how a non-finite f64 fallback result is rendered (`(0.5 -1024) math:exponentiation ?x`) — which reads as ±INF / NaN, so such a result still matches a bound `"INF"^^xsd:double` and later comparisons on `?x`. Arithmetic RESULT datatypes and lexical forms are unchanged (EYE-compat rules below).
 - **N3 `math:` exact arithmetic is on the SHARED substrate tower (`sq-pbz04.5.1`, seam 2).** The chainer's exact add / subtract / multiply / negate / abs core (and the scale-aligned comparison the max/min and value-equality paths use) DELEGATES to `sparq-substrate::numeric::Dec` — a base, non-optional `numeric`-slice dependency, the SAME exact fixed-point `mant * 10^-scale` decimal the SPARQL engine's FILTER/BIND path drives — so the reasoner and the engine can never diverge on exact-decimal arithmetic (`0.1 + 0.2` is exactly `0.3`; `('2.7' '2') math:difference` is exactly `0.7`). The private `NumVal` enum stays a thin EYE-compat ADAPTER over that core: EYE's own edges are byte-identical and stay adapter-resident — lexical-shape string coercion, the `numval_term` result rendering (whole-`f64` → `xsd:integer`), `math:remainder`'s divisor-sign integer semantics, `math:integerQuotient`'s floor, `math:quotient`'s scale-34 exactness rule (non-terminating → `f64`, exact integer/integer → `xsd:integer`, NOT substrate `Dec::checked_div`'s always-decimal scale-18 rounding), integer `math:exponentiation`, and the `Int`-collapse rendering of floor/ceiling. The i128↔i64 wrinkle: the chainer `Int` tier is `i128` while substrate `Num::Int` is `i64`, so an out-of-`i64`-range integer is carried as substrate `Dec { mant, scale: 0 }` (exact for the full `i128` range; a mantissa overflow falls back to `f64` exactly as before). N3/EYE differential + expressivity floors and `RIF_CORE_FLOOR` are all byte-identical (the closure is unchanged; a direct old-`NumVal`-vs-substrate differential over the `>i64::MAX` / `0.1+0.2` / INF-NaN / `2.7-2` matrix pins it).
-- **`reason_n3_pass_all` echoes rules, with two caveats.** `RuleVars::N3` output re-parses to the same rules, so re-running it is a FIXPOINT — *unless* a rule mints an existential (a blank node in its CONCLUSION), which gets a fresh `_:__sk…` label per firing, so such a document grows on every re-run (the same caveat EYE carries). `RuleVars::VarIris` (the `--pass-all-ground` form) replaces `?x` with `<http://www.w3.org/2000/10/swap/var#x>` throughout the echoed RULES — at every depth, quoted `{ … }` formulae included, since N3 quantifies `?x` in the outermost formula — but the rule is then made of CONSTANTS, so feeding that document back to the reasoner does **not** re-derive anything. It grounds rules, not data: a document that ASSERTS a formula-valued fact carrying a variable (`:a :p { ?x :q :b }.`) still echoes that `?x` in the closure half, so "no `?` anywhere" holds for rule documents, not for every input. Parity is by construction (closure + rules), not byte-verified against EYE's own writer: sparq emits full `<…>` IRIs with no `@prefix` reconstruction and sorts the closure statements.
+- **An N3 forward closure that never reaches a fixpoint is refused (GH #6757).** Each forward closure (one document's fixpoint over all its strata, and each nested `log:conclusion` closure on its own) may run `ClosureLimits::max_rounds` rounds (default 1,000,000) and hold `ClosureLimits::max_facts` facts, asserted and derived (default 50,000,000). Past either limit the call returns `Err("n3: forward closure limit exceeded …")` and records a cut, so no entry point returns the truncated closure, and `MaterializedN3Graph` fails closed as it does for any refused rematerialization. A semi-naive closure needs about one round per step of its longest derivation chain, so a linear walk over N edges needs about N + 2 rounds. Raise the limits with `reason_n3_with_limits` / `reason_n3_terms_with_limits` for longer finite walks, or lower them to fail faster. This is an **iteration bound, not a memory bound**: rules whose terms grow (a string that doubles each round) can exhaust memory within a few dozen rounds and facts. That case is tracked in [GH #6771](https://github.com/sparq-org/sparq/issues/6771).
+- **A formula-level `@forAll` is treated as document-scoped (known limitation, GH #6754).** Every `@forAll` of one IRI — at document level or inside any formula — is the SAME variable, `?__ua.<iri>`. Which mentions become that variable is still lexical (the declaring scope and its inner formulae, after the declaration), but separate declarations in a rule's premise and conclusion, sibling formulae, or nested shadowing all share it, unlike N3's per-scope semantics. Two different IRIs with one local name (`@forAll a:x, b:x`) are two variables. The `.` in the name keeps it outside the quickvar lexical space, so no `?…` can collide with it.
+- **`reason_n3_pass_all` echoes rules, with two caveats.** `RuleVars::N3` output re-parses to the same rules, so re-running it is a FIXPOINT — *unless* a rule mints an existential (a blank node in its CONCLUSION), which gets a fresh `_:__sk…` label per firing, so such a document grows on every re-run (the same caveat EYE carries). `RuleVars::VarIris` (the `--pass-all-ground` form) replaces `?x` with `<http://www.w3.org/2000/10/swap/var#x>` throughout the echoed RULES — at every depth, quoted `{ … }` formulae included, since N3 quantifies `?x` in the outermost formula — but the rule is then made of CONSTANTS, so feeding that document back to the reasoner does **not** re-derive anything. It grounds rules, not data: a document that ASSERTS a formula-valued fact carrying a variable (`:a :p { ?x :q :b }.`) still echoes that `?x` in the closure half, so "no `?` anywhere" holds for rule documents, not for every input. Parity is by construction (closure + rules), not byte-verified against EYE's own writer: sparq emits full `<…>` IRIs with no `@prefix` reconstruction and sorts the closure statements. It is exact or it fails: each `@forAll` universal is declared once, on a document `@forAll` line before the first fact or rule using it (units ordered so plain mentions of the IRI come first), and the whole output is re-parsed and compared, universals by exact name; when a closure fact or rule has no lossless N3 form (a unit mixing a plain mention and the universal, a cycle of such units, a backward-chaining copy of a universal) the call returns `Err` instead of writing a document that would re-reason differently.
 - **`why()` is a witness, not a proof set.** It returns the first derivation in deterministic order, or `None` if the triple isn't in the closure or `ExplainOpts` caps (default depth 128, 65 536 nodes) are exceeded — not an enumeration of all derivations.
 - **Deletion semantics:** `delete` removes *base* (asserted) triples; a deleted base triple still derivable from the remainder stays in the closure, and deleting a derived-only fact is a no-op (standard materialized-view semantics).
 
