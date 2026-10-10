@@ -5,7 +5,8 @@
 #   noir_var  - one variable-length BLAKE3 per value, written in Noir
 #   hand      - the same variable-length BLAKE3 as hand-written ACIR,
 #               appended to the compiled `spliced` program
-# Each value is checked for equality with itself (op 4).
+# Each value is compared with value <= 2^64 - 1 (op 1), which every u64
+# satisfies, so the public inputs do not reveal the values.
 # Usage: run.sh VALUE...   (exactly N = leaf::N values)
 set -euo pipefail
 cd "$(dirname "$0")/circuits"
@@ -20,7 +21,7 @@ for v in "$@"; do
   h=$(python3 ../blake3_leaf.py hs "$v")
   echo "hs = \"$h\"" > encode/Prover.toml
   operands+=("\"$("$NARGO" execute --package encode 2>&1 | sed -n 's/.*Circuit output: //p')\"")
-  hs+=("\"$h\"") ops+=(4) bounds+=("\"$v\"") values+=("\"$v\"")
+  hs+=("\"$h\"") ops+=(1) bounds+=("\"18446744073709551615\"") values+=("\"$v\"")
 done
 common="operands = [$(join "${operands[@]}")]
 ops = [$(join "${ops[@]}")]

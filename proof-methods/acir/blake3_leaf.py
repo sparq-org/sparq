@@ -142,6 +142,7 @@ class Builder:
         self.next = first_free
         self.ops = []
         self.stats = Counter()
+        self.sums = []  # addition results, each bounded by an XOR or RANGE
 
     def val(self, e):
         return (sum(c * self.w[k] for k, c in e.terms.items()) + e.const) % P
@@ -195,18 +196,21 @@ class Builder:
     def xor(self, a, b):
         if a.is_const() and b.is_const():
             return C(a.const ^ b.const)
-        if a.is_const() and a.const == 0:
-            return b
-        if b.is_const() and b.const == 0:
-            return a
+        if a.is_const() and a.const == 0 or b.is_const() and b.const == 0:
+            # x ^ 0 = x, but the XOR black box would also have bounded x to
+            # 32 bits; an addition result reaching here relies on that bound.
+            x = b if a.is_const() and a.const == 0 else a
+            self.range(x, 32)
+            return x
         out = self.new(self.val(a) ^ self.val(b))
         self.ops.append({"BlackBoxFuncCall": {"XOR": [self.input(a), self.input(b), 32, out]}})
         self.stats["xor"] += 1
         return W(out)
 
     def add32(self, *terms):
-        """(sum of terms) mod 2^32. Every result feeds an XOR or a byte
-        decomposition, either of which constrains it to 32 bits."""
+        """(sum of terms) mod 2^32. The result is not range-checked here:
+        every result feeds an XOR or a 32-bit RANGE, which bounds it, and the
+        carry is then unique."""
         s = terms[0]
         for t in terms[1:]:
             s = s + t
@@ -214,6 +218,7 @@ class Builder:
             return C(s.const & M32)
         v = self.val(s)
         out = self.new(v & M32)
+        self.sums.append(out)
         carry = self.new(v >> 32)
         self.assert_zero(s - W(out) - W(carry) * (1 << 32))
         self.range(W(carry), 2 if len(terms) > 2 else 1)

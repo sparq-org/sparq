@@ -40,6 +40,23 @@ class Opening(unittest.TestCase):
             with self.assertRaises(ValueError):
                 build(v, m.hs_of(v + 1))
 
+    def test_every_addition_result_is_bounded(self):
+        # An unbounded sum admits a second carry and a wrong hash.
+        b = build(0, m.hs_of(0))
+        bounded = set()
+        for op in b.ops:
+            call = op.get("BlackBoxFuncCall", {})
+            for name in ("XOR", "RANGE"):
+                if name not in call:
+                    continue
+                args = call[name]
+                if name == "RANGE" and args[1] != 32:
+                    continue
+                for arg in args[:2] if name == "XOR" else args[:1]:
+                    if "Witness" in arg:
+                        bounded.add(arg["Witness"])
+        self.assertEqual([w for w in b.sums if w not in bounded], [])
+
     def test_circuit_does_not_depend_on_the_value(self):
         # The same opcodes for every digit count: the circuit reveals no length.
         first = build(VALUES[0], m.hs_of(VALUES[0])).ops

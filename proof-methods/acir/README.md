@@ -44,7 +44,9 @@ BB=bb python3 proof-methods/acir/tamper.py 30
 python3 -m unittest proof-methods/acir/test_blake3_leaf.py
 ```
 
-`run.sh` proves and verifies all three circuits for the given values.
+`run.sh` proves and verifies all three circuits for the given values, with
+bounds that do not reveal them. It does not pin tool versions or thread
+counts; compare timings only from one machine and one toolchain.
 `tamper.py` changes one witness of the hand-written circuit at a time and
 checks that the proof fails. Measurements are kept outside the repository.
 
