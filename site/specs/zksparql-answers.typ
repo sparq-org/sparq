@@ -252,9 +252,9 @@ identity. What the verifier learns is listed in section 10.2.
   the same label denote the same blank node. A result label has no relationship to any blank
   node label in a credential, even if the strings are equal.
 - In an Exact SELECT result, `results.bindings` keeps duplicate solutions. Its order is the
-  order section 6.1 defines: the query's ORDER BY, with ties ordered by the proof method's
-  canonical encoding of each solution, or that encoding alone if there is no ORDER BY, in which
-  case the order carries no meaning.
+  order section 6.1 defines: the proof method's total order for the query's ORDER BY, or the
+  canonical encoding of each solution if there is no ORDER BY, in which case the order carries
+  no meaning.
 - In a Supported SELECT result, `results.bindings` has no duplicate solutions.
 
 The proof is over the proof method's canonical encoding of the result, not over the JSON text.
@@ -282,12 +282,21 @@ ASK, `result` is `true` if and only if $[| Q |]_D$ is not empty; for CONSTRUCT, 
 graph SPARQL 1.1 defines for $Q$ over $D$. If the result would exceed `limits.maxResultRows` or a
 bound of the proof method, the holder service MUST NOT return a truncated result.
 
-SPARQL 1.1 leaves the order of solutions open wherever ORDER BY does not fix it, so OFFSET and
-LIMIT alone do not determine which solutions are kept. For an Exact answer this document fixes
-the choice: before each OFFSET and LIMIT in the query, including in a subquery, the solutions
-are put in the order of the ORDER BY at that level, and solutions that ORDER BY leaves equal,
-or all solutions where there is no ORDER BY, are ordered by the proof method's canonical
-encoding of each solution. The result is then unique.
+SPARQL 1.1 leaves some choices open: the order of solutions wherever ORDER BY does not fix it
+(solutions it leaves equal, values it does not compare, such as two language-tagged strings,
+and queries without ORDER BY), the value SAMPLE picks, and the order in which GROUP_CONCAT
+joins its values. For an Exact answer each of these choices MUST be made by rules the proof
+method publishes (section 9):
+
+- a total order on solutions for each ORDER BY, including in a subquery, that agrees with
+  SPARQL 1.1 wherever SPARQL 1.1 orders two solutions, covers unbound values, errors and
+  values SPARQL 1.1 does not compare, and ends with the canonical encoding of each solution;
+- the canonical encoding order for solutions where there is no ORDER BY;
+- for SAMPLE and GROUP_CONCAT, which value is picked and the order of the values joined. A
+  proof method that does not publish these rules does not support SAMPLE or GROUP_CONCAT for
+  Exact answers.
+
+OFFSET and LIMIT then apply to that order, and the result is unique.
 
 An Exact answer never satisfies a request for a Supported answer, and the reverse; the kinds
 MUST be equal.
@@ -499,6 +508,7 @@ Each proof method MUST publish:
 - the form of the `verificationKey` member, including byte order where the key or image ID is
   a sequence of words;
 - the form of its `parameters` member and its defaults;
+- for Exact answers, its rules for the choices SPARQL 1.1 leaves open (section 6.1);
 - the canonical encoding of the statement and how the evidence binds it (section 7); for an
   attestation, the statement digest MUST be in the signed report;
 - the encoding of the `proof` member and any size or capacity bounds.
@@ -648,9 +658,8 @@ What differs or is missing:
   strings need a fixed conversion.
 + The RISC Zero methods' `imageId` is eight 32-bit words; the code encodes it as the words in
   order, each little-endian. A wire profile has to fix that encoding.
-+ It has not been checked that the RISC Zero methods order solutions by their canonical
-  encoding before OFFSET and LIMIT, as section 6.1 requires for Exact answers, or that they
-  reject REDUCED.
++ The RISC Zero methods have not published the rules of section 6.1 (total order, SAMPLE,
+  GROUP_CONCAT), and it has not been checked that they reject REDUCED.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
   (a verifier-agreed SELECT); its other five combinations have run only in tests without
   proving.
