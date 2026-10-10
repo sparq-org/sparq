@@ -37,8 +37,9 @@ implied by this entry; verify the tagged run and every registry and release arti
 - **sparq-reason:** `@forAll` universals are named by their full IRI, so `@forAll a:x, b:x`
   are two variables and `reason_n3_pass_all` no longer prints internal `__ua_` names. Exact
   writers refuse a document that would not re-read the same way. (#6701)
-- **sparq-reason:** a forward N3 closure that never reaches a fixpoint stops with an error at a
-  configurable `ClosureLimits` bound instead of exhausting memory. (#6769)
+- **sparq-reason:** a forward N3 closure that never reaches a fixpoint stops with an error once
+  it exceeds the configurable `ClosureLimits` round or fact count. The limits count rounds and
+  facts, not bytes, so rules that grow a term each round can still use unbounded memory. (#6769)
 - **sparq-reason:** `math:` comparisons promote numeric types as XPath does. (#6772)
 - **sparq-reason:** the RDFS closure reaches its fixpoint when schema properties have schemas
   of their own, including with `why()` and incremental updates. (#6736)
