@@ -1,0 +1,90 @@
+{
+  "@context": {
+    "@protected": true,
+    "id": "@id",
+    "type": "@type",
+    "vcq": "https://w3id.org/sparq/vcq#",
+    "cred": "https://www.w3.org/2018/credentials#",
+    "sec": "https://w3id.org/security#",
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "QueryRequest": "vcq:QueryRequest",
+    "QueryAnswerPresentation": "vcq:QueryAnswerPresentation",
+    "QueryAnswerProof": "vcq:QueryAnswerProof",
+    "IssuerKeys": "vcq:IssuerKeys",
+    "Multikey": "sec:Multikey",
+    "hidden": "vcq:hidden",
+    "revealed": "vcq:revealed",
+    "disclosed": "vcq:disclosed",
+    "query": "vcq:query",
+    "inputCommitment": "vcq:inputCommitment",
+    "trustedIssuers": {
+      "@id": "vcq:trustedIssuers",
+      "@container": "@set"
+    },
+    "issuer": {
+      "@id": "vcq:issuer",
+      "@type": "@id"
+    },
+    "verificationMethod": {
+      "@id": "sec:verificationMethod",
+      "@type": "@id"
+    },
+    "controller": {
+      "@id": "sec:controller",
+      "@type": "@id"
+    },
+    "publicKeyMultibase": "sec:publicKeyMultibase",
+    "cryptosuite": "sec:cryptosuite",
+    "signatureMode": {
+      "@id": "vcq:signatureMode",
+      "@type": "@vocab"
+    },
+    "proofMethod": {
+      "@id": "vcq:proofMethod",
+      "@type": "@id"
+    },
+    "method": {
+      "@id": "vcq:method",
+      "@type": "@id"
+    },
+    "verificationKey": "vcq:verificationKey",
+    "parameters": {
+      "@id": "vcq:parameters",
+      "@type": "@json"
+    },
+    "maxPresentationBytes": {
+      "@id": "vcq:maxPresentationBytes",
+      "@type": "xsd:nonNegativeInteger"
+    },
+    "maxResultSize": {
+      "@id": "vcq:maxResultSize",
+      "@type": "xsd:nonNegativeInteger"
+    },
+    "challenge": "sec:challenge",
+    "domain": "sec:domain",
+    "validFrom": {
+      "@id": "cred:validFrom",
+      "@type": "xsd:dateTime"
+    },
+    "validUntil": {
+      "@id": "cred:validUntil",
+      "@type": "xsd:dateTime"
+    },
+    "requestDigest": "vcq:requestDigest",
+    "revealedSignature": {
+      "@id": "vcq:revealedSignature",
+      "@container": "@set"
+    },
+    "signedMessage": "vcq:signedMessage",
+    "signatureValue": "vcq:signatureValue",
+    "result": {
+      "@id": "vcq:result",
+      "@type": "@json"
+    },
+    "resultGraph": {
+      "@id": "vcq:resultGraph",
+      "@container": "@graph"
+    },
+    "proofValue": "sec:proofValue"
+  }
+}

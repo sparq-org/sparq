@@ -69,7 +69,7 @@ export const SPECS: Spec[] = [
     date: "2026-10-10",
     editors: "Jesse Wright · the sparq project",
     blurb:
-      "The JSON query request a verifier service sends and the answer presentation a holder service returns: the query, Supported or Exact answers, holder-declared or verifier-agreed input, accepted issuer keys and proof systems, the result in SPARQL Query Results JSON, and the verifier's checks. Includes a check against OpenID for Verifiable Presentations 1.0. Proof methods plug in by identifier and version, zero-knowledge or not; the ones built so far are research prototypes without an external audit.",
+      "The query request a verifier service sends and the answer presentation a holder service returns, as RDF with a JSON-LD serialization, a companion context and a vocabulary: the SPARQL 1.2 query, the trusted issuers, accepted cryptosuites and proof methods, hidden or revealed signatures, an optional agreed input dataset, and the result with its proof as a verifiable presentation. Includes a check against OpenID for Verifiable Presentations 1.0. Proof methods plug in by IRI, zero-knowledge or not; the ones built so far are research prototypes without an external audit.",
   },
   {
     slug: "mpc-sparql",
