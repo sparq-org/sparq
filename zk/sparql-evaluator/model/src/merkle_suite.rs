@@ -5,29 +5,31 @@
 //!
 //! The issuer signs one 32-byte message that commits to a salted binary SHA-256
 //! Merkle tree over the credential's quads. Each leaf hashes a typed byte encoding
-//! of the quad's four terms. A literal's encoding carries a 31-byte value lane,
-//! derived only from its lexical form and datatype, whose big-endian byte order is
-//! the SPARQL value order within one lane class. A proof can therefore compare
-//! numbers, date-times and string prefixes without parsing lexical forms.
+//! of the quad's four terms. A literal's encoding carries a 31-byte comparison key,
+//! derived only from its lexical form and datatype. Within one key class, the
+//! keys' big-endian byte order is the order that the SPARQL relational operators
+//! give the literals, so a proof can compare numbers, date-times and
+//! `xsd:string` prefixes without parsing lexical forms. Equal keys do not make
+//! two literals the same RDF term; term identity uses the whole encoding.
 //!
 //! The functions here are the normative computations of the spec. Issuance and
 //! holder-side RDFC-1.0 canonicalization happen outside the proof; inside it,
 //! [`crate::authenticated_rdf`] recomputes every leaf from the parsed terms, so
-//! value lanes always agree with lexical forms.
+//! comparison keys always agree with lexical forms.
 
 use oxrdf::{GraphName, Literal, Quad, Term};
 use sha2::{Digest, Sha256};
 
 /// The suite identifier, the `cryptosuite` value of its Data Integrity proofs.
 pub const EDDSA_SHA256_MERKLE_2026: &str = "eddsa-sha256-merkle-2026";
-/// Bytes in a value lane: one class byte and thirty payload bytes.
-pub const LANE_BYTES: usize = 31;
+/// Bytes in a comparison key: one class byte and thirty payload bytes.
+pub const KEY_BYTES: usize = 31;
 /// Bytes of the issuer's secret tree salt, appended to the signature in `proofValue`.
 pub const SALT_BYTES: usize = 32;
 
-/// Value-lane classes. Lanes compare in value order only within one class.
-pub mod lane {
-    /// No value lane: IRIs' literals of other datatypes and ill-typed literals.
+/// Comparison-key classes. Keys compare in value order only within one class.
+pub mod key_class {
+    /// No comparison key: `rdf:langString`, other datatypes and ill-typed literals.
     pub const NONE: u8 = 0x00;
     /// `xsd:integer` or `xsd:decimal`, scaled by 10^18 and offset by 2^239.
     pub const DECIMAL: u8 = 0x01;
@@ -39,46 +41,46 @@ pub mod lane {
     pub const LOCAL_DATE_TIME: u8 = 0x04;
     /// `xsd:boolean`: 0 or 1.
     pub const BOOLEAN: u8 = 0x05;
-    /// `xsd:string` or `rdf:langString` of at most 30 bytes and no U+0000.
+    /// `xsd:string` of at most 30 bytes and no U+0000.
     pub const STRING: u8 = 0x06;
-    /// A longer string, or one containing U+0000: its first 30 bytes.
+    /// A longer `xsd:string`, or one containing U+0000: its first 30 bytes.
     pub const STRING_PREFIX: u8 = 0x07;
-    /// A valid value outside the lane's range or precision, or NaN.
+    /// A valid value outside the key's range or precision, or NaN.
     pub const UNREPRESENTABLE: u8 = 0x7f;
 }
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
-const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
-const PAYLOAD: usize = LANE_BYTES - 1;
+const PAYLOAD: usize = KEY_BYTES - 1;
 const DECIMAL_SCALE: usize = 18;
 
-/// The 31-byte value lane of `literal`.
+/// The 31-byte comparison key of `literal`.
 #[must_use]
-pub fn value_lane(literal: &Literal) -> [u8; LANE_BYTES] {
+pub fn comparison_key(literal: &Literal) -> [u8; KEY_BYTES] {
     let datatype = literal.datatype().as_str();
     let lexical = literal.value();
-    let mut out = [0; LANE_BYTES];
+    let mut out = [0; KEY_BYTES];
     let local = datatype.strip_prefix(XSD);
     let class = match local {
-        Some("integer") if is_integer(lexical) => decimal_lane(lexical, &mut out),
-        Some("decimal") if is_decimal(lexical) => decimal_lane(lexical, &mut out),
-        Some("double") => double_lane(lexical, false, &mut out),
-        Some("float") => double_lane(lexical, true, &mut out),
-        Some("dateTime") => date_time_lane(lexical, &mut out),
+        Some("integer") if is_integer(lexical) => decimal_key(lexical, &mut out),
+        Some("decimal") if is_decimal(lexical) => decimal_key(lexical, &mut out),
+        Some("double") => double_key(lexical, false, &mut out),
+        Some("float") => double_key(lexical, true, &mut out),
+        Some("dateTime") => date_time_key(lexical, &mut out),
         Some("boolean") => match lexical {
             "true" | "1" => {
                 out[1] = 1;
-                lane::BOOLEAN
+                key_class::BOOLEAN
             }
-            "false" | "0" => lane::BOOLEAN,
-            _ => lane::NONE,
+            "false" | "0" => key_class::BOOLEAN,
+            _ => key_class::NONE,
         },
-        Some("string") => string_lane(lexical, &mut out),
-        _ if datatype == RDF_LANG_STRING => string_lane(lexical, &mut out),
-        _ => lane::NONE,
+        // SPARQL orders only simple literals and `xsd:string`; language-tagged
+        // strings get no key.
+        Some("string") => string_key(lexical, &mut out),
+        _ => key_class::NONE,
     };
-    if class == lane::NONE || class == lane::UNREPRESENTABLE {
-        out = [0; LANE_BYTES];
+    if class == key_class::NONE || class == key_class::UNREPRESENTABLE {
+        out = [0; KEY_BYTES];
     }
     out[0] = class;
     out
@@ -93,7 +95,7 @@ pub fn encode_term(term: &Term, out: &mut Vec<u8>) {
             tagged(out, 0x03, literal.value());
             framed(out, literal.datatype().as_str());
             framed(out, literal.language().unwrap_or(""));
-            out.extend_from_slice(&value_lane(literal));
+            out.extend_from_slice(&comparison_key(literal));
         }
         Term::Triple(_) => unreachable!("triple terms are rejected before encoding"),
     }
@@ -211,12 +213,12 @@ fn mul_add(acc: &mut [u8; PAYLOAD], mul: u32, add: u32) -> bool {
     carry == 0
 }
 
-fn decimal_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {
+fn decimal_key(lexical: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
     let (negative, body) = unsigned(lexical);
     let (whole, fraction) = body.split_once('.').unwrap_or((body, ""));
     let fraction = fraction.trim_end_matches('0');
     if fraction.len() > DECIMAL_SCALE {
-        return lane::UNREPRESENTABLE;
+        return key_class::UNREPRESENTABLE;
     }
     let mut magnitude = [0u8; PAYLOAD];
     let scaled = whole
@@ -225,12 +227,12 @@ fn decimal_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {
         .chain(std::iter::repeat_n(b'0', DECIMAL_SCALE - fraction.len()));
     for digit in scaled {
         if !mul_add(&mut magnitude, 10, u32::from(digit - b'0')) {
-            return lane::UNREPRESENTABLE;
+            return key_class::UNREPRESENTABLE;
         }
     }
     // The magnitude must stay below the 2^239 offset.
     if magnitude[0] & 0x80 != 0 {
-        return lane::UNREPRESENTABLE;
+        return key_class::UNREPRESENTABLE;
     }
     let zero = magnitude.iter().all(|b| *b == 0);
     let mut offset = [0u8; PAYLOAD];
@@ -241,7 +243,7 @@ fn decimal_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {
         add(&offset, &magnitude)
     };
     out[1..].copy_from_slice(&payload);
-    lane::DECIMAL
+    key_class::DECIMAL
 }
 
 fn add(a: &[u8; PAYLOAD], b: &[u8; PAYLOAD]) -> [u8; PAYLOAD] {
@@ -289,14 +291,14 @@ fn is_xsd_double(lexical: &str) -> bool {
     mantissa_ok && exponent.is_none_or(|exponent| digits(unsigned(exponent).1))
 }
 
-fn double_lane(lexical: &str, single: bool, out: &mut [u8; LANE_BYTES]) -> u8 {
+fn double_key(lexical: &str, single: bool, out: &mut [u8; KEY_BYTES]) -> u8 {
     if !is_xsd_double(lexical) {
-        return lane::NONE;
+        return key_class::NONE;
     }
     let text = match lexical {
         "INF" | "+INF" => "inf",
         "-INF" => "-inf",
-        "NaN" => return lane::UNREPRESENTABLE,
+        "NaN" => return key_class::UNREPRESENTABLE,
         text => text,
     };
     let value = if single {
@@ -304,12 +306,12 @@ fn double_lane(lexical: &str, single: bool, out: &mut [u8; LANE_BYTES]) -> u8 {
     } else {
         text.parse::<f64>()
     };
-    let Ok(value) = value else { return lane::NONE };
+    let Ok(value) = value else { return key_class::NONE };
     // Negative zero compares equal to zero.
     let bits = if value == 0.0 { 0 } else { value.to_bits() };
     let key = if bits >> 63 == 1 { !bits } else { bits ^ (1 << 63) };
     out[1..9].copy_from_slice(&key.to_be_bytes());
-    lane::DOUBLE
+    key_class::DOUBLE
 }
 
 fn number(text: &str, len: usize) -> Option<i64> {
@@ -326,7 +328,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-fn date_time_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {
+fn date_time_key(lexical: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
     match date_time_millis(lexical) {
         Ok((class, millis)) => {
             let key = (millis as u64) ^ (1 << 63);
@@ -341,7 +343,7 @@ fn date_time_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {
 // outside the four-digit-year, millisecond, before-24:00 profile is
 // `Err(UNREPRESENTABLE)`.
 fn date_time_millis(lexical: &str) -> Result<(u8, i64), u8> {
-    let invalid = lane::NONE;
+    let invalid = key_class::NONE;
     let (date, time) = lexical.split_once('T').ok_or(invalid)?;
     let (negative, date) = match date.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -361,10 +363,11 @@ fn date_time_millis(lexical: &str) -> Result<(u8, i64), u8> {
         return Err(invalid);
     }
     let (month, day) = (number(month_text, 2).ok_or(invalid)?, number(day_text, 2).ok_or(invalid)?);
-    // Years beyond i64 are still valid; any year above four digits is unrepresentable.
-    let year = if year_text.len() == 4 { year_text.parse::<i64>().map_err(|_| invalid)? } else { 10_000 };
-    let signed_year = if negative { -year } else { year };
-    let leap = signed_year % 4 == 0 && (signed_year % 100 != 0 || signed_year % 400 == 0);
+    // Leap years follow the proleptic Gregorian calendar of the actual year, of any
+    // length; only years of four digits can be represented.
+    let modulo = |m: u32| year_text.bytes().fold(0, |acc, digit| (acc * 10 + u32::from(digit - b'0')) % m);
+    let leap = modulo(4) == 0 && (modulo(100) != 0 || modulo(400) == 0);
+    let year = if year_text.len() == 4 { year_text.parse::<i64>().map_err(|_| invalid)? } else { 0 };
     let month_days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     if !(1..=12).contains(&month) || day < 1 || day > month_days[(month - 1) as usize] {
         return Err(invalid);
@@ -401,24 +404,24 @@ fn date_time_millis(lexical: &str) -> Result<(u8, i64), u8> {
             sign * (h * 60 + m)
         }
     };
-    if negative || year == 0 || year_text.len() > 4 || end_of_day || fraction.len() > 3 {
-        return Err(lane::UNREPRESENTABLE);
+    if negative || year == 0 || end_of_day || fraction.len() > 3 {
+        return Err(key_class::UNREPRESENTABLE);
     }
     let millis_part = format!("{fraction:0<3}").parse::<i64>().map_err(|_| invalid)?;
     let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second
         - offset_minutes * 60;
-    let class = if zone.is_some() { lane::DATE_TIME } else { lane::LOCAL_DATE_TIME };
+    let class = if zone.is_some() { key_class::DATE_TIME } else { key_class::LOCAL_DATE_TIME };
     Ok((class, seconds * 1_000 + millis_part))
 }
 
-fn string_lane(lexical: &str, out: &mut [u8; LANE_BYTES]) -> u8 {
+fn string_key(lexical: &str, out: &mut [u8; KEY_BYTES]) -> u8 {
     let bytes = lexical.as_bytes();
     let take = bytes.len().min(PAYLOAD);
     out[1..=take].copy_from_slice(&bytes[..take]);
     if bytes.len() <= PAYLOAD && !bytes.contains(&0) {
-        lane::STRING
+        key_class::STRING
     } else {
-        lane::STRING_PREFIX
+        key_class::STRING_PREFIX
     }
 }
 

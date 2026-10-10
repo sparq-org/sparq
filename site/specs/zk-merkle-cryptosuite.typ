@@ -17,8 +17,9 @@
   This document defines Data Integrity cryptosuites for RDF verifiable credentials
   in which the issuer signs a salted Merkle root over the credential's quads. Each
   leaf hashes a typed encoding of one quad. A literal's encoding carries a value
-  lane whose order is the SPARQL value order for numbers, date-times, booleans
-  and string prefixes. A zero-knowledge proof can then authenticate a credential
+  comparison key: an order-preserving encoding of its value under the SPARQL
+  relational operators, for numbers, date-times, booleans and `xsd:string`
+  prefixes. A zero-knowledge proof can then authenticate a credential
   without canonicalizing it, and compare typed values without parsing lexical
   forms. The suite family has three members that share the encoding and the
   tree shape: `eddsa-sha256-merkle-2026` for hash-accelerated zkVMs,
@@ -39,7 +40,7 @@ holder. It must also parse every literal it compares.
 The suites in this document move canonicalization to the issuer. The issuer
 signs a Merkle tree over the canonical quads, so a proof only hashes the quads
 it is given and checks they form the signed tree. Each literal leaf carries a
-fixed-width value lane, derived from the lexical form, that compares in value
+fixed-width comparison key, derived from the lexical form, that compares in value
 order as bytes or as a field element.
 
 The suites are designed for the two signature modes of the ZK SPARQL answers
@@ -99,24 +100,35 @@ The #dfn[term encoding] `enc(t)` of a term `t` is:
 - a blank node: byte `0x02`, then the length and bytes of its label without `_:`;
 - a literal: byte `0x03`, then the length and bytes of the lexical form, of the
   datatype IRI, and of the language tag in lower case (empty when there is
-  none), then the 31-byte value lane;
+  none), then the 31-byte comparison key;
 - the default graph, as a graph name: byte `0x00`.
 
-== Value lanes
+== Comparison keys
 
-A #dfn[value lane] is one class byte and 30 payload bytes, computed from the
-literal's datatype and lexical form only. Within one class, comparing two lanes
-as unsigned big-endian integers gives the SPARQL value order of the literals.
-Lanes of different classes MUST NOT be compared as values. A proof that needs
-such a comparison, or a class `0x00` or `0x7F` operand, falls back to the
-lexical form.
+A literal's #dfn[comparison key] is one class byte and 30 payload bytes,
+computed from its datatype and lexical form only. It is an order-preserving
+encoding of the literal's value: for two literals whose keys have the same class
+from `0x01` to `0x06`, comparing the keys as unsigned big-endian integers gives
+the result of the SPARQL operators `=`, `!=`, `<`, `>`, `<=` and `>=` on the
+literals #cite("SPARQL11-QUERY"). Each class holds only datatypes that SPARQL
+compares with one another.
+
+- Keys of different classes MUST NOT be compared.
+- A class `0x07` key decides an order only when the two prefixes differ.
+- Keys of class `0x00` or `0x7F` decide nothing.
+- Equal keys do not make two literals the same RDF term. `sameTerm`, joins and
+  `DISTINCT` use the whole term encoding.
+- A function such as `STRSTARTS` that has its own argument compatibility rules
+  MUST apply them before it uses a key.
+
+In every other case, a proof uses the lexical form.
 
 #table(
   columns: (auto, 1fr, 1.6fr),
   [*Class*], [*Literals*], [*Payload*],
   [`0x01`], [valid `xsd:integer` and `xsd:decimal`],
     [the value times 10#super[18] plus 2#super[239], as 30 bytes; integers and
-     decimals with equal values share a lane],
+     decimals with equal values share a key],
   [`0x02`], [valid `xsd:double` and `xsd:float`],
     [8 bytes: the IEEE 754 binary64 value's bits, with every bit inverted when the
      sign bit is set and only the sign bit inverted otherwise. A float is widened
@@ -125,19 +137,22 @@ lexical form.
     [8 bytes: milliseconds since 1970-01-01T00:00:00Z plus 2#super[63]],
   [`0x04`], [`xsd:dateTime` without a timezone], [as class `0x03`, read as UTC],
   [`0x05`], [`xsd:boolean`], [one byte: 0 for `false` or `0`, 1 for `true` or `1`],
-  [`0x06`], [`xsd:string` and `rdf:langString` of at most 30 bytes and no U+0000],
+  [`0x06`], [`xsd:string` of at most 30 bytes and no U+0000],
     [the lexical bytes],
-  [`0x07`], [other `xsd:string` and `rdf:langString`], [the first 30 lexical bytes],
-  [`0x7F`], [valid values the lane cannot represent],
+  [`0x07`], [other `xsd:string`], [the first 30 lexical bytes],
+  [`0x7F`], [valid values the key cannot represent],
     [none: decimals with more than 18 fractional digits or a magnitude of at least
      2#super[239]/10#super[18]; NaN; date-times whose year is not four digits from
      0001, that end at 24:00:00, or that have sub-millisecond precision],
-  [`0x00`], [every other literal, including ill-typed ones], [none],
+  [`0x00`], [every other literal, including `rdf:langString` and ill-typed
+    literals], [none],
 )
 
 Payload bytes not listed are zero. For class `0x06`, byte order is code point
-order because UTF-8 preserves it. A class `0x07` lane orders strings only when
-their prefixes differ.
+order because UTF-8 preserves it. Language-tagged strings get no key because
+SPARQL defines no order on them. A date-time's validity, including 29 February,
+follows the proleptic Gregorian calendar of its actual year, however many
+digits it has.
 
 == Leaves and tree
 
@@ -172,7 +187,7 @@ where `id` is the ASCII suite identifier.
 == Proof creation
 
 + Canonicalize the credential and the proof configuration with RDFC-1.0.
-+ Draw a fresh 32-byte salt from a cryptographically secure source.
++ Draw a fresh, uniformly random 32-byte salt.
 + Compute the leaves, the root and the signed message.
 + Sign the message: with Ed25519 for `eddsa-sha256-merkle-2026`, or with
   ML-DSA-44 (pure, empty context) for `mldsa44-sha256-merkle-2026`.
@@ -192,20 +207,26 @@ A proof system that evaluates a SPARQL query over credentials secured with these
 suites receives the quads in leaf order, the configuration and the salt as
 private input. It recomputes every leaf from the terms, checks that the leaves
 are strictly increasing, and rebuilds the signed message. The answer is then
-computed over exactly those quads. Because every lane is recomputed from its
-lexical form, a malformed lane in a credential makes the proof fail.
+computed over exactly those quads. Because every comparison key is recomputed
+from its lexical form, a malformed key in a credential makes the proof fail. A
+holder can hold the same credential under several salts, so a proof that rejects
+duplicate credentials MUST identify a credential by its quad count and unsalted
+root, not by its signed message.
 
 - In `hidden` mode the signature is also private input, and the proof verifies
   it against a key the verifier authorized.
 - In `revealed` mode the proof outputs the signed message and the verification
   method. The verifier checks the presented signature over that message. The
+  holder reveals only the signature bytes, never the full `proofValue`: the tree
+  salt MUST stay private to the holder, because a verifier that learns it can
+  confirm guesses of the credential's content. The
   verifier learns a salted digest, so it cannot confirm guesses about the
   credential, but presentations of the same credential are linkable through the
   message and the signature.
 
-A circuit that compares lanes without recomputing them from lexical forms relies
+A circuit that compares keys without recomputing them from lexical forms relies
 on the issuer to have computed them correctly. Such a circuit SHOULD recompute
-the lanes it compares.
+the keys it compares.
 
 = The Poseidon2 member
 
@@ -214,9 +235,9 @@ and the Poseidon2 sponge `P` with width 4, rate 3, 8 full and 56 partial rounds,
 as defined by the zkSPARQL draft #cite("ZKSPARQL") and Noir's standard library.
 
 - `h(x)` is SHA-256 of the bytes `x`, keeping its low 31 bytes as an integer.
-- The field term encoding is `encF(t) = P(k, h(enc'(t)), lane(t))`, where `k` is
-  the term's tag byte, `enc'(t)` is `enc(t)` without the lane, and `lane(t)` is
-  the 31-byte lane as an integer (zero for non-literals).
+- The field term encoding is `encF(t) = P(k, h(enc'(t)), key(t))`, where `k` is
+  the term's tag byte, `enc'(t)` is `enc(t)` without the comparison key, and
+  `key(t)` is the 31-byte comparison key as an integer (zero for non-literals).
 - A leaf is `P(1, encF(s), encF(p), encF(o), encF(g))`, and an inner node is
   `P(2, left, right)`. The padding leaf is zero, and leaves are sorted as
   integers.
@@ -226,7 +247,7 @@ as defined by the zkSPARQL draft #cite("ZKSPARQL") and Noir's standard library.
 - The signature is a Schnorr signature over Baby Jubjub with a Poseidon2
   challenge, as defined by the zkSPARQL draft's issuer attestation.
 
-A circuit compares two class-`0x01` lanes with one range check on their
+A circuit compares two class-`0x01` keys with one range check on their
 difference, instead of opening a hashed lexical form.
 
 #note[This member has no implementation in this revision. Its constants and
@@ -258,7 +279,7 @@ message layout may change when it is implemented and given fixed vectors.]
   forgery by such an adversary. The hash-based tree and the salted message keep
   their binding and hiding against quantum adversaries, with security margins
   reduced by generic quantum search.
-- *Value lanes.* Lanes add no information beyond the lexical form. They are
+- *Comparison keys.* Keys add no information beyond the lexical form. They are
   disclosed only where a proof discloses a leaf.
 - *Completeness.* A signature covers one credential. A holder can still choose
   which credentials to present unless the verifier fixes them in advance.
@@ -276,14 +297,14 @@ has the leaf
 Together with `<urn:vc:1> <http://ex/name> "Alice"@en .`, the root is
 
 ```
-173a57085f798200738c519bcc71b7af4cb16bf67edcf1b2e1add2b516f6be2b
+311072a0f565868c243e392ea085e4c2fe752b39751e0707bcd7e42c78683682
 ```
 
 With 32 bytes of `0x07` as the salt, a quad count of 2 and 32 bytes of `0x09` as
 the configuration digest, the `eddsa-sha256-merkle-2026` signed message is
 
 ```
-f2c7bec9161e40bf8054356fa12905665d7c2d4187504d31aa529aeee4e601a3
+d79eb8afe1cbb6c7c146089a2522aa54a6a875176585d135a39d129d50be81a8
 ```
 
 = References

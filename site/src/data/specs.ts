@@ -69,7 +69,7 @@ export const SPECS: Spec[] = [
     date: "2026-10-10",
     editors: "Jesse Wright · the sparq project",
     blurb:
-      "Data Integrity cryptosuites whose issuer signs a salted Merkle root over a credential's typed quad leaves, with order-preserving value lanes for numeric, date-time and string comparison, so zero-knowledge proofs of SPARQL answers skip in-proof canonicalization; members eddsa-sha256-merkle-2026 (implemented in the zkVM relation), schnorr-poseidon2-merkle-2026 and mldsa44-sha256-merkle-2026.",
+      "Data Integrity cryptosuites whose issuer signs a salted Merkle root over a credential's typed quad leaves, with order-preserving comparison keys for numeric, date-time and string comparison, so zero-knowledge proofs of SPARQL answers skip in-proof canonicalization; members eddsa-sha256-merkle-2026 (implemented in the zkVM relation), schnorr-poseidon2-merkle-2026 and mldsa44-sha256-merkle-2026.",
   },
   {
     slug: "mpc-sparql",

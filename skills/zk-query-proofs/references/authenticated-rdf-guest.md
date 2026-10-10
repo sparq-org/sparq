@@ -138,12 +138,12 @@ digest.
 - `EddsaSha256Merkle2026`: the `eddsa-sha256-merkle-2026` suite specified in
   `site/specs/zk-merkle-cryptosuite.typ`. The issuer signs a salted SHA-256
   Merkle root over typed quad leaves. Each literal leaf carries an
-  order-preserving value lane. The guest canonicalizes only the proof
+  order-preserving comparison key. The guest canonicalizes only the proof
   configuration: it recomputes each document quad's leaf, requires the leaves
   to be strictly increasing, and rebuilds the 32-byte signed message. The
   witness `signature` is the 64-byte signature (hidden mode only) followed by
   the 32-byte tree salt. The model module `merkle_suite` holds the leaf, root,
-  message and value-lane functions, plus `issue` for issuers and test harnesses.
+  message and comparison-key functions, plus `issue` for issuers and test harnesses.
   Fixed vectors are in `model/tests/merkle_suite.rs` and the spec.
 
 The vcq adapter accepts only `EddsaRdfc2022` in hidden mode. The paper's
@@ -163,7 +163,8 @@ ZK SPARQL answers spec (`site/specs/zksparql-answers.typ`).
 - `Revealed`: witness credentials carry an empty signature, and the guest
   verifies none. For each credential the guest still canonicalizes, hashes and
   checks the table. It commits a `SignedMessage { verification_method, message }`
-  in document-hash order, where `message` is SHA-256(canonical proof config) ||
+  in credential order (by document hash, or by quad count and root for the
+  Merkle suite), where `message` is SHA-256(canonical proof config) ||
   SHA-256(canonical document), exactly the eddsa-rdfc-2022 signing input (for
   the Merkle suite it is the salted 32-byte root message). The
   verifier checks the presented signatures over those messages with

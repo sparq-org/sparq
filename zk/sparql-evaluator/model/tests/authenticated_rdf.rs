@@ -1048,6 +1048,13 @@ fn merkle_suite_rejects_reordered_tampered_or_resalted_credentials() {
     let mut resalted = merkle_bob();
     resalted.signature[64] ^= 1;
     assert_eq!(reason(run_one(resalted)), "Ed25519 signature verification failed");
+    // The same document reissued under a fresh salt is still a duplicate.
+    let claims = format!("<did:example:bob> <http://ex/balance> \"99\"^^<{XSD}integer> .\n");
+    let reissued = merkle_sign(&document("urn:vc:m-bob", ISSUER_B, &claims), &merkle_config(VM_B), 2, [0x43; 32]);
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, merkle_policy(), vec![merkle_bob(), reissued])),
+        "duplicate authenticated credential document"
+    );
     let mut short = merkle_bob();
     short.signature.truncate(64);
     assert_eq!(reason(run_one(short)), "Merkle proof value must be the signature (hidden mode only) and salt");

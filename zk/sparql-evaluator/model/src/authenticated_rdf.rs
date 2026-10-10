@@ -35,7 +35,8 @@
 //!    `SHA-256(config) || SHA-256(document)`; in [`SignatureMode::Revealed`],
 //!    publish that signed message in the journal instead (see below).
 //!
-//! Verified credentials are sorted by document hash, and duplicates reject. The
+//! Verified credentials are sorted by document hash (for the Merkle suite, by a
+//! hash of the quad count and unsalted root), and duplicates reject. The
 //! exact hashed canonical document quads are unioned into one default graph,
 //! with blank nodes renamed `k{index}_{label}` so that credentials never share a
 //! blank node. Literal lexical forms are copied unchanged. V3 then evaluates that
@@ -49,9 +50,10 @@
 //! to be strictly increasing, and builds the salted root message from them, the
 //! quad count, the 32-byte tree salt that follows the signature in the witness
 //! `signature` bytes, and the configuration hash. Step 5 verifies (or, in revealed
-//! mode, publishes) that 32-byte message. The commitment and the credential sort
-//! use the message in place of the document hash. Blank node labels are those the
-//! issuer signed.
+//! mode, publishes) that 32-byte message. The commitment uses the message in
+//! place of the document hash; ordering and duplicate
+//! rejection use SHA-256 of the quad count and root, so reissuing a document under
+//! a new salt is still a duplicate. Blank node labels are those the issuer signed.
 //!
 //! # Signature modes
 //!
@@ -59,7 +61,7 @@
 //! the key-to-credential mapping private: the proof shows a valid signature from a
 //! table key on every credential. [`SignatureMode::Revealed`] moves only the
 //! Ed25519 check out of the proof. The witness then carries no signatures, and the
-//! journal lists one [`SignedMessage`] per credential, sorted by document hash:
+//! journal lists one [`SignedMessage`] per credential, in that credential order:
 //! the verification method and the exact 64 signed bytes derived in-proof from
 //! the canonical inputs that were mapped into the queried dataset. The verifier
 //! checks the presented `proofValue`s against those messages and table keys with
@@ -326,8 +328,8 @@ pub struct Journal {
     pub dataset_commitment: [u8; 32],
     pub provenance: Provenance,
     pub result: v3::CanonicalResult,
-    /// Empty in [`SignatureMode::Hidden`]; one entry per credential, sorted by
-    /// document hash, in [`SignatureMode::Revealed`].
+    /// Empty in [`SignatureMode::Hidden`]; one entry per credential, in the
+    /// relation's credential order, in [`SignatureMode::Revealed`].
     pub signed_messages: Vec<SignedMessage>,
 }
 
@@ -347,7 +349,7 @@ impl Cryptosuite {
         match self {
             Self::EddsaRdfc2022 => "eddsa-rdfc-2022:rdfc-1.0:sha-256:ed25519-strict:assertionMethod",
             Self::EddsaSha256Merkle2026 => {
-                "eddsa-sha256-merkle-2026:sha-256-merkle:value-lanes-v1:ed25519-strict:assertionMethod"
+                "eddsa-sha256-merkle-2026:sha-256-merkle:comparison-keys-v1:ed25519-strict:assertionMethod"
             }
         }
     }
@@ -642,6 +644,9 @@ struct Authenticated {
 struct Verified {
     /// SHA-256 of the canonical document, or the Merkle suite's signed message.
     document_hash: [u8; 32],
+    /// Unsalted document identity for ordering and duplicate rejection: the
+    /// document hash, or SHA-256 of the Merkle quad count and root.
+    identity: [u8; 32],
     config_hash: [u8; 32],
     quads: Vec<Quad>,
     method: String,
@@ -662,11 +667,10 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
         .iter()
         .map(|credential| verify(credential, &table, policy.cryptosuite, policy.signature_mode))
         .collect::<Result<Vec<_>, _>>()?;
-    verified.sort_unstable_by_key(|a| a.document_hash);
-    if verified
-        .windows(2)
-        .any(|pair| pair[0].document_hash == pair[1].document_hash)
-    {
+    // Ordered by unsalted identity, so reissuing one document under a fresh salt
+    // is still a duplicate.
+    verified.sort_unstable_by_key(|a| a.identity);
+    if verified.windows(2).any(|pair| pair[0].identity == pair[1].identity) {
         return Err(Rejected("duplicate authenticated credential document"));
     }
     let mut hash = Sha256::new();
@@ -785,13 +789,13 @@ fn verify(
     let method = proof_method(&parse(&config, MAX_PROOF_CONFIG_QUADS)?, suite)?;
     let (entry, key) = lookup(table, &method)?;
     let config_hash: [u8; 32] = Sha256::digest(config.as_bytes()).into();
-    let (quads, document_hash, message) = match suite {
+    let (quads, document_hash, identity, message) = match suite {
         Cryptosuite::EddsaRdfc2022 => {
             let document = canonical(&parse(&credential.document, MAX_DOCUMENT_QUADS)?)?;
             // Every later check reads the exact canonical bytes that are hashed and signed.
             let quads = parse(&document, MAX_DOCUMENT_QUADS)?;
             let document_hash: [u8; 32] = Sha256::digest(document.as_bytes()).into();
-            (quads, document_hash, signed_bytes(&config_hash, &document_hash).to_vec())
+            (quads, document_hash, document_hash, signed_bytes(&config_hash, &document_hash).to_vec())
         }
         Cryptosuite::EddsaSha256Merkle2026 => {
             // No canonicalization: the signed object is the leaf set itself.
@@ -808,7 +812,10 @@ fn verify(
                 .try_into()
                 .map_err(|_| Rejected("Merkle tree salt must be 32 bytes"))?;
             let message = merkle::signed_message(&salt, leaves.len() as u32, &root, &config_hash);
-            (quads, message, message.to_vec())
+            let mut identity = Sha256::new();
+            identity.update((leaves.len() as u32).to_be_bytes());
+            identity.update(root);
+            (quads, message, identity.finalize().into(), message.to_vec())
         }
     };
     check_document(&quads, &entry.issuer)?;
@@ -821,6 +828,7 @@ fn verify(
     }
     Ok(Verified {
         document_hash,
+        identity,
         config_hash,
         quads,
         method,
