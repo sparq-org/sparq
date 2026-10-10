@@ -240,7 +240,10 @@ impl PodStore {
             .map_err(|e| format!("put_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
         // PARSE FIRST — a malformed document is rejected before anything mutates.
         let new_graph = Graph::load_str(content, format).map_err(|e| {
-            format!("put_acl denied: ACL content for <{}> did not parse as {}: {}", acl_iri, format, e)
+            format!(
+                "put_acl denied: ACL content for <{}> did not parse as {}: {}",
+                acl_iri, format, e
+            )
         })?;
         let new_len = graph_len(&new_graph);
 
@@ -258,10 +261,13 @@ impl PodStore {
         // The rollback path stays a full clear (conservative).
         let scope = crate::ReindexScope::Origin;
         if let Err(e) = self.rematerialize_scoped(acp, scope) {
-            self.restore_named_slot(&term, prior, acp);
-            return Err(e);
+            return Err(self.restore_named_slot(&term, prior, acp, e));
         }
-        Ok(AclWriteOutcome { acl: name, existed, triples: new_len })
+        Ok(AclWriteOutcome {
+            acl: name,
+            existed,
+            triples: new_len,
+        })
     }
 
     /// Shared `delete_acl` body — capture, remove, re-materialize, rollback-on-error.
@@ -283,10 +289,13 @@ impl PodStore {
         // AuthIndex per-origin and invalidates exactly the origins whose buckets changed.
         let scope = crate::ReindexScope::Origin;
         if let Err(e) = self.rematerialize_scoped(acp, scope) {
-            self.restore_named_slot(&term, prior, acp);
-            return Err(e);
+            return Err(self.restore_named_slot(&term, prior, acp, e));
         }
-        Ok(AclWriteOutcome { acl: name, existed, triples: 0 })
+        Ok(AclWriteOutcome {
+            acl: name,
+            existed,
+            triples: 0,
+        })
     }
 
     /// Remove and return the sub-graph currently stored under `name`, if any (so it can be
@@ -297,24 +306,35 @@ impl PodStore {
         Some(self.graph.named.swap_remove(pos).1)
     }
 
-    /// Restore a captured prior slot after a failed re-materialization, then rebuild the
-    /// auth view from the restored content so the store is left consistent with the PRIOR
-    /// rules (the rollback path). The earlier swap already removed the new content; here we
-    /// re-insert the old content (or leave the slot absent if there was none) and
-    /// re-materialize from it.
-    fn restore_named_slot(&mut self, name: &Term, prior: Option<Graph>, acp: bool) {
+    /// Restore a captured prior slot after a failed re-materialization (`failed`), then
+    /// rebuild the auth view from the restored content; the error to return. A failed
+    /// materialization leaves the previous view untouched, so after the restore view and rules
+    /// agree again. If rebuilding from the restored rules fails too, whether they still agree
+    /// is not established: the view is dropped, so every request is denied until a
+    /// re-materialization succeeds, and the error says so.
+    fn restore_named_slot(
+        &mut self,
+        name: &Term,
+        prior: Option<Graph>,
+        acp: bool,
+        failed: String,
+    ) -> String {
         // Drop whatever is currently in the slot (the new content that failed) and put the
         // prior content back.
         let _ = self.take_named_slot(name);
         if let Some(g) = prior {
             self.graph.named.push((name.clone(), g));
         }
-        // Rebuild the auth view from the restored (prior) rules. This re-runs the SAME
-        // materialization that previously succeeded for this content, so it is expected to
-        // succeed; if it somehow fails the prior auth view left in place by the failed run
-        // still stands (materialize leaves the previous view untouched on error) and the
-        // index is rebuilt from it — fail-closed either way.
-        let _ = self.rematerialize(acp);
+        match self.rematerialize(acp) {
+            Ok(()) => failed,
+            Err(e) => {
+                self.drop_auth_view();
+                format!(
+                    "{failed}; rebuilding the authorization view from the prior rules failed \
+                     too ({e}); every request is denied until it is re-materialized"
+                )
+            }
+        }
     }
 
     /// Re-materialize the WAC or ACP view with a FULL session-cache clear (the rollback
@@ -337,7 +357,11 @@ impl PodStore {
     /// `materialize_acp()` the write path used before — and, [SONNET-4.6] sq-ysv3u, with no
     /// verified credentials either, so an `acp:vc` matcher stays fail-closed across an ACL
     /// write exactly as it is on a plain `materialize_acp()`.
-    fn rematerialize_scoped(&mut self, acp: bool, scope: crate::ReindexScope) -> Result<(), String> {
+    fn rematerialize_scoped(
+        &mut self,
+        acp: bool,
+        scope: crate::ReindexScope,
+    ) -> Result<(), String> {
         if acp {
             self.materialize_acp_with_scoped(
                 &crate::AccessProvenance::new(),
