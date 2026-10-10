@@ -146,7 +146,7 @@ verifier accepts, trading proving cost against disclosure.
 
 This paper centres on Exact answers over explicitly scoped, authenticated RDF input. The request
 states who chose the input, a dataset commitment fixes it and, if the request lists issuer keys, the
-proof shows that every credential in it is signed under one of them. Our contributions are:
+presentation shows that every credential in it is signed under one of them. Our contributions are:
 
 - *Answer kinds and input kinds* (§#ref(<meaning>, supplement: none)): Exact answers, over an input
   that the holder declared or the verifier agreed in advance, and Supported answers, for monotone
@@ -232,8 +232,9 @@ graph. It states which layout it uses, because a query written for one does not 
 
 The proof fixes $D$ through a _dataset commitment_: a digest of the included credentials and of a
 random salt that the holder chooses. It is binding if the hash is collision-resistant, so the holder
-cannot later claim another $D$ for it. While the salt stays secret, it is also hiding, so that on
-its own it reveals nothing about $D$: computationally, if the hash is modelled as a random oracle.
+cannot later claim another $D$ for it. While the salt stays secret, it is also hiding: if the hash
+is modelled as a random oracle, the commitment on its own reveals nothing about $D$ to a
+computationally bounded verifier.
 
 === Supported and Exact answers <semantics>
 
@@ -670,7 +671,7 @@ dataset commitment and the input kind to the journal. A second build adds signat
 of the same evaluator: it verifies each credential's `eddsa-rdfc-2022` signature in the hidden mode,
 checks the key against the request's issuer keys, and evaluates the query over the signed canonical
 N-Quads. Our holder and verifier services wrap both builds with query requests and the checks of
-§#ref(<validation>, supplement: none); the journal binds the stored request through a digest
+§#ref(<validation>, supplement: none), and the journal binds the stored request through a digest
 (§#ref(<capabilities>, supplement: none)). We have not confirmed that the verifier service performs
 its checks in exactly the order of §#ref(<validation>, supplement: none). Separately, two Noir
 circuits produce Supported answers to `SELECT DISTINCT` queries over one basic graph pattern: in the
