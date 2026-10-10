@@ -1,0 +1,2 @@
+[workspace]
+members = ["leaf", "baseline", "spliced", "noir_var", "encode"]
