@@ -68,3 +68,9 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
 - Revealed mode for zkVM eddsa-rdfc-2022 (#6787): discloses the verification method and the SHA-256
   hashes of the canonical document and of the proof configuration. Unsalted, so presentations of one
   credential are linkable and a low-entropy document can be confirmed by guessing.
+- Motivation for the Merkle-root suite (Proof methods thread, project file
+  `zk-proof-methods/ultrahonk-gate-breakdown.md`): in the current Noir u64/i64 result circuits about
+  87% of about 490k gates is the literal range check. Literals are committed as a BLAKE3 hash of
+  their text with a private digit count, so the circuit hashes all 20 possible lengths (about 54k
+  gates per filtered value). A field-native leaf does the same comparison in about 300 gates. Cite
+  only once frozen as an evidence record.
