@@ -508,8 +508,8 @@ order, and rejects it at the first check that fails:
 + Reject a presentation larger than the request's `maxPresentationBytes`, before parsing it.
 + Reject it unless it is a JSON-LD document that follows @sec-vocab and @sec-presentation.
 + Reject it unless `requestDigest` is the request digest of the request, the current time is
-  between the request's `validFrom` and `validUntil`, the proof's `challenge` and `domain`
-  equal the request's, and the challenge has not been consumed (see the last step).
+  between the request's `validFrom` and `validUntil`, and the proof's `challenge` and
+  `domain` equal the request's.
 + Reject it unless the proof's `proofMethod` is the `method` of one of the request's proof
   method entries, and verify with that entry's `verificationKey` and `parameters`.
 + If the request has an `inputCommitment`, reject it unless the presentation's equals it.
@@ -522,13 +522,11 @@ order, and rejects it at the first check that fails:
   `maxResultSize`.
 + Verify the proof with the proof method over the statement computed from the request and the
   presentation. Reject it if verification fails.
-+ Consume the challenge: in one atomic operation, check that the current time is still
-  before the request's `validUntil` and that the challenge has not been consumed, and record
-  it as consumed; reject the presentation if either check fails. The record MUST be shared by
-  every proof method and every instance of the verifier service that accepts presentations
-  for the request, and MUST last until every instance's clock has passed the request's
-  `validUntil`, that is, until `validUntil` plus the largest clock difference between the
-  instances. Only then is the presentation accepted.
+
+A verifier service MUST NOT accept more than one presentation with the same challenge, across
+all of its instances and at any time, and MUST NOT accept a presentation once the request's
+`validUntil` has passed, however long verification took. Implementations typically meet this
+with an atomic, durable record of the challenges already used.
 
 On acceptance the verifier has the query, the result, the dataset commitment and whether it
 agreed that commitment, and the trust requirements its credentials met.
@@ -722,8 +720,7 @@ presentations. An agreed commitment is linkable by design, to the verifier that 
 
 The request digest covers the challenge, the domain and the validity period, and the proof
 binds the request digest. A presentation therefore verifies only for the request it answers.
-The verifier consumes each challenge atomically when it accepts a presentation, and accepts
-at most one presentation per challenge even when copies arrive concurrently (@sec-verify), so a captured
+The verifier accepts at most one presentation per challenge (@sec-verify), so a captured
 presentation cannot be replayed to the same verifier, and the domain stops it being used with
 another. Without a challenge, anyone who captured a presentation could present it again within
 the validity period, so `challenge` is required even though Data Integrity makes it optional.
