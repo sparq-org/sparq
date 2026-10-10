@@ -2246,6 +2246,134 @@ pub enum PatchError {
     TooDeep,
 }
 
+/// Whether `content_type` is JSON: `application/json`, or any `+json` structured syntax suffix
+/// (RFC 6839), parameters aside.
+fn is_json_type(content_type: &str) -> bool {
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    essence == "application/json" || essence.ends_with("+json")
+}
+
+/// Whether every number in the JSON text `text` is kept exactly by [`Value`]: an integer within
+/// `i64` or `u64`, or one whose `f64` writes back as the same decimal value. Others (an integer
+/// past `u64`, more digits than an `f64` holds) would be rounded when parsed, so a patch would
+/// rewrite numbers it never touched, and a `test` could match a number it does not equal. A
+/// scan of the text, outside strings; `text` is JSON already parsed.
+fn numbers_exact(text: &[u8]) -> bool {
+    let mut i = 0;
+    let mut in_string = false;
+    while i < text.len() {
+        let c = text[i];
+        if in_string {
+            match c {
+                b'\\' => i += 1,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if c == b'-' || c.is_ascii_digit() {
+            let start = i;
+            while i < text.len()
+                && matches!(text[i], b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')
+            {
+                i += 1;
+            }
+            let Ok(token) = std::str::from_utf8(&text[start..i]) else {
+                return false;
+            };
+            if !number_exact(token) {
+                return false;
+            }
+            continue;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Whether the JSON number `token` parses into a [`Value`] without losing anything of its value.
+fn number_exact(token: &str) -> bool {
+    if token.parse::<i64>().is_ok() || token.parse::<u64>().is_ok() {
+        return true;
+    }
+    let Some(n) = token
+        .parse::<f64>()
+        .ok()
+        .and_then(serde_json::Number::from_f64)
+    else {
+        return false;
+    };
+    decimal(token).is_some_and(|d| decimal(&n.to_string()) == Some(d))
+}
+
+/// A decimal number's value as (negative, significant digits, power of ten): `1.50e1` and `15`
+/// are both `(false, "15", 0)`, and every zero is `(false, "", 0)`.
+fn decimal(s: &str) -> Option<(bool, String, i64)> {
+    let (neg, s) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s),
+    };
+    let (mantissa, exp) = match s.find(['e', 'E']) {
+        Some(i) => (&s[..i], s[i + 1..].parse::<i64>().ok()?),
+        None => (s, 0),
+    };
+    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let mut digits: String = format!("{int}{frac}").trim_start_matches('0').to_string();
+    let mut exp = exp.checked_sub(i64::try_from(frac.len()).ok()?)?;
+    while digits.ends_with('0') {
+        digits.pop();
+        exp = exp.checked_add(1)?;
+    }
+    if digits.is_empty() {
+        return Some((false, digits, 0));
+    }
+    Some((neg, digits, exp))
+}
+
+/// Whether some operation of the patch text `body` names a member twice (`{"op": "add", "op":
+/// "remove"}`): a parsed [`Value`] keeps one of them silently, so the operation checked would not
+/// be the one the client wrote. `body` is a patch already checked to be an array of objects.
+fn repeats_a_member(body: &[u8]) -> bool {
+    struct Members;
+    impl<'de> serde::Deserialize<'de> for Members {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct Visit;
+            impl<'de> serde::de::Visitor<'de> for Visit {
+                type Value = Members;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("an operation")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<Members, A::Error> {
+                    let mut seen = std::collections::HashSet::new();
+                    while let Some(key) = map.next_key::<String>()? {
+                        if !seen.insert(key) {
+                            return Err(serde::de::Error::custom("a member is repeated"));
+                        }
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                    }
+                    Ok(Members)
+                }
+            }
+            d.deserialize_map(Visit)
+        }
+    }
+    serde_json::from_slice::<Vec<Members>>(body).is_err()
+}
+
 /// Check that `ops` is an RFC 6902 patch document, without applying it.
 pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
     let ops = ops.as_array().ok_or(PatchError::Malformed(
@@ -2670,6 +2798,18 @@ impl Patch {
         if let Err(PatchError::Malformed(why)) = validate_json_patch(&patch) {
             return Err(problem(StatusCode::BAD_REQUEST, Some(why)));
         }
+        if repeats_a_member(&req.body) {
+            return Err(problem(
+                StatusCode::BAD_REQUEST,
+                Some("an operation repeats a member"),
+            ));
+        }
+        if !numbers_exact(&req.body) {
+            return Err(problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the patch holds a number that cannot be kept exactly"),
+            ));
+        }
         Ok(Patch::Json(patch))
     }
 
@@ -2738,6 +2878,29 @@ async fn patch<S: Store + 'static>(
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
+    // What the request is (its patch format, and the resource's) is settled before its
+    // preconditions: a patch that could never apply is a 415 whatever its validators.
+    let patch = match Patch::parse(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    // A JSON Patch applies to a JSON document only: a resource stored as another format is
+    // never rewritten as JSON.
+    let not_json = || {
+        let mut r = problem(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Some("the resource is not JSON"),
+        );
+        set(
+            r.headers_mut(),
+            header::HeaderName::from_static("accept-patch"),
+            ACCEPT_PATCH,
+        );
+        r
+    };
+    if !is_json_type(&meta.content_type) {
+        return not_json();
+    }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
         &req.headers,
         Some(&quoted(&meta.etag)),
@@ -2746,10 +2909,6 @@ async fn patch<S: Store + 'static>(
     ) {
         return problem(StatusCode::PRECONDITION_FAILED, None);
     }
-    let patch = match Patch::parse(req) {
-        Ok(p) => p,
-        Err(r) => return r,
-    };
     if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
         return r;
     }
@@ -2762,30 +2921,22 @@ async fn patch<S: Store + 'static>(
     } else {
         match serde_json::from_slice::<Value>(&body) {
             Ok(v) => v,
-            Err(_) => {
-                // The stored representation is not JSON, so neither patch format applies to it.
-                let mut r = problem(
-                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                    Some("the resource is not JSON"),
-                );
-                set(
-                    r.headers_mut(),
-                    header::HeaderName::from_static("accept-patch"),
-                    ACCEPT_PATCH,
-                );
-                return r;
-            }
+            Err(_) => return not_json(),
         }
     };
+    // The content is written back whole, so a number it holds that a [`Value`] cannot keep
+    // exactly would be changed although the patch never touched it.
+    if !numbers_exact(&body) {
+        return problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("the resource holds a number that cannot be kept exactly"),
+        );
+    }
     let patched = match patch.apply(&target, patch_budget(state)) {
         Ok(v) => v,
         Err(r) => return r,
     };
-    let ct = if meta.content_type.contains("json") {
-        meta.content_type.clone()
-    } else {
-        JSON.to_string()
-    };
+    let ct = meta.content_type.clone();
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -6712,6 +6863,127 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Review finding: numbers were parsed into `f64` and written back, so an integer past
+    /// `u64` or a decimal with more digits than an `f64` holds was rewritten by a patch that never
+    /// touched it, and a `test` could match a number it does not equal. Numbers are kept exactly,
+    /// or the patch is refused and nothing changes.
+    #[tokio::test]
+    async fn json_patch_keeps_every_number_exactly() {
+        for (token, exact) in [
+            ("0", true),
+            ("-0", true),
+            ("18446744073709551615", true),
+            ("-9223372036854775808", true),
+            ("0.1", true),
+            ("1.5e300", true),
+            ("1E2", true),
+            ("100000000000000000000", true),
+            ("18446744073709551616", false),
+            ("12345678901234567890123", false),
+            ("0.1000000000000000055511151231257827", false),
+            ("3.14159265358979323846", false),
+            ("1e400", false),
+        ] {
+            assert_eq!(number_exact(token), exact, "{token}");
+        }
+        assert!(numbers_exact(
+            br#"{"a":"12345678901234567890123","b":[1,2.5]}"#
+        ));
+        assert!(!numbers_exact(
+            br#"{"a":"x\"","b":12345678901234567890123}"#
+        ));
+
+        let st = state().await;
+        let big = r#"{"id":12345678901234567890123,"n":1}"#;
+        let uri = post(&st, "big.json", JSON, big, &[]).await;
+        let p = path_of(&uri);
+        let add = r#"[{"op":"add","path":"/x","value":1}]"#;
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], add).await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(st.store.read(&uri).await.unwrap().body, Bytes::from(big));
+        // A patch carrying such a number is refused too, before it is compared or stored.
+        let uri = post(&st, "small.json", JSON, r#"{"n":1}"#, &[]).await;
+        let p = path_of(&uri);
+        for patch in [
+            r#"[{"op":"add","path":"/x","value":12345678901234567890123}]"#,
+            r#"[{"op":"test","path":"/n","value":1.00000000000000000001}]"#,
+        ] {
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], patch).await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{patch}");
+        }
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from(r#"{"n":1}"#)
+        );
+        // Numbers a value keeps exactly patch as before.
+        let patch = r#"[{"op":"add","path":"/x","value":0.1},{"op":"add","path":"/y","value":18446744073709551615}]"#;
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], patch).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let body: Value = serde_json::from_slice(&st.store.read(&uri).await.unwrap().body).unwrap();
+        assert_eq!(
+            body,
+            json!({"n": 1, "x": 0.1, "y": 18446744073709551615u64})
+        );
+    }
+
+    /// Review finding: a JSON Patch on a resource stored as another format rewrote it as JSON
+    /// when its content happened to parse. Only a JSON resource is patched; the format is checked
+    /// (415) before the preconditions (412), and an operation that names a member twice is a 400.
+    #[tokio::test]
+    async fn json_patch_applies_to_json_resources_only() {
+        let st = state().await;
+        let uri = post(&st, "n.txt", "text/plain", "{\"a\":1}", &[]).await;
+        let p = path_of(&uri);
+        let add = r#"[{"op":"add","path":"/b","value":2}]"#;
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], add).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(hdr(&r, "accept-patch"), JSON_PATCH);
+        let stored = st.store.read(&uri).await.unwrap();
+        assert_eq!(stored.body, Bytes::from("{\"a\":1}"));
+        assert_eq!(stored.meta.content_type, "text/plain");
+        // 415 before 412, for the patch format and for the resource's.
+        let stale = ("if-match", "\"stale\"");
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH), stale], add).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let json = post(&st, "j.json", "application/ld+json", "{\"a\":1}", &[]).await;
+        let jp = path_of(&json);
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", "text/plain"), stale],
+            add,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", JSON_PATCH), stale],
+            add,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        // A `+json` type is JSON, and keeps its type.
+        let r = call(&st, "PATCH", jp, &[("content-type", JSON_PATCH)], add).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            st.store.read(&json).await.unwrap().meta.content_type,
+            "application/ld+json"
+        );
+        // A repeated member is refused, whichever of its values would have been kept.
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/a","value":1,"op":"remove"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
