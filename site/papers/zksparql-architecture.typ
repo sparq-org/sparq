@@ -414,10 +414,9 @@ such as a circuit's verification key or a zkVM image ID.
 
 === What the proof shows <linkage>
 
-The public inputs of the statement identify the request, by its request digest, and the answer kind,
-the input kind and the signature mode. They also contain the dataset commitment, the result and, in
-the revealed mode, the signed messages. A proof method may bind them all by one digest. The proof
-shows that:
+The statement's public inputs are the request digest, the answer kind, the input kind and the
+signature mode. They also include the dataset commitment, the result and, in the revealed mode, the
+signed messages. A proof method may bind them all by one digest. The proof shows that:
 
 + the dataset commitment fixes $D$;
 + if the request lists issuer keys, $D$ is built from exactly the data that signatures under those
@@ -605,10 +604,10 @@ inputs and on the zero-knowledge of the proof system. In the revealed mode, a cr
 signature links its presentations, and with an RDFC cryptosuite the verifier can also confirm a
 guessed credential. Whether a quantum adversary can forge a signature depends on the cryptosuite,
 not on the mode. Outside the disclosed mode, the proof system's knowledge soundness must also hold.
-A quantum adversary could forge UltraHonk proofs, even ones made earlier. RISC Zero's succinct
-receipts are STARK-based, and we infer that Shor's algorithm does not break their knowledge
-soundness. Our zkVM proof method accepts only these, not RISC Zero's Groth16 receipts, which are
-cheaper to verify but knowledge-sound only against a classical adversary.
+A quantum adversary could forge UltraHonk proofs, so even proofs made earlier would cease to be
+evidence. RISC Zero's succinct receipts are STARK-based, and we infer that Shor's algorithm does not
+break their knowledge soundness. Our zkVM proof method accepts only these, not RISC Zero's Groth16
+receipts, which are cheaper to verify but knowledge-sound only against a classical adversary.
 
 #[
 #show figure: set block(breakable: false)
@@ -662,9 +661,9 @@ The prototype implements part of the architecture of §#ref(<architecture>, supp
 services encode query requests in binary, not in the specification's JSON, and accept a different
 set of query features from version 1 of the specification. Our Noir circuits publish no dataset
 commitment, so they cannot yet produce the specification's presentations, and no proof method for
-the disclosed mode is built. The revealed mode and our Merkle-based cryptosuite exist only in a
-later build, which we executed without proving, so our cost figures are cycle counts, not proving
-times.
+the disclosed mode is built. In the zkVM, the revealed mode and our Merkle-based cryptosuite exist
+only in a later build, which we executed without proving, so our cost figures are cycle counts, not
+proving times.
 
 Our guest program runs a SPARQL evaluator inside the RISC Zero zkVM and writes the Exact result, the
 dataset commitment and the input kind to the journal. A second build adds signature checks in front
@@ -684,7 +683,7 @@ subqueries and property paths, and rejects `SERVICE`, `NOW` and `RAND`. It also 
 `FROM` and `FROM NAMED`, which version 1 of the specification excludes. Without signature checks,
 the dataset commitment covers a catalog of named graphs and a policy for `DESCRIBE`, so the
 evaluator can answer these queries. With signature checks, the presented credentials form the
-default graph and there are no named graphs, so the prover and the verifier reject all three, before
+default graph and there are no named graphs; the prover and the verifier reject all three, before
 proving and before verification. In both builds, our services reject `DESCRIBE`, a base IRI and a
 `SELECT` query with a top-level `ORDER BY`, so they return `SELECT` results only as multisets.
 // TODO(evidence): bind to the coverage manifest of the evaluator with signature checks
@@ -944,9 +943,9 @@ infrastructure exists. Without it, a deployment can offer only holder-declared i
 
 === Agents and several holders <agents>
 
-A software agent that receives an answer cannot ask a person what acceptance guarantees, but a query
-request records the guarantee where software can check it: the answer kind, the input kind and the
-accepted issuer keys. We have not evaluated agents or agent protocols.
+A query request lets a software agent that receives an answer check what acceptance guarantees: the
+answer kind, the input kind and the accepted issuer keys. We have not evaluated agents or agent
+protocols.
 
 We consider a single holder. Queries over records held by several parties that do not trust one
 another could combine multi-party computation with proofs; we leave them to separate work.
@@ -974,11 +973,11 @@ input that the holder declared or the verifier agreed in advance. When the reque
 keys, one proof can show, under stated assumptions, the answer over exactly the data signed under
 those keys, in a signature mode that trades proving cost against disclosure. A public-input rule
 lets the proof make public what the verifier can compute from its request and the result alone. A
-prototype zkVM evaluator has proved Exact answers with signature checks, including an answer that no
-payment was returned, each over one synthetic credential. Its cycle counts, taken without proving,
-show signature verification as the largest step for the payment question, and fewer cycles when the
-holder reveals the signatures or the issuer uses a Merkle-based cryptosuite. Realistic credentials,
-proving times and an external audit remain to be done.
+prototype SPARQL evaluator running in a zkVM has proved Exact answers with signature checks,
+including an answer that no payment was returned, each over one synthetic credential. Its cycle
+counts, taken without proving, show signature verification as the largest step for the payment
+question, and fewer cycles when the holder reveals the signatures or the issuer uses a Merkle-based
+cryptosuite. Realistic credentials, proving times and an external audit remain to be done.
 
 #pagebreak(weak: true)
 #heading(level: 2, numbering: none)[References]
@@ -1141,9 +1140,10 @@ quantum adversary.
     module learning-with-errors and self-target module short-integer-solution problems on
     lattices @fips204. q-SDH is the q-strong Diffie–Hellman assumption in pairing groups. KZG is
     the polynomial commitment of Kate, Zaverucha and Goldberg, which needs a trusted setup. The
-    algebraic group model assumes that an adversary computes each group element it outputs from
-    group elements it has seen. RISC Zero's security model states the knowledge soundness of its
-    receipts under the Toy Problem conjecture about its STARK protocol @risc0sec.
+    algebraic group model requires an adversary to give, with each group element it outputs,
+    coefficients that express it as a combination of group elements it has received. RISC Zero's
+    security model bases the knowledge soundness of its receipts on the random oracle model and
+    the Toy Problem conjecture @risc0sec.
   ],
 ) <assumptions-table>
 ]
@@ -1503,18 +1503,18 @@ cycle counter after decoding its input and at the end of each phase. It passes t
 host, not to the journal. A phase that runs once per credential is summed over the credentials, and
 the readings include the instrumentation.
 
-The sweep's query cases cover star and chain basic graph patterns of several sizes; the operators
-`OPTIONAL`, `UNION`, `MINUS`, `EXISTS`, `NOT EXISTS`, `BIND`, `VALUES` and a subquery; comparisons
-of IRIs, strings, language-tagged strings, numbers and date-times; and string functions. They also
-cover aggregates, `DISTINCT`, `ORDER BY` with `LIMIT` and `OFFSET`, property paths and each query
-form. Further cases probe features that the evaluator should reject, or patterns that cannot match
-credential data. Run outside the zkVM on the same input, the evaluator decided which cases to admit.
-It rejected `EXISTS` and `NOT EXISTS`, which it does not admit over data with blank nodes such as
-the generated credentials; `SERVICE`; the functions `BNODE`, `NOW` and `RAND`; a custom function; a
-triple term; and a nested `EXISTS`. With four credentials, it also rejected a zero-or-more property
-path whose result exceeded its limits. It admitted `DESCRIBE`, `FROM` and `FROM NAMED`, which the
-prover and verifier reject with signature checks (§#ref(<prototype>, supplement: none)).
-@sweep-table gives the counts and cycles per configuration.
+The sweep's query cases cover star and chain basic graph patterns of several sizes. Some use
+`OPTIONAL`, `UNION`, `MINUS`, `EXISTS`, `NOT EXISTS`, `BIND`, `VALUES` or a subquery; others compare
+IRIs, strings, language-tagged strings, numbers or date-times, or call string functions. The cases
+also cover aggregates, `DISTINCT`, `ORDER BY` with `LIMIT` and `OFFSET`, property paths and each
+query form. Further cases probe features that the evaluator should reject, or patterns that cannot
+match credential data. Run outside the zkVM on the same input, the evaluator decided which cases to
+admit. It rejected `EXISTS` and `NOT EXISTS`, which it does not admit over data with blank nodes
+such as the generated credentials; `SERVICE`; the functions `BNODE`, `NOW` and `RAND`; a custom
+function; a triple term; and a nested `EXISTS`. With four credentials, it also rejected a
+zero-or-more property path whose result exceeded its limits. It admitted `DESCRIBE`, `FROM` and
+`FROM NAMED`, which the prover and verifier reject with signature checks
+(§#ref(<prototype>, supplement: none)). @sweep-table gives the counts and cycles per configuration.
 
 #[
 #show figure: set block(breakable: false)
