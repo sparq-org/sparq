@@ -114,21 +114,8 @@ impl PodStore {
         session: &TrustSession,
         target: &NamedNode,
     ) -> Result<TrustAdmissionOutcome, String> {
-        let admitted = admit(credential, rules, session, target);
-        let mut grants = derive_grants(&admitted, abac_rule_n3_for(self))?;
-        // A dropped view is not rebuilt by trust grants (see `PodStore::grant_view`).
-        match self.grant_view() {
-            Some(view) if !grants.is_empty() => {
-                install_auth_grants(view, &grants);
-                self.reindex_with(crate::ReindexScope::Full);
-            }
-            Some(_) => {}
-            None => grants.clear(),
-        }
-        Ok(TrustAdmissionOutcome {
-            admitted,
-            installed_grants: grants,
-        })
+        let rule = abac_rule_n3_for(self);
+        self.admit_trust_credential_with_rule(credential, rules, session, target, rule)
     }
 
     /// As [`PodStore::admit_trust_credential_and_materialize`] but with an explicit

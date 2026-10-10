@@ -1532,8 +1532,8 @@ impl PodStore {
     /// The auth view a grant source other than the static WAC/ACP rules writes its grants
     /// into: `None` while the view is dropped (see [`PodStore::may_install_grants`]). Every
     /// such source takes the graph from here (or [`PodStore::refresh_bridged`]) rather than
-    /// from `self.graph`, so none can install onto a dropped view; the
-    /// `grant_sources_take_the_guarded_view` test holds every installer call to that.
+    /// from `self.graph`, so none can install onto a dropped view; `dropped_view_tests`
+    /// drives every grant and refresh entry point against a dropped view.
     #[cfg_attr(
         not(any(feature = "odrl-bridge", feature = "trust-graph")),
         allow(dead_code)
@@ -1926,6 +1926,9 @@ impl PodStore {
 }
 
 #[cfg(test)]
+mod dropped_view_tests;
+
+#[cfg(test)]
 mod scoped_cache_tests {
     //! [OPUS-4.8] sq-b7k7u (issue #1571) — WHITE-BOX proof that a scoped ACL write invalidates
     //! ONLY the written pod's session-cache slice, keeping every other pod's slice warm, and
@@ -1976,109 +1979,6 @@ mod scoped_cache_tests {
         store.materialize_wac().expect("materializes");
         assert!(store.may_install_grants());
         assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
-    }
-
-    /// Review finding: the batch bridge installed grants onto a dropped view, so access
-    /// resumed before any static materialization succeeded.
-    #[cfg(feature = "odrl-bridge")]
-    #[test]
-    fn a_batch_bridge_does_not_install_onto_a_dropped_view() {
-        let policy = sparq_policy::parse_policy_str(
-            r#"
-@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-<urn:pol/read> a odrl:Set ; odrl:permission [
-    odrl:action odrl:read ;
-    odrl:target <https://a.ex/doc> ;
-    odrl:assignee <https://alice.ex/card#me> ] .
-"#,
-            "turtle",
-        )
-        .expect("parses");
-        let request = sparq_policy::Request::new("http://www.w3.org/ns/odrl/2/read")
-            .on("https://a.ex/doc")
-            .by(ALICE);
-        // The same batch grants on a live view.
-        let mut live = two_pod_store();
-        assert!(live.materialize_odrl_policy_for_each(&policy, std::slice::from_ref(&request))[0].granted);
-
-        let mut store = two_pod_store();
-        let alice = sess(ALICE);
-        store.drop_auth_view();
-        let outcomes = store.materialize_odrl_policy_for_each(&policy, &[request]);
-        assert_eq!(outcomes.len(), 1);
-        assert!(!outcomes[0].granted);
-        assert!(store.accessible(&alice, Mode::Read).is_empty(), "the batch bridge resurrected access");
-        assert!(!store.may_install_grants());
-    }
-
-    /// Every call that installs grants into the auth view (the ODRL bridge's materializers,
-    /// its ledger refresh, the trust graph's installers) takes the graph from
-    /// [`PodStore::grant_view`] / [`PodStore::refresh_bridged`], never `&mut self.graph`
-    /// directly, so none can install onto a dropped view. A new installer call that bypasses
-    /// the guard fails here.
-    #[test]
-    fn grant_sources_take_the_guarded_view() {
-        // Name prefixes of the installer calls, one per family the store uses.
-        const INSTALLERS: &[&str] = &[
-            "materialize_permission",
-            "materialize_prohibition",
-            "materialize_policy",
-            "bridge_ledger.refresh",
-            "install_auth_grants",
-            "install_conditional_grant",
-        ];
-        let mut calls = vec![0usize; INSTALLERS.len()];
-        for (file, src) in [("lib.rs", include_str!("lib.rs")), ("trust_wire.rs", include_str!("trust_wire.rs"))] {
-            // Production code only: the test modules call installers on bare graphs.
-            let prod = src.split("#[cfg(test)]\nmod ").next().expect("non-empty");
-            for (family, name) in INSTALLERS.iter().enumerate() {
-                for (at, _) in prod.match_indices(name) {
-                    let line = &prod[prod[..at].rfind('\n').map_or(0, |i| i + 1)..at];
-                    if line.trim_start().starts_with("//") || line.trim_end().ends_with("fn") {
-                        continue; // a doc mention or a definition, not a call
-                    }
-                    // The rest of the callee's name, then its argument list.
-                    let rest = &prod[at + name.len()..];
-                    let ident = rest.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(rest.len());
-                    let Some(args) = rest[ident..].trim_start().strip_prefix('(') else {
-                        continue; // a path or field mention, not a call
-                    };
-                    let first_arg: String = args
-                        .chars()
-                        .take_while(|&c| c != ',' && c != ')')
-                        .filter(|c| !c.is_whitespace())
-                        .collect();
-                    calls[family] += 1;
-                    assert!(
-                        !first_arg.contains("self.graph"),
-                        "{file}: `{name}…({first_arg}, …)` installs grants without the dropped-view guard"
-                    );
-                }
-            }
-        }
-        for (name, n) in INSTALLERS.iter().zip(&calls) {
-            assert!(*n > 0, "the scan found no `{name}` call: its pattern is stale");
-        }
-        // Every bridge function that writes a graph and is called from the store is one of
-        // the scanned installers.
-        let store = include_str!("lib.rs").split("#[cfg(test)]\nmod ").next().expect("non-empty");
-        let bridge = include_str!("odrl_bridge.rs");
-        for (at, _) in bridge.match_indices("pub fn ").chain(bridge.match_indices("pub(crate) fn ")) {
-            let sig = &bridge[at..];
-            let sig = &sig[..sig.find('{').unwrap_or(sig.len())];
-            if !sig.contains("graph: &mut Graph") {
-                continue;
-            }
-            let name = sig.split("fn ").nth(1).and_then(|r| r.split('(').next()).unwrap_or_default();
-            if !store.contains(&format!("{name}(")) {
-                continue;
-            }
-            assert!(
-                INSTALLERS.iter().any(|p| name.contains(p.trim_end_matches('('))
-                    || p.trim_end_matches('(').ends_with(name)),
-                "odrl_bridge::{name} writes the auth view but is not among the scanned installers"
-            );
-        }
     }
 
     fn key_for(s: &Session) -> SessionKey {
