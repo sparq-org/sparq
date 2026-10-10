@@ -78,7 +78,7 @@
     "@rdfjs/types": "^2.0.1",
     "@types/n3": "^1.26.4",
     "@types/node": "^26.6.4",
-    "n3": "^2.13.8",
+    "n3": "^2.13.9",
     "typescript": "^6.0.3"
   },
   "dependencies": {
