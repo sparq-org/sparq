@@ -20,7 +20,7 @@
 
 #import "_lib/bench.typ": headline, ev, provenance, authors, anon, paper_heading_numbering
 
-#set document(title: "Answers Instead of Documents: Exact Private SPARQL Answers over Verifiable Credentials")
+#set document(title: "Answers Instead of Documents: Private SPARQL Answers over Verifiable Credentials")
 #set text(size: 11pt)
 #set par(justify: true)
 // Plain page numbers in the PDF footer (page set rules have no effect in HTML export).
@@ -90,7 +90,7 @@
   ]
   #v(0.2em)
   #text(size: 12pt)[
-    Exact Private SPARQL Answers over Verifiable Credentials
+    Private SPARQL Answers over Verifiable Credentials
   ]
 ]
 #authors()
@@ -103,21 +103,24 @@
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
 
 A verifier often needs the answer to a question about a person's credentials, not the credentials
-themselves. zkRDF and an earlier interface for zero-knowledge SPARQL over credentials prove that
-each returned solution follows from signed data, but neither proves that something is absent, such
-as a returned payment. We define Supported answers, in which every returned solution is a solution,
-and Exact answers, the complete result over a committed input dataset. As an Exact answer is only as
-complete as its input, the verifier's query request also states who fixed the input: the holder, or
-the verifier in advance. When the request lists issuer keys, one proof in our architecture shows,
-under stated assumptions, that the answer is correct over exactly the data signed under those keys.
-Three signature modes trade proving cost against what the verifier learns, and a public-input rule
-lets a proof make public any value that the verifier can compute from its request and the result
-alone. We also propose Merkle-based cryptosuites designed for proving. A SPARQL evaluator running in
-a zero-knowledge virtual machine has produced verified proofs of Exact answers with issuer
-signatures checked inside the proof, including an answer that no payment was returned, each over one
-synthetic credential. Cycle counts taken without proving show signature verification as the largest
-step inside the proof for the payment question, and fewer cycles when the holder reveals the
-signatures or the issuer uses a Merkle-based cryptosuite. Proving times are pending.
+themselves. zkRDF proves that each returned SPARQL solution follows from signed data but cannot
+prove absence, and an earlier zkVM prototype answered `SELECT` queries over signed credentials
+without stating its input. We show how a holder can prove, in one zero-knowledge proof, that an
+answer is a result SPARQL 1.2 permits over a stated input dataset, with the issuers' signatures
+checked inside the proof. Such answers include closed-world answers, such as a false `ASK` or a
+count, which read the input as complete. Answers to monotone queries stay true for any larger
+input, but a closed-world answer is only as meaningful as the verifier's reason to believe that
+the input is complete. The query request therefore states who fixed the input: the holder, or the
+verifier, by agreeing a dataset commitment in advance. It also names the trusted issuers, the
+accepted cryptosuites and a signature mode, which trades proving cost against disclosure. We
+propose Merkle-based cryptosuites designed for proving, and a rule for making public what the
+verifier can compute from its request and the result. A SPARQL evaluator running in the RISC Zero
+zkVM has produced verified proofs of `SELECT`, true and false `ASK` and `CONSTRUCT` answers with
+signatures checked inside the proof, including an answer that no payment was returned, each over
+one synthetic credential. Executed without proving, a later build evaluated queries with
+`OPTIONAL`, `MINUS`, aggregates, subqueries and property paths over up to four credentials. Cycle
+counts show signature verification as the largest step for the payment question, and fewer cycles
+with revealed signatures or a Merkle-based cryptosuite. Proving times are pending.
 
 == Introduction <intro>
 
@@ -128,7 +131,7 @@ verifiable credential @vcdm2, the lender could check that the bank signed it, bu
 would still disclose everything in it.
 
 A zero-knowledge proof lets the applicant, as holder, return only the answer, with a proof that it
-is correct. The lender writes its question as a SPARQL query @sparql11, our running example:
+is correct. The lender writes its question as a SPARQL query @sparql12, our running example:
 
 ```sparql
 PREFIX ex: <https://bank.example/vocab#>
@@ -136,14 +139,21 @@ ASK { ?payment a ex:Payment ; ex:paymentStatus ex:Returned . }
 ```
 
 zkRDF @braun26 proves that each returned solution follows from signed data, disclosing only the
-terms that the solution needs. An answer of `false`, however, has no solution to show, and zkRDF
-cannot prove absence (§#ref(<bg-zkrdf>, supplement: none)).
+terms that the solution needs. An answer of `false`, however, has no solution to show, and its
+authors state that zkRDF cannot prove absence. An earlier prototype by Wright @wright25dc evaluated
+SPARQL `SELECT` queries in a zkVM and checked the credentials' signatures inside the proof, but its
+results do not say over which credentials they hold, and it had no `ASK`
+(§#ref(<bg-zkrdf>, supplement: none)).
 
-To prove `false`, the holder must prove that the result is complete over some input. Because the
-holder chooses which credentials to include, `false` means only "no returned payment in the
-credentials I included", unless the verifier fixed the input in advance. No stronger proof removes
-this limit; the request can only state it, so that the verifier knows what an accepted answer
-guarantees.
+This paper shows how a holder can prove general SPARQL answers over its credentials: results that
+SPARQL 1.2 permits for a `SELECT`, `ASK` or `CONSTRUCT` query over a stated input dataset,
+closed-world answers such as `false` included, with the issuers' signatures checked inside the
+proof.
+// TODO(citation): status of the zksparql.org preprint (author to confirm)
+A closed-world answer is only as useful as its input is complete. Because the holder chooses which
+credentials to include, `false` means only "no returned payment in the credentials I included",
+unless the verifier fixed the input in advance. No stronger proof removes this limit; the request
+can only state who fixed the input, so that the verifier knows what an accepted answer guarantees.
 
 The proof must also show that the queried data is the data the issuers signed. Checking signatures
 inside the proof is costly: for the payment question over one credential, signature verification was
@@ -151,27 +161,25 @@ the largest step inside the proof in our cycle counts (§#ref(<cost>, supplement
 can instead reveal the signatures for the verifier to check. This removes their verification from
 the proof, but lets the verifier link presentations of the same credential and, for the standard RDF
 cryptosuites, confirm a guess about its content. The request therefore lists the signature modes the
-verifier accepts, trading proving cost against disclosure.
+verifier accepts, trading proving cost against disclosure. Our contributions are:
 
-This paper centres on Exact answers over explicitly scoped, authenticated RDF input. The request
-states who chose the input, a dataset commitment fixes it and, if the request lists issuer keys, the
-presentation shows that every credential in it is signed under one of them. Our contributions are:
-
-- *Answer kinds and input kinds* (§#ref(<meaning>, supplement: none)): Exact answers, over an input
-  that the holder declared or the verifier agreed in advance, and Supported answers, for monotone
-  queries only.
-- *An architecture* (§#ref(<architecture>, supplement: none)) in which, when the request lists
-  issuer keys, one proof shows the answer to the verifier's query request over exactly the data
-  signed under those keys, under the assumptions of Appendix #ref(<app-relation>, supplement: none).
+- *Answers and their reading* (§#ref(<meaning>, supplement: none)): an answer is a result SPARQL
+  1.2 permits for the query over the input dataset. Answers to monotone queries keep the open-world
+  reading; closed-world answers depend on who fixed the input, which the request states.
+- *An architecture* (§#ref(<architecture>, supplement: none)) in which one proof shows such an
+  answer, bound to the verifier's query request, with every credential's signature checked against
+  the request's trusted issuers, under the assumptions of Appendix
+  #ref(<app-relation>, supplement: none).
 - *Signature modes and Merkle-based cryptosuites* (§#ref(<modes>, supplement: none),
-  §#ref(<cryptosuites>, supplement: none)), which set what authenticating the input costs and
-  discloses, with a comparison of their security and disclosure.
+  §#ref(<cryptosuites>, supplement: none)), which the request selects and which set what
+  authenticating the input costs and discloses, with a comparison of their security and disclosure.
 - *A public-input rule* (§#ref(<minimize>, supplement: none)): a proof method may make public any
   value that the verifier can compute from its request and the result alone.
 - *An evaluation* (§#ref(<evidence>, supplement: none)) of a SPARQL evaluator running in the RISC
-  Zero zkVM @risc0: verified proofs of Exact answers with signature checks, including the payment
-  question, each over one synthetic credential; and cycle counts over one and four credentials
-  across signature modes, cryptosuites and query types. Proving times are pending.
+  Zero zkVM @risc0: verified proofs, with signature checks, of `SELECT`, true and false `ASK` and
+  `CONSTRUCT` answers, each over one synthetic credential; executions without proving of one query
+  case per feature, with the unsupported features listed (§#ref(<expressivity>, supplement: none));
+  and cycle counts across signature modes and cryptosuites. Proving times are pending.
 
 == Background <background>
 
@@ -188,20 +196,21 @@ assumption: an absent triple is not thereby false.
 === Credentials and Data Integrity proofs <bg-vc>
 
 A verifiable credential @vcdm2 is a set of claims that an issuer makes about a subject, secured so
-that its authorship can be verified; a holder presents it to a verifier. Its Data Integrity proof
-@vcdi is, in this paper, a signature with its proof configuration: the proof without its proof value
-(`proofValue`), which holds the signature. A cryptosuite specifies how to create and verify the
-proof, and the proof names its verification method, here a public key, by an identifier
-(`verificationMethod`). The cryptosuite `eddsa-rdfc-2022` @vcdieddsa canonicalises the credential
-and the proof configuration with RDF Dataset Canonicalization (RDFC-1.0) @rdfc10. Ed25519 then signs
-the SHA-256 hash of the canonical proof configuration followed by that of the canonical document. A
-valid signature shows only that someone with the signing key signed these bytes. The verifier must
-still check that the issuer authorised the key, through a verification relationship in the issuer's
-controlled identifier document @vcdi. It may also check credential status (revocation or
-suspension), the validity period, and holder binding: that the presenter is the subject or controls
-a key bound to the credential. None of these checks makes the claims true. Selective-disclosure
-cryptosuites such as `bbs-2023` @vcdibbs let the holder derive a proof that discloses only selected
-claims.
+that its authorship can be verified. A holder presents it to a verifier in a verifiable
+presentation, which may carry data derived from credentials, such as a zero-knowledge proof, instead
+of the credentials. A credential's Data Integrity proof @vcdi is, in this paper, a signature with its
+proof configuration: the proof without its proof value (`proofValue`), which holds the signature. A
+cryptosuite specifies how to create and verify the proof, and the proof names its verification
+method, here a public key, by an identifier (`verificationMethod`). The cryptosuite
+`eddsa-rdfc-2022` @vcdieddsa canonicalises the credential and the proof configuration with RDF
+Dataset Canonicalization (RDFC-1.0) @rdfc10. Ed25519 then signs the SHA-256 hash of the canonical
+proof configuration followed by that of the canonical document. A valid signature shows only that
+someone with the signing key signed these bytes. The verifier must still check that the issuer
+authorised the key, through a verification relationship in the issuer's controlled identifier
+document @vcdi. It may also check credential status (revocation or suspension), the validity
+period, and holder binding: that the presenter is the subject or controls a key bound to the
+credential. None of these checks makes the claims true. Selective-disclosure cryptosuites such as
+`bbs-2023` @vcdibbs let the holder derive a proof that discloses only selected claims.
 
 === Zero-knowledge proofs and zkVMs <bg-zk>
 
@@ -217,18 +226,20 @@ image ID and exit status, with a seal attesting to them; development mode produc
 zkVM can therefore prove a general SPARQL evaluator without a circuit for each query, but it proves
 only that the program ran over the bytes it received, not who signed them.
 
-=== Selective disclosure and its limits <bg-zkrdf>
+=== Proofs of SPARQL answers over credentials <bg-zkrdf>
 
 zkRDF @braun26, building on RDF-based semantics for selective disclosure @braunkaefer25, proves the
 soundness of SPARQL results: every returned solution is a solution over signed data. It discloses
 query constants and projected terms, hides the rest, and proves signatures, equalities and numeric
-bounds with BBS and range proofs. Its authors state that it cannot prove non-existence, so it
-supports neither `MINUS` nor a false `ASK`. An earlier interface for zero-knowledge SPARQL over
-credentials made the same choice deliberately: it certified each returned result as following from
-data signed under listed keys, and required no proof of an empty result.
-// TODO(citation): the earlier results-only interface is the unpublished ISWC 2025 manuscript;
-// decide whether to cite it anonymously or leave it uncited (language guide, open question 1).
-Neither states a complete answer over an input that a named party fixed.
+bounds with BBS+ signatures and range proofs. Its fragment includes basic graph patterns, joins,
+`UNION`, `OPTIONAL`, `VALUES`, integer `FILTER`s, `GROUP BY`, `DISTINCT`, `LIMIT` and `CONSTRUCT`,
+and `ASK` only when `true` (Table 1 of @braun26). Its authors state that it cannot prove
+non-existence, and so neither `MINUS` nor a false `ASK` (§5.1 of @braun26). Wright @wright25dc
+evaluated SPARQL 1.1 `SELECT` queries over Ed25519-signed credentials in the RISC Zero zkVM, whose
+guest program also verified the credentials (§5 of @wright25dc; §3 of @braun26). A result does not
+state the input over which it holds, and `ASK` and `CONSTRUCT` were left to future work (§7 of
+@wright25dc). zkRDF thus proves no answer that depends on absence, and the zkVM prototype's answers
+do not say which input they cover.
 
 == What an accepted answer means <meaning>
 
@@ -690,42 +701,27 @@ receipts, which are cheaper to verify but knowledge-sound only against a classic
 === Prototype and method <prototype>
 
 The prototype implements part of the architecture of §#ref(<architecture>, supplement: none). Our
-services encode query requests in binary, not as the specification's JSON-LD, and accept a different
-set of query features from version 1 of the specification. Our Noir circuits publish no dataset
-commitment, so they cannot yet produce the specification's presentations, and no proof method for
-the disclosed mode is built. In the zkVM, the revealed mode and our Merkle-based cryptosuite exist
-only in a later build, which we executed without proving, so our cost figures are cycle counts, not
-proving times.
+services encode query requests in binary, not as the specification's JSON-LD, and compute the
+request digest over that encoding. Our Noir circuits publish no dataset commitment, so they cannot
+yet produce the specification's presentations, and we have not evaluated a proof method for the
+disclosed mode. In the zkVM, the revealed mode and our Merkle-based cryptosuite exist only in a
+later build, which we executed without proving, so our cost figures are cycle counts, not proving
+times.
 
 Our guest program runs a SPARQL evaluator inside the RISC Zero zkVM and writes the result, the
-dataset commitment and whether the input was agreed to the journal. A second build adds signature checks in front
-of the same evaluator: it verifies each credential's `eddsa-rdfc-2022` signature in the hidden mode,
-checks the key against the request's trusted issuers, and evaluates the query over the signed canonical
-N-Quads. Our holder and verifier services wrap both builds with query requests and the checks of
-§#ref(<validation>, supplement: none), and the journal binds the stored request through a digest
-(§#ref(<capabilities>, supplement: none)). We have not confirmed that the verifier service performs
-its checks in exactly the order of §#ref(<validation>, supplement: none). Separately, two Noir
-circuits prove, for `SELECT DISTINCT` queries over one basic graph pattern, that each returned row
-is a solution, not that none is missing. In the baseline circuit the matched triple is part of the
-witness, and in the public-triple circuit a public input. Both check Schnorr signatures over their own commitment format, not Data Integrity
+dataset commitment and whether the input was agreed to the journal. A second build adds signature
+checks in front of the same evaluator: it verifies each credential's `eddsa-rdfc-2022` signature in
+the hidden mode, checks that the key belongs to a trusted issuer, and evaluates the query over the
+signed canonical N-Quads. Our holder and verifier services wrap both builds with query requests and
+the checks of §#ref(<validation>, supplement: none), and the journal binds the stored request
+through a digest (§#ref(<capabilities>, supplement: none)). We have not confirmed that the verifier
+service performs its checks in exactly the order of §#ref(<validation>, supplement: none).
+Separately, two Noir circuits prove, for `SELECT DISTINCT` queries over one basic graph pattern,
+that each returned row is a solution, not that none is missing. Such a proof gives an answer only
+where the returned rows form a permitted result, as when they reach the query's `LIMIT`. In the
+baseline circuit the matched triple is part of the witness, and in the public-triple circuit a
+public input. Both check Schnorr signatures over their own commitment format, not Data Integrity
 proofs, and check credential status against a snapshot that the verifier accepted.
-
-The evaluator admits most SPARQL 1.1 query features, including `OPTIONAL`, `MINUS`, aggregates,
-subqueries and property paths, and rejects `SERVICE`, `NOW` and `RAND`. It also admits `DESCRIBE`,
-`FROM` and `FROM NAMED`, which version 1 of the specification excludes. Without signature checks,
-the dataset commitment covers a catalog of named graphs and a policy for `DESCRIBE`, so the
-evaluator can answer these queries. With signature checks, the presented credentials form the
-default graph and there are no named graphs; the prover and the verifier reject all three, before
-proving and before verification. In both builds, our services reject `DESCRIBE`, a base IRI and a
-`SELECT` query with a top-level `ORDER BY`, so they return `SELECT` results only as multisets.
-// TODO(evidence): bind to the coverage manifest of the evaluator with signature checks
-// (zk/sparql-evaluator/coverage-authenticated-rdf.json, draft sparq-org/sparq#6791) once frozen as
-// an evidence record. The executor sweep (paper-executor-sweep-*.json) already records, for its
-// own query cases, the evaluator's admission and the host query profile. Sources for the rest of
-// this paragraph: the DESCRIBE/FROM answer from the ZK code landing thread (10 October) and the
-// services' shared admission check, which rejects a base IRI, DESCRIBE and a SELECT whose result
-// keeps the order of a top-level ORDER BY (zk/sparql-evaluator/host/src/vcq.rs, checked_admission;
-// companion specification §11).
 
 We used only synthetic credentials signed with test keys. We generated all receipts with development
 mode disabled and verified them against the expected guest image ID. For experiments without † in
@@ -782,6 +778,54 @@ and the software behind them (§#ref(<repro>, supplement: none)).
   ],
 ) <evidence-table>
 ]
+
+=== Which queries the evaluator answers <expressivity>
+
+Our evaluator implements SPARQL 1.1 @sparql11, without the additions of SPARQL 1.2 such as triple
+terms. We separate the features that our proofs cover from those that the guest program executed
+without proving.
+
+_Proved._ With signature checks, the evaluator produced verified proofs of `SELECT` results that
+keep duplicate rows, of true and false `ASK`, and of `CONSTRUCT`, each over one credential
+(§#ref(<proved>, supplement: none)). These queries are basic graph patterns, and the false `ASK` is
+a closed-world answer. Without signature checks, our proofs also cover `UNION`, `VALUES`,
+`OPTIONAL`, `MINUS`, `EXISTS`, `NOT EXISTS`, a counting subquery, property paths, `ORDER BY` with
+`LIMIT`, `FROM NAMED` and `DESCRIBE` (§#ref(<supp-exact>, supplement: none)).
+
+_Executed without proving._ With signature checks, we ran a sweep of
+#headline("zkexec.sweep_cases") query cases, one per feature, in each configuration of
+§#ref(<cost>, supplement: none). Each case first ran in the evaluator outside the zkVM, which
+decided whether to admit it, and then in the guest program. With one credential, the evaluator
+admitted #headline("zkexec.sweep_rdfc_hidden_n1_s32_admitted") cases, and the guest program
+completed all of them. They cover basic graph patterns of several sizes and shapes; `OPTIONAL`,
+`UNION`, `MINUS`, `BIND`, `VALUES` and a subquery; comparisons of IRIs, strings, language-tagged
+strings, numbers and date-times; `STRSTARTS`, `CONTAINS`, `REGEX` and `LANGMATCHES`; `COUNT`,
+`SUM`, `MIN` and `MAX` with `GROUP BY` and `HAVING`; `DISTINCT`; `ORDER BY` with `LIMIT` and
+`OFFSET`; sequence, alternative, inverse, one-or-more and zero-or-more property paths; and `SELECT`,
+true and false `ASK`, and `CONSTRUCT`.
+// [OPUS-5.5] Case list: the sweep audit's `cases`
+// (research/zk-paper-evidence/paper-executor-sweep-audit.json). The admitted and completed counts
+// are equal in every one-credential configuration; asserts beside the sweep table (supplementary
+// material) keep these two sentences true if the evidence changes.
+
+_Not supported._ The evaluator rejected `SERVICE`; the functions `NOW`, `RAND` and `BNODE`, whose
+values the query and the data do not fix; a custom function; a triple term; a nested `EXISTS`; and
+`EXISTS` and `NOT EXISTS` over any credential with a blank node, as each generated credential has.
+With four credentials, it also rejected a zero-or-more property path whose result exceeded its
+limits. The guest program rejected every case that the evaluator rejected, except in some runs over
+four credentials, which reached the session limit first. The evaluator admitted `DESCRIBE`, `FROM`
+and `FROM NAMED`, but with signature checks the presented credentials form the default graph, and
+our prover and verifier reject these three before proving and before verification. Our services
+also reject a `SELECT` query with a top-level `ORDER BY`, so they return `SELECT` results only as
+multisets. The build with signature checks accepts at most four credentials, each of at most 128
+triples, and 256 triples in total.
+// Sources: the sweep audit's rejected_runs, one rejection_cause per rejected run (guest_abort or
+// session_limit), and /reruns (zkexec.sweep_reruns); the DESCRIBE/FROM answer from the ZK code
+// landing thread (10 October 2026); the services' shared admission check, which rejects DESCRIBE
+// and a SELECT whose result keeps the order of a top-level ORDER BY
+// (zk/sparql-evaluator/host/src/vcq.rs, checked_admission); and the capacity constants
+// MAX_CREDENTIALS, MAX_DOCUMENT_QUADS and MAX_TOTAL_QUADS in
+// zk/sparql-evaluator/model/src/authenticated_rdf.rs at the sweep's source commit.
 
 === Proved answers <proved>
 
@@ -912,19 +956,17 @@ query took fewer cycles than processing the document or verifying the signature.
 ) <phase-table>
 ]
 
-A sweep of #headline("zkexec.sweep_cases") query cases, one per feature, ran in the same
-configurations over generated credentials of #headline("zkexec.sweep_statements_small") and
+The sweep of §#ref(<expressivity>, supplement: none) ran in the same configurations over generated
+credentials of #headline("zkexec.sweep_statements_small") and
 #headline("zkexec.sweep_statements_large") triples each (§#ref(<supp-cost>, supplement: none)). Our
 prover stops an execution that reaches a session limit of #mcycles("zkexec.sweep_session_limit")
 million cycles, and then produces no proof. With `eddsa-rdfc-2022` in the hidden mode, four
 credentials of #headline("zkexec.sweep_statements_large") triples exceeded this limit in every case
 that the evaluator admitted. In every other configuration, including the revealed mode and the
-Merkle-based cryptosuite over the same credentials, every admitted case completed within it. The
-guest program also rejected every case that the evaluator rejected outside the zkVM, except in some
-runs over four credentials, which reached the session limit first.
+Merkle-based cryptosuite over the same credentials, every admitted case completed within it.
 // Source: paper-executor-sweep-audit.json /configurations/*/rejected_runs, one rejection_cause per
 // rejected run (guest_abort or session_limit), and /reruns (zkexec.sweep_reruns). The audit records
-// no count per cause, so neither sentence on the rejected cases gives one.
+// no count per cause, so the sentence on rejected cases in the expressivity subsection gives none.
 
 #todo-results[Proving time, memory and receipt size for each configuration and query, and the
 issuer, holder and verifier costs: signing and tree construction, and verification time split into
@@ -937,37 +979,43 @@ and TEE attestation.]
 
 == Related work <related>
 
-_Selective disclosure over RDF._ Braun and Käfer define RDF-based semantics for selective disclosure
-and zero-knowledge proofs on credentials @braunkaefer25, on which zkRDF builds
-(§#ref(<bg-zkrdf>, supplement: none)), and Yamamoto, Suga and Sako formalise linked-data credentials
-for selective disclosure @yamamoto22. We add closed-world answers, a statement of who fixed the
-input, and signature modes, and examine what disclosure saves when the signature does not support
-selective disclosure.
+_Zero-knowledge SPARQL over credentials._ zk-SPARQL @yamamotozksparql answers `SELECT` and `ASK`
+queries with one basic graph pattern over credentials signed with BBS+, with `FILTER`s only on
+disclosed variables. zkRDF and Wright's zkVM prototype are described in
+§#ref(<bg-zkrdf>, supplement: none). Each of these fixes one signature scheme, BBS+ or Ed25519,
+whereas our requests choose among cryptosuites and signature modes. Wright's prototype took about
+7.5 minutes for `SELECT *` over one credential of 23 triples (§5 of @wright25dc), and zkRDF reports
+proving three orders of magnitude faster on three small queries, under BBS+ rather than Ed25519
+signatures (§5.2 of @braun26); our proving times are pending. We add closed-world answers over a
+stated input of issuer-signed credentials, and request terms that say who fixed that input.
+// TODO(citation): status of the zksparql.org preprint (author to confirm)
+
+_Querying credentials without zero knowledge._ De Mulder et al. express a SPARQL subset in
+OpenID4VP, which the wallet maps to claim selections; the holder returns an ordinary verifiable
+presentation, and the verifier checks the signatures and evaluates the query itself (§2 of
+@demulder25), as in our disclosed mode. The Digital Credentials Query Language (DCQL) of OpenID4VP
+selects claims by path, with optional exact value matching (§6 and §7 of @openid4vp); AnonCreds
+@anoncreds adds integer inequalities; and SD-JWT @sdjwt and the Data Integrity BBS cryptosuites
+@vcdibbs disclose claims or statements without predicates. CL signatures @cl01, zk-creds @zkcreds
+and Crescent @crescent let a holder prove statements about signed attributes. A query request could
+travel in OpenID4VP as a new credential format, but the protocol has no step in which a verifier
+agrees an input in advance.
 
 _Verifiable query processing._ Query authentication distinguishes correctness, meaning that every
 returned record is in the owner's database unmodified, from completeness, meaning that no answer is
-omitted @li06. In these terms an answer is correct and complete over $D$, and zkRDF proves
-correctness. IntegriDB @integridb, vSQL @vsql and ZKSQL @zksql prove SQL results, ZKSQL in
-zero knowledge with explicit leakage of schema and cardinalities; ZKGraph proves graph queries
-@zkgraph25; VeriDKG verifies that SPARQL results over a decentralised knowledge graph are complete
-@veridkg23. Their completeness is over a published database, the counterpart of our agreed input,
-not over a holder's private credentials. Wright @wright25dc evaluated SPARQL over
-Ed25519-signed credentials in RISC Zero; zkRDF later reduced the proving cost substantially with a
-data-centric design under a different signature scheme @braun26. Our evaluator returns to a zkVM to
-support non-monotone queries, and inherits the cost question.
-
-_Credentials and presentation protocols._ CL signatures @cl01, BBS @bbs, zk-creds @zkcreds and
-Crescent @crescent let a holder prove statements about signed attributes, and SD-JWT @sdjwt lets a
-holder disclose selected claims of a signed JSON token. OpenID for Verifiable Presentations
-@openid4vp requests credentials with queries in its Digital Credentials Query Language (DCQL), which
-select credentials and the claims to disclose. A query request could travel in it as a new
-credential format, but the protocol has no step in which a verifier agrees an input in advance.
+omitted @li06. In these terms our answers are correct and complete over $D$, and zkRDF proves
+correctness. Complete answers over a committed database exist for SQL, in IntegriDB @integridb, vSQL
+@vsql and, in zero knowledge, ZKSQL @zksql, whose proofs are interactive (§2.1 of @zksql). VeriDKG
+proves SPARQL results over a decentralised knowledge graph sound, complete and fresh, without
+privacy (Theorem 7.1 of @veridkg23), and ZKGraph proves graph queries @zkgraph25. In each, the data
+owner commits to the whole database, the counterpart of our agreed input. Our input is a holder's
+credentials from independent issuers, authenticated inside the proof.
 
 _Other proof methods._ A proof method need not produce a zero-knowledge proof. The companion
-specification @zksparqlspec proposes attestation by a TEE that a measured program evaluated the
-query and checked the signatures. It also proposes QuickSilver @quicksilver21, a designated-verifier
-proof that is interactive and that only the verifier taking part can check. We have built neither as
-a proof method.
+specification @zksparqlspec defines one in which a TEE attests that a measured program evaluated the
+query and checked the signatures. An interactive designated-verifier proof such as QuickSilver
+@quicksilver21, which only the verifier taking part can check, is another option. We have evaluated
+neither.
 // No performance comparison with QuickSilver is reported: no evidence record exists for it.
 
 == Discussion and limitations <discussion>
@@ -976,20 +1024,19 @@ a proof method.
 
 Reading a closed-world answer over an agreed input as evidence about all the relevant records rests
 on an assumption we do not discharge: that a party the verifier trusts fixed an input that covers
-them.
-For the payment question, the bank could sign a dataset commitment that covers the credentials it
-issued to the applicant for a period. Alternatively, the verifier could agree a commitment in an
+them. For the payment question, the bank could sign a dataset commitment that covers the credentials
+it issued to the applicant for a period. Alternatively, the verifier could agree a commitment in an
 earlier exchange in which it learned which credentials the dataset holds. We do not claim that such
-infrastructure exists. Without it, a deployment can offer only inputs chosen by the holder.
+infrastructure exists. Without it, a deployment can offer only inputs chosen by the holder, over
+which answers to monotone queries keep their meaning and closed-world answers cover only the
+included credentials.
 
 === Agents and several holders <agents>
 
-A query request lets a software agent that receives an answer check what acceptance guarantees: the
-query, whether the input was agreed, and the trusted issuers. We have not evaluated agents or agent
-protocols.
-
-We consider a single holder. Queries over records held by several parties that do not trust one
-another could combine multi-party computation with proofs; we leave them to separate work.
+A software agent that receives an answer can read from the request what acceptance guarantees: the
+query, whether the input was agreed, and the trusted issuers. We have not evaluated agents. We
+consider a single holder; queries over records that several parties hold without trusting one
+another could combine multi-party computation with proofs, which we leave to separate work.
 
 === Limitations <limitations>
 
@@ -1001,24 +1048,27 @@ prototype has not undergone an external security audit. Our arguments for what a
 support some of these assumptions but do not establish them. Negative tests show that specific
 checks exist and fire; they cannot rule out substitutions we did not try. The evaluator is covered
 by tests, not by a conformance suite. Every zkVM proof with signature checks covers one synthetic
-credential. Our cycle counts, taken without proving, cover at most four synthetic credentials of
-#headline("zkexec.sweep_statements_large") triples each, so we have no evidence yet about realistic
-credentials, larger inputs or proving times.
+credential and a basic graph pattern. Our cycle counts, taken without proving, cover at most four
+synthetic credentials of #headline("zkexec.sweep_statements_large") triples each, so we have no
+evidence yet about realistic credentials, larger inputs or proving times.
 
 == Conclusion <conclusion>
 
-A holder can answer a verifier's SPARQL query over credentials without handing them over, but an
-accepted answer is useful only if the verifier knows what it guarantees. Answers to monotone
-queries stay true for any larger input; closed-world answers are complete over an input that the
-holder chose or the verifier agreed in advance. When the request lists issuer
-keys, one proof can show, under stated assumptions, the answer over exactly the data signed under
-those keys, in a signature mode that trades proving cost against disclosure. A public-input rule
-lets the proof make public what the verifier can compute from its request and the result alone. A
-prototype SPARQL evaluator running in a zkVM has proved answers with signature checks,
-including an answer that no payment was returned, each over one synthetic credential. Its cycle
-counts, taken without proving, show signature verification as the largest step for the payment
-question, and fewer cycles when the holder reveals the signatures or the issuer uses a Merkle-based
-cryptosuite. Realistic credentials, proving times and an external audit remain to be done.
+A holder can answer a verifier's SPARQL query over credentials without handing them over. We showed
+how one proof can establish that an answer is a result SPARQL 1.2 permits over a stated input
+dataset, closed-world answers such as `false` included, while checking that trusted issuers signed
+every credential in that input. Answers to monotone queries stay true for any larger input;
+closed-world answers are only as meaningful as the verifier's reason to believe the input complete,
+so the request states who fixed it. The request also chooses the cryptosuites and a signature mode
+that trades proving cost against disclosure, and a public-input rule lets the proof make public what
+the verifier can compute from its request and the result alone. A prototype SPARQL evaluator running
+in a zkVM has proved `SELECT`, true and false `ASK` and `CONSTRUCT` answers with signature checks,
+including an answer that no payment was returned, each over one synthetic credential. Executed
+without proving, a later build also evaluated queries with `OPTIONAL`, `MINUS`, aggregates,
+subqueries and property paths. Its cycle counts show signature verification as the largest step for
+the payment question, and fewer cycles when the holder reveals the signatures or the issuer uses a
+Merkle-based cryptosuite. Realistic credentials, proving times and an external audit remain to be
+done.
 
 #pagebreak(weak: true)
 #heading(level: 2, numbering: none)[References]
@@ -1592,6 +1642,17 @@ configuration.
     )
   }
   rows
+}
+// [OPUS-5.5] §7.2 says that, with one credential, the evaluator admitted the same number of cases
+// in every configuration and the guest program completed all of them; these asserts keep it true.
+#for suite in ("rdfc", "merkle") {
+  for mode in ("hidden", "revealed") {
+    for size in ("s32", "s64") {
+      let stem = "zkexec.sweep_" + suite + "_" + mode + "_n1_" + size
+      assert(headline(stem + "_admitted") == headline("zkexec.sweep_rdfc_hidden_n1_s32_admitted"))
+      assert(headline(stem + "_completed") == headline(stem + "_admitted"))
+    }
+  }
 }
 #figure(
   {

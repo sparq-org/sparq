@@ -518,3 +518,35 @@ merklesuites:
   author: "Wright, Jesse"
   date: 2026
   url: "https://github.com/sparq-org/sparq/pull/6789"
+
+# [OPUS-5.5] Prior work on expressivity, from the prior-work research note of 10 October 2026
+# (sources opened there): the zk-SPARQL talk (no peer-reviewed paper found), the ISWC 2025
+# queryable-credentials paper, and the AnonCreds specification.
+yamamotozksparql:
+  type: misc
+  title: "zk-SPARQL. Talk at the Symposium on Cryptography and Information Security (SCIS 2023)"
+  author:
+    - Yamamoto, Dan
+    - Suga, Yuji
+    - Sako, Kazue
+  date: 2023-01-25
+  url: "https://speakerdeck.com/yamdan/20230125-zk-sparql-pub"
+
+demulder25:
+  type: article
+  title: "Towards Queryable Verifiable Credentials"
+  author:
+    - De Mulder, G.
+    - Dedecker, R.
+    - De Meester, B.
+    - Colpaert, P.
+  date: 2025
+  url: "https://ceur-ws.org/Vol-4085/paper81.pdf"
+  parent:
+    type: proceedings
+    title: "ISWC 2025 Companion Volume, CEUR-WS Vol. 4085"
+
+anoncreds:
+  type: reference
+  title: "AnonCreds Specification, version 1.0"
+  url: "https://anoncreds.github.io/anoncreds-spec/"
