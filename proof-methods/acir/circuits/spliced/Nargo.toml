@@ -1,0 +1,8 @@
+[package]
+name = "spliced"
+type = "bin"
+authors = ["sparq"]
+
+[dependencies]
+sparq_zk_compose_core = { path = "../../../../zk/compose/compose_core" }
+leaf = { path = "../leaf" }
