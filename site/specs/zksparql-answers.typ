@@ -129,9 +129,9 @@ meaning needed:
   `cryptosuite`, `verificationMethod`, `Multikey` and `publicKeyMultibase`
   #cite("VC-DATA-INTEGRITY");
 - `rdf:JSON` for values that are JSON documents, such as SPARQL query results
-  #cite("JSON-LD11"). The lexical form of an `rdf:JSON` literal is the JSON value serialized
-  under the JSON Canonicalization Scheme (JCS) #cite("RFC8785"), as JSON-LD 1.1 requires, so
-  equal JSON values give equal literals.
+  #cite("JSON-LD11"). JSON-LD 1.1 does not fix one lexical form for these literals, so this
+  document does: it is the JSON value serialized under the JSON Canonicalization Scheme (JCS)
+  #cite("RFC8785"), and equal JSON values give equal literals.
 
 Rules for both resources:
 
@@ -152,7 +152,8 @@ Rules for both resources:
 + Byte strings are multibase-encoded base64url without padding (prefix `u`)
   #cite("VC-DATA-INTEGRITY"), typed `sec:multibase` in RDF.
 + Digests are SHA-256 #cite("FIPS180-4") and are 32 bytes before encoding.
-+ Times are `xsd:dateTimeStamp` values.
++ Times are `xsd:dateTime` values, as in the VC Data Model #cite("VC-DATA-MODEL-2.0"), and
+  MUST include a time zone offset.
 + The #dfn[request digest] is SHA-256 over the canonical N-Quads of the query request's RDF
   dataset under RDF Dataset Canonicalization (RDFC-1.0) #cite("RDF-CANON"). Two JSON-LD
   documents with the same RDF content have the same request digest.
@@ -278,7 +279,8 @@ is about.
 
 The result in a presentation MUST be a result that SPARQL 1.2 permits for $Q$ over $D$: for
 SELECT, a solution sequence $Q$ can produce over $D$, with every solution and duplicate; for
-ASK, `true` if and only if the query pattern has a solution over $D$; for CONSTRUCT, the graph
+ASK, `true` if and only if the solution sequence of $Q$ over $D$, after its solution
+modifiers, is not empty; for CONSTRUCT, the graph
 $Q$ can produce over $D$. Nothing is added and nothing is left out. If the result would exceed
 `maxResultSize` or a bound of the proof method, the holder service MUST NOT return a truncated
 result.
@@ -507,7 +509,7 @@ order, and rejects it at the first check that fails:
 + Reject it unless it is a JSON-LD document that follows @sec-vocab and @sec-presentation.
 + Reject it unless `requestDigest` is the request digest of the request, the current time is
   between the request's `validFrom` and `validUntil`, the proof's `challenge` and `domain`
-  equal the request's, and no other presentation with this challenge has been accepted.
+  equal the request's, and the challenge has not been consumed (see the last step).
 + Reject it unless the proof's `proofMethod` is the `method` of one of the request's proof
   method entries, and verify with that entry's `verificationKey` and `parameters`.
 + If the request has an `inputCommitment`, reject it unless the presentation's equals it.
@@ -520,6 +522,11 @@ order, and rejects it at the first check that fails:
   `maxResultSize`.
 + Verify the proof with the proof method over the statement computed from the request and the
   presentation. Reject it if verification fails.
++ Consume the challenge: in one atomic operation, check that the challenge has not been
+  consumed and record it as consumed, and reject the presentation if it had been. The record
+  MUST be shared by every proof method and every instance of the verifier service that accepts
+  presentations for the request, and MUST last until the request's `validUntil`. Only then is
+  the presentation accepted.
 
 On acceptance the verifier has the query, the result, the dataset commitment and whether it
 agreed that commitment, and the trust requirements its credentials met.
@@ -554,10 +561,11 @@ Each proof method MUST publish:
   verifier service SHOULD list only methods that support its query;
 - #strong[the results it can prove]: in particular, a method that proves only that the
   returned solutions are solutions, and not that none is missing, can answer only queries
-  for which every such result is a permitted result, such as an ASK whose answer is `true`,
-  or a `SELECT DISTINCT … LIMIT k` query with no ORDER BY, OFFSET, GROUP BY, aggregate or
-  HAVING for which it returns `k` solutions. With ORDER BY or OFFSET, which rows are permitted
-  depends on solutions not returned, so membership alone is not enough;
+  for which every such result is a permitted result. Examples are an ASK whose answer is
+  `true`, and a `SELECT DISTINCT … LIMIT k` query for which it returns `k` solutions, in both
+  cases with no subquery, GROUP BY, aggregate, HAVING, ORDER BY, OFFSET or REDUCED, and for
+  ASK no LIMIT. With those, which results are permitted depends on solutions not returned, so
+  membership alone is not enough;
 - #strong[what the verifier must trust] for an accepted proof to mean the statement holds: for
   example the proof system's soundness and any trusted setup, or for an attestation the
   hardware vendor's attestation key, the measured program and the TEE's resistance to physical
@@ -712,7 +720,8 @@ presentations. An agreed commitment is linkable by design, to the verifier that 
 
 The request digest covers the challenge, the domain and the validity period, and the proof
 binds the request digest. A presentation therefore verifies only for the request it answers.
-The verifier accepts at most one presentation per challenge (@sec-verify), so a captured
+The verifier consumes each challenge atomically when it accepts a presentation, and accepts
+at most one presentation per challenge even when copies arrive concurrently (@sec-verify), so a captured
 presentation cannot be replayed to the same verifier, and the domain stops it being used with
 another. Without a challenge, anyone who captured a presentation could present it again within
 the validity period, so `challenge` is required even though Data Integrity makes it optional.
