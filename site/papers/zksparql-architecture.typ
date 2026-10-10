@@ -11,8 +11,9 @@
 // pilot timings, in the supplementary material); none is typed into prose, and counts from
 // different experiments are never added. Experiments without the internal re-check carry a dagger
 // in the evidence table. Facts not yet frozen as evidence records (guest coverage, cryptosuite
-// implementation state, the gate breakdown, the proof-method comparison) appear only qualitatively,
-// each with a TODO(evidence) comment. Executor cycle counts are shown in millions through one
+// implementation state, the gate breakdown) appear only qualitatively, each with a TODO(evidence)
+// comment; the proof-method comparison with QuickSilver has no evidence record and is not reported,
+// even qualitatively. Executor cycle counts are shown in millions through one
 // display helper (mcycles). Pending measurements are visible todo-results placeholders.
 
 #import "_lib/bench.typ": headline, ev, provenance, authors, anon, paper_heading_numbering
@@ -93,14 +94,14 @@
 #heading(level: 2, numbering: none, outlined: false)[Abstract]
 
 A verifier often needs the answer to a question about a person's credentials, not the credentials
-themselves. Existing zero-knowledge methods for SPARQL over credentials prove that each returned
-solution follows from signed data, but cannot show that something is absent, such as a returned
-payment. We define Supported answers, in which every returned solution is a solution, and Exact
-answers, the complete result over a committed input dataset. As an Exact answer is only as complete
-as its input, the verifier's query request also states who fixed the input: the holder, or the
-verifier in advance. In our architecture, one proof shows that the answer is correct over exactly
-the data the issuers signed. Three signature modes trade proving cost against what the verifier
-learns, and a public-input rule lets a proof make public any value that the verifier can compute
+themselves. zkRDF and an earlier interface for zero-knowledge SPARQL over credentials prove that
+each returned solution follows from signed data, but neither proves that something is absent, such
+as a returned payment. We define Supported answers, in which every returned solution is a solution,
+and Exact answers, the complete result over a committed input dataset. As an Exact answer is only as
+complete as its input, the verifier's query request also states who fixed the input: the holder, or
+the verifier in advance. When the request lists issuer keys, one proof in our architecture shows,
+under stated assumptions, that the answer is correct over exactly the data signed under those keys.
+Three signature modes trade proving cost against what the verifier learns, and a public-input rule lets a proof make public any value that the verifier can compute
 from its request and the result alone. We also propose Merkle-based cryptosuites designed for
 proving. A SPARQL evaluator running in a zero-knowledge virtual machine has produced verified proofs
 of Exact answers with issuer signatures checked inside the proof, including an answer that no
@@ -150,9 +151,11 @@ Our contributions are:
 - *Answer kinds and input kinds* (§#ref(<meaning>, supplement: none)): Supported answers, for
   monotone queries only, and Exact answers, over an input that the holder declared or the verifier
   agreed in advance.
-- *An architecture* (§#ref(<architecture>, supplement: none)) in which one proof shows the answer to
-  the verifier's query request over exactly the signed data, with the signatures hidden or revealed.
-  A third signature mode lets the verifier evaluate the query over disclosed credentials.
+- *An architecture* (§#ref(<architecture>, supplement: none)) in which, when the request lists
+  issuer keys, one proof shows the answer to the verifier's query request over exactly the data
+  signed under those keys, under the assumptions of Appendix #ref(<app-relation>, supplement: none).
+  The signatures are hidden in the proof or revealed; a third signature mode lets the verifier
+  evaluate the query over disclosed credentials.
 - *A public-input rule* (§#ref(<minimize>, supplement: none)): a proof method may make public any
   value that the verifier can compute from its request and the result alone.
 - *Merkle-based cryptosuites designed for proving* (§#ref(<cryptosuites>, supplement: none)), and a
@@ -433,7 +436,8 @@ it supports for each cryptosuite.
 
 - In the _hidden_ mode, the proof shows that the holder knows a valid signature from a listed key on
   every credential in $D$. The signatures, the signed messages and which key signed which credential
-  stay hidden.
+  are part of the witness. They stay hidden as far as the proof system is zero-knowledge and the
+  public inputs do not disclose them (§#ref(<leakage>, supplement: none)).
 - In the _revealed_ mode, the presentation carries each credential's signature and signed message,
   which the verifier checks itself. The proof then shows only that $D$ is exactly the data those
   messages cover and that the result is correct. Removing signature verification from the proof
@@ -960,17 +964,12 @@ holder disclose selected claims of a signed JSON token. OpenID for Verifiable Pr
 disclose. A query request could travel in it as a new credential format, but the protocol has no
 step in which a verifier agrees an input in advance.
 
-_Other proof methods._ A proof method need not produce a zero-knowledge proof. A TEE could attest
-that a measured program evaluated the query and checked the signatures. A designated-verifier proof
-based on vector oblivious linear evaluation, such as QuickSilver @quicksilver21, would convince only
-the verifier that took part. Both are proposed in the companion specification, not built as proof
-methods. In a preliminary comparison on our Noir circuits, QuickSilver proved more slowly than
-UltraHonk at every circuit size we tried, and its verifier had to stay online and receive far more
-data. At these sizes, the comparison found no advantage for QuickSilver other than that its proof
-cannot be transferred.
-// TODO(evidence): bind to the QuickSilver re-run with large LPN parameters (project file
-// zk-proof-methods/quicksilver-vs-ultrahonk.md, draft sparq-org/sparq#6790) once frozen as an
-// evidence record. The earlier 'medium' run must not be cited.
+_Other proof methods._ A proof method need not produce a zero-knowledge proof. The companion
+specification proposes attestation by a TEE that a measured program evaluated the query and checked
+the signatures. It also proposes QuickSilver @quicksilver21, a designated-verifier proof that is
+interactive and that only the verifier taking part can check. We have built neither as a proof
+method.
+// No performance comparison with QuickSilver is reported: no evidence record exists for it.
 
 == Discussion and limitations <discussion>
 
@@ -1014,9 +1013,9 @@ realistic credentials, larger inputs or proving times.
 A holder can answer a verifier's SPARQL query over credentials without handing them over, but an
 accepted answer is useful only if the verifier knows what it guarantees. We distinguish Supported
 answers, whose returned solutions are all solutions, from Exact answers, which are complete over an
-input that the holder declared or the verifier agreed in advance. One proof can show the answer over
-exactly the data the issuers signed, in a signature mode that trades proving cost against
-disclosure. A public-input rule lets the proof make public what the verifier can compute from its
+input that the holder declared or the verifier agreed in advance. When the request lists issuer
+keys, one proof can show, under stated assumptions, the answer over exactly the data signed under
+those keys, in a signature mode that trades proving cost against disclosure. A public-input rule lets the proof make public what the verifier can compute from its
 request and the result alone. A prototype zkVM evaluator has proved Exact answers with signature
 checks, including an answer that no payment was returned, each over one synthetic credential. Its
 cycle counts, taken without proving, show signature verification as the largest step inside the
