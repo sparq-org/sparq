@@ -75,6 +75,22 @@
       "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit a194e024 (from CI run 37340835239)",
       "sha256": "7f0ec01938cfb07b24aceb1d0e15dffb5a78cca8d2650a1b847a58d615b7e4be"
     },
+    "paper-executor-main-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-executor-evidence commit ca906afa (draft #6793)",
+      "sha256": "c7144813aad652a52e3c8592d1bc0e133b67e5c4d41218c8b44fed18db017383"
+    },
+    "paper-executor-main-records.jsonl.gz": {
+      "source": "sparq-org/sparq branch claude/zk-executor-evidence commit ca906afa (draft #6793)",
+      "sha256": "82c63a752949a1baf124d06a50deabe75cf859c0124dbc3fe3fb7a60b47588b2"
+    },
+    "paper-executor-sweep-audit.json": {
+      "source": "sparq-org/sparq branch claude/zk-executor-evidence commit ca906afa (draft #6793)",
+      "sha256": "23bc835dc5381035cfff3fc0c5fed4adc9244a39cc51ab948f2f9de77c925aea"
+    },
+    "paper-executor-sweep-records.jsonl.gz": {
+      "source": "sparq-org/sparq branch claude/zk-executor-evidence commit ca906afa (draft #6793)",
+      "sha256": "7fbcfeb478495a1f1bf843311e94c7a07aea0426c4aeadcf8a05dc3bfe46ee8e"
+    },
     "authenticated-vcq-payment-ask-holder-declared-audit.json": {
       "source": "sparq-org/sparq branch claude/zk-paper-evidence-records commit 6f756537",
       "sha256": "b159e742117e95ef63d47fb3c006977dbf939277a1b6d60b43727c2b13a3522d"
