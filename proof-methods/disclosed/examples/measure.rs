@@ -9,8 +9,6 @@ use sparq_proved_evaluator_model::DatasetAuthority;
 use sparq_vcq_disclosed::fixtures::{self, QUERIES};
 use sparq_vcq_disclosed::{present, verify};
 
-const PAYMENTS: usize = 3;
-
 fn median_iqr(mut v: Vec<f64>) -> (f64, f64, f64) {
     v.sort_by(f64::total_cmp);
     let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
@@ -34,8 +32,8 @@ fn main() {
         .unwrap_or(21);
     let salt = [0xa5; 32];
     for n in [1, 4] {
-        let issuer = time(reps, || fixtures::credentials(n, PAYMENTS));
-        let credentials = fixtures::credentials(n, PAYMENTS);
+        let issuer = time(reps, || fixtures::credentials(n));
+        let credentials = fixtures::credentials(n);
         let raw_bytes: usize = credentials
             .iter()
             .map(|c| c.document.len() + c.proof_config.len() + c.signature.len())

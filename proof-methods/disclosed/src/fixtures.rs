@@ -1,5 +1,5 @@
-//! Synthetic payment-history credentials and the query set Q1–Q5 for
-//! comparing proof methods. Public test data only.
+//! The paper's payment-history credential, copies of it for more holders, and
+//! the query set Q1–Q5, for comparing proof methods. Public test data only.
 //!
 //! Every credential is signed with the RFC 8032 section 7.1 TEST 1 key, whose
 //! secret key is published, so none of these is a deployment credential.
@@ -21,11 +21,51 @@ pub const ISSUER: &str = "https://bank.example/issuers/1";
 /// `did:key` verification method of the TEST 1 key.
 pub const VERIFICATION_METHOD: &str = "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw";
 
-const V: &str = "https://bank.example/vocab#";
-const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
 const XSD_DATE_TIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-const CRED: &str = "https://www.w3.org/2018/credentials#";
+
+/// The synthetic payment-history credential behind the paper's false-ASK
+/// evidence (`PAYMENT_DOCUMENT` in
+/// `zk/sparql-evaluator/host/tests/support/authenticated_rdf.rs`), in canonical
+/// RDFC-1.0 N-Quads.
+pub const PAYMENT_DOCUMENT: &str = concat!(
+    r#"<did:example:abcdefgh> <https://bank.example/vocab#payment> <https://bank.example/payments/2026-06> ."#,
+    "\n",
+    r#"<did:example:abcdefgh> <https://bank.example/vocab#payment> <https://bank.example/payments/2026-07> ."#,
+    "\n",
+    r#"<did:example:abcdefgh> <https://bank.example/vocab#payment> <https://bank.example/payments/2026-08> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-06> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#Payment> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-06> <https://bank.example/vocab#amount> "1250.00"^^<http://www.w3.org/2001/XMLSchema#decimal> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-06> <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Settled> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-07> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#Payment> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-07> <https://bank.example/vocab#amount> "1250.00"^^<http://www.w3.org/2001/XMLSchema#decimal> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-07> <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Settled> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-08> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#Payment> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-08> <https://bank.example/vocab#amount> "1310.50"^^<http://www.w3.org/2001/XMLSchema#decimal> ."#,
+    "\n",
+    r#"<https://bank.example/payments/2026-08> <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Settled> ."#,
+    "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://bank.example/vocab#PaymentHistoryCredential> ."#,
+    "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://www.w3.org/2018/credentials#VerifiableCredential> ."#,
+    "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <https://www.w3.org/2018/credentials#credentialSubject> <did:example:abcdefgh> ."#,
+    "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <https://www.w3.org/2018/credentials#issuer> <https://bank.example/issuers/1> ."#,
+    "\n",
+    r#"<urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60> <https://www.w3.org/2018/credentials#validFrom> "2026-09-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ."#,
+    "\n",
+);
+/// Recorded `eddsa-rdfc-2022` signature on [`PAYMENT_DOCUMENT`] (hex).
+pub const PAYMENT_SIGNATURE: &str = "0091a31ff65b96f9ec4fde510c5cc083691182e7fd3743b3b8a19dc0209523341e7534a4aee5fa29136407dcc6d8d6d9d09cfece61b0d70eeaad8701e2899405";
 
 /// One query of the comparison set.
 #[derive(Clone, Copy, Debug)]
@@ -34,31 +74,33 @@ pub struct Query {
     pub text: &'static str,
 }
 
-/// Q1–Q5: false ASK, bag SELECT, CONSTRUCT, `xsd:decimal` FILTER, string FILTER.
+/// Q1–Q5, copied verbatim from `zk/sparql-evaluator/fixtures/paper/*.rq`.
 pub const QUERIES: [Query; 5] = [
     Query {
         id: "Q1",
-        text: "ASK { ?p a <https://bank.example/vocab#Payment> ; \
-               <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Returned> }",
+        text: "PREFIX bank: <https://bank.example/vocab#>\n\
+               ASK { ?p a bank:Payment ; bank:paymentStatus bank:Returned }\n",
     },
     Query {
         id: "Q2",
-        text: "SELECT ?amount WHERE { ?p a <https://bank.example/vocab#Payment> ; \
-               <https://bank.example/vocab#amount> ?amount }",
+        text: "PREFIX bank: <https://bank.example/vocab#>\n\
+               SELECT ?amount WHERE { ?p a bank:Payment ; bank:amount ?amount }\n",
     },
     Query {
         id: "Q3",
-        text: "CONSTRUCT { ?s <https://bank.example/vocab#paid> ?p } \
-               WHERE { ?s <https://bank.example/vocab#payment> ?p }",
+        text: "PREFIX bank: <https://bank.example/vocab#>\n\
+               CONSTRUCT { ?p bank:amount ?amount } WHERE { ?p a bank:Payment ; bank:amount ?amount }\n",
     },
     Query {
         id: "Q4",
-        text: "SELECT ?p WHERE { ?p <https://bank.example/vocab#amount> ?a FILTER(?a > 1300.00) }",
+        text: "PREFIX bank: <https://bank.example/vocab#>\n\
+               SELECT ?p WHERE { ?p bank:amount ?amount FILTER(?amount > 1300.00) }\n",
     },
     Query {
         id: "Q5",
-        text: "SELECT ?p WHERE { ?p <https://bank.example/vocab#reference> ?r \
-               FILTER(STRSTARTS(?r, \"RENT-\")) }",
+        text: "PREFIX bank: <https://bank.example/vocab#>\n\
+               SELECT ?p WHERE { ?p a bank:Payment \
+               FILTER(STRSTARTS(STR(?p), \"https://bank.example/payments/2026-07\")) }\n",
     },
 ];
 
@@ -66,70 +108,39 @@ fn iri(value: &str) -> String {
     format!("<{value}>")
 }
 
-/// Canonical N-Quads of credential `index` with `payments` payments.
+/// Canonical N-Quads of credential `index`.
 ///
-/// The document has no blank nodes, so its RDFC-1.0 canonical form is its
-/// sorted, de-duplicated lines.
-pub fn document(index: usize, payments: usize) -> String {
-    let subject = iri("did:example:abcdefgh");
-    let credential = iri(&format!("urn:uuid:00000000-0000-4000-8000-{index:012}"));
-    let mut lines = vec![
-        format!(
-            "{credential} {} {} .",
-            iri(RDF_TYPE),
-            iri(&format!("{V}PaymentHistoryCredential"))
-        ),
-        format!(
-            "{credential} {} {} .",
-            iri(RDF_TYPE),
-            iri(&format!("{CRED}VerifiableCredential"))
-        ),
-        format!(
-            "{credential} {} {subject} .",
-            iri(&format!("{CRED}credentialSubject"))
-        ),
-        format!(
-            "{credential} {} {} .",
-            iri(&format!("{CRED}issuer")),
-            iri(ISSUER)
-        ),
-        format!(
-            "{credential} {} \"2026-09-01T00:00:00Z\"^^{} .",
-            iri(&format!("{CRED}validFrom")),
-            iri(XSD_DATE_TIME)
-        ),
-    ];
-    for k in 0..payments {
-        let payment = iri(&format!("https://bank.example/payments/{index}-{k}"));
-        let cents = 125_000 + 6_050 * ((index * payments + k) % 4);
-        let reference = if k % 2 == 0 { "RENT" } else { "UTIL" };
-        lines.push(format!(
-            "{subject} {} {payment} .",
-            iri(&format!("{V}payment"))
-        ));
-        lines.push(format!(
-            "{payment} {} {} .",
-            iri(RDF_TYPE),
-            iri(&format!("{V}Payment"))
-        ));
-        lines.push(format!(
-            "{payment} {} \"{}.{:02}\"^^{} .",
-            iri(&format!("{V}amount")),
-            cents / 100,
-            cents % 100,
-            iri(XSD_DECIMAL)
-        ));
-        lines.push(format!(
-            "{payment} {} {} .",
-            iri(&format!("{V}paymentStatus")),
-            iri(&format!("{V}Settled"))
-        ));
-        lines.push(format!(
-            "{payment} {} \"{reference}-{index:04}-{k:04}\" .",
-            iri(&format!("{V}reference"))
-        ));
+/// Index 0 is [`PAYMENT_DOCUMENT`] byte for byte. Index `i > 0` is a copy for
+/// subject `did:example:holder-i`, credential id `...-{i:012}`, with every
+/// payment month moved `3 * i` months later. The document has no blank nodes,
+/// so its canonical form is its sorted lines.
+pub fn document(index: usize) -> String {
+    if index == 0 {
+        return PAYMENT_DOCUMENT.to_owned();
     }
-    lines.sort();
+    let mut text = PAYMENT_DOCUMENT
+        .replace(
+            "did:example:abcdefgh",
+            &format!("did:example:holder-{index}"),
+        )
+        .replace(
+            "urn:uuid:7d1c2b4e-6f0a-4c39-9a51-2b8e3f4d5a60",
+            &format!("urn:uuid:7d1c2b4e-6f0a-4c39-9a51-{index:012}"),
+        );
+    for month in [6, 7, 8] {
+        let shifted = month - 1 + 3 * index;
+        text = text.replace(
+            &format!("payments/2026-{month:02}>"),
+            &format!(
+                "payments/{}-{:02}#m>",
+                2026 + shifted / 12,
+                shifted % 12 + 1
+            ),
+        );
+    }
+    let text = text.replace("#m>", ">");
+    let mut lines: Vec<&str> = text.lines().collect();
+    lines.sort_unstable();
     lines.dedup();
     let mut out = lines.join("\n");
     out.push('\n');
@@ -171,9 +182,9 @@ pub fn sign(document: String) -> SignedCredential {
     }
 }
 
-/// `n` signed credentials of `payments` payments each.
-pub fn credentials(n: usize, payments: usize) -> Vec<SignedCredential> {
-    (0..n).map(|i| sign(document(i, payments))).collect()
+/// `n` signed credentials: [`PAYMENT_DOCUMENT`] and `n - 1` copies.
+pub fn credentials(n: usize) -> Vec<SignedCredential> {
+    (0..n).map(|i| sign(document(i))).collect()
 }
 
 /// The verifier's one-entry key table.

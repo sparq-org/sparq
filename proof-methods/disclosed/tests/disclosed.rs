@@ -18,7 +18,7 @@ fn every_query_round_trips_for_one_and_four_credentials() {
     for n in [1, 4] {
         for q in QUERIES {
             let request = fixtures::request(q.text, DatasetAuthority::HolderDeclared, NONCE);
-            let (statement, proof) = present(&request, fixtures::credentials(n, 3), SALT)
+            let (statement, proof) = present(&request, fixtures::credentials(n), SALT)
                 .unwrap_or_else(|e| panic!("{} n={n}: {}", q.id, e.0));
             assert_eq!(
                 verify(&request, &statement, &proof).expect("verifies"),
@@ -31,21 +31,55 @@ fn every_query_round_trips_for_one_and_four_credentials() {
 #[test]
 fn q1_is_false_and_q4_selects_only_amounts_above_the_bound() {
     let request = fixtures::request(query("Q1"), DatasetAuthority::HolderDeclared, NONCE);
-    let (statement, _) = present(&request, fixtures::credentials(4, 3), SALT).expect("presents");
+    let (statement, _) = present(&request, fixtures::credentials(4), SALT).expect("presents");
     assert_eq!(statement.result, CanonicalResult::Ask(false));
 
-    // Amounts cycle 1250.00, 1310.50, 1371.00, 1431.50 over 12 payments: 9 exceed 1300.00.
-    let request = fixtures::request(query("Q4"), DatasetAuthority::HolderDeclared, NONCE);
-    let (statement, _) = present(&request, fixtures::credentials(4, 3), SALT).expect("presents");
-    let CanonicalResult::Select { rows, .. } = statement.result else {
-        panic!("select result")
-    };
-    assert_eq!(rows.len(), 9);
+    // Each credential has amounts 1250.00, 1250.00 and 1310.50: one exceeds 1300.00.
+    for (n, expected) in [(1, 1), (4, 4)] {
+        let request = fixtures::request(query("Q4"), DatasetAuthority::HolderDeclared, NONCE);
+        let (statement, _) = present(&request, fixtures::credentials(n), SALT).expect("presents");
+        let CanonicalResult::Select { rows, .. } = statement.result else {
+            panic!("select result")
+        };
+        assert_eq!(rows.len(), expected, "Q4 n={n}");
+    }
+
+    // Q2 keeps the duplicate amount; Q5 matches only the 2026-07 payment of the first credential.
+    for (id, expected) in [("Q2", 12), ("Q5", 1)] {
+        let request = fixtures::request(query(id), DatasetAuthority::HolderDeclared, NONCE);
+        let (statement, _) = present(&request, fixtures::credentials(4), SALT).expect("presents");
+        let CanonicalResult::Select { rows, .. } = statement.result else {
+            panic!("select result")
+        };
+        assert_eq!(rows.len(), expected, "{id}");
+    }
+}
+
+#[test]
+fn first_credential_is_the_recorded_payment_fixture() {
+    let credential = fixtures::sign(fixtures::document(0));
+    let hex: String = credential
+        .signature
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert_eq!(hex, fixtures::PAYMENT_SIGNATURE);
+    for i in 1..4 {
+        let copy = fixtures::document(i);
+        assert_eq!(
+            copy.lines().count(),
+            fixtures::PAYMENT_DOCUMENT.lines().count()
+        );
+        assert!(
+            !copy.contains("abcdefgh"),
+            "copy {i} keeps the original subject"
+        );
+    }
 }
 
 #[test]
 fn verifier_agreed_commitment_is_the_zkvm_method_commitment() {
-    let credentials = fixtures::credentials(2, 3);
+    let credentials = fixtures::credentials(2);
     let commitment = auth::dataset_commitment(
         &PrivateCredentials {
             credentials: credentials.clone(),
@@ -67,8 +101,7 @@ fn verifier_agreed_commitment_is_the_zkvm_method_commitment() {
 #[test]
 fn verifier_rejects_a_changed_result_document_signature_or_commitment() {
     let request = fixtures::request(query("Q4"), DatasetAuthority::HolderDeclared, NONCE);
-    let (statement, proof) =
-        present(&request, fixtures::credentials(1, 3), SALT).expect("presents");
+    let (statement, proof) = present(&request, fixtures::credentials(1), SALT).expect("presents");
 
     let mut wrong = statement.clone();
     wrong.result = CanonicalResult::Ask(true);
@@ -105,7 +138,7 @@ fn verifier_rejects_a_changed_result_document_signature_or_commitment() {
 fn verifier_agreed_rejects_other_credentials() {
     let agreed = auth::dataset_commitment(
         &PrivateCredentials {
-            credentials: fixtures::credentials(1, 3),
+            credentials: fixtures::credentials(1),
             salt: SALT,
         },
         &fixtures::policy(),
@@ -116,5 +149,5 @@ fn verifier_agreed_rejects_other_credentials() {
         DatasetAuthority::VerifierAgreed { commitment: agreed },
         NONCE,
     );
-    assert!(present(&request, fixtures::credentials(2, 3), SALT).is_err());
+    assert!(present(&request, fixtures::credentials(2), SALT).is_err());
 }
