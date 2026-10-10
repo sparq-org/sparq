@@ -2018,34 +2018,37 @@ mod scoped_cache_tests {
     /// the guard fails here.
     #[test]
     fn grant_sources_take_the_guarded_view() {
+        // Name prefixes of the installer calls, one per family the store uses.
         const INSTALLERS: &[&str] = &[
             "materialize_permission",
             "materialize_prohibition",
             "materialize_policy",
-            "materialize_odrl_n3",
-            "bridge_ledger.refresh(",
-            "install_auth_grants(",
-            "install_conditional_grant(",
+            "bridge_ledger.refresh",
+            "install_auth_grants",
+            "install_conditional_grant",
         ];
-        let mut calls = 0;
+        let mut calls = vec![0usize; INSTALLERS.len()];
         for (file, src) in [("lib.rs", include_str!("lib.rs")), ("trust_wire.rs", include_str!("trust_wire.rs"))] {
             // Production code only: the test modules call installers on bare graphs.
             let prod = src.split("#[cfg(test)]\nmod ").next().expect("non-empty");
-            for name in INSTALLERS {
+            for (family, name) in INSTALLERS.iter().enumerate() {
                 for (at, _) in prod.match_indices(name) {
+                    let line = &prod[prod[..at].rfind('\n').map_or(0, |i| i + 1)..at];
+                    if line.trim_start().starts_with("//") || line.trim_end().ends_with("fn") {
+                        continue; // a doc mention or a definition, not a call
+                    }
+                    // The rest of the callee's name, then its argument list.
                     let rest = &prod[at + name.len()..];
-                    let Some(open) = rest.find('(').filter(|&i| rest[..i].chars().all(|c| c.is_alphanumeric() || c == '_')) else {
-                        continue;
+                    let ident = rest.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(rest.len());
+                    let Some(args) = rest[ident..].trim_start().strip_prefix('(') else {
+                        continue; // a path or field mention, not a call
                     };
-                    let first_arg: String = rest[open + 1..]
+                    let first_arg: String = args
                         .chars()
                         .take_while(|&c| c != ',' && c != ')')
                         .filter(|c| !c.is_whitespace())
                         .collect();
-                    if first_arg.is_empty() {
-                        continue; // a declaration or doc mention, not a call into the view
-                    }
-                    calls += 1;
+                    calls[family] += 1;
                     assert!(
                         !first_arg.contains("self.graph"),
                         "{file}: `{name}…({first_arg}, …)` installs grants without the dropped-view guard"
@@ -2053,7 +2056,9 @@ mod scoped_cache_tests {
                 }
             }
         }
-        assert!(calls > 0, "the scan found no installer calls: its patterns are stale");
+        for (name, n) in INSTALLERS.iter().zip(&calls) {
+            assert!(*n > 0, "the scan found no `{name}` call: its pattern is stale");
+        }
         // Every bridge function that writes a graph and is called from the store is one of
         // the scanned installers.
         let store = include_str!("lib.rs").split("#[cfg(test)]\nmod ").next().expect("non-empty");
