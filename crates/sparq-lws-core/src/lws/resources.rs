@@ -3482,7 +3482,8 @@ fn linkset_cost(doc: &Value, base_len: usize) -> Option<usize> {
         return None;
     }
     let resolved = (entries.len() + targets).checked_mul(base_len)?;
-    json_size(doc)
+    // Linksets hold no numbers as text: every byte counts.
+    serialized_size(doc)
         .checked_mul(2)?
         .checked_add(json_values(doc).checked_mul(LINKSET_OVERHEAD)?)?
         .checked_add(resolved)
@@ -3782,9 +3783,9 @@ async fn linkset<S: Store + 'static>(
             // The patch holds its numbers as their text, so the linkset is read the same way,
             // and written back with every number restored. A linkset holds no numbers, so one a
             // patch adds is refused below, whatever its size.
-            let held = serde_json::to_string(&document)
+            let held = serde_json::to_vec(&document)
                 .ok()
-                .and_then(|text| serde_json::from_str::<Value>(&numbers_as_text(&text)).ok());
+                .and_then(|text| read_numbers_as_text(&text).ok());
             let Some(held) = held else {
                 return problem(StatusCode::INTERNAL_SERVER_ERROR, None);
             };
