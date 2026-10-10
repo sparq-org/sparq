@@ -108,6 +108,10 @@ paper-evidence.json.
   revealed 3.26M. In-guest signature verification is the largest phase in eddsa hidden mode (about
   3.3M cycles). The Merkle suite cuts the document phase from 1.39M to 0.80M. Appendix sweep (816
   configurations) running; proving on the m7i next.
-- Pending spec change (#6786 at 9738935, not confirmed): an Exact answer becomes "a result SPARQL 1.1
+- Confirmed spec wording for Exact (#6786 at ecd614fa): "An Exact answer is a result SPARQL 1.1
   permits for Q over D, with nothing added or omitted; where SPARQL leaves a choice open, the holder
-  makes it". Do not rely on it until confirmed.
+  makes it." The spec does not define when a query has only one permitted result; a method MAY fix the
+  open choices, and a verifier relies on that only where the method publishes them. Spec section 10:
+  the holder's choice can act as a covert channel (e.g. LIMIT 1 over {0, 1} encodes a hidden bit;
+  zero-knowledge does not prevent this because the result is public). This supersedes decision 2 in
+  the scratch spec-decisions note (canonical tie-break) for the paper's definition of Exact.
