@@ -141,7 +141,7 @@ Our contributions are:
   verifier agreed in advance.
 - *An architecture* (§#ref(<architecture>, supplement: none)) in which one proof shows the answer
   to the verifier's query request over exactly the signed data, with the signatures hidden or
-  revealed; a third signature mode lets the verifier evaluate the query over disclosed
+  revealed. A third signature mode lets the verifier evaluate the query over disclosed
   credentials.
 - *A public-input rule* (§#ref(<minimize>, supplement: none)): a proof method may make public any
   value that the verifier can compute from its request and the result alone.
@@ -226,11 +226,11 @@ graph. It states which layout it uses, because a query written for one does not 
 
 Let $Q$ be the request's query. A _Supported_ answer states that every returned solution is a
 solution. For `SELECT`, the result is non-empty and has no duplicate rows, and each row is in
-$[| Q' |]_D$, where $Q'$ is $Q$ without its top-level `ORDER BY`, `OFFSET` and `LIMIT`, which only
+$[| Q' |]_D$. Here $Q'$ is $Q$ without its top-level `ORDER BY`, `OFFSET` and `LIMIT`, which only
 order the solutions or limit how many the holder returns. For `ASK`, the result is `true`. A Supported answer says nothing about the solutions it does not return.
 
 An _Exact_ answer is a result SPARQL 1.1 permits for $Q$ over $D$, with nothing added or
-omitted: a `SELECT` result keeps its duplicates, an `ASK` result is `true` exactly when
+omitted. A `SELECT` result keeps its duplicates, an `ASK` result is `true` exactly when
 $[| Q |]_D$ is non-empty, and a `CONSTRUCT` graph is compared up to isomorphism. Where SPARQL
 leaves a choice open, the holder makes it. Such choices include `OFFSET` and `LIMIT` where
 `ORDER BY` does not fix the order, the order of tied rows, `REDUCED`, `SAMPLE` and
@@ -260,9 +260,7 @@ displace the latest payment.
 A tempting shortcut lets the holder return Supported rows and the verifier compute `COUNT`,
 `ORDER BY` or `LIMIT` over them. This works only if the returned rows are the complete result;
 otherwise the verifier counts what the holder chose to show. A count over a subset of the
-credentials is that subset's exact count, never a Supported count of the whole. A sum of payment
-amounts likewise needs the Exact multiset: two payments of equal amount give two rows, which
-`DISTINCT` would merge.
+credentials is that subset's exact count, never a Supported count of the whole.
 
 === Who fixed the input <input-kinds>
 
@@ -406,7 +404,7 @@ configuration, such as a circuit's verification key or a zkVM image ID.
 
 The public inputs of the statement are the request digest, the answer kind, the input kind, the
 dataset commitment, the result, the signature mode and, in the revealed mode, the signed
-messages; a proof method may bind them by one digest. The proof shows that:
+messages. A proof method may bind them all by one digest. The proof shows that:
 
 + the dataset commitment fixes $D$;
 + if the request lists issuer keys, $D$ is built from exactly the data that signatures under
@@ -604,7 +602,12 @@ verification, whose knowledge soundness holds only against a classical adversary
     table(
       columns: (1.3fr, 1.6fr, 1fr, 1fr),
       align: (left, left, left, left),
-      table.header[Signature mode (cryptosuites)][The verifier also receives][Links presentations][Confirms guessed content],
+      table.header(
+        table.cell(fill: luma(235))[*Signature mode (cryptosuites)*],
+        table.cell(fill: luma(235))[*The verifier also receives*],
+        table.cell(fill: luma(235))[*Links presentations*],
+        table.cell(fill: luma(235))[*Confirms guessed content*],
+      ),
       [Hidden (any)], [A salted dataset commitment and, from a RISC Zero receipt, part of the
         execution's shape; no signature, signed message or issuer key],
         [Only through a commitment repeated by reusing a salt, or a verifier-agreed commitment], [No],
@@ -779,8 +782,7 @@ over a single credential, in three experiments:
 
 Each accepted receipt came with negative tests (@evidence-table). They alter the request, the
 issuer keys, the proof method, the receipt, the input kind or the agreed commitment; present the
-receipt under another guest's image ID; or replay it. Each gave its expected outcome. These runs
-were validations, not benchmarks, and we report no timings for them.
+receipt under another guest's image ID; or replay it. Each gave its expected outcome; we report no timings for these runs.
 
 === The public-triple circuit pilot <pilot-evidence>
 
@@ -873,8 +875,8 @@ cannot be transferred.
 Reading a verifier-agreed Exact answer as evidence about all the relevant records rests on an
 assumption we do not discharge: that a party the verifier trusts fixed an input that covers
 them. For the payment question, the bank could sign a dataset commitment that covers its statement
-credentials for a period, or the verifier could agree a commitment in an
-earlier exchange in which it learned which credentials the dataset holds. We do not claim that
+credentials for a period. Alternatively, the verifier could agree a commitment in an earlier
+exchange in which it learned which credentials the dataset holds. We do not claim that
 such infrastructure exists. Without it, a deployment can offer only holder-declared inputs.
 
 === Agents and several holders <agents>
@@ -908,8 +910,8 @@ accepted answer is useful only if the verifier knows what it guarantees. We dist
 answers, whose returned solutions are all solutions, from Exact answers, which are complete over
 an input that the holder declared or the verifier agreed in advance. One proof can show the
 answer over exactly the data the issuers signed, in a signature mode that trades proving cost
-against disclosure, and a public-input rule lets a proof make public what the verifier can
-compute from its request and the result alone. A prototype zkVM evaluator has proved Exact answers with signature checks, including
+against disclosure. A public-input rule lets the proof make public what the verifier can compute
+from its request and the result alone. A prototype zkVM evaluator has proved Exact answers with signature checks, including
 an answer that no payment was returned, each over one synthetic credential. Realistic
 credentials, the cost measurements and an external audit remain to be done.
 
