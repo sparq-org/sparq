@@ -131,7 +131,7 @@ For each mode and cryptosuite:
 
 ## 9. Canonical main-body queries (fixed by ZK code landing, 10 October 2026)
 
-All five use the 16-statement payment credential behind the payment `ASK` evidence: three settled
+All five use the 17-statement payment credential behind the payment `ASK` evidence: three settled
 `xsd:decimal` payments, signed with `eddsa-rdfc-2022`.
 
 - Q1 `ASK`: is any payment's status `bank:Returned`? (false)

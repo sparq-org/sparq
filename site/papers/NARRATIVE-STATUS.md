@@ -115,3 +115,6 @@ paper-evidence.json.
   the holder's choice can act as a covert channel (e.g. LIMIT 1 over {0, 1} encodes a hidden bit;
   zero-knowledge does not prevent this because the result is public). This supersedes decision 2 in
   the scratch spec-decisions note (canonical tie-break) for the paper's definition of Exact.
+- Corrections (ZK code landing): the main payment credential has 17 statements, not 16. Coverage
+  claims are guest-execution claims: all 42 supported cases ran in the guest; all 9 rejections were
+  guest aborts.
