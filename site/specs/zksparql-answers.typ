@@ -150,14 +150,19 @@ anything the holder returns.
   [`input`], [object], [REQUIRED. Section 6.2. Either `{"kind": "holder-declared"}` or
     `{"kind": "verifier-agreed", "commitment": <digest>}`.],
   [`issuers`], [array of objects], [REQUIRED. The issuer keys the verifier accepts. Each entry
-    has `issuer` (IRI), `verificationMethod` (IRI) and `cryptosuite` (string, for example
-    `"eddsa-rdfc-2022"`) and MAY have `publicKeyMultibase`. An empty array means the verifier
+    has `issuer` (IRI), `verificationMethod` (IRI), `cryptosuite` (string, for example
+    `"eddsa-rdfc-2022"`) and `publicKeyMultibase`, the key itself as the cryptosuite encodes
+    it. Keys are given, never looked up, so both sides prove and verify against the same
+    keys. An empty array means the verifier
     accepts an input dataset whose credentials are not checked against any issuer key.],
   [`signatureModes`], [array of strings], [REQUIRED if `issuers` is not empty, and absent
     otherwise. The signature modes the verifier accepts: `"hidden"`, `"revealed"` or both.
     Section 6.3.],
   [`proofSystems`], [array of objects], [REQUIRED, non-empty. The proof systems the verifier
-    accepts, in order of preference. Each entry has `id`, `version` and `artifact` (section 9).],
+    accepts, in order of preference. Each entry has `id`, `version`, `artifact` and
+    `parameters`: the proof system's settings that the statement depends on, such as its
+    capacity bounds, in the encoding the proof system publishes (section 9). An empty
+    object means the proof system's published defaults.],
   [`limits`], [object], [REQUIRED. `maxPresentationBytes` (integer) bounds the encoded
     presentation; `maxResultRows` (integer) bounds the solutions in a SELECT result or the
     triples in a CONSTRUCT result.],
@@ -222,8 +227,9 @@ the verifier learns is listed in section 10.2.
 - An ASK result is a SPARQL 1.1 Query Results JSON object with `head` and `boolean`.
 - A CONSTRUCT result is `{"ntriples": <string>}`: the constructed graph in canonical N-Triples
   under RDF Dataset Canonicalization (RDFC-1.0) #cite("RDF-CANON").
-- A blank node in a SELECT result is given a label local to this result. Two cells with the
-  same label denote the same blank node; no label is the label used in any credential.
+- A blank node in a SELECT result is given a label whose scope is this result. Two cells with
+  the same label denote the same blank node. A result label has no relationship to any blank
+  node label in a credential, even if the strings are equal.
 - In an Exact SELECT result, `results.bindings` keeps duplicate solutions. Its order is the
   query's order if the query has ORDER BY; otherwise it is sorted by the proof system's
   canonical encoding of each solution and the order carries no meaning.
@@ -308,13 +314,15 @@ Exact answer over an input it agreed earlier:
   "issuers": [{
     "issuer": "https://bank.example/",
     "verificationMethod": "https://bank.example/keys#2026",
-    "cryptosuite": "eddsa-rdfc-2022"
+    "cryptosuite": "eddsa-rdfc-2022",
+    "publicKeyMultibase": "z6Mk…"
   }],
   "signatureModes": ["hidden"],
   "proofSystems": [{
     "id": "urn:sparq:vcq:method:risc0-authenticated-rdf",
     "version": 5,
-    "artifact": { "imageId": "Yc9B…", "sha256": "1mE0…" }
+    "artifact": { "imageId": "Yc9B…", "sha256": "1mE0…" },
+    "parameters": {}
   }],
   "limits": { "maxPresentationBytes": 2000000, "maxResultRows": 1 },
   "challenge": "3Jd8…",
@@ -371,12 +379,16 @@ presentation.
 A verifier service processes an answer presentation in this order and rejects it at the first
 check that fails. It returns no partial result and no warning instead of a rejection.
 
-+ Reject if the encoded presentation is larger than `limits.maxPresentationBytes`. This check
-  comes before parsing.
++ Before parsing, reject a presentation larger than the verifier service's own fixed ceiling,
+  which is at least the largest `limits.maxPresentationBytes` among its stored requests. If the
+  transport already identifies the request (as OpenID4VP does through `state` or the Digital
+  Credentials API call), use that request's `limits.maxPresentationBytes` instead.
 + Parse the presentation and reject it if it does not follow sections 3 and 5.
 + Find the stored request whose request digest equals `requestDigest`. Reject if there is none,
-  if the current time is outside `notBefore` to `notAfter`, or if a presentation for this
-  request was already accepted.
+  if the transport identified a different request, if the current time is outside
+  `notBefore` to `notAfter`, or if a presentation for this request was already accepted.
+  Reject if the encoded presentation is larger than that request's
+  `limits.maxPresentationBytes`.
 + Reject unless `proofSystem` names an entry of the request's `proofSystems`, and load that
   entry's verification artifact from the verifier's own configuration.
 + Reject unless `answerKind` and `input.kind` equal the request's. For a verifier-agreed input,
@@ -402,7 +414,9 @@ The proof-system identifier and version are the way to add new proof systems. Ea
 system MUST publish:
 
 - its identifier (an IRI) and version (a positive integer);
-- the form of the `artifact` member that pins its verification key or program;
+- the form of the `artifact` member that pins its verification key or program, including
+  byte order where the identifier is a sequence of words;
+- the form of its `parameters` member and its defaults;
 - the query forms, answer kinds and input kinds it supports, and the SPARQL fragment it accepts
   (a proof system MAY accept only part of SPARQL 1.1);
 - how it builds the input dataset from credentials, and which cryptosuites it can check;
@@ -427,8 +441,9 @@ cryptographic audit.
     ASK, CONSTRUCT], [holder-declared, verifier-agreed], [`eddsa-rdfc-2022` against the
     request's keys, inside the proof],
   [`urn:sparq:vcq:method:noir-selected-support-unsigned` v2 (Noir circuits)], [Supported:
-    SELECT (positive basic graph patterns with integer FILTERs)], [holder-declared], [Schnorr
-    signatures over the sparq commitment format, inside the proof],
+    SELECT (positive basic graph patterns with integer FILTERs)], [holder-declared; not usable
+    with version 1 of this document yet (section 11)], [Schnorr signatures over the sparq
+    commitment format, inside the proof],
 )
 
 = Security and privacy considerations
@@ -499,8 +514,16 @@ What differs or is missing:
   Results JSON; the conversion of section 5.1 is not written.
 + Every proof system implements only the hidden signature mode. The revealed mode, and a
   cryptosuite that signs a Merkle root over a credential's RDF terms, are not built yet.
-+ The Noir Supported proof system has its own request and result types and is not reached
-  through the `sparq-query-protocol` adapters.
++ The Noir Supported proof system cannot produce a version 1 presentation. It keeps graph
+  roots and salts private, so it has no dataset commitment to publish, and it requires a
+  credential-status root that version 1 has no member for. It needs a new version of its
+  circuits that publishes and binds a dataset commitment, not only an encoder. It is also not
+  reached through the `sparq-query-protocol` adapters.
++ The version 5 policy (issuer keys and capacity bounds) has no JSON encoding yet, so the
+  mapping from `issuers` and `parameters` to the adapter's parameter digest is not defined.
++ The adapters accept a narrower query surface than section 4: they reject a `baseIri` and
+  SELECT queries with ORDER BY. Their request stores times as Unix seconds, so the RFC 3339
+  strings need a fixed conversion.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
   (a verifier-agreed SELECT); its other five combinations have run only in tests without
   proving.
@@ -531,25 +554,25 @@ define one, here called
   [Authorization request `dcql_query`], [One credential query with `"format": "sparql_answer"`,
     `"multiple": false` and `"require_cryptographic_holder_binding": false`. Its `meta` object
     holds the query request members `query`, `baseIri`, `answerKind`, `input`, `issuers`,
-    `signatureModes`, `proofSystems` and `limits`.],
+    `signatureModes`, `proofSystems`, `limits`, `notBefore` and `notAfter`, as the exact
+    strings and values of the stored request.],
   [Authorization request `nonce`], [The source of `challenge`: the holder service and the
     verifier set `challenge` to SHA-256 of the `nonce` string, which gives 32 bytes from
     OpenID4VP's string nonce.],
   [Authorization request `client_id`], [`audience`. Over the Digital Credentials API, the
     origin prefixed with `origin:`, as OpenID4VP requires.],
-  [Request lifetime], [`notBefore` and `notAfter`, set by the verifier when it creates the
-    request.],
   [`vp_formats_supported` metadata], [The proof systems each side supports, under the
     `sparql_answer` key, as a list of `{id, version}`.],
   [Response `vp_token`], [`{ "<credential query id>": [ <answer presentation> ] }`, with the
     answer presentation as a JSON object.],
-  [Response mode], [`direct_post` or `direct_post.jwt`. Proofs can be large, so the fragment
-    and query response modes are unsuitable.],
+  [Response mode], [Over HTTPS redirects, `direct_post` or `direct_post.jwt`; proofs can be
+    large, so the fragment and query modes are unsuitable. Over the Digital Credentials API,
+    `dc_api` or `dc_api.jwt`, as OpenID4VP requires there.],
 )
 
-Both sides rebuild the query request from the authorization request and compute its request
-digest. Because JCS is deterministic, they reach the same digest without the request being
-sent twice.
+Both sides rebuild the query request from `meta`, the nonce and the audience, and compute its
+request digest. Every member is either carried exactly or derived by a fixed rule, and JCS is
+deterministic, so both reach the same digest.
 
 A wallet that does not support `sparql_answer` finds no credential of that format and returns
 an error (`access_denied` or `vp_formats_not_supported`). It cannot fall back to sending whole
