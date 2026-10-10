@@ -663,37 +663,43 @@ classical adversary.
 === Prototype and method <prototype>
 
 Our guest program runs a SPARQL evaluator inside the RISC Zero zkVM and writes the Exact result, the
-dataset commitment and the input kind to the journal. A second build adds signature checks in front of the
-same evaluator: it verifies each credential's `eddsa-rdfc-2022` signature in the hidden mode, checks
-the key against the request's issuer keys, and evaluates the query over the signed canonical
+dataset commitment and the input kind to the journal. A second build adds signature checks in front
+of the same evaluator: it verifies each credential's `eddsa-rdfc-2022` signature in the hidden mode,
+checks the key against the request's issuer keys, and evaluates the query over the signed canonical
 N-Quads. Our holder and verifier services wrap both builds with query requests and the checks of
 §#ref(<validation>, supplement: none). They use a binary encoding rather than the specification's
-JSON. The challenge, audience and validity
-period reach the proof indirectly: the journal binds a value derived from the stored request. We
-have not confirmed that the verifier service performs its checks in exactly the order of
-§#ref(<validation>, supplement: none). Separately, two Noir circuits produce Supported answers to
-`SELECT DISTINCT` queries over one basic graph pattern: in the baseline circuit the matched triple
-is part of the witness, and in the public-triple circuit a public input. Both check Schnorr
-signatures over their own commitment format, not Data Integrity proofs, and check credential status
-against a snapshot that the verifier accepted. They publish no dataset commitment, so they cannot
-yet produce the specification's presentations.
+JSON. The challenge, audience and validity period reach the proof indirectly: the journal binds a
+value derived from the stored request. We have not confirmed that the verifier service performs its
+checks in exactly the order of §#ref(<validation>, supplement: none). Separately, two Noir circuits
+produce Supported answers to `SELECT DISTINCT` queries over one basic graph pattern: in the
+baseline circuit the matched triple is part of the witness, and in the public-triple circuit a
+public input. Both check Schnorr signatures over their own commitment format, not Data Integrity
+proofs, and check credential status against a snapshot that the verifier accepted. They publish no
+dataset commitment, so they cannot yet produce the specification's presentations.
 
 The evaluator admits most SPARQL 1.1 query features, including `OPTIONAL`, `MINUS`, aggregates,
-subqueries and property paths, and rejects `SERVICE`, `NOW` and `RAND`. It evaluates `DESCRIBE`,
-`FROM` and `FROM NAMED`, which version 1 of the specification excludes; with signature checks, our
-services reject them before proving and before verification.
+subqueries and property paths, and rejects `SERVICE`, `NOW` and `RAND`. It also admits `DESCRIBE`,
+`FROM` and `FROM NAMED`, which version 1 of the specification excludes. Without signature checks,
+the dataset commitment covers a catalog of named graphs and a policy for `DESCRIBE`, so the
+evaluator can answer these queries. With signature checks, the presented credentials form the
+default graph and there are no named graphs, so the prover and the verifier reject all three, before
+proving and before verification. In both builds, our services reject `DESCRIBE`, a base IRI and a
+`SELECT` query with a top-level `ORDER BY`, so they return `SELECT` results only as multisets.
 // TODO(evidence): bind to the coverage manifest of the evaluator with signature checks
 // (zk/sparql-evaluator/coverage-authenticated-rdf.json, draft sparq-org/sparq#6791) once frozen as
-// an evidence record. The executor sweep (paper-executor-sweep-*.json, §S4) already records, for
-// its own query cases, the evaluator's admission and the host query profile.
+// an evidence record. The executor sweep (paper-executor-sweep-*.json) already records, for its
+// own query cases, the evaluator's admission and the host query profile. Sources for the rest of
+// this paragraph: the DESCRIBE/FROM answer from the ZK code landing thread (10 October) and the
+// services' shared admission check, which rejects a base IRI, DESCRIBE and a SELECT whose result
+// keeps the order of a top-level ORDER BY (zk/sparql-evaluator/host/src/vcq.rs, checked_admission;
+// companion specification §11).
 
 We used only synthetic credentials signed with test keys. We generated all receipts with development
 mode disabled and verified them against the expected guest image ID. For experiments without † in
 @evidence-table, we recomputed hashes of source files, guest binaries and receipts. We compared the
 hashes and recorded test outcomes with the archived records. We did not verify the proofs again.
-Appendix #ref(<app-inventories>, supplement: none) lists the test cases, and the supplementary
-material details the records (§#ref(<supp-records>, supplement: none)) and the software behind
-them (§#ref(<repro>, supplement: none)).
+The supplementary material lists the test cases and records (§#ref(<supp-records>, supplement: none))
+and the software behind them (§#ref(<repro>, supplement: none)).
 
 #[
 #show figure: set block(breakable: false)
@@ -706,7 +712,7 @@ them (§#ref(<repro>, supplement: none)).
       align: (left, left, left, left),
       table.header[Experiment][Answers][Signatures checked in the proof][Strongest result],
       [Evaluator, CI build], [Exact `SELECT` with duplicate rows, false `ASK`, `CONSTRUCT`,
-        `DESCRIBE` (now rejected); both input kinds, not every form under each], [No],
+        `DESCRIBE`; both input kinds, not every form under each], [No],
         [Proof verified: #headline("zkvcq.exact_hosted_receipts") receipts],
       [Evaluator with our services], [Exact `SELECT`, true and false `ASK`, `CONSTRUCT`; both
         input kinds], [No], [Proof verified: #headline("zkvcq.adapter_receipts") receipts,
@@ -744,56 +750,24 @@ them (§#ref(<repro>, supplement: none)).
 ) <evidence-table>
 ]
 
-=== Exact answers without signature checks <exact-evidence>
+=== Exact answers <exact-evidence>
 
-A CI job built the evaluator from source and produced #headline("zkvcq.exact_hosted_receipts")
-receipts. They cover a `SELECT` with duplicate rows, a false `ASK`, `CONSTRUCT` and `DESCRIBE`,
-under both input kinds, though not every form under each (Appendix
-#ref(<app-inventories>, supplement: none)). Some used `DESCRIBE` or `FROM NAMED`, which version 1 of
-the specification excludes; with signature checks, our services now reject both before proving.
-Their `DESCRIBE` answer
-contained every default-graph triple whose subject was the described resource and, recursively,
-every triple whose subject was a blank node reached as an object. The same job ran
-#headline("zkvcq.exact_replay_cases") test cases outside the zkVM, in
-#headline("zkvcq.exact_replay_jobs") runs across request formats and input kinds. Each run gave its
-expected outcome, and none produced a proof.
+Without signature checks, the evaluator produced #headline("zkvcq.exact_hosted_receipts") receipts
+in a CI build and #headline("zkvcq.adapter_receipts") with our services, under both input kinds
+(@evidence-table). With our services, the verifier rejected
+#headline("zkvcq.adapter_row_bound_rejected") receipt whose result exceeded the row limit: a valid
+proof is necessary, not sufficient, for acceptance. These receipts show Exact evaluation bound to a
+request, not who issued the data.
 
-With our holder and verifier services, on another machine and guest binary, the evaluator produced
-#headline("zkvcq.adapter_receipts") receipts. The verifier accepted
-#headline("zkvcq.adapter_accepted"), covering `SELECT`, true and false `ASK` and `CONSTRUCT` under
-both input kinds. It rejected #headline("zkvcq.adapter_row_bound_rejected") receipt, whose result
-exceeded the row limit: a valid proof is necessary, not sufficient, for acceptance. The
-#headline("zkvcq.adapter_controls") negative tests exercised each verifier check (@controls-table).
-These receipts show Exact evaluation bound to a request, not who issued the data.
-
-=== Exact answers with signature checks <v5-evidence>
-
-The build with signature checks passed #headline("zkvcq.v5_auth_tests_passed") tests outside the
-zkVM, including the rejection of valid signatures under the wrong issuer, verification method, proof
-purpose or cryptosuite. Executed without proving, its guest accepted
-#headline("zkvcq.v5g_direct_v5_positive") valid inputs and rejected
-#headline("zkvcq.v5g_direct_v5_aborts") altered ones, such as forged, spliced or unauthorised
-credentials, each with its expected error.
-
-With our holder and verifier services, the build then produced one receipt per test case, each over
-a single credential, in three experiments:
-
-- a verifier-agreed `SELECT` over the W3C test vector for `eddsa-rdfc-2022`, whose result keeps a
-  duplicated row (#raw("?" + headline("zkvcq.vcqg_result_variable")) is
-  #raw(headline("zkvcq.vcqg_result_row1")) twice);
-- the payment question of §#ref(<intro>, supplement: none), over a synthetic credential that lists
-  three settled payments and is signed with the public RFC 8032 test key, so its issuer stands in
-  for a bank. Under both input kinds the journal reports `false`, and the verifier accepted the
-  answer;
-- the remaining test cases, over the W3C test vector: `SELECT`, false `ASK` and `CONSTRUCT` under a
-  holder-declared input; true `ASK` and `CONSTRUCT` under a verifier-agreed input; and a `SELECT`
-  whose result exceeds the row limit. The verifier accepted every answer except the last, which it
-  rejected before marking the request as answered.
-
-Each accepted receipt came with negative tests (@evidence-table). They alter the request, the issuer
-keys, the proof method, the receipt, the input kind or the agreed commitment; present the receipt
-under another guest's image ID; or replay it. Each gave its expected outcome; we report no timings
-for these runs.
+With signature checks and our services, the evaluator produced one receipt per test case, each over
+one credential. For the payment question of §#ref(<intro>, supplement: none), the credential lists
+three settled payments and is signed with the public RFC 8032 test key, so its issuer stands in for
+a bank. Under both input kinds the journal reports `false`, and the verifier accepted the answer.
+Each accepted receipt came with negative tests, which alter the request, the issuer keys, the proof
+method, the receipt, the input kind or the agreed commitment, check the receipt against the other
+build's image ID, or replay it. Each gave its expected outcome. Supplementary
+§#ref(<supp-records>, supplement: none) details every test case; we report no timings for these
+runs.
 
 === The public-triple circuit pilot <pilot-evidence>
 
@@ -909,19 +883,13 @@ query took fewer cycles than processing the document or verifying the signature.
 
 A sweep of #headline("zkexec.sweep_cases") query cases, one per feature, ran in the same
 configurations over generated credentials of #headline("zkexec.sweep_statements_small") and
-#headline("zkexec.sweep_statements_large") triples each (@sweep-table). The evaluator admitted
-#headline("zkexec.sweep_rdfc_hidden_n1_s32_admitted") cases with one credential and
-#headline("zkexec.sweep_rdfc_hidden_n4_s32_admitted") with four, and rejected the others, such as
-`SERVICE`, `NOW` and `RAND`. With one credential of #headline("zkexec.sweep_statements_small")
-triples, in the hidden mode with `eddsa-rdfc-2022`, the admitted cases needed from
-#mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_min") to
-#mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_max") million cycles, with a median of
-#mcycles("zkexec.sweep_rdfc_hidden_n1_s32_user_median"). Our prover stops an execution that reaches
-a session limit of #mcycles("zkexec.sweep_session_limit") million cycles, and then produces no
-proof. With `eddsa-rdfc-2022` in the hidden mode, four credentials of
-#headline("zkexec.sweep_statements_large") triples exceeded this limit in every admitted case.
-Every other configuration stayed within it, including the revealed mode and the Merkle-based
-cryptosuite over the same credentials.
+#headline("zkexec.sweep_statements_large") triples each (§#ref(<supp-cost>, supplement: none)). Our
+prover stops an execution that reaches a session limit of
+#mcycles("zkexec.sweep_session_limit") million cycles, and then produces no proof. With
+`eddsa-rdfc-2022` in the hidden mode, four credentials of #headline("zkexec.sweep_statements_large")
+triples exceeded this limit in every case that the evaluator admitted. Every other configuration
+stayed within it, including the revealed mode and the Merkle-based cryptosuite over the same
+credentials.
 
 #todo-results[Proving time, memory and receipt size for each configuration and query, and the
 issuer, holder and verifier costs: signing and tree construction, and verification time split into
@@ -956,8 +924,8 @@ _Credentials and presentation protocols._ CL signatures @cl01, BBS @bbs, zk-cred
 Crescent @crescent let a holder prove statements about signed attributes, and SD-JWT @sdjwt lets a
 holder disclose selected claims of a signed JSON token. OpenID for Verifiable Presentations
 @openid4vp requests credentials with queries in its Digital Credentials Query Language (DCQL), which
-select credentials and the claims to disclose. A query request could travel in it as a new credential format, but the protocol has no
-step in which a verifier agrees an input in advance.
+select credentials and the claims to disclose. A query request could travel in it as a new
+credential format, but the protocol has no step in which a verifier agrees an input in advance.
 
 _Other proof methods._ A proof method need not produce a zero-knowledge proof. The companion
 specification proposes attestation by a TEE that a measured program evaluated the query and checked
@@ -973,18 +941,15 @@ method.
 Reading a verifier-agreed Exact answer as evidence about all the relevant records rests on an
 assumption we do not discharge: that a party the verifier trusts fixed an input that covers them.
 For the payment question, the bank could sign a dataset commitment that covers the credentials it
-issued to the applicant for a period. Alternatively, the verifier could agree a commitment in an earlier
-exchange in which it learned which credentials the dataset holds. We do not claim that such
+issued to the applicant for a period. Alternatively, the verifier could agree a commitment in an
+earlier exchange in which it learned which credentials the dataset holds. We do not claim that such
 infrastructure exists. Without it, a deployment can offer only holder-declared inputs.
 
 === Agents and several holders <agents>
 
-Software agents may soon carry people's records between organisations. A person who vouches for her
-own calendar can simply sign her answer. A proof is needed when a holder relays a statement it did
-not make and must not reveal the rest, as when an applicant's agent relays a bank's records. The
-receiving agent cannot pause to ask a person what an accepted answer guarantees; a query request
-that states the answer kind, the input kind and the accepted issuer keys records that guarantee
-where software can check it. We have not evaluated agents or agent protocols.
+A software agent that receives an answer cannot ask a person what acceptance guarantees, but a
+query request records the guarantee where software can check it: the answer kind, the input kind
+and the accepted issuer keys. We have not evaluated agents or agent protocols.
 
 We consider a single holder. Queries over records held by several parties that do not trust one
 another could combine multi-party computation with proofs; we leave them to separate work.
@@ -1024,7 +989,8 @@ remain to be done.
 
 // ---------------------------------------------------------------------------------------------
 // Appendix: at most two LNCS pages after the references. It states what an accepted presentation
-// shows and lists the test cases behind Table 3. The supplementary material follows it.
+// shows and the assumptions behind that argument. The test cases behind the evidence table are in
+// the supplementary material, which follows it.
 // ---------------------------------------------------------------------------------------------
 #pagebreak(weak: true)
 #heading(level: 1, numbering: none)[Appendix]
@@ -1070,8 +1036,8 @@ hidden mode, the credentials' signatures. Public inputs and witness satisfy the 
 / A5: The cryptosuite's signatures are unforgeable, each listed key belongs to the issuer that its
   entry names, and that issuer keeps the private key secret.
 
-Tests support A2 and A4 (Appendix #ref(<app-inventories>, supplement: none)); A1, A3 and A5 concern
-the proof system, the hash function and the issuers.
+Tests support A2 and A4 (supplementary §#ref(<supp-records>, supplement: none)); A1, A3 and A5
+concern the proof system, the hash function and the issuers.
 
 *Argument.* Suppose the verifier accepts a presentation. By A4, the receipt verifies under the
 verifier's image ID for a journal that holds the stored request's digest, its answer and input
@@ -1097,48 +1063,6 @@ triples as public inputs, and checks that each is in $D$ and signed, therefore s
 statement as one that finds them in its witness. It discloses nothing that the verifier cannot
 compute from the row. The baseline and public-triple circuits of
 §#ref(<pilot-evidence>, supplement: none) differ in exactly this way.
-
-== Test cases per experiment <app-inventories>
-
-@test-cases-table shows the Exact answers that each zkVM experiment of @evidence-table proved, by
-input kind. The inputs were small synthetic graphs or, with signature checks, the W3C test vector
-for `eddsa-rdfc-2022` and the payment credential of §#ref(<v5-evidence>, supplement: none). The
-supplementary material gives the tests and negative tests (§#ref(<supp-records>, supplement: none)),
-and the source commits and guest binaries (§#ref(<repro>, supplement: none)).
-
-#[
-#show figure: set block(breakable: false)
-#figure(
-  {
-    set text(size: 0.8em)
-    set par(justify: false)
-    table(
-      columns: (1.9fr, 0.9fr, 1.1fr, 0.9fr, 1fr, 1.2fr),
-      align: (left, center, center, center, center, center),
-      table.header(
-        [Exact answer], [CI build], [Our services], [First case], [Payment †], [Remaining †],
-      ),
-      [`SELECT`, duplicate rows], [H], [H, V], [V], [–], [H],
-      [`SELECT`, `ORDER BY` and `COUNT`], [V], [–], [–], [–], [–],
-      [`ASK`, true], [–], [V], [–], [–], [V],
-      [`ASK`, false], [H, V], [H], [–], [H, V], [H],
-      [`CONSTRUCT`], [V], [H, V], [–], [–], [H, V],
-      [`DESCRIBE`], [H], [–], [–], [–], [–],
-      [`SELECT` over the row limit, rejected], [–], [V], [–], [–], [V],
-      [Negative tests], [In its tests], [#headline("zkvcq.adapter_controls") in total],
-        [#headline("zkvcq.vcqg_controls")],
-        [#headline("zkvcq.vcqp_controls") V, #headline("zkvcq.vcqph_controls") H],
-        [#headline("zkvcq.ci_asktva_controls") V, #headline("zkvcq.ci_askfhd_controls") H each],
-    )
-  },
-  caption: [
-    Exact answers proved, by input kind: H holder-declared, V verifier-agreed; an entry may stand
-    for several receipts. The columns are the rows of @evidence-table with receipts: the
-    evaluator's CI build, the evaluator with our services and, with signature checks, the first test
-    case, the payment question and the remaining test cases. † No internal check.
-  ],
-) <test-cases-table>
-]
 
 // ---------------------------------------------------------------------------------------------
 // Supplementary material: not part of the appendix; at submission it goes behind an anonymous
@@ -1210,8 +1134,8 @@ The verifier service lists the proof methods it accepts in each query request, w
 key for each from its own configuration (§#ref(<request>, supplement: none)). @methods-table shows
 what our proof methods support, and §#ref(<repro>, supplement: none) gives their identifiers. Our
 services reject a request outside these limits before proving and before marking it as answered.
-They also reject a base IRI, an ordered `SELECT`, `DESCRIBE`, and a request that requires credential
-status or holder binding.
+Besides the queries of §#ref(<prototype>, supplement: none), they reject a request that requires
+credential status or holder binding.
 
 #[
 #show figure: set block(breakable: false)
@@ -1245,11 +1169,10 @@ status or holder binding.
 *Request formats.* The CI build of the evaluator read requests in three formats, each extending the
 one before: the default-graph format; the named-graph format, which adds named graphs, `GRAPH`,
 `FROM` and `FROM NAMED`; and the graph-result format, which adds `CONSTRUCT`, `DESCRIBE` and blank
-nodes in the input and the result. Behind our services, both builds use the graph-result format;
-with signature checks, the services also reject `FROM` and `FROM NAMED`
-(§#ref(<prototype>, supplement: none)). The
-services encode the query request in binary rather than in the specification's JSON, compute the
-request digest over that encoding, and store times as Unix seconds.
+nodes in the input and the result. Behind our services, both builds use the graph-result format,
+with the exclusions of §#ref(<prototype>, supplement: none). The services encode the query request
+in binary rather than in the specification's JSON, compute the request digest over that encoding,
+and store times as Unix seconds.
 
 *How the stored request reaches the proof.* The holder service gives the guest program the query,
 the input kind, any agreed commitment and the evaluation limits. It also gives a SHA-256 hash of the
@@ -1260,8 +1183,8 @@ signature checks, the proof-method entry contains a digest of the request's issu
 evaluation limits, so changing any key, issuer or verification method changes the entry.
 
 *Dataset commitments.* Without signature checks, the evaluator commits with SHA-256 to a format tag,
-its capacity limits, the salt, the names of any named graphs and the exact bytes of the N-Triples or
-N-Quads input. It does not canonicalise the input, so equivalent serialisations give different
+its capacity limits, its policy for `DESCRIBE`, the salt, the names of any named graphs and the
+exact bytes of the N-Triples or N-Quads input. It does not canonicalise the input, so equivalent serialisations give different
 commitments. With signature checks, the commitment covers the digest of the request's issuer keys
 and evaluation limits, the salt and the number of credentials. For each credential, it also covers
 the signed hashes of the canonical document and proof configuration. A commitment agreed under
@@ -1269,9 +1192,45 @@ one list of issuer keys therefore cannot serve another.
 
 == Experiment records <supp-records>
 
-@tests-table lists the tests and executions without proving, by run. Appendix
-#ref(<app-inventories>, supplement: none) lists the receipts, and @controls-table the negative
-tests.
+@test-cases-table shows the Exact answers that each zkVM experiment of @evidence-table proved, by
+input kind. The inputs were small synthetic graphs or, with signature checks, the W3C test vector
+for `eddsa-rdfc-2022` and the payment credential of §#ref(<exact-evidence>, supplement: none).
+@tests-table lists the tests and executions without proving, by run, and @controls-table the
+negative tests.
+
+#[
+#show figure: set block(breakable: false)
+#figure(
+  {
+    set text(size: 0.8em)
+    set par(justify: false)
+    table(
+      columns: (1.9fr, 0.9fr, 1.1fr, 0.9fr, 1fr, 1.2fr),
+      align: (left, center, center, center, center, center),
+      table.header(
+        [Exact answer], [CI build], [Our services], [First case], [Payment †], [Remaining †],
+      ),
+      [`SELECT`, duplicate rows], [H], [H, V], [V], [–], [H],
+      [`SELECT`, `ORDER BY` and `COUNT`], [V], [–], [–], [–], [–],
+      [`ASK`, true], [–], [V], [–], [–], [V],
+      [`ASK`, false], [H, V], [H], [–], [H, V], [H],
+      [`CONSTRUCT`], [V], [H, V], [–], [–], [H, V],
+      [`DESCRIBE`], [H], [–], [–], [–], [–],
+      [`SELECT` over the row limit, rejected], [–], [V], [–], [–], [V],
+      [Negative tests], [In its tests], [#headline("zkvcq.adapter_controls") in total],
+        [#headline("zkvcq.vcqg_controls")],
+        [#headline("zkvcq.vcqp_controls") V, #headline("zkvcq.vcqph_controls") H],
+        [#headline("zkvcq.ci_asktva_controls") V, #headline("zkvcq.ci_askfhd_controls") H each],
+    )
+  },
+  caption: [
+    Exact answers proved, by input kind: H holder-declared, V verifier-agreed; an entry may stand
+    for several receipts. The columns are the rows of @evidence-table with receipts: the
+    evaluator's CI build, the evaluator with our services and, with signature checks, the first test
+    case, the payment question and the remaining test cases. † No internal check.
+  ],
+) <test-cases-table>
+]
 
 #[
 #show figure: set block(breakable: false)
@@ -1337,36 +1296,58 @@ evaluator's tests, then the tests that run the guest program, one at a time. The
   blank node shared across rows (holder-declared); a `DESCRIBE` (holder-declared); and a `CONSTRUCT`
   that creates fresh blank nodes (verifier-agreed).
 
-Each test compares the journal with the result of the evaluator run outside the zkVM. Some also
-check that verification fails after a change to the query, the request's limits, the input kind, the
-agreed commitment or one journal byte. They also check that it fails under another image ID and for
-a fake receipt, and that a second verification of the same receipt fails as a replay.
+The `DESCRIBE` answer contained every default-graph triple whose subject was the described resource
+and, recursively, every triple whose subject was a blank node reached as an object. Each test
+compares the journal with the result of the evaluator run outside the zkVM. Some also check that
+verification fails after a change to the query, the request's limits, the input kind, the agreed
+commitment or one journal byte. They also check that it fails under another image ID and for a fake
+receipt, and that a second verification of the same receipt fails as a replay. The same job ran
+#headline("zkvcq.exact_replay_cases") test cases outside the zkVM, in
+#headline("zkvcq.exact_replay_jobs") runs across request formats and input kinds. Each run gave its
+expected outcome, and none produced a proof.
 
 Our services ran a separately built guest program of the same evaluator on another machine
 (§#ref(<repro>, supplement: none)). Their test cases query a small synthetic graph in which triples
-share an object, so the `SELECT` result has duplicate rows.
+share an object, so the `SELECT` result has duplicate rows. Of the
+#headline("zkvcq.adapter_receipts") receipts, the verifier accepted
+#headline("zkvcq.adapter_accepted"), covering `SELECT`, true and false `ASK` and `CONSTRUCT` under
+both input kinds, and rejected the one whose result exceeded the row limit. The
+#headline("zkvcq.adapter_controls") negative tests exercised each verifier check (@controls-table).
 
 === The evaluator with signature checks <supp-signed>
 
-@tests-table lists the runs that tested this build without proving. Its tests outside the zkVM use
-the W3C test vector and synthetic keys. They check that valid signatures under the wrong issuer,
-verification method, proof purpose or cryptosuite are rejected, and that signed lexical forms and
-each credential's blank-node scope are kept. They also check that the request's issuer keys are
-bound into the request and the commitment, and they evaluate `SELECT`, `ASK` and `CONSTRUCT` under
-both input kinds. Executed without proving, the guest program accepted the test vector under both
-input kinds. Besides the altered credentials of §#ref(<v5-evidence>, supplement: none), it rejected
-input that was not in canonical form or used another encoding. A positive control preceded each
-group of negative tests. The evaluator without signature checks rejected input meant for this build
-and still accepted its own. The tests of our services check that changing a listed key, issuer,
-verification method or limit changes the proof-method entry's digest and the digest in the journal,
-while reordering the keys does not. They also check that a mismatched proof-method entry, guest
-program or image ID, and a fake or foreign receipt, are rejected before the request is marked as
-answered.
+@tests-table lists the runs that tested this build without proving. Its
+#headline("zkvcq.v5_auth_tests_passed") tests outside the zkVM use the W3C test vector and synthetic
+keys. They check that valid signatures under the wrong issuer, verification method, proof purpose or
+cryptosuite are rejected, and that signed lexical forms and each credential's blank-node scope are
+kept. They also check that the request's issuer keys are bound into the request and the
+commitment, and they evaluate `SELECT`, `ASK` and `CONSTRUCT` under both input kinds. Executed
+without proving, the guest program accepted the test vector, under both input kinds, in
+#headline("zkvcq.v5g_direct_v5_positive") executions. It rejected
+#headline("zkvcq.v5g_direct_v5_aborts") altered inputs, each with its expected error: forged,
+spliced or unauthorised credentials, and input that was not in canonical form or used another
+encoding. A positive control preceded each group of negative tests. The evaluator without signature checks rejected input meant for this build and still
+accepted its own. The tests of our services check that changing a listed key, issuer, verification
+method or limit changes the proof-method entry's digest and the digest in the journal, while
+reordering the keys does not. They also check that a mismatched proof-method entry, guest program or
+image ID, and a fake or foreign receipt, are rejected before the request is marked as answered.
 
-The receipts came from three experiments (Appendix #ref(<app-inventories>, supplement: none)), with
-different machines and guest binaries (§#ref(<repro>, supplement: none)). For the first test case,
-the internal check covered #headline("zkvcq.vcqg_source_files_verified") source files, unchanged
-during the run, and #headline("zkvcq.vcqg_archive_verified_files") archived files.
+With our services, this build produced one receipt per test case, each over a single credential, in
+three experiments with different machines and guest binaries (§#ref(<repro>, supplement: none)):
+
+- a verifier-agreed `SELECT` over the W3C test vector for `eddsa-rdfc-2022`, whose result keeps a
+  duplicated row (#raw("?" + headline("zkvcq.vcqg_result_variable")) is
+  #raw(headline("zkvcq.vcqg_result_row1")) twice);
+- the payment question, over the payment credential of §#ref(<exact-evidence>, supplement: none),
+  under both input kinds;
+- the remaining test cases, over the W3C test vector: `SELECT`, false `ASK` and `CONSTRUCT` under a
+  holder-declared input; true `ASK` and `CONSTRUCT` under a verifier-agreed input; and a `SELECT`
+  whose result exceeds the row limit. The verifier accepted every answer except the last, which it
+  rejected before marking the request as answered.
+
+For the first test case, the internal check covered #headline("zkvcq.vcqg_source_files_verified")
+source files, unchanged during the run, and #headline("zkvcq.vcqg_archive_verified_files") archived
+files.
 
 === Negative tests <supp-negative>
 
@@ -1507,13 +1488,13 @@ The sweep's query cases cover star and chain basic graph patterns of several siz
 of IRIs, strings, language-tagged strings, numbers and date-times; and string functions. They also
 cover aggregates, `DISTINCT`, `ORDER BY` with `LIMIT` and `OFFSET`, property paths and each query
 form. Further cases probe features that the evaluator should reject, or patterns that cannot match
-credential data. Run outside the zkVM on the same input, the evaluator decided which cases to admit. It rejected
-`EXISTS` and `NOT EXISTS`, which it does not admit over data with blank nodes such as the generated
-credentials; `SERVICE`; the functions `BNODE`, `NOW` and `RAND`; a custom function; a triple term;
-and a nested `EXISTS`. With four credentials, it also rejected a zero-or-more property path whose
-result exceeded its limits. It admitted `DESCRIBE`, `FROM` and `FROM NAMED`, which our services
-reject before proving (§#ref(<prototype>, supplement: none)). @sweep-table gives the counts and
-cycles per configuration.
+credential data. Run outside the zkVM on the same input, the evaluator decided which cases to
+admit. It rejected `EXISTS` and `NOT EXISTS`, which it does not admit over data with blank nodes such
+as the generated credentials; `SERVICE`; the functions `BNODE`, `NOW` and `RAND`; a custom
+function; a triple term; and a nested `EXISTS`. With four credentials, it also rejected a
+zero-or-more property path whose result exceeded its limits. It admitted `DESCRIBE`, `FROM` and
+`FROM NAMED`, which the prover and verifier reject with signature checks
+(§#ref(<prototype>, supplement: none)). @sweep-table gives the counts and cycles per configuration.
 
 #[
 #show figure: set block(breakable: false)
