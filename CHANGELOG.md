@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.5] - 2026-10-09
+## [0.1.5] - 2026-10-10
 
 Fix-forward release after the v0.1.4 release workflow failed before creating a GitHub
 Release (no v0.1.4 assets, npm or PyPI packages were published). Publication is not
@@ -28,9 +28,18 @@ implied by this entry; verify the tagged run and every registry and release arti
 - **sparq-solid:** a SPARQL Update request with more than one operation can no longer include a
   `DELETE`/`INSERT … WHERE` with a variable `GRAPH` target; send that operation on its own.
   (#6763)
+- **sparq-server / sparq-lws-core (ODRL):** rules that target an `odrl:AssetCollection` now
+  apply to the collection's `odrl:partOf` members on the server's ODRL lane and the LWS ODRL
+  gate. (#6773)
+- **sparq-solid:** if rebuilding the authorization view fails after an accepted `.acl` / `.acr`
+  change, the store denies every request until a rebuild succeeds, instead of continuing to
+  enforce the previous rules. (#6742)
 
 ### Added
 
+- **sparq-solid:** `PodStore::attach_odrl_policy` keeps an ODRL policy on the store and
+  evaluates its prohibitions for the requesting session on every read, query, decision and
+  update path. (#6759)
 - `sparq-vectors` can open canonical little-endian `.spqv` stores on big-endian hosts by
   validating the file and byte-swapping its dense f32 region into aligned owned storage; `.spqv`
   writers and the `.spqg` reader/writer remain little-endian-host only.
