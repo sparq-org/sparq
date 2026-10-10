@@ -91,9 +91,10 @@ and checked.
 
 This document uses the SPARQL 1.1 terms #emph[query form], #emph[solution mapping],
 #emph[solution sequence] and #emph[RDF dataset] #cite("SPARQL11-QUERY"), and writes
-$[| Q |]_D$ for a multiset of solution mappings that SPARQL 1.1 permits as the result of query
-$Q$ over RDF dataset $D$. Where it permits more than one (section 6.1), $[| Q |]_D$ is the one
-the holder evaluated. It also uses:
+$[| Q |]_D$ for a multiset of solution mappings that SPARQL 1.1 permits for the query pattern
+of $Q$ over RDF dataset $D$ after its solution modifiers; for an ASK query, this is the
+multiset before it becomes a boolean. Where SPARQL 1.1 permits more than one (section 6.1),
+$[| Q |]_D$ is the one the holder evaluated. It also uses:
 
 / Input dataset: The RDF dataset a holder evaluates the query over, built from credentials as
   the proof method states. The methods in this document use the RDF merge #cite("RDF11-MT") of
