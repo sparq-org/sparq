@@ -276,9 +276,10 @@ What the server exposes, all discoverable from the storage description
   applied (a missing path, a failed `test`) gets `422`, another patch format or a resource not
   stored as JSON (`application/json` or a `+json` type, which it keeps) gets `415` with
   `Accept-Patch`, checked before the preconditions, and a result larger than the body limit, more
-  than 1,000 operations, or work past four times the body limit gets `413`. Numbers are kept
-  exactly: a patch or a resource holding one a 64-bit integer or a double cannot hold exactly
-  gets `422` and nothing changes. A patch that reads the content (`test`, `copy`, `move`) needs
+  than 1,000 operations, or work past four times the body limit gets `413`. Numbers are never
+  read as binary floats: each is kept as its text, so one a patch does not touch is written back
+  as it was (members are written in name order), and `test` compares numbers as the decimal
+  values their texts denote. A patch that reads the content (`test`, `copy`, `move`) needs
   Read as well as Modify. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
