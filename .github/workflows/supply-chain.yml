@@ -125,13 +125,13 @@ jobs:
       # The generator derives transient member locks from the committed root lock without
       # dependency resolution, and fails unless the shared-client runtime view attests both
       # lazy codec dependencies.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Generate JS SBOM (runtime + full tree)
         run: scripts/gen-js-sbom.sh
       - name: Upload JS SBOM artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-js-cyclonedx
           path: sbom/sparq-js*.cdx.json
@@ -168,7 +168,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-deny + cargo-vet + cargo-cyclonedx
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-deny,cargo-vet@0.10.2,cargo-cyclonedx
 
@@ -311,7 +311,7 @@ jobs:
       - name: Upload SBOM artifact
         # The JS SBOMs (uploaded above as sbom-js-cyclonedx) are excluded to preserve this artifact's exact
         # former contents.
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom-cyclonedx
           path: |

@@ -86,7 +86,7 @@ jobs:
       # Pinned, prebuilt mdbook (GitHub Releases binary — reproducible + fast, no
       # cargo compile). Explicit `tool:` is required by the sq-ur7o install-action lint.
       - name: Install mdbook (pinned)
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: mdbook@0.4.40
 
@@ -108,7 +108,7 @@ jobs:
           echo "OK: mdbook test passed" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload rendered guide (CI artifact only — NOT a Pages deploy)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs-guide
           path: book/book

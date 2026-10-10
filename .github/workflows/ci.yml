@@ -149,7 +149,7 @@ jobs:
       # item 2) lets a residual transient binary race self-heal. SHA-pinned install
       # action (a pin already vetted elsewhere in this workflow).
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
       # Build + ARCHIVE the whole workspace test set once. `--all-targets`
@@ -177,7 +177,7 @@ jobs:
       # Upload the archive immediately after the build, BEFORE doctests, so
       # the shards' input artifact is produced even if the doctest step later fails.
       - name: Upload nextest archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nextest-archive
           path: nextest.tar.zst
@@ -324,11 +324,11 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: nextest
       - name: Download nextest archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nextest-archive
       # No build step: each shard RUNS the pre-built archive
@@ -608,7 +608,7 @@ jobs:
       # RUNS the exported API (JsError/serialisation across the JS boundary), so the
       # web.rs #[wasm_bindgen_test]s run via wasm-pack in the Node executor — closing
       # exactly that gap. Verified locally: 20 passed.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 20
       # #5771: this pin must stay EQUAL to the one the `js` lane
@@ -1085,7 +1085,7 @@ jobs:
           echo "pass: ${PASS:-unknown} + documented divergences: ${DIV:-0} = $TOTAL (ratchet: $RATCHET)"
           [ -n "$PASS" ] && [ "$TOTAL" -ge "$RATCHET" ] || { echo "::error::conformance regressed below the ratchet ($TOTAL < $RATCHET)"; exit 1; }
       - name: Upload report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: conformance-report
@@ -1223,7 +1223,7 @@ jobs:
           [ -n "$CORE_PASS" ] && [ "$CORE_PASS" -ge "$CORE_FLOOR" ] || { echo "::error::SHACL core regressed below the ratchet (${CORE_PASS:-?} < $CORE_FLOOR)"; exit 1; }
           [ -n "$SPARQL_PASS" ] && [ "$SPARQL_PASS" -ge "$SPARQL_FLOOR" ] || { echo "::error::SHACL-SPARQL regressed below the ratchet (${SPARQL_PASS:-?} < $SPARQL_FLOOR)"; exit 1; }
       - name: Upload scoreboard
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shacl-conformance
@@ -1367,7 +1367,7 @@ jobs:
           cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard
           cat conformance-scoreboard.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload scoreboard
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: geo-conformance
@@ -1466,7 +1466,7 @@ jobs:
           cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard
           cat conformance-scoreboard.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload scoreboard
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: solid-conformance
@@ -1566,7 +1566,7 @@ jobs:
           cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard
           cat conformance-scoreboard.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload scoreboard
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: odrl-conformance
@@ -1663,7 +1663,7 @@ jobs:
           cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard
           cat conformance-scoreboard.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload scoreboard
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: text-oracle
@@ -1764,7 +1764,7 @@ jobs:
           cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard
           cat conformance-scoreboard.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload scoreboard
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: rsp-oracle
@@ -1911,7 +1911,7 @@ jobs:
           cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance-scoreboard
           cat conformance-scoreboard.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload scoreboard
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: jsonld-conformance
@@ -2066,7 +2066,7 @@ jobs:
             grep -E 'pass /' served-conformance.log || true
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload served-surface conformance report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: served-conformance-report
           path: served-conformance.json
@@ -2399,7 +2399,7 @@ jobs:
           [ -n "$PROFILE_PASS" ] && [ "$PROFILE_PASS" -ge "$PROFILE_FLOOR" ] || { echo "::error::OWL 2 DL profile-identification regressed below the pinned floor ($PROFILE_PASS < $PROFILE_FLOOR)"; exit 1; }
           [ -n "$DIRECT_PASS" ] && [ "$DIRECT_PASS" -ge "$DIRECT_FLOOR" ] || { echo "::error::OWL 2 DL direct lane regressed below the pinned floor ($DIRECT_PASS < $DIRECT_FLOOR)"; exit 1; }
       - name: Upload report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: inference-conformance-report
@@ -2585,7 +2585,7 @@ jobs:
         # sq-tool-pin: taiki-e/install-action picks the tool from its @<tool> ref;
         # SHA-pinning (our code-scanning=0 policy) drops that ref, so an explicit `with: tool:`
         # is MANDATORY — without it install-action installs NOTHING and `cargo llvm-cov` ENOENTs.
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # cargo-llvm-cov
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
       - name: Measure + enforce per-crate coverage (shard ${{ matrix.shard }}, max-remeasure gate)
@@ -2614,7 +2614,7 @@ jobs:
           ./scripts/coverage.sh
           python3 scripts/coverage-gate.py --check-robust target/coverage/coverage-summary.json
       - name: Upload coverage summary (shard ${{ matrix.shard }})
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: coverage-summary-shard-${{ matrix.shard }}
@@ -2706,7 +2706,7 @@ jobs:
         # sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action (the @<tool> ref is dropped by the pin). Both tools are needed:
         # llvm-cov for instrumentation, nextest for the partitioning.
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # cargo-llvm-cov
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Fetch W3C fixtures (engine tests need them)
@@ -2718,7 +2718,7 @@ jobs:
       - name: Compile + run partition ${{ matrix.part }}/3 (--no-report, emit .profraw)
         run: ./scripts/coverage-engine-shard.sh run ${{ matrix.part }} 3
       - name: Upload partition ${{ matrix.part }} .profraw
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-engine-profraw-${{ matrix.part }}
           # sq-piapk: the native llvm-cov path emits .profraw under
@@ -2769,7 +2769,7 @@ jobs:
           # Save on main only (canonical note on the `build-archive` cache step).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-llvm-cov + nextest
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # cargo-llvm-cov
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov,nextest
       - name: Build instrumented engine objects (for `report`, no test run)
@@ -2780,7 +2780,7 @@ jobs:
         # archive extraction.
         run: ./scripts/coverage-engine-shard.sh build-objects
       - name: Download all partition .profraw
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: coverage-engine-profraw-*   # every partition's profraw artifact
           path: engine-profraw
@@ -2847,7 +2847,7 @@ jobs:
         # exit), so the merged number cannot be a silent transient undercount here.
         run: python3 scripts/coverage-gate.py --check target/coverage/coverage-summary.json
       - name: Upload merged engine coverage summary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: coverage-summary-engine
@@ -2962,7 +2962,7 @@ jobs:
         # sq-tool-pin: explicit `with: tool:` is MANDATORY when SHA-pinning
         # install-action — the @<tool> ref is dropped by the SHA pin, so without this the
         # tool is silently NOT installed and `cargo llvm-cov` ENOENTs (see per-commit job).
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # cargo-llvm-cov
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # cargo-llvm-cov
         with:
           tool: cargo-llvm-cov
       - name: Test-presence gate
@@ -2982,7 +2982,7 @@ jobs:
           ./scripts/coverage.sh
           python3 scripts/coverage-gate.py --check-robust target/coverage/coverage-summary.json
       - name: Upload coverage summary
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: coverage-summary-nightly
@@ -3372,7 +3372,7 @@ jobs:
           # Save on main only (canonical note on the `build-archive` cache step).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-mutants
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # cargo-mutants
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # cargo-mutants
         with:
           tool: cargo-mutants@25.3.1
       - name: Run cargo-mutants for this crate + ratchet against the baseline
@@ -3447,7 +3447,7 @@ jobs:
         if: ${{ !cancelled() && steps.run_mutants.outputs.measurement_completed == 'true' }}
         run: echo "Mutation measurement completed; advisory ratchet verdict remains separate."
       - name: Upload mutation outcomes
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           # sq-qcnn.11: per-crate artifact name — upload-artifact v4+ REJECTS two
@@ -3530,7 +3530,7 @@ jobs:
           # Save on main only (canonical note on the `build-archive` cache step).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-geiger
-        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: cargo-geiger
         continue-on-error: true
