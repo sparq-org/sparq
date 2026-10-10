@@ -91,8 +91,9 @@ and checked.
 
 This document uses the SPARQL 1.1 terms #emph[query form], #emph[solution mapping],
 #emph[solution sequence] and #emph[RDF dataset] #cite("SPARQL11-QUERY"), and writes
-$[| Q |]_D$ for the multiset of solution mappings of query $Q$ over RDF dataset $D$ under the
-SPARQL 1.1 semantics. It also uses:
+$[| Q |]_D$ for a multiset of solution mappings that SPARQL 1.1 permits as the result of query
+$Q$ over RDF dataset $D$. Where it permits more than one (section 6.1), $[| Q |]_D$ is the one
+the holder evaluated. It also uses:
 
 / Input dataset: The RDF dataset a holder evaluates the query over, built from credentials as
   the proof method states. The methods in this document use the RDF merge #cite("RDF11-MT") of
@@ -279,16 +280,13 @@ ASK, `result` is `true` if and only if $[| Q |]_D$ is not empty; for CONSTRUCT, 
 graph SPARQL 1.1 permits for $Q$ over $D$. If the result would exceed `limits.maxResultRows` or a
 bound of the proof method, the holder service MUST NOT return a truncated result.
 
-For some queries SPARQL 1.1 permits more than one result over the same dataset: OFFSET and
-LIMIT where ORDER BY does not fix the order of solutions (no ORDER BY, solutions it leaves
-equal, or values it does not compare), REDUCED, SAMPLE, GROUP_CONCAT, aggregates over
-floating-point values, and blank nodes made by `BNODE`. An Exact answer to such a query is one
-of the permitted results, and the holder chooses which. The result is unique when every OFFSET and LIMIT, at every level of the query,
-follows an ORDER BY that strictly orders all the solutions at that level, and the query uses
-no REDUCED, SAMPLE, GROUP_CONCAT or `BNODE`, no SUM or AVG over `xsd:float` or `xsd:double`
-values, and no MIN or MAX over values that compare equal but are different terms. A verifier
-that needs one particular result writes such a query. A proof method MAY fix these choices
-itself, but a verifier MUST NOT rely on that unless the method publishes it.
+For some queries SPARQL 1.1 permits more than one result over the same dataset, for example
+with OFFSET and LIMIT where ORDER BY does not fix the order of the solutions, with REDUCED,
+SAMPLE, GROUP_CONCAT, MIN or MAX over values SPARQL 1.1 does not order, with arithmetic whose
+precision is implementation-defined. An Exact answer to such a query is one of
+the permitted results, and the holder chooses which. This document does not define when a
+query has only one permitted result. A proof method MAY fix these choices, and a verifier
+relies on that only where the method publishes it (section 9).
 
 An Exact answer never satisfies a request for a Supported answer, and the reverse; the kinds
 MUST be equal.
@@ -500,6 +498,7 @@ Each proof method MUST publish:
 - the form of the `verificationKey` member, including byte order where the key or image ID is
   a sequence of words;
 - the form of its `parameters` member and its defaults;
+- any of the choices section 6.1 leaves to the holder that the method fixes;
 - the canonical encoding of the statement and how the evidence binds it (section 7); for an
   attestation, the statement digest MUST be in the signed report;
 - the encoding of the `proof` member and any size or capacity bounds.
@@ -597,8 +596,11 @@ problem while the salt stays private, but not the first. For this reason the rev
 sends the signature without the salt (section 6.3). Whether signatures can be forged by an attacker with a quantum computer depends on the
 cryptosuite, not on the mode: for Ed25519, the public key alone is enough.
 
-Where SPARQL 1.1 permits several results (section 6.1), the holder's choice among them
-reveals nothing beyond the result it returns.
+Where SPARQL 1.1 permits several results (section 6.1), the holder chooses among them, and
+the choice can carry information: for `SELECT ?x WHERE { VALUES ?x { 0 1 } } LIMIT 1` the
+returned value can encode one bit of the holder's choosing. A zero-knowledge proof does not
+prevent this, because the result is public. This matters when the holder does not fully
+trust its holder service, for example when a third party operates it.
 
 In the disclosed signature mode the verifier learns everything the disclosed credentials or
 derived presentations contain, including claims the issuer made mandatory to disclose.
