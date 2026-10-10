@@ -284,6 +284,10 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         credentials.push(credential);
         issue_ns.push(ns);
     }
+    let counts: Vec<usize> =
+        credentials.iter().map(|c| c.document.lines().filter(|line| !line.trim().is_empty()).count()).collect();
+    assert!(counts.windows(2).all(|pair| pair[0] == pair[1]), "credentials differ in size");
+    let statements = counts[0];
     let credential_bytes: Vec<usize> = credentials.iter().map(|c| c.document.len() + c.proof_config.len()).collect();
     let mut presented = Vec::new();
     if config.mode == SignatureMode::Revealed {
@@ -317,7 +321,7 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
         "suite": suite_name(config.suite),
         "mode": config.mode.as_str(),
         "n": config.n,
-        "statements_per_credential": if set == "main" { 16 } else { config.size },
+        "statements_per_credential": statements,
         "credential_blank_nodes": set != "main" && !args.blank_free,
         "issuer_sign_ns": issue_ns,
         "credential_bytes": credential_bytes,

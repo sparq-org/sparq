@@ -2438,13 +2438,15 @@ impl ProofManifest {
     /// Descriptive only: acceptance is decided by the verifier's checks, which apply
     /// a clear attestation's checks whenever one is present.
     pub fn signature_mode(&self) -> Option<SignatureMode> {
-        let clear: std::collections::BTreeSet<&str> =
-            self.commitment_attestations.iter().map(|a| a.commitment.0.as_str()).collect();
-        let hidden_only = self
-            .hidden_issuer_attestations
-            .iter()
-            .filter(|a| !clear.contains(a.commitment.0.as_str()))
-            .count();
+        // Compare parsed field elements, as the verifier does; a malformed
+        // commitment makes the mode undetermined.
+        let field = |c: &FieldHex| c.to_field().map(|f| FieldHex::from_field(&f).0);
+        let clear: Option<std::collections::BTreeSet<String>> =
+            self.commitment_attestations.iter().map(|a| field(&a.commitment)).collect();
+        let hidden: Option<Vec<String>> =
+            self.hidden_issuer_attestations.iter().map(|a| field(&a.commitment)).collect();
+        let (clear, hidden) = (clear?, hidden?);
+        let hidden_only = hidden.iter().filter(|c| !clear.contains(*c)).count();
         match (clear.is_empty(), hidden_only) {
             (false, 0) => Some(SignatureMode::Revealed),
             (true, n) if n > 0 => Some(SignatureMode::Hidden),

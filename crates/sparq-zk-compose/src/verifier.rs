@@ -8998,6 +8998,12 @@ mod tests {
         // A hidden proof over a clearly attested commitment is still revealed.
         m.hidden_issuer_attestations = vec![hidden("0x10")];
         assert_eq!(m.signature_mode(), Some(SignatureMode::Revealed));
+        // Commitments compare as field elements, not as hex strings.
+        m.hidden_issuer_attestations = vec![hidden("0x0010")];
+        assert_eq!(m.signature_mode(), Some(SignatureMode::Revealed));
+        m.hidden_issuer_attestations = vec![hidden("not hex")];
+        assert_eq!(m.signature_mode(), None);
+        m.hidden_issuer_attestations = vec![hidden("0x10")];
         m.hidden_issuer_attestations.push(hidden("0x11"));
         assert_eq!(m.signature_mode(), None);
         m.commitment_attestations.clear();

@@ -63,10 +63,22 @@ def load(path):
         return {record["id"]: record for record in map(json.loads, handle)}
 
 
+CONFIGURATION = {"set": "sweep", "suite": "eddsa-rdfc-2022", "mode": "hidden", "n": 1, "statements_per_credential": 32}
+
+
 def status(record):
+    """Classify one record, refusing anything that is not guest-execution evidence."""
+    for key, value in CONFIGURATION.items():
+        if record.get(key) != value:
+            sys.exit(f"{record['id']}: {key} is {record.get(key)!r}, expected {value!r}")
     if record["admitted"]:
+        execution = record.get("execution")
+        if not isinstance(execution, dict) or "error" in execution or not execution.get("user_cycles"):
+            sys.exit(f"{record['id']}: admitted natively but has no successful guest execution")
         return "guest_executed"
-    return "rejected_in_guest" if record.get("guest_aborted") else "rejected_before_guest"
+    if not record.get("guest_aborted"):
+        sys.exit(f"{record['id']}: rejected natively but the guest did not run to an abort")
+    return "rejected_in_guest"
 
 
 def main():
