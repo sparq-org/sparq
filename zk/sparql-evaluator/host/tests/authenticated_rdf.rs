@@ -16,7 +16,9 @@
 mod fixture;
 
 use fixture::{CountingNonces, Expect};
-use sparq_proved_evaluator::authenticated_rdf::{prove_with_artifact, verify_with_artifact};
+use sparq_proved_evaluator::authenticated_rdf::{
+    prove_with_artifact, verify_revealed_with_artifact, verify_with_artifact,
+};
 use sparq_proved_evaluator::{
     AcceptedGuest, ArtifactPin, Error, embedded_artifact, embedded_authrdf_artifact,
     embedded_authrdf_pin, embedded_pin,
@@ -153,4 +155,56 @@ fn verification_failures_never_consume_the_nonce() {
         );
         assert_eq!(nonces.calls, 0, "{error}: the nonce store was reached");
     }
+}
+
+/// The published vector in revealed mode: the witness carries no signature and
+/// the verifier checks the W3C signature over the journal's signed message.
+fn revealed_witness() -> auth::Witness {
+    let mut witness = fixture::witness(fixture::ASK_ISSUER, DatasetAuthority::HolderDeclared, NONCE);
+    witness.request.policy = fixture::policy().with_signature_mode(auth::SignatureMode::Revealed);
+    witness.dataset.credentials[0].signature.clear();
+    witness
+}
+
+#[test]
+fn revealed_mode_reveals_the_published_signed_message_and_checks_it_outside_the_proof() {
+    let witness = revealed_witness();
+    let journal = auth::evaluate(&witness).expect("native oracle");
+    assert_eq!(journal.result, Expect::Ask(true).result());
+    let [entry] = journal.signed_messages.as_slice() else { panic!("one credential") };
+    assert_eq!(entry.verification_method, fixture::W3C_VM);
+    let expected: Vec<u8> = [
+        fixture::hex::<32>(fixture::W3C_PROOF_SHA256),
+        fixture::hex::<32>(fixture::W3C_DOCUMENT_SHA256),
+    ]
+    .concat();
+    assert_eq!(entry.message, expected);
+    let signature = fixture::hex::<64>(fixture::W3C_SIGNATURE).to_vec();
+    auth::check_revealed_signatures(&journal, &witness.request, std::slice::from_ref(&signature)).unwrap();
+
+    let guest = auth_guest();
+    let bytes: Vec<u8> = risc0_zkvm::serde::to_vec(&journal)
+        .unwrap()
+        .into_iter()
+        .flat_map(u32::to_le_bytes)
+        .collect();
+    let fake = fixture::fake_receipt(guest.image_id(), bytes);
+    let hidden = fixture::request(fixture::ASK_ISSUER, DatasetAuthority::HolderDeclared, NONCE);
+    let mut nonces = CountingNonces::default();
+    // Each entry point refuses the other mode, and a fake receipt fails first.
+    assert_eq!(
+        verify_with_artifact(&fake, &witness.request, &mut nonces, &guest).unwrap_err(),
+        Error("revealed-mode V5 requests use verify_revealed_with_artifact")
+    );
+    assert_eq!(
+        verify_revealed_with_artifact(&fake, &hidden, std::slice::from_ref(&signature), &mut nonces, &guest)
+            .unwrap_err(),
+        Error("hidden-mode V5 requests use verify_with_artifact")
+    );
+    assert_eq!(
+        verify_revealed_with_artifact(&fake, &witness.request, &[signature], &mut nonces, &guest)
+            .unwrap_err(),
+        Error("only succinct receipts are accepted")
+    );
+    assert_eq!(nonces.calls, 0);
 }

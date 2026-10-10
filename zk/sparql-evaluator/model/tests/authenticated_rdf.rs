@@ -822,3 +822,102 @@ fn journal_version_request_and_result_substitutions_reject() {
     };
     assert_ne!(v3::request_digest(&inner).unwrap(), journal.request_digest);
 }
+
+// Revealed mode: the witness carries no signature; the verifier checks it.
+fn strip(credential: SignedCredential) -> (SignedCredential, Vec<u8>) {
+    let signature = credential.signature.clone();
+    (SignedCredential { signature: Vec::new(), ..credential }, signature)
+}
+
+fn revealed() -> Policy {
+    Policy::new(table()).with_signature_mode(auth::SignatureMode::Revealed)
+}
+
+#[test]
+fn revealed_mode_publishes_exact_signed_messages_and_hidden_digests_are_unchanged() {
+    assert_eq!(Policy::new(table()).signature_mode, auth::SignatureMode::Hidden);
+    assert_eq!(auth::SignatureMode::Hidden.as_str(), "hidden");
+    assert_eq!(auth::SignatureMode::Revealed.as_str(), "revealed");
+    // A hidden policy serialized before the field existed decodes to Hidden.
+    let mut json = serde_json::to_value(Policy::new(table())).unwrap();
+    json.as_object_mut().unwrap().remove("signature_mode");
+    assert_eq!(serde_json::from_value::<Policy>(json).unwrap(), Policy::new(table()));
+
+    let query = "SELECT ?n WHERE { ?s ex:name ?n }";
+    let hidden = holder(query, vec![alice(), bob()]).unwrap();
+    assert!(hidden.signed_messages.is_empty());
+    let (a, sig_a) = strip(alice());
+    let (b, sig_b) = strip(bob());
+    let journal = run(query, DatasetAuthority::HolderDeclared, revealed(), vec![a.clone(), b.clone()]).unwrap();
+    assert_eq!(journal.result, hidden.result);
+    // The policy digest, and so the commitment and request digest, bind the mode.
+    assert_ne!(journal.dataset_commitment, hidden.dataset_commitment);
+    assert_ne!(journal.request_digest, hidden.request_digest);
+    assert_eq!(journal.signed_messages.len(), 2);
+    let mut expected = Vec::new();
+    for (credential, method) in [(&alice(), VM_A), (&bob(), VM_B)] {
+        let config_hash = Sha256::digest(sparq_canon::canonicalize_nquads(&credential.proof_config).unwrap());
+        let document_hash = Sha256::digest(sparq_canon::canonicalize_nquads(&credential.document).unwrap());
+        expected.push((document_hash.to_vec(), method, [config_hash.as_slice(), document_hash.as_slice()].concat()));
+    }
+    expected.sort();
+    for (entry, (_, method, message)) in journal.signed_messages.iter().zip(&expected) {
+        assert_eq!(entry.verification_method, *method);
+        assert_eq!(&entry.message, message);
+    }
+    let req = request(query, DatasetAuthority::HolderDeclared, revealed());
+    auth::bind_journal(&journal, &req).unwrap();
+    // Signatures go in journal order (sorted by document hash).
+    let ordered: Vec<Vec<u8>> = journal
+        .signed_messages
+        .iter()
+        .map(|m| if m.verification_method == VM_A { sig_a.clone() } else { sig_b.clone() })
+        .collect();
+    auth::check_revealed_signatures(&journal, &req, &ordered).unwrap();
+    let swapped: Vec<Vec<u8>> = ordered.iter().rev().cloned().collect();
+    assert_eq!(reason(auth::check_revealed_signatures(&journal, &req, &swapped)), "Ed25519 signature verification failed");
+    assert_eq!(reason(auth::check_revealed_signatures(&journal, &req, &ordered[..1])), "revealed signature count mismatch");
+    let mut forged = ordered.clone();
+    forged[0][0] ^= 1;
+    assert!(auth::check_revealed_signatures(&journal, &req, &forged).is_err());
+    assert_eq!(reason(auth::check_revealed_signatures(&journal, &req, &[vec![0; 63], ordered[1].clone()])), "Ed25519 signature must be 64 bytes");
+    // A hidden request never accepts a revealed journal, and the reverse.
+    let hidden_req = request(query, DatasetAuthority::HolderDeclared, Policy::new(table()));
+    assert!(auth::bind_journal(&journal, &hidden_req).is_err());
+    assert!(auth::bind_journal(&hidden, &req).is_err());
+    assert_eq!(reason(auth::check_revealed_signatures(&hidden, &hidden_req, &[])), "revealed signature count mismatch");
+    let mut emptied = journal.clone();
+    emptied.signed_messages.clear();
+    assert_eq!(reason(auth::bind_journal(&emptied, &req)), "authenticated journal signature mode mismatch");
+}
+
+#[test]
+fn revealed_mode_rejects_witness_signatures_and_still_enforces_the_table() {
+    let query = "ASK { ?s ex:name ?n }";
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, revealed(), vec![alice()])),
+        "revealed mode carries no witness signature"
+    );
+    let (a, _) = strip(alice());
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, Policy::new(table()), vec![a])),
+        "Ed25519 signature must be 64 bytes"
+    );
+    // Unlisted methods and issuer mismatches still reject inside the proof.
+    let (unlisted, _) = strip(sign(&alice_document(), &config(VM_UNLISTED), 1));
+    assert_eq!(
+        reason(run(query, DatasetAuthority::HolderDeclared, revealed(), vec![unlisted])),
+        "verification method is not authorized"
+    );
+    // A verifier-agreed anchor binds the mode it was computed under.
+    let (a, _) = strip(alice());
+    let anchor = auth::dataset_commitment(&credentials(vec![a.clone()]), &revealed()).unwrap();
+    let journal =
+        run(query, DatasetAuthority::VerifierAgreed { commitment: anchor }, revealed(), vec![a.clone()]).unwrap();
+    assert_eq!(journal.provenance, Provenance::VerifierAgreedAuthenticated);
+    let hidden_anchor = authenticate(vec![alice()]).unwrap();
+    assert_eq!(
+        reason(run(query, DatasetAuthority::VerifierAgreed { commitment: hidden_anchor }, revealed(), vec![a])),
+        "authenticated dataset anchor mismatch"
+    );
+}
