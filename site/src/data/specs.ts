@@ -72,6 +72,17 @@ export const SPECS: Spec[] = [
       "The query request a verifier service sends and the answer presentation a holder service returns, as RDF with a JSON-LD serialization, a companion context and a vocabulary: the SPARQL 1.2 query, the trusted issuers, accepted cryptosuites and proof methods, hidden or revealed signatures, an optional agreed input dataset, and the result with its proof as a verifiable presentation. Includes a check against OpenID for Verifiable Presentations 1.0. Proof methods plug in by IRI, zero-knowledge or not; the ones built so far are research prototypes without an external audit.",
   },
   {
+    slug: "zk-merkle-cryptosuite",
+    source: "zk-merkle-cryptosuite.typ",
+    title: "Merkle-Root Cryptosuites for RDF Verifiable Credentials",
+    shortName: "zk-merkle-cryptosuite",
+    status: "unofficial",
+    date: "2026-10-10",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "Data Integrity cryptosuites whose issuer signs a salted Merkle root over a credential's typed quad leaves, with order-preserving comparison keys for numeric, date-time and string comparison, so zero-knowledge proofs of SPARQL answers skip in-proof canonicalization; members eddsa-sha256-merkle-2026 (implemented in the zkVM relation), schnorr-poseidon2-merkle-2026 and mldsa44-sha256-merkle-2026.",
+  },
+  {
     slug: "mpc-sparql",
     source: "mpc-sparql.typ",
     title:

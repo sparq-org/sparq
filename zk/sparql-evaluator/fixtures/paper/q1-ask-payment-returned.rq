@@ -1,0 +1,2 @@
+PREFIX bank: <https://bank.example/vocab#>
+ASK { ?p a bank:Payment ; bank:paymentStatus bank:Returned }

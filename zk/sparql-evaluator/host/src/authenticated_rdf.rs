@@ -40,7 +40,8 @@
 use crate::v3::CheckedFailure;
 use crate::{AcceptedGuest, Error, Nonces, Presentation, prove_serialized, verify_receipt};
 use sparq_proved_evaluator_model::authenticated_rdf::{
-    Journal, Request, Witness, bind_journal, dataset_commitment, validate_request,
+    Journal, Request, SignatureMode, Witness, bind_journal, check_revealed_signatures,
+    dataset_commitment, validate_request,
 };
 use std::{convert::Infallible, path::Path};
 
@@ -101,11 +102,42 @@ pub fn verify_with_artifact(
     nonces: &mut impl Nonces,
     guest: &AcceptedGuest,
 ) -> Result<Journal, Error> {
+    // A revealed-mode journal is unauthenticated until its signatures are checked.
+    if expected.policy.signature_mode == SignatureMode::Revealed {
+        return Err(Error("revealed-mode V5 requests use verify_revealed_with_artifact"));
+    }
     let no_check = |_: &Journal| Ok::<(), Infallible>(());
     match verify_checked(presentation, expected, nonces, guest.image_id, no_check) {
         Ok((journal, ())) => Ok(journal),
         Err(CheckedFailure::Verification(error)) => Err(error),
         Err(CheckedFailure::Check(never)) => match never {},
+    }
+}
+
+/// Verifies a revealed-mode V5 receipt and the presented issuer signatures.
+///
+/// As [`verify_with_artifact`], and before the nonce is consumed, checks each
+/// presented `proofValue` (journal order, 64 bytes each) with strict Ed25519
+/// against the journal's signed message and the request table key it names.
+///
+/// # Errors
+/// Everything [`verify_with_artifact`] rejects, hidden-mode requests, and any
+/// missing, extra, malformed or invalid signature.
+pub fn verify_revealed_with_artifact(
+    presentation: &Presentation,
+    expected: &Request,
+    signatures: &[Vec<u8>],
+    nonces: &mut impl Nonces,
+    guest: &AcceptedGuest,
+) -> Result<Journal, Error> {
+    if expected.policy.signature_mode != SignatureMode::Revealed {
+        return Err(Error("hidden-mode V5 requests use verify_with_artifact"));
+    }
+    let check = |journal: &Journal| check_revealed_signatures(journal, expected, signatures);
+    match verify_checked(presentation, expected, nonces, guest.image_id, check) {
+        Ok((journal, ())) => Ok(journal),
+        Err(CheckedFailure::Verification(error)) => Err(error),
+        Err(CheckedFailure::Check(_)) => Err(Error("revealed issuer signature rejected")),
     }
 }
 
