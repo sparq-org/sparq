@@ -211,7 +211,10 @@ computed over exactly those quads. Because every comparison key is recomputed
 from its lexical form, a malformed key in a credential makes the proof fail. A
 holder can hold the same credential under several salts, so a proof that rejects
 duplicate credentials MUST identify a credential by its quad count and unsalted
-root, not by its signed message.
+root, not by its signed message. Any order the proof makes public, such as the
+order of revealed messages, MUST depend only on salted values; an order by the
+unsalted root would let a verifier compare a private credential with a known
+one.
 
 - In `hidden` mode the signature is also private input, and the proof verifies
   it against a key the verifier authorized.
@@ -305,6 +308,14 @@ the configuration digest, the `eddsa-sha256-merkle-2026` signed message is
 
 ```
 d79eb8afe1cbb6c7c146089a2522aa54a6a875176585d135a39d129d50be81a8
+```
+
+Its Ed25519 signature under the RFC 8032 section 7.1 TEST 1 key (public key
+`d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a`) is
+
+```
+82f02d82b9845d064bae00df4668950cc03007af33ca6e9970ea0f5514b62eca
+4af505ea8ada76d779bcfc7fa06dcafd997be37abedb75ff6a5ea2ef0bf33501
 ```
 
 = References

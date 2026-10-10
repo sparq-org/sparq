@@ -163,7 +163,7 @@ ZK SPARQL answers spec (`site/specs/zksparql-answers.typ`).
 - `Revealed`: witness credentials carry an empty signature, and the guest
   verifies none. For each credential the guest still canonicalizes, hashes and
   checks the table. It commits a `SignedMessage { verification_method, message }`
-  in credential order (by document hash, or by quad count and root for the
+  in credential order (by document hash, or by the salted message for the
   Merkle suite), where `message` is SHA-256(canonical proof config) ||
   SHA-256(canonical document), exactly the eddsa-rdfc-2022 signing input (for
   the Merkle suite it is the salted 32-byte root message). The

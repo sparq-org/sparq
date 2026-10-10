@@ -35,8 +35,8 @@
 //!    `SHA-256(config) || SHA-256(document)`; in [`SignatureMode::Revealed`],
 //!    publish that signed message in the journal instead (see below).
 //!
-//! Verified credentials are sorted by document hash (for the Merkle suite, by a
-//! hash of the quad count and unsalted root), and duplicates reject. The
+//! Verified credentials are sorted by document hash (for the Merkle suite, by the
+//! salted signed message), and duplicates reject. The
 //! exact hashed canonical document quads are unioned into one default graph,
 //! with blank nodes renamed `k{index}_{label}` so that credentials never share a
 //! blank node. Literal lexical forms are copied unchanged. V3 then evaluates that
@@ -50,10 +50,10 @@
 //! to be strictly increasing, and builds the salted root message from them, the
 //! quad count, the 32-byte tree salt that follows the signature in the witness
 //! `signature` bytes, and the configuration hash. Step 5 verifies (or, in revealed
-//! mode, publishes) that 32-byte message. The commitment uses the message in
-//! place of the document hash; ordering and duplicate
-//! rejection use SHA-256 of the quad count and root, so reissuing a document under
-//! a new salt is still a duplicate. Blank node labels are those the issuer signed.
+//! mode, publishes) that 32-byte message. The commitment and the credential order
+//! use the message in place of the document hash. Duplicate rejection uses SHA-256
+//! of the quad count and root, so reissuing a document under a new salt is still a
+//! duplicate; nothing published depends on that unsalted value. Blank node labels are those the issuer signed.
 //!
 //! # Signature modes
 //!
@@ -644,8 +644,8 @@ struct Authenticated {
 struct Verified {
     /// SHA-256 of the canonical document, or the Merkle suite's signed message.
     document_hash: [u8; 32],
-    /// Unsalted document identity for ordering and duplicate rejection: the
-    /// document hash, or SHA-256 of the Merkle quad count and root.
+    /// Unsalted document identity for duplicate rejection only: the document
+    /// hash, or SHA-256 of the Merkle quad count and root.
     identity: [u8; 32],
     config_hash: [u8; 32],
     quads: Vec<Quad>,
@@ -667,10 +667,14 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
         .iter()
         .map(|credential| verify(credential, &table, policy.cryptosuite, policy.signature_mode))
         .collect::<Result<Vec<_>, _>>()?;
-    // Ordered by unsalted identity, so reissuing one document under a fresh salt
-    // is still a duplicate.
-    verified.sort_unstable_by_key(|a| a.identity);
-    if verified.windows(2).any(|pair| pair[0].identity == pair[1].identity) {
+    // Duplicates compare unsalted identities, so reissuing one document under a
+    // fresh salt is still a duplicate. The published order uses the salted
+    // message instead: an order by unsalted identity would let a verifier compare
+    // a private credential's hash with a known one's.
+    let mut identities: Vec<[u8; 32]> = verified.iter().map(|v| v.identity).collect();
+    identities.sort_unstable();
+    verified.sort_unstable_by_key(|a| a.document_hash);
+    if identities.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(Rejected("duplicate authenticated credential document"));
     }
     let mut hash = Sha256::new();

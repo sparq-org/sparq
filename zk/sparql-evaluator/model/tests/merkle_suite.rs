@@ -147,7 +147,21 @@ fn leaf_root_and_message_match_the_fixed_vectors() {
     assert_eq!(merkle::root(&[leaf, leaf]), None);
     let message = merkle::signed_message(&[7; 32], 2, &root, &[9; 32]);
     assert_eq!(hex_string(&message), MESSAGE);
+    // Ed25519 over the message with the public RFC 8032 section 7.1 TEST 1 key.
+    let key = ed25519_dalek::SigningKey::from_bytes(&hex(TEST1_SECRET));
+    assert_eq!(hex_string(&key.verifying_key().to_bytes()), TEST1_PUBLIC);
+    let signature = ed25519_dalek::Signer::sign(&key, &message);
+    assert_eq!(hex_string(&signature.to_bytes()), SIGNATURE);
+    key.verifying_key().verify_strict(&message, &signature).unwrap();
 }
+
+fn hex<const N: usize>(text: &str) -> [u8; N] {
+    std::array::from_fn(|i| u8::from_str_radix(&text[2 * i..2 * i + 2], 16).unwrap())
+}
+
+const TEST1_SECRET: &str = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+const TEST1_PUBLIC: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+const SIGNATURE: &str = "82f02d82b9845d064bae00df4668950cc03007af33ca6e9970ea0f5514b62eca4af505ea8ada76d779bcfc7fa06dcafd997be37abedb75ff6a5ea2ef0bf33501";
 
 const LEAF: &str = "8c4a491021d82e07c77c748df8c123d9721163cb8da614c7d21a4aef901c1146";
 const ROOT: &str = "311072a0f565868c243e392ea085e4c2fe752b39751e0707bcd7e42c78683682";

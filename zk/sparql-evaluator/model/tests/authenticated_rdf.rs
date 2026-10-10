@@ -1026,6 +1026,46 @@ fn merkle_suite_answers_with_blank_nodes_in_both_modes() {
 }
 
 #[test]
+fn merkle_credential_order_depends_only_on_salted_messages() {
+    // A known reference credential next to a private one: the published order must
+    // follow the salted messages, never the unsalted roots.
+    let query = "ASK { ?s ex:balance ?b }";
+    let policy = merkle_policy().with_signature_mode(auth::SignatureMode::Revealed);
+    let reference = merkle_bob();
+    let (_, reference_message) = merkle_parts(&reference.document, &reference.proof_config, [0x42; 32]);
+    let identity = |c: &SignedCredential| {
+        let (_, root, n) = {
+            let quads: Vec<oxrdf::Quad> = oxttl::NQuadsParser::new()
+                .for_slice(c.document.as_bytes())
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let leaves: Vec<[u8; 32]> = quads.iter().map(|q| merkle::leaf(q).unwrap()).collect();
+            ((), merkle::root(&leaves).unwrap(), leaves.len() as u32)
+        };
+        let mut hash = Sha256::new();
+        hash.update(n.to_be_bytes());
+        hash.update(root);
+        <[u8; 32]>::from(hash.finalize())
+    };
+    let mut disagreements = 0;
+    for amount in 100..140 {
+        let claims = format!("<did:example:carol> <http://ex/balance> \"{amount}\"^^<{XSD}integer> .\n");
+        let private = merkle_sign(&document("urn:vc:m-carol", ISSUER_A, &claims), &merkle_config(VM_A), 1, [0x44; 32]);
+        let (_, private_message) = merkle_parts(&private.document, &private.proof_config, [0x44; 32]);
+        let strip = |c: &SignedCredential| SignedCredential { signature: c.signature[64..].to_vec(), ..c.clone() };
+        let journal =
+            run(query, DatasetAuthority::HolderDeclared, policy.clone(), vec![strip(&reference), strip(&private)]).unwrap();
+        let by_message = private_message < reference_message;
+        let by_identity = identity(&private) < identity(&reference);
+        disagreements += usize::from(by_message != by_identity);
+        let first = &journal.signed_messages[0].message;
+        assert_eq!(first == &private_message.to_vec(), by_message, "amount {amount}");
+    }
+    // The loop exercises cases where the two orders differ.
+    assert!(disagreements > 0);
+}
+
+#[test]
 fn merkle_suite_rejects_reordered_tampered_or_resalted_credentials() {
     let query = "ASK { ?s ex:balance ?b }";
     let run_one = |credential: SignedCredential| {
