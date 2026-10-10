@@ -95,6 +95,7 @@ bacl = "bacl"            # test-fixture blob key ("blob acl") in ldp/handler.rs 
 onn = "onn"              # deliberate near-miss garbage value in the tls.rs affirmative-env-parse test vector
 
 [default.extend-words]
+COSE = "COSE"            # CBOR Object Signing and Encryption (RFC 9052), e.g. the Nitro attestation document's COSE_Sign1 envelope
 quikly = "quikly"      # [GPT-5.6] Intentional one-edit fuzzy-search query fixture in the public skill example.
 ND = "ND"                # [OPUS-4.8] "NDAs" (Non-Disclosure Agreements) — typos splits camelCase NDAs into ND+As
 GES = "GES"              # [FABLE-5] "PathGES" (CCS 2024 graph-encryption scheme, research/e2ee-queryable-options.md) — typos splits the camelCase name into Path+GES

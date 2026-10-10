@@ -15,6 +15,7 @@
 //!
 //! Spec: <https://www.w3.org/TR/json-ld11-api/#node-map-generation>.
 
+use crate::fx::{FxMap, FxSet};
 use crate::json::Json;
 use std::collections::BTreeMap;
 
@@ -66,11 +67,26 @@ impl BlankNodeIssuer {
 pub struct GraphMap {
     /// subject `@id` → its node object (a `Json::Obj`), in first-insertion order.
     nodes: Vec<(String, Json)>,
+    /// subject `@id` → its position in `nodes`, so lookups don't scan.
+    index: FxMap<String, usize>,
+    /// (node position, property) → the serialized values of that property, kept once
+    /// the property holds [`LINEAR_DEDUP`] values so duplicate checks stay constant-time.
+    seen: FxMap<(usize, String), FxSet<String>>,
+}
+
+/// Up to this many values, a property's duplicate check scans its array.
+const LINEAR_DEDUP: usize = 16;
+
+/// A value's identity for duplicate checks: its serialization.
+fn value_key(value: &Json) -> String {
+    let mut s = String::new();
+    value.write(&mut s);
+    s
 }
 
 impl GraphMap {
     fn new() -> Self {
-        GraphMap { nodes: Vec::new() }
+        GraphMap::default()
     }
 
     /// The subject ids present in this graph, in first-insertion order.
@@ -80,21 +96,55 @@ impl GraphMap {
 
     /// Borrows the node object for `subject`, or `None` if absent.
     pub fn get(&self, subject: &str) -> Option<&Json> {
-        self.nodes
-            .iter()
-            .find(|(k, _)| k == subject)
-            .map(|(_, v)| v)
+        self.index.get(subject).map(|&pos| &self.nodes[pos].1)
     }
 
     /// Ensures a node object exists for `subject`, creating `{ "@id": subject }` if absent,
     /// and returns a mutable reference to it (§7.2 the "reference a node" step).
     fn ensure(&mut self, subject: &str) -> &mut Json {
-        if let Some(pos) = self.nodes.iter().position(|(k, _)| k == subject) {
-            return &mut self.nodes[pos].1;
+        let pos = self.position(subject);
+        &mut self.nodes[pos].1
+    }
+
+    /// The position in `nodes` of `subject`'s node object, created as in [`Self::ensure`].
+    fn position(&mut self, subject: &str) -> usize {
+        match self.index.get(subject) {
+            Some(&pos) => pos,
+            None => {
+                let node = Json::Obj(vec![("@id".to_string(), Json::Str(subject.to_string()))]);
+                self.nodes.push((subject.to_string(), node));
+                self.index.insert(subject.to_string(), self.nodes.len() - 1);
+                self.nodes.len() - 1
+            }
         }
-        let node = Json::Obj(vec![("@id".to_string(), Json::Str(subject.to_string()))]);
-        self.nodes.push((subject.to_string(), node));
-        &mut self.nodes.last_mut().unwrap().1
+    }
+
+    /// Adds `value` to `subject`'s `property` array unless an equal value is already
+    /// there; list objects are always added (equal lists are distinct list nodes).
+    fn merge(&mut self, subject: &str, property: &str, value: Json) {
+        let dedup = !is_list_object(&value);
+        let pos = self.position(subject);
+        let Json::Obj(members) = &mut self.nodes[pos].1 else { return };
+        let Some(slot) = members.iter_mut().find(|(k, _)| k == property) else {
+            members.push((property.to_string(), Json::Arr(vec![value])));
+            return;
+        };
+        let Json::Arr(items) = &mut slot.1 else { return };
+        if dedup {
+            if items.len() < LINEAR_DEDUP {
+                if items.contains(&value) {
+                    return;
+                }
+            } else {
+                let seen = self.seen.entry((pos, property.to_string())).or_insert_with(|| {
+                    items.iter().filter(|v| !is_list_object(v)).map(value_key).collect()
+                });
+                if !seen.insert(value_key(&value)) {
+                    return;
+                }
+            }
+        }
+        items.push(value);
     }
 }
 
@@ -103,29 +153,38 @@ impl GraphMap {
 #[derive(Default)]
 pub struct NodeMap {
     graphs: Vec<(String, GraphMap)>,
+    /// graph name → its position in `graphs`.
+    index: FxMap<String, usize>,
 }
 
 impl NodeMap {
     fn new() -> Self {
         let mut nm = NodeMap::default();
-        nm.graphs.push(("@default".to_string(), GraphMap::new()));
+        nm.graph_mut("@default");
         nm
     }
 
     fn graph_mut(&mut self, name: &str) -> &mut GraphMap {
-        if let Some(pos) = self.graphs.iter().position(|(k, _)| k == name) {
-            return &mut self.graphs[pos].1;
-        }
-        self.graphs.push((name.to_string(), GraphMap::new()));
-        &mut self.graphs.last_mut().unwrap().1
+        let pos = match self.index.get(name) {
+            Some(&pos) => pos,
+            None => {
+                self.graphs.push((name.to_string(), GraphMap::new()));
+                self.index.insert(name.to_string(), self.graphs.len() - 1);
+                self.graphs.len() - 1
+            }
+        };
+        &mut self.graphs[pos].1
     }
 
     /// Borrows the [`GraphMap`] for graph `name`, or `None` if it has no entry.
     pub fn graph(&self, name: &str) -> Option<&GraphMap> {
-        self.graphs
-            .iter()
-            .find(|(k, _)| k == name)
-            .map(|(_, v)| v)
+        self.index.get(name).map(|&pos| &self.graphs[pos].1)
+    }
+
+    /// Consumes the map, yielding each graph's name and its `(subject, node)` pairs, in
+    /// first-insertion order.
+    pub fn into_graphs(self) -> impl Iterator<Item = (String, Vec<(String, Json)>)> {
+        self.graphs.into_iter().map(|(name, g)| (name, g.nodes))
     }
 
     /// The graph names present, in first-insertion order (always includes `@default`).
@@ -427,19 +486,7 @@ fn merge_into_property(
     property: &str,
     value: Json,
 ) {
-    let dedup = !is_list_object(&value);
-    let node = node_map.graph_mut(active_graph).ensure(subject);
-    if let Json::Obj(node_members) = node {
-        if let Some(slot) = node_members.iter_mut().find(|(k, _)| k == property) {
-            if let Json::Arr(items) = &mut slot.1 {
-                if !dedup || !items.contains(&value) {
-                    items.push(value);
-                }
-            }
-        } else {
-            node_members.push((property.to_string(), Json::Arr(vec![value])));
-        }
-    }
+    node_map.graph_mut(active_graph).merge(subject, property, value);
 }
 
 /// True iff `value` is a list object (`{ "@list": … }`).
@@ -480,6 +527,24 @@ mod tests {
 
     fn parse(s: &str) -> Json {
         Json::parse(s).expect("valid JSON fixture")
+    }
+
+    /// A subject with many values keeps each distinct value once, every list, and
+    /// insertion order, without a quadratic duplicate scan.
+    #[test]
+    fn many_values_dedup_in_linear_time() {
+        let mut values: Vec<String> = (0..40_000).map(|i| format!(r#"{{"@id":"http://ex/o{}"}}"#, i % 20_000)).collect();
+        values.push(r#"{"@list":[{"@value":1}]}"#.to_string());
+        values.push(r#"{"@list":[{"@value":1}]}"#.to_string());
+        let doc = parse(&format!(r#"[{{"@id":"http://ex/s","http://ex/p":[{}]}}]"#, values.join(",")));
+        let started = std::time::Instant::now();
+        let nm = generate_node_map(&doc);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        let p = nm.graph("@default").and_then(|g| g.get("http://ex/s")).and_then(|n| n.get("http://ex/p")).unwrap();
+        let Json::Arr(items) = p else { panic!() };
+        assert_eq!(items.len(), 20_002);
+        assert_eq!(items[0].get("@id").and_then(Json::as_str), Some("http://ex/o0"));
+        assert_eq!(items[19_999].get("@id").and_then(Json::as_str), Some("http://ex/o19999"));
     }
 
     /// `BlankNodeIssuer::new` mints `_:b0` first and reuses labels per input id.

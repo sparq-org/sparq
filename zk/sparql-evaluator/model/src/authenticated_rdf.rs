@@ -1,5 +1,6 @@
 // Issuer-authenticated RDF relation V5; zkp-14.5 runs it in a separate guest.
-//! Issuer-authenticated bounded RDF queries over W3C `eddsa-rdfc-2022` credentials.
+//! Issuer-authenticated bounded RDF queries over W3C `eddsa-rdfc-2022` credentials
+//! and `eddsa-sha256-merkle-2026` credentials.
 //!
 //! This is relation version 5. Source for a separately pinned optional guest
 //! (methods feature `authenticated-rdf`) runs this relation unchanged behind a
@@ -30,13 +31,44 @@
 //!    or `sec:proofValue`, one `VerifiableCredential` node and one IRI issuer;
 //! 4. require the verification method to be in the table and the document issuer
 //!    to equal that entry's pinned issuer;
-//! 5. verify strict Ed25519 over `SHA-256(config) || SHA-256(document)`.
+//! 5. in [`SignatureMode::Hidden`], verify strict Ed25519 over the signed message
+//!    `SHA-256(config) || SHA-256(document)`; in [`SignatureMode::Revealed`],
+//!    publish that signed message in the journal instead (see below).
 //!
-//! Verified credentials are sorted by document hash, and duplicates reject. The
+//! Verified credentials are sorted by document hash (for the Merkle suite, by the
+//! salted signed message), and duplicates reject. The
 //! exact hashed canonical document quads are unioned into one default graph,
 //! with blank nodes renamed `k{index}_{label}` so that credentials never share a
 //! blank node. Literal lexical forms are copied unchanged. V3 then evaluates that
 //! graph under an internal `HolderDeclared` authority; only its result is kept.
+//!
+//! # Merkle suite
+//!
+//! Under [`Cryptosuite::EddsaSha256Merkle2026`], step 2 canonicalizes only the
+//! proof configuration. The document quads are not canonicalized: the guest
+//! computes each quad's leaf with [`crate::merkle_suite::leaf`], requires the leaves
+//! to be strictly increasing, and builds the salted root message from them, the
+//! quad count, the 32-byte tree salt that follows the signature in the witness
+//! `signature` bytes, and the configuration hash. Step 5 verifies (or, in revealed
+//! mode, publishes) that 32-byte message. The commitment and the credential order
+//! use the message in place of the document hash. Duplicate rejection uses SHA-256
+//! of the quad count and root, so reissuing a document under a new salt is still a
+//! duplicate; nothing published depends on that unsalted value. Blank node labels are those the issuer signed.
+//!
+//! # Signature modes
+//!
+//! [`SignatureMode::Hidden`] (the default) keeps signatures, signed messages and
+//! the key-to-credential mapping private: the proof shows a valid signature from a
+//! table key on every credential. [`SignatureMode::Revealed`] moves only the
+//! Ed25519 check out of the proof. The witness then carries no signatures, and the
+//! journal lists one [`SignedMessage`] per credential, in that credential order:
+//! the verification method and the exact 64 signed bytes derived in-proof from
+//! the canonical inputs that were mapped into the queried dataset. The verifier
+//! checks the presented `proofValue`s against those messages and table keys with
+//! [`check_revealed_signatures`]. Revealed mode publishes each credential's
+//! document and configuration hashes and its verification method, so
+//! presentations become linkable and low-entropy documents can be guessed.
+//! Hidden-mode policy digests and commitments are unchanged by the mode field.
 //!
 //! # Commitment
 //!
@@ -60,6 +92,7 @@
 //! `dateTimeStamp` values reject as unsupported, and malformed values reject as
 //! malformed. Full typed proof-option handling is left to a later integration.
 
+use crate::merkle_suite as merkle;
 use crate::{DatasetAuthority, ProofContract, Rejected, v3};
 use ed25519_dalek::{Signature, VerifyingKey};
 use oxrdf::{BlankNode, NamedNode, NamedOrBlankNode, Quad, Term};
@@ -93,14 +126,14 @@ pub const MAX_TOTAL_QUADS: usize = 256;
 /// The pinned SDK encoding packs each string into words behind a length word and
 /// spends one word per `u8` element of a key, signature, anchor, nonce or salt.
 /// The terms cover the V3 query, all credential source bytes, a full table (two
-/// IRIs and a 32-word key per entry) and four 64-word signatures. The fixed margin
+/// IRIs and a 32-word key per entry) and four 96-word signature-and-salt values. The fixed margin
 /// covers lengths, enum tags, V3 policy scalars, anchor, nonce, salt and padding.
 /// No valid V5 witness reaches this bound. The V5 guest image embeds it, so
 /// changing it changes that image ID; the exact guest never compiles it.
 pub const MAX_WITNESS_BYTES: usize = crate::MAX_QUERY_BYTES
     + MAX_TOTAL_BYTES
     + MAX_AUTHORIZED_KEYS * (2 * MAX_IRI_BYTES + 32 * 4)
-    + MAX_CREDENTIALS * 64 * 4
+    + MAX_CREDENTIALS * (64 + merkle::SALT_BYTES) * 4
     + 4_096;
 
 // Per-input RDFC-1.0 limits. Input and output allow re-serialization escapes and
@@ -134,6 +167,29 @@ const EDDSA_RDFC_2022: &str = "eddsa-rdfc-2022";
 pub enum Cryptosuite {
     /// W3C `eddsa-rdfc-2022`: RDFC-1.0, SHA-256, strict Ed25519, `assertionMethod`.
     EddsaRdfc2022,
+    /// `eddsa-sha256-merkle-2026`: strict Ed25519 over a salted SHA-256 Merkle root
+    /// of the document quads; see [`crate::merkle_suite`].
+    EddsaSha256Merkle2026,
+}
+
+/// Whether issuer signatures are verified inside the proof or by the verifier.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SignatureMode {
+    /// The proof checks every signature; signatures and signed messages stay private.
+    #[default]
+    Hidden,
+    /// The journal publishes every signed message; the verifier checks signatures.
+    Revealed,
+}
+
+impl SignatureMode {
+    /// The data-model identifier: `"hidden"` or `"revealed"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hidden => "hidden",
+            Self::Revealed => "revealed",
+        }
+    }
 }
 
 /// Fixed mapping from verified credentials to the private V3 dataset.
@@ -165,6 +221,9 @@ pub struct Policy {
     pub authorization: Vec<AuthorizedKey>,
     pub cryptosuite: Cryptosuite,
     pub mapping: Mapping,
+    /// Defaults to [`SignatureMode::Hidden`].
+    #[serde(default)]
+    pub signature_mode: SignatureMode,
 }
 
 impl Policy {
@@ -175,7 +234,22 @@ impl Policy {
             authorization,
             cryptosuite: Cryptosuite::EddsaRdfc2022,
             mapping: Mapping::ScopedCanonicalUnion,
+            signature_mode: SignatureMode::Hidden,
         }
+    }
+
+    /// The same policy with the given cryptosuite.
+    #[must_use]
+    pub fn with_cryptosuite(mut self, cryptosuite: Cryptosuite) -> Self {
+        self.cryptosuite = cryptosuite;
+        self
+    }
+
+    /// The same policy with the given signature mode.
+    #[must_use]
+    pub fn with_signature_mode(mut self, mode: SignatureMode) -> Self {
+        self.signature_mode = mode;
+        self
     }
 }
 
@@ -199,7 +273,10 @@ pub struct SignedCredential {
     pub document: String,
     /// N-Quads of the proof configuration, without `proofValue`.
     pub proof_config: String,
-    /// The 64 raw Ed25519 signature bytes decoded from `proofValue`.
+    /// The raw bytes decoded from `proofValue`: the 64-byte Ed25519 signature,
+    /// followed for the Merkle suite by its 32-byte tree salt. In
+    /// [`SignatureMode::Revealed`] the signature is omitted (the verifier receives
+    /// it instead), leaving only the salt, if any.
     pub signature: Vec<u8>,
 }
 
@@ -251,12 +328,48 @@ pub struct Journal {
     pub dataset_commitment: [u8; 32],
     pub provenance: Provenance,
     pub result: v3::CanonicalResult,
+    /// Empty in [`SignatureMode::Hidden`]; one entry per credential, in the
+    /// relation's credential order, in [`SignatureMode::Revealed`].
+    pub signed_messages: Vec<SignedMessage>,
+}
+
+/// One credential's signed bytes, published only in [`SignatureMode::Revealed`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SignedMessage {
+    /// The verification method named by the credential's proof configuration.
+    pub verification_method: String,
+    /// The bytes signed: `SHA-256(canonical config) || SHA-256(canonical document)`
+    /// for `eddsa-rdfc-2022`, or the 32-byte salted root message for the Merkle suite.
+    pub message: Vec<u8>,
 }
 
 impl Cryptosuite {
     fn profile(self) -> &'static str {
         match self {
             Self::EddsaRdfc2022 => "eddsa-rdfc-2022:rdfc-1.0:sha-256:ed25519-strict:assertionMethod",
+            Self::EddsaSha256Merkle2026 => {
+                "eddsa-sha256-merkle-2026:sha-256-merkle:comparison-keys-v1:ed25519-strict:assertionMethod"
+            }
+        }
+    }
+
+    /// The `cryptosuite` value its proof configurations carry.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::EddsaRdfc2022 => EDDSA_RDFC_2022,
+            Self::EddsaSha256Merkle2026 => merkle::EDDSA_SHA256_MERKLE_2026,
+        }
+    }
+
+    /// Exact witness `signature` bytes: the Ed25519 signature in hidden mode
+    /// (none in revealed mode), then the 32-byte tree salt for the Merkle suite.
+    fn witness_bytes(self, mode: SignatureMode) -> usize {
+        let signature = if mode == SignatureMode::Hidden { 64 } else { 0 };
+        match self {
+            Self::EddsaRdfc2022 => signature,
+            Self::EddsaSha256Merkle2026 => signature + merkle::SALT_BYTES,
         }
     }
 }
@@ -311,6 +424,10 @@ fn policy_digest(policy: &Policy, table: &[Entry<'_>]) -> Result<[u8; 32], Rejec
     hash.update(b"sparq:proved-evaluator:authenticated-rdf:policy:v5\0");
     frame(&mut hash, policy.cryptosuite.profile().as_bytes());
     frame(&mut hash, policy.mapping.profile().as_bytes());
+    // Hidden adds nothing, so digests from before the mode field are unchanged.
+    if policy.signature_mode == SignatureMode::Revealed {
+        frame(&mut hash, b"signature-mode:revealed");
+    }
     for bound in [
         MAX_CREDENTIALS,
         MAX_AUTHORIZED_KEYS,
@@ -440,6 +557,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
         dataset_commitment: authenticated.commitment,
         provenance,
         result: inner.result,
+        signed_messages: authenticated.signed_messages,
     })
 }
 
@@ -455,6 +573,10 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
 pub fn bind_journal(journal: &Journal, expected: &Request) -> Result<(), Rejected> {
     if journal.version != VERSION || journal.request_digest != request_digest(expected)? {
         return Err(Rejected("authenticated journal request mismatch"));
+    }
+    let revealed = expected.policy.signature_mode == SignatureMode::Revealed;
+    if revealed == journal.signed_messages.is_empty() {
+        return Err(Rejected("authenticated journal signature mode mismatch"));
     }
     match &expected.authority {
         DatasetAuthority::VerifierAgreed { commitment } => {
@@ -473,15 +595,62 @@ pub fn bind_journal(journal: &Journal, expected: &Request) -> Result<(), Rejecte
     Ok(())
 }
 
+/// Verifies presented signatures against a bound revealed-mode journal.
+///
+/// Call after [`bind_journal`]. `signatures` holds one 64-byte `proofValue` per
+/// journal entry, in journal order. Each is checked with strict Ed25519 under the
+/// request table key for that entry's verification method.
+///
+/// # Errors
+/// Rejects hidden-mode requests, a count or length mismatch, methods outside the
+/// table and failed signatures.
+pub fn check_revealed_signatures(
+    journal: &Journal,
+    expected: &Request,
+    signatures: &[Vec<u8>],
+) -> Result<(), Rejected> {
+    if expected.policy.signature_mode != SignatureMode::Revealed
+        || journal.signed_messages.is_empty()
+        || journal.signed_messages.len() != signatures.len()
+    {
+        return Err(Rejected("revealed signature count mismatch"));
+    }
+    let table = checked_table(&expected.policy.authorization)?;
+    for (entry, signature) in journal.signed_messages.iter().zip(signatures) {
+        let key = lookup(&table, &entry.verification_method)?;
+        let signature: [u8; 64] = signature
+            .as_slice()
+            .try_into()
+            .map_err(|_| Rejected("Ed25519 signature must be 64 bytes"))?;
+        key.1.verify_strict(&entry.message, &Signature::from_bytes(&signature))
+            .map_err(|_| Rejected("Ed25519 signature verification failed"))?;
+    }
+    Ok(())
+}
+
+fn lookup<'t>(table: &'t [Entry<'_>], method: &str) -> Result<&'t Entry<'t>, Rejected> {
+    table
+        .binary_search_by(|(entry, _)| entry.verification_method.as_str().cmp(method))
+        .map(|index| &table[index])
+        .map_err(|_| Rejected("verification method is not authorized"))
+}
+
 struct Authenticated {
     commitment: [u8; 32],
     nquads: String,
+    signed_messages: Vec<SignedMessage>,
 }
 
 struct Verified {
+    /// SHA-256 of the canonical document, or the Merkle suite's signed message.
     document_hash: [u8; 32],
+    /// Unsalted document identity for duplicate rejection only: the document
+    /// hash, or SHA-256 of the Merkle quad count and root.
+    identity: [u8; 32],
     config_hash: [u8; 32],
     quads: Vec<Quad>,
+    method: String,
+    message: Vec<u8>,
 }
 
 fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authenticated, Rejected> {
@@ -492,17 +661,20 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
     if dataset.salt == [0; 32] {
         return Err(Rejected("authenticated dataset blinding rejected"));
     }
-    admit_sizes(&dataset.credentials)?;
+    admit_sizes(&dataset.credentials, policy.cryptosuite, policy.signature_mode)?;
     let mut verified = dataset
         .credentials
         .iter()
-        .map(|credential| verify(credential, &table))
+        .map(|credential| verify(credential, &table, policy.cryptosuite, policy.signature_mode))
         .collect::<Result<Vec<_>, _>>()?;
+    // Duplicates compare unsalted identities, so reissuing one document under a
+    // fresh salt is still a duplicate. The published order uses the salted
+    // message instead: an order by unsalted identity would let a verifier compare
+    // a private credential's hash with a known one's.
+    let mut identities: Vec<[u8; 32]> = verified.iter().map(|v| v.identity).collect();
+    identities.sort_unstable();
     verified.sort_unstable_by_key(|a| a.document_hash);
-    if verified
-        .windows(2)
-        .any(|pair| pair[0].document_hash == pair[1].document_hash)
-    {
+    if identities.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(Rejected("duplicate authenticated credential document"));
     }
     let mut hash = Sha256::new();
@@ -511,14 +683,22 @@ fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authent
     hash.update(dataset.salt);
     hash.update((verified.len() as u32).to_le_bytes());
     let mut nquads = String::new();
+    let mut signed_messages = Vec::new();
     for (scope, credential) in verified.iter().enumerate() {
         hash.update(credential.document_hash);
         hash.update(credential.config_hash);
         map_scoped(&mut nquads, scope, &credential.quads)?;
+        if policy.signature_mode == SignatureMode::Revealed {
+            signed_messages.push(SignedMessage {
+                verification_method: credential.method.clone(),
+                message: credential.message.clone(),
+            });
+        }
     }
     Ok(Authenticated {
         commitment: hash.finalize().into(),
         nquads,
+        signed_messages,
     })
 }
 
@@ -530,14 +710,24 @@ fn statement_bound(text: &str) -> usize {
         .count()
 }
 
-fn admit_sizes(credentials: &[SignedCredential]) -> Result<(), Rejected> {
+fn admit_sizes(credentials: &[SignedCredential], suite: Cryptosuite, mode: SignatureMode) -> Result<(), Rejected> {
     if credentials.is_empty() || credentials.len() > MAX_CREDENTIALS {
         return Err(Rejected("authenticated credential count must be 1 to 4"));
     }
     let (mut bytes, mut quads) = (0, 0);
     for credential in credentials {
-        if credential.signature.len() != 64 {
-            return Err(Rejected("Ed25519 signature must be 64 bytes"));
+        if credential.signature.len() != suite.witness_bytes(mode) {
+            return Err(match (suite, mode) {
+                (Cryptosuite::EddsaRdfc2022, SignatureMode::Hidden) => {
+                    Rejected("Ed25519 signature must be 64 bytes")
+                }
+                (Cryptosuite::EddsaRdfc2022, SignatureMode::Revealed) => {
+                    Rejected("revealed mode carries no witness signature")
+                }
+                (Cryptosuite::EddsaSha256Merkle2026, _) => {
+                    Rejected("Merkle proof value must be the signature (hidden mode only) and salt")
+                }
+            });
         }
         if credential.document.len() > MAX_DOCUMENT_BYTES
             || credential.proof_config.len() > MAX_PROOF_CONFIG_BYTES
@@ -586,33 +776,67 @@ fn canonical(quads: &[Quad]) -> Result<String, Rejected> {
         .map_err(|_| Rejected("bounded RDFC-1.0 canonicalization rejected"))
 }
 
-fn verify(credential: &SignedCredential, table: &[Entry<'_>]) -> Result<Verified, Rejected> {
-    let document = canonical(&parse(&credential.document, MAX_DOCUMENT_QUADS)?)?;
+fn signed_bytes(config_hash: &[u8; 32], document_hash: &[u8; 32]) -> [u8; 64] {
+    let mut bytes = [0; 64];
+    bytes[..32].copy_from_slice(config_hash);
+    bytes[32..].copy_from_slice(document_hash);
+    bytes
+}
+
+fn verify(
+    credential: &SignedCredential,
+    table: &[Entry<'_>],
+    suite: Cryptosuite,
+    mode: SignatureMode,
+) -> Result<Verified, Rejected> {
     let config = canonical(&parse(&credential.proof_config, MAX_PROOF_CONFIG_QUADS)?)?;
-    // Every later check reads the exact canonical bytes that are hashed and signed.
-    let quads = parse(&document, MAX_DOCUMENT_QUADS)?;
-    let method = proof_method(&parse(&config, MAX_PROOF_CONFIG_QUADS)?)?;
-    let (entry, key) = table
-        .binary_search_by(|(entry, _)| entry.verification_method.as_str().cmp(method.as_str()))
-        .map(|index| &table[index])
-        .map_err(|_| Rejected("verification method is not authorized"))?;
-    check_document(&quads, &entry.issuer)?;
+    let method = proof_method(&parse(&config, MAX_PROOF_CONFIG_QUADS)?, suite)?;
+    let (entry, key) = lookup(table, &method)?;
     let config_hash: [u8; 32] = Sha256::digest(config.as_bytes()).into();
-    let document_hash: [u8; 32] = Sha256::digest(document.as_bytes()).into();
-    let mut hash_data = [0; 64];
-    hash_data[..32].copy_from_slice(&config_hash);
-    hash_data[32..].copy_from_slice(&document_hash);
-    let signature: [u8; 64] = credential
-        .signature
-        .as_slice()
-        .try_into()
-        .map_err(|_| Rejected("Ed25519 signature must be 64 bytes"))?;
-    key.verify_strict(&hash_data, &Signature::from_bytes(&signature))
-        .map_err(|_| Rejected("Ed25519 signature verification failed"))?;
+    let (quads, document_hash, identity, message) = match suite {
+        Cryptosuite::EddsaRdfc2022 => {
+            let document = canonical(&parse(&credential.document, MAX_DOCUMENT_QUADS)?)?;
+            // Every later check reads the exact canonical bytes that are hashed and signed.
+            let quads = parse(&document, MAX_DOCUMENT_QUADS)?;
+            let document_hash: [u8; 32] = Sha256::digest(document.as_bytes()).into();
+            (quads, document_hash, document_hash, signed_bytes(&config_hash, &document_hash).to_vec())
+        }
+        Cryptosuite::EddsaSha256Merkle2026 => {
+            // No canonicalization: the signed object is the leaf set itself.
+            let quads = parse(&credential.document, MAX_DOCUMENT_QUADS)?;
+            let leaves = quads
+                .iter()
+                .map(merkle::leaf)
+                .collect::<Option<Vec<_>>>()
+                .ok_or(Rejected("RDF 1.2 triple terms are not admitted"))?;
+            let root = merkle::root(&leaves)
+                .ok_or(Rejected("Merkle leaves must be non-empty and strictly increasing"))?;
+            let salt_at = credential.signature.len() - merkle::SALT_BYTES;
+            let salt: [u8; merkle::SALT_BYTES] = credential.signature[salt_at..]
+                .try_into()
+                .map_err(|_| Rejected("Merkle tree salt must be 32 bytes"))?;
+            let message = merkle::signed_message(&salt, leaves.len() as u32, &root, &config_hash);
+            let mut identity = Sha256::new();
+            identity.update((leaves.len() as u32).to_be_bytes());
+            identity.update(root);
+            (quads, message, identity.finalize().into(), message.to_vec())
+        }
+    };
+    check_document(&quads, &entry.issuer)?;
+    if mode == SignatureMode::Hidden {
+        let signature: [u8; 64] = credential.signature[..64]
+            .try_into()
+            .map_err(|_| Rejected("Ed25519 signature must be 64 bytes"))?;
+        key.verify_strict(&message, &Signature::from_bytes(&signature))
+            .map_err(|_| Rejected("Ed25519 signature verification failed"))?;
+    }
     Ok(Verified {
         document_hash,
+        identity,
         config_hash,
         quads,
+        method,
+        message,
     })
 }
 
@@ -620,7 +844,7 @@ fn is_iri(term: &Term, iri: &str) -> bool {
     matches!(term, Term::NamedNode(node) if node.as_str() == iri)
 }
 
-fn proof_method(quads: &[Quad]) -> Result<String, Rejected> {
+fn proof_method(quads: &[Quad], suite: Cryptosuite) -> Result<String, Rejected> {
     let subject = quads.first().map(|quad| &quad.subject);
     if quads.iter().any(|quad| Some(&quad.subject) != subject) {
         return Err(Rejected("proof configuration must describe one proof node"));
@@ -643,9 +867,9 @@ fn proof_method(quads: &[Quad]) -> Result<String, Rejected> {
             (0, object) if is_iri(object, SEC_DATA_INTEGRITY_PROOF) => {}
             (0, _) => return Err(Rejected("proof type must be DataIntegrityProof")),
             (1, Term::Literal(literal))
-                if literal.value() == EDDSA_RDFC_2022
+                if literal.value() == suite.name()
                     && literal.datatype().as_str() == SEC_CRYPTOSUITE_STRING => {}
-            (1, _) => return Err(Rejected("cryptosuite must be the typed eddsa-rdfc-2022 value")),
+            (1, _) => return Err(Rejected("cryptosuite must be the policy's typed cryptosuite value")),
             (2, Term::NamedNode(node)) => method = Some(node.as_str().to_owned()),
             (2, _) => return Err(Rejected("verification method must be an IRI")),
             (3, object) if is_iri(object, SEC_ASSERTION_METHOD) => {}

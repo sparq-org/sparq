@@ -45,6 +45,61 @@ pub fn parse_policy_str(rdf: &str, format: &str) -> Result<ValidatedPolicy, Stri
     parse_policy(&graph)
 }
 
+/// [`parse_policy_str`] plus the document's [`target_memberships`]: the policy and the
+/// `(member, collection)` asset evidence for its collection targets, from one load.
+///
+/// # Errors
+///
+/// As [`parse_policy_str`].
+pub fn parse_policy_str_with_memberships(
+    rdf: &str,
+    format: &str,
+) -> Result<(ValidatedPolicy, BTreeSet<(String, String)>), String> {
+    let graph = Graph::load_str(rdf, format)?;
+    let policy = parse_policy(&graph)?;
+    let members = target_memberships(&policy, &graph)?;
+    Ok((policy, members))
+}
+
+/// The `member odrl:partOf collection` edges `graph` states (default graph) whose
+/// `collection` is the target of one of `policy`'s rules, as `(member, collection)`.
+///
+/// A rule matches a request on an asset that is the rule's target or a member of it under
+/// the request's asset evidence ([`crate::Request::asset_matches`]). An enforcement point
+/// that evaluates a policy per target graph therefore evaluates each of these members too,
+/// with the edge as the request's [`crate::Request::with_asset_membership`] evidence.
+/// Being a rule target makes `collection` an asset collection here, whatever
+/// [`Policy::party_collections`] also records for it. Blank nodes and literals are skipped.
+///
+/// # Errors
+///
+/// Returns `Err` if the query over the graph fails.
+pub fn target_memberships(
+    policy: &Policy,
+    graph: &Graph,
+) -> Result<BTreeSet<(String, String)>, String> {
+    let targets: BTreeSet<&str> = policy
+        .permissions
+        .iter()
+        .chain(policy.prohibitions.iter())
+        .filter_map(|r| r.target.as_deref())
+        .collect();
+    if targets.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let res = sparq_engine::query(graph, &format!("SELECT ?m ?c WHERE {{ ?m <{ODRL_NS}partOf> ?c }}"))?;
+    Ok(res
+        .rows
+        .into_iter()
+        .filter_map(|r| match (r.first().cloned().flatten(), r.get(1).cloned().flatten()) {
+            (Some(Term::NamedNode(m)), Some(Term::NamedNode(c))) if targets.contains(c.as_str()) => {
+                Some((m.into_string(), c.into_string()))
+            }
+            _ => None,
+        })
+        .collect())
+}
+
 /// Parse an ODRL policy from an already-loaded [`Graph`].
 ///
 /// # Errors

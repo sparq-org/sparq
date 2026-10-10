@@ -231,9 +231,12 @@ fn analyze(upd: &Update) -> WriteReqs {
     reqs
 }
 
-/// Does the session have `need` on the concrete graph `g`?
-fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need) -> bool {
-    let has = |mode: Mode| auth.accessible(s, mode).iter().any(|x| x == g);
+/// Does the session have `need` on the concrete graph `g`? `veto` removes a mode the
+/// static view grants (the store's request-time ODRL prohibitions, issue #6743).
+fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need, veto: &Veto<'_>) -> bool {
+    let has = |mode: Mode| {
+        auth.accessible(s, mode).iter().any(|x| x == g) && !veto(mode, g.as_str())
+    };
     match need {
         Need::Write => has(Mode::Write),
         Need::WriteOrAppend => has(Mode::Write) || has(Mode::Append),
@@ -265,6 +268,9 @@ pub(crate) struct Permit {
     /// instantiates with [`authorize_writes`].
     pub var_graphs: bool,
 }
+
+/// A per-graph veto over the static write view: `veto(mode, graph)` removes `mode`.
+pub(crate) type Veto<'a> = dyn Fn(Mode, &str) -> bool + 'a;
 
 /// Check that every graph an update's patterns name is in `readable` (the session's read
 /// view), so a `DELETE`/`INSERT … WHERE` reads exactly what a query by the same session
@@ -446,6 +452,7 @@ pub(crate) fn check(
     session: &Session,
     upd: &Update,
     group_docs: &FxHashSet<String>,
+    veto: &Veto<'_>,
 ) -> Result<Permit, String> {
     let mut reqs = analyze(upd);
 
@@ -469,7 +476,7 @@ pub(crate) fn check(
 
     // Static per-graph requirements.
     for (g, need) in &reqs.graphs {
-        if !allowed(auth, session, g, *need) {
+        if !allowed(auth, session, g, *need, veto) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(*need),
@@ -485,7 +492,7 @@ pub(crate) fn check(
             // convention (writing an .acl under a CLEAR ALL needs the Write grant that
             // only Control-holders have).
             let g_need = strongest(need, need_for_graph(g.as_str(), need));
-            if !allowed(auth, session, &g, g_need) {
+            if !allowed(auth, session, &g, g_need, veto) {
                 return Err(format!(
                     "update denied: a graph-wildcard operation (variable GRAPH target or \
                      CLEAR/DROP ALL|NAMED) requires {} permission on every graph, but the \
@@ -522,6 +529,7 @@ pub(crate) fn authorize_writes(
     deletes: &[Option<Term>],
     inserts: &[Option<Term>],
     auth_input: &mut bool,
+    veto: &Veto<'_>,
 ) -> Result<(), String> {
     let slots = deletes
         .iter()
@@ -540,7 +548,7 @@ pub(crate) fn authorize_writes(
             }
         };
         let need = need_for_graph(g.as_str(), base);
-        if !allowed(auth, session, g, need) {
+        if !allowed(auth, session, g, need, veto) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(need),
@@ -550,6 +558,79 @@ pub(crate) fn authorize_writes(
         *auth_input |= affects_auth_view(g.as_str(), group_docs);
     }
     Ok(())
+}
+
+/// Authorize what an update actually did — its resolved effects, from running it against the
+/// evolving candidate state — against the CURRENT view `auth` (the one in force before the
+/// update): every graph an effect writes needs the same permission a static target of that
+/// kind needs in [`check`]. `graph` is the store before the update (a `CLEAR`/`DROP` of every
+/// graph needs write on each of them). `Ok(true)` when an effect wrote an auth-view input, so
+/// the view must be rebuilt.
+///
+/// [`check`] resolves a variable graph target against the store as it was before the request;
+/// a later operation of the same request can target a graph an earlier one named. Checking the
+/// effects closes that gap: whatever the request wrote, however its targets were reached, was
+/// authorized, and decides whether the view is rebuilt.
+pub(crate) fn check_effects(
+    graph: &sparq_core::Graph,
+    auth: &AuthIndex,
+    session: &Session,
+    effects: &[sparq_engine::UpdateEffect],
+    group_docs: &FxHashSet<String>,
+    veto: &Veto<'_>,
+) -> Result<bool, String> {
+    use sparq_engine::UpdateEffect;
+    let mut rules = false;
+    let mut need_on = |n: &NamedNode, base: Need| -> Result<(), String> {
+        let need = need_for_graph(n.as_str(), base);
+        if !allowed(auth, session, n, need, veto) {
+            return Err(format!(
+                "update denied: session lacks {} permission on <{}>",
+                need_label(need),
+                n.as_str()
+            ));
+        }
+        if affects_auth_view(n.as_str(), group_docs) {
+            rules = true;
+        }
+        Ok(())
+    };
+    let default_denied = || {
+        "update denied: writes to the default graph are not permitted (pod data lives in \
+         named graphs only)"
+            .to_owned()
+    };
+    for effect in effects {
+        match effect {
+            UpdateEffect::Delta { slot, deletes, .. } => match slot {
+                Some(Term::NamedNode(n)) => {
+                    let base = if deletes.is_empty() {
+                        Need::WriteOrAppend
+                    } else {
+                        Need::Write
+                    };
+                    need_on(n, base)?;
+                }
+                Some(_) => return Err("update denied: a graph name that is not an IRI".into()),
+                None => return Err(default_denied()),
+            },
+            UpdateEffect::Clear(target) | UpdateEffect::Drop(target) => match target {
+                GraphTarget::NamedNode(n) => need_on(n, Need::Write)?,
+                GraphTarget::DefaultGraph | GraphTarget::AllGraphs => return Err(default_denied()),
+                GraphTarget::NamedGraphs => {
+                    // Each graph it empties is checked, the auth-view inputs among them included.
+                    for g in store_named_graphs(graph) {
+                        need_on(&g, Need::Write)?;
+                    }
+                }
+            },
+            UpdateEffect::Create(Term::NamedNode(n)) => need_on(n, Need::WriteOrAppend)?,
+            UpdateEffect::Create(_) => {
+                return Err("update denied: a graph name that is not an IRI".into())
+            }
+        }
+    }
+    Ok(rules)
 }
 
 fn need_label(n: Need) -> &'static str {

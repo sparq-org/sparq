@@ -114,6 +114,7 @@ A rule whose `odrl:assignee` is an `odrl:PartyCollection` (or whose `odrl:target
 - **Sound / fail-closed:** membership draws ONLY on the caller-supplied set — **never inferred**. With no membership edge, assignee/target matching is byte-for-byte the exact-IRI base case, so a non-member is denied and access is never widened. The edge must name the rule's exact collection (membership in a *different* collection does not match).
 - **Reading the evidence back:** `req.party_collection_members(collection)` returns the parties the request evidenced as members of `collection` (sorted; empty for a plain party IRI or an un-evidenced collection). This is the read side a consumer needs when it must *persist* a collection-valued rule as a per-session-rechecked head rather than call the evaluator — see the ODRL→ACP bridge's `odrl:PartyCollection` head expansion below (sq-rf9uv), including why the DENY direction must not use it. It is **not a collection test**: the empty result is shared by a plain party IRI and by a collection this request happened to supply no edges for.
 - **Collection identity, separate from membership:** `Policy::party_collections` is the set of IRIs the policy DOCUMENT identifies as an `odrl:PartyCollection` — every subject typed `a odrl:PartyCollection`, plus every object of an `odrl:partOf` edge the document states (minus anything explicitly typed `a odrl:AssetCollection`). `parse_policy_str`/`parse_policy` fill it; a hand-built `Policy` leaves it empty. This is what a consumer needs when it must fail CLOSED on collection-valued input: membership evidence is per-request and possibly partial, so "has ≥1 known member" is a lower bound on collection-ness, never a test for it (sq-rf9uv).
+- **Evidence for collection targets:** `target_memberships(&policy, &graph)` returns the `member odrl:partOf collection` edges a graph states (default graph) whose collection is one of the policy's rule targets, and `parse_policy_str_with_memberships(rdf, format)` returns them with the parsed policy from one load. An enforcement point that evaluates per target graph also evaluates each such member with the edge as its asset evidence. Both ODRL enforcement consumers below do this: the server lane reads the edges from the request dataset, and `PolicyOdrlGate` reads them from its policy document plus any added with `with_asset_membership(member, collection)`.
 
 ```rust,ignore
 use sparq_policy::{evaluate, Request};
@@ -335,6 +336,28 @@ let out = store.materialize_odrl_policy(&policy, &req);
 ### `materialize_odrl_permission_conditional` stores the one-shot grant only
 
 `materialize_odrl_permission_conditional` used to persist recipient, assignee and `dateTime` constraints as re-checked `auth:ConditionalGrant` heads (agent matchers, `noneOf` exceptions, live-clock windows). A head re-checks identity and clock but not the rest of the decision, so it could grant a session `decide` denies: a prohibition on another party or a later time, or an assignee and a recipient that must both hold. It now stores exactly what `materialize_odrl_permission` stores: the one `party auth:<mode> target` triple from the `Permit` that `decide` issued for that request, and only when the permit is `lasting()` (an unconstrained grant to the named party, in a policy with no prohibitions). Constrained grants, and grants under any prohibition, are tracked in [#6743](https://github.com/sparq-org/sparq/issues/6743) (per-request evaluation through `decide`).
+
+### Request-time prohibitions (`PodStore::attach_odrl_policy`) — #6743
+
+`PodStore::attach_odrl_policy(policy)` keeps a `ValidatedPolicy` on the store and checks its prohibitions with `matched_prohibition` for the **accessing session** on every authorizing call. Nothing is materialized, so a party-scoped prohibition denies only the parties it applies to, and an asset needs no materialization to be covered.
+
+- **Deny-only.** The layer removes modes the static WAC/ACP decision grants and never adds one, so it composes with ACP denies, origin restrictions and `Control` as an intersection. Attached permissions grant nothing here; a lasting grant still goes through `materialize_odrl_*`.
+- **One gate.** Every entry point goes through it:
+  - the reads behind the cached session set: `accessible`, `accessible_set`, the views and queries, `wac_allow` and `scoped_dataset`;
+  - point decisions: `decide`, `decide_batch` and `decide_create`;
+  - every update path, including the graphs an update's `WHERE` reads (it is evaluated under the same session read set).
+  
+  `decide_create` refuses control-document names first, then checks prohibitions on the container and on the child. `tests/odrl_request_decide.rs` fails when a new public function that takes a `Session` is not classified.
+- **Session context.** The session's agent is the party and default recipient, and its `now` is the request time. `WAC-Allow`'s `public` field keeps the request clock. `add_odrl_asset_membership(asset, collection)` adds `odrl:partOf` evidence to every request, so an asset that joins a prohibited collection is denied at once. No party-membership evidence reaches a request, so when a policy names an `odrl:PartyCollection` a prohibition applies if it applies under any membership the agent could have: a prohibition on a collection reaches every authenticated agent, and one excluding a collection still reaches them too. Every membership subset is evaluated, so a policy with prohibitions may name at most four party collections; `attach_odrl_policy` refuses a larger one.
+- **Mode mapping.** A mode is removed when a prohibition applies (True or Unknown) to any ODRL action of that mode:
+  - the read family maps to `Read`;
+  - `append`/`modify`/`delete`/`write` map to both `Append` and `Write`.
+- **Never touched:** `Control`, `.acl`/`.acr` documents and the reserved `urn:sparq:` graphs, so a policy cannot lock an owner out of their own rules.
+- **Refused at attach time:** a policy whose `odrl:conflict` strategy `decide` cannot honour.
+- **Tests.** `tests/odrl_request_decide.rs` runs every session and clock across the generated policy space:
+  - the result equals the static verdict narrowed by `matched_prohibition`;
+  - it never denies a session that the materialized conditional deny lets through.
+- **Not cached yet:** each call re-evaluates the attached prohibitions for each candidate graph.
 
 ### Constraint-conditional DENY (`materialize_odrl_prohibition_conditional`) — sq-4r70
 

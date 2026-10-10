@@ -61,6 +61,17 @@ export const SPECS: Spec[] = [
       "Proving SPARQL query answers over committed RDF graphs in zero knowledge, transcribed from the sparq codebase — an explicit threat model, the committed data model (RDFC-1.0 + Poseidon2/BN254 sponge, Schnorr/Baby-Jubjub attestation), a scoped query fragment and circuit family with a per-construct disposition table plus phase-gated property-path and expression extensions, the ProofManifest member schema, and the fail-closed verifier obligations and four audit gates. Research-grade and NOT externally audited (sq-qhy4).",
   },
   {
+    slug: "zk-merkle-cryptosuite",
+    source: "zk-merkle-cryptosuite.typ",
+    title: "Merkle-Root Cryptosuites for RDF Verifiable Credentials",
+    shortName: "zk-merkle-cryptosuite",
+    status: "unofficial",
+    date: "2026-10-10",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "Data Integrity cryptosuites whose issuer signs a salted Merkle root over a credential's typed quad leaves, with order-preserving comparison keys for numeric, date-time and string comparison, so zero-knowledge proofs of SPARQL answers skip in-proof canonicalization; members eddsa-sha256-merkle-2026 (implemented in the zkVM relation), schnorr-poseidon2-merkle-2026 and mldsa44-sha256-merkle-2026.",
+  },
+  {
     slug: "mpc-sparql",
     source: "mpc-sparql.typ",
     title:

@@ -91,6 +91,7 @@ it produces no presentation.
 |---|---|
 | `prove_with_artifact(&Witness, r0vm, &AcceptedGuest)` | Proves with an explicitly supplied local `r0vm` and an independently accepted V5 guest; returns an already verified and request-bound `Presentation` without consuming a nonce |
 | `verify_with_artifact(&Presentation, &Request, &mut impl Nonces, &AcceptedGuest)` | Verifies against the verifier's own `Request`, then consumes its nonce once |
+| `verify_revealed_with_artifact(&Presentation, &Request, &[Vec<u8>], &mut impl Nonces, &AcceptedGuest)` | Revealed mode only: as `verify_with_artifact`, and also checks one presented issuer signature per journal `signed_messages` entry before consuming the nonce |
 | `embedded_authrdf_artifact()`, `embedded_authrdf_pin()` | The locally built V5 image and its pin, for release review; operators must approve the pin |
 
 There is no embedded-default `prove` or `verify`. Load the guest with
@@ -126,6 +127,65 @@ and verifies the receipt before returning.
 Every earlier failure leaves the nonce unconsumed. A store error is returned
 unchanged. A crate-private checked-verification hook runs between steps 3 and 4
 for the vcq adapter. No public API exposes it.
+
+## Cryptosuites
+
+`Policy::cryptosuite` selects one suite for every credential of a request; set
+it with `Policy::with_cryptosuite`. The suite profile is framed into the policy
+digest.
+
+- `EddsaRdfc2022` (the default): W3C `eddsa-rdfc-2022`, as described above.
+- `EddsaSha256Merkle2026`: the `eddsa-sha256-merkle-2026` suite specified in
+  `site/specs/zk-merkle-cryptosuite.typ`. The issuer signs a salted SHA-256
+  Merkle root over typed quad leaves. Each literal leaf carries an
+  order-preserving comparison key. The guest canonicalizes only the proof
+  configuration: it recomputes each document quad's leaf, requires the leaves
+  to be strictly increasing, and rebuilds the 32-byte signed message. The
+  witness `signature` is the 64-byte signature (hidden mode only) followed by
+  the 32-byte tree salt. The model module `merkle_suite` holds the leaf, root,
+  message and comparison-key functions, plus `issue` for issuers and test harnesses.
+  Fixed vectors are in `model/tests/merkle_suite.rs` and the spec.
+
+The vcq adapter accepts only `EddsaRdfc2022` in hidden mode. The paper's
+canonical query set Q1–Q5 is in `fixtures/paper/`. A host test runs it over the
+payment credential under both suites and both modes.
+
+## Signature modes
+
+`Policy::signature_mode` selects what the proof hides. The names match the
+`signatureModes` request member and `signatureMode` presentation member of the
+ZK SPARQL answers spec (`site/specs/zksparql-answers.typ`).
+
+- `Hidden` (the default, and the only mode before this field existed): each
+  witness credential carries its 64-byte Ed25519 signature, and the guest
+  verifies it. The proof shows knowledge of a valid issuer signature, and the
+  journal's `signed_messages` is empty.
+- `Revealed`: witness credentials carry an empty signature, and the guest
+  verifies none. For each credential the guest still canonicalizes, hashes and
+  checks the table. It commits a `SignedMessage { verification_method, message }`
+  in credential order (by document hash, or by the salted message for the
+  Merkle suite), where `message` is SHA-256(canonical proof config) ||
+  SHA-256(canonical document), exactly the eddsa-rdfc-2022 signing input (for
+  the Merkle suite it is the salted 32-byte root message). The
+  verifier checks the presented signatures over those messages with
+  `check_revealed_signatures` (called by `verify_revealed_with_artifact`),
+  outside the proof.
+
+The mode is framed into the policy digest only when it is `Revealed`, so the
+request digests and commitments of hidden-mode requests are unchanged. A
+revealed request therefore has a different request digest and dataset
+commitment. A verifier-agreed anchor must be computed under the same policy.
+`bind_journal` rejects a journal whose `signed_messages` presence does not
+match the expected mode, and each verify entry point refuses the other mode.
+The vcq adapter (`vcq_authenticated`) offers only `Hidden`, because it checks no
+presented signatures.
+
+In revealed mode with `eddsa-rdfc-2022` the verifier learns each credential's
+verification method and its document and proof-config hashes. Presentations of the same credential are
+linkable through them, and a verifier can confirm a guess at a low-entropy
+document. With the Merkle suite the verifier learns the method and a salted message, which
+is just as linkable but does not let it confirm guesses. Hidden mode reveals
+none of these.
 
 Obtain the expected `Request`, including its authorization table and any agreed
 commitment, from verifier-owned configuration. Never take them from a

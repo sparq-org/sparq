@@ -294,7 +294,7 @@ class LiveRepo(unittest.TestCase):
         record = chk.parse_record(REPO_ROOT / chk.RECORD_PATH)
         self.assertEqual(
             {p["name"] for p in record["packages"]},
-            {"braces", "extract-zip", "basic-ftp"},
+            {"braces", "extract-zip"},
         )
 
     def test_main_exits_zero_on_the_live_repo(self):

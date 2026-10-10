@@ -46,6 +46,28 @@
   ],
   "vulnerabilities": [
     {
+      "id": "RUSTSEC-2021-0127",
+      "source": {
+        "name": "RustSec",
+        "url": "https://rustsec.org/advisories/RUSTSEC-2021-0127"
+      },
+      "ratings": [
+        {
+          "source": {
+            "name": "RustSec"
+          },
+          "severity": "none"
+        }
+      ],
+      "description": "serde_cbor is archived and no longer maintained. This is an informational maintenance-status advisory with no reported vulnerability, CVE, or known exploit.",
+      "detail": "serde_cbor 0.11.2 appears only in the detached proof-methods graph, as a dependency of aws-nitro-enclaves-nsm-api (every release through 0.5.2 depends on it), which sparq-vcq-tee enables only through its default-OFF enclave feature. There it encodes requests to and decodes responses from the local Nitro Secure Module driver inside the enclave. No code-unreachability or exploitability verdict is established here. Remove this statement and the matching deny.toml ignore when aws-nitro-enclaves-nsm-api drops serde_cbor.",
+      "affects": [
+        {
+          "ref": "pkg:cargo/sparq"
+        }
+      ]
+    },
+    {
       "id": "RUSTSEC-2024-0436",
       "source": {
         "name": "RustSec",

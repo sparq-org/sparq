@@ -372,9 +372,9 @@ fn policy_and_parameter_digests_follow_the_documented_composition() {
         hash.update(id.as_bytes());
     }
     // Hand-copied bounds: query bytes, then the V5 model bounds in declaration
-    // order. The witness bound is 8192 + 32768 + 16 * (2 * 512 + 128) + 4 * 256 + 4096.
+    // order. The witness bound is 8192 + 32768 + 16 * (2 * 512 + 128) + 4 * 384 + 4096.
     for bound in [
-        8_192_u64, 4, 16, 512, 8_192, 2_048, 32_768, 128, 8, 256, 64_512,
+        8_192_u64, 4, 16, 512, 8_192, 2_048, 32_768, 128, 8, 256, 65_024,
     ] {
         hash.update(bound.to_be_bytes());
     }
@@ -383,7 +383,7 @@ fn policy_and_parameter_digests_follow_the_documented_composition() {
     }
     let expected: [u8; 32] = hash.finalize().into();
     assert_eq!(vcq5::parameter_digest(&policy).unwrap(), expected);
-    assert_eq!(auth::MAX_WITNESS_BYTES, 64_512);
+    assert_eq!(auth::MAX_WITNESS_BYTES, 65_024);
 }
 
 #[test]
