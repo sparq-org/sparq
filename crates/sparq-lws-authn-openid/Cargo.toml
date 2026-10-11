@@ -1,0 +1,26 @@
+[package]
+name = "sparq-lws-authn-openid"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "The OpenID Connect and Solid-OIDC authentication suites of the Linked Web Storage authorization server: ID Tokens, with DPoP proofs for bound ones, as subject tokens."
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["solid", "lws", "openid", "oidc", "dpop"]
+categories = ["authentication"]
+readme = "README.md"
+publish = false
+
+[dependencies]
+sparq-lws-authn = { path = "../sparq-lws-authn" }
+async-trait = "0.1"
+oxrdf.workspace = true
+oxttl.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde_json = "1"
+url = "2"
+
+[dev-dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
