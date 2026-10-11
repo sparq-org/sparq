@@ -126,6 +126,30 @@ converge on.
 
 = Defining the reserved trust requirements <sec-impl-trust>
 
+The data model reserves these trust requirement types (its §6.3):
+
+#table(
+  columns: (1.2fr, 3fr),
+  align: (left, left),
+  table.header[Type][Trust source],
+  [`TrustedList`], [Issuers listed for a service type in an ETSI trusted list
+    (TS 119 612, as the eIDAS national lists are #cite("ETSI-TS-119-612")) or list of trusted
+    entities (TS 119 602, as for EU PID providers #cite("ETSI-TS-119-602")), given by the list's
+    IRI and the service type IRI. Corresponds to the OpenID4VP `trusted_authorities` type
+    `etsi_tl` #cite("OID4VP").],
+  [`FederationTrustAnchor`], [Issuers with a trust chain to an OpenID Federation trust anchor,
+    optionally holding a trust mark of a given type #cite("OPENID-FEDERATION"). Corresponds to
+    `openid_federation`, which has no trust mark condition.],
+  [`RecognitionCredential`], [Issuers that a recognition credential, signed by an authority
+    the verifier trusts, recognizes for a purpose #cite("VC-RECOGNITION"). This is the one
+    source here that is already RDF.],
+  [`TrustFramework`], [Issuers certified under a governance framework, such as the UK digital
+    identity and attributes trust framework, with the scope of the certification checked as
+    the sparq trust-expression proposal describes #cite("SPARQ-TRUST-EXPRESSION"). The UK
+    register names certified organisations and services but publishes no keys, so it cannot
+    yet be resolved to a key set.],
+)
+
 The types the data model reserves (its §6.3) follow the trust sources verifiers already use. Defining one needs three
 things the data model does not yet fix: which entries of the list count as issuers of
 credentials; how holder and verifier agree on the same version of the list, for example by
@@ -136,3 +160,23 @@ signed. Until then a verifier that trusts the issuers on a list can resolve the 
 and send the result as `IssuerKeys` entries. A vocabulary for verifier trust policies is
 also planned by the W3C Verifiable Credentials Working Group ("Verifiable Issuers and
 Verifiers"); a later version of the data model should reuse it.
+
+= References <sec-refs>
+
+#references((
+  ("ETSI-TS-119-612", [ETSI. #emph[Electronic Signatures and Trust Infrastructures (ESI);
+    Trusted Lists]. ETSI TS 119 612.]),
+  ("ETSI-TS-119-602", [ETSI. #emph[Electronic Signatures and Trust Infrastructures (ESI);
+    Lists of Trusted Entities; Data model]. ETSI TS 119 602 V1.1.1, November 2025.]),
+  ("OID4VP", [Terbu, O.; Lodderstedt, T.; Yasuda, K.; Fett, D.; Heenan, J. #emph[OpenID for
+    Verifiable Presentations 1.0]. OpenID Foundation, Final Specification, 9 July 2025.
+    https://openid.net/specs/openid-4-verifiable-presentations-1_0.html.]),
+  ("OPENID-FEDERATION", [Hedberg, R.; Jones, M. B.; Solberg, A. Å.; Bradley, J.; De Marco, G.;
+    Dzhuvinov, V. #emph[OpenID Federation 1.0]. OpenID Foundation, Final Specification, February
+    2026.]),
+  ("VC-RECOGNITION", [W3C Credentials Community Group. #emph[Verifiable Recognition Credentials
+    v0.9]. Final Community Group Report, 20 March 2026.]),
+  ("SPARQ-TRUST-EXPRESSION", [The sparq project. #emph[Trust Expression: A Verifier-Holder
+    Contract for Framework-Anchored Attestation Queries]. Unofficial Proposal Draft, 2026.
+    Published on this site as `trust-expression`.]),
+))

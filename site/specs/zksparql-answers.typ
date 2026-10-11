@@ -237,8 +237,9 @@ the credentials themselves. Its properties, by JSON-LD term:
     Equal to the request's `inputCommitment` if the request has one.],
   [`signatureMode`], [IRI], [REQUIRED if the request has `trustedIssuers`, and absent
     otherwise. One of the request's signature modes.],
-  [`revealedSignature`], [list of objects], [REQUIRED in the revealed mode, and absent
-    otherwise. One per credential in the input dataset, each with `verificationMethod`,
+  [`revealedSignature`], [list of objects], [REQUIRED in the revealed mode when the input
+    dataset has at least one credential, and absent otherwise. One per credential in the input
+    dataset, each with `verificationMethod`,
     `cryptosuite`, `signedMessage` (byte string) and `signatureValue` (byte string: the
     signature alone, without any other value the cryptosuite's `proofValue` carries).
     @sec-modes.],
@@ -312,7 +313,8 @@ trusted issuer.
 
 A trust requirement identifies issuers and their verification methods; which cryptosuites are
 accepted is the separate `cryptosuite` list. Every trust requirement MUST resolve to a finite
-set of verification methods with public keys, the same for holder and verifier. A requirement
+set of verification methods with public keys, the same for holder and verifier, before the
+holder service proves and when the verifier service verifies. A requirement
 that names an external source, such as a trusted list, MUST say how both sides obtain that set,
 and the proof method MUST bind a digest of it.
 
@@ -326,27 +328,19 @@ This document defines one type of trust requirement and reserves others:
     (`verificationMethod`, each a `Multikey` #cite("CID") with `id`, `controller` and
     `publicKeyMultibase`). The keys are given, not looked up, so both sides prove and verify
     against the same keys.], [Defined.],
-  [`TrustedList`], [Issuers listed for a service type in an ETSI trusted list
-    (TS 119 612, as the eIDAS national lists are #cite("ETSI-TS-119-612")) or list of trusted
-    entities (TS 119 602, as for EU PID providers #cite("ETSI-TS-119-602")), given by the list's
-    IRI and the service type IRI. Corresponds to the OpenID4VP `trusted_authorities` type
-    `etsi_tl` #cite("OID4VP").], [Reserved.],
-  [`FederationTrustAnchor`], [Issuers with a trust chain to an OpenID Federation trust anchor,
-    optionally holding a trust mark of a given type #cite("OPENID-FEDERATION"). Corresponds to
-    `openid_federation`, which has no trust mark condition.], [Reserved.],
-  [`RecognitionCredential`], [Issuers that a recognition credential, signed by an authority
-    the verifier trusts, recognizes for a purpose #cite("VC-RECOGNITION"). This is the one
-    source here that is already RDF.], [Reserved.],
-  [`TrustFramework`], [Issuers certified under a governance framework, such as the UK digital
-    identity and attributes trust framework, with the scope of the certification checked as
-    the sparq trust-expression proposal describes #cite("SPARQ-TRUST-EXPRESSION"). The UK
-    register names certified organisations and services but publishes no keys, so it cannot
-    yet be resolved to a key set.], [Reserved.],
+  [`TrustedList`], [Issuers on an ETSI trusted list or list of trusted entities.],
+    [Reserved.],
+  [`FederationTrustAnchor`], [Issuers with a trust chain to an OpenID Federation trust
+    anchor.], [Reserved.],
+  [`RecognitionCredential`], [Issuers recognized by a verifiable recognition credential.],
+    [Reserved.],
+  [`TrustFramework`], [Issuers certified under a governance framework.], [Reserved.],
 )
 
 A reserved type is not yet defined well enough to be used: a verifier service MUST NOT put
 one in a request, and a holder service MUST reject a request that has one or that has any
-type it does not implement.
+type it does not implement. The implementation status companion describes the sources the
+reserved types correspond to and what defining each one needs.
 
 == Signature modes <sec-modes>
 
@@ -704,19 +698,4 @@ to its description in RDF.
   ("ZK-MERKLE-CRYPTOSUITE", [The sparq project. #emph[Merkle-Root Cryptosuites for RDF
     Verifiable Credentials]. Unofficial Proposal Draft, 2026. Published on this site as
     `zk-merkle-cryptosuite`.]),
-  ("SPARQ-TRUST-EXPRESSION", [The sparq project. #emph[Trust Expression: A Verifier-Holder
-    Contract for Framework-Anchored Attestation Queries]. Unofficial Proposal Draft, 2026.
-    Published on this site as `trust-expression`.]),
-  ("ETSI-TS-119-612", [ETSI. #emph[Electronic Signatures and Trust Infrastructures (ESI);
-    Trusted Lists]. ETSI TS 119 612.]),
-  ("ETSI-TS-119-602", [ETSI. #emph[Electronic Signatures and Trust Infrastructures (ESI);
-    Lists of Trusted Entities; Data model]. ETSI TS 119 602 V1.1.1, November 2025.]),
-  ("VC-RECOGNITION", [W3C Credentials Community Group. #emph[Verifiable Recognition Credentials
-    v0.9]. Final Community Group Report, 20 March 2026.]),
-  ("OPENID-FEDERATION", [Hedberg, R.; Jones, M. B.; Solberg, A. Å.; Bradley, J.; De Marco, G.;
-    Dzhuvinov, V. #emph[OpenID Federation 1.0]. OpenID Foundation, Final Specification, February
-    2026.]),
-  ("OID4VP", [Terbu, O.; Lodderstedt, T.; Yasuda, K.; Fett, D.; Heenan, J. #emph[OpenID for
-    Verifiable Presentations 1.0]. OpenID Foundation, Final Specification, 9 July 2025.
-    https://openid.net/specs/openid-4-verifiable-presentations-1_0.html.]),
 ))
