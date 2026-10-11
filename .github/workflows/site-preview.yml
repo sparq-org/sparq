@@ -1,0 +1,134 @@
+# Hosted PR previews, part 1 of 2: BUILD the site for a pull request.
+#
+# Builds the same Next.js static export pages.yml publishes (specs and papers rendered from
+# site/specs/*.typ and site/papers/*.typ) with basePath /sparq-previews/pr-<N>, and uploads
+# it as the `site-preview-pr-<N>` artifact. It skips the /app GUI, the /guide mdBook and
+# the /dev dashboards, which have their own lanes.
+#
+# Previews are served from a SEPARATE origin, https://sparq-org.github.io/sparq-previews/,
+# never from the production site: an unmerged PR's JavaScript must not run where the
+# production /app/ keeps users' workspaces in localStorage. The sparq-org/sparq-previews
+# repository's own workflow publishes them (scripts/site-preview-publish.py): it reads the
+# open same-repository PRs and their successful pull_request runs of THIS workflow, and a
+# closed PR's preview drops out on its next pass. Fork PRs build here but are never
+# published. Only pull_request runs: they cannot write main's caches, and the publisher
+# trusts nothing but the PR association GitHub records on the run.
+#
+# Part 2, site-preview-comment.yml, links the preview from the PR.
+
+name: site-preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "site/**"
+      - "js/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/site-preview-manifest.mjs"
+      - ".github/workflows/site-preview.yml"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: site-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+
+      # site/scripts/sync-benchmarks.mjs reads origin/benchmark-data:dev/bench/data.js, as on
+      # main; without it the build keeps the committed snapshot, so a failed fetch is not fatal.
+      - name: Fetch benchmark-data
+        run: git fetch --depth=1 origin benchmark-data:refs/remotes/origin/benchmark-data || true
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      # Restore-only: this workflow runs only on pull_request refs, never main.
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          shared-key: site-wasm
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
+
+      - name: Build sparq wasm bundle
+        working-directory: js
+        run: |
+          npm ci
+          npm run build:wasm
+
+      - name: Build W-reason wasm bundle
+        working-directory: js
+        run: npm run build:reason-wasm
+
+      - name: Build W-rsp wasm bundle
+        working-directory: js
+        run: npm run build:rsp-wasm
+
+      - name: Build W-text wasm bundle
+        working-directory: js
+        run: npm run build:text-wasm
+
+      - name: Install Typst CLI
+        run: |
+          set -euo pipefail
+          TYPST_VERSION=v0.15.0
+          TYPST_SHA256=59b207df01be2dab9f13e80f73d04d7ff8273ffd46b3dd1b9eef5c60f3eeabea
+          url="https://github.com/typst/typst/releases/download/${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz"
+          curl -sSfL -o /tmp/typst.tar.xz "$url"
+          echo "${TYPST_SHA256}  /tmp/typst.tar.xz" | sha256sum -c -
+          tar -xf /tmp/typst.tar.xz -C /tmp
+          mkdir -p "$HOME/.local/bin"
+          cp /tmp/typst-x86_64-unknown-linux-musl/typst "$HOME/.local/bin/typst"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/typst" --version
+
+      - name: Build static site (basePath /sparq-previews/pr-N)
+        working-directory: site
+        env:
+          NEXT_PUBLIC_BASE_PATH: /sparq-previews/pr-${{ env.PR }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Write preview manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          rm -f site/out/CNAME   # the production custom domain; meaningless under the previews site
+          gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' \
+            | node scripts/site-preview-manifest.mjs site/out/_preview.json "$PR" "$SHA"
+          echo "Preview size: $(du -sh site/out | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site-preview-pr-${{ env.PR }}
+          path: site/out
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: error
