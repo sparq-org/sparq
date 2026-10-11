@@ -122,9 +122,13 @@ pub enum SparqHttpError {
     /// The server returned a 4xx — fatal (a malformed query / rejected request; retrying won't help).
     #[error("client error (HTTP {status})")]
     ClientStatus { status: u16 },
-    /// The response body exceeded `MAX_RESPONSE_BYTES` or could not be read — fatal.
-    #[error("response too large or unreadable")]
+    /// The response body could not be read (the connection failed part way) — fatal.
+    #[error("response body unreadable")]
     Body,
+    /// The response body passed the size it may take (`MAX_RESPONSE_BYTES`, or a caller's
+    /// smaller cap) — fatal.
+    #[error("response too large")]
+    TooLarge,
     /// The response was not the expected shape (e.g. not valid sparql-results JSON) — fatal.
     #[error("malformed response: {0}")]
     Malformed(String),
@@ -187,12 +191,82 @@ impl HttpSparqClient {
         }
     }
 
+    /// The children `q` selects, or `None` once their IRIs pass `max_bytes`.
+    ///
+    /// With `rows` (the query asks for one more), the response is read only up to a size such a
+    /// listing could take, and more rows than `rows` is a listing that does not fit: `None`.
+    async fn children(
+        &self,
+        q: String,
+        max_bytes: usize,
+        rows: Option<usize>,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        let cap = match rows {
+            // Each binding's JSON around its IRI is well under 256 bytes; an IRI may be escaped
+            // to at most twice its length.
+            Some(n) => max_bytes
+                .saturating_mul(2)
+                .saturating_add(n.saturating_add(1).saturating_mul(256))
+                .saturating_add(4096)
+                .min(MAX_RESPONSE_BYTES as usize),
+            None => MAX_RESPONSE_BYTES as usize,
+        };
+        let body = match self.query_raw_within(&q, ACCEPT_RESULTS_JSON, cap).await {
+            Ok((body, _ct)) => body,
+            // Only a response past the cap is a listing that does not fit; one that could not
+            // be read is a failure, whatever its size.
+            Err(SparqHttpError::TooLarge) if rows.is_some() => return Ok(None),
+            Err(e) => return Err(e.into_sparq()),
+        };
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        if rows.is_some_and(|n| result.rows.len() > n) {
+            return Ok(None);
+        }
+        let mut children = Vec::with_capacity(result.rows.len());
+        let mut bytes = 0usize;
+        for row in result.rows {
+            // A row of a `SELECT ?child` MUST carry the `child` binding. A row missing it is a
+            // malformed backend response, NOT an empty/partial list — surface it as a fatal error
+            // rather than silently dropping it, because list_children feeds the fail-closed
+            // empty-container DELETE check (a silently-shortened list could wrongly let a non-empty
+            // container be deleted).
+            match row.get("child") {
+                Some(child) => {
+                    bytes = bytes.saturating_add(child.len());
+                    if bytes > max_bytes {
+                        return Ok(None);
+                    }
+                    children.push(child.clone())
+                }
+                None => {
+                    return Err(SparqHttpError::Malformed(
+                        "select-children row missing the 'child' binding".into(),
+                    )
+                    .into_sparq())
+                }
+            }
+        }
+        Ok(Some(children))
+    }
+
     /// Issue a SPARQL **query**, returning the raw body bytes + the response `Content-Type`. The
     /// `accept` header drives the result serialisation.
     async fn query_raw(
         &self,
         sparql: &str,
         accept: &str,
+    ) -> Result<(Bytes, String), SparqHttpError> {
+        self.query_raw_within(sparql, accept, MAX_RESPONSE_BYTES as usize)
+            .await
+    }
+
+    /// [`query_raw`](Self::query_raw), its response read up to `cap` bytes
+    /// ([`SparqHttpError::TooLarge`] past that).
+    async fn query_raw_within(
+        &self,
+        sparql: &str,
+        accept: &str,
+        cap: usize,
     ) -> Result<(Bytes, String), SparqHttpError> {
         let req = Request::builder()
             .method(Method::POST)
@@ -201,7 +275,7 @@ impl HttpSparqClient {
             .header(header::ACCEPT, accept)
             .body(Full::new(Bytes::from(sparql.to_string())))
             .map_err(|e| SparqHttpError::Build(e.to_string()))?;
-        self.send(req).await
+        self.send_within(req, cap).await
     }
 
     /// Issue a SPARQL **update** (`application/sparql-update`); a 2xx (the server uses 204) is
@@ -227,6 +301,15 @@ impl HttpSparqClient {
     /// status error regardless of whether the (ignored) error body reads cleanly — a 5xx with an
     /// oversized/unreadable body stays a retryable `ServerStatus`, never a fatal `Body`.
     async fn send(&self, req: Request<Full<Bytes>>) -> Result<(Bytes, String), SparqHttpError> {
+        self.send_within(req, MAX_RESPONSE_BYTES as usize).await
+    }
+
+    /// [`send`](Self::send), its response body read up to `cap` bytes.
+    async fn send_within(
+        &self,
+        req: Request<Full<Bytes>>,
+        cap: usize,
+    ) -> Result<(Bytes, String), SparqHttpError> {
         let client = self.client.clone();
         let exchange = async move {
             let resp = client
@@ -248,7 +331,7 @@ impl HttpSparqClient {
             // client follows no redirects to a trusted internal endpoint) → fatal. The error body is
             // not needed (errors are conveyed by status), so it is dropped unread.
             if status.is_success() {
-                let body = read_bounded(resp.into_body()).await?;
+                let body = read_bounded(resp.into_body(), cap).await?;
                 Ok((body, content_type))
             } else if status == StatusCode::NOT_IMPLEMENTED {
                 Err(SparqHttpError::ClientStatus {
@@ -274,16 +357,18 @@ impl HttpSparqClient {
 /// Read an HTTP response body into [`Bytes`], failing closed if it exceeds [`MAX_RESPONSE_BYTES`].
 ///
 /// `B` is the concrete incoming body the hyper-util legacy client yields ([`hyper::body::Incoming`]);
-/// [`http_body_util::Limited`] bounds the read, so a runaway response is a fatal [`SparqHttpError::Body`]
-/// rather than an OOM.
-async fn read_bounded<B>(body: B) -> Result<Bytes, SparqHttpError>
+/// [`http_body_util::Limited`] bounds the read, so a runaway response is a fatal
+/// [`SparqHttpError::TooLarge`] rather than an OOM; a body that fails part way is
+/// [`SparqHttpError::Body`], never taken for one too large.
+async fn read_bounded<B>(body: B, cap: usize) -> Result<Bytes, SparqHttpError>
 where
     B: hyper::body::Body,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    let limited = http_body_util::Limited::new(body, MAX_RESPONSE_BYTES as usize);
+    let limited = http_body_util::Limited::new(body, cap);
     match limited.collect().await {
         Ok(collected) => Ok(collected.to_bytes()),
+        Err(e) if e.is::<http_body_util::LengthLimitError>() => Err(SparqHttpError::TooLarge),
         Err(_) => Err(SparqHttpError::Body),
     }
 }
@@ -504,30 +589,18 @@ impl SparqClient for HttpSparqClient {
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
-        let q = sparql::select_children(container)?;
-        let (body, _ct) = self
-            .query_raw(&q, ACCEPT_RESULTS_JSON)
-            .await
-            .map_err(SparqHttpError::into_sparq)?;
-        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
-        let mut children = Vec::with_capacity(result.rows.len());
-        for row in result.rows {
-            // A row of a `SELECT ?child` MUST carry the `child` binding. A row missing it is a
-            // malformed backend response, NOT an empty/partial list — surface it as a fatal error
-            // rather than silently dropping it, because list_children feeds the fail-closed
-            // empty-container DELETE check (a silently-shortened list could wrongly let a non-empty
-            // container be deleted).
-            match row.get("child") {
-                Some(child) => children.push(child.clone()),
-                None => {
-                    return Err(SparqHttpError::Malformed(
-                        "select-children row missing the 'child' binding".into(),
-                    )
-                    .into_sparq())
-                }
-            }
-        }
-        Ok(children)
+        let children = self.children(sparql::select_children(container)?, usize::MAX, None);
+        Ok(children.await?.unwrap_or_default())
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        let rows = super::sparq::max_rows(container, max_bytes);
+        let q = sparql::select_children_limited(container, rows.saturating_add(1))?;
+        self.children(q, max_bytes, Some(rows)).await
     }
 
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
@@ -661,6 +734,39 @@ impl HttpSparqClient {
 mod tests {
     use super::*;
 
+    /// Review finding: a body past the cap and a body that failed part way were one error, so a
+    /// connection reset on a small listing read as a listing too large to keep (`507`). They are
+    /// told apart.
+    #[tokio::test]
+    async fn a_body_past_the_cap_is_not_a_body_that_failed() {
+        struct Reset;
+        impl hyper::body::Body for Reset {
+            type Data = Bytes;
+            type Error = std::io::Error;
+            fn poll_frame(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Self::Error>>>
+            {
+                std::task::Poll::Ready(Some(Err(std::io::Error::other("connection reset"))))
+            }
+        }
+        assert!(matches!(
+            read_bounded(Reset, 1 << 20).await,
+            Err(SparqHttpError::Body)
+        ));
+        let big = Full::new(Bytes::from(vec![b'x'; 64]));
+        assert!(matches!(
+            read_bounded(big, 16).await,
+            Err(SparqHttpError::TooLarge)
+        ));
+        let small = Full::new(Bytes::from_static(b"ok"));
+        assert_eq!(
+            read_bounded(small, 16).await.unwrap(),
+            Bytes::from_static(b"ok")
+        );
+    }
+
     #[test]
     fn ask_json_parses_true_and_false() {
         assert!(parse_ask_json(br#"{"head":{},"boolean":true}"#).unwrap());
@@ -709,6 +815,7 @@ mod tests {
         assert!(!SparqHttpError::ClientStatus { status: 400 }.is_retryable());
         assert!(!SparqHttpError::Malformed("x".into()).is_retryable());
         assert!(!SparqHttpError::Body.is_retryable());
+        assert!(!SparqHttpError::TooLarge.is_retryable());
         assert!(!SparqHttpError::Build("x".into()).is_retryable());
     }
 

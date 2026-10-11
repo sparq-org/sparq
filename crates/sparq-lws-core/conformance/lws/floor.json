@@ -3,6 +3,7 @@
   "passed": {
     "core": 122,
     "auth": 22,
+    "index": 40,
     "notifications/webhook": 11
   }
 }

@@ -18,7 +18,7 @@ use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
     problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
     JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
-    REQUESTS_PATH, SUBSCRIPTIONS_PATH,
+    REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -1312,6 +1312,8 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
             grants,
             requests,
             notifications,
+            service("type-index", "TypeIndexService", cfg.absolute(TYPE_INDEX_PATH)),
+            service("type-search", "TypeSearchService", cfg.absolute(TYPE_SEARCH_PATH)),
         ],
         "verificationMethod": [{
             "id": key_id,
@@ -1836,6 +1838,9 @@ pub struct IriLocks {
     hidden: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
     hid: tokio::sync::Notify,
+    /// How many times anything was set aside: a walk over many resources reads it before and
+    /// after, and fails if it moved ([`IriLocks::set_asides`]).
+    set_asides: std::sync::atomic::AtomicU64,
 }
 
 /// The locks by IRI, held weakly, and how many entries the map may reach before the dropped ones
@@ -1893,6 +1898,14 @@ impl IriLocks {
             .contains_key(iri)
     }
 
+    /// How many times anything was set aside so far. A walk that reads it before it starts and
+    /// again when it ends, and finds it the same, met no resource set aside during it: one set
+    /// aside before was not visible when the walk reached it, and one set aside after its visit
+    /// moved the count.
+    pub fn set_asides(&self) -> u64 {
+        self.set_asides.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Set `iris` aside (once more each), and wake every wait for a lock so it checks again.
     pub(crate) fn hide(&self, iris: &[String]) {
         {
@@ -1900,6 +1913,8 @@ impl IriLocks {
             for iri in iris {
                 *hidden.entry(iri.clone()).or_default() += 1;
             }
+            self.set_asides
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
         self.hid.notify_waiters();
     }

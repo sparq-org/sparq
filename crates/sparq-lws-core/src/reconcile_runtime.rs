@@ -87,6 +87,14 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.list_children(container).await
     }
 
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        self.0.list_children_within(container, max_bytes).await
+    }
+
     async fn referenced_blob_keys(&self) -> Result<HashSet<String>, SparqError> {
         self.0.referenced_blob_keys().await
     }
