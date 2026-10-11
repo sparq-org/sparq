@@ -47,7 +47,8 @@ env:
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
   CORE_CRATES: >-
     -p sparq-core -p sparq-substrate -p sparq-engine -p sparq-cli
-    -p sparq-server -p sparq-lws-core -p sparq-solid
+    -p sparq-server -p sparq-lws-core -p sparq-lws-authn -p sparq-lws-authn-saml
+    -p sparq-solid
 
 jobs:
   lint:

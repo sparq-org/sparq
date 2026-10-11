@@ -116,8 +116,8 @@ pub struct LwsConfig {
     /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
     pub delivery: notify::DeliveryLimits,
     /// The authentication suites kept in their own packages that the authorization server offers,
-    /// besides the ones it holds (see [`authz_server::BUILT_IN_TOKEN_TYPES`]).
-    pub suites: sparq_lws_authn::Suites,
+    /// besides the ones it holds (see [`LwsConfig::register_suite`]).
+    suites: sparq_lws_authn::Suites,
 }
 
 impl LwsConfig {
@@ -262,10 +262,7 @@ impl LwsConfig {
     fn register_suites_from_env(&mut self) -> Result<(), String> {
         #[cfg(feature = "authn-saml")]
         if let Some(saml) = sparq_lws_authn_saml::Saml::from_env()? {
-            self.suites.register(
-                std::sync::Arc::new(saml),
-                authz_server::BUILT_IN_TOKEN_TYPES,
-            )?;
+            self.register_suite(std::sync::Arc::new(saml))?;
         }
         #[cfg(not(feature = "authn-saml"))]
         if std::env::var_os("SOLID_SERVER_LWS_SAML_IDPS_FILE").is_some_and(|v| !v.is_empty()) {
@@ -298,6 +295,21 @@ impl LwsConfig {
         std::iter::once(jose::VerifyKey::from(&self.as_key))
             .chain(self.as_previous_key.clone())
             .collect()
+    }
+
+    /// Offer `suite` too. Refused when it takes a subject token type the server checks itself
+    /// ([`authz_server::BUILT_IN_TOKEN_TYPES`]) or another offered suite takes.
+    pub fn register_suite(
+        &mut self,
+        suite: std::sync::Arc<dyn sparq_lws_authn::Suite>,
+    ) -> Result<(), String> {
+        self.suites
+            .register(suite, authz_server::BUILT_IN_TOKEN_TYPES)
+    }
+
+    /// The authentication suites in their own packages that the authorization server offers.
+    pub fn suites(&self) -> &sparq_lws_authn::Suites {
+        &self.suites
     }
 
     /// The absolute URI of a server path.

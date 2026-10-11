@@ -346,7 +346,8 @@ What the server exposes, all discoverable from the storage description
   is the client.
   Authentication suites other than did:key, controlled identifiers and OpenID Connect live in
   their own packages (`sparq-lws-authn-*`, each an `authn-*` feature of `sparq-lws-core`)
-  and implement `sparq_lws_authn::Suite`; `LwsConfig::suites` holds the ones a server offers,
+  and implement `sparq_lws_authn::Suite`; `LwsConfig::register_suite` offers one (never for a
+  token type the server checks itself), `LwsConfig::suites` lists them,
   and the metadata lists their token types. SAML is `sparq-lws-authn-saml`
   (`authn-saml`).
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token

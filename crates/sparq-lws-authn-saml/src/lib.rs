@@ -521,10 +521,7 @@ impl TrustKey {
                             .and_then(jose::b64url_decode)
                             .ok_or("an RSA JWK needs n and e")
                     };
-                    Ok(TrustKey::Rsa {
-                        n: get("n")?,
-                        e: get("e")?,
-                    })
+                    rsa_key(&get("n")?, &get("e")?)
                 }
                 Some("EC") => jose::ec_public_from_jwk(&jwk)
                     .map(TrustKey::P256)
@@ -678,14 +675,48 @@ fn rsa_public_key(pkcs1: &[u8]) -> Result<TrustKey, String> {
     let (0x02, e, _) = der(rest).ok_or_else(bad)? else {
         return Err(bad());
     };
+    rsa_key(n, e)
+}
+
+/// Smallest and largest RSA modulus, in bits, a signature is verified with
+/// (`RSA_PKCS1_2048_8192_SHA256`).
+const RSA_MODULUS_BITS: std::ops::RangeInclusive<usize> = 2048..=8192;
+
+/// Largest RSA public exponent, in bits, a signature is verified with.
+const RSA_EXPONENT_MAX_BITS: usize = 33;
+
+/// An RSA key from its modulus and public exponent (big-endian, leading zeros allowed), only when
+/// a signature could be verified with it: a modulus of 2048 to 8192 bits, odd, and an odd
+/// exponent of at least 3 and at most 33 bits, below the modulus. A key that could verify nothing
+/// is refused when it is configured, not at every exchange.
+fn rsa_key(n: &[u8], e: &[u8]) -> Result<TrustKey, String> {
     let strip = |v: &[u8]| {
         let i = v.iter().position(|b| *b != 0).unwrap_or(v.len());
         v[i..].to_vec()
     };
-    Ok(TrustKey::Rsa {
-        n: strip(n),
-        e: strip(e),
-    })
+    let bits = |v: &[u8]| match v.first() {
+        Some(top) => (v.len() - 1) * 8 + (8 - top.leading_zeros() as usize),
+        None => 0,
+    };
+    let odd = |v: &[u8]| v.last().is_some_and(|b| b & 1 == 1);
+    let (n, e) = (strip(n), strip(e));
+    if !RSA_MODULUS_BITS.contains(&bits(&n)) {
+        return Err(format!(
+            "an RSA modulus of {} bits; {} to {} are supported",
+            bits(&n),
+            RSA_MODULUS_BITS.start(),
+            RSA_MODULUS_BITS.end()
+        ));
+    }
+    if !odd(&n) {
+        return Err("an RSA modulus that is even".into());
+    }
+    if !odd(&e) || bits(&e) < 2 || bits(&e) > RSA_EXPONENT_MAX_BITS {
+        return Err(
+            "an RSA public exponent that is not odd, at least 3 and at most 33 bits".into(),
+        );
+    }
+    Ok(TrustKey::Rsa { n, e })
 }
 
 // ---------------------------------------------------------------- XML tree
@@ -1169,6 +1200,7 @@ fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     /// The authorization server's configuration, as far as the suite sees it.
     struct LwsConfig {
@@ -1778,5 +1810,72 @@ mod tests {
         );
         assert!(matches!(TrustKey::parse(&pem).unwrap(), TrustKey::P256(_)));
         assert!(TrustKey::parse("garbage").is_err());
+    }
+
+    /// Review finding: an RSA key no signature could be verified with (an empty or 1024-bit
+    /// modulus) was accepted at start, so the suite was offered and every exchange failed. Such
+    /// a key is refused when it is configured, as a JWK and as PEM alike.
+    #[test]
+    fn rsa_keys_that_could_verify_nothing_are_refused() {
+        let modulus = |bytes: usize| {
+            let mut n = vec![0xc5; bytes];
+            n[bytes - 1] |= 1;
+            n
+        };
+        let jwk = |n: &[u8], e: &[u8]| {
+            json!({"kty": "RSA", "n": jose::b64url(n), "e": jose::b64url(e)}).to_string()
+        };
+        // PKCS#1 RSAPublicKey: SEQUENCE { INTEGER n, INTEGER e }.
+        let pem = |n: &[u8], e: &[u8]| {
+            let int = |v: &[u8]| {
+                let mut body = vec![0];
+                body.extend_from_slice(v);
+                tlv(0x02, &body)
+            };
+            let der = tlv(0x30, &[int(n), int(e)].concat());
+            format!(
+                "-----BEGIN RSA PUBLIC KEY-----\n{}\n-----END RSA PUBLIC KEY-----\n",
+                STANDARD.encode(der)
+            )
+        };
+        let f4 = [1, 0, 1];
+        for key in [jwk(&modulus(256), &f4), pem(&modulus(256), &f4)] {
+            assert!(TrustKey::parse(&key).is_ok(), "{key}");
+        }
+        for (n, e) in [
+            (vec![], f4.to_vec()),
+            (modulus(128), f4.to_vec()),
+            (modulus(1025), f4.to_vec()),
+            (
+                {
+                    let mut n = modulus(256);
+                    n[255] &= 0xfe;
+                    n
+                },
+                f4.to_vec(),
+            ),
+            (modulus(256), vec![]),
+            (modulus(256), vec![1]),
+            (modulus(256), vec![1, 0, 0]),
+            (modulus(256), vec![1, 0, 0, 0, 0, 1]),
+        ] {
+            assert!(TrustKey::parse(&jwk(&n, &e)).is_err(), "jwk {n:?} {e:?}");
+            assert!(TrustKey::parse(&pem(&n, &e)).is_err(), "pem {n:?} {e:?}");
+        }
+        let idps = |key: String| BTreeMap::from([("https://idp.example/".to_string(), key)]);
+        assert!(Saml::new(idps(jwk(&modulus(128), &f4))).is_err());
+        assert!(Saml::new(idps(jwk(&[], &f4))).is_err());
+    }
+
+    /// A DER element: its tag, its length and `body`.
+    fn tlv(tag: u8, body: &[u8]) -> Vec<u8> {
+        let mut out = vec![tag];
+        match body.len() {
+            n if n < 0x80 => out.push(n as u8),
+            n if n < 0x100 => out.extend_from_slice(&[0x81, n as u8]),
+            n => out.extend_from_slice(&[0x82, (n >> 8) as u8, n as u8]),
+        }
+        out.extend_from_slice(body);
+        out
     }
 }

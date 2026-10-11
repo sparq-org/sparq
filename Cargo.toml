@@ -37,7 +37,6 @@ default-members = [
     "crates/sparq-jsonld",
     "crates/sparq-lws-core",
     "crates/sparq-lws-authn",
-    "crates/sparq-lws-authn-saml",
     "crates/sparq-lws-wasm",
     "crates/sparq-solid",
     "crates/sparq-wac-oracle",

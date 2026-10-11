@@ -19,10 +19,10 @@ pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchang
 pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
 
 /// The subject token types of the suites this server holds itself (did:key, controlled
-/// identifiers and OpenID Connect); the suites in their own packages ([`LwsConfig::suites`])
-/// take the others.
+/// identifiers and OpenID Connect); the suites in their own packages
+/// ([`LwsConfig::register_suite`]) take the others, never these.
 ///
-/// [`LwsConfig::suites`]: super::LwsConfig::suites
+/// [`LwsConfig::register_suite`]: super::LwsConfig::register_suite
 pub const BUILT_IN_TOKEN_TYPES: &[&str] = &[JWT_TOKEN_TYPE, ID_TOKEN_TYPE];
 
 pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Response {
@@ -63,7 +63,7 @@ pub fn metadata<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
     let mut token_types = BUILT_IN_TOKEN_TYPES.to_vec();
     let mut identifier_types = vec!["https", "did:key"];
-    for suite in cfg.suites.iter() {
+    for suite in cfg.suites().iter() {
         token_types.extend(suite.token_types());
         for t in suite.identifier_types() {
             if !identifier_types.contains(t) {
@@ -129,7 +129,7 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
             )
             .await
         }
-        other => match state.cfg.suites.find(other) {
+        other => match state.cfg.suites().find(other) {
             Some(suite) => {
                 suite
                     .verify(&sparq_lws_authn::Exchange {
@@ -343,9 +343,25 @@ mod tests {
         use super::super::test_store;
         let fake = std::sync::Arc::new(Fake(Default::default()));
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
-        cfg.suites
-            .register(fake.clone(), BUILT_IN_TOKEN_TYPES)
-            .unwrap();
+        cfg.register_suite(fake.clone()).unwrap();
+        // The server's own token types are never a suite's.
+        struct Jwt;
+        #[async_trait::async_trait]
+        impl sparq_lws_authn::Suite for Jwt {
+            fn name(&self) -> &'static str {
+                "jwt"
+            }
+            fn token_types(&self) -> &[&'static str] {
+                &[JWT_TOKEN_TYPE]
+            }
+            async fn verify(
+                &self,
+                _: &sparq_lws_authn::Exchange<'_>,
+            ) -> Result<sparq_lws_authn::Verified, String> {
+                unreachable!()
+            }
+        }
+        assert!(cfg.register_suite(std::sync::Arc::new(Jwt)).is_err());
         let state = LwsState::new(test_store::FlakyStore::new(), cfg)
             .await
             .unwrap();
