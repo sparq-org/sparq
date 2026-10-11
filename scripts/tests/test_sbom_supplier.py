@@ -224,6 +224,15 @@ class TestDetachedSuppliers(unittest.TestCase):
             ("spargebra", "vendor/spargebra", "crates.io"),
             ("unrelated", "zk/sparql-evaluator/model", None),
             ("sparq-proved-evaluator-model", "elsewhere/model", None),
+            # The detached proof-methods workspace: members and binary targets.
+            ("sparq-vcq-disclosed", "proof-methods/disclosed", "Jesse Wright"),
+            ("sparq_vcq_disclosed", "proof-methods/disclosed", "Jesse Wright"),
+            ("sparq-vcq-tee", "proof-methods/tee", "Jesse Wright"),
+            ("sparq_vcq_tee", "proof-methods/tee", "Jesse Wright"),
+            ("sparq-vcq-tee-enclave", "proof-methods/tee", "Jesse Wright"),
+            ("sparq-vcq-tee-holder", "proof-methods/tee", "Jesse Wright"),
+            ("sparq-vcq-tee", "proof-methods/other", None),
+            ("sparq-vcq-other", "proof-methods/tee", None),
         ]
         raw = {"components": [{"name": name, "bom-ref": f"path+file:///build/{path}#0.1.0"}
                                for name, path, _ in pairs]}

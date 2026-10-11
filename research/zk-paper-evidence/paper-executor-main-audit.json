@@ -1,0 +1,863 @@
+{
+  "schema": "sparq.zk-paper-executor-audit.v1",
+  "source": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
+  "source_note": "Harness built from fix/zk-v5-answer-profile at ad457bf4 (PR #6792 stacked on #6791 and #6789); the same deltas were later rebuilt on main as efd8cc7f with byte-identical diffs. The harness and its fixtures land on main with #6791 and #6792.",
+  "harness": "zk/sparql-evaluator/host/examples/paper_sweep.rs",
+  "generator": "zk/sparql-evaluator/scripts/paper_executor_audit.py",
+  "set": "main",
+  "guest_image_id": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
+  "phase_measurement_image_id": "458152dbe6877a4e3ee446cb3301d7bde07251f7380f69ae8e6b86040d3d7238",
+  "r0vm": "risc0-r0vm 3.0.6",
+  "executor_only": true,
+  "proofs": 0,
+  "records_sha256": "8c7c0c5f2a2bbf21f59c1257c19e2b09f57991a469d70b2e86ad63c5b79496b8",
+  "records": 40,
+  "session_limit_cycles": 33554432,
+  "note": "RISC Zero executor runs of the accepted V5 image; user_cycles exclude padding, total_cycles are padded segment cycles. Phase cycles come from the separate phase measurement image and include its instrumentation. Wall-clock fields in the records are from a shared container and are not evidence.",
+  "cases": [
+    {
+      "id": "q1-ask-payment-returned",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "q2-select-bag-amounts",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "q3-construct-amounts",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "q4-numeric-filter",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "q5-string-filter",
+      "host_query_profile": "accepted"
+    }
+  ],
+  "configurations": [
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 7154300,
+        "min": 7091746,
+        "max": 7312474
+      },
+      "total_cycles": {
+        "median": 8388608,
+        "min": 8388608,
+        "max": 8519680
+      },
+      "segments": {
+        "median": 8,
+        "max": 9
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 24243733,
+        "min": 24139684,
+        "max": 25015601
+      },
+      "total_cycles": {
+        "median": 27394048,
+        "min": 27262976,
+        "max": 28311552
+      },
+      "segments": {
+        "median": 27,
+        "max": 27
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 3888213,
+        "min": 3833513,
+        "max": 4031118
+      },
+      "total_cycles": {
+        "median": 5242880,
+        "min": 4718592,
+        "max": 5242880
+      },
+      "segments": {
+        "median": 5,
+        "max": 5
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 11125709,
+        "min": 10976376,
+        "max": 11866828
+      },
+      "total_cycles": {
+        "median": 13631488,
+        "min": 13107200,
+        "max": 14680064
+      },
+      "segments": {
+        "median": 13,
+        "max": 14
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 6624007,
+        "min": 6568110,
+        "max": 6784232
+      },
+      "total_cycles": {
+        "median": 7602176,
+        "min": 7471104,
+        "max": 7864320
+      },
+      "segments": {
+        "median": 8,
+        "max": 8
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 21968326,
+        "min": 21867684,
+        "max": 22725778
+      },
+      "total_cycles": {
+        "median": 24641536,
+        "min": 24379392,
+        "max": 25427968
+      },
+      "segments": {
+        "median": 24,
+        "max": 25
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 3305383,
+        "min": 3254139,
+        "max": 3466694
+      },
+      "total_cycles": {
+        "median": 4194304,
+        "min": 4194304,
+        "max": 4325376
+      },
+      "segments": {
+        "median": 4,
+        "max": 5
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "statements_per_credential": 17,
+      "cases": 5,
+      "admitted": 5,
+      "rejected": 0,
+      "executed": 5,
+      "over_session_limit": [],
+      "user_cycles": {
+        "median": 8799346,
+        "min": 8691196,
+        "max": 9550733
+      },
+      "total_cycles": {
+        "median": 10485760,
+        "min": 10485760,
+        "max": 11534336
+      },
+      "segments": {
+        "median": 10,
+        "max": 11
+      }
+    }
+  ],
+  "phase_breakdown": [
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1395383,
+        "Journal": 573864,
+        "Mapping": 56481,
+        "ProofConfig": 461298,
+        "Query": 666356,
+        "Request": 591366,
+        "Signature": 3282459,
+        "input": 70679
+      }
+    },
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5493112,
+        "Journal": 573864,
+        "Mapping": 178172,
+        "ProofConfig": 1851199,
+        "Query": 1964560,
+        "Request": 693402,
+        "Signature": 13173703,
+        "input": 224711
+      }
+    },
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1387198,
+        "Journal": 574271,
+        "Mapping": 56693,
+        "ProofConfig": 460599,
+        "Query": 666472,
+        "Request": 591772,
+        "input": 66148
+      }
+    },
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5479424,
+        "Journal": 574271,
+        "Mapping": 179424,
+        "ProofConfig": 1848758,
+        "Query": 1964581,
+        "Request": 693805,
+        "input": 206423
+      }
+    },
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 574493,
+        "Mapping": 56198,
+        "ProofConfig": 467533,
+        "Query": 666021,
+        "Request": 592103,
+        "Signature": 3327223,
+        "input": 73003
+      }
+    },
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149614,
+        "Journal": 574486,
+        "Mapping": 178469,
+        "ProofConfig": 1877520,
+        "Query": 1964400,
+        "Request": 694456,
+        "Signature": 13185192,
+        "input": 234025
+      }
+    },
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 578506,
+        "Mapping": 56386,
+        "ProofConfig": 470488,
+        "Query": 666144,
+        "Request": 596116,
+        "input": 68501
+      }
+    },
+    {
+      "case": "q1-ask-payment-returned",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149778,
+        "Journal": 578506,
+        "Mapping": 179625,
+        "ProofConfig": 1877535,
+        "Query": 1964382,
+        "Request": 698476,
+        "input": 215853
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1395969,
+        "Journal": 573874,
+        "Mapping": 56481,
+        "ProofConfig": 461515,
+        "Query": 697151,
+        "Request": 591371,
+        "Signature": 3282459,
+        "input": 70755
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5466668,
+        "Journal": 573881,
+        "Mapping": 178172,
+        "ProofConfig": 1849625,
+        "Query": 2052773,
+        "Request": 693414,
+        "Signature": 13173703,
+        "input": 224794
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1395281,
+        "Journal": 574281,
+        "Mapping": 56693,
+        "ProofConfig": 464865,
+        "Query": 697257,
+        "Request": 591777,
+        "input": 66224
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5485337,
+        "Journal": 574281,
+        "Mapping": 179424,
+        "ProofConfig": 1851970,
+        "Query": 2052826,
+        "Request": 693810,
+        "input": 206506
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 574496,
+        "Mapping": 56198,
+        "ProofConfig": 465938,
+        "Query": 696769,
+        "Request": 592101,
+        "Signature": 3327223,
+        "input": 73078
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149614,
+        "Journal": 574496,
+        "Mapping": 178469,
+        "ProofConfig": 1874373,
+        "Query": 2052728,
+        "Request": 694461,
+        "Signature": 13185192,
+        "input": 234108
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 578516,
+        "Mapping": 56386,
+        "ProofConfig": 466386,
+        "Query": 696990,
+        "Request": 596121,
+        "input": 68576
+      }
+    },
+    {
+      "case": "q2-select-bag-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149778,
+        "Journal": 578516,
+        "Mapping": 179625,
+        "ProofConfig": 1878195,
+        "Query": 2052724,
+        "Request": 698481,
+        "input": 215936
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1388280,
+        "Journal": 578259,
+        "Mapping": 56481,
+        "ProofConfig": 461019,
+        "Query": 876379,
+        "Request": 591391,
+        "Signature": 3282459,
+        "input": 71112
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5484897,
+        "Journal": 578259,
+        "Mapping": 178172,
+        "ProofConfig": 1845603,
+        "Query": 2816208,
+        "Request": 693427,
+        "Signature": 13173703,
+        "input": 225272
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1386910,
+        "Journal": 578666,
+        "Mapping": 56693,
+        "ProofConfig": 462104,
+        "Query": 874432,
+        "Request": 591797,
+        "input": 66581
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5476123,
+        "Journal": 578666,
+        "Mapping": 179424,
+        "ProofConfig": 1851265,
+        "Query": 2812221,
+        "Request": 693830,
+        "input": 206984
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 578881,
+        "Mapping": 56198,
+        "ProofConfig": 468088,
+        "Query": 875699,
+        "Request": 592121,
+        "Signature": 3327223,
+        "input": 73436
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149614,
+        "Journal": 578881,
+        "Mapping": 178469,
+        "ProofConfig": 1871369,
+        "Query": 2816827,
+        "Request": 694481,
+        "Signature": 13185192,
+        "input": 234586
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 582901,
+        "Mapping": 56386,
+        "ProofConfig": 465814,
+        "Query": 875139,
+        "Request": 596141,
+        "input": 68934
+      }
+    },
+    {
+      "case": "q3-construct-amounts",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149778,
+        "Journal": 582901,
+        "Mapping": 179625,
+        "ProofConfig": 1875631,
+        "Query": 2807464,
+        "Request": 698501,
+        "input": 216414
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1391385,
+        "Journal": 573877,
+        "Mapping": 56481,
+        "ProofConfig": 461477,
+        "Query": 718417,
+        "Request": 591372,
+        "Signature": 3282459,
+        "input": 70793
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5469279,
+        "Journal": 573877,
+        "Mapping": 178172,
+        "ProofConfig": 1844349,
+        "Query": 2150878,
+        "Request": 693408,
+        "Signature": 13173703,
+        "input": 224850
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1400617,
+        "Journal": 574284,
+        "Mapping": 56693,
+        "ProofConfig": 459480,
+        "Query": 718620,
+        "Request": 591778,
+        "input": 66262
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5474163,
+        "Journal": 574284,
+        "Mapping": 179424,
+        "ProofConfig": 1850970,
+        "Query": 2150910,
+        "Request": 693811,
+        "input": 206562
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 574499,
+        "Mapping": 56198,
+        "ProofConfig": 467762,
+        "Query": 718073,
+        "Request": 592102,
+        "Signature": 3327223,
+        "input": 73116
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149614,
+        "Journal": 574499,
+        "Mapping": 178469,
+        "ProofConfig": 1876441,
+        "Query": 2150124,
+        "Request": 694462,
+        "Signature": 13185192,
+        "input": 234164
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 578519,
+        "Mapping": 56386,
+        "ProofConfig": 467789,
+        "Query": 718326,
+        "Request": 596122,
+        "input": 68614
+      }
+    },
+    {
+      "case": "q4-numeric-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149778,
+        "Journal": 578519,
+        "Mapping": 179625,
+        "ProofConfig": 1871758,
+        "Query": 2150116,
+        "Request": 698482,
+        "input": 215992
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1379097,
+        "Journal": 578263,
+        "Mapping": 56481,
+        "ProofConfig": 463768,
+        "Query": 728684,
+        "Request": 591403,
+        "Signature": 3282459,
+        "input": 71403
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5514967,
+        "Journal": 578263,
+        "Mapping": 178172,
+        "ProofConfig": 1847506,
+        "Query": 2059372,
+        "Request": 693439,
+        "Signature": 13173703,
+        "input": 225643
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 1393387,
+        "Journal": 578670,
+        "Mapping": 56693,
+        "ProofConfig": 460336,
+        "Query": 728887,
+        "Request": 591809,
+        "input": 66872
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 5511784,
+        "Journal": 578670,
+        "Mapping": 179424,
+        "ProofConfig": 1853437,
+        "Query": 2059364,
+        "Request": 693842,
+        "input": 207355
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 578885,
+        "Mapping": 56198,
+        "ProofConfig": 467945,
+        "Query": 728340,
+        "Request": 592133,
+        "Signature": 3327223,
+        "input": 73716
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149614,
+        "Journal": 578885,
+        "Mapping": 178469,
+        "ProofConfig": 1871948,
+        "Query": 2059246,
+        "Request": 694493,
+        "Signature": 13185192,
+        "input": 234957
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "phase_cycles": {
+        "Document": 800695,
+        "Journal": 582905,
+        "Mapping": 56386,
+        "ProofConfig": 468148,
+        "Query": 728500,
+        "Request": 596153,
+        "input": 69214
+      }
+    },
+    {
+      "case": "q5-string-filter",
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "phase_cycles": {
+        "Document": 3149778,
+        "Journal": 582905,
+        "Mapping": 179625,
+        "ProofConfig": 1872585,
+        "Query": 2059208,
+        "Request": 698513,
+        "input": 216743
+      }
+    }
+  ]
+}

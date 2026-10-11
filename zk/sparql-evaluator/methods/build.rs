@@ -15,6 +15,8 @@ struct Guest {
     constants: &'static str,
     /// Generated file in `OUT_DIR` that `src/lib.rs` includes.
     output: &'static str,
+    /// Guest-crate features; a non-empty set builds into its own target subdirectory.
+    features: &'static str,
 }
 
 /// The default exact V1-V3 guest; always built.
@@ -23,6 +25,7 @@ const EXACT: Guest = Guest {
     package: "sparq-exact-guest",
     constants: "SPARQ_EXACT_GUEST",
     output: "methods.rs",
+    features: "",
 };
 
 /// The separately pinned V5 guest; built only with the `authenticated-rdf` feature.
@@ -31,6 +34,17 @@ const AUTHRDF: Guest = Guest {
     package: "sparq-authrdf-guest",
     constants: "SPARQ_AUTHRDF_GUEST",
     output: "authrdf_methods.rs",
+    features: "",
+};
+
+/// The V5 guest with per-phase cycle reporting, for measurement only; built only
+/// with the `phase-cycles` feature. It is never an accepted production image.
+const AUTHRDF_PHASES: Guest = Guest {
+    dir: "guest-authrdf",
+    package: "sparq-authrdf-guest",
+    constants: "SPARQ_AUTHRDF_PHASES_GUEST",
+    output: "authrdf_phases_methods.rs",
+    features: "phase-cycles",
 };
 
 /// Repository-relative source inputs of the exact guest image.
@@ -101,11 +115,25 @@ fn main() {
         build.guest(&AUTHRDF);
         sources.extend(AUTHRDF_SOURCES);
     }
+    if env::var_os("CARGO_FEATURE_PHASE_CYCLES").is_some() {
+        build.guest(&AUTHRDF_PHASES);
+    }
     for source in sources {
         println!("cargo:rerun-if-changed={}", build.repo.join(source).display());
     }
     for key in ["RISC0_HOME", "RISC0_SKIP_BUILD", "CARGO_HOME"] {
         println!("cargo:rerun-if-env-changed={key}");
+    }
+}
+
+impl Guest {
+    /// Target subdirectory and artifact stem: the package, plus any features.
+    fn stem(&self) -> String {
+        if self.features.is_empty() {
+            self.package.to_owned()
+        } else {
+            format!("{}-{}", self.package, self.features)
+        }
     }
 }
 
@@ -116,7 +144,7 @@ impl Build {
             .map(PathBuf::from)
             .filter(|p| p.is_absolute())
             .unwrap_or_else(|| self.out.join("guest-target"))
-            .join(guest.package);
+            .join(guest.stem());
         let flags = vec![
             format!("--remap-path-prefix={}=/sparq", self.repo.display()),
             format!("--remap-path-prefix={}=/cargo-home", self.cargo_home.display()),
@@ -138,6 +166,9 @@ impl Build {
             .arg(directory.join("Cargo.toml"))
             .arg("--target-dir")
             .arg(&target);
+        if !guest.features.is_empty() {
+            command.args(["--features", guest.features]);
+        }
         if !command.get_args().any(|arg| arg == "--locked") {
             command.arg("--locked");
         }
@@ -155,7 +186,7 @@ impl Build {
         let kernel = risc0_build::GuestOptions::default().kernel();
         let binary = risc0_binfmt::ProgramBinary::new(&user, &kernel).encode();
         let id = risc0_binfmt::compute_image_id(&binary).expect("guest image identity");
-        let artifact = self.out.join(format!("{}.bin", guest.package));
+        let artifact = self.out.join(format!("{}.bin", guest.stem()));
         fs::write(&artifact, binary).expect("guest artifact output");
         // The generated text embeds the absolute `OUT_DIR` artifact path, so it is
         // not a build-independent invariant; the artifact bytes and image ID are.

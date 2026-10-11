@@ -154,6 +154,11 @@ def derive_supplier($author):
     elif (($ref | test("^path\\+file://.*/zk/sparql-evaluator/(host|model|methods|methods/guest|methods/guest-authrdf)#"))
           and (.name | test("^sparq[-_](proved[-_]evaluator([-_]model|[-_]methods)?|exact[-_]guest|authrdf[-_]guest)$"))) then
       {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
+    # The detached proof-methods workspace: its two members and their binary
+    # targets, by exact path and name.
+    elif (($ref | test("^path\\+file://.*/proof-methods/(disclosed|tee)#"))
+          and (.name | test("^sparq[-_]vcq[-_](disclosed|tee([-_](enclave|holder))?)$"))) then
+      {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
     elif ($ref | test("^path\\+file://.*/vendor/")) then
       # vendored [patch.crates-io] upstream crate -> crates.io is the supplier-of-record
       {name: "crates.io", url: [cratesio_url]}

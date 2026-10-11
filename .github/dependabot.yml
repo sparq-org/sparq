@@ -222,6 +222,20 @@ updates:
           - "version-update:semver-minor"
           - "version-update:semver-major"
 
+  # The sparq-vcq-tee Nitro Enclave image (proof-methods/tee/nitro). Its
+  # amazonlinux:2023 base matches the parent instance that builds the binary.
+  - package-ecosystem: docker
+    directory: "/proof-methods/tee/nitro"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+
   - package-ecosystem: docker
     directory: "/crates/sparq-lws-core"
     schedule:

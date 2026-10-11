@@ -13,20 +13,25 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use super::access::{format_rfc3339, parse_rfc3339, Action};
+use super::notify::Event;
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
-    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, JSON,
-    LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
+    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
+    JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
+    REQUESTS_PATH, SUBSCRIPTIONS_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-const LINKSET_ALLOW: &str = "GET, HEAD";
+const ACCEPT_PATCH: &str = "application/json-patch+json";
+const LINKSET_ALLOW: &str = "GET, HEAD, PATCH";
 
 /// Relations that are server-managed or protocol-level: never taken from a client's Link header
 /// as user-managed metadata.
 const STRUCTURAL_RELATIONS: &[&str] = &[
+    // Not a relation: the key a linkset entry names its context with (RFC 9264 section 4.2.2).
+    "anchor",
     "type",
     "up",
     "linkset",
@@ -46,8 +51,7 @@ pub async fn handle<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
-    let target = req.path.strip_suffix(META_SUFFIX).unwrap_or(&req.path);
-    if let Some(refused) = set_aside(state, &state.cfg.absolute(target), &req.method) {
+    if let Some(refused) = unavailable(state, req) {
         return refused;
     }
     // A write or a delete waits for its locks and checks its preconditions in the request, where
@@ -76,7 +80,7 @@ pub(crate) fn set_aside<S: Store + 'static>(
 }
 
 /// `503` with a `Retry-After`, for `why`.
-fn retry_later(why: &str) -> Response {
+pub(crate) fn retry_later(why: &str) -> Response {
     let mut resp = problem(StatusCode::SERVICE_UNAVAILABLE, Some(why));
     set(resp.headers_mut(), header::RETRY_AFTER, "5");
     resp
@@ -84,8 +88,18 @@ fn retry_later(why: &str) -> Response {
 
 /// The answer to a request whose resource was set aside while it waited for its lock (see
 /// [`IriLocks::lock`]).
-fn set_aside_meanwhile() -> Response {
+pub(crate) fn set_aside_meanwhile() -> Response {
     retry_later("a failed change to this resource is still being put back")
+}
+
+/// [`set_aside`] for the resource `req` is to (a linkset's resource for the linkset): the check
+/// every route makes first.
+pub(crate) fn unavailable<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+) -> Option<Response> {
+    let target = req.path.strip_suffix(META_SUFFIX).unwrap_or(&req.path);
+    set_aside(state, &state.cfg.absolute(target), &req.method)
 }
 
 async fn handle_now<S: Store + 'static>(
@@ -102,7 +116,7 @@ async fn handle_now<S: Store + 'static>(
     let is_root = path == "/";
     let accept = req.header(header::ACCEPT).unwrap_or_default();
     // The storage description is public: a client refused with a 401 finds the services through
-    // it. The root container's listing,
+    // it, and a webhook receiver finds the delivery key in it. The root container's listing,
     // served at the same URI for the LWS container types, is not. Only an explicit request for the
     // description bypasses authorization, so an anonymous probe of the root without Accept still
     // meets the challenge a client discovers the authorization server by.
@@ -137,6 +151,7 @@ async fn handle_now<S: Store + 'static>(
             Some("a partial PUT (Content-Range) is not supported"),
         ),
         Method::PUT => update(state, req, agent, &uri).await,
+        Method::PATCH => patch(state, req, agent, &uri).await,
         Method::DELETE => delete(state, req, agent, &uri).await,
         Method::OPTIONS => options(state, &uri).await,
         _ => method_not_allowed(&allow_for(&uri, is_root)),
@@ -184,7 +199,7 @@ fn allow_for(uri: &str, is_root: bool) -> String {
     } else if uri.ends_with('/') {
         "GET, HEAD, OPTIONS, POST, DELETE".into()
     } else {
-        "GET, HEAD, OPTIONS, PUT, DELETE".into()
+        "GET, HEAD, OPTIONS, PUT, PATCH, DELETE".into()
     }
 }
 
@@ -200,6 +215,13 @@ async fn options<S: Store + 'static>(state: &LwsState<S>, uri: &str) -> Response
         header::ALLOW,
         &allow_for(uri, uri == state.cfg.storage()),
     );
+    if !uri.ends_with('/') {
+        set(
+            resp.headers_mut(),
+            header::HeaderName::from_static("accept-patch"),
+            ACCEPT_PATCH,
+        );
+    }
     resp
 }
 
@@ -351,6 +373,17 @@ enum Precondition {
     Proceed,
     NotModified,
     Failed,
+}
+
+/// How a read of a service resource (a grant, request or subscription, or a service listing)
+/// whose current entity tag is `etag` is answered under the request's preconditions: 304, 412,
+/// or `None` to serve it, as [`evaluate`] decides for storage resources.
+pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
+    match evaluate(&req.headers, Some(etag), None, true) {
+        Precondition::Proceed => None,
+        Precondition::NotModified => Some(StatusCode::NOT_MODIFIED),
+        Precondition::Failed => Some(StatusCode::PRECONDITION_FAILED),
+    }
 }
 
 /// Preconditions are read once, here, from every field line: a list header (`If-Match`,
@@ -720,7 +753,7 @@ fn ld_json_lws_profile() -> String {
 /// The container media type for `accept`: lws+json, ld+json (with the LWS profile when the request
 /// names it), or json. "Servers MUST honor a request for any of these media types and MUST set the
 /// Content-Type response header to the requested media type."
-fn negotiate_container(accept: Option<&str>) -> Option<String> {
+pub(crate) fn negotiate_container(accept: Option<&str>) -> Option<String> {
     if let Some(a) = accept {
         if parse_accept(a)
             .iter()
@@ -1245,11 +1278,30 @@ async fn listing<S: Store + 'static>(
 }
 
 /// The storage description: a controlled identifier document extended with the LWS vocabulary,
-/// naming the storage and its services.
+/// naming the storage and its services, and publishing the key notifications are signed with.
 pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
     let storage = cfg.storage();
     let service = |frag: &str, ty: &str, endpoint: String| json!({"id": format!("{storage}#{frag}"), "type": ty, "serviceEndpoint": endpoint});
+    let mut grants = service(
+        "access-grants",
+        "AccessGrantService",
+        cfg.absolute(GRANTS_PATH),
+    );
+    grants["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
+    let mut requests = service(
+        "access-requests",
+        "AccessRequestService",
+        cfg.absolute(REQUESTS_PATH),
+    );
+    requests["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
+    let mut notifications = service(
+        "notifications",
+        "NotificationService",
+        cfg.absolute(SUBSCRIPTIONS_PATH),
+    );
+    notifications["subscriptionType"] = json!(["WebhookSubscription"]);
+    let key_id = format!("{storage}#{}", cfg.notify_key.kid());
     json!({
         "@context": [CID_CONTEXT, LWS_CONTEXT],
         "id": storage,
@@ -1257,7 +1309,17 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
         "service": [
             service("storage-root", "StorageRoot", storage.clone()),
             service("authorization-server", "AuthorizationServer", cfg.issuer().to_string()),
+            grants,
+            requests,
+            notifications,
         ],
+        "verificationMethod": [{
+            "id": key_id,
+            "type": "JsonWebKey",
+            "controller": storage,
+            "publicKeyJwk": cfg.notify_key.public_jwk(),
+        }],
+        "authentication": [key_id],
     })
 }
 
@@ -1324,6 +1386,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     // Repeats are found with a set, as in [`content_types`].
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
+    let mut targets = 0usize;
     for (target, params) in parse_links(&req.header_all(header::LINK)) {
         let Some(rel) = params.get("rel") else {
             continue;
@@ -1356,6 +1419,18 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
             } else if !STRUCTURAL_RELATIONS.contains(&key.as_str())
                 && seen.insert((key.clone(), resolved.clone()))
             {
+                // Held to the caps a linkset PATCH holds its result to, so the linkset these
+                // links make can always be patched.
+                targets += 1;
+                if key.len() > MAX_LINKSET_FIELD
+                    || resolved.len() > MAX_LINKSET_FIELD
+                    || targets > MAX_LINKSET_TARGETS
+                {
+                    return Err(problem(
+                        StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+                        Some("the Link header declares more than a linkset may hold"),
+                    ));
+                }
                 links.entry(key).or_default().push(resolved.clone());
             }
         }
@@ -1373,15 +1448,6 @@ fn resolve_reference(base: &str, target: &str) -> Option<String> {
             .ok()?
             .into_inner(),
     )
-}
-
-/// `target` resolved against `base`, or as it is when it cannot be.
-fn resolve_against(base: &str, target: &str) -> String {
-    url::Url::parse(base)
-        .ok()
-        .and_then(|b| b.join(target).ok())
-        .map(|u| u.to_string())
-        .unwrap_or_else(|| target.to_string())
 }
 
 /// The types a representation states for the resource itself: `<> a <T>` in Turtle.
@@ -1442,13 +1508,13 @@ fn initial_linkset(uri: &str, links: &Links) -> Option<Value> {
         return None;
     }
     let mut entry = Map::new();
-    entry.insert("anchor".into(), Value::String(uri.into()));
-    for (rel, targets) in links {
+    for (rel, targets) in links.iter().filter(|(rel, _)| rel.as_str() != "anchor") {
         entry.insert(
             rel.clone(),
             Value::Array(targets.iter().map(|t| json!({"href": t})).collect()),
         );
     }
+    entry.insert("anchor".into(), Value::String(uri.into()));
     Some(json!({"linkset": [Value::Object(entry)]}))
 }
 
@@ -1581,6 +1647,10 @@ async fn create<S: Store + 'static>(
         modified_ms: is_container.then(now_ms),
         ..Default::default()
     };
+    let format = (!is_container).then_some(content_type.as_str());
+    if let Err(refused) = admissible_meta(&child, &state.cfg.storage(), &meta, format) {
+        return refused;
+    }
     // The new member's metadata is written before its content, replacing whatever an earlier
     // resource at the IRI left behind (a delete whose metadata removal failed): content never
     // exists under metadata that is not its own. When the content cannot be created the metadata
@@ -1637,9 +1707,18 @@ async fn create<S: Store + 'static>(
                 }
             };
             // What follows a commit follows it whether or not the client is still there: the
-            // container's bookkeeping. The locks go first (the touch takes the container's lock
-            // again).
+            // container's bookkeeping and the Create notification. Who hears of it is decided
+            // with the locks still held, so no change that follows can hide the create; the locks
+            // then go (the touch takes the container's lock again) before anything is sent.
+            let event = Event {
+                kind: "Create",
+                uri: child.clone(),
+                is_container,
+                relation: Some(("target", parent.clone())),
+            };
+            let pending = state.notify.prepare(&state, &event).await;
             touch_after(&state, locks, &parent).await;
+            state.notify.send(&state, pending);
             Ok(created)
         })
         .await
@@ -1737,7 +1816,7 @@ async fn current<S: Store + 'static>(
 }
 
 /// Per-resource write locks. The store offers no compare-and-swap, so a conditional write (PUT,
-/// DELETE) holds its resource's lock from the precondition check through
+/// PATCH, DELETE, a linkset PATCH) holds its resource's lock from the precondition check through
 /// the write, and an If-Match can never pass against a state another writer is replacing. Metadata
 /// read-modify-writes of a container (membership touches) take the container's lock too.
 ///
@@ -1913,15 +1992,16 @@ async fn stored_meta<S: Store + 'static>(
 ///
 /// When the writes failed and could not be put back (`writes` yields what is left), the task
 /// sets that aside with the locks ([`LwsState::set_aside`](super::LwsState::set_aside)) and the
-/// locks do not come back. When they changed a container's listing (`touch` names it, from
-/// their outcome), the task also releases the locks and touches it ([`touch_container`]): a
-/// request that goes away once its writes have started cannot leave the container's date
-/// behind its listing.
+/// locks do not come back. What the writes changed (`after` says, from their outcome: a
+/// container whose listing changed, an event to announce) the task records once they are over:
+/// it decides who hears of the event with the locks held, then releases them, touches the
+/// container ([`touch_container`]) and sends the notifications, so a request that goes away once its writes have started can neither leave the
+/// container's date behind its listing nor keep subscribers from hearing of the change.
 async fn hold_locks<S, L, T, F, C>(
     state: &LwsState<S>,
     locks: L,
     admission: Option<crate::overload::AdmissionSlot>,
-    touch: C,
+    after: C,
     writes: F,
 ) -> Result<(T, Option<L>), ServerError>
 where
@@ -1929,18 +2009,28 @@ where
     L: Send + 'static,
     T: Send + 'static,
     F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
-    C: FnOnce(&T) -> Option<String> + Send + 'static,
+    C: FnOnce(&T) -> (Option<String>, Option<Event>) + Send + 'static,
 {
     let state = state.clone();
     tokio::spawn(async move {
         let _admission = admission;
         match writes.await {
-            (out, None) => match touch(&out) {
-                Some(container) => {
-                    touch_after(&state, locks, &container).await;
+            (out, None) => match after(&out) {
+                (None, None) => (out, Some(locks)),
+                (container, event) => {
+                    // Who hears of the change is decided while its locks are held: a later
+                    // write cannot then hide it from a subscriber who may read the result.
+                    let pending = match &event {
+                        Some(event) => state.notify.prepare(&state, event).await,
+                        None => Vec::new(),
+                    };
+                    match container {
+                        Some(container) => touch_after(&state, locks, &container).await,
+                        None => drop(locks),
+                    }
+                    state.notify.send(&state, pending);
                     (out, None)
                 }
-                None => (out, Some(locks)),
             },
             (out, Some(left)) => {
                 state.set_aside(left, locks);
@@ -1962,9 +2052,10 @@ where
 /// - Metadata changed: three writes, through a [`Journal`](super::Journal). The old metadata
 ///   marked `pending` first; then the content; then the new metadata, which clears the mark.
 ///   When any step fails, the journal puts back what the steps before it did, the last first, so
-///   the resource is as it was: its content and its metadata. When putting back fails too, the
-///   `pending` mark stays and the resource fails closed: only its owner and creator may act on it
-///   (see [`access::allowed`](super::access::allowed)) until a write completes.
+///   the resource is as it was: its content and its metadata. When putting back fails too, it is
+///   retried with the lock still held until it succeeds, so nobody sees the steps in between; the
+///   `pending` mark (failing closed: only its owner and creator may act on it, see
+///   [`access::allowed`](super::access::allowed)) covers only a process that stops mid-way.
 ///
 /// The writes, a lone content write included, run with the resource's lock (`guard`, handed back
 /// when they are done) held, in the request's own task (see [`hold_locks`]), so a client that goes
@@ -1992,6 +2083,14 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
                   undone: bool| {
         !undone && matches!(outcome, Ok(_) | Err(ServerError::Storage(_)))
     };
+    // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
+    // metadata was modified"); none of one that may not have happened.
+    let update = {
+        let uri = uri.to_string();
+        move |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>| {
+            outcome.is_ok().then(|| updated(&uri))
+        }
+    };
     let changed = meta
         .map(|(mut new, old)| {
             new.pending = false;
@@ -2008,8 +2107,9 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
             let state = state.clone();
             async move { (state.store.write(&uri, body, &content_type).await, None) }
         };
-        let touch = move |w: &Result<_, ServerError>| parent.filter(|_| landed(w, false));
-        return match hold_locks(&state, guard, admission, touch, write).await {
+        let after =
+            move |w: &Result<_, ServerError>| (parent.filter(|_| landed(w, false)), update(w));
+        return match hold_locks(&state, guard, admission, after, write).await {
             Ok((written, guard)) => (written, guard, false),
             Err(e) => (Err(e), None, false),
         };
@@ -2042,9 +2142,10 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
             }
         }
     };
-    let touch =
-        move |(w, undone): &(Result<_, ServerError>, bool)| parent.filter(|_| landed(w, *undone));
-    match hold_locks(&state, guard, admission, touch, writes).await {
+    let after = move |(w, undone): &(Result<_, ServerError>, bool)| {
+        (parent.filter(|_| landed(w, *undone)), update(w))
+    };
+    match hold_locks(&state, guard, admission, after, writes).await {
         Ok(((outcome, undone), guard)) => (outcome, guard, undone),
         Err(e) => (Err(e), None, false),
     }
@@ -2141,6 +2242,11 @@ async fn update<S: Store + 'static>(
     };
     rmeta.types = all_types(&declared, stated);
     rmeta.declared_types = Some(declared);
+    // The linkset as it would be served, the stored one's links and attributes with it.
+    let format = (!uri.ends_with('/')).then_some(content_type.as_str());
+    if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
+        return refused;
+    }
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
     let (written, _guard, _) = write_with_meta(
@@ -2166,6 +2272,1034 @@ async fn update<S: Store + 'static>(
             "set-linkset",
         );
     }
+    resp
+}
+
+/// The event announcing that `uri`, which exists, changed: "Update — an existing resource's
+/// content or metadata was modified".
+fn updated(uri: &str) -> Event {
+    Event {
+        kind: "Update",
+        uri: uri.to_string(),
+        is_container: uri.ends_with('/'),
+        relation: None,
+    }
+}
+
+// ---- patch ----
+
+/// The most a patched document may grow to, in serialized bytes, whatever the configured body
+/// limit. A JSON Patch `copy` doubles what it copies, so without a bound a few dozen operations
+/// exhaust memory. A server patches within the smaller of this and its request body limit
+/// (`patch_budget`).
+pub const PATCH_BUDGET: usize = 64 * 1024 * 1024;
+
+/// How far a patched document may grow on this server: no larger than a request body may be (a
+/// document a PUT could not store is no more acceptable from a PATCH), and never past
+/// [`PATCH_BUDGET`]. The work a JSON Patch may do follows from it.
+fn patch_budget<S: Store + 'static>(state: &LwsState<S>) -> usize {
+    state.cfg.max_body.min(PATCH_BUDGET)
+}
+
+/// How many operations a JSON Patch may have.
+pub const MAX_PATCH_OPS: usize = 1000;
+
+/// The work a JSON Patch may do, in bytes measured, cloned or compared, as a multiple of
+/// [`PATCH_BUDGET`].
+pub const PATCH_WORK_FACTOR: usize = 4;
+
+/// The least work any JSON Patch may do, however small its size budget.
+pub const MIN_PATCH_WORK: usize = 1 << 20;
+
+/// How deeply a patched document may nest, in arrays and objects: the deepest document
+/// `serde_json` parses back (its recursion limit). The parser bounds every document a request
+/// carries, but JSON Patch builds new ones: each `move` or `copy` may nest an existing value under
+/// another, so without this bound a patch could build a document deep enough to overflow the stack
+/// when it is serialized, compared, cloned or dropped.
+pub const MAX_JSON_DEPTH: usize = 127;
+
+/// How deeply `v` nests arrays and objects: 0 for a scalar, 1 for `[]` or `{}`. Iterative, so it is
+/// safe on a value of any depth.
+fn json_depth(v: &Value) -> usize {
+    let mut deepest = 0;
+    let mut stack = vec![(v, 0usize)];
+    while let Some((v, d)) = stack.pop() {
+        match v {
+            Value::Array(a) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(a.iter().map(|c| (c, d + 1)));
+            }
+            Value::Object(m) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(m.values().map(|c| (c, d + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
+/// Why a JSON Patch was not applied.
+#[derive(Debug, PartialEq)]
+pub enum PatchError {
+    /// The patch document is not an RFC 6902 patch: not an array, an unknown `op`, or a member an
+    /// operation requires missing or of the wrong type (400).
+    Malformed(&'static str),
+    /// A well-formed operation cannot be applied to the target: a path that does not exist, or a
+    /// failed `test` (RFC 5789 section 2.2).
+    Failed,
+    /// The result would outgrow [`PATCH_BUDGET`].
+    TooLarge,
+    /// The result would nest deeper than [`MAX_JSON_DEPTH`] (422).
+    TooDeep,
+}
+
+/// Whether `content_type` is JSON: `application/json`, or any `+json` structured syntax suffix
+/// (RFC 6839), parameters aside.
+fn is_json_type(content_type: &str) -> bool {
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    essence == "application/json" || essence.ends_with("+json")
+}
+
+/// What marks a number held as text while a JSON Patch is applied. A JSON Patch never reads a
+/// number as a binary float: before the patch and its target are parsed, every number in them is
+/// rewritten as a string holding this mark and the number's own text ([`numbers_as_text`]), and
+/// written back as that text once the patch is applied ([`numbers_from_text`]). So a number the
+/// patch does not touch is written back as it was, whatever its size or precision, and `test`
+/// compares numbers as the decimal values their texts denote ([`json_equal`]). A string value
+/// of the document that itself starts with the mark is kept apart by doubling it.
+const NUMBER_MARK: char = '\u{E000}';
+
+/// Rewrite the JSON text `json`, token by token: each string in a value position (never an
+/// object member's name) through `string` (given its raw content between the quotes; `None`
+/// keeps it), and each number through `number`. Everything else is copied. Text that is not
+/// JSON is copied as far as it can be scanned, for the parser to refuse.
+fn rewrite_json(
+    json: &str,
+    string: impl Fn(&str) -> Option<String>,
+    number: impl Fn(&str) -> String,
+) -> String {
+    let b = json.as_bytes();
+    let mut out = String::with_capacity(json.len() + json.len() / 8);
+    // Per open container, whether it is an object; and whether a member name comes next.
+    let mut stack: Vec<bool> = Vec::new();
+    let mut name = false;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                let mut j = i + 1;
+                while j < b.len() && b[j] != b'"' {
+                    j += if b[j] == b'\\' { 2 } else { 1 };
+                }
+                let end = j.min(b.len() - 1);
+                let raw = &json[i..=end];
+                let content = &json[i + 1..j.min(b.len())];
+                if name && stack.last() == Some(&true) {
+                    out.push_str(raw);
+                } else {
+                    match string(content) {
+                        Some(r) => out.push_str(&r),
+                        None => out.push_str(raw),
+                    }
+                }
+                i = end + 1;
+                continue;
+            }
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < b.len() && matches!(b[i], b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E')
+                {
+                    i += 1;
+                }
+                out.push_str(&number(&json[start..i]));
+                continue;
+            }
+            b'{' => {
+                stack.push(true);
+                name = true;
+            }
+            b'[' => {
+                stack.push(false);
+                name = false;
+            }
+            b'}' | b']' => {
+                stack.pop();
+                name = false;
+            }
+            b',' => name = stack.last() == Some(&true),
+            b':' => name = false,
+            _ => {}
+        }
+        // Outside strings valid JSON is ASCII; anything else is copied whole, for the parser.
+        let len = json[i..].chars().next().map_or(1, char::len_utf8);
+        out.push_str(&json[i..i + len]);
+        i += len;
+    }
+    out
+}
+
+/// Whether `token` is a JSON number (RFC 8259 section 6).
+fn is_json_number(token: &str) -> bool {
+    let s = token.strip_prefix('-').unwrap_or(token);
+    let (mantissa, exp) = match s.find(['e', 'E']) {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
+    };
+    let (int, frac) = match mantissa.split_once('.') {
+        Some((i, f)) => (i, Some(f)),
+        None => (mantissa, None),
+    };
+    let digits = |d: &str| !d.is_empty() && d.bytes().all(|c| c.is_ascii_digit());
+    digits(int)
+        && (int == "0" || !int.starts_with('0'))
+        && frac.is_none_or(digits)
+        && exp.is_none_or(|e| digits(e.strip_prefix(['+', '-']).unwrap_or(e)))
+}
+
+/// A JSON Patch body read as every PATCH reads it: its numbers held as text
+/// ([`read_numbers_as_text`]), checked to be a JSON Patch with no member repeated. `400` (or
+/// what a refused number gives) otherwise.
+#[allow(clippy::result_large_err)]
+fn read_json_patch(body: &[u8]) -> Result<Value, Response> {
+    let patch = match read_numbers_as_text(body) {
+        Ok(patch) => patch,
+        Err(Unreadable::Number) => return Err(number_refused()),
+        Err(Unreadable::NotJson) => {
+            return Err(problem(
+                StatusCode::BAD_REQUEST,
+                Some("the patch is not JSON"),
+            ))
+        }
+    };
+    if let Err(PatchError::Malformed(why)) = validate_json_patch(&patch) {
+        return Err(problem(StatusCode::BAD_REQUEST, Some(why)));
+    }
+    if repeats_a_member(body) {
+        return Err(problem(
+            StatusCode::BAD_REQUEST,
+            Some("an operation repeats a member"),
+        ));
+    }
+    Ok(patch)
+}
+
+/// Read `body` as a PATCH reads it ([`read_json_patch`]), keeping nothing: whether it is a
+/// JSON Patch. Public only so the measured bound [`LINKSET_PARSE_AMPLIFICATION`] is tested on
+/// the parsing a linkset PATCH does.
+#[doc(hidden)]
+pub fn reads_as_json_patch(body: &[u8]) -> bool {
+    read_json_patch(body).is_ok()
+}
+
+/// The longest number text a JSON Patch reads, in bytes. Every number is held to it, in the patch
+/// and in its target, so comparing two numbers costs at most this much whatever the document.
+const MAX_NUMBER_TEXT: usize = 1024;
+
+/// Why [`read_numbers_as_text`] refused a JSON text.
+#[derive(Debug, PartialEq)]
+enum Unreadable {
+    /// It is not JSON (RFC 8259).
+    NotJson,
+    /// It holds a number past [`MAX_NUMBER_TEXT`], or one whose power of ten does not fit 64 bits.
+    Number,
+}
+
+/// Parse the JSON text `body` with every number held as its text ([`numbers_as_text`]). The text
+/// is checked to be JSON as written first (numbers scanned, never converted), so the rewriting
+/// can neither make malformed text parse nor change what it holds.
+fn read_numbers_as_text(body: &[u8]) -> Result<Value, Unreadable> {
+    let text = std::str::from_utf8(body).map_err(|_| Unreadable::NotJson)?;
+    serde_json::from_str::<serde::de::IgnoredAny>(text).map_err(|_| Unreadable::NotJson)?;
+    let held = numbers_as_text(text).ok_or(Unreadable::Number)?;
+    serde_json::from_str(&held).map_err(|_| Unreadable::NotJson)
+}
+
+/// `json` with every number rewritten as a marked string ([`NUMBER_MARK`]), and every string
+/// value that starts with the mark with the mark doubled. `None` when a number is past
+/// [`MAX_NUMBER_TEXT`] or its value cannot be read ([`decimal`]): such a number is refused, never
+/// compared as text.
+fn numbers_as_text(json: &str) -> Option<String> {
+    let refused = std::cell::Cell::new(false);
+    let starts_marked = |content: &str| {
+        content.starts_with(NUMBER_MARK)
+            || content
+                .get(..6)
+                .is_some_and(|e| e.eq_ignore_ascii_case("\\ue000"))
+    };
+    let held = rewrite_json(
+        json,
+        |content| starts_marked(content).then(|| format!("\"{NUMBER_MARK}{content}\"")),
+        |token| {
+            if !is_json_number(token) {
+                return token.to_string();
+            }
+            if token.len() > MAX_NUMBER_TEXT || decimal(token).is_none() {
+                refused.set(true);
+            }
+            format!("\"{NUMBER_MARK}{token}\"")
+        },
+    );
+    (!refused.get()).then_some(held)
+}
+
+/// The JSON `json` (as `serde_json` writes it) with each marked string written back as the
+/// number it holds, and each doubled mark undone: the inverse of [`numbers_as_text`].
+fn numbers_from_text(json: &str) -> String {
+    rewrite_json(
+        json,
+        |content| {
+            let rest = content.strip_prefix(NUMBER_MARK)?;
+            Some(if rest.starts_with(NUMBER_MARK) {
+                format!("\"{rest}\"")
+            } else {
+                rest.to_string()
+            })
+        },
+        str::to_string,
+    )
+}
+
+/// The number text a marked string holds ([`numbers_as_text`]), or a [`Value::Number`]'s.
+fn number_text(v: &Value) -> Option<std::borrow::Cow<'_, str>> {
+    match v {
+        Value::Number(n) => Some(n.to_string().into()),
+        Value::String(s) => s
+            .strip_prefix(NUMBER_MARK)
+            .filter(|rest| !rest.starts_with(NUMBER_MARK))
+            .map(Into::into),
+        _ => None,
+    }
+}
+
+/// A decimal number's value as (negative, significant digits, power of ten): `1.50e1` and `15`
+/// are both `(false, "15", 0)`, and every zero is `(false, "", 0)`. `None` when the power of ten
+/// does not fit 64 bits ([`numbers_as_text`] refuses such a number).
+fn decimal(s: &str) -> Option<(bool, String, i64)> {
+    let (neg, s) = match s.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, s),
+    };
+    let (mantissa, exp) = match s.find(['e', 'E']) {
+        Some(i) => (&s[..i], Some(&s[i + 1..])),
+        None => (s, None),
+    };
+    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let all = format!("{int}{frac}");
+    let digits = all.trim_start_matches('0').trim_end_matches('0');
+    // Zero is zero whatever its sign and power of ten.
+    if digits.is_empty() {
+        return Some((false, String::new(), 0));
+    }
+    let exp = exp.map_or(Some(0), |e| e.parse::<i64>().ok())?;
+    let trailing = all.len() - all.trim_end_matches('0').len();
+    let exp = exp
+        .checked_sub(i64::try_from(frac.len()).ok()?)?
+        .checked_add(i64::try_from(trailing).ok()?)?;
+    Some((neg, digits.to_string(), exp))
+}
+
+/// Whether some operation of the patch text `body` names a member twice (`{"op": "add", "op":
+/// "remove"}`): a parsed [`Value`] keeps one of them silently, so the operation checked would not
+/// be the one the client wrote. `body` is a patch already checked to be an array of objects.
+fn repeats_a_member(body: &[u8]) -> bool {
+    struct Members;
+    impl<'de> serde::Deserialize<'de> for Members {
+        fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct Visit;
+            impl<'de> serde::de::Visitor<'de> for Visit {
+                type Value = Members;
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("an operation")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> Result<Members, A::Error> {
+                    let mut seen = std::collections::HashSet::new();
+                    while let Some(key) = map.next_key::<String>()? {
+                        if !seen.insert(key) {
+                            return Err(serde::de::Error::custom("a member is repeated"));
+                        }
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                    }
+                    Ok(Members)
+                }
+            }
+            d.deserialize_map(Visit)
+        }
+    }
+    serde_json::from_slice::<Vec<Members>>(body).is_err()
+}
+
+/// Check that `ops` is an RFC 6902 patch document, without applying it.
+pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
+    let ops = ops.as_array().ok_or(PatchError::Malformed(
+        "a JSON Patch is an array of operations",
+    ))?;
+    let pointer = |v: Option<&Value>| v.and_then(Value::as_str).and_then(Pointer::parse).is_some();
+    for op in ops {
+        let kind = op
+            .get("op")
+            .and_then(Value::as_str)
+            .ok_or(PatchError::Malformed("every operation needs an op"))?;
+        if !pointer(op.get("path")) {
+            return Err(PatchError::Malformed(
+                "every operation needs a JSON Pointer path",
+            ));
+        }
+        match kind {
+            "add" | "replace" | "test" if op.get("value").is_none() => {
+                return Err(PatchError::Malformed("add, replace and test need a value"));
+            }
+            "move" | "copy" if !pointer(op.get("from")) => {
+                return Err(PatchError::Malformed(
+                    "move and copy need a JSON Pointer from",
+                ));
+            }
+            "add" | "remove" | "replace" | "move" | "copy" | "test" => {}
+            _ => return Err(PatchError::Malformed("unknown JSON Patch operation")),
+        }
+    }
+    Ok(ops)
+}
+
+/// Whether a JSON Patch observes the target's content: `test` compares a value and `copy` / `move`
+/// read one, so applying it reveals what the patcher may not be allowed to read.
+pub fn json_patch_reads(ops: &Value) -> bool {
+    ops.as_array().is_some_and(|ops| {
+        ops.iter().any(|op| {
+            matches!(
+                op.get("op").and_then(Value::as_str),
+                Some("test" | "copy" | "move")
+            )
+        })
+    })
+}
+
+/// The size of `v` as written, in bytes: a number held as text ([`NUMBER_MARK`]) counts as the
+/// number it is written back as, not as the marked string it is held as.
+fn json_size(v: &Value) -> usize {
+    serialized_size(v).saturating_sub(mark_overhead(v))
+}
+
+/// The bytes the marks of [`numbers_as_text`] add to `v` as `serde_json` writes it: the quotes and
+/// mark around each number, and each doubled mark.
+fn mark_overhead(v: &Value) -> usize {
+    let mark = NUMBER_MARK.len_utf8();
+    match v {
+        Value::String(s) => match s.strip_prefix(NUMBER_MARK) {
+            Some(rest) if rest.starts_with(NUMBER_MARK) => mark,
+            Some(_) => mark + 2,
+            None => 0,
+        },
+        Value::Array(a) => a.iter().map(mark_overhead).sum(),
+        Value::Object(m) => m.values().map(mark_overhead).sum(),
+        _ => 0,
+    }
+}
+
+/// The serialized size of `v`, in bytes.
+fn serialized_size(v: &Value) -> usize {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut c = Count(0);
+    let _ = serde_json::to_writer(&mut c, v);
+    c.0
+}
+
+/// RFC 6902 JSON Patch, applied whole or not at all, within `budget` serialized bytes. `target`
+/// and `ops` hold their numbers as text ([`read_numbers_as_text`]): a string starting with
+/// [`NUMBER_MARK`] is a number here, so this is private to the module that reads them so.
+fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, PatchError> {
+    json_patch_within(target, ops, budget, false)
+}
+
+/// [`json_patch`], with every value measured, when `in_memory`, by what it allocates as well as
+/// its serialized size ([`value_cost`]). The target is charged before it is copied, and each
+/// value an operation adds before it is cloned, so a patch past the budget allocates nothing
+/// to find that out.
+fn json_patch_within(
+    target: &Value,
+    ops: &Value,
+    budget: usize,
+    in_memory: bool,
+) -> Result<Value, PatchError> {
+    let json_size = |v: &Value| {
+        let bytes = json_size(v);
+        if !in_memory {
+            return bytes;
+        }
+        bytes.saturating_add(value_cost(v))
+    };
+    use PatchError::Failed;
+    let ops = validate_json_patch(ops)?;
+    if ops.len() > MAX_PATCH_OPS {
+        return Err(PatchError::TooLarge);
+    }
+    // The document's size, kept as an upper bound: every operation that adds checks the budget
+    // before it clones or inserts anything, and the target is checked before it is copied.
+    let mut size = json_size(target);
+    if size > budget {
+        return Err(PatchError::TooLarge);
+    }
+    let mut doc = target.clone();
+    // The work done, in bytes measured, cloned or compared: a patch within the size budget can
+    // still repeat costly operations (a copy of a large value over itself, again and again), so
+    // the total is held to a budget of its own.
+    let work_budget = budget.saturating_mul(PATCH_WORK_FACTOR).max(MIN_PATCH_WORK);
+    let mut work = size;
+    let charge = |work: &mut usize, bytes: usize| {
+        *work = work.saturating_add(bytes);
+        if *work > work_budget {
+            return Err(PatchError::TooLarge);
+        }
+        Ok(())
+    };
+    // Every pointer was parsed when the patch was validated; it is parsed the same way here.
+    let pointer_of = |op: &Value, k: &str| {
+        op[k]
+            .as_str()
+            .and_then(Pointer::parse)
+            .ok_or(PatchError::Malformed("a JSON Pointer is malformed"))
+    };
+    for op in ops {
+        let path = pointer_of(op, "path")?;
+        // What an add at `path` would overwrite: an existing object member is replaced.
+        let replaced = |doc: &Value| -> usize {
+            let Some((parent, _)) = path.split() else {
+                return json_size(doc);
+            };
+            match (walk(doc, parent), path.get(doc)) {
+                (Some(Value::Object(_)), Some(old)) => json_size(old),
+                _ => 0,
+            }
+        };
+        // A value placed at `path` sits under one container per pointer segment.
+        let fits = |v: &Value| {
+            if path.0.len() + json_depth(v) > MAX_JSON_DEPTH {
+                return Err(PatchError::TooDeep);
+            }
+            Ok(())
+        };
+        let grow = |size: &mut usize, by: usize, minus: usize| {
+            let next = size.saturating_sub(minus).saturating_add(by);
+            if next > budget {
+                return Err(PatchError::TooLarge);
+            }
+            *size = next;
+            Ok(())
+        };
+        match op["op"].as_str().unwrap_or_default() {
+            "add" => {
+                let v = &op["value"];
+                fits(v)?;
+                let minus = replaced(&doc);
+                let value = json_size(v);
+                charge(&mut work, 2 * value + minus + shift_cost(&doc, &path, true))?;
+                let by = value + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
+                pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
+            }
+            "remove" => {
+                let overhead = member_overhead(&doc, &path, false);
+                charge(&mut work, shift_cost(&doc, &path, false))?;
+                let old = pointer_remove(&mut doc, &path).ok_or(Failed)?;
+                let gone = json_size(&old);
+                charge(&mut work, gone)?;
+                size = size.saturating_sub(gone + overhead);
+            }
+            "replace" => {
+                let v = &op["value"];
+                fits(v)?;
+                let old = path.get(&doc).ok_or(Failed)?;
+                let minus = json_size(old);
+                let value = json_size(v);
+                // Taken out and put back: an array member shifts the rest of its array twice.
+                let shifts = 2 * shift_cost(&doc, &path, false);
+                charge(&mut work, 2 * value + minus + shifts)?;
+                grow(&mut size, value, minus)?;
+                pointer_remove(&mut doc, &path).ok_or(Failed)?;
+                pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
+            }
+            "move" => {
+                let from = pointer_of(op, "from")?;
+                // A value cannot move into itself (RFC 6902 section 4.4).
+                if from.0.len() < path.0.len() && path.0.starts_with(&from.0) {
+                    return Err(Failed);
+                }
+                // The value moves; what changes is the member around it (its key, a separator), and
+                // what an add at `path` replaces.
+                let overhead = member_overhead(&doc, &from, false);
+                charge(&mut work, shift_cost(&doc, &from, false))?;
+                let v = pointer_remove(&mut doc, &from).ok_or(Failed)?;
+                fits(&v)?;
+                let moved = json_size(&v);
+                size = size.saturating_sub(moved + overhead);
+                let minus = replaced(&doc);
+                charge(&mut work, 2 * moved + minus + shift_cost(&doc, &path, true))?;
+                let by = moved + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
+                pointer_add(&mut doc, &path, v).ok_or(Failed)?;
+            }
+            "copy" => {
+                let from = pointer_of(op, "from")?;
+                let source = from.get(&doc).ok_or(Failed)?;
+                fits(source)?;
+                let copied = json_size(source);
+                let added = copied + member_overhead(&doc, &path, true);
+                let minus = replaced(&doc);
+                charge(
+                    &mut work,
+                    2 * copied + minus + shift_cost(&doc, &path, true),
+                )?;
+                grow(&mut size, added, minus)?;
+                let v = from.get(&doc).ok_or(Failed)?.clone();
+                pointer_add(&mut doc, &path, v).ok_or(Failed)?;
+            }
+            "test" => {
+                // A comparison is charged for what it reads of both sides as it reads it.
+                let target = path.get(&doc).ok_or(Failed)?;
+                let mut left = work_budget.saturating_sub(work);
+                let equal = json_equal(target, &op["value"], &mut left);
+                work = work_budget - left;
+                if !equal.ok_or(PatchError::TooLarge)? {
+                    return Err(Failed);
+                }
+            }
+            _ => unreachable!("validated"),
+        }
+    }
+    // The running size is an upper bound kept without serializing; the result itself is held to
+    // the budget too.
+    if json_size(&doc) > budget {
+        return Err(PatchError::TooLarge);
+    }
+    Ok(doc)
+}
+
+/// The bytes a member at `path` of `doc` takes beside its value: in an object its key (quoted and
+/// escaped) and colon, and in either container the comma between it and a sibling. `adding`: for a
+/// member about to be added (nothing for an object member that would be replaced); otherwise for
+/// the member there now.
+fn member_overhead(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
+        return 0;
+    };
+    let comma = |others: usize| usize::from(others > 0);
+    match walk(doc, parent) {
+        Some(Value::Object(m)) => {
+            let present = m.contains_key(key);
+            if adding && present {
+                return 0;
+            }
+            let others = m.len() - usize::from(present);
+            json_size(&Value::String(key.to_string())) + 1 + comma(others)
+        }
+        Some(Value::Array(a)) => comma(if adding {
+            a.len()
+        } else {
+            a.len().saturating_sub(1)
+        }),
+        _ => 0,
+    }
+}
+
+/// The work of the shift an insertion (`adding`) or a removal at `path` makes in the array that
+/// holds it, if one does: every member after the index moves, each counted as the bytes a `Value`
+/// takes in memory. An append, or a member of an object, moves nothing.
+fn shift_cost(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
+        return 0;
+    };
+    let Some(Value::Array(a)) = walk(doc, parent) else {
+        return 0;
+    };
+    let Some(i) = array_index(key, a.len(), adding) else {
+        return 0;
+    };
+    let moved = if adding {
+        a.len().saturating_sub(i)
+    } else {
+        a.len().saturating_sub(i + 1)
+    };
+    moved.saturating_mul(std::mem::size_of::<Value>())
+}
+
+/// RFC 6902 section 4.6 equality: numbers are equal when their values are (`1` and `1.0`), strings
+/// and literals when they are identical, arrays element by element, objects member by member
+/// whatever their order. Integers compare exactly (two distinct large integers never meet through
+/// a float), and an integer equals a float only when the float is exactly that integer.
+///
+/// `left` is the work the comparison may still do, in bytes read from either side; `None` once
+/// it would do more.
+fn json_equal(a: &Value, b: &Value, left: &mut usize) -> Option<bool> {
+    // Numbers are equal when the decimal values their texts denote are.
+    match (number_text(a), number_text(b)) {
+        (Some(x), Some(y)) => {
+            spend(left, x.len() + y.len())?;
+            return Some(match (decimal(&x), decimal(&y)) {
+                (Some(x), Some(y)) => x == y,
+                // Never reached for numbers read through [`numbers_as_text`], which refuses
+                // these; and never decided by their text.
+                _ => false,
+            });
+        }
+        (None, None) => {}
+        _ => return Some(false),
+    }
+    match (a, b) {
+        (Value::Array(x), Value::Array(y)) => {
+            spend(left, 0)?;
+            if x.len() != y.len() {
+                return Some(false);
+            }
+            for (x, y) in x.iter().zip(y) {
+                if !json_equal(x, y, left)? {
+                    return Some(false);
+                }
+            }
+            Some(true)
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            spend(left, 0)?;
+            if x.len() != y.len() {
+                return Some(false);
+            }
+            for (k, v) in x {
+                spend(left, k.len())?;
+                match y.get(k) {
+                    Some(w) if json_equal(v, w, left)? => {}
+                    _ => return Some(false),
+                }
+            }
+            Some(true)
+        }
+        (Value::String(x), Value::String(y)) => {
+            spend(left, x.len().min(y.len()))?;
+            Some(x == y)
+        }
+        _ => Some(a == b),
+    }
+}
+
+/// Take `bytes` (and one for the step) from the work `left`; `None` when there is not that much.
+fn spend(left: &mut usize, bytes: usize) -> Option<()> {
+    *left = left.checked_sub(bytes.saturating_add(1))?;
+    Some(())
+}
+
+/// An RFC 6901 JSON Pointer, parsed once: its reference tokens, unescaped. Every JSON Patch
+/// operation reads its paths through this one parser, so no operation accepts a pointer (or an
+/// array index) that another refuses.
+struct Pointer(Vec<String>);
+
+impl Pointer {
+    /// `None` for anything RFC 6901 does not allow: a non-empty pointer not starting with `/`,
+    /// or a `~` not followed by `0` or `1`.
+    fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() {
+            return Some(Pointer(Vec::new()));
+        }
+        let tokens = s.strip_prefix('/')?.split('/').map(|t| {
+            let mut out = String::with_capacity(t.len());
+            let mut chars = t.chars();
+            while let Some(c) = chars.next() {
+                out.push(if c != '~' {
+                    c
+                } else {
+                    match chars.next()? {
+                        '0' => '~',
+                        '1' => '/',
+                        _ => return None,
+                    }
+                });
+            }
+            Some(out)
+        });
+        tokens.collect::<Option<Vec<_>>>().map(Pointer)
+    }
+
+    /// The tokens of the container and the last token; `None` for the whole document.
+    fn split(&self) -> Option<(&[String], &str)> {
+        let (last, parent) = self.0.split_last()?;
+        Some((parent, last))
+    }
+
+    fn get<'a>(&self, doc: &'a Value) -> Option<&'a Value> {
+        walk(doc, &self.0)
+    }
+}
+
+/// The value `tokens` reference in `doc`.
+fn walk<'a>(doc: &'a Value, tokens: &[String]) -> Option<&'a Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get(t),
+        Value::Array(a) => a.get(array_index(t, a.len(), false)?),
+        _ => None,
+    })
+}
+
+fn walk_mut<'a>(doc: &'a mut Value, tokens: &[String]) -> Option<&'a mut Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get_mut(t),
+        Value::Array(a) => {
+            let i = array_index(t, a.len(), false)?;
+            a.get_mut(i)
+        }
+        _ => None,
+    })
+}
+
+/// An array index token (RFC 6901 section 4): `0`, or digits without a leading zero, below `len`;
+/// when `adding`, also `len` itself and `-` (the end). No sign, no leading zero, no overflow.
+fn array_index(token: &str, len: usize, adding: bool) -> Option<usize> {
+    if adding && token == "-" {
+        return Some(len);
+    }
+    let b = token.as_bytes();
+    let well_formed = token == "0"
+        || (matches!(b.first(), Some(b'1'..=b'9')) && b.iter().all(u8::is_ascii_digit));
+    let i: usize = token.parse().ok().filter(|_| well_formed)?;
+    (i < len || (adding && i == len)).then_some(i)
+}
+
+fn pointer_add(doc: &mut Value, path: &Pointer, value: Value) -> Option<()> {
+    let Some((parent, key)) = path.split() else {
+        *doc = value;
+        return Some(());
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => {
+            m.insert(key.to_string(), value);
+        }
+        Value::Array(a) => {
+            let i = array_index(key, a.len(), true)?;
+            a.insert(i, value);
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn pointer_remove(doc: &mut Value, path: &Pointer) -> Option<Value> {
+    let Some((parent, key)) = path.split() else {
+        return Some(std::mem::replace(doc, Value::Null));
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => m.remove(key),
+        Value::Array(a) => {
+            let i = array_index(key, a.len(), false)?;
+            Some(a.remove(i))
+        }
+        _ => None,
+    }
+}
+
+/// The answer to a patch, or a target, holding a number [`numbers_as_text`] refuses.
+fn number_refused() -> Response {
+    problem(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Some("a number is too long, or its power of ten too large, to compare"),
+    )
+}
+
+/// A patch document a request carries.
+enum Patch {
+    /// RFC 6902 JSON Patch, already checked to be well-formed.
+    Json(Value),
+}
+
+impl Patch {
+    /// Parse the request body by its Content-Type. `Err` carries the response: 415 for another
+    /// format, 400 for a body that is not JSON or not a well-formed patch.
+    fn parse(req: &LwsRequest) -> Result<Self, Response> {
+        let ct = req.content_type().unwrap_or_default();
+        if ct != JSON_PATCH {
+            let mut r = problem(StatusCode::UNSUPPORTED_MEDIA_TYPE, None);
+            set(
+                r.headers_mut(),
+                header::HeaderName::from_static("accept-patch"),
+                ACCEPT_PATCH,
+            );
+            return Err(r);
+        }
+        read_json_patch(&req.body).map(Patch::Json)
+    }
+
+    /// Whether applying the patch observes the target's content (see [`json_patch_reads`]).
+    fn reads_content(&self) -> bool {
+        matches!(self, Patch::Json(ops) if json_patch_reads(ops))
+    }
+
+    /// Apply the patch to `target` within `budget` serialized bytes. `Err` carries the response.
+    fn apply(&self, target: &Value, budget: usize) -> Result<Value, Response> {
+        match self {
+            Patch::Json(ops) => json_patch(target, ops, budget),
+        }
+        .map_err(patch_refused)
+    }
+
+    /// [`Patch::apply`], charging each value what it allocates too ([`json_patch_within`]).
+    /// Whether every operation is a `remove` or a `test`: a patch that adds, copies and
+    /// replaces nothing.
+    fn only_removes(&self) -> bool {
+        match self {
+            Patch::Json(ops) => ops.as_array().is_some_and(|ops| {
+                ops.iter()
+                    .all(|op| matches!(op["op"].as_str(), Some("remove" | "test")))
+            }),
+        }
+    }
+
+    fn apply_in_memory(&self, target: &Value, budget: usize) -> Result<Value, Response> {
+        match self {
+            Patch::Json(ops) => json_patch_within(target, ops, budget, true),
+        }
+        .map_err(patch_refused)
+    }
+}
+
+/// The response to a JSON Patch that cannot be applied.
+fn patch_refused(e: PatchError) -> Response {
+    match e {
+        PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
+        PatchError::Failed => problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("the JSON Patch cannot be applied"),
+        ),
+        PatchError::TooLarge => problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some("the patched document would be too large"),
+        ),
+        PatchError::TooDeep => problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("the patched document would nest too deeply"),
+        ),
+    }
+}
+
+/// A patch that observes content (see [`Patch::reads_content`]) needs Read as well as Modify:
+/// otherwise 403, or the challenge for an anonymous caller.
+async fn patch_read_check<S: Store + 'static>(
+    state: &LwsState<S>,
+    patch: &Patch,
+    uri: &str,
+    agent: &Agent,
+) -> Result<(), Response> {
+    if patch.reads_content() {
+        return recheck(state, Action::Read, uri, agent).await;
+    }
+    Ok(())
+}
+
+async fn patch<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+) -> Response {
+    let Some(guard) = state.locks.lock(uri).await else {
+        return set_aside_meanwhile();
+    };
+    let listing = match listing_guard(state, uri).await {
+        Ok(listing) => listing,
+        Err(r) => return r,
+    };
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
+    if uri.ends_with('/') {
+        return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
+    }
+    // What the request is (its patch format, and the resource's) is settled before its
+    // preconditions: a patch that could never apply is a 415 whatever its validators.
+    let patch = match Patch::parse(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    // A JSON Patch applies to a JSON document only: a resource stored as another format is
+    // never rewritten as JSON.
+    let not_json = || {
+        let mut r = problem(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Some("the resource is not JSON"),
+        );
+        set(
+            r.headers_mut(),
+            header::HeaderName::from_static("accept-patch"),
+            ACCEPT_PATCH,
+        );
+        r
+    };
+    if !is_json_type(&meta.content_type) {
+        return not_json();
+    }
+    if let Precondition::Failed | Precondition::NotModified = evaluate(
+        &req.headers,
+        Some(&quoted(&meta.etag)),
+        meta.last_modified.map(|t| to_secs(epoch_ms(t))),
+        false,
+    ) {
+        return problem(StatusCode::PRECONDITION_FAILED, None);
+    }
+    if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
+        return r;
+    }
+    let body = match state.store.read_at(uri, &meta).await {
+        Ok(b) => b,
+        Err(e) => return store_error(e),
+    };
+    // Its numbers are held as their text ([`NUMBER_MARK`]) while the patch applies, so the
+    // content is written back with every number it does not touch as it was.
+    // An empty body is not JSON either.
+    let target = match read_numbers_as_text(&body) {
+        Ok(target) => target,
+        Err(Unreadable::Number) => return number_refused(),
+        Err(Unreadable::NotJson) => return not_json(),
+    };
+    let patched = match patch.apply(&target, patch_budget(state)) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
+    let ct = meta.content_type.clone();
+    // The linkset is left alone: a PATCH changes the content only.
+    // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
+    // which touches the container once they are over.
+    let (written, _guard, _) = write_with_meta(
+        state,
+        (guard, listing),
+        uri,
+        Bytes::from(patched),
+        &ct,
+        None,
+        req.admission.clone(),
+    )
+    .await;
+    let written = match written {
+        Ok(m) => m,
+        Err(e) => return store_error(e),
+    };
+    let mut resp = StatusCode::NO_CONTENT.into_response();
+    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
     resp
 }
 
@@ -2241,19 +3375,46 @@ async fn delete<S: Store + 'static>(
             return r;
         }
     }
-    // The removals run in a task that holds the subtree's locks, and the listing lock, until
-    // they are over, and then touches the container (see [`hold_locks`]). A removal that was
-    // put back changed nothing; what could not be is in `removed`.
+    // Who hears of each removal is decided before the resources go, while who may read each can
+    // still be decided; the notifications go out only once the whole removal happened. A recursive
+    // delete removes every descendant, and each removal is a Delete of its own.
+    let mut notices = Vec::with_capacity(doomed.len());
+    // They share the delivery queue's bound: what is prepared past it would be dropped when
+    // sent, and is not held while the removals run.
+    let mut room = state.cfg.delivery.queue;
+    for (gone, origin) in doomed.iter().cloned() {
+        let event = Event {
+            kind: "Delete",
+            is_container: gone.ends_with('/'),
+            uri: gone,
+            relation: origin.map(|p| ("origin", p)),
+        };
+        let pending = state.notify.prepare_at_most(state, &event, room).await;
+        room = room.saturating_sub(pending.len());
+        notices.push(pending);
+    }
+    // The removals, the notifications of those that happened and the touch of the container run
+    // in a task that holds the subtree's locks, and the listing lock, until the removals are
+    // over (see [`hold_locks`]). A removal that was put back changed nothing; what could not be
+    // is in `removed`.
     let removal = {
         let state = state.clone();
         async move {
             let (removed, outcome, left) = remove(&state, &doomed).await;
+            // Only a delete that happened whole is announced. One that failed was put back, or
+            // what could not be is set aside, so nothing it touched is announced as gone.
+            if outcome.is_ok() {
+                for pending in notices {
+                    state.notify.send(&state, pending);
+                }
+            }
             ((removed, outcome), left)
         }
     };
-    let touch = move |(removed, _): &(Vec<String>, _)| parent.filter(|_| !removed.is_empty());
+    let after =
+        move |(removed, _): &(Vec<String>, _)| (parent.filter(|_| !removed.is_empty()), None);
     let locks = (guards, listing);
-    let outcome = match hold_locks(state, locks, req.admission.clone(), touch, removal).await {
+    let outcome = match hold_locks(state, locks, req.admission.clone(), after, removal).await {
         Ok(((_, outcome), _)) => outcome,
         Err(e) => return store_error(e),
     };
@@ -2422,19 +3583,272 @@ async fn remove_in<S: Store + 'static>(
 /// server restrict `up`; `self` carries the representation's format, size and modification time.
 const SERVER_MANAGED: &[&str] = &["up", "type", "self", "linkset"];
 
-/// Whether a linkset entry is about `uri` (its anchor, resolved against `uri`).
+/// Whether a linkset entry is about `uri`. Anchors are absolute: every document the server keeps
+/// was resolved by [`absolute_linkset`] (or built with absolute anchors).
 fn anchored_at(entry: &Value, uri: &str) -> bool {
-    entry
-        .get("anchor")
-        .and_then(Value::as_str)
-        .is_some_and(|a| a == uri || resolve_against(uri, a) == uri)
+    entry.get("anchor").and_then(Value::as_str) == Some(uri)
+}
+
+/// Whether a link target attribute has the shape RFC 9264 section 4.2.4 gives it: `href`,
+/// `title`, `type` and `media` a string; `hreflang` an array of strings; an internationalised
+/// attribute (`title*`, any `name*`) an array of `{"value", "language"?}` objects of strings;
+/// any other (extension) attribute an array of strings.
+fn target_attribute_ok(key: &str, value: &Value) -> bool {
+    let strings = |v: &Value| v.as_array().is_some_and(|a| a.iter().all(Value::is_string));
+    match key {
+        "href" | "title" | "type" | "media" => value.is_string(),
+        "hreflang" => strings(value),
+        // One or more value objects (RFC 9264 section 4.2.4.2).
+        k if k.ends_with('*') => value.as_array().is_some_and(|a| {
+            !a.is_empty()
+                && a.iter().all(|o| {
+                    o.as_object().is_some_and(|o| {
+                        o.get("value").is_some_and(Value::is_string)
+                            && o.get("language").is_none_or(Value::is_string)
+                            && o.keys().all(|k| k == "value" || k == "language")
+                    })
+                })
+        }),
+        _ => strings(value),
+    }
+}
+
+/// Why [`absolute_linkset`] refused a document.
+#[derive(Debug, PartialEq)]
+enum Unresolved {
+    /// An anchor or href is not a URI reference, or a target attribute is misshapen.
+    Invalid,
+    /// The document passes a cap, or resolving it could pass the budget ([`linkset_cost`]).
+    TooLarge,
+}
+
+/// The most a served linkset document may be in serialized bytes: what the resource's
+/// metadata, which stores the linkset, may hold.
+const LINKSET_SERVED_BYTES: usize = super::MAX_META_BYTES;
+
+/// The most memory reading a JSON Patch body ([`read_json_patch`]) holds at once per byte of
+/// it, at most: measured as peak live bytes with a counting allocator over the smallest
+/// syntactic units, numbers, escapes, long keys, deep nesting and mixes of them, repeated
+/// (`tests/linkset_parse_amplification.rs`), whose worst is objects nested in objects (about
+/// 128 bytes per byte read, a map node each), and doubled.
+pub const LINKSET_PARSE_AMPLIFICATION: usize = 256;
+
+/// The most a linkset PATCH body may be: what parsing it, whatever its shape, can allocate
+/// within [`LINKSET_COST_BUDGET`] ([`LINKSET_PARSE_AMPLIFICATION`]). Ample for a patch to a
+/// linkset; replacing a large linkset whole takes several.
+pub const LINKSET_PATCH_BODY: usize = LINKSET_COST_BUDGET / LINKSET_PARSE_AMPLIFICATION;
+/// Whether `s` starts with a URI scheme (RFC 3986 section 3.1): an absolute reference, which
+/// resolving leaves as long as it is. Anything else is charged as if it grew by the base.
+fn has_scheme(s: &str) -> bool {
+    let Some((scheme, _)) = s.split_once(':') else {
+        return false;
+    };
+    scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
+/// What a linkset PATCH may allocate for any one document it holds: the patch as parsed, the
+/// stored linkset as patched (every clone checked first, [`value_cost`]), and resolving and
+/// indexing the result ([`linkset_cost`]).
+pub const LINKSET_COST_BUDGET: usize = 2 << 20;
+
+/// Restore, in place, the strings of a document read with its numbers as text
+/// ([`read_numbers_as_text`]): `false` when it holds a number.
+fn strings_without_numbers(v: &mut Value) -> bool {
+    let mut stack = vec![v];
+    while let Some(v) = stack.pop() {
+        match v {
+            Value::String(s) => match s.strip_prefix(NUMBER_MARK) {
+                Some(rest) if rest.starts_with(NUMBER_MARK) => *s = rest.to_string(),
+                Some(_) => return false,
+                None => {}
+            },
+            Value::Number(_) => return false,
+            Value::Array(a) => stack.extend(a.iter_mut()),
+            Value::Object(o) => stack.extend(o.values_mut()),
+            _ => {}
+        }
+    }
+    true
+}
+
+/// How many entries a linkset document a client writes may hold.
+const MAX_LINKSET_ENTRIES: usize = 256;
+/// How many link targets, over all its entries and relations, it may hold.
+const MAX_LINKSET_TARGETS: usize = 1024;
+/// How long an anchor, a relation and an href in it may each be, in bytes.
+const MAX_LINKSET_FIELD: usize = 4096;
+/// What any parsed or cloned [`Value`] costs in memory beyond its string bytes, at most: its
+/// slot in its parent (32 bytes), doubled for a vector's spare capacity, rounded up. Measured,
+/// with a counting allocator, on the worst shapes (arrays of empty strings, of empty arrays, of
+/// one-element arrays).
+const VALUE_COST: usize = 64;
+/// What an object costs beyond [`VALUE_COST`], at most: `serde_json`'s map is a `BTreeMap`,
+/// which allocates a whole node (632 bytes for a `String` key and a `Value`) even for one
+/// member, rounded up.
+const OBJECT_COST: usize = 704;
+/// What each member of an object costs beyond its value, at most: its share of further nodes
+/// (a node holds at least five members once split, measured at about 100 bytes a member).
+const MEMBER_COST: usize = 160;
+
+/// What `v` allocates in memory beyond its strings' bytes, at most ([`VALUE_COST`],
+/// [`OBJECT_COST`], [`MEMBER_COST`]). Iterative, so it is safe on any document.
+fn value_cost(v: &Value) -> usize {
+    let mut cost = 0usize;
+    let mut stack = vec![v];
+    while let Some(v) = stack.pop() {
+        cost = cost.saturating_add(VALUE_COST);
+        match v {
+            Value::Array(a) => stack.extend(a),
+            Value::Object(o) => {
+                cost = cost
+                    .saturating_add(OBJECT_COST)
+                    .saturating_add(o.len().saturating_mul(MEMBER_COST));
+                stack.extend(o.values());
+            }
+            _ => {}
+        }
+    }
+    cost
+}
+
+/// The most that resolving a linkset document against a base of `base_len` bytes, and then
+/// deriving its indexed links ([`links_of`]), can allocate. Every string the document holds is
+/// copied at most twice (into the resolved document, and into the indexed links), so its
+/// serialized size is charged twice; every value it holds is charged what it allocates
+/// ([`value_cost`]), so empty relations, long attribute arrays and objects count; and every
+/// relative anchor and href may grow by the base when it is resolved. Computed from the parsed
+/// document before any of that work is done; `None` when the document passes a cap (entries, targets, or an
+/// anchor's, relation's or href's length).
+fn linkset_cost(doc: &Value, base_len: usize) -> Option<usize> {
+    let entries = doc
+        .get("linkset")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    if entries.len() > MAX_LINKSET_ENTRIES || base_len > MAX_LINKSET_FIELD * 2 {
+        return None;
+    }
+    let too_long = |v: &Value| v.as_str().is_some_and(|s| s.len() > MAX_LINKSET_FIELD);
+    let relative_ref = |v: &Value| v.as_str().is_none_or(|s| !has_scheme(s));
+    let mut targets = 0usize;
+    let mut relative = 0usize;
+    for entry in entries {
+        for (k, v) in entry.as_object().into_iter().flatten() {
+            if k == "anchor" {
+                if too_long(v) {
+                    return None;
+                }
+                relative += usize::from(relative_ref(v));
+                continue;
+            }
+            if k.len() > MAX_LINKSET_FIELD {
+                return None;
+            }
+            for t in v.as_array().into_iter().flatten() {
+                targets += 1;
+                if t.get("href").is_some_and(too_long) {
+                    return None;
+                }
+                relative += usize::from(t.get("href").is_none_or(relative_ref));
+            }
+        }
+    }
+    if targets > MAX_LINKSET_TARGETS {
+        return None;
+    }
+    // Only a relative reference grows by the base when it is resolved.
+    let resolved = relative.checked_mul(base_len)?;
+    // Linksets hold no numbers as text: every byte counts.
+    serialized_size(doc)
+        .checked_mul(2)?
+        .checked_add(value_cost(doc))?
+        .checked_add(resolved)
+}
+
+/// A linkset document whose every `anchor` and `href` is absolute: made by [`absolute_linkset`]
+/// from what a client wrote, or taken from what the server stored or built itself
+/// ([`Resolved::stored`]). Its links are used as they are and never resolved again
+/// ([`links_of`]).
+#[derive(Clone, Debug, PartialEq)]
+struct Resolved(Value);
+
+impl Resolved {
+    /// A linkset the server stored or built: what a client wrote was resolved by
+    /// [`absolute_linkset`] before it was stored, and Link header targets by
+    /// [`link_declared`], so every link in it is absolute.
+    /// `None` when it is not shaped as a linkset ([`valid_linkset`]): a `Resolved` always is.
+    fn stored(doc: Value) -> Option<Self> {
+        valid_linkset(&doc).then_some(Self(doc))
+    }
+
+    fn into_value(self) -> Value {
+        self.0
+    }
+}
+
+/// A linkset document with every `anchor` and `href` resolved against `base`, the linkset's own
+/// URI (RFC 9264 section 4: the context of relative references in a linkset is the resource that
+/// delivers it, not the resource it describes). [`Unresolved::Invalid`] when one is not a URI
+/// reference (RFC 3986), or a target attribute has not the shape RFC 9264 gives it
+/// ([`target_attribute_ok`]), which the document may not hold. Before anything is resolved, the
+/// document is held to the caps and its [`linkset_cost`] to `budget`: past either it is
+/// [`Unresolved::TooLarge`], and nothing is built.
+fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, Unresolved> {
+    use Unresolved::Invalid;
+    if linkset_cost(doc, base.len()).is_none_or(|cost| cost > budget) {
+        return Err(Unresolved::TooLarge);
+    }
+    let base = oxiri::Iri::parse(base).map_err(|_| Invalid)?;
+    let resolve = |v: &Value| -> Result<Value, Unresolved> {
+        let resolved = base
+            .resolve(v.as_str().ok_or(Invalid)?)
+            .map_err(|_| Invalid)?
+            .into_inner();
+        // Resolving may lengthen a reference past the cap a stored linkset is held to.
+        if resolved.len() > MAX_LINKSET_FIELD {
+            return Err(Unresolved::TooLarge);
+        }
+        Ok(Value::String(resolved))
+    };
+    let mut entries = Vec::new();
+    for entry in doc
+        .get("linkset")
+        .and_then(Value::as_array)
+        .ok_or(Invalid)?
+    {
+        let mut out = Map::new();
+        for (k, v) in entry.as_object().ok_or(Invalid)? {
+            let v = if k == "anchor" {
+                resolve(v)?
+            } else {
+                let mut targets = Vec::new();
+                for t in v.as_array().ok_or(Invalid)? {
+                    let t = t.as_object().ok_or(Invalid)?;
+                    if !t.iter().all(|(k, v)| target_attribute_ok(k, v)) {
+                        return Err(Invalid);
+                    }
+                    let href = resolve(t.get("href").ok_or(Invalid)?)?;
+                    let mut t = t.clone();
+                    t.insert("href".into(), href);
+                    targets.push(Value::Object(t));
+                }
+                Value::Array(targets)
+            };
+            out.insert(k.clone(), v);
+        }
+        entries.push(Value::Object(out));
+    }
+    Ok(Resolved(json!({"linkset": entries})))
 }
 
 /// The user-managed part of a linkset document: every server-managed relation dropped from the
-/// entries about `uri`. A client cannot write those relations; whatever a stored document has
-/// there is ignored and the server's own values stand.
-fn user_linkset(doc: &Value, uri: &str) -> Value {
+/// entries about `uri`. A client cannot write those relations; whatever a patch puts there is
+/// ignored and the server's own values stand.
+fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
     let entries = doc
+        .0
         .get("linkset")
         .and_then(Value::as_array)
         .cloned()
@@ -2453,7 +3867,70 @@ fn user_linkset(doc: &Value, uri: &str) -> Value {
             Some(e)
         })
         .collect();
-    json!({"linkset": kept})
+    Resolved(json!({"linkset": kept}))
+}
+
+/// The user-managed links a linkset document holds about `uri`, by relation: what the type
+/// index matches relations against, kept equal to the document. Its links are absolute already
+/// ([`Resolved`]) and are taken as they are. Repeats are found per relation, borrowing the
+/// document's own strings, so a relation is copied once for each entry it is in and an href
+/// once.
+fn links_of(doc: &Resolved, uri: &str) -> Links {
+    let mut links = Links::new();
+    let mut seen: std::collections::HashMap<String, std::collections::HashSet<&str>> =
+        Default::default();
+    for entry in doc
+        .0
+        .get("linkset")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|e| anchored_at(e, uri))
+    {
+        for (rel, targets) in entry.as_object().into_iter().flatten() {
+            let key = rel_key(rel);
+            if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&key.as_str()) {
+                continue;
+            }
+            let seen = seen.entry(key.clone()).or_default();
+            let out = links.entry(key).or_default();
+            for href in targets
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|t| t.get("href").and_then(Value::as_str))
+            {
+                if seen.insert(href) {
+                    out.push(href.to_string());
+                }
+            }
+        }
+    }
+    links.retain(|_, hrefs| !hrefs.is_empty());
+    links
+}
+
+/// A data resource's representation, as its linkset describes it (`self`): its format, size
+/// and modification time.
+struct Representation<'a> {
+    format: &'a str,
+    size: String,
+    modified: String,
+}
+
+impl<'a> Representation<'a> {
+    /// The longest a representation of `format` is described as: the largest size, and the
+    /// latest modification time a stored date can give (its text grows with the year). What a
+    /// write checks a linkset with ([`admissible_meta`]), so that a later change to the
+    /// content, which changes the size and time it gives but checks no linkset, never makes a
+    /// stored linkset one a PATCH refuses.
+    fn longest(format: &'a str) -> Self {
+        Self {
+            format,
+            size: u64::MAX.to_string(),
+            modified: format_rfc3339(to_secs(u64::MAX) as i64),
+        }
+    }
 }
 
 /// A resource's whole linkset document: the server-managed metadata (its container, its types, and
@@ -2464,34 +3941,69 @@ async fn linkset_document<S: Store + 'static>(
     uri: &str,
     meta: &ResourceMeta,
 ) -> Result<Value, ServerError> {
+    let stored = if uri.ends_with('/') {
+        None
+    } else {
+        state.store.meta(uri).await?
+    };
+    let representation = match &stored {
+        Some(stored) => {
+            let size = state.store.read_at(uri, stored).await?.len();
+            let modified = stored.last_modified.map(epoch_ms).unwrap_or_default();
+            Some(Representation {
+                format: &stored.content_type,
+                size: size.to_string(),
+                modified: format_rfc3339(to_secs(modified) as i64),
+            })
+        }
+        None => None,
+    };
+    Ok(served_linkset(
+        uri,
+        &state.cfg.storage(),
+        meta,
+        representation,
+    ))
+}
+
+/// What a JSON Patch charges for its target ([`json_patch_within`], in memory): its size as
+/// written and what it allocates.
+fn patch_cost(target: &Value) -> usize {
+    json_size(target).saturating_add(value_cost(target))
+}
+
+/// [`linkset_document`], given the representation it describes.
+fn served_linkset(
+    uri: &str,
+    storage: &str,
+    meta: &ResourceMeta,
+    representation: Option<Representation<'_>>,
+) -> Value {
     let mut server = Map::new();
     server.insert("anchor".into(), Value::String(uri.into()));
-    if let Some(parent) = parent_of(uri, &state.cfg.storage()) {
+    if let Some(parent) = parent_of(uri, storage) {
         server.insert("up".into(), json!([{"href": parent}]));
     }
     let mut types = vec![json!({"href": lws_type(uri)})];
     types.extend(meta.types.iter().map(|t| json!({"href": t})));
     server.insert("type".into(), Value::Array(types));
-    if !uri.ends_with('/') {
-        if let Some(stored) = state.store.meta(uri).await? {
-            let size = state.store.read_at(uri, &stored).await?.len();
-            let modified = stored.last_modified.map(epoch_ms).unwrap_or_default();
-            server.insert(
-                "self".into(),
-                json!([{
-                    "href": uri,
-                    "format": [stored.content_type],
-                    "size": [size.to_string()],
-                    "modified": [format_rfc3339(to_secs(modified) as i64)],
-                }]),
-            );
-        }
+    if let Some(r) = representation {
+        server.insert(
+            "self".into(),
+            json!([{
+                "href": uri,
+                "format": [r.format],
+                "size": [r.size],
+                "modified": [r.modified],
+            }]),
+        );
     }
     let user = meta
         .linkset
         .clone()
         .or_else(|| initial_linkset(uri, &meta.links))
-        .map(|d| user_linkset(&d, uri))
+        .and_then(Resolved::stored)
+        .map(|d| user_linkset(&d, uri).into_value())
         .unwrap_or_else(|| json!({"linkset": []}));
     let mut entries = user["linkset"].as_array().cloned().unwrap_or_default();
     match entries.iter().position(|e| anchored_at(e, uri)) {
@@ -2504,7 +4016,47 @@ async fn linkset_document<S: Store + 'static>(
         }
         None => entries.insert(0, Value::Object(server)),
     }
-    Ok(json!({"linkset": entries}))
+    json!({"linkset": entries})
+}
+
+/// Whether a linkset document, as served, is one a PATCH may change: what a PATCH checks its
+/// target against before it applies anything, and what applying none of it (`[]`) and resolving
+/// the result against the linkset's own URI (`base_len` bytes long) then costs and is capped by
+/// ([`linkset_cost`], which charges at least the target's size and [`value_cost`]), with the
+/// document within what the metadata holds ([`LINKSET_SERVED_BYTES`]). Every write that changes
+/// a linkset (POST, PUT and PATCH) checks the document it would serve with this, so whatever it
+/// stores can be patched within [`LINKSET_COST_BUDGET`]. Metadata stored before this was checked
+/// is not refused when it is read or put back (a rollback restores exactly what was stored); a
+/// PATCH of it is applied within its own cost, and must leave it admissible.
+fn admissible(served: &Value, base_len: usize) -> bool {
+    valid_linkset(served)
+        && serialized_size(served) <= LINKSET_SERVED_BYTES
+        && linkset_cost(served, base_len).is_some_and(|cost| cost <= LINKSET_COST_BUDGET)
+}
+
+/// [`admissible`], for the linkset `meta` makes for `uri`, describing a representation of
+/// `format` (none for a container) at its longest ([`Representation::longest`]). `413`
+/// otherwise.
+#[allow(clippy::result_large_err)]
+fn admissible_meta(
+    uri: &str,
+    storage: &str,
+    meta: &ResourceMeta,
+    format: Option<&str>,
+) -> Result<(), Response> {
+    let served = served_linkset(uri, storage, meta, format.map(Representation::longest));
+    if !admissible(&served, linkset_base(uri).len()) {
+        return Err(problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some("the resource's linkset would be more than a linkset may hold (a PATCH of the linkset can shrink it)"),
+        ));
+    }
+    Ok(())
+}
+
+/// The URI a resource's linkset is served at, against which its relative references resolve.
+fn linkset_base(uri: &str) -> String {
+    format!("{uri}{META_SUFFIX}")
 }
 
 /// A linkset document's entity tag: a digest of the document, server-managed metadata included, so
@@ -2514,27 +4066,45 @@ fn linkset_etag(doc: &Value) -> String {
     format!("\"ls-{}\"", jose::b64url(&digest[..12]))
 }
 
-/// A resource's linkset (RFC 9264): GET and HEAD. Writes are not offered, so they are 405 with the
-/// methods that are.
+/// A resource's linkset (RFC 9264): GET, HEAD and PATCH (JSON Patch). PUT is
+/// not offered, so it is 405 with the methods that are.
 async fn linkset<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
     agent: &Agent,
     uri: &str,
 ) -> Response {
-    if !matches!(req.method, Method::GET | Method::HEAD | Method::OPTIONS) {
-        return method_not_allowed(LINKSET_ALLOW);
-    }
-    let action = Action::Read;
+    let action = if matches!(req.method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        Action::Read
+    } else {
+        Action::Modify
+    };
     // A request is authorized once before it waits for the resource's lock, so one that may not
-    // read the resource never queues behind a write (holding its admission slot while it waits).
+    // touch the resource never queues behind a write (holding its admission slot while it waits).
     if let Some(refused) = authorize_unlocked(state, action, uri, agent).await {
         return refused;
     }
     // The resource's lock is taken before the permission check that counts, so the decision holds
-    // for what is served.
-    let Some(_shared) = state.locks.read(uri).await else {
-        return set_aside_meanwhile();
+    // for what is served or changed: shared for a read, exclusive for a patch (from the
+    // precondition through the write).
+    let (_shared, mut exclusive) = if req.method == Method::PATCH {
+        match state.locks.lock(uri).await {
+            Some(guard) => (None, Some(guard)),
+            None => return set_aside_meanwhile(),
+        }
+    } else {
+        match state.locks.read(uri).await {
+            Some(guard) => (Some(guard), None),
+            None => return set_aside_meanwhile(),
+        }
+    };
+    let mut listing = if req.method == Method::PATCH {
+        match listing_guard(state, uri).await {
+            Ok(listing) => listing,
+            Err(r) => return r,
+        }
+    } else {
+        None
     };
     let exists = match state.store.exists(uri).await {
         Ok(e) => e,
@@ -2550,7 +4120,7 @@ async fn linkset<S: Store + 'static>(
     if let Err(r) = recheck(state, action, uri, agent).await {
         return r;
     }
-    let meta = match state.resource_meta(uri).await {
+    let mut meta = match state.resource_meta(uri).await {
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
@@ -2578,11 +4148,199 @@ async fn linkset<S: Store + 'static>(
             }
         },
         Method::OPTIONS => StatusCode::NO_CONTENT.into_response(),
+        Method::PATCH => {
+            // The body is held, before it is parsed, to what parsing any text of its size may
+            // allocate ([`LINKSET_PATCH_BODY`]); the stored linkset it patches is held to the
+            // metadata's size. Every copy the handler then makes (the patched document, its
+            // resolved form, the indexed links, the rebuilt metadata) is checked against
+            // [`LINKSET_COST_BUDGET`] before it is made.
+            if req.body.len() > LINKSET_PATCH_BODY {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some(&format!(
+                        "a linkset patch is at most {LINKSET_PATCH_BODY} bytes"
+                    )),
+                );
+            }
+            // The patch format is settled before the preconditions, as for a data resource.
+            let patch = match Patch::parse(req) {
+                Ok(p) => p,
+                Err(r) => return r,
+            };
+            if let Precondition::Failed | Precondition::NotModified =
+                evaluate(&req.headers, Some(&etag), None, false)
+            {
+                return problem(StatusCode::PRECONDITION_FAILED, None);
+            }
+            if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
+                return r;
+            }
+            let base = linkset_base(uri);
+            // The patch holds its numbers as their text, so the linkset is read the same way,
+            // and written back with every number restored. A linkset holds no numbers, so one a
+            // patch adds is refused below, whatever its size.
+            let held = serde_json::to_vec(&document)
+                .ok()
+                .and_then(|text| read_numbers_as_text(&text).ok());
+            let Some(held) = held else {
+                return problem(StatusCode::INTERNAL_SERVER_ERROR, None);
+            };
+            // Applied within the cost budget with every value charged as `linkset_cost` charges
+            // it, so no clone the patch makes is past what resolving the result may cost. A
+            // linkset this server stored is [`admissible`]. One stored before that was checked
+            // may not be: it may only shrink, by a patch of `remove` and `test` operations alone
+            // (which add and copy nothing), applied within its own cost (already paid to load
+            // it, and bounded by the metadata's size), until it is admissible again; the result
+            // is held to the budget and every cap below. Nothing a patch adds is ever funded by
+            // what a target past the budget costs.
+            let legacy = !admissible(&document, base.len());
+            if legacy && !patch.only_removes() {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some("the linkset is more than a linkset may hold: only remove and test operations apply to it until it is within"),
+                );
+            }
+            let budget = if legacy {
+                LINKSET_COST_BUDGET.max(patch_cost(&held))
+            } else {
+                LINKSET_COST_BUDGET
+            };
+            let mut patched = match patch.apply_in_memory(&held, budget) {
+                Ok(v) => v,
+                Err(r) => return r,
+            };
+            // Its strings are restored in place; a number (which a linkset never holds) refuses
+            // it. Nothing is written out and parsed again.
+            if !strings_without_numbers(&mut patched) {
+                return problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some("the result is not a linkset document"),
+                );
+            }
+            let Some(patched) = Some(patched).filter(valid_linkset) else {
+                return problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some("the result is not a linkset document"),
+                );
+            };
+            // Relative references are resolved once, here, against the linkset's own URI: what
+            // is stored, served and indexed is then the same absolute link.
+            let patched = match absolute_linkset(&patched, &base, LINKSET_COST_BUDGET) {
+                Ok(p) => p,
+                Err(Unresolved::Invalid) => return problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some("an anchor or href is not a URI reference, or a target attribute is not shaped as RFC 9264 says"),
+                ),
+                Err(Unresolved::TooLarge) => return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some("the patched document would be too large"),
+                ),
+            };
+            // Only the user-managed part is kept; the links the type index matches are taken from
+            // it, so the two never drift apart.
+            let user = user_linkset(&patched, uri);
+            meta.links = links_of(&user, uri);
+            meta.linkset = Some(user.into_value());
+            meta.linkset_etag = None;
+            // The result is checked as it will be served, with the server-managed links (`up`,
+            // `type`, `self`) a patch may strip put back, with what the next PATCH checks its
+            // target with ([`admissible`]): a linkset is stored only if it can be patched again.
+            let rebuilt = match linkset_document(state, uri, &meta).await {
+                Ok(d) => d,
+                Err(e) => return store_error(e),
+            };
+            let format = if uri.ends_with('/') {
+                None
+            } else {
+                match state.store.meta(uri).await {
+                    Ok(stored) => stored.map(|m| m.content_type),
+                    Err(e) => return store_error(e),
+                }
+            };
+            if let Err(refused) =
+                admissible_meta(uri, &state.cfg.storage(), &meta, format.as_deref())
+            {
+                return refused;
+            }
+            // The linkset is checked whole, as it will be stored: inside the metadata it nests a
+            // level deeper than in the patched document, and metadata that does not read back
+            // would be lost.
+            match super::encode_meta(&meta) {
+                Ok(_) => {}
+                Err(ServerError::Conflict(_)) => {
+                    return problem(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        Some("the resource's metadata would be too large"),
+                    )
+                }
+                Err(_) => {
+                    return problem(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Some("the linkset nests too deeply to be stored"),
+                    )
+                }
+            }
+            // The tag of the document as written, which `rebuilt` is.
+            let new_etag = linkset_etag(&rebuilt);
+            // The write runs in a task that holds the lock and the listing's, and then touches
+            // the container when the write may have landed (see [`hold_locks`]).
+            let Some(guard) = exclusive.take() else {
+                return store_error(ServerError::Storage("the lock is not held".into()));
+            };
+            let write = {
+                let (state, uri, meta) = (state.clone(), uri.to_string(), meta.clone());
+                async move { (state.put_resource_meta(&uri, &meta).await, None) }
+            };
+            let parent = parent_of(uri, &state.cfg.storage());
+            let event = updated(uri);
+            let after = move |w: &Result<(), ServerError>| {
+                let landed = matches!(w, Ok(()) | Err(ServerError::Storage(_)));
+                (parent.filter(|_| landed), w.is_ok().then_some(event))
+            };
+            let locks = (guard, listing.take());
+            match hold_locks(state, locks, req.admission.clone(), after, write).await {
+                Ok((Ok(()), _)) => {}
+                Ok((Err(e), _)) | Err(e) => return store_error(e),
+            }
+            let mut r = StatusCode::NO_CONTENT.into_response();
+            set(r.headers_mut(), header::ETAG, &new_etag);
+            r
+        }
         _ => method_not_allowed(LINKSET_ALLOW),
     };
     set(resp.headers_mut(), header::ALLOW, LINKSET_ALLOW);
+    set(
+        resp.headers_mut(),
+        header::HeaderName::from_static("accept-patch"),
+        ACCEPT_PATCH,
+    );
     add_link(resp.headers_mut(), uri, "anchor", None);
     resp
+}
+
+/// An RFC 9264 linkset document: an object whose `linkset` is an array of objects with an `anchor`
+/// and arrays of target objects with an `href`.
+fn valid_linkset(doc: &Value) -> bool {
+    // `linkset` is the document's only member (RFC 9264 section 4.2.1).
+    if doc.as_object().is_none_or(|o| o.len() != 1) {
+        return false;
+    }
+    let Some(entries) = doc.get("linkset").and_then(Value::as_array) else {
+        return false;
+    };
+    entries.iter().all(|e| {
+        let Some(o) = e.as_object() else { return false };
+        o.iter().all(|(k, v)| {
+            if k == "anchor" {
+                v.is_string()
+            } else {
+                v.as_array().is_some_and(|ts| {
+                    ts.iter()
+                        .all(|t| t.get("href").is_some_and(Value::is_string))
+                })
+            }
+        })
+    })
 }
 
 /// Silence the unused import lint for constants other modules use through this one.
@@ -2698,7 +4456,7 @@ mod tests {
 
     use crate::store::sparq::InMemorySparqClient;
     use crate::store::{CompositeStore, InMemoryBlobStore};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     type Mem = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
     const BASE: &str = "http://lws.test";
@@ -2956,20 +4714,566 @@ mod tests {
         assert_eq!(e["license"][0]["href"], "https://ex.org/lic");
     }
 
+    /// A webhook inbox on loopback that records what it is sent.
+    async fn inbox() -> (String, Arc<Mutex<Vec<Value>>>) {
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let sink = got.clone();
+        let app = axum::Router::new().route(
+            "/inbox",
+            axum::routing::post(move |body: Bytes| {
+                let sink = sink.clone();
+                async move {
+                    if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+                        sink.lock().unwrap().push(v);
+                    }
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        (format!("http://{addr}/inbox"), got)
+    }
+
+    async fn subscribe(st: &LwsState<Mem>, inbox: &str) {
+        let body =
+            json!({"type": "WebhookSubscription", "topic": [format!("{BASE}/")], "inbox": inbox});
+        let r = call(
+            st,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body.to_string(),
+        )
+        .await;
+        assert!(r.status().is_success(), "{}", r.status());
+    }
+
+    /// The (type, object id) of each activity delivered so far, once `n` have arrived.
+    async fn activities(got: &Arc<Mutex<Vec<Value>>>, n: usize) -> Vec<(String, String)> {
+        for _ in 0..200 {
+            if got.lock().unwrap().len() >= n {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        got.lock()
+            .unwrap()
+            .iter()
+            .flat_map(|e| match &e["activity"] {
+                Value::Array(a) => a.clone(),
+                one => vec![one.clone()],
+            })
+            .map(|a| {
+                (
+                    a["type"][0].as_str().unwrap_or_default().to_string(),
+                    a["object"]["id"].as_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn linkset_patch_announces_an_update() {
+        let st = state().await;
+        let uri = post(&st, "n.txt", "text/plain", "x", &[]).await;
+        let (inbox, got) = inbox().await;
+        subscribe(&st, &inbox).await;
+        let patch =
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l"}]}]});
+        let r = call(
+            &st,
+            "PATCH",
+            &format!("{}{META_SUFFIX}", path_of(&uri)),
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&patch),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(activities(&got, 1).await, vec![("Update".to_string(), uri)]);
+    }
+
+    /// Review finding: the owner could subscribe to the access request, grant and subscription
+    /// containers, but creating or removing a record in them announced nothing to those
+    /// subscriptions. Each is announced, to a subscription to its own container (not to one to
+    /// the storage root, whose members these records are not).
+    #[tokio::test]
+    async fn service_records_are_announced_to_their_containers() {
+        let st = state().await;
+        let (inbox, got) = inbox().await;
+        for container in [SUBSCRIPTIONS_PATH, REQUESTS_PATH, GRANTS_PATH] {
+            let body = json!({"type": "WebhookSubscription", "topic": [format!("{BASE}{container}")], "inbox": inbox});
+            let r = call(
+                &st,
+                "POST",
+                SUBSCRIPTIONS_PATH,
+                &[("content-type", LWS_JSON)],
+                &body.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED, "{container}");
+        }
+        // The subscriptions container's own subscription hears of itself and the two made
+        // after it.
+        let mut want: Vec<(String, String)> = Vec::new();
+        let seen = activities(&got, 3).await;
+        assert_eq!(seen.len(), 3, "{seen:?}");
+        assert!(seen.iter().all(|(kind, _)| kind == "Create"));
+        want.extend(seen);
+        for (path, kind) in [
+            (REQUESTS_PATH, "AccessRequest"),
+            (GRANTS_PATH, "AccessGrant"),
+        ] {
+            let doc = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": [kind],
+                "storage": format!("{BASE}/"),
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+            });
+            let r = call(
+                &st,
+                "POST",
+                path,
+                &[("content-type", LWS_JSON)],
+                &doc.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED, "{path}");
+            let record = hdr(&r, "location");
+            want.push(("Create".into(), record.clone()));
+            let r = call(&st, "DELETE", path_of(&record), &[], "").await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT, "{path}");
+            want.push(("Delete".into(), record));
+        }
+        let mut seen = activities(&got, want.len()).await;
+        seen.sort();
+        want.sort();
+        assert_eq!(seen, want);
+    }
+
+    #[tokio::test]
+    async fn recursive_delete_announces_every_descendant() {
+        let st = state().await;
+        let container = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+        let c = hdr(
+            &call(&st, "POST", "/", &[("slug", "d"), ("link", container)], "").await,
+            "location",
+        );
+        let inner = hdr(
+            &call(
+                &st,
+                "POST",
+                path_of(&c),
+                &[("slug", "e"), ("link", container)],
+                "",
+            )
+            .await,
+            "location",
+        );
+        let leaf = hdr(
+            &call(
+                &st,
+                "POST",
+                path_of(&inner),
+                &[("slug", "f.txt"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+            "location",
+        );
+        let (inbox, got) = inbox().await;
+        subscribe(&st, &inbox).await;
+        let r = call(&st, "DELETE", path_of(&c), &[("depth", "infinity")], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let mut seen = activities(&got, 3).await;
+        seen.sort();
+        let mut want: Vec<(String, String)> = [&c, &inner, &leaf]
+            .iter()
+            .map(|u| ("Delete".to_string(), u.to_string()))
+            .collect();
+        want.sort();
+        assert_eq!(seen, want);
+    }
+
+    /// A JSON Patch replacing the `linkset` array with `doc`'s.
+    fn replace_linkset(doc: &Value) -> String {
+        json!([{"op": "replace", "path": "/linkset", "value": doc["linkset"]}]).to_string()
+    }
+
+    /// A linkset PATCH in another format is a 415 whatever its validators, and a JSON Patch with
+    /// a stale one a 412.
+    /// A linkset holds no numbers: one a patch adds is refused as a number, not taken as the
+    /// text the patch holds it as.
+    #[tokio::test]
+    async fn a_linkset_patch_cannot_add_a_number() {
+        let st = state().await;
+        let uri = post(&st, "f.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        for value in ["5", "1e400", r#"[{"href":"https://ex.org/l","title":5}]"#] {
+            let ops = format!(r#"[{{"op":"add","path":"/linkset/0/license","value":{value}}}]"#);
+            let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], &ops).await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+        }
+        let ops = r#"[{"op":"add","path":"/linkset/0/license","value":[{"href":"https://ex.org/l","title":"\ue0005"}]}]"#;
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], ops).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let r = call(&st, "GET", &meta, &[], "").await;
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let doc: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(doc["linkset"][0]["license"][0]["title"], "\u{E000}5");
+    }
+
+    /// Every value is charged before it is copied: a compact array is refused for what it holds,
+    /// before the target or a copy of it is cloned.
+    #[test]
+    fn a_weighted_patch_charges_values_before_cloning_them() {
+        let many = Value::Array(vec![json!(""); 1000]);
+        let doc = json!({"a": many});
+        let none = json!([]);
+        let bytes = json_size(&doc);
+        assert!(json_patch_within(&doc, &none, bytes, false).is_ok());
+        assert_eq!(
+            json_patch_within(&doc, &none, bytes, true),
+            Err(PatchError::TooLarge)
+        );
+        let small = json!({"a": []});
+        let copy = json!([{"op": "add", "path": "/b", "value": many}]);
+        let budget = json_size(&small) + value_cost(&small) + 1000 * 3;
+        assert_eq!(
+            json_patch_within(&small, &copy, budget, true),
+            Err(PatchError::TooLarge)
+        );
+        assert!(json_patch_within(&small, &copy, budget, false).is_ok());
+        // Objects are charged a whole map node each, however few members they have.
+        let objects = Value::Array(vec![json!({"value": ""}); 100]);
+        assert!(value_cost(&objects) >= 100 * (VALUE_COST * 2 + OBJECT_COST + MEMBER_COST));
+    }
+
+    /// Review finding: a linkset patch was applied, written out and parsed again before its size
+    /// was checked, so one adding a target with half a million empty extension strings took tens
+    /// of MiB; and metadata past its size limit was answered as nesting too deeply. A linkset
+    /// patch, and what it makes, are held to the metadata's size before anything is applied.
+    #[tokio::test]
+    async fn a_linkset_patch_is_held_to_the_metadata_size() {
+        let st = state().await;
+        let uri = post(&st, "f.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let empties = vec!["\"\""; 500_000].join(",");
+        let ops = format!(
+            r#"[{{"op":"add","path":"/linkset/0/license","value":[{{"href":"https://ex.org/l","ext":[{empties}]}}]}}]"#
+        );
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], &ops).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        // The body is held to what parsing any text of its size may allocate, whatever its
+        // shape: singleton arrays and compact objects allocate far more than their bytes.
+        for unit in [r#"[""]"#, r#"{"value":""}"#, r#"{"":""}"#] {
+            let many = vec![unit; 15_000].join(",");
+            let ops = format!(
+                r#"[{{"op":"add","path":"/linkset/0/license","value":[{{"href":"https://ex.org/l","ext":[{many}]}}]}}]"#
+            );
+            let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], &ops).await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE, "{unit}");
+        }
+        // Within the body limit, but copied past what the linkset may cost.
+        let long = "a".repeat(LINKSET_PATCH_BODY / 4);
+        // Each copy appends the array to itself, doubling it.
+        let copies = [r#"{"op":"copy","from":"/linkset/0/license","path":"/linkset/0/license/-"}"#;
+            12]
+            .join(",");
+        let ops = format!(
+            r#"[{{"op":"add","path":"/linkset/0/license","value":[{{"href":"https://ex.org/l","title":"{long}"}}]}},{copies}]"#
+        );
+        assert!(ops.len() < LINKSET_PATCH_BODY);
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], &ops).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let ops =
+            r#"[{"op":"add","path":"/linkset/0/license","value":[{"href":"https://ex.org/l"}]}]"#;
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], ops).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// Review finding: a Link header with `rel="anchor"` on a create or a replace overwrote the
+    /// linkset entry's anchor with a target array, served as it was. `anchor` is not a relation:
+    /// it is never taken from a Link header, and a stored linkset is used only when it is shaped
+    /// as one.
+    #[tokio::test]
+    async fn a_link_header_never_sets_the_anchor() {
+        let st = state().await;
+        let link = (
+            "link",
+            r#"<https://evil.example/x>; rel="anchor", <https://ex.org/l>; rel="license""#,
+        );
+        let uri = post(&st, "f.txt", "text/plain", "x", &[link]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let r = call(&st, "GET", &meta, &[], "").await;
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let doc: Value = serde_json::from_slice(&body).unwrap();
+        for entry in doc["linkset"].as_array().unwrap() {
+            assert!(entry["anchor"].is_string(), "{doc}");
+        }
+        let mine = doc["linkset"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["anchor"] == uri.as_str())
+            .unwrap();
+        assert_eq!(mine["license"][0]["href"], "https://ex.org/l");
+        assert!(Resolved::stored(json!({"linkset": [{"anchor": ["x"]}]})).is_none());
+    }
+
+    /// Review note: links a create accepted could make a linkset no PATCH could keep. A Link
+    /// header is held to the same caps as a patched linkset.
+    #[tokio::test]
+    async fn a_link_header_is_held_to_the_linkset_caps() {
+        let st = state().await;
+        let long = format!(
+            "<https://ex.org/{}>; rel=\"license\"",
+            "a".repeat(MAX_LINKSET_FIELD)
+        );
+        let r = call(
+            &st,
+            "POST",
+            "/",
+            &[("content-type", "text/plain"), ("link", &long)],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+        let many = (0..=MAX_LINKSET_TARGETS)
+            .map(|i| format!("<https://e.org/{i}>; rel=\"license\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let r = call(
+            &st,
+            "POST",
+            "/",
+            &[("content-type", "text/plain"), ("link", &many)],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+    }
+
+    /// Review findings: a Turtle representation stating thousands of types was stored, but its
+    /// linkset was then past what any PATCH may change, so every PATCH (even one shrinking it)
+    /// was refused; and a patched document with members besides `linkset` was taken, with them
+    /// dropped. A write is held to what a linkset PATCH accepts, and other members are refused.
+    #[tokio::test]
+    async fn a_stored_linkset_is_always_patchable() {
+        let st = state().await;
+        let many: String = (0..MAX_LINKSET_TARGETS)
+            .map(|i| format!("<> a <https://ex.org/T{i}> .\n"))
+            .collect();
+        let r = call(&st, "POST", "/", &[("content-type", "text/turtle")], &many).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let most: String = (0..MAX_LINKSET_TARGETS - 8)
+            .map(|i| format!("<> a <https://ex.org/T{i}> .\n"))
+            .collect();
+        let uri = post(&st, "t.ttl", "text/turtle", &most, &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let ops =
+            r#"[{"op":"add","path":"/linkset/0/license","value":[{"href":"https://ex.org/l"}]}]"#;
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], ops).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let ops = r#"[{"op":"add","path":"/extra","value":"x"}]"#;
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], ops).await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn a_linkset_patch_checks_its_format_before_its_preconditions() {
+        let st = state().await;
+        let uri = post(&st, "f.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let stale = ("if-match", "\"stale\"");
+        let ops =
+            r#"[{"op":"add","path":"/linkset/0/license","value":[{"href":"https://ex.org/l"}]}]"#;
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", "application/merge-patch+json"), stale],
+            "{}",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH), stale],
+            ops,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], ops).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn linkset_patch_ignores_server_managed_relations_and_keeps_links_in_step() {
+        let st = state().await;
+        let uri = post(
+            &st,
+            "p.txt",
+            "text/plain",
+            "x",
+            &[("link", "<https://ex.org/lic>; rel=\"license\"")],
+        )
+        .await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        // A patch replacing the whole array: a forged parent and type, and a new link only.
+        let patch = json!({"linkset": [{"anchor": uri, "up": [{"href": "https://forged/"}],
+            "type": [{"href": "https://forged/T"}], "describedby": [{"href": "https://ex.org/schema"}]}]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&patch),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let e = &doc["linkset"][0];
+        assert_eq!(e["up"], json!([{"href": format!("{BASE}/")}]));
+        assert_eq!(
+            e["type"],
+            json!([{"href": "https://www.w3.org/ns/lws#DataResource"}])
+        );
+        assert_eq!(e["describedby"][0]["href"], "https://ex.org/schema");
+        assert!(e.get("license").is_none());
+        // The links the type index matches follow the document: the license is gone from both.
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert!(!m.links.contains_key("license"), "{:?}", m.links);
+        assert_eq!(
+            m.links["describedby"],
+            vec!["https://ex.org/schema".to_string()]
+        );
+        assert!(m.types.is_empty());
+    }
+
     #[test]
     fn user_linkset_strips_server_relations_of_the_anchor_only() {
-        let doc = json!({"linkset": [
-            {"anchor": "http://h/a", "up": [{"href": "x"}], "self": [{"href": "y"}], "license": [{"href": "l"}]},
-            {"anchor": "http://h/b", "up": [{"href": "z"}]},
-            {"anchor": "/a", "type": [{"href": "t"}]},
-        ]});
-        assert_eq!(
-            user_linkset(&doc, "http://h/a"),
-            json!({"linkset": [
-                {"anchor": "http://h/a", "license": [{"href": "l"}]},
+        let doc = absolute_linkset(
+            &json!({"linkset": [
+                {"anchor": "http://h/a", "up": [{"href": "x"}], "self": [{"href": "y"}], "license": [{"href": "l"}]},
                 {"anchor": "http://h/b", "up": [{"href": "z"}]},
+                {"anchor": "/a", "type": [{"href": "t"}]},
+            ]}),
+            "http://h/a.meta",
+            usize::MAX,
+        )
+        .unwrap();
+        assert_eq!(
+            user_linkset(&doc, "http://h/a").into_value(),
+            json!({"linkset": [
+                {"anchor": "http://h/a", "license": [{"href": "http://h/l"}]},
+                {"anchor": "http://h/b", "up": [{"href": "http://h/z"}]},
             ]})
         );
+        let links = links_of(&doc, "http://h/a");
+        assert_eq!(links.keys().collect::<Vec<_>>(), vec!["license"]);
+        assert_eq!(links["license"], vec!["http://h/l".to_string()]);
+    }
+
+    /// Review finding: relative references in a patched linkset were resolved against the
+    /// resource, while clients resolve them against the linkset that delivers them (RFC 9264
+    /// section 4), and malformed references were kept and served.
+    #[tokio::test]
+    async fn linkset_references_resolve_against_the_linkset() {
+        let st = state().await;
+        let uri = post(&st, "doc", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let linkset = format!("{uri}{META_SUFFIX}");
+        let patch = json!({"linkset": [
+            {"anchor": uri, "license": [{"href": "#license"}]},
+            {"anchor": "", "author": [{"href": "https://ex.org/a"}]},
+        ]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&patch),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let entries = doc["linkset"].as_array().unwrap();
+        let about = |a: &str| entries.iter().find(|e| e["anchor"] == a).unwrap().clone();
+        // What is served and what the type index matches name the same link.
+        assert_eq!(
+            about(&uri)["license"][0]["href"],
+            format!("{linkset}#license")
+        );
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.links["license"], vec![format!("{linkset}#license")]);
+        // An empty anchor is the linkset itself, not the resource it describes.
+        assert_eq!(about(&linkset)["author"][0]["href"], "https://ex.org/a");
+        assert!(!m.links.contains_key("author"));
+        let before = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        for bad in [
+            json!({"linkset": [{"anchor": "http://[", "license": [{"href": "https://ex.org/l"}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "%ZZ"}]}]}),
+            // Review finding: target attributes are held to the shapes RFC 9264 gives them.
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title": 123}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "hreflang": "en"}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title*": [{"value": 1}]}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title*": []}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "ext": "x"}]}]}),
+        ] {
+            let r = call(
+                &st,
+                "PATCH",
+                &meta,
+                &[("content-type", JSON_PATCH)],
+                &replace_linkset(&bad),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        }
+        // The same through a JSON Patch.
+        for target in [
+            json!({"href": "https://ex.org/l", "hreflang": "en"}),
+            json!({"href": "https://ex.org/l", "title*": []}),
+        ] {
+            let bad = json!([{"op": "replace", "path": "/linkset", "value": [{"anchor": uri,
+                "license": [target]}]}]);
+            let r = call(
+                &st,
+                "PATCH",
+                &meta,
+                &[("content-type", JSON_PATCH)],
+                &bad.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        }
+        // None of them changed the metadata.
+        assert_eq!(
+            json_of(call(&st, "GET", &meta, &[], "").await).await,
+            before
+        );
+        // Well-shaped attributes are kept.
+        let good = json!({"linkset": [{"anchor": uri, "license": [{"href": "#license",
+            "title": "L", "hreflang": ["en"], "title*": [{"value": "L", "language": "en"}]}]}]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&good),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.links["license"], vec![format!("{linkset}#license")]);
     }
 
     /// Review finding: nothing bounded the types and links a resource's metadata held. A resource's
@@ -2980,7 +5284,7 @@ mod tests {
         let st = state().await;
         let turtle = |n: usize| {
             (0..n)
-                .map(|j| format!("<> a <https://ex.org/{j}/{}> .\n", "x".repeat(8000)))
+                .map(|j| format!("<> a <https://ex.org/{j}/{}> .\n", "x".repeat(4000)))
                 .collect::<String>()
         };
         let uri = post(&st, "m.ttl", "text/turtle", &turtle(1), &[]).await;
@@ -3001,7 +5305,8 @@ mod tests {
             }
         }
         let (i, status) = refused.expect("the metadata never filled");
-        assert_eq!(status, StatusCode::CONFLICT);
+        // The linkset the types make is held to the metadata's size before the metadata is.
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
         assert!(i > 2);
         // Neither the refused write's content nor its metadata was kept.
         let m = st.resource_meta(&uri).await.unwrap();
@@ -3339,6 +5644,11 @@ mod tests {
             ("GET", "", ""),
             ("HEAD", "", ""),
             ("PUT", "application/json", "{}"),
+            (
+                "PATCH",
+                JSON_PATCH,
+                "[{\"op\": \"remove\", \"path\": \"/pin\"}]",
+            ),
             ("DELETE", "", ""),
         ] {
             let r = handle(
@@ -3426,13 +5736,19 @@ mod tests {
             }
         };
         type Case<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str);
-        let cases: [Case<'_>; 4] = [
+        let cases: [Case<'_>; 5] = [
             ("GET", file.as_str(), &[], ""),
             (
                 "PUT",
                 file.as_str(),
                 &[("content-type", "application/json")],
                 "{\"bob\": 1}",
+            ),
+            (
+                "PATCH",
+                file.as_str(),
+                &[("content-type", JSON_PATCH)],
+                "[{\"op\": \"add\", \"path\": \"/bob\", \"value\": 1}]",
             ),
             ("DELETE", file.as_str(), &[], ""),
             (
@@ -3529,6 +5845,122 @@ mod tests {
         .await;
         assert_eq!(again.status(), StatusCode::OK);
         assert_ne!(hdr(&again, "last-modified"), since);
+    }
+
+    /// Review finding: Delete notifications were queued before the removal ran, so a failed
+    /// backend delete (a 500) still told subscribers the resource was gone, and a recursive delete
+    /// that stopped part way announced descendants it never touched.
+    #[tokio::test]
+    async fn deletes_are_announced_only_once_they_happen() {
+        use super::super::route;
+        use super::super::test_store::{request as req, state as flaky_state};
+        use std::sync::atomic::Ordering;
+        let (st, store) = flaky_state(100).await;
+        let base = st.cfg.absolute("");
+        let local = |u: &str| u.strip_prefix(base.as_str()).unwrap().to_string();
+        let send = |m: Method, p: &str, h: &[(&str, &str)], b: &str| {
+            let st = st.clone();
+            let r = req(m, p, h, b);
+            async move { route(&st, r).await }
+        };
+        let created = |r: Response| {
+            assert_eq!(r.status(), StatusCode::CREATED);
+            hdr(&r, "location")
+        };
+        let f = created(
+            send(
+                Method::POST,
+                "/",
+                &[("slug", "f"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let d = created(
+            send(
+                Method::POST,
+                "/",
+                &[("slug", "d"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+        );
+        let a = created(
+            send(
+                Method::POST,
+                &local(&d),
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let b = created(
+            send(
+                Method::POST,
+                &local(&d),
+                &[("slug", "b"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let (inbox, got) = inbox().await;
+        let body =
+            json!({"type": "WebhookSubscription", "topic": [st.cfg.storage()], "inbox": inbox});
+        let r = send(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body.to_string(),
+        )
+        .await;
+        assert!(r.status().is_success());
+        let deletes = |got: &Arc<Mutex<Vec<Value>>>| {
+            let got = got.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let mut gone: Vec<String> = activities(&got, 0)
+                    .await
+                    .into_iter()
+                    .filter(|(t, _)| t == "Delete")
+                    .map(|(_, u)| u)
+                    .collect();
+                gone.sort();
+                gone
+            }
+        };
+        // Wait until nothing is set aside: what a failed delete removed is put back first.
+        let settled = |st: LwsState<super::super::test_store::FlakyStore>, iris: Vec<String>| async move {
+            for _ in 0..250 {
+                if iris.iter().all(|i| st.visible(i)) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            panic!("still set aside");
+        };
+        let everything = vec![st.cfg.storage(), f.clone(), d.clone(), a.clone(), b.clone()];
+        // The backend refuses: a 5xx, the resource stays, and nobody hears of a delete.
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let r = send(Method::DELETE, &local(&f), &[], "").await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        store.fail_delete.store(false, Ordering::SeqCst);
+        settled(st.clone(), everything.clone()).await;
+        assert!(st.store.exists(&f).await.unwrap());
+        assert!(deletes(&got).await.is_empty());
+        // A recursive delete that fails on `b` is undone whole, and announces nothing.
+        *store.fail_delete_of.lock().unwrap() = Some(b.clone());
+        let r = send(Method::DELETE, &local(&d), &[("depth", "infinity")], "").await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.fail_delete_of.lock().unwrap() = None;
+        settled(st.clone(), everything.clone()).await;
+        for u in [&d, &a, &b] {
+            assert!(st.store.exists(u).await.unwrap(), "{u} was not put back");
+        }
+        assert!(deletes(&got).await.is_empty());
+        // Once the delete succeeds, it is announced.
+        let r = send(Method::DELETE, &local(&f), &[], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(deletes(&got).await.contains(&f));
     }
 
     /// Review finding: a data resource was removed in two steps, its parent's membership edge
@@ -3690,8 +6122,124 @@ mod tests {
             .ends_with(META_SUFFIX));
     }
 
-    /// Review finding: a create ignored the request's preconditions: a `POST` with
-    /// `If-None-Match: *` to an existing container created a member. They are now evaluated
+    /// Review finding: the metadata was written before the content and a failed rollback was
+    /// ignored. With one write left in a bounded store, a `Prefer: set-linkset` adding a type a
+    /// public grant covers landed its metadata, the content write and the rollback both failed,
+    /// and the old private content became public. Now the resource fails closed instead.
+    #[tokio::test]
+    async fn a_write_that_fails_part_way_fails_closed() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use super::super::FOAF_AGENT;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let public = "https://e.example/Public";
+        // Everyone may read what has the public type.
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": FOAF_AGENT,
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": public}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let base = st.cfg.absolute("");
+        let make = |slug: &'static str| {
+            let st = st.clone();
+            let owner = owner.clone();
+            async move {
+                let h = [("slug", slug), ("content-type", "text/plain")];
+                let r = create(
+                    &st,
+                    &req(Method::POST, "/", &h, "private"),
+                    &owner,
+                    &st.cfg.storage(),
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                hdr(&r, "location")
+            }
+        };
+        let link = format!("<{public}>; rel=\"type\"");
+        let put = |uri: &str| {
+            req(
+                Method::PUT,
+                uri.strip_prefix(base.as_str()).unwrap(),
+                &[
+                    ("content-type", "text/plain"),
+                    ("prefer", "set-linkset"),
+                    ("link", &link),
+                ],
+                "now public",
+            )
+        };
+        let get = |uri: &str| {
+            req(
+                Method::GET,
+                uri.strip_prefix(base.as_str()).unwrap(),
+                &[],
+                "",
+            )
+        };
+        // The control: once the write lands, the stranger reads the new content.
+        let open = make("open.txt").await;
+        assert_eq!(
+            handle(&st, &get(&open), &stranger).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            handle(&st, &put(&open), &owner).await.status(),
+            StatusCode::NO_CONTENT
+        );
+        let r = handle(&st, &get(&open), &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("now public"));
+        // One write left: the first metadata write lands, the content write and the rollback fail.
+        let secret = make("secret.txt").await;
+        *store.write_budget.lock().unwrap() = Some(1);
+        let r = handle(&st, &put(&secret), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.write_budget.lock().unwrap() = None;
+        assert_eq!(
+            st.store.read(&secret).await.unwrap().body,
+            Bytes::from("private")
+        );
+        // Whatever the metadata now says, the old content is not public.
+        let r = handle(&st, &get(&secret), &stranger).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        // The owner still may, and a completed write clears the mark.
+        assert_eq!(
+            handle(&st, &get(&secret), &owner).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            handle(&st, &put(&secret), &owner).await.status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(!st.resource_meta(&secret).await.unwrap().pending);
+        assert_eq!(
+            handle(&st, &get(&secret), &stranger).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// Review finding: a create, and a revocation of an access grant, ignored the request's
+    /// preconditions: a `POST` with `If-None-Match: *` to an existing container created a member,
+    /// and a grant was revoked under an `If-Match` naming another tag. Both are now evaluated
     /// against the target's validators before anything changes.
     #[tokio::test]
     async fn creates_and_service_deletes_evaluate_preconditions() {
@@ -3716,6 +6264,39 @@ mod tests {
         // The listing changed: the old tag no longer matches.
         let r = call(&st, "POST", "/c/", &[text, ("if-match", &tag)], "x").await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        // A grant is revoked only under a matching tag.
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let json = ("content-type", LWS_JSON);
+        let r = call(
+            &st,
+            "POST",
+            GRANTS_PATH,
+            &[json, ("if-none-match", "*")],
+            &grant,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        let r = call(&st, "POST", GRANTS_PATH, &[json], &grant).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let path = hdr(&r, "location")
+            .strip_prefix(&st.cfg.base_url)
+            .unwrap()
+            .to_string();
+        let tag = hdr(&call(&st, "GET", &path, &[], "").await, "etag");
+        let r = call(&st, "DELETE", &path, &[("if-match", "\"other\"")], "").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            call(&st, "GET", &path, &[], "").await.status(),
+            StatusCode::OK
+        );
+        let r = call(&st, "DELETE", &path, &[("if-match", &tag)], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
     }
 
     /// Review finding: a gzip body was stored as the representation and its Content-Encoding
@@ -3942,6 +6523,401 @@ mod tests {
         assert_ne!(st.resource_meta(&d).await.unwrap().modified_ms, before);
     }
 
+    /// Review finding: a conditional create in a service container checked the listing without
+    /// holding it, so two creates under the same `If-Match` both succeeded; a listing that could
+    /// not be produced (a representation the client does not accept) carried no `ETag` and so
+    /// passed `If-None-Match: *`; and members of an ordinary container were written and deleted
+    /// without waiting for a conditional create holding their container.
+    #[tokio::test]
+    async fn conditional_creates_hold_the_listing_they_checked() {
+        let st = state().await;
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let json = ("content-type", LWS_JSON);
+        let r = call(
+            &st,
+            "POST",
+            GRANTS_PATH,
+            &[json, ("accept", "text/plain"), ("if-none-match", "*")],
+            &grant,
+        )
+        .await;
+        assert!(!r.status().is_success(), "{}", r.status());
+        let tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let matching = [json, ("if-match", tag.as_str())];
+        let both = tokio::join!(
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+        );
+        let mut statuses = [both.0.status(), both.1.status()];
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            [StatusCode::CREATED, StatusCode::PRECONDITION_FAILED]
+        );
+        // While a conditional create holds a container, its members' changes wait.
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let r = call(&st, "POST", "/", &[("slug", "c"), ("link", &container)], "").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let text = ("content-type", "text/plain");
+        for name in ["put", "delete"] {
+            let r = call(&st, "POST", "/c/", &[text, ("slug", name)], "x").await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let put_tag = current(&st, &st.cfg.absolute("/c/put"))
+            .await
+            .ok()
+            .map(|m| m.etag);
+        let grants_tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let held = st.locks.lock(&st.cfg.absolute("/c/")).await;
+        let grants = st.locks.lock(&st.cfg.absolute(GRANTS_PATH)).await;
+        let spawn = |method: &'static str,
+                     path: &'static str,
+                     headers: Vec<(&'static str, &'static str)>,
+                     body: &'static str| {
+            let st = st.clone();
+            tokio::spawn(async move { call(&st, method, path, &headers, body).await.status() })
+        };
+        let waiting = [
+            spawn("PUT", "/c/put", vec![text], "y"),
+            spawn("DELETE", "/c/delete", vec![], ""),
+            spawn(
+                "POST",
+                GRANTS_PATH,
+                vec![json],
+                Box::leak(grant.into_boxed_str()),
+            ),
+        ];
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        for w in &waiting {
+            assert!(!w.is_finished());
+        }
+        // Nothing changed meanwhile: each waits before its write, not only before its touch.
+        let tag = |path: &'static str| {
+            let iri = st.cfg.absolute(path);
+            let st = st.clone();
+            async move { current(&st, &iri).await.ok().map(|m| m.etag) }
+        };
+        assert_eq!(tag("/c/put").await, put_tag);
+        assert!(st
+            .store
+            .exists(&st.cfg.absolute("/c/delete"))
+            .await
+            .unwrap());
+        let listed = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        assert_eq!(listed, grants_tag);
+        drop((held, grants));
+        for w in waiting {
+            assert!(w.await.unwrap().is_success());
+        }
+    }
+
+    /// Review finding: a linkset PATCH was held to the body limit on the document it produced,
+    /// but a patch that strips the server-managed links got them back afterwards, so the served
+    /// linkset could pass the limit. The rebuilt document is what is measured.
+    #[tokio::test]
+    async fn a_linkset_patch_is_measured_with_the_links_it_gets_back() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        cfg.max_body = 64 << 10;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let types: String = (0..400)
+            .map(|i| format!("<> a <https://e.example/{}{i}> .\n", "t".repeat(80)))
+            .collect();
+        let turtle = ("content-type", "text/turtle");
+        let r = call(&st, "POST", "/", &[turtle, ("slug", "d")], &types).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let patch = ("content-type", "application/json-patch+json");
+        let replace = |n: usize| {
+            json!([{"op": "replace", "path": "/linkset/0", "value": {
+                "anchor": format!("{BASE}/d"),
+                "https://e.example/rel": [{"href": format!("https://e.example/{}", "x".repeat(n))}],
+            }}])
+            .to_string()
+        };
+        let r = call(&st, "PATCH", "/d.meta", &[patch], &replace(1 << 10)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = call(&st, "PATCH", "/d.meta", &[patch], &replace(30 << 10)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let served = body_of(call(&st, "GET", "/d.meta", &[], "").await).await;
+        assert!(served.len() <= 64 << 10, "{}", served.len());
+    }
+
+    /// Review findings: relative references were resolved with no bound, the size checked only
+    /// on the rebuilt document, and the indexed links copied a relation for every target: a patch
+    /// of many short references under a long name, or of many targets under one long relation,
+    /// allocated far more than the body limit first. A document a client writes is held to caps
+    /// on entries, targets and each field, and its worst case to the budget, before anything is
+    /// resolved.
+    #[test]
+    fn a_linkset_is_measured_before_it_is_resolved() {
+        let base = "http://h/r.meta";
+        let doc = |entries: usize, targets: usize, rel: &str, href: &str| {
+            let entry = |i: usize| {
+                let mut e = Map::new();
+                e.insert("anchor".into(), json!(format!("http://h/{i}")));
+                e.insert(rel.into(), json!(vec![json!({"href": href}); targets]));
+                Value::Object(e)
+            };
+            json!({"linkset": (0..entries).map(entry).collect::<Vec<_>>()})
+        };
+        let ok = |d: &Value| absolute_linkset(d, base, usize::MAX).is_ok();
+        let large = |d: &Value| absolute_linkset(d, base, usize::MAX) == Err(Unresolved::TooLarge);
+        // Entries.
+        assert!(ok(&doc(MAX_LINKSET_ENTRIES, 1, "license", "x")));
+        assert!(large(&doc(MAX_LINKSET_ENTRIES + 1, 1, "license", "x")));
+        // Targets, over every entry.
+        let per = MAX_LINKSET_TARGETS / 4;
+        assert!(ok(&doc(4, per, "license", "x")));
+        let mut over = doc(4, per, "license", "x");
+        over["linkset"][0]["license"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"href": "y"}));
+        assert!(large(&over));
+        // Each field.
+        let at = "r".repeat(MAX_LINKSET_FIELD);
+        let past = "r".repeat(MAX_LINKSET_FIELD + 1);
+        assert!(ok(&doc(1, 1, &format!("x:{}", &at[2..]), "x")));
+        assert!(large(&doc(1, 1, &format!("x:{}", &past[2..]), "x")));
+        assert!(ok(&doc(1, 1, "license", &format!("x:{}", &at[2..]))));
+        assert!(large(&doc(1, 1, "license", &past)));
+        // A relative reference at the cap is past it once resolved, and is refused rather
+        // than stored past it.
+        assert!(large(&doc(1, 1, "license", &at)));
+        let mut anchored = doc(1, 1, "license", "x");
+        anchored["linkset"][0]["anchor"] = json!(format!("http://h/{}", &at[9..]));
+        assert!(ok(&anchored));
+        anchored["linkset"][0]["anchor"] = json!(format!("http://h/{}", &past[9..]));
+        assert!(large(&anchored));
+        // The worst case against the budget: at it, and one byte short of it.
+        let d = doc(4, 8, "license", "x");
+        let cost = linkset_cost(&d, base.len()).unwrap();
+        assert!(absolute_linkset(&d, base, cost).is_ok());
+        assert_eq!(
+            absolute_linkset(&d, base, cost - 1),
+            Err(Unresolved::TooLarge)
+        );
+        // One long relation over many targets: the copies the indexed links could make are
+        // within the budget, or it is refused.
+        let rel = format!("x:{}", "k".repeat(MAX_LINKSET_FIELD - 2));
+        let hrefs: Vec<Value> = (0..MAX_LINKSET_TARGETS)
+            .map(|i| json!({"href": format!("x:{i:05}")}))
+            .collect();
+        let many = json!({"linkset": [{"anchor": "http://h/r", rel.clone(): hrefs}]});
+        let cost = linkset_cost(&many, base.len()).unwrap();
+        assert!(cost >= 2 * json_size(&many));
+        assert_eq!(
+            absolute_linkset(&many, base, PATCH_BUDGET.min(cost - 1)),
+            Err(Unresolved::TooLarge)
+        );
+        let resolved = absolute_linkset(&many, base, cost).unwrap();
+        let links = links_of(&resolved, "http://h/r");
+        assert_eq!(links[&rel].len(), MAX_LINKSET_TARGETS);
+    }
+
+    /// Review finding: the measure charged only anchors, relations and hrefs, so relations with
+    /// no targets and long attribute arrays were not counted. Every value is charged.
+    #[test]
+    fn a_linkset_is_charged_for_every_value_it_holds() {
+        let base = "http://h/r.meta";
+        let mut empty = Map::new();
+        empty.insert("anchor".into(), json!("http://h/r"));
+        for i in 0..10_000 {
+            empty.insert(format!("x:{i}"), json!([]));
+        }
+        let empty = json!({"linkset": [empty]});
+        let attrs = json!({"linkset": [{"anchor": "http://h/r", "license": [{
+            "href": "x", "ext": vec!["a"; 10_000],
+        }]}]});
+        for d in [&empty, &attrs] {
+            let cost = linkset_cost(d, base.len()).unwrap();
+            assert!(cost >= 10_000 * VALUE_COST, "{cost}");
+            assert_eq!(
+                absolute_linkset(d, base, 10_000 * VALUE_COST),
+                Err(Unresolved::TooLarge)
+            );
+            assert!(absolute_linkset(d, base, cost).is_ok());
+        }
+    }
+
+    /// Review finding: the indexed links resolved a linkset's references again, with other
+    /// rules than the linkset's own, so a stored link could name another target than the
+    /// served one. They are taken as resolved.
+    #[test]
+    fn indexed_links_are_the_linksets_own() {
+        let doc = json!({"linkset": [{"anchor": "https://example.test/d", "license": [
+            {"href": "https:foo"}, {"href": "https:foo"}, {"href": "/l"},
+        ]}]});
+        let resolved = absolute_linkset(&doc, "https://example.test/d.meta", usize::MAX).unwrap();
+        let served: Vec<&str> = resolved.0["linkset"][0]["license"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["href"].as_str().unwrap())
+            .collect();
+        let links = links_of(&resolved, "https://example.test/d");
+        let mut once = served.clone();
+        once.dedup();
+        assert_eq!(links["license"], once);
+    }
+
+    /// A PATCH past the caps is refused with 413, with a body under the limit.
+    #[tokio::test]
+    async fn a_linkset_patch_past_the_caps_is_refused() {
+        let st = state().await;
+        let uri = post(&st, "doc", "text/plain", "x", &[]).await;
+        let path = format!("{}{META_SUFFIX}", path_of(&uri));
+        let patch = ("content-type", JSON_PATCH);
+        // A linkset at the cap, stored as a write would store it (a patch body is too small to
+        // hold one whole).
+        let served = body_of(call(&st, "GET", &path, &[], "").await).await;
+        let served: Value = serde_json::from_slice(&served).unwrap();
+        let server_targets: usize = served["linkset"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|e| e.as_object().unwrap().values())
+            .filter_map(Value::as_array)
+            .map(Vec::len)
+            .sum();
+        let full: Vec<Value> = (0..MAX_LINKSET_TARGETS - server_targets)
+            .map(|i| json!({"href": format!("https://ex.org/{i}")}))
+            .collect();
+        let mut meta = st.resource_meta(&uri).await.unwrap();
+        meta.linkset = Some(json!({"linkset": [{"anchor": uri, "license": full}]}));
+        st.put_resource_meta(&uri, &meta).await.unwrap();
+        let add = |href: &str| {
+            json!([{"op": "add", "path": "/linkset/0/license/-", "value": {"href": href}}])
+                .to_string()
+        };
+        let r = call(&st, "PATCH", &path, &[patch], &add("https://ex.org/more")).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        // One that keeps within the cap applies.
+        let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+        assert!(r.status().is_success(), "{}", r.status());
+    }
+
+    /// Review finding: metadata stored before linksets were held to their caps (an href past
+    /// the field cap, more targets than a linkset may hold) could not be patched at all, not even
+    /// to remove what passes the caps. Until it is admissible again it takes only remove and test
+    /// operations (nothing its cost could fund), and the result is held to every cap: one that
+    /// removes the excess succeeds, one that keeps it or adds anything is refused.
+    #[tokio::test]
+    async fn a_linkset_stored_past_the_caps_can_be_patched_back_within_them() {
+        let st = state().await;
+        let patch = ("content-type", JSON_PATCH);
+        let long = format!("https://ex.org/{}", "a".repeat(MAX_LINKSET_FIELD));
+        let many: Vec<Value> = (0..3 * MAX_LINKSET_TARGETS)
+            .map(|i| json!({"href": format!("https://ex.org/{i}")}))
+            .collect();
+        for license in [json!([{"href": long}]), Value::Array(many)] {
+            let uri = post(&st, "legacy", "text/plain", "x", &[]).await;
+            let path = format!("{}{META_SUFFIX}", path_of(&uri));
+            let mut meta = st.resource_meta(&uri).await.unwrap();
+            meta.linkset = Some(json!({"linkset": [{"anchor": uri, "license": license}]}));
+            st.put_resource_meta(&uri, &meta).await.unwrap();
+            let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            let keep = r#"[{"op":"add","path":"/linkset/0/describedby","value":[{"href":"https://ex.org/d"}]}]"#;
+            let r = call(&st, "PATCH", &path, &[patch], keep).await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            // Until it is admissible, only remove and test apply: removing it funds no copy.
+            let copy = r#"[{"op":"remove","path":"/linkset/0/license"},{"op":"add","path":"/x","value":[{}]},{"op":"copy","from":"/x","path":"/x/-"}]"#;
+            let r = call(&st, "PATCH", &path, &[patch], copy).await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            let remove = r#"[{"op":"remove","path":"/linkset/0/license"}]"#;
+            let r = call(&st, "PATCH", &path, &[patch], remove).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            let served = json_of(call(&st, "GET", &path, &[], "").await).await;
+            assert!(served["linkset"][0].get("license").is_none());
+            let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            // Admissible again, it takes any patch.
+            let r = call(&st, "PATCH", &path, &[patch], keep).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        }
+    }
+
+    /// Review findings: a patched linkset was checked, with the server's links put back, only
+    /// for its size, so one could be stored whose cost the next PATCH refused, every PATCH after
+    /// it then refused, even one shrinking it; a PUT adding types to a patched linkset was checked
+    /// without it; and a relative href at the cap was stored past it once resolved. Every write
+    /// that stores a linkset checks it as the next PATCH checks its target, so a PATCH applying
+    /// nothing always succeeds afterwards.
+    #[tokio::test]
+    async fn every_stored_linkset_takes_a_patch() {
+        let st = state().await;
+        let patch = ("content-type", JSON_PATCH);
+        let turtle = |n: usize| -> String {
+            (0..n)
+                .map(|i| format!("<> a <https://ex.org/T{i}> .\n"))
+                .collect()
+        };
+        // Many types, then a target with many attribute values, copied over and over.
+        let uri = post(&st, "t.ttl", "text/turtle", &turtle(900), &[]).await;
+        let path = format!("{}{META_SUFFIX}", path_of(&uri));
+        let mut ops = vec![json!({
+            "op": "add",
+            "path": "/linkset/0/license",
+            "value": [{"href": "https://ex.org/l", "ext": vec![""; 2048]}],
+        })];
+        ops.extend((0..13).map(|_| {
+            json!({"op": "copy", "from": "/linkset/0/license/0", "path": "/linkset/0/license/-"})
+        }));
+        let ops = Value::Array(ops).to_string();
+        assert!(ops.len() <= LINKSET_PATCH_BODY);
+        let r = call(&st, "PATCH", &path, &[patch], &ops).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        // A linkset grown as far as PATCH takes it, then a PUT adding types to it.
+        let uri = post(&st, "u.ttl", "text/turtle", &turtle(1), &[]).await;
+        let path = format!("{}{META_SUFFIX}", path_of(&uri));
+        let one = json!([{
+            "op": "add",
+            "path": "/linkset/0/license/-",
+            "value": {"href": "https://ex.org/l", "ext": vec![""; 2048]},
+        }])
+        .to_string();
+        let first = json!([{"op": "add", "path": "/linkset/0/license", "value": []}]).to_string();
+        let r = call(&st, "PATCH", &path, &[patch], &first).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let mut grown = 0;
+        loop {
+            let r = call(&st, "PATCH", &path, &[patch], &one).await;
+            if r.status() != StatusCode::NO_CONTENT {
+                assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+                break;
+            }
+            grown += 1;
+            assert!(grown < 1000);
+        }
+        assert!(grown > 0);
+        let put = ("content-type", "text/turtle");
+        let r = call(&st, "PUT", path_of(&uri), &[put], &turtle(900)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        // A relative href at the cap is past it once resolved.
+        let long = json!([{
+            "op": "add",
+            "path": "/linkset/0/describedby",
+            "value": [{"href": "r".repeat(MAX_LINKSET_FIELD)}],
+        }])
+        .to_string();
+        let r = call(&st, "PATCH", &path, &[patch], &long).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let r = call(&st, "PATCH", &path, &[patch], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
     /// Review finding: a create whose store call reported a failure removed the new member's
     /// metadata, though a remote store may have committed the content before its reply was lost:
     /// the content stayed, without its creator, types and links. The metadata now goes only once
@@ -4046,7 +7022,8 @@ mod tests {
     }
 
     /// Sweep finding: HEAD on a 304 carried `Content-Length: 0`, which RFC 9110 section 8.6
-    /// forbids unless the 200 has that length.
+    /// forbids unless the 200 has that length; and service resources and listings answered GET
+    /// with a failing `If-Match` as if it held.
     #[tokio::test]
     async fn bodiless_heads_and_service_reads_follow_their_preconditions() {
         use axum::body::Body;
@@ -4067,7 +7044,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status(), StatusCode::CREATED);
-        for uri in ["/doc.txt"] {
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": "http://localhost:3000/",
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        });
+        let r = send(
+            "POST",
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            grant.to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let member = hdr(&r, "location")
+            .strip_prefix("http://localhost:3000")
+            .unwrap()
+            .to_string();
+        for uri in ["/doc.txt", GRANTS_PATH, member.as_str()] {
             let tag = hdr(&send("GET", uri, &[], String::new()).await.unwrap(), "etag");
             let head = send("HEAD", uri, &[("if-none-match", &tag)], String::new())
                 .await
@@ -4170,6 +7166,113 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(status, StatusCode::OK);
+    }
+
+    /// Review finding: a content write that failed was taken not to have landed, and the old
+    /// metadata put back. A remote store can report a failure (a timeout, a lost reply) for an
+    /// update it committed: a PUT that made a public resource private and dropped its public type
+    /// then left the new private content under the old public type. A write whose outcome is not
+    /// known is now put back whole, content included; and when putting back fails too, the
+    /// resource stays pending, so it fails closed.
+    #[tokio::test]
+    async fn a_write_whose_outcome_is_unknown_stays_pending() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use super::super::FOAF_AGENT;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let public = "https://e.example/Public";
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": FOAF_AGENT,
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": public}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let put = |ty: &str, body: &str| {
+            let link = format!("<{ty}>; rel=\"type\"");
+            req(
+                Method::PUT,
+                "/doc.txt",
+                &[("content-type", "text/plain"), ("link", &link)],
+                body,
+            )
+        };
+        let get = req(Method::GET, "/doc.txt", &[], "");
+        let uri = st.cfg.absolute("/doc.txt");
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, "x"),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(hdr(&r, "location"), uri);
+        // Public to begin with.
+        let r = handle(&st, &put(public, "public"), &owner).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert_eq!(handle(&st, &get, &stranger).await.status(), StatusCode::OK);
+        // Made private; the store commits the content and then reports a failure. The content
+        // and the metadata are put back as they were, so nothing changed.
+        let version = || async { st.resource_meta(&st.cfg.storage()).await.unwrap().version };
+        let before = version().await;
+        *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.fail_after_write_of.lock().unwrap() = None;
+        assert_eq!(version().await, before);
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public"));
+        // When the content cannot be put back either, the PUT ends (5xx) and the resource is set
+        // aside, its lock held, until it is put back: meanwhile it is unavailable (503), and the
+        // new content is never served under the old public type.
+        *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
+        *store.fail_restore_of.lock().unwrap() = Some(uri.clone());
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        *store.fail_after_write_of.lock().unwrap() = None;
+        *store.fail_restore_of.lock().unwrap() = None;
+        for _ in 0..200 {
+            if st.visible(&uri) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public"));
+        // (Its container was touched: when the PUT answered, the outcome was not settled.)
+        assert!(!st.resource_meta(&uri).await.unwrap().pending);
+        // A write that fails before it is sent still restores the old metadata.
+        let r = handle(&st, &put(public, "public again"), &owner).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        *store.refuse_write_of.lock().unwrap() = Some(uri.clone());
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        *store.refuse_write_of.lock().unwrap() = None;
+        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        assert!(!st.resource_meta(&uri).await.unwrap().pending);
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public again"));
     }
 
     /// Review finding: a conditional DELETE of a container computed the listing's tag only for
@@ -5204,6 +8307,51 @@ mod tests {
         assert_eq!(hdr(&r, "location"), format!("{x}-2"));
     }
 
+    /// Review finding: a create's writes ran in a task of their own, but the container's touch and
+    /// the Create notification ran after it in the request, so a client that went away left a
+    /// committed member that nobody heard of and a container whose listing validators stood still.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancelled_create_is_still_announced() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::time::Duration;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        // No room in the delivery queue: every notification made is counted as dropped.
+        cfg.delivery = super::super::notify::DeliveryLimits {
+            queue: 0,
+            workers: 1,
+            per_inbox: 1,
+        };
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let root = st.cfg.storage();
+        st.notify
+            .subscribe_root_for_test(&root, "http://127.0.0.1:9/inbox");
+        let version = st.resource_meta(&root).await.unwrap().version;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let h = [("slug", "x"), ("content-type", "text/plain")];
+        let request = req(Method::POST, "/", &h, "x");
+        let agent = Agent::anonymous();
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            create(&st, &request, &agent, &root),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if st.notify.dropped() > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(st.store.exists(&format!("{root}x")).await.unwrap());
+        assert_eq!(st.notify.dropped(), 1, "the Create was never announced");
+        assert_ne!(st.resource_meta(&root).await.unwrap().version, version);
+    }
+
     /// Review finding: with the create's writes inline, a client that went away released the
     /// locks while a remote create it had sent was still pending. A second POST with the same
     /// Slug took the name and wrote its creator's metadata, and the late commit then put the first
@@ -5290,7 +8438,7 @@ mod tests {
         }
     }
 
-    /// Review finding: a content-only PUT and a DELETE made their store writes
+    /// Review finding: a linkset PATCH, a content-only PUT and a DELETE made their store writes
     /// inline, so a client that went away released the resource's lock while a write sent to a
     /// remote store could still commit. A delete and a re-create by someone else could then slip
     /// in, and the late write landed on the new resource: the old creator over it, or old content
@@ -5370,6 +8518,27 @@ mod tests {
                 assert_eq!(m.creator, bob.subject, "{name}");
             }
         };
+        // A linkset PATCH whose metadata write is pending when the client goes away.
+        let x = format!("{c}x");
+        assert_eq!(
+            post(st.clone(), owner.clone(), "x", "owner's")
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_write_of.lock().unwrap() = Some((meta_key(&x), gate.clone()));
+        let patch = format!(
+            r#"[{{"op":"replace","path":"/linkset","value":[{{"anchor":"{x}","https://e.example/rel":[{{"href":"https://e.example/t"}}]}}]}}]"#
+        );
+        let h = [("content-type", JSON_PATCH)];
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            handle(&st, &req(Method::PATCH, "/c/x.meta", &h, &patch), &owner),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        replace("x", gate).await;
         // A content-only PUT whose write is pending when the client goes away.
         let y = format!("{c}y");
         assert_eq!(
@@ -5425,6 +8594,52 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_ne!(version().await, was);
+    }
+
+    /// Review finding: a linkset nested to the parser's limit validated, but stored inside the
+    /// metadata it nested one level deeper, so the metadata never read back and every later read
+    /// took the defaults (no creator, no types, no links).
+    #[tokio::test]
+    async fn a_linkset_too_deep_to_store_is_refused() {
+        let st = state().await;
+        let uri = post(&st, "deep.txt", "text/plain", "x", &[]).await;
+        let mut meta = st.resource_meta(&uri).await.unwrap();
+        meta.creator = Some("https://bob.example/#me".into());
+        meta.types = vec!["https://e.example/T".into()];
+        st.put_resource_meta(&uri, &meta).await.unwrap();
+        let p = format!("{}{META_SUFFIX}", path_of(&uri));
+        // The deepest patch the request parser accepts.
+        let body = |depth: usize| {
+            format!(
+                r#"[{{"op":"replace","path":"/linkset","value":[{{"anchor":"{uri}","https://e.example/rel":[{{"href":"x","ext":{}1{}}}]}}]}}]"#,
+                "[".repeat(depth),
+                "]".repeat(depth)
+            )
+        };
+        let depth = (1..200)
+            .take_while(|d| serde_json::from_str::<Value>(&body(*d)).is_ok())
+            .last()
+            .unwrap();
+        let r = call(
+            &st,
+            "PATCH",
+            &p,
+            &[("content-type", JSON_PATCH)],
+            &body(depth),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let kept = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(kept.creator, meta.creator);
+        assert_eq!(kept.types, meta.types);
+        // One that fits as stored (and has the shapes RFC 9264 gives its attributes: nothing
+        // nests deeper than an internationalised attribute's objects) is taken, and reads back.
+        let fits = format!(
+            r#"[{{"op":"replace","path":"/linkset","value":[{{"anchor":"{uri}","https://e.example/rel":[{{"href":"x","ext":["1"],"title*":[{{"value":"t"}}]}}]}}]}}]"#
+        );
+        let r = call(&st, "PATCH", &p, &[("content-type", JSON_PATCH)], &fits).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(st.resource_meta(&uri).await.unwrap().creator, meta.creator);
     }
 
     /// Review finding: stored metadata that did not parse was read as the defaults.
@@ -5693,5 +8908,664 @@ mod tests {
             let r = call(&st, m, &p, &[("if-none-match", &tag)], "").await;
             assert_eq!(r.status(), StatusCode::NOT_MODIFIED, "{m}");
         }
+    }
+
+    /// Review finding: a JSON Patch `move` was not counted against the budget at all, and adds and
+    /// copies counted their values but not the keys and separators around them, so a patch could
+    /// build a document larger than the budget.
+    #[test]
+    fn json_patch_counts_keys_separators_and_moves() {
+        let long = "k".repeat(1000);
+        // Many members with long keys and empty values: the keys are most of the document.
+        let ops: Vec<Value> = (0..20)
+            .map(|i| json!({"op": "add", "path": format!("/{long}{i}"), "value": 0}))
+            .collect();
+        let ops = Value::Array(ops);
+        let built = json_patch(&json!({}), &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&built);
+        assert!(size > 20_000);
+        // Exact: the budget the result takes is enough, a byte less is not.
+        assert_eq!(json_patch(&json!({}), &ops, size), Ok(built));
+        assert_eq!(
+            json_patch(&json!({}), &ops, size - 1),
+            Err(PatchError::TooLarge)
+        );
+        // A move to a longer key grows the document by the difference.
+        let doc = json!({"a": [1, 2, 3], "b": {}});
+        let ops = json!([{"op": "move", "from": "/a", "path": format!("/b/{long}")}]);
+        let moved = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&moved);
+        assert_eq!(json_patch(&doc, &ops, size), Ok(moved));
+        assert_eq!(json_patch(&doc, &ops, size - 1), Err(PatchError::TooLarge));
+        // Moves, copies, removes and escaped keys, counted exactly along the way.
+        let ops = json!([
+            {"op": "add", "path": "/x", "value": {"q\"uote": [1, 2]}},
+            {"op": "copy", "from": "/x", "path": "/y~1z"},
+            {"op": "move", "from": "/x/q\"uote/0", "path": "/x/q\"uote/-"},
+            {"op": "remove", "path": "/b"},
+            {"op": "add", "path": "/arr", "value": []},
+            {"op": "move", "from": "/a", "path": "/arr/0"},
+        ]);
+        let out = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        // The largest the document gets along the way.
+        let peak = (1..=ops.as_array().unwrap().len())
+            .map(|n| {
+                let prefix = Value::Array(ops.as_array().unwrap()[..n].to_vec());
+                json_size(&json_patch(&doc, &prefix, PATCH_BUDGET).unwrap())
+            })
+            .max()
+            .unwrap();
+        assert_eq!(json_patch(&doc, &ops, peak).as_ref(), Ok(&out));
+        assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
+    }
+
+    /// Review finding: array indexes were parsed with `str::parse`, so `01` and `+1` named
+    /// member 1 in some operations, and escapes other than `~0` and `~1` passed. Every operation
+    /// now reads its pointers through one RFC 6901 parser.
+    #[test]
+    fn json_pointers_follow_rfc_6901() {
+        let doc = json!({"a": [10, 11, 12], "~/": 1});
+        let run = |ops: Value| json_patch(&doc, &ops, PATCH_BUDGET);
+        for index in [
+            "01",
+            "+1",
+            "1.0",
+            " 1",
+            "1 ",
+            "-1",
+            "3",
+            "18446744073709551616",
+            "-",
+        ] {
+            let path = format!("/a/{index}");
+            for op in [
+                json!({"op": "remove", "path": path}),
+                json!({"op": "replace", "path": path, "value": 0}),
+                json!({"op": "test", "path": path, "value": 11}),
+                json!({"op": "copy", "from": path, "path": "/b"}),
+                json!({"op": "move", "from": path, "path": "/b"}),
+            ] {
+                assert_eq!(run(json!([op])), Err(PatchError::Failed), "{op}");
+            }
+            if index != "3" && index != "-" {
+                let add = json!([{"op": "add", "path": path, "value": 0}]);
+                assert_eq!(run(add), Err(PatchError::Failed), "add at {index}");
+            }
+        }
+        for bad in ["a", "/~2", "/~", "/a~"] {
+            let op = json!([{"op": "test", "path": bad, "value": 1}]);
+            assert!(matches!(run(op), Err(PatchError::Malformed(_))), "{bad}");
+        }
+        let ops = json!([
+            {"op": "test", "path": "/a/0", "value": 10},
+            {"op": "test", "path": "/~0~1", "value": 1},
+            {"op": "add", "path": "/a/3", "value": 13},
+            {"op": "add", "path": "/a/-", "value": 14},
+            {"op": "move", "from": "/a/1", "path": "/a/1"},
+        ]);
+        assert_eq!(run(ops).unwrap()["a"], json!([10, 11, 12, 13, 14]));
+    }
+
+    /// Review finding: the work budget charged what an operation adds, not the array members an
+    /// insertion or a removal shifts. A thousand adds at the front of a long array passed both
+    /// budgets while moving the whole array each time.
+    #[test]
+    fn json_patch_charges_array_shifts() {
+        let long = Value::Array(vec![json!(0); 100_000]);
+        let budget = 8 << 20;
+        let at = |op: &str, path: &str| match op {
+            "remove" => json!({"op": "remove", "path": path}),
+            _ => json!({"op": op, "path": path, "value": 1}),
+        };
+        for (op, path) in [("add", "/0"), ("remove", "/0"), ("replace", "/0")] {
+            let few = Value::Array(vec![at(op, path); 3]);
+            assert!(json_patch(&long, &few, budget).is_ok(), "{op}");
+            let many = Value::Array(vec![at(op, path); MAX_PATCH_OPS]);
+            assert_eq!(
+                json_patch(&long, &many, budget),
+                Err(PatchError::TooLarge),
+                "{op}"
+            );
+        }
+        let moves = json!({"op": "move", "from": "/0", "path": "/1"});
+        let many = Value::Array(vec![moves; MAX_PATCH_OPS]);
+        assert_eq!(json_patch(&long, &many, budget), Err(PatchError::TooLarge));
+        // Appends and removals at the end move nothing.
+        let appends = Value::Array(vec![at("add", "/-"); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &appends, budget).is_ok());
+        let last = format!("/{}", 100_000 - 1);
+        let ops = Value::Array(vec![at("replace", &last); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &ops, budget).is_ok());
+    }
+
+    /// Review finding: a JSON Patch could repeat a costly operation without end within the size
+    /// budget (a copy of a large value over itself replaces it, so the document never grows). The
+    /// operations are counted, and the work they do is held to a budget of its own.
+    #[test]
+    fn json_patch_work_is_bounded() {
+        let big = json!({ "a": "x".repeat(1 << 20) });
+        let over_itself = json!({"op": "copy", "from": "/a", "path": "/a"});
+        // A few are fine; enough to do many times the budget's work are refused.
+        let few = Value::Array(vec![over_itself.clone(); 3]);
+        assert_eq!(json_patch(&big, &few, 8 << 20), Ok(big.clone()));
+        let many = Value::Array(vec![over_itself; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // Tests count too.
+        let probe = json!({"op": "test", "path": "/a", "value": "x".repeat(1 << 20)});
+        let many = Value::Array(vec![probe; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // And so do operations, however cheap.
+        let cheap = json!({"op": "test", "path": "/b", "value": 1});
+        let ops = Value::Array(vec![cheap.clone(); MAX_PATCH_OPS]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Ok(json!({"b": 1}))
+        );
+        let ops = Value::Array(vec![cheap; MAX_PATCH_OPS + 1]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn json_patch_copy_is_held_to_a_budget() {
+        let mut ops = Vec::new();
+        for _ in 0..40 {
+            ops.push(json!({"op": "copy", "from": "/a", "path": "/a/-"}));
+        }
+        let r = json_patch(&json!({"a": [1, 2, 3, 4]}), &Value::Array(ops), 4096);
+        assert_eq!(r, Err(PatchError::TooLarge));
+        // Within the budget, copies apply.
+        let ok = json_patch(
+            &json!({"a": [1]}),
+            &json!([{"op": "copy", "from": "/a", "path": "/b"}]),
+            4096,
+        );
+        assert_eq!(ok, Ok(json!({"a": [1], "b": [1]})));
+        // Replacing a member does not count the old value twice.
+        let mut ops = Vec::new();
+        for _ in 0..100 {
+            ops.push(json!({"op": "copy", "from": "/a", "path": "/b"}));
+        }
+        let big = json!({"a": "x".repeat(100)});
+        assert!(json_patch(&big, &Value::Array(ops), 1024).is_ok());
+    }
+
+    #[tokio::test]
+    async fn content_reading_patches_need_read() {
+        let st = state_with(false).await;
+        let anonymous = Agent::anonymous();
+        let reads = Patch::Json(json!([{"op": "test", "path": "/a", "value": 1}]));
+        let blind = Patch::Json(json!([{"op": "add", "path": "/a", "value": 1}]));
+        assert!(reads.reads_content());
+        assert!(!blind.reads_content());
+        for op in ["copy", "move"] {
+            assert!(json_patch_reads(
+                &json!([{"op": op, "from": "/a", "path": "/b"}])
+            ));
+        }
+        let uri = format!("{BASE}/");
+        let denied = patch_read_check(&st, &reads, &uri, &anonymous)
+            .await
+            .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let someone = Agent {
+            subject: Some("https://someone.example/#me".into()),
+            client: None,
+        };
+        let denied = patch_read_check(&st, &reads, &uri, &someone)
+            .await
+            .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        assert!(patch_read_check(&st, &blind, &uri, &anonymous)
+            .await
+            .is_ok());
+    }
+
+    /// `doc` with its `/d` wrapped in `n` more objects, by add and move alone.
+    fn nesting_ops(n: usize) -> Value {
+        let mut ops = Vec::new();
+        for _ in 0..n {
+            ops.push(json!({"op": "add", "path": "/w", "value": {}}));
+            ops.push(json!({"op": "move", "from": "/d", "path": "/w/d"}));
+            ops.push(json!({"op": "move", "from": "/w", "path": "/d"}));
+        }
+        Value::Array(ops)
+    }
+
+    /// Review finding: add and move can nest a document without bound (each op is small, so the
+    /// size budget never trips), deep enough to overflow the stack when it is serialized, cloned
+    /// or dropped.
+    #[tokio::test]
+    async fn json_patch_bounds_the_nesting_depth() {
+        let doc = json!({"d": 0});
+        // The root object and 126 wrappers: the deepest document serde_json parses back.
+        let ok = json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH - 1), PATCH_BUDGET).unwrap();
+        assert_eq!(json_depth(&ok), MAX_JSON_DEPTH);
+        let text = serde_json::to_string(&ok).unwrap();
+        assert!(serde_json::from_str::<Value>(&text).is_ok());
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Far past the bound: refused, not a stack overflow (by the operation count first, and by
+        // the depth bound for as many as are allowed).
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(100_000), PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_PATCH_OPS / 3), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // A copy into itself doubles the depth; add places a deep value under a deep path.
+        let deep = (0..100).fold(json!(0), |v, _| json!({ "d": v }));
+        let into = format!("/a{}", "/d".repeat(50));
+        let copy = json!([{"op": "copy", "from": "/a", "path": into}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep.clone() }), &copy, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        let path = format!("/a{}", "/d".repeat(99));
+        // 1 + 99 segments + a 30-deep value: over the bound, though each part alone parses.
+        let value = (0..30).fold(json!(1), |v, _| json!([v]));
+        let add = json!([{"op": "add", "path": path, "value": value}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep }), &add, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Over HTTP: 422, and the resource is untouched.
+        let st = state().await;
+        let uri = post(&st, "deep.json", "application/json", "{\"d\": 0}", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            &nesting_ops(MAX_JSON_DEPTH).to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = body_of(call(&st, "GET", path_of(&uri), &[], "").await).await;
+        assert_eq!(body, Bytes::from("{\"d\": 0}"));
+    }
+
+    /// Review finding: `test` compared with `Value` equality, so `1` and `1.0` differed; RFC 6902
+    /// section 4.6 compares numbers by value.
+    #[test]
+    fn json_patch_test_compares_numbers_by_value() {
+        let doc = json!({"n": 1, "f": 1.5, "big": u64::MAX, "a": [1, {"x": 2}], "o": {"p": 10, "q": [0]}});
+        let test = |path: &str, value: Value| {
+            json_patch(
+                &doc,
+                &json!([{"op": "test", "path": path, "value": value}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(test("/n", json!(1.0)));
+        assert!(test("/f", json!(1.5)));
+        assert!(test("/a", json!([1.0, {"x": 2.0}])));
+        assert!(test("/o", json!({"q": [0.0], "p": 1e1})));
+        assert!(test("/big", json!(u64::MAX)));
+        assert!(!test("/n", json!(1.5)));
+        assert!(!test("/n", json!("1")));
+        assert!(!test("/big", json!(u64::MAX - 1)));
+        // Distinct large integers never meet through a float.
+        let near = json!({"n": 9_007_199_254_740_993_i64});
+        let t = |v: Value| {
+            json_patch(
+                &near,
+                &json!([{"op": "test", "path": "/n", "value": v}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(!t(json!(9_007_199_254_740_992_i64)));
+        assert!(!t(json!(9_007_199_254_740_992.0)));
+        assert!(t(json!(9_007_199_254_740_993_i64)));
+    }
+
+    /// Review finding: a resource PATCH was held to the fixed [`PATCH_BUDGET`], so a
+    /// small patch could grow a document far past the configured body limit. Its result is now
+    /// held to `max_body`.
+    #[tokio::test]
+    async fn a_patch_is_held_to_the_body_limit() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        cfg.max_body = 64 << 10;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let doc = json!({ "a": "x".repeat(20 << 10) }).to_string();
+        let json = ("content-type", "application/json");
+        let r = call(&st, "POST", "/", &[json, ("slug", "d.json")], &doc).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let patch = ("content-type", "application/json-patch+json");
+        let copies = |n: usize| {
+            let ops: Vec<Value> = (0..n)
+                .map(|i| json!({"op": "copy", "from": "/a", "path": format!("/b{i}")}))
+                .collect();
+            Value::Array(ops).to_string()
+        };
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(1)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(4)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn malformed_json_patch_is_400_and_a_failing_one_422() {
+        let st = state().await;
+        let uri = post(&st, "k.json", JSON, r#"{"a":1}"#, &[]).await;
+        let p = path_of(&uri);
+        for bad in [
+            r#"{"op":"add"}"#,
+            r#"[{"op":"frobnicate","path":"/a"}]"#,
+            r#"[{"op":"add","path":"/b"}]"#,
+            r#"[{"op":"copy","path":"/b"}]"#,
+            r#"[{"path":"/a"}]"#,
+            r#"[{"op":"remove","path":"a"}]"#,
+        ] {
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], bad).await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{bad}");
+        }
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"remove","path":"/nope"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/a","value":2}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Review findings: a stored number of a million digits was normalized again by every
+    /// `test`, charged only for the patch's side; the size limits counted the marked form, so a
+    /// document of many small numbers outgrew the budget unchanged; a power of ten past 64 bits
+    /// was compared as text; and malformed text (`{1:2}`) was made JSON by the rewriting. Numbers
+    /// are bounded where they are read, zero is zero whatever its exponent, sizes are those
+    /// written, and the text is checked as written first.
+    #[tokio::test]
+    async fn json_patch_reads_numbers_within_bounds() {
+        let long = format!("1{}", "0".repeat(MAX_NUMBER_TEXT));
+        let longest = format!("1{}", "0".repeat(MAX_NUMBER_TEXT - 1));
+        assert_eq!(
+            read_numbers_as_text(format!("[{long}]").as_bytes()),
+            Err(Unreadable::Number)
+        );
+        assert!(read_numbers_as_text(format!("[{longest}]").as_bytes()).is_ok());
+        assert_eq!(
+            read_numbers_as_text(b"[1e9223372036854775808]"),
+            Err(Unreadable::Number)
+        );
+        assert_eq!(read_numbers_as_text(b"{1:2}"), Err(Unreadable::NotJson));
+        // A `test` is charged for both sides as it reads them: the long numbers it reads in the
+        // target count, not only the short ones the patch gives.
+        let one = format!("1.{}", "0".repeat(MAX_NUMBER_TEXT - 2));
+        let target = format!("{{\"a\":[{}]}}", vec![one.as_str(); 100].join(","));
+        let target = read_numbers_as_text(target.as_bytes()).unwrap();
+        let ones = vec!["1"; 100].join(",");
+        let test = format!(r#"{{"op":"test","path":"/a","value":[{ones}]}}"#);
+        let ops = |n: usize| {
+            read_numbers_as_text(format!("[{}]", vec![test.as_str(); n].join(",")).as_bytes())
+                .unwrap()
+        };
+        let budget = 2 * json_size(&target);
+        assert!(json_patch(&target, &ops(1), budget).is_ok());
+        assert_eq!(
+            json_patch(&target, &ops(20), budget),
+            Err(PatchError::TooLarge)
+        );
+        // Sizes are those written: the marks are not counted.
+        for text in ["[0,0,-1.5e3]", "{\"a\":\"\u{E000}x\",\"b\":[1,{\"c\":2}]}"] {
+            let held = read_numbers_as_text(text.as_bytes()).unwrap();
+            assert_eq!(json_size(&held), text.len(), "{text}");
+        }
+
+        let st = state().await;
+        let stored = r#"{"big":1e9223372036854775807,"z":0e9223372036854775808}"#;
+        let uri = post(&st, "n.json", JSON, stored, &[]).await;
+        let p = path_of(&uri);
+        for (ops, want) in [
+            (
+                r#"[{"op":"test","path":"/big","value":10e9223372036854775806}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/z","value":0}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/z","value":-0.0e-5}]"#,
+                StatusCode::NO_CONTENT,
+            ),
+            (
+                r#"[{"op":"test","path":"/big","value":1e9223372036854775808}]"#,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], ops).await;
+            assert_eq!(r.status(), want, "{ops}");
+        }
+        assert_eq!(st.store.read(&uri).await.unwrap().body, Bytes::from(stored));
+        // A target holding a number past the bound is refused, and left as it was.
+        let refused = format!("{{\"n\":{long}}}");
+        let uri = post(&st, "long.json", JSON, &refused, &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from(refused)
+        );
+        // An empty body is not JSON: refused, and left as it was.
+        let uri = post(&st, "empty.json", JSON, "", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert!(st.store.read(&uri).await.unwrap().body.is_empty());
+        // Malformed text stored as JSON is not rewritten into JSON.
+        let uri = post(&st, "bad.json", JSON, "{1:2}", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            "[]",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from("{1:2}")
+        );
+    }
+
+    /// Review findings: numbers were parsed into `f64` and written back, so an integer past
+    /// `u64` or a decimal with more digits than an `f64` holds was rewritten by a patch that
+    /// never touched it; a `test` compared an integer with a float through a cast, so it matched
+    /// a number it does not equal; and a guard refusing such numbers read them with another
+    /// float parser than the patch did. A patch never reads a number as a float: each is kept as
+    /// its text, and compared as the decimal value it denotes.
+    #[tokio::test]
+    async fn json_patch_keeps_every_number_exactly() {
+        // The text round trip, a string value or a member name that starts with the mark
+        // included (members in the order a written document has them).
+        let text = "{\"a\":[1e400,-0.9299999999999999,12345678901234567890123],\"e\":\"\\ue000w\",\"s\":\"1\",\"\u{E000}k\":\"\u{E000}v\"}";
+        let held = numbers_as_text(text).unwrap();
+        let parsed: Value = serde_json::from_str(&held).unwrap();
+        assert_eq!(parsed["a"][0], json!("\u{E000}1e400"));
+        assert_eq!(parsed["\u{E000}k"], json!("\u{E000}\u{E000}v"));
+        assert_eq!(parsed["e"], json!("\u{E000}\u{E000}w"));
+        assert_eq!(parsed["s"], json!("1"));
+        assert_eq!(
+            numbers_from_text(&serde_json::to_string(&parsed).unwrap()),
+            "{\"a\":[1e400,-0.9299999999999999,12345678901234567890123],\"e\":\"\u{E000}w\",\"s\":\"1\",\"\u{E000}k\":\"\u{E000}v\"}"
+        );
+        // Not a number: left for the parser to refuse.
+        for bad in ["01", "1.", ".5", "1e", "--1", "1.2.3"] {
+            assert!(!is_json_number(bad), "{bad}");
+            assert_eq!(
+                read_numbers_as_text(format!("[{bad}]").as_bytes()),
+                Err(Unreadable::NotJson)
+            );
+        }
+
+        let st = state().await;
+        let stored = r#"{"big":1e400,"f":0.9299999999999999,"id":12345678901234567890123,"n":1000000000000001024}"#;
+        let uri = post(&st, "big.json", JSON, stored, &[]).await;
+        let p = path_of(&uri);
+        let body = || async { st.store.read(&uri).await.unwrap().body };
+        // An empty patch writes every number back as it was.
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], "[]").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(body().await, Bytes::from(stored));
+        // `test` compares decimal values: a float near an integer does not equal it, and the
+        // same value written another way does.
+        for (value, equal) in [
+            ("1.000000000000001e18", false),
+            ("1000000000000001024.0", true),
+            ("1.000000000000001024e18", true),
+        ] {
+            let patch = format!(r#"[{{"op":"test","path":"/n","value":{value}}}]"#);
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], &patch).await;
+            let want = if equal {
+                StatusCode::NO_CONTENT
+            } else {
+                StatusCode::UNPROCESSABLE_ENTITY
+            };
+            assert_eq!(r.status(), want, "{value}");
+        }
+        // A patch's numbers are stored as written, and 1e400 is just another number.
+        let patch = r#"[{"op":"add","path":"/x","value":1e400},{"op":"add","path":"/y","value":0.1000000000000000055511151231257827}]"#;
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], patch).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let written = String::from_utf8(body().await.to_vec()).unwrap();
+        assert!(
+            written.starts_with(&stored[..stored.len() - 1]),
+            "{written}"
+        );
+        assert!(
+            written.ends_with(r#""x":1e400,"y":0.1000000000000000055511151231257827}"#),
+            "{written}"
+        );
+        // A number is never equal to a string holding its text.
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/x","value":"1e400"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Review finding: a JSON Patch on a resource stored as another format rewrote it as JSON
+    /// when its content happened to parse. Only a JSON resource is patched; the format is checked
+    /// (415) before the preconditions (412), and an operation that names a member twice is a 400.
+    #[tokio::test]
+    async fn json_patch_applies_to_json_resources_only() {
+        let st = state().await;
+        let uri = post(&st, "n.txt", "text/plain", "{\"a\":1}", &[]).await;
+        let p = path_of(&uri);
+        let add = r#"[{"op":"add","path":"/b","value":2}]"#;
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], add).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(hdr(&r, "accept-patch"), JSON_PATCH);
+        let stored = st.store.read(&uri).await.unwrap();
+        assert_eq!(stored.body, Bytes::from("{\"a\":1}"));
+        assert_eq!(stored.meta.content_type, "text/plain");
+        // 415 before 412, for the patch format and for the resource's.
+        let stale = ("if-match", "\"stale\"");
+        let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH), stale], add).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let json = post(&st, "j.json", "application/ld+json", "{\"a\":1}", &[]).await;
+        let jp = path_of(&json);
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", "text/plain"), stale],
+            add,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", JSON_PATCH), stale],
+            add,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        // A `+json` type is JSON, and keeps its type.
+        let r = call(&st, "PATCH", jp, &[("content-type", JSON_PATCH)], add).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            st.store.read(&json).await.unwrap().meta.content_type,
+            "application/ld+json"
+        );
+        // A repeated member is refused, whichever of its values would have been kept.
+        let r = call(
+            &st,
+            "PATCH",
+            jp,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/a","value":1,"op":"remove"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn patches() {
+        let t = json!({"title": "a", "keep": 1, "drop": true});
+        let p = json!([{"op": "add", "path": "/added", "value": 42}, {"op": "remove", "path": "/drop"},
+                       {"op": "replace", "path": "/title", "value": "b"}, {"op": "test", "path": "/keep", "value": 1}]);
+        assert_eq!(
+            json_patch(&t, &p, PATCH_BUDGET),
+            Ok(json!({"title": "b", "keep": 1, "added": 42}))
+        );
+        assert_eq!(
+            json_patch(
+                &t,
+                &json!([{"op": "test", "path": "/keep", "value": 2}]),
+                PATCH_BUDGET
+            ),
+            Err(PatchError::Failed)
+        );
+        assert_eq!(
+            json_patch(
+                &json!({"a": [1, 2]}),
+                &json!([{"op": "add", "path": "/a/-", "value": 3}]),
+                PATCH_BUDGET
+            ),
+            Ok(json!({"a": [1, 2, 3]}))
+        );
     }
 }
