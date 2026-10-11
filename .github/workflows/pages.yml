@@ -97,6 +97,11 @@ jobs:
     # re-publishes the paper factory; both are CI-written branches, never PR refs.
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/benchmark-data'
     runs-on: ubuntu-latest
+    # actions + pull-requests read: the PR-preview overlay lists open PRs and their artifacts.
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -495,10 +500,22 @@ jobs:
           [ "$fail" -eq 0 ] || { echo "::error::Pages artifact smoke check failed — see errors above"; exit 1; }
           echo "OK: Pages artifact smoke check passed" >> "$GITHUB_STEP_SUMMARY"
 
+      # Hosted PR previews: carry the open same-repository PRs' previews (preview/pr-N/,
+      # built by site-preview.yml) into every main deploy so a main deploy never drops them.
+      # A preview problem must not block the main site, hence continue-on-error.
+      - name: Overlay PR site previews (preview/pr-N/)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/site-preview-overlay.sh site/out
+
+      # retention-days: site-preview-deploy.yml starts from this artifact (the live site)
+      # when it publishes a PR preview between main deploys.
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site/out
+          retention-days: 30
 
   deploy:
     needs: build
