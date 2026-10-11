@@ -34,11 +34,15 @@ cargo test -p sparq-lws-authn
 - `Suites`: the suites a server offers. No two take the same token type.
 - `jose`: ES256 keys and compact JWS, JWK thumbprints, base64url.
 - `parse_datetime`, `SKEW_SECS`, `is_uri`: subject token times and IRIs.
+- `parse_jwt`, `check_times`, `addressed_to`: what every JWT subject token is checked for.
+- `fetch`: document fetches that refuse private and loopback addresses and cap size and
+  redirects.
 
 ## 📚 Learn more
 
 - `skills/solid-lws-server/SKILL.md`: configuring the suites a server offers.
-- [`sparq-lws-authn-saml`](../sparq-lws-authn-saml): a suite built on this crate.
+- [`sparq-lws-authn-openid`](../sparq-lws-authn-openid) and
+  [`sparq-lws-authn-saml`](../sparq-lws-authn-saml): suites built on this crate.
 
 ## License
 

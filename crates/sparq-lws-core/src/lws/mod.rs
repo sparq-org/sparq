@@ -51,9 +51,7 @@ use serde_json::{json, Value};
 
 use crate::store::Store;
 
-pub const LWS_NS: &str = "https://www.w3.org/ns/lws#";
-pub const LWS_CONTEXT: &str = "https://www.w3.org/ns/lws/v1";
-pub const CID_CONTEXT: &str = "https://www.w3.org/ns/cid/v1";
+pub use sparq_lws_authn::{CID_CONTEXT, LWS_CONTEXT, LWS_NS};
 pub const AS_CONTEXT: &str = "https://www.w3.org/ns/activitystreams";
 pub const FOAF_AGENT: &str = "http://xmlns.com/foaf/0.1/Agent";
 
@@ -106,9 +104,6 @@ pub struct LwsConfig {
     /// private addresses (identity documents, OpenID providers, webhook inboxes). Development and
     /// conformance testing only.
     pub allow_insecure_fetch: bool,
-    /// OpenID Providers whose identities get the reserved half of the DPoP replay cache (see
-    /// [`subject_tokens::DpopReplay`]). Every other provider shares the other half.
-    pub trusted_oidc_issuers: Vec<String>,
     /// Largest request body read, in bytes; a larger one is refused with 413 before it is
     /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
     /// [`crate::body_limit`]), the same one the Solid surface enforces.
@@ -120,8 +115,24 @@ pub struct LwsConfig {
     suites: sparq_lws_authn::Suites,
 }
 
+/// The suites a configuration offers before any is configured: those built in that need no
+/// configuration (OpenID Connect, with no trusted providers).
+fn default_suites() -> sparq_lws_authn::Suites {
+    #[allow(unused_mut)]
+    let mut suites = sparq_lws_authn::Suites::default();
+    #[cfg(feature = "authn-openid")]
+    suites
+        .register(
+            std::sync::Arc::new(sparq_lws_authn_openid::OpenId::default()),
+            authz_server::BUILT_IN_TOKEN_TYPES,
+        )
+        .expect("the built-in suites take distinct token types");
+    suites
+}
+
 impl LwsConfig {
-    /// A configuration with fresh keys and no owner, for `base_url`.
+    /// A configuration with fresh keys and no owner, for `base_url`. It offers the authentication
+    /// suites built in that need no configuration ([`LwsConfig::suites`]).
     pub fn new(base_url: &str) -> Self {
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -133,11 +144,26 @@ impl LwsConfig {
             notify_key: jose::EcKey::generate("notify-key"),
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
-            trusted_oidc_issuers: Vec::new(),
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
             delivery: notify::DeliveryLimits::default(),
-            suites: Default::default(),
+            suites: default_suites(),
         }
+    }
+
+    /// A configuration like [`LwsConfig::new`] that offers `suites` and no others, for an
+    /// embedder that configures its suites itself (an OpenID Connect suite with its trusted
+    /// providers, say). Refused when two suites take the same subject token type, or a suite
+    /// takes one the server checks itself.
+    pub fn with_suites(
+        base_url: &str,
+        suites: impl IntoIterator<Item = std::sync::Arc<dyn sparq_lws_authn::Suite>>,
+    ) -> Result<Self, String> {
+        let mut cfg = Self::new(base_url);
+        cfg.suites = sparq_lws_authn::Suites::default();
+        for suite in suites {
+            cfg.register_suite(suite)?;
+        }
+        Ok(cfg)
     }
 
     /// Read the `SOLID_SERVER_LWS_*` environment:
@@ -159,7 +185,8 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
     /// - `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS`: comma-separated OpenID Provider issuers whose
-    ///   identities get the reserved half of the DPoP replay cache;
+    ///   identities get the reserved half of the DPoP replay cache (the OpenID Connect suite, built
+    ///   with the default `authn-openid` feature; without it, setting this is an error);
     /// - `SOLID_SERVER_LWS_SAML_IDPS_FILE`: a JSON object of trusted SAML identity provider entity
     ///   ids to their keys, which offers the SAML 2.0 suite (built with the `authn-saml` feature;
     ///   without it, setting this is an error);
@@ -180,15 +207,6 @@ impl LwsConfig {
         cfg.open = flag("SOLID_SERVER_LWS_OPEN") || flag("SOLID_SERVER_OPEN_MODE");
         // Open mode is for local test harnesses, whose inboxes and documents are on private hosts.
         cfg.allow_insecure_fetch = cfg.open || flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
-        cfg.trusted_oidc_issuers = var("SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS")
-            .map(|v| {
-                v.split(',')
-                    .map(str::trim)
-                    .filter(|i| !i.is_empty())
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
             cfg.page_size = n
                 .parse()
@@ -260,6 +278,20 @@ impl LwsConfig {
 
     /// Offer the authentication suites the environment configures, of those built in.
     fn register_suites_from_env(&mut self) -> Result<(), String> {
+        self.suites = sparq_lws_authn::Suites::default();
+        #[cfg(feature = "authn-openid")]
+        self.register_suite(std::sync::Arc::new(
+            sparq_lws_authn_openid::OpenId::from_env(),
+        ))?;
+        #[cfg(not(feature = "authn-openid"))]
+        if std::env::var_os("SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS").is_some_and(|v| !v.is_empty())
+        {
+            return Err(
+                "SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS is set, but this server was built \
+                 without the OpenID Connect suite (the authn-openid feature)"
+                    .into(),
+            );
+        }
         #[cfg(feature = "authn-saml")]
         if let Some(saml) = sparq_lws_authn_saml::Saml::from_env()? {
             self.register_suite(std::sync::Arc::new(saml))?;
@@ -312,58 +344,27 @@ impl LwsConfig {
         &self.suites
     }
 
+    /// What the server may fetch: identity documents, provider metadata and keys, webhook
+    /// inboxes.
+    pub fn fetch_policy(&self) -> sparq_lws_authn::fetch::Policy {
+        sparq_lws_authn::fetch::Policy {
+            allow_insecure_fetch: self.allow_insecure_fetch,
+        }
+    }
+
     /// The absolute URI of a server path.
     pub fn absolute(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
 }
 
-/// The client the authorization server fetches identity documents, OpenID provider metadata and
-/// JWKS with (see [`subject_tokens::fetch`]): no automatic redirects (each hop is checked before it
-/// is requested), no proxy, and, unless `allow_insecure_fetch` is set, `https:` only through a
-/// resolver that hands out public addresses alone, so the connection goes to an address that
-/// passed the check (no DNS rebinding between check and connect).
+/// The client the authorization server and the notification sender fetch with (see
+/// [`sparq_lws_authn::fetch::fetch_client`]), for `cfg`'s fetch policy.
 pub fn fetch_client(cfg: &LwsConfig) -> Result<reqwest::Client, String> {
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy();
-    if !cfg.allow_insecure_fetch {
-        builder = builder
-            .dns_resolver(Arc::new(PublicOnlyResolver))
-            .https_only(true);
-    }
-    builder.build().map_err(|e| format!("http client: {e}"))
+    sparq_lws_authn::fetch::fetch_client(&cfg.fetch_policy())
 }
 
-/// Resolves names to their public addresses only (see [`subject_tokens::is_forbidden_ip`]), so an
-/// outbound request (a fetch or a notification delivery) cannot be pointed at the server's own
-/// network by a name that resolves there.
-pub struct PublicOnlyResolver;
-
-impl reqwest::dns::Resolve for PublicOnlyResolver {
-    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
-        let host = name.as_str().to_string();
-        Box::pin(async move {
-            let addrs = public_addrs(tokio::net::lookup_host((host.as_str(), 0)).await?);
-            if addrs.is_empty() {
-                return Err(format!("{host} has no public address").into());
-            }
-            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
-        })
-    }
-}
-
-/// The public addresses among `addrs`.
-pub fn public_addrs(
-    addrs: impl IntoIterator<Item = std::net::SocketAddr>,
-) -> Vec<std::net::SocketAddr> {
-    addrs
-        .into_iter()
-        .filter(|a| !subject_tokens::is_forbidden_ip(a.ip()))
-        .collect()
-}
+pub use sparq_lws_authn::fetch::{is_forbidden_ip, public_addrs, PublicOnlyResolver};
 
 /// The private key in the JWK file at `path`; when there is no file yet, a fresh key written there,
 /// its kid `kid` or, without one, its thumbprint.
@@ -407,45 +408,6 @@ fn rotated_as_keys(
         return Err("its kid is the current key's; give the rotated keys distinct kids".into());
     }
     Ok((current, previous))
-}
-
-/// Whether an address is one the server must not be made to reach: anything but a global unicast
-/// address. The one predicate every outbound request uses: identity documents, OpenID Providers,
-/// JWKS and webhook inboxes alike.
-pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(v4) => {
-            let o = v4.octets();
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_multicast()
-                || o[0] == 0
-                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10 shared address space
-                || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0.0/24
-                || (o[0] == 198 && (o[1] & 0xfe) == 18) // 198.18.0.0/15 benchmarking
-                || o[0] >= 240
-        }
-        std::net::IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(std::net::IpAddr::V4(v4));
-            }
-            let s = v6.segments();
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || v6.is_multicast()
-                || (s[0] & 0xfe00) == 0xfc00 // unique local
-                || (s[0] & 0xffc0) == 0xfe80 // link local
-                || (s[0] & 0xffc0) == 0xfec0 // site local
-                || (s[0] == 0x2001 && s[1] == 0x0db8) // documentation
-                || (s[0] == 0x0064 && s[1] == 0xff9b) // NAT64
-                || (s[0] == 0 && s[1] == 0 && s[2] == 0 && s[3] == 0 && s[4] == 0 && s[5] == 0)
-            // IPv4-compatible
-        }
-    }
 }
 
 /// Write a private key file readable by its owner only.
@@ -549,8 +511,6 @@ pub struct Inner<S: Store> {
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
     pub locks: resources::IriLocks,
-    /// DPoP proof ids seen at the token endpoint.
-    pub dpop_replay: subject_tokens::DpopReplay,
     /// The bytes set-aside changes hold to put back (see [`LwsState::may_write`]).
     set_aside_bytes: std::sync::atomic::AtomicUsize,
     /// The containers whose own modification time may be behind a change to them: each with
@@ -609,7 +569,6 @@ impl<S: Store + 'static> LwsState<S> {
                 notify,
                 http,
                 locks: Default::default(),
-                dpop_replay: Default::default(),
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
                 owed_touches: Default::default(),
@@ -1617,30 +1576,7 @@ impl Quota {
     }
 }
 
-/// How many bytes of expanded terms the triples parsed from `body_len` bytes of Turtle may hold
-/// between them. A prefix is written once and expanded at every use, so a short document can
-/// stand for an unbounded amount of text: parsing stops (and the document is refused) past this.
-pub(crate) fn expansion_budget(body_len: usize) -> usize {
-    body_len.saturating_mul(16).saturating_add(1 << 20)
-}
-
-/// The bytes a parsed triple's terms hold once expanded, as [`expansion_budget`] counts them.
-pub(crate) fn triple_bytes(t: &oxrdf::Triple) -> usize {
-    let node = |n: &oxrdf::NamedOrBlankNode| match n {
-        oxrdf::NamedOrBlankNode::NamedNode(n) => n.as_str().len(),
-        oxrdf::NamedOrBlankNode::BlankNode(b) => b.as_str().len(),
-    };
-    #[allow(unreachable_patterns)]
-    let object = match &t.object {
-        oxrdf::Term::NamedNode(n) => n.as_str().len(),
-        oxrdf::Term::BlankNode(b) => b.as_str().len(),
-        oxrdf::Term::Literal(l) => {
-            l.value().len() + l.datatype().as_str().len() + l.language().map_or(0, str::len)
-        }
-        other => other.to_string().len(),
-    };
-    node(&t.subject) + t.predicate.as_str().len() + object
-}
+pub(crate) use sparq_lws_authn::{expansion_budget, triple_bytes};
 
 /// Stored metadata of `iri`, parsed; metadata that does not parse is an error.
 pub(crate) fn parse_meta(
@@ -2723,6 +2659,37 @@ pub(crate) mod test_store {
 mod tests {
     use super::*;
     use test_store::{body_json, links, request};
+
+    /// Review finding: the default OpenID Connect suite could not be swapped for one with
+    /// trusted providers, as a second suite for ID Tokens is refused. An embedder offers the one
+    /// it configured, and that instance is the one the token endpoint asks.
+    #[cfg(feature = "authn-openid")]
+    #[test]
+    fn an_embedder_offers_the_suites_it_configured() {
+        use sparq_lws_authn::Suite;
+        use sparq_lws_authn_openid::OpenId;
+        let openid = Arc::new(OpenId::new(vec!["https://op.example".into()]));
+        let cfg =
+            LwsConfig::with_suites("http://localhost:3000", [openid.clone() as Arc<dyn Suite>])
+                .unwrap();
+        let offered = cfg.suites().find(authz_server::ID_TOKEN_TYPE).unwrap();
+        assert!(std::ptr::addr_eq(offered, Arc::as_ptr(&openid)));
+        assert_eq!(cfg.suites().iter().count(), 1);
+        // Still one suite per token type.
+        assert!(LwsConfig::with_suites(
+            "http://localhost:3000",
+            [
+                openid.clone() as Arc<dyn Suite>,
+                Arc::new(OpenId::default())
+            ]
+        )
+        .is_err());
+        // And the default configuration still offers it, without trusted providers.
+        assert!(LwsConfig::new("http://localhost:3000")
+            .suites()
+            .find(authz_server::ID_TOKEN_TYPE)
+            .is_some());
+    }
 
     /// Review finding: request caps were checked against what was registered, and the record
     /// registered after an asynchronous create, so concurrent creates all passed. Places are

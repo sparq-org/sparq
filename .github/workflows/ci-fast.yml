@@ -48,7 +48,7 @@ env:
   CORE_CRATES: >-
     -p sparq-core -p sparq-substrate -p sparq-engine -p sparq-cli
     -p sparq-server -p sparq-lws-core -p sparq-lws-authn -p sparq-lws-authn-saml
-    -p sparq-solid
+    -p sparq-lws-authn-openid -p sparq-solid
 
 jobs:
   lint:

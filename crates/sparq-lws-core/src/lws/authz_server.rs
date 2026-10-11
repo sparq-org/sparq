@@ -18,12 +18,12 @@ use crate::store::Store;
 pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
 
-/// The subject token types of the suites this server holds itself (did:key, controlled
-/// identifiers and OpenID Connect); the suites in their own packages
-/// ([`LwsConfig::register_suite`]) take the others, never these.
+/// The subject token types of the suites this server holds itself (did:key and controlled
+/// identifiers); the suites in their own packages ([`LwsConfig::register_suite`]) take the
+/// others, never these.
 ///
 /// [`LwsConfig::register_suite`]: super::LwsConfig::register_suite
-pub const BUILT_IN_TOKEN_TYPES: &[&str] = &[JWT_TOKEN_TYPE, ID_TOKEN_TYPE];
+pub const BUILT_IN_TOKEN_TYPES: &[&str] = &[JWT_TOKEN_TYPE];
 
 pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Response {
     if req.path == AS_TOKEN_PATH {
@@ -116,18 +116,8 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
         );
     }
     let verified = match form.subject_token_type.as_str() {
-        JWT_TOKEN_TYPE | ID_TOKEN_TYPE => {
-            subject_tokens::verify(
-                &state.cfg,
-                &state.http,
-                &form.subject_token,
-                &form.subject_token_type,
-                &subject_tokens::DpopContext {
-                    proof: dpop_header(req),
-                    replay: &state.dpop_replay,
-                },
-            )
-            .await
+        JWT_TOKEN_TYPE => {
+            subject_tokens::verify(&state.cfg, &state.http, &form.subject_token).await
         }
         other => match state.cfg.suites().find(other) {
             Some(suite) => {
@@ -136,8 +126,11 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
                         subject_token: &form.subject_token,
                         subject_token_type: other,
                         authorization_server: state.cfg.issuer(),
+                        token_endpoint: &state.cfg.absolute(AS_TOKEN_PATH),
                         dpop: dpop_header(req),
                         now: super::jose::now_secs(),
+                        fetch: state.cfg.fetch_policy(),
+                        http: &state.http,
                     })
                     .await
             }
