@@ -62,7 +62,9 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -1142,6 +1144,38 @@ class TestSlsaL3IsolationContract(unittest.TestCase):
         self.assertEqual(dirs, {"release-assets"}, f"release job stages into {sorted(dirs)}")
         for d in dirs:
             self.assertFalse((REPO_ROOT / d).exists(), f"{d}/ is in the repository checkout")
+
+    def test_release_staging_guard_runs_first_and_rejects_existing_dir(self):
+        """Run the guard step itself: it must come before every staging download, pass when
+        release-assets/ is absent, and fail when it exists (empty or not)."""
+        release_job = self.release.split("\n  release:\n", 1)[1].split("\n  verify-provenance:", 1)[0]
+        guard_at = release_job.find("- name: Require an empty release staging dir")
+        self.assertNotEqual(guard_at, -1, "release job has no staging-dir guard step")
+        first_download = release_job.find("actions/download-artifact@")
+        self.assertTrue(0 <= guard_at < first_download, "guard must run before the first download")
+        body = release_job[guard_at:].split("        run: |\n", 1)[1].splitlines()
+        lines = []
+        for line in body:
+            if not line.startswith(" " * 10):
+                break
+            lines.append(line[10:])
+        script = "\n".join(lines)
+
+        def run_guard(setup):
+            with tempfile.TemporaryDirectory() as tmp:
+                setup(Path(tmp))
+                return subprocess.run(["bash", "-c", script], cwd=tmp, capture_output=True).returncode
+
+        self.assertEqual(run_guard(lambda d: None), 0, "guard fails with no staging dir")
+        self.assertNotEqual(
+            run_guard(lambda d: (d / "release-assets").mkdir()), 0, "guard accepts an empty existing dir"
+        )
+
+        def with_file(d):
+            (d / "release-assets").mkdir()
+            (d / "release-assets" / "logo.svg").write_text("<svg/>")
+
+        self.assertNotEqual(run_guard(with_file), 0, "guard accepts a dir that already holds a file")
 
     # ---- #4572: the tag-pin review/bump policy. ----
     def test_pin_policy_holds(self):
