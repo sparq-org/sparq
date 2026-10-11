@@ -13,11 +13,12 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use super::access::{format_rfc3339, parse_rfc3339, Action};
+use super::notify::Event;
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
     problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
     JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
-    REQUESTS_PATH,
+    REQUESTS_PATH, SUBSCRIPTIONS_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -115,7 +116,7 @@ async fn handle_now<S: Store + 'static>(
     let is_root = path == "/";
     let accept = req.header(header::ACCEPT).unwrap_or_default();
     // The storage description is public: a client refused with a 401 finds the services through
-    // it. The root container's listing,
+    // it, and a webhook receiver finds the delivery key in it. The root container's listing,
     // served at the same URI for the LWS container types, is not. Only an explicit request for the
     // description bypasses authorization, so an anonymous probe of the root without Accept still
     // meets the challenge a client discovers the authorization server by.
@@ -374,7 +375,7 @@ enum Precondition {
     Failed,
 }
 
-/// How a read of a service resource (a grant or request, or a service listing)
+/// How a read of a service resource (a grant, request or subscription, or a service listing)
 /// whose current entity tag is `etag` is answered under the request's preconditions: 304, 412,
 /// or `None` to serve it, as [`evaluate`] decides for storage resources.
 pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
@@ -1277,7 +1278,7 @@ async fn listing<S: Store + 'static>(
 }
 
 /// The storage description: a controlled identifier document extended with the LWS vocabulary,
-/// naming the storage and its services.
+/// naming the storage and its services, and publishing the key notifications are signed with.
 pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
     let storage = cfg.storage();
@@ -1294,6 +1295,13 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
         cfg.absolute(REQUESTS_PATH),
     );
     requests["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
+    let mut notifications = service(
+        "notifications",
+        "NotificationService",
+        cfg.absolute(SUBSCRIPTIONS_PATH),
+    );
+    notifications["subscriptionType"] = json!(["WebhookSubscription"]);
+    let key_id = format!("{storage}#{}", cfg.notify_key.kid());
     json!({
         "@context": [CID_CONTEXT, LWS_CONTEXT],
         "id": storage,
@@ -1303,7 +1311,15 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
             service("authorization-server", "AuthorizationServer", cfg.issuer().to_string()),
             grants,
             requests,
+            notifications,
         ],
+        "verificationMethod": [{
+            "id": key_id,
+            "type": "JsonWebKey",
+            "controller": storage,
+            "publicKeyJwk": cfg.notify_key.public_jwk(),
+        }],
+        "authentication": [key_id],
     })
 }
 
@@ -1691,9 +1707,18 @@ async fn create<S: Store + 'static>(
                 }
             };
             // What follows a commit follows it whether or not the client is still there: the
-            // container's bookkeeping. The locks go first (the touch takes the container's lock
-            // again).
+            // container's bookkeeping and the Create notification. Who hears of it is decided
+            // with the locks still held, so no change that follows can hide the create; the locks
+            // then go (the touch takes the container's lock again) before anything is sent.
+            let event = Event {
+                kind: "Create",
+                uri: child.clone(),
+                is_container,
+                relation: Some(("target", parent.clone())),
+            };
+            let pending = state.notify.prepare(&state, &event).await;
             touch_after(&state, locks, &parent).await;
+            state.notify.send(&state, pending);
             Ok(created)
         })
         .await
@@ -1967,15 +1992,16 @@ async fn stored_meta<S: Store + 'static>(
 ///
 /// When the writes failed and could not be put back (`writes` yields what is left), the task
 /// sets that aside with the locks ([`LwsState::set_aside`](super::LwsState::set_aside)) and the
-/// locks do not come back. When they changed a container's listing (`touch` names it, from
-/// their outcome), the task also releases the locks and touches it ([`touch_container`]): a
-/// request that goes away once its writes have started cannot leave the container's date
-/// behind its listing.
+/// locks do not come back. What the writes changed (`after` says, from their outcome: a
+/// container whose listing changed, an event to announce) the task records once they are over:
+/// it decides who hears of the event with the locks held, then releases them, touches the
+/// container ([`touch_container`]) and sends the notifications, so a request that goes away once its writes have started can neither leave the
+/// container's date behind its listing nor keep subscribers from hearing of the change.
 async fn hold_locks<S, L, T, F, C>(
     state: &LwsState<S>,
     locks: L,
     admission: Option<crate::overload::AdmissionSlot>,
-    touch: C,
+    after: C,
     writes: F,
 ) -> Result<(T, Option<L>), ServerError>
 where
@@ -1983,18 +2009,28 @@ where
     L: Send + 'static,
     T: Send + 'static,
     F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
-    C: FnOnce(&T) -> Option<String> + Send + 'static,
+    C: FnOnce(&T) -> (Option<String>, Option<Event>) + Send + 'static,
 {
     let state = state.clone();
     tokio::spawn(async move {
         let _admission = admission;
         match writes.await {
-            (out, None) => match touch(&out) {
-                Some(container) => {
-                    touch_after(&state, locks, &container).await;
+            (out, None) => match after(&out) {
+                (None, None) => (out, Some(locks)),
+                (container, event) => {
+                    // Who hears of the change is decided while its locks are held: a later
+                    // write cannot then hide it from a subscriber who may read the result.
+                    let pending = match &event {
+                        Some(event) => state.notify.prepare(&state, event).await,
+                        None => Vec::new(),
+                    };
+                    match container {
+                        Some(container) => touch_after(&state, locks, &container).await,
+                        None => drop(locks),
+                    }
+                    state.notify.send(&state, pending);
                     (out, None)
                 }
-                None => (out, Some(locks)),
             },
             (out, Some(left)) => {
                 state.set_aside(left, locks);
@@ -2047,6 +2083,14 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
                   undone: bool| {
         !undone && matches!(outcome, Ok(_) | Err(ServerError::Storage(_)))
     };
+    // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
+    // metadata was modified"); none of one that may not have happened.
+    let update = {
+        let uri = uri.to_string();
+        move |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>| {
+            outcome.is_ok().then(|| updated(&uri))
+        }
+    };
     let changed = meta
         .map(|(mut new, old)| {
             new.pending = false;
@@ -2063,8 +2107,9 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
             let state = state.clone();
             async move { (state.store.write(&uri, body, &content_type).await, None) }
         };
-        let touch = move |w: &Result<_, ServerError>| parent.filter(|_| landed(w, false));
-        return match hold_locks(&state, guard, admission, touch, write).await {
+        let after =
+            move |w: &Result<_, ServerError>| (parent.filter(|_| landed(w, false)), update(w));
+        return match hold_locks(&state, guard, admission, after, write).await {
             Ok((written, guard)) => (written, guard, false),
             Err(e) => (Err(e), None, false),
         };
@@ -2097,9 +2142,10 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
             }
         }
     };
-    let touch =
-        move |(w, undone): &(Result<_, ServerError>, bool)| parent.filter(|_| landed(w, *undone));
-    match hold_locks(&state, guard, admission, touch, writes).await {
+    let after = move |(w, undone): &(Result<_, ServerError>, bool)| {
+        (parent.filter(|_| landed(w, *undone)), update(w))
+    };
+    match hold_locks(&state, guard, admission, after, writes).await {
         Ok(((outcome, undone), guard)) => (outcome, guard, undone),
         Err(e) => (Err(e), None, false),
     }
@@ -2227,6 +2273,17 @@ async fn update<S: Store + 'static>(
         );
     }
     resp
+}
+
+/// The event announcing that `uri`, which exists, changed: "Update — an existing resource's
+/// content or metadata was modified".
+fn updated(uri: &str) -> Event {
+    Event {
+        kind: "Update",
+        uri: uri.to_string(),
+        is_container: uri.ends_with('/'),
+        relation: None,
+    }
 }
 
 // ---- patch ----
@@ -3318,19 +3375,46 @@ async fn delete<S: Store + 'static>(
             return r;
         }
     }
-    // The removals run in a task that holds the subtree's locks, and the listing lock, until
-    // they are over, and then touches the container (see [`hold_locks`]). A removal that was
-    // put back changed nothing; what could not be is in `removed`.
+    // Who hears of each removal is decided before the resources go, while who may read each can
+    // still be decided; the notifications go out only once the whole removal happened. A recursive
+    // delete removes every descendant, and each removal is a Delete of its own.
+    let mut notices = Vec::with_capacity(doomed.len());
+    // They share the delivery queue's bound: what is prepared past it would be dropped when
+    // sent, and is not held while the removals run.
+    let mut room = state.cfg.delivery.queue;
+    for (gone, origin) in doomed.iter().cloned() {
+        let event = Event {
+            kind: "Delete",
+            is_container: gone.ends_with('/'),
+            uri: gone,
+            relation: origin.map(|p| ("origin", p)),
+        };
+        let pending = state.notify.prepare_at_most(state, &event, room).await;
+        room = room.saturating_sub(pending.len());
+        notices.push(pending);
+    }
+    // The removals, the notifications of those that happened and the touch of the container run
+    // in a task that holds the subtree's locks, and the listing lock, until the removals are
+    // over (see [`hold_locks`]). A removal that was put back changed nothing; what could not be
+    // is in `removed`.
     let removal = {
         let state = state.clone();
         async move {
             let (removed, outcome, left) = remove(&state, &doomed).await;
+            // Only a delete that happened whole is announced. One that failed was put back, or
+            // what could not be is set aside, so nothing it touched is announced as gone.
+            if outcome.is_ok() {
+                for pending in notices {
+                    state.notify.send(&state, pending);
+                }
+            }
             ((removed, outcome), left)
         }
     };
-    let touch = move |(removed, _): &(Vec<String>, _)| parent.filter(|_| !removed.is_empty());
+    let after =
+        move |(removed, _): &(Vec<String>, _)| (parent.filter(|_| !removed.is_empty()), None);
     let locks = (guards, listing);
-    let outcome = match hold_locks(state, locks, req.admission.clone(), touch, removal).await {
+    let outcome = match hold_locks(state, locks, req.admission.clone(), after, removal).await {
         Ok(((_, outcome), _)) => outcome,
         Err(e) => return store_error(e),
     };
@@ -4208,11 +4292,13 @@ async fn linkset<S: Store + 'static>(
                 async move { (state.put_resource_meta(&uri, &meta).await, None) }
             };
             let parent = parent_of(uri, &state.cfg.storage());
-            let touch = move |w: &Result<(), ServerError>| {
-                parent.filter(|_| matches!(w, Ok(()) | Err(ServerError::Storage(_))))
+            let event = updated(uri);
+            let after = move |w: &Result<(), ServerError>| {
+                let landed = matches!(w, Ok(()) | Err(ServerError::Storage(_)));
+                (parent.filter(|_| landed), w.is_ok().then_some(event))
             };
             let locks = (guard, listing.take());
-            match hold_locks(state, locks, req.admission.clone(), touch, write).await {
+            match hold_locks(state, locks, req.admission.clone(), after, write).await {
                 Ok((Ok(()), _)) => {}
                 Ok((Err(e), _)) | Err(e) => return store_error(e),
             }
@@ -4370,7 +4456,7 @@ mod tests {
 
     use crate::store::sparq::InMemorySparqClient;
     use crate::store::{CompositeStore, InMemoryBlobStore};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     type Mem = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
     const BASE: &str = "http://lws.test";
@@ -4626,6 +4712,188 @@ mod tests {
         assert_eq!(e["self"][0]["size"][0], "5");
         assert!(e["self"][0]["modified"][0].is_string());
         assert_eq!(e["license"][0]["href"], "https://ex.org/lic");
+    }
+
+    /// A webhook inbox on loopback that records what it is sent.
+    async fn inbox() -> (String, Arc<Mutex<Vec<Value>>>) {
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let sink = got.clone();
+        let app = axum::Router::new().route(
+            "/inbox",
+            axum::routing::post(move |body: Bytes| {
+                let sink = sink.clone();
+                async move {
+                    if let Ok(v) = serde_json::from_slice::<Value>(&body) {
+                        sink.lock().unwrap().push(v);
+                    }
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        (format!("http://{addr}/inbox"), got)
+    }
+
+    async fn subscribe(st: &LwsState<Mem>, inbox: &str) {
+        let body =
+            json!({"type": "WebhookSubscription", "topic": [format!("{BASE}/")], "inbox": inbox});
+        let r = call(
+            st,
+            "POST",
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body.to_string(),
+        )
+        .await;
+        assert!(r.status().is_success(), "{}", r.status());
+    }
+
+    /// The (type, object id) of each activity delivered so far, once `n` have arrived.
+    async fn activities(got: &Arc<Mutex<Vec<Value>>>, n: usize) -> Vec<(String, String)> {
+        for _ in 0..200 {
+            if got.lock().unwrap().len() >= n {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        got.lock()
+            .unwrap()
+            .iter()
+            .flat_map(|e| match &e["activity"] {
+                Value::Array(a) => a.clone(),
+                one => vec![one.clone()],
+            })
+            .map(|a| {
+                (
+                    a["type"][0].as_str().unwrap_or_default().to_string(),
+                    a["object"]["id"].as_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn linkset_patch_announces_an_update() {
+        let st = state().await;
+        let uri = post(&st, "n.txt", "text/plain", "x", &[]).await;
+        let (inbox, got) = inbox().await;
+        subscribe(&st, &inbox).await;
+        let patch =
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l"}]}]});
+        let r = call(
+            &st,
+            "PATCH",
+            &format!("{}{META_SUFFIX}", path_of(&uri)),
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&patch),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(activities(&got, 1).await, vec![("Update".to_string(), uri)]);
+    }
+
+    /// Review finding: the owner could subscribe to the access request, grant and subscription
+    /// containers, but creating or removing a record in them announced nothing to those
+    /// subscriptions. Each is announced, to a subscription to its own container (not to one to
+    /// the storage root, whose members these records are not).
+    #[tokio::test]
+    async fn service_records_are_announced_to_their_containers() {
+        let st = state().await;
+        let (inbox, got) = inbox().await;
+        for container in [SUBSCRIPTIONS_PATH, REQUESTS_PATH, GRANTS_PATH] {
+            let body = json!({"type": "WebhookSubscription", "topic": [format!("{BASE}{container}")], "inbox": inbox});
+            let r = call(
+                &st,
+                "POST",
+                SUBSCRIPTIONS_PATH,
+                &[("content-type", LWS_JSON)],
+                &body.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED, "{container}");
+        }
+        // The subscriptions container's own subscription hears of itself and the two made
+        // after it.
+        let mut want: Vec<(String, String)> = Vec::new();
+        let seen = activities(&got, 3).await;
+        assert_eq!(seen.len(), 3, "{seen:?}");
+        assert!(seen.iter().all(|(kind, _)| kind == "Create"));
+        want.extend(seen);
+        for (path, kind) in [
+            (REQUESTS_PATH, "AccessRequest"),
+            (GRANTS_PATH, "AccessGrant"),
+        ] {
+            let doc = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": [kind],
+                "storage": format!("{BASE}/"),
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+            });
+            let r = call(
+                &st,
+                "POST",
+                path,
+                &[("content-type", LWS_JSON)],
+                &doc.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED, "{path}");
+            let record = hdr(&r, "location");
+            want.push(("Create".into(), record.clone()));
+            let r = call(&st, "DELETE", path_of(&record), &[], "").await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT, "{path}");
+            want.push(("Delete".into(), record));
+        }
+        let mut seen = activities(&got, want.len()).await;
+        seen.sort();
+        want.sort();
+        assert_eq!(seen, want);
+    }
+
+    #[tokio::test]
+    async fn recursive_delete_announces_every_descendant() {
+        let st = state().await;
+        let container = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+        let c = hdr(
+            &call(&st, "POST", "/", &[("slug", "d"), ("link", container)], "").await,
+            "location",
+        );
+        let inner = hdr(
+            &call(
+                &st,
+                "POST",
+                path_of(&c),
+                &[("slug", "e"), ("link", container)],
+                "",
+            )
+            .await,
+            "location",
+        );
+        let leaf = hdr(
+            &call(
+                &st,
+                "POST",
+                path_of(&inner),
+                &[("slug", "f.txt"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+            "location",
+        );
+        let (inbox, got) = inbox().await;
+        subscribe(&st, &inbox).await;
+        let r = call(&st, "DELETE", path_of(&c), &[("depth", "infinity")], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let mut seen = activities(&got, 3).await;
+        seen.sort();
+        let mut want: Vec<(String, String)> = [&c, &inner, &leaf]
+            .iter()
+            .map(|u| ("Delete".to_string(), u.to_string()))
+            .collect();
+        want.sort();
+        assert_eq!(seen, want);
     }
 
     /// A JSON Patch replacing the `linkset` array with `doc`'s.
@@ -5579,6 +5847,122 @@ mod tests {
         assert_ne!(hdr(&again, "last-modified"), since);
     }
 
+    /// Review finding: Delete notifications were queued before the removal ran, so a failed
+    /// backend delete (a 500) still told subscribers the resource was gone, and a recursive delete
+    /// that stopped part way announced descendants it never touched.
+    #[tokio::test]
+    async fn deletes_are_announced_only_once_they_happen() {
+        use super::super::route;
+        use super::super::test_store::{request as req, state as flaky_state};
+        use std::sync::atomic::Ordering;
+        let (st, store) = flaky_state(100).await;
+        let base = st.cfg.absolute("");
+        let local = |u: &str| u.strip_prefix(base.as_str()).unwrap().to_string();
+        let send = |m: Method, p: &str, h: &[(&str, &str)], b: &str| {
+            let st = st.clone();
+            let r = req(m, p, h, b);
+            async move { route(&st, r).await }
+        };
+        let created = |r: Response| {
+            assert_eq!(r.status(), StatusCode::CREATED);
+            hdr(&r, "location")
+        };
+        let f = created(
+            send(
+                Method::POST,
+                "/",
+                &[("slug", "f"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let d = created(
+            send(
+                Method::POST,
+                "/",
+                &[("slug", "d"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+        );
+        let a = created(
+            send(
+                Method::POST,
+                &local(&d),
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let b = created(
+            send(
+                Method::POST,
+                &local(&d),
+                &[("slug", "b"), ("content-type", "text/plain")],
+                "x",
+            )
+            .await,
+        );
+        let (inbox, got) = inbox().await;
+        let body =
+            json!({"type": "WebhookSubscription", "topic": [st.cfg.storage()], "inbox": inbox});
+        let r = send(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body.to_string(),
+        )
+        .await;
+        assert!(r.status().is_success());
+        let deletes = |got: &Arc<Mutex<Vec<Value>>>| {
+            let got = got.clone();
+            async move {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let mut gone: Vec<String> = activities(&got, 0)
+                    .await
+                    .into_iter()
+                    .filter(|(t, _)| t == "Delete")
+                    .map(|(_, u)| u)
+                    .collect();
+                gone.sort();
+                gone
+            }
+        };
+        // Wait until nothing is set aside: what a failed delete removed is put back first.
+        let settled = |st: LwsState<super::super::test_store::FlakyStore>, iris: Vec<String>| async move {
+            for _ in 0..250 {
+                if iris.iter().all(|i| st.visible(i)) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            panic!("still set aside");
+        };
+        let everything = vec![st.cfg.storage(), f.clone(), d.clone(), a.clone(), b.clone()];
+        // The backend refuses: a 5xx, the resource stays, and nobody hears of a delete.
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let r = send(Method::DELETE, &local(&f), &[], "").await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        store.fail_delete.store(false, Ordering::SeqCst);
+        settled(st.clone(), everything.clone()).await;
+        assert!(st.store.exists(&f).await.unwrap());
+        assert!(deletes(&got).await.is_empty());
+        // A recursive delete that fails on `b` is undone whole, and announces nothing.
+        *store.fail_delete_of.lock().unwrap() = Some(b.clone());
+        let r = send(Method::DELETE, &local(&d), &[("depth", "infinity")], "").await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.fail_delete_of.lock().unwrap() = None;
+        settled(st.clone(), everything.clone()).await;
+        for u in [&d, &a, &b] {
+            assert!(st.store.exists(u).await.unwrap(), "{u} was not put back");
+        }
+        assert!(deletes(&got).await.is_empty());
+        // Once the delete succeeds, it is announced.
+        let r = send(Method::DELETE, &local(&f), &[], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(deletes(&got).await.contains(&f));
+    }
+
     /// Review finding: a data resource was removed in two steps, its parent's membership edge
     /// first, so a failure of the second left it readable but listed nowhere, and a retried
     /// recursive delete of its container could then succeed around it. The record and the edge
@@ -6139,6 +6523,100 @@ mod tests {
         assert_ne!(st.resource_meta(&d).await.unwrap().modified_ms, before);
     }
 
+    /// Review finding: a conditional create in a service container checked the listing without
+    /// holding it, so two creates under the same `If-Match` both succeeded; a listing that could
+    /// not be produced (a representation the client does not accept) carried no `ETag` and so
+    /// passed `If-None-Match: *`; and members of an ordinary container were written and deleted
+    /// without waiting for a conditional create holding their container.
+    #[tokio::test]
+    async fn conditional_creates_hold_the_listing_they_checked() {
+        let st = state().await;
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let json = ("content-type", LWS_JSON);
+        let r = call(
+            &st,
+            "POST",
+            GRANTS_PATH,
+            &[json, ("accept", "text/plain"), ("if-none-match", "*")],
+            &grant,
+        )
+        .await;
+        assert!(!r.status().is_success(), "{}", r.status());
+        let tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let matching = [json, ("if-match", tag.as_str())];
+        let both = tokio::join!(
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+        );
+        let mut statuses = [both.0.status(), both.1.status()];
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            [StatusCode::CREATED, StatusCode::PRECONDITION_FAILED]
+        );
+        // While a conditional create holds a container, its members' changes wait.
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let r = call(&st, "POST", "/", &[("slug", "c"), ("link", &container)], "").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let text = ("content-type", "text/plain");
+        for name in ["put", "delete"] {
+            let r = call(&st, "POST", "/c/", &[text, ("slug", name)], "x").await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let put_tag = current(&st, &st.cfg.absolute("/c/put"))
+            .await
+            .ok()
+            .map(|m| m.etag);
+        let grants_tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let held = st.locks.lock(&st.cfg.absolute("/c/")).await;
+        let grants = st.locks.lock(&st.cfg.absolute(GRANTS_PATH)).await;
+        let spawn = |method: &'static str,
+                     path: &'static str,
+                     headers: Vec<(&'static str, &'static str)>,
+                     body: &'static str| {
+            let st = st.clone();
+            tokio::spawn(async move { call(&st, method, path, &headers, body).await.status() })
+        };
+        let waiting = [
+            spawn("PUT", "/c/put", vec![text], "y"),
+            spawn("DELETE", "/c/delete", vec![], ""),
+            spawn(
+                "POST",
+                GRANTS_PATH,
+                vec![json],
+                Box::leak(grant.into_boxed_str()),
+            ),
+        ];
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        for w in &waiting {
+            assert!(!w.is_finished());
+        }
+        // Nothing changed meanwhile: each waits before its write, not only before its touch.
+        let tag = |path: &'static str| {
+            let iri = st.cfg.absolute(path);
+            let st = st.clone();
+            async move { current(&st, &iri).await.ok().map(|m| m.etag) }
+        };
+        assert_eq!(tag("/c/put").await, put_tag);
+        assert!(st
+            .store
+            .exists(&st.cfg.absolute("/c/delete"))
+            .await
+            .unwrap());
+        let listed = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        assert_eq!(listed, grants_tag);
+        drop((held, grants));
+        for w in waiting {
+            assert!(w.await.unwrap().is_success());
+        }
+    }
+
     /// Review finding: a linkset PATCH was held to the body limit on the document it produced,
     /// but a patch that strips the server-managed links got them back afterwards, so the served
     /// linkset could pass the limit. The rebuilt document is what is measured.
@@ -6438,100 +6916,6 @@ mod tests {
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
         let r = call(&st, "PATCH", &path, &[patch], "[]").await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
-    }
-
-    /// Review finding: a conditional create in a service container checked the listing without
-    /// holding it, so two creates under the same `If-Match` both succeeded; a listing that could
-    /// not be produced (a representation the client does not accept) carried no `ETag` and so
-    /// passed `If-None-Match: *`; and members of an ordinary container were written and deleted
-    /// without waiting for a conditional create holding their container.
-    #[tokio::test]
-    async fn conditional_creates_hold_the_listing_they_checked() {
-        let st = state().await;
-        let grant = json!({
-            "@context": ["https://www.w3.org/ns/lws/v1"],
-            "type": ["AccessGrant"],
-            "storage": st.cfg.storage(),
-            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
-        })
-        .to_string();
-        let json = ("content-type", LWS_JSON);
-        let r = call(
-            &st,
-            "POST",
-            GRANTS_PATH,
-            &[json, ("accept", "text/plain"), ("if-none-match", "*")],
-            &grant,
-        )
-        .await;
-        assert!(!r.status().is_success(), "{}", r.status());
-        let tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
-        let matching = [json, ("if-match", tag.as_str())];
-        let both = tokio::join!(
-            call(&st, "POST", GRANTS_PATH, &matching, &grant),
-            call(&st, "POST", GRANTS_PATH, &matching, &grant),
-        );
-        let mut statuses = [both.0.status(), both.1.status()];
-        statuses.sort();
-        assert_eq!(
-            statuses,
-            [StatusCode::CREATED, StatusCode::PRECONDITION_FAILED]
-        );
-        // While a conditional create holds a container, its members' changes wait.
-        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
-        let r = call(&st, "POST", "/", &[("slug", "c"), ("link", &container)], "").await;
-        assert_eq!(r.status(), StatusCode::CREATED);
-        let text = ("content-type", "text/plain");
-        for name in ["put", "delete"] {
-            let r = call(&st, "POST", "/c/", &[text, ("slug", name)], "x").await;
-            assert_eq!(r.status(), StatusCode::CREATED);
-        }
-        let put_tag = current(&st, &st.cfg.absolute("/c/put"))
-            .await
-            .ok()
-            .map(|m| m.etag);
-        let grants_tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
-        let held = st.locks.lock(&st.cfg.absolute("/c/")).await;
-        let grants = st.locks.lock(&st.cfg.absolute(GRANTS_PATH)).await;
-        let spawn = |method: &'static str,
-                     path: &'static str,
-                     headers: Vec<(&'static str, &'static str)>,
-                     body: &'static str| {
-            let st = st.clone();
-            tokio::spawn(async move { call(&st, method, path, &headers, body).await.status() })
-        };
-        let waiting = [
-            spawn("PUT", "/c/put", vec![text], "y"),
-            spawn("DELETE", "/c/delete", vec![], ""),
-            spawn(
-                "POST",
-                GRANTS_PATH,
-                vec![json],
-                Box::leak(grant.into_boxed_str()),
-            ),
-        ];
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        for w in &waiting {
-            assert!(!w.is_finished());
-        }
-        // Nothing changed meanwhile: each waits before its write, not only before its touch.
-        let tag = |path: &'static str| {
-            let iri = st.cfg.absolute(path);
-            let st = st.clone();
-            async move { current(&st, &iri).await.ok().map(|m| m.etag) }
-        };
-        assert_eq!(tag("/c/put").await, put_tag);
-        assert!(st
-            .store
-            .exists(&st.cfg.absolute("/c/delete"))
-            .await
-            .unwrap());
-        let listed = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
-        assert_eq!(listed, grants_tag);
-        drop((held, grants));
-        for w in waiting {
-            assert!(w.await.unwrap().is_success());
-        }
     }
 
     /// Review finding: a create whose store call reported a failure removed the new member's
@@ -7921,6 +8305,51 @@ mod tests {
             .expect("the container stayed locked");
         assert_eq!(r.status(), StatusCode::CREATED);
         assert_eq!(hdr(&r, "location"), format!("{x}-2"));
+    }
+
+    /// Review finding: a create's writes ran in a task of their own, but the container's touch and
+    /// the Create notification ran after it in the request, so a client that went away left a
+    /// committed member that nobody heard of and a container whose listing validators stood still.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancelled_create_is_still_announced() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::time::Duration;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        // No room in the delivery queue: every notification made is counted as dropped.
+        cfg.delivery = super::super::notify::DeliveryLimits {
+            queue: 0,
+            workers: 1,
+            per_inbox: 1,
+        };
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let root = st.cfg.storage();
+        st.notify
+            .subscribe_root_for_test(&root, "http://127.0.0.1:9/inbox");
+        let version = st.resource_meta(&root).await.unwrap().version;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let h = [("slug", "x"), ("content-type", "text/plain")];
+        let request = req(Method::POST, "/", &h, "x");
+        let agent = Agent::anonymous();
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            create(&st, &request, &agent, &root),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if st.notify.dropped() > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(st.store.exists(&format!("{root}x")).await.unwrap());
+        assert_eq!(st.notify.dropped(), 1, "the Create was never announced");
+        assert_ne!(st.resource_meta(&root).await.unwrap().version, version);
     }
 
     /// Review finding: with the create's writes inline, a client that went away released the
