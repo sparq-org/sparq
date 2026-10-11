@@ -350,15 +350,53 @@ vcdieddsa:
 
 sparql12:
   type: reference
-  title: "SPARQL 1.2 Query Language"
+  title: "SPARQL 1.2 Query Language (Working Draft)"
+  author:
+    - Hartig, Olaf
+    - Seaborne, Andy
+    - Taelman, Ruben
+    - Williams, Gregory
+    - Pellissier Tanon, Thomas
+  date: 2026
   publisher: W3C
   url: "https://www.w3.org/TR/sparql12-query/"
+
+jsonld11:
+  type: reference
+  title: "JSON-LD 1.1"
+  author:
+    - Kellogg, Gregg
+    - Champin, Pierre-Antoine
+    - Longley, Dave
+  date: 2020
+  publisher: W3C
+  url: "https://www.w3.org/TR/json-ld11/"
+
+# [OPUS-5.5] RDF 1.2, on which the companion specification depends (editors and status as its
+# reference list gives them).
+rdf12:
+  type: reference
+  title: "RDF 1.2 Concepts and Abstract Data Model (Candidate Recommendation)"
+  author:
+    - Kellogg, Gregg
+    - Hartig, Olaf
+    - Champin, Pierre-Antoine
+    - Seaborne, Andy
+  date: 2026
+  publisher: W3C
+  url: "https://www.w3.org/TR/rdf12-concepts/"
 
 risc0:
   type: reference
   title: "RISC Zero zkVM Developer Documentation"
   author: "RISC Zero"
   url: "https://dev.risczero.com/"
+
+risc0sec:
+  type: reference
+  title: "Security Model (RISC Zero zkVM Developer Documentation, version 3.0)"
+  author: "RISC Zero"
+  url: "https://dev.risczero.com/api/security-model"
 
 crescent:
   type: repository
@@ -368,3 +406,147 @@ crescent:
     - Policharla
     - Zaverucha
   url: "https://github.com/microsoft/crescent-credentials"
+
+# [OPUS-5.5] Additions for the main-body rewrite to the language guide (sources listed in
+# site/papers/zksparql-language-guide.md §8 and the security comparison).
+rdf11mt:
+  type: reference
+  title: "RDF 1.1 Semantics"
+  author:
+    - Hayes, Patrick J.
+    - Patel-Schneider, Peter F.
+  date: 2014
+  publisher: W3C
+  url: "https://www.w3.org/TR/rdf11-mt/"
+
+vcdi:
+  type: reference
+  title: "Verifiable Credential Data Integrity 1.0"
+  author:
+    - Sporny, Manu
+    - Longley, Dave
+  date: 2025
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-data-integrity/"
+
+vcdiecdsa:
+  type: reference
+  title: "Data Integrity ECDSA Cryptosuites v1.0"
+  date: 2025
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-di-ecdsa/"
+
+vcdibbs:
+  type: reference
+  title: "Data Integrity BBS Cryptosuites v1.0 (Candidate Recommendation Draft)"
+  date: 2026
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-di-bbs/"
+
+vcdiqr:
+  type: reference
+  title: "Quantum-Resistant Cryptosuites v1.0 (First Public Working Draft, 16 June 2026)"
+  date: 2026
+  publisher: W3C
+  url: "https://www.w3.org/TR/vc-di-quantum-resistant/"
+
+fips204:
+  type: reference
+  title: "FIPS 204: Module-Lattice-Based Digital Signature Standard"
+  # An organisation, given as a single name so that the style does not split it into a person.
+  author:
+    name: "National Institute of Standards and Technology"
+  date: 2024
+  publisher: NIST
+
+zkproof:
+  type: report
+  title: "ZKProof Community Reference, version 0.3"
+  author: "ZKProof"
+  date: 2022
+  url: "https://docs.zkproof.org/reference.pdf"
+
+li06:
+  type: article
+  title: "Dynamic Authenticated Index Structures for Outsourced Databases"
+  author:
+    - Li, Feifei
+    - Hadjieleftheriou, Marios
+    - Kollios, George
+    - Reyzin, Leonid
+  date: 2006
+  parent:
+    type: proceedings
+    title: "ACM SIGMOD International Conference on Management of Data"
+
+sdjwt:
+  type: reference
+  title: "Selective Disclosure for JWTs (SD-JWT)"
+  author:
+    - Fett, Daniel
+    - Yasuda, Kristina
+    - Campbell, Brian
+  date: 2025
+  publisher: IETF
+  url: "https://datatracker.ietf.org/doc/draft-ietf-oauth-selective-disclosure-jwt/"
+
+quicksilver21:
+  type: article
+  title: "QuickSilver: Efficient and Affordable Zero-Knowledge Proofs for Circuits and Polynomials over Any Field"
+  author:
+    - Yang, Kang
+    - Sarkar, Pratik
+    - Weng, Chenkai
+    - Wang, Xiao
+  date: 2021
+  parent:
+    type: proceedings
+    title: "ACM SIGSAC Conference on Computer and Communications Security (CCS)"
+
+# [OPUS-5.5] The companion drafts. The paper replaces both entries with anonymised ones (no
+# author, repository or URL) when it is built with `--input anon=true`; see its bibliography call.
+zksparqlspec:
+  type: reference
+  title: "Zero-Knowledge SPARQL Answers: Request and Presentation Data Model (draft specification)"
+  author: "Wright, Jesse"
+  date: 2026
+  url: "https://github.com/sparq-org/sparq/pull/6786"
+
+merklesuites:
+  type: reference
+  title: "Merkle-Root Cryptosuites for RDF Verifiable Credentials (draft specification)"
+  author: "Wright, Jesse"
+  date: 2026
+  url: "https://github.com/sparq-org/sparq/pull/6789"
+
+# [OPUS-5.5] Prior work on expressivity, from the prior-work research note of 10 October 2026
+# (sources opened there): the zk-SPARQL talk (no peer-reviewed paper found), the ISWC 2025
+# queryable-credentials paper, and the AnonCreds specification.
+yamamotozksparql:
+  type: misc
+  title: "zk-SPARQL. Talk at the Symposium on Cryptography and Information Security (SCIS 2023)"
+  author:
+    - Yamamoto, Dan
+    - Suga, Yuji
+    - Sako, Kazue
+  date: 2023-01-25
+  url: "https://speakerdeck.com/yamdan/20230125-zk-sparql-pub"
+
+demulder25:
+  type: article
+  title: "Towards Queryable Verifiable Credentials"
+  author:
+    - De Mulder, G.
+    - Dedecker, R.
+    - De Meester, B.
+    - Colpaert, P.
+  date: 2025
+  url: "https://ceur-ws.org/Vol-4085/paper81.pdf"
+  parent:
+    type: proceedings
+    title: "ISWC 2025 Companion Volume, CEUR-WS Vol. 4085"
+
+anoncreds:
+  type: reference
+  title: "AnonCreds Specification, version 1.0"
+  url: "https://anoncreds.github.io/anoncreds-spec/"

@@ -1983,6 +1983,2376 @@
       "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/7/difference_seconds/verify_inclusive_seconds",
       "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/7/difference_seconds/verify_inclusive_seconds" },
       "note": "[OPUS-5.5 zkp-19] K2 round 3 paired inclusive verify difference. Indicative."
+    },
+    "zkvcq.vcqp_source_commit": {
+      "value": "ff83bcfbee57d7db90f8f406a5e09574f81e5a91",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/source" },
+      "note": "[zkp-14.6] Source of the payment false-ASK genuine run (branch claude/zk-payment-false-ask). A separate run from the select-bag receipt (zkvcq.vcqg_*); counts are never added across records."
+    },
+    "zkvcq.vcqp_case": {
+      "value": "ask-false-payment-verifier-agreed",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case proved: ASK 'was any payment returned?' under a verifier-agreed anchor over a synthetic payment-history credential."
+    },
+    "zkvcq.vcqp_all_cases_run": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /all_defined_cases_run",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/all_defined_cases_run" },
+      "note": "[zkp-14.6] The run covered one declared case only."
+    },
+    "zkvcq.vcqp_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine (development mode disabled) RISC Zero receipt for the one declared case. Not independently inspected by a second party; not an external audit."
+    },
+    "zkvcq.vcqp_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts of this run accepted by the adapter's protocol verifier."
+    },
+    "zkvcq.vcqp_receipt_inner": {
+      "value": "Succinct",
+      "unit": "receipt-kind",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /receipt/inner",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/receipt/inner" },
+      "note": "[zkp-14.6] Inner receipt kind."
+    },
+    "zkvcq.vcqp_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code recorded in the receipt."
+    },
+    "zkvcq.vcqp_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode was disabled."
+    },
+    "zkvcq.vcqp_receipt_sha256": {
+      "value": "3d2a1d025807e63e13087a919543d2cb5c6140a980db71db0b7ae65220ee6f10",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /receipt/receipt_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/receipt/receipt_sha256" },
+      "note": "[zkp-14.6] SHA-256 of the retained receipt."
+    },
+    "zkvcq.vcqp_guest_sha256": {
+      "value": "7b68dc0656abfe3a825b116e9a94df3e971dc5979deefe7ab616e8cd5e1b482e",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /receipt/artifact_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/receipt/artifact_sha256" },
+      "note": "[zkp-14.6] SHA-256 of the guest image pinned for this run; differs from the select-bag run's guest because the guest was rebuilt at another path."
+    },
+    "zkvcq.vcqp_result_ask": {
+      "value": false,
+      "unit": "boolean-result",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /actual_result/Ask",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/actual_result/Ask" },
+      "note": "[zkp-14.6] ASK result in the verified journal (expected false)."
+    },
+    "zkvcq.vcqp_provenance": {
+      "value": "VerifierAgreedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.vcqp_controls": {
+      "value": 28,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt, each behaving as the test asserts."
+    },
+    "zkvcq.vcqp_r0vm_version": {
+      "value": "risc0-r0vm 3.0.6",
+      "unit": "tool-version",
+      "environment": "canonical",
+      "kind": "toolchain-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json /r0vm/version",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-audit.json", "pointer": "/r0vm/version" },
+      "note": "[zkp-14.6] Prover/verifier binary version."
+    },
+    "zkvcq.ci_source_commit": {
+      "value": "335a59ad072c0dcb7ac6d29327b0a34b9c34578c",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/source" },
+      "note": "[zkp-14.6] Source of the CI genuine run covering six declared authenticated cases (branch claude/zk-authrdf-genuine-receipts). Separate from the bag SELECT and payment runs; counts never added."
+    },
+    "zkvcq.ci_guest_sha256": {
+      "value": "4fdc0dc401e09e306df8ecf9c8d20a4d4511684d29594a11e60e1b9d372eeb69",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /receipt/artifact_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/receipt/artifact_sha256" },
+      "note": "[zkp-14.6] V5 guest artifact pinned for all six CI jobs (identical across jobs). Differs from the other runs' pins because the artifact hash depends on the build path."
+    },
+    "zkvcq.ci_r0vm_version": {
+      "value": "risc0-r0vm 3.0.6",
+      "unit": "tool-version",
+      "environment": "canonical",
+      "kind": "toolchain-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /r0vm/version",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/r0vm/version" },
+      "note": "[zkp-14.6] Prover/verifier binary version."
+    },
+    "zkvcq.ci_asktva_case": {
+      "value": "ask-true-verifier-agreed",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case ask-true-verifier-agreed."
+    },
+    "zkvcq.ci_asktva_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_asktva_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_asktva_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_asktva_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_asktva_provenance": {
+      "value": "VerifierAgreedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_asktva_controls": {
+      "value": 28,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-true-verifier-agreed-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_askfhd_case": {
+      "value": "ask-false-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case ask-false-holder-declared."
+    },
+    "zkvcq.ci_askfhd_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_askfhd_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_askfhd_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_askfhd_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_askfhd_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_askfhd_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-ask-false-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_selhd_case": {
+      "value": "select-bag-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case select-bag-holder-declared."
+    },
+    "zkvcq.ci_selhd_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_selhd_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_selhd_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_selhd_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_selhd_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_selhd_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_conva_case": {
+      "value": "construct-verifier-agreed",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case construct-verifier-agreed."
+    },
+    "zkvcq.ci_conva_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_conva_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_conva_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_conva_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_conva_provenance": {
+      "value": "VerifierAgreedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_conva_controls": {
+      "value": 28,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-verifier-agreed-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_conhd_case": {
+      "value": "construct-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case construct-holder-declared."
+    },
+    "zkvcq.ci_conhd_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_conhd_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_conhd_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_conhd_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_conhd_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_conhd_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-construct-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached to this receipt (28 under a verifier-agreed anchor, 26 when holder-declared: the two anchor controls do not apply)."
+    },
+    "zkvcq.ci_rowb_case": {
+      "value": "select-bag-row-bound",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case select-bag-row-bound."
+    },
+    "zkvcq.ci_rowb_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt (development mode disabled). Not second-party inspected."
+    },
+    "zkvcq.ci_rowb_protocol_accepted": {
+      "value": 0,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.ci_rowb_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[zkp-14.6] Development mode flag."
+    },
+    "zkvcq.ci_rowb_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[zkp-14.6] Guest exit code."
+    },
+    "zkvcq.ci_rowb_provenance": {
+      "value": "VerifierAgreedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.ci_rowb_rejection": {
+      "value": "CapacityExceeded(Backend { name: \"vcq-released-rows\", requested: 2, ceiling: 1 })",
+      "unit": "rejection-code",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, CI genuine run 37340835239)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json /rejection/code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-select-bag-row-bound-audit.json", "pointer": "/rejection/code" },
+      "note": "[zkp-14.6] Typed rejection: the released result exceeds the contract's row bound; rejected before the original challenge is consumed."
+    },
+    "zkvcq.vcqph_source_commit": {
+      "value": "ff83bcfbee57d7db90f8f406a5e09574f81e5a91",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/source" },
+      "note": "[zkp-14.6] Source of the holder-declared payment false-ASK run."
+    },
+    "zkvcq.vcqph_case": {
+      "value": "ask-false-payment-holder-declared",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/case" },
+      "note": "[zkp-14.6] Declared case: ASK 'was any payment returned?' over a holder-declared input."
+    },
+    "zkvcq.vcqph_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[zkp-14.6] Genuine receipt. Not second-party inspected."
+    },
+    "zkvcq.vcqph_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[zkp-14.6] Receipts accepted by the protocol verifier."
+    },
+    "zkvcq.vcqph_provenance": {
+      "value": "HolderSelectedAuthenticated",
+      "unit": "result-provenance",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /actual_provenance",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/actual_provenance" },
+      "note": "[zkp-14.6] Result provenance in the verified journal."
+    },
+    "zkvcq.vcqph_result_ask": {
+      "value": false,
+      "unit": "boolean-result",
+      "environment": "canonical",
+      "kind": "result",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /actual_result/Ask",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/actual_result/Ask" },
+      "note": "[zkp-14.6] ASK result in the verified journal (expected false)."
+    },
+    "zkvcq.vcqph_controls": {
+      "value": 26,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /control_count",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/control_count" },
+      "note": "[zkp-14.6] Controls attached (no anchor controls under a holder-declared input)."
+    },
+    "zkexec.main_source_commit": {
+      "value": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/source" },
+      "note": "[OPUS-5.5] Source commit of the harness and guest for the main-query executor runs."
+    },
+    "zkexec.main_guest_image_id": {
+      "value": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
+      "unit": "risc0-image-id",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /guest_image_id",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/guest_image_id" },
+      "note": "[OPUS-5.5] Image ID of the accepted guest image with signature checks that the executor ran."
+    },
+    "zkexec.main_phase_image_id": {
+      "value": "458152dbe6877a4e3ee446cb3301d7bde07251f7380f69ae8e6b86040d3d7238",
+      "unit": "risc0-image-id",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_measurement_image_id",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_measurement_image_id" },
+      "note": "[OPUS-5.5] Image ID of the separate instrumented build that reports cycles per phase; measurement only."
+    },
+    "zkexec.main_r0vm": {
+      "value": "risc0-r0vm 3.0.6",
+      "unit": "tool-version",
+      "environment": "canonical",
+      "kind": "toolchain-identity",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /r0vm",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/r0vm" },
+      "note": "[OPUS-5.5] Executor tool version for the main-query runs."
+    },
+    "zkexec.main_runs": {
+      "value": 40,
+      "unit": "runs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /records",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/records" },
+      "note": "[OPUS-5.5] Runs: five queries in each of eight configurations. Executor only; no proofs."
+    },
+    "zkexec.main_queries": {
+      "value": 5,
+      "unit": "queries",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/0/cases",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/0/cases" },
+      "note": "[OPUS-5.5] Queries per configuration (Q1-Q5); the same in all eight configurations."
+    },
+    "zkexec.main_statements": {
+      "value": 17,
+      "unit": "statements",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/0/statements_per_credential",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/0/statements_per_credential" },
+      "note": "[OPUS-5.5] Statements per payment credential; the same in all eight configurations."
+    },
+    "zkexec.main_rdfc_hidden_n1_user_median": {
+      "value": 7154300,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/0/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/0/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-rdfc-2022, hidden mode, one credential. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_rdfc_hidden_n1_segments_median": {
+      "value": 8,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/0/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/0/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-rdfc-2022, hidden mode, one credential."
+    },
+    "zkexec.main_rdfc_hidden_n4_user_median": {
+      "value": 24243733,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/1/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/1/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-rdfc-2022, hidden mode, four credentials. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_rdfc_hidden_n4_segments_median": {
+      "value": 27,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/1/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/1/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-rdfc-2022, hidden mode, four credentials."
+    },
+    "zkexec.main_rdfc_revealed_n1_user_median": {
+      "value": 3888213,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/2/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/2/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-rdfc-2022, revealed mode, one credential. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_rdfc_revealed_n1_segments_median": {
+      "value": 5,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/2/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/2/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-rdfc-2022, revealed mode, one credential."
+    },
+    "zkexec.main_rdfc_revealed_n4_user_median": {
+      "value": 11125709,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/3/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/3/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-rdfc-2022, revealed mode, four credentials. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_rdfc_revealed_n4_segments_median": {
+      "value": 13,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/3/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/3/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-rdfc-2022, revealed mode, four credentials."
+    },
+    "zkexec.main_merkle_hidden_n1_user_median": {
+      "value": 6624007,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/4/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/4/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-sha256-merkle-2026, hidden mode, one credential. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_merkle_hidden_n1_segments_median": {
+      "value": 8,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/4/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/4/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-sha256-merkle-2026, hidden mode, one credential."
+    },
+    "zkexec.main_merkle_hidden_n4_user_median": {
+      "value": 21968326,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/5/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/5/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-sha256-merkle-2026, hidden mode, four credentials. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_merkle_hidden_n4_segments_median": {
+      "value": 24,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/5/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/5/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-sha256-merkle-2026, hidden mode, four credentials."
+    },
+    "zkexec.main_merkle_revealed_n1_user_median": {
+      "value": 3305383,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/6/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/6/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-sha256-merkle-2026, revealed mode, one credential. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_merkle_revealed_n1_segments_median": {
+      "value": 4,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/6/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/6/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-sha256-merkle-2026, revealed mode, one credential."
+    },
+    "zkexec.main_merkle_revealed_n4_user_median": {
+      "value": 8799346,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/7/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/7/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over Q1-Q5: eddsa-sha256-merkle-2026, revealed mode, four credentials. Executor count, deterministic; not a proving time."
+    },
+    "zkexec.main_merkle_revealed_n4_segments_median": {
+      "value": 10,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /configurations/7/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/configurations/7/segments/median" },
+      "note": "[OPUS-5.5] Median segments over Q1-Q5: eddsa-sha256-merkle-2026, revealed mode, four credentials."
+    },
+    "zkexec.q1_rdfc_hidden_n1_input": {
+      "value": 70679,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/input",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/input" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase input in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_hidden_n1_request": {
+      "value": 591366,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/Request",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/Request" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase Request in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_hidden_n1_proof_config": {
+      "value": 461298,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/ProofConfig",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/ProofConfig" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase ProofConfig in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_hidden_n1_document": {
+      "value": 1395383,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/Document",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/Document" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase Document in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_hidden_n1_signature": {
+      "value": 3282459,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/Signature",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/Signature" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase Signature in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_hidden_n1_mapping": {
+      "value": 56481,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/Mapping",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/Mapping" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase Mapping in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_hidden_n1_query": {
+      "value": 666356,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/Query",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/Query" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase Query in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_hidden_n1_journal": {
+      "value": 573864,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/0/phase_cycles/Journal",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/0/phase_cycles/Journal" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, hidden mode, one credential: cycles of phase Journal in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_revealed_n1_input": {
+      "value": 66148,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/2/phase_cycles/input",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/2/phase_cycles/input" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, revealed mode, one credential: cycles of phase input in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_revealed_n1_request": {
+      "value": 591772,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/2/phase_cycles/Request",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/2/phase_cycles/Request" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, revealed mode, one credential: cycles of phase Request in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_revealed_n1_proof_config": {
+      "value": 460599,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/2/phase_cycles/ProofConfig",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/2/phase_cycles/ProofConfig" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, revealed mode, one credential: cycles of phase ProofConfig in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_revealed_n1_document": {
+      "value": 1387198,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/2/phase_cycles/Document",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/2/phase_cycles/Document" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, revealed mode, one credential: cycles of phase Document in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_revealed_n1_mapping": {
+      "value": 56693,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/2/phase_cycles/Mapping",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/2/phase_cycles/Mapping" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, revealed mode, one credential: cycles of phase Mapping in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_revealed_n1_query": {
+      "value": 666472,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/2/phase_cycles/Query",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/2/phase_cycles/Query" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, revealed mode, one credential: cycles of phase Query in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_rdfc_revealed_n1_journal": {
+      "value": 574271,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/2/phase_cycles/Journal",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/2/phase_cycles/Journal" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-rdfc-2022, revealed mode, one credential: cycles of phase Journal in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_input": {
+      "value": 73003,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/input",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/input" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase input in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_request": {
+      "value": 592103,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/Request",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/Request" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase Request in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_proof_config": {
+      "value": 467533,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/ProofConfig",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/ProofConfig" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase ProofConfig in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_document": {
+      "value": 800695,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/Document",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/Document" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase Document in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_signature": {
+      "value": 3327223,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/Signature",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/Signature" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase Signature in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_mapping": {
+      "value": 56198,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/Mapping",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/Mapping" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase Mapping in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_query": {
+      "value": 666021,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/Query",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/Query" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase Query in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_hidden_n1_journal": {
+      "value": 574493,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/4/phase_cycles/Journal",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/4/phase_cycles/Journal" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, hidden mode, one credential: cycles of phase Journal in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_revealed_n1_input": {
+      "value": 68501,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/6/phase_cycles/input",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/6/phase_cycles/input" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, revealed mode, one credential: cycles of phase input in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_revealed_n1_request": {
+      "value": 596116,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/6/phase_cycles/Request",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/6/phase_cycles/Request" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, revealed mode, one credential: cycles of phase Request in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_revealed_n1_proof_config": {
+      "value": 470488,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/6/phase_cycles/ProofConfig",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/6/phase_cycles/ProofConfig" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, revealed mode, one credential: cycles of phase ProofConfig in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_revealed_n1_document": {
+      "value": 800695,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/6/phase_cycles/Document",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/6/phase_cycles/Document" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, revealed mode, one credential: cycles of phase Document in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_revealed_n1_mapping": {
+      "value": 56386,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/6/phase_cycles/Mapping",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/6/phase_cycles/Mapping" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, revealed mode, one credential: cycles of phase Mapping in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_revealed_n1_query": {
+      "value": 666144,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/6/phase_cycles/Query",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/6/phase_cycles/Query" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, revealed mode, one credential: cycles of phase Query in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.q1_merkle_revealed_n1_journal": {
+      "value": 578506,
+      "unit": "phase-cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, five main-body queries over the payment credential)",
+      "source": "research/zk-paper-evidence/paper-executor-main-audit.json /phase_breakdown/6/phase_cycles/Journal",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-main-audit.json", "pointer": "/phase_breakdown/6/phase_cycles/Journal" },
+      "note": "[OPUS-5.5] Q1 payment ASK, eddsa-sha256-merkle-2026, revealed mode, one credential: cycles of phase Journal in the instrumented build (includes its instrumentation)."
+    },
+    "zkexec.sweep_source_commit": {
+      "value": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/source" },
+      "note": "[OPUS-5.5] Source commit of the harness and guest for the sweep executor runs."
+    },
+    "zkexec.sweep_guest_image_id": {
+      "value": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
+      "unit": "risc0-image-id",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /guest_image_id",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/guest_image_id" },
+      "note": "[OPUS-5.5] Image ID of the accepted guest image with signature checks that the executor ran."
+    },
+    "zkexec.sweep_r0vm": {
+      "value": "risc0-r0vm 3.0.6",
+      "unit": "tool-version",
+      "environment": "canonical",
+      "kind": "toolchain-identity",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /r0vm",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/r0vm" },
+      "note": "[OPUS-5.5] Executor tool version for the sweep runs."
+    },
+    "zkexec.sweep_runs": {
+      "value": 832,
+      "unit": "runs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /records",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/records" },
+      "note": "[OPUS-5.5] Runs: every query case in each of sixteen configurations. Executor only; no proofs."
+    },
+    "zkexec.sweep_reruns": {
+      "value": 80,
+      "unit": "runs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /reruns",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/reruns" },
+      "note": "[OPUS-5.5] Re-executions, on the same guest image with the executor's error kept, of the runs over four credentials that the evaluator rejected (paper-executor-sweep-reruns.jsonl.gz, digest in /reruns_sha256): every such run, ten in each of the eight four-credential configurations. The audit lists each rejected run in /configurations/*/rejected_runs with its rejection_cause, guest_abort or session_limit, taken from its own guest outcome or this re-execution; session_limit occurs only with four credentials. The audit records no count per cause. Executor only; no proofs."
+    },
+    "zkexec.sweep_cases": {
+      "value": 52,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/cases",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/cases" },
+      "note": "[OPUS-5.5] Query cases per configuration; the same in all sixteen configurations."
+    },
+    "zkexec.sweep_statements_small": {
+      "value": 32,
+      "unit": "statements",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/statements_per_credential",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/statements_per_credential" },
+      "note": "[OPUS-5.5] Statements per generated credential, smaller size."
+    },
+    "zkexec.sweep_statements_large": {
+      "value": 64,
+      "unit": "statements",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/statements_per_credential",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/statements_per_credential" },
+      "note": "[OPUS-5.5] Statements per generated credential, larger size."
+    },
+    "zkexec.sweep_session_limit": {
+      "value": 33554432,
+      "unit": "cycles",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /session_limit_cycles",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/session_limit_cycles" },
+      "note": "[OPUS-5.5] Session limit set for every execution, the same as the prover's own limit; an execution that reaches it stops and yields no proof."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s32_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s32_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s32_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s32_user_median": {
+      "value": 8071413,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s32_user_min": {
+      "value": 8008619,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s32_user_max": {
+      "value": 14465989,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s32_segments_median": {
+      "value": 9,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/0/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/0/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s64_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s64_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s64_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s64_user_median": {
+      "value": 10575018,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s64_user_min": {
+      "value": 10507077,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s64_user_max": {
+      "value": 19787201,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n1_s64_segments_median": {
+      "value": 12,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/1/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/1/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-rdfc-2022, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s32_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/2/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/2/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s32_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/2/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/2/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s32_completed": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/2/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/2/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s32_user_median": {
+      "value": 27943133.5,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/2/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/2/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s32_user_min": {
+      "value": 27778211,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/2/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/2/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s32_user_max": {
+      "value": 28559207,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/2/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/2/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-rdfc-2022, hidden mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s32_segments_median": {
+      "value": 31.0,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/2/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/2/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-rdfc-2022, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s64_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/3/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/3/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, hidden mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s64_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/3/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/3/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, hidden mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_rdfc_hidden_n4_s64_completed": {
+      "value": 0,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/3/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/3/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, hidden mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s32_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/4/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/4/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s32_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/4/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/4/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s32_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/4/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/4/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s32_user_median": {
+      "value": 4748304,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/4/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/4/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s32_user_min": {
+      "value": 4666226,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/4/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/4/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s32_user_max": {
+      "value": 11172626,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/4/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/4/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s32_segments_median": {
+      "value": 6,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/4/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/4/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s64_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/5/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/5/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s64_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/5/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/5/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s64_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/5/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/5/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s64_user_median": {
+      "value": 7328924,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/5/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/5/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s64_user_min": {
+      "value": 7253357,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/5/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/5/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s64_user_max": {
+      "value": 16528704,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/5/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/5/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n1_s64_segments_median": {
+      "value": 9,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/5/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/5/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-rdfc-2022, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s32_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/6/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/6/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s32_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/6/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/6/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s32_completed": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/6/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/6/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s32_user_median": {
+      "value": 14701396.0,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/6/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/6/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s32_user_min": {
+      "value": 14519564,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/6/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/6/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s32_user_max": {
+      "value": 15300947,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/6/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/6/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s32_segments_median": {
+      "value": 17.0,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/6/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/6/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s64_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/7/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/7/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-rdfc-2022, revealed mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s64_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/7/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/7/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-rdfc-2022, revealed mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s64_completed": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/7/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/7/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-rdfc-2022, revealed mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s64_user_median": {
+      "value": 24923744.5,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/7/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/7/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s64_user_min": {
+      "value": 24770225,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/7/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/7/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s64_user_max": {
+      "value": 26959988,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/7/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/7/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_rdfc_revealed_n4_s64_segments_median": {
+      "value": 28.0,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/7/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/7/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-rdfc-2022, revealed mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s32_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/8/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/8/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s32_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/8/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/8/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s32_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/8/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/8/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s32_user_median": {
+      "value": 7001824,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/8/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/8/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s32_user_min": {
+      "value": 6934529,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/8/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/8/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s32_user_max": {
+      "value": 13430343,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/8/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/8/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s32_segments_median": {
+      "value": 8,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/8/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/8/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s64_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/9/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/9/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s64_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/9/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/9/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s64_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/9/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/9/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s64_user_median": {
+      "value": 8659407,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/9/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/9/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s64_user_min": {
+      "value": 8589620,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/9/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/9/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s64_user_max": {
+      "value": 17859878,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/9/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/9/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n1_s64_segments_median": {
+      "value": 10,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/9/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/9/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, hidden mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s32_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/10/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/10/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s32_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/10/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/10/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s32_completed": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/10/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/10/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s32_user_median": {
+      "value": 23814424.5,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/10/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/10/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s32_user_min": {
+      "value": 23683495,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/10/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/10/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s32_user_max": {
+      "value": 24437891,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/10/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/10/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s32_segments_median": {
+      "value": 26.0,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/10/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/10/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s64_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/11/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/11/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, hidden mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s64_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/11/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/11/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, hidden mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s64_completed": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/11/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/11/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, hidden mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s64_user_median": {
+      "value": 30249242.0,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/11/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/11/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s64_user_min": {
+      "value": 30126746,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/11/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/11/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s64_user_max": {
+      "value": 32360926,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/11/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/11/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_hidden_n4_s64_segments_median": {
+      "value": 32.0,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/11/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/11/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, hidden mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s32_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/12/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/12/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s32_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/12/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/12/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s32_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/12/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/12/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s32_user_median": {
+      "value": 3721589,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/12/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/12/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s32_user_min": {
+      "value": 3651604,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/12/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/12/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s32_user_max": {
+      "value": 10138511,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/12/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/12/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s32_segments_median": {
+      "value": 5,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/12/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/12/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s64_admitted": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/13/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/13/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s64_rejected": {
+      "value": 9,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/13/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/13/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s64_completed": {
+      "value": 43,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/13/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/13/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s64_user_median": {
+      "value": 5380737,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/13/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/13/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s64_user_min": {
+      "value": 5313849,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/13/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/13/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s64_user_max": {
+      "value": 14577354,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/13/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/13/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n1_s64_segments_median": {
+      "value": 6,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/13/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/13/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, revealed mode, one credential of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s32_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/14/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/14/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s32_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/14/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/14/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s32_completed": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/14/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/14/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s32_user_median": {
+      "value": 10589056.5,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/14/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/14/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s32_user_min": {
+      "value": 10453872,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/14/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/14/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s32_user_max": {
+      "value": 11214796,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/14/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/14/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 32 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s32_segments_median": {
+      "value": 12.0,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/14/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/14/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 32 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s64_admitted": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/15/admitted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/15/admitted" },
+      "note": "[OPUS-5.5] Cases the evaluator admitted (run outside the zkVM): eddsa-sha256-merkle-2026, revealed mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s64_rejected": {
+      "value": 10,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/15/rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/15/rejected" },
+      "note": "[OPUS-5.5] Cases the evaluator rejected: eddsa-sha256-merkle-2026, revealed mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s64_completed": {
+      "value": 42,
+      "unit": "query-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/15/executed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/15/executed" },
+      "note": "[OPUS-5.5] Admitted cases whose execution completed within the session limit: eddsa-sha256-merkle-2026, revealed mode, four credentials of 64 statements."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s64_user_median": {
+      "value": 17088546.5,
+      "unit": "user-cycles-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/15/user_cycles/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/15/user_cycles/median" },
+      "note": "[OPUS-5.5] Median user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s64_user_min": {
+      "value": 16960630,
+      "unit": "user-cycles-min",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/15/user_cycles/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/15/user_cycles/min" },
+      "note": "[OPUS-5.5] Min user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s64_user_max": {
+      "value": 19222429,
+      "unit": "user-cycles-max",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/15/user_cycles/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/15/user_cycles/max" },
+      "note": "[OPUS-5.5] Max user cycles over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 64 statements. Not a proving time."
+    },
+    "zkexec.sweep_merkle_revealed_n4_s64_segments_median": {
+      "value": 19.0,
+      "unit": "segments-median",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "executor cycle counts (evaluator with signature checks, query-type sweep over generated credentials)",
+      "source": "research/zk-paper-evidence/paper-executor-sweep-audit.json /configurations/15/segments/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/paper-executor-sweep-audit.json", "pointer": "/configurations/15/segments/median" },
+      "note": "[OPUS-5.5] Median segments over the completed cases: eddsa-sha256-merkle-2026, revealed mode, four credentials of 64 statements."
+    },
+    "zkvcq.vcqph_guest_sha256": {
+      "value": "7b68dc0656abfe3a825b116e9a94df3e971dc5979deefe7ab616e8cd5e1b482e",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, payment false-ASK holder-declared genuine run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json /receipt/artifact_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-payment-ask-holder-declared-audit.json", "pointer": "/receipt/artifact_sha256" },
+      "note": "[zkp-14.6] Guest artifact pinned for this run."
     }
   }
 }
