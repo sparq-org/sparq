@@ -96,7 +96,7 @@ impl Budget {
     }
 }
 
-/// A parsed document and what is left of its [`Budget`]: the only way to a tree, and the only way
+/// A parsed document and what is left of its `Budget`: the only way to a tree, and the only way
 /// to canonicalize one, so every step of a verification draws on the same budget.
 pub struct Document {
     root: Element,
@@ -104,7 +104,7 @@ pub struct Document {
 }
 
 impl Document {
-    /// Parse `xml` into its root element; see [`parse_tree`].
+    /// Parse `xml` into its root element; see `parse_tree`.
     pub fn parse(xml: &str) -> Result<Self, String> {
         let budget = Budget::for_document(xml.len());
         let root = parse_tree(xml, &budget)?;
