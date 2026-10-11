@@ -33,7 +33,8 @@ Two informative companion documents accompany this one: #emph[Zero-Knowledge SPA
 over OpenID for Verifiable Presentations] (https://sparq.jeswr.org/specs/zksparql-answers-oid4vp)
 shows how OpenID4VP can carry the request and the presentation, and #emph[Zero-Knowledge SPARQL
 Answers: Implementation Status] (https://sparq.jeswr.org/specs/zksparql-answers-implementation)
-compares this document with the code in the sparq repository.
+lists the proof methods built and proposed and compares this document with the code in
+the sparq repository.
 
 = Introduction <sec-intro>
 
@@ -600,56 +601,10 @@ circuit or program for the same method, for example a circuit compiled directly 
 instead of from Noir, has a new verification key, and the verifier names that key in
 `verificationKey`.
 
-The proof methods currently in the sparq repository are below. This table is informative and
-records what the code does, not what is assured: none of them has had an external
+The proof methods built in the sparq repository, and those proposed, are listed in the
+implementation status companion
+(https://sparq.jeswr.org/specs/zksparql-answers-implementation). None has had an external
 cryptographic audit.
-
-#table(
-  columns: (1.5fr, 1.3fr, 1.2fr),
-  align: (left, left, left),
-  table.header[IRI][Results][Issuer checking],
-  [`urn:sparq:vcq:method:` \ `risc0-exact:v3` (RISC Zero program)], [The full result of
-    SELECT, ASK and CONSTRUCT queries in its fragment], [none: the request MUST NOT have
-    `trustedIssuers`],
-  [`urn:sparq:vcq:method:` \ `risc0-authenticated-rdf:v5` (RISC Zero program)], [The full
-    result of SELECT, ASK and CONSTRUCT queries in its fragment], [`eddsa-rdfc-2022` against
-    `IssuerKeys`, inside the proof],
-  [`urn:sparq:vcq:method:` \ `noir-selected-support-unsigned:v2` (Noir circuits)], [Only that
-    returned solutions are solutions: ASK when `true`, and SELECT over basic graph patterns
-    with integer FILTERs; not usable with this document yet], [Schnorr
-    signatures over the sparq commitment format, inside the proof],
-  [`urn:sparq:vcq:method:` \ `disclosed-reevaluation:v1` (`proof-methods/disclosed`)],
-    [The full result; the holder sends the signed credentials and the salt, and the verifier
-    checks the signatures and evaluates the query itself. Its dataset commitment is the one
-    `risc0-authenticated-rdf:v5` computes, so one agreed commitment serves both. A baseline
-    that hides nothing.], [`eddsa-rdfc-2022` against `IssuerKeys`, by the verifier],
-  [`urn:sparq:vcq:method:` \ `tee-attestation:v1` (`proof-methods/tee`)], [The full result,
-    attested by a program in an AWS Nitro Enclave whose attestation document carries the
-    statement digest. Only the `aws-nitro` platform is built.], [`eddsa-rdfc-2022`, inside the
-    enclave; hidden mode only],
-)
-
-A prototype of `vole-designated-verifier:v1`, an interactive proof based on vector oblivious
-linear evaluation (VOLE) as in QuickSilver, proves the ACIR of the Noir circuits
-(`proof-methods/vole`); it is not yet a proof method in the sense of this section. The
-following methods are proposed and not built. Their IRIs use the same prefix and end in
-`:v1`.
-
-#table(
-  columns: (1.5fr, 1fr, 2fr),
-  align: (left, left, left),
-  table.header[Name][Evidence kind][What it is],
-  [`selective-disclosure-reevaluation`], [disclosed credentials, selectively], [The holder
-    discloses, with `bbs-2023` or `ecdsa-sd-2023`, the claims each returned solution uses,
-    together with any claims the issuer made mandatory to disclose and the structure the
-    cryptosuite needs; the verifier checks them and evaluates the query over them. It can
-    show only that returned solutions are solutions, so it supports the same results as the
-    Noir method above.],
-  [`vole-designated-verifier`], [zero-knowledge proof, interactive, designated-verifier],
-  [An interactive proof based on VOLE. It convinces only the verifier that took part.],
-  [`tee-attestation` on other platforms], [attestation], [The `parameters` name the platform:
-    `intel-tdx`, `amd-sev-snp` or `nvidia-cc`.],
-)
 
 = Security and privacy considerations <sec-security>
 
@@ -689,7 +644,7 @@ the dataset was built from:
   that they are true #cite("VC-DATA-MODEL-2.0").
 - #strong[More than the method's trust assumptions.] An accepted proof means the statement
   holds only if what the method says the verifier must trust (@sec-methods) holds. The proof
-  methods in this document are research prototypes without an external audit; an accepted
+  methods built so far are research prototypes without an external audit; an accepted
   proof is evidence produced by that code, not a guarantee.
 
 == What the verifier learns <sec-learns>

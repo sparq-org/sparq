@@ -41,7 +41,7 @@ define one, here called `sparql_answer`:
   [Authorization request `client_id`], [`domain`. Over the Digital Credentials API, the origin
     prefixed with `origin:`, as OpenID4VP requires.],
   [DCQL `trusted_authorities`], [Not needed for checking, because the request carries its
-    trust requirements. A wallet MAY use it to choose credentials; a `TrustedList` or
+    trust requirements. A wallet can use it to choose credentials; a `TrustedList` or
     `FederationTrustAnchor` requirement corresponds to its `etsi_tl` or `openid_federation`
     type.],
   [`vp_formats_supported` metadata], [The proof method IRIs each side supports, under the

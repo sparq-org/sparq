@@ -91,7 +91,7 @@ export const SPECS: Spec[] = [
     date: "2026-10-11",
     editors: "Jesse Wright · the sparq project",
     blurb:
-      "Informative companion to the zero-knowledge SPARQL answers data model: how the proof methods and protocol code in the sparq repository compare with it, and what is not built yet.",
+      "Informative companion to the zero-knowledge SPARQL answers data model: how the proof methods and protocol code in the sparq repository compare with it, the proof methods built and proposed, and what is not built yet.",
   },
   {
     slug: "zk-merkle-cryptosuite",
