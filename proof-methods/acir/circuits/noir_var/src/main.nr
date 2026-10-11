@@ -8,7 +8,7 @@ fn main(
     values: [u64; leaf::N],
 ) {
     for i in 0..leaf::N {
-        let hs = leaf::literal_hash(values[i]);
+        let hs = leaf::literal_hash::<0>(values[i]);
         assert_eq(h2(TYPE_CODE_LITERAL, hs), operands[i], "operand encoding mismatch");
         assert(leaf::verdict(ops[i], bounds[i], values[i]), "filter verdict mismatch");
     }

@@ -31,22 +31,73 @@ pub fn verdict(op: u32, bound: u64, value: u64) -> bool {
     }
 }
 
-fn rotr(x: u32, r: u32) -> u32 {
+unconstrained fn split(x: u32, r: u32) -> (Field, Field) {
+    ((x & ((1 << r) - 1)) as Field, ((x >> r) | (x << (32 - r))) as Field)
+}
+
+/// x >>> R as the hand-written ACIR does it: x = rot * 2^R - lo * (2^32 - 1)
+/// with lo < 2^R and rot < 2^32. Both bounds are explicit; the compiler drops
+/// the 32-bit check where an XOR on the result already implies it.
+fn rotr<let R: u32>(x: u32) -> u32 {
+    // Safety: lo and rot are constrained below.
+    let (lo, rot) = unsafe { split(x, R) };
+    lo.assert_max_bit_size::<R>();
+    rot.assert_max_bit_size::<32>();
+    let p: Field = (1 << R) as Field;
+    assert_eq(x as Field, rot * p - lo * 4294967295);
+    rot as u32
+}
+
+unconstrained fn carry_split(s: Field) -> (Field, Field) {
+    let v = s as u64;
+    ((v & 0xFFFFFFFF) as Field, (v >> 32) as Field)
+}
+
+/// (sum of 32-bit terms) mod 2^32 with an explicit carry of at most 2 bits.
+fn add(s: Field) -> u32 {
+    // Safety: out and the carry are range-checked below.
+    let (out, carry) = unsafe { carry_split(s) };
+    out.assert_max_bit_size::<32>();
+    carry.assert_max_bit_size::<2>();
+    assert_eq(s, out + carry * 4294967296);
+    out as u32
+}
+
+/// The obvious Noir: u32 shifts, OR and wrapping_add.
+fn g_plain(s: &mut [u32; 16], a: u32, b: u32, c: u32, d: u32, x: u32, y: u32) {
+    s[a] = s[a].wrapping_add(s[b]).wrapping_add(x);
+    s[d] = rotr_plain(s[d] ^ s[a], 16);
+    s[c] = s[c].wrapping_add(s[d]);
+    s[b] = rotr_plain(s[b] ^ s[c], 12);
+    s[a] = s[a].wrapping_add(s[b]).wrapping_add(y);
+    s[d] = rotr_plain(s[d] ^ s[a], 8);
+    s[c] = s[c].wrapping_add(s[d]);
+    s[b] = rotr_plain(s[b] ^ s[c], 7);
+}
+
+fn rotr_plain(x: u32, r: u32) -> u32 {
     (x >> r) | (x << (32 - r))
 }
 
+/// The same G with the rotations and additions written as field
+/// constraints, the way blake3_leaf.py emits them.
 fn g(s: &mut [u32; 16], a: u32, b: u32, c: u32, d: u32, x: u32, y: u32) {
-    s[a] = s[a].wrapping_add(s[b]).wrapping_add(x);
-    s[d] = rotr(s[d] ^ s[a], 16);
-    s[c] = s[c].wrapping_add(s[d]);
-    s[b] = rotr(s[b] ^ s[c], 12);
-    s[a] = s[a].wrapping_add(s[b]).wrapping_add(y);
-    s[d] = rotr(s[d] ^ s[a], 8);
-    s[c] = s[c].wrapping_add(s[d]);
-    s[b] = rotr(s[b] ^ s[c], 7);
+    s[a] = add(s[a] as Field + s[b] as Field + x as Field);
+    s[d] = rotr::<16>(s[d] ^ s[a]);
+    s[c] = add(s[c] as Field + s[d] as Field);
+    s[b] = rotr::<12>(s[b] ^ s[c]);
+    s[a] = add(s[a] as Field + s[b] as Field + y as Field);
+    s[d] = rotr::<8>(s[d] ^ s[a]);
+    s[c] = add(s[c] as Field + s[d] as Field);
+    s[b] = rotr::<7>(s[b] ^ s[c]);
 }
 
-fn compress(cv: [u32; 8], block: [u32; 16], block_len: u32, flags: u32) -> [u32; 8] {
+fn compress<let TUNED: u32>(
+    cv: [u32; 8],
+    block: [u32; 16],
+    block_len: u32,
+    flags: u32,
+) -> [u32; 8] {
     let mut s: [u32; 16] = [0; 16];
     for i in 0..8 {
         s[i] = cv[i];
@@ -58,14 +109,46 @@ fn compress(cv: [u32; 8], block: [u32; 16], block_len: u32, flags: u32) -> [u32;
     s[15] = flags;
     let mut m = block;
     for _ in 0..7 {
-        g(&mut s, 0, 4, 8, 12, m[0], m[1]);
-        g(&mut s, 1, 5, 9, 13, m[2], m[3]);
-        g(&mut s, 2, 6, 10, 14, m[4], m[5]);
-        g(&mut s, 3, 7, 11, 15, m[6], m[7]);
-        g(&mut s, 0, 5, 10, 15, m[8], m[9]);
-        g(&mut s, 1, 6, 11, 12, m[10], m[11]);
-        g(&mut s, 2, 7, 8, 13, m[12], m[13]);
-        g(&mut s, 3, 4, 9, 14, m[14], m[15]);
+        if TUNED == 1 {
+            g(&mut s, 0, 4, 8, 12, m[0], m[1]);
+        } else {
+            g_plain(&mut s, 0, 4, 8, 12, m[0], m[1]);
+        }
+        if TUNED == 1 {
+            g(&mut s, 1, 5, 9, 13, m[2], m[3]);
+        } else {
+            g_plain(&mut s, 1, 5, 9, 13, m[2], m[3]);
+        }
+        if TUNED == 1 {
+            g(&mut s, 2, 6, 10, 14, m[4], m[5]);
+        } else {
+            g_plain(&mut s, 2, 6, 10, 14, m[4], m[5]);
+        }
+        if TUNED == 1 {
+            g(&mut s, 3, 7, 11, 15, m[6], m[7]);
+        } else {
+            g_plain(&mut s, 3, 7, 11, 15, m[6], m[7]);
+        }
+        if TUNED == 1 {
+            g(&mut s, 0, 5, 10, 15, m[8], m[9]);
+        } else {
+            g_plain(&mut s, 0, 5, 10, 15, m[8], m[9]);
+        }
+        if TUNED == 1 {
+            g(&mut s, 1, 6, 11, 12, m[10], m[11]);
+        } else {
+            g_plain(&mut s, 1, 6, 11, 12, m[10], m[11]);
+        }
+        if TUNED == 1 {
+            g(&mut s, 2, 7, 8, 13, m[12], m[13]);
+        } else {
+            g_plain(&mut s, 2, 7, 8, 13, m[12], m[13]);
+        }
+        if TUNED == 1 {
+            g(&mut s, 3, 4, 9, 14, m[14], m[15]);
+        } else {
+            g_plain(&mut s, 3, 4, 9, 14, m[14], m[15]);
+        }
         let mut next = m;
         for i in 0..16 {
             next[i] = m[PERMUTATION[i]];
@@ -90,8 +173,9 @@ unconstrained fn digit_count(value: u64) -> u32 {
 }
 
 /// big-endian(blake3(token)[1..32]) for the canonical xsd:integer token of
-/// value, with one variable-length hash over two compressions.
-pub fn literal_hash(value: u64) -> Field {
+/// value, with one variable-length hash over two compressions. TUNED = 1
+/// writes the rotations and additions as field constraints; 0 uses u32 ops.
+pub fn literal_hash<let TUNED: u32>(value: u64) -> Field {
     let mut digits: [u8; 20] = [0; 20];
     let mut remaining = value;
     for i in 0..20 {
@@ -148,8 +232,8 @@ pub fn literal_hash(value: u64) -> Field {
     let two = n > 18;
     let len = n + 46;
     let (len1, flags1) = if two { (64, 1) } else { (len, 11) };
-    let out1 = compress(IV, first, len1, flags1);
-    let out2 = compress(out1, second, if two { len - 64 } else { 0 }, 10);
+    let out1 = compress::<TUNED>(IV, first, len1, flags1);
+    let out2 = compress::<TUNED>(out1, second, if two { len - 64 } else { 0 }, 10);
     let digest = if two { out2 } else { out1 };
     let mut hs: Field = 0;
     for i in 0..8 {

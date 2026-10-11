@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Builds the three openings of N private xsd:integer literals and proves and
+# Builds the four openings of N private xsd:integer literals and proves and
 # verifies each with UltraHonk:
 #   baseline  - full_u64_check: 20 fixed-length BLAKE3 black boxes per value
-#   noir_var  - one variable-length BLAKE3 per value, written in Noir
+#   noir_var  - one variable-length BLAKE3 per value, written in Noir with u32
+#               shifts, OR and wrapping_add
+#   noir_tuned - the same in Noir, with rotations and additions written as
+#               field constraints as the hand-written ACIR does
 #   hand      - the same variable-length BLAKE3 as hand-written ACIR,
 #               appended to the compiled `spliced` program
 # Each value is compared with value <= 2^64 - 1 (op 1), which every u64
@@ -29,17 +32,18 @@ bounds = [$(join "${bounds[@]}")]
 values = [$(join "${values[@]}")]"
 printf '%s\n' "$common" > baseline/Prover.toml
 printf '%s\n' "$common" > noir_var/Prover.toml
+printf '%s\n' "$common" > noir_tuned/Prover.toml
 printf '%s\nhs = [%s]\n' "$common" "$(join "${hs[@]}")" > spliced/Prover.toml
-for p in baseline noir_var spliced; do
+for p in baseline noir_var noir_tuned spliced; do
   "$NARGO" execute --package "$p" >/dev/null
 done
 python3 ../blake3_leaf.py splice target/spliced.json target/spliced.gz target/hand.json target/hand.gz >&2
 # bb has no UltraHonk witness check, so prove and verify.
-for p in baseline noir_var hand; do
+for p in baseline noir_var noir_tuned hand; do
   out=target/proof-$p
   rm -rf "$out" && mkdir -p "$out"
   "$BB" prove -s ultra_honk -b "target/$p.json" -w "target/$p.gz" -o "$out" --write_vk >"$out/log" 2>&1 \
     && "$BB" verify -s ultra_honk -p "$out/proof" -k "$out/vk" -i "$out/public_inputs" >>"$out/log" 2>&1 \
     || { echo "$p does not prove and verify (see $out/log)" >&2; exit 1; }
 done
-echo "values $*: all three prove and verify" >&2
+echo "values $*: all four prove and verify" >&2

@@ -30,9 +30,12 @@ so the circuit reveals no digit count. The generator appends them to the
 compiled `circuits/spliced` program, which checks `h2(2, hs) == operand` and
 the comparison verdict, and it solves and checks its own witnesses.
 
-`circuits/noir_var` writes the same variable-length algorithm in Noir, so the
-comparison separates the gain from the algorithm from the gain from writing
-ACIR by hand. `circuits/baseline` calls `full_u64_check`. Each circuit opens
+`circuits/noir_var` writes the same variable-length algorithm in Noir with
+u32 shifts, OR and `wrapping_add`. `circuits/noir_tuned` writes it in Noir
+with the rotations and additions as the field constraints the generator
+emits (a hinted split checked by one linear equation and range checks).
+Together they separate the gain from the algorithm, from how the arithmetic
+is written, and from writing ACIR by hand. `circuits/baseline` calls `full_u64_check`. Each circuit opens
 `leaf::N` values.
 
 ```sh
@@ -44,7 +47,7 @@ BB=bb python3 proof-methods/acir/tamper.py 30
 python3 -m unittest proof-methods/acir/test_blake3_leaf.py
 ```
 
-`run.sh` proves and verifies all three circuits for the given values, with
+`run.sh` proves and verifies all four circuits for the given values, with
 bounds that do not reveal them. It does not pin tool versions or thread
 counts; compare timings only from one machine and one toolchain.
 `tamper.py` changes one witness of the hand-written circuit at a time and
