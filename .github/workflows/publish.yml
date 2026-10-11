@@ -194,7 +194,14 @@ jobs:
           set -euo pipefail
           ver=$(node -p "require('./package.json').version")
           echo "Inspecting registry attestations for @sparq-org/sparq@${ver}"
-          att=$(npm view "@sparq-org/sparq@${ver}" dist.attestations 2>/dev/null || true)
+          # The registry can take a few minutes to serve a just-published version (v0.1.5:
+          # about two), so poll before calling the publish unattested.
+          att=""
+          for _ in $(seq 1 20); do
+            att=$(npm view "@sparq-org/sparq@${ver}" dist.attestations 2>/dev/null || true)
+            if [ -n "$att" ] && [ "$att" != "undefined" ]; then break; fi
+            sleep 30
+          done
           echo "$att"
           if [ -z "$att" ] || [ "$att" = "undefined" ]; then
             echo "::error::no provenance attestation recorded for @sparq-org/sparq@${ver} — publish was not provenance-bearing"
@@ -284,7 +291,14 @@ jobs:
         run: |
           set -euo pipefail
           ver=$(node -p "require('./package.json').version")
-          att=$(npm view "@sparq-org/eyereasoner-compat@${ver}" dist.attestations 2>/dev/null || true)
+          # The registry can take a few minutes to serve a just-published version (v0.1.5:
+          # about two), so poll before calling the publish unattested.
+          att=""
+          for _ in $(seq 1 20); do
+            att=$(npm view "@sparq-org/eyereasoner-compat@${ver}" dist.attestations 2>/dev/null || true)
+            if [ -n "$att" ] && [ "$att" != "undefined" ]; then break; fi
+            sleep 30
+          done
           echo "$att"
           if [ -z "$att" ] || [ "$att" = "undefined" ]; then
             echo "::error::no provenance attestation recorded for @sparq-org/eyereasoner-compat@${ver}"
@@ -372,7 +386,14 @@ jobs:
         run: |
           set -euo pipefail
           ver=$(node -p "require('./package.json').version")
-          att=$(npm view "@sparq-org/solid-server@${ver}" dist.attestations 2>/dev/null || true)
+          # The registry can take a few minutes to serve a just-published version (v0.1.5:
+          # about two), so poll before calling the publish unattested.
+          att=""
+          for _ in $(seq 1 20); do
+            att=$(npm view "@sparq-org/solid-server@${ver}" dist.attestations 2>/dev/null || true)
+            if [ -n "$att" ] && [ "$att" != "undefined" ]; then break; fi
+            sleep 30
+          done
           echo "$att"
           if [ -z "$att" ] || [ "$att" = "undefined" ]; then
             echo "::error::no provenance attestation recorded for @sparq-org/solid-server@${ver}"
@@ -513,13 +534,15 @@ jobs:
       # maturin-action provisions the Rust toolchain + (on Linux) the manylinux container.
       # `python-release` profile keeps unwinding panics — the plain release profile is
       # panic=abort, which would turn a Rust panic into a hard interpreter abort (pyproject.toml).
+      # No `--release`: maturin >= 1.15 rejects it alongside `--profile` (v0.1.5's wheels failed on
+      # it), and python-release already inherits release.
       - name: Build abi3 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.platform.target }}
           # auto on Linux builds inside the manylinux container; empty elsewhere.
           manylinux: ${{ matrix.platform.manylinux }}
-          args: --release --profile python-release --manifest-path crates/sparq-py/Cargo.toml --out dist
+          args: --profile python-release --manifest-path crates/sparq-py/Cargo.toml --out dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: pypi-wheel-${{ matrix.platform.target }}

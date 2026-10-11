@@ -1,0 +1,1452 @@
+{
+  "schema": "sparq.zk-paper-executor-audit.v1",
+  "source": "ad457bf4b8abdc145607cdbc561debd21b1e0875",
+  "source_note": "Harness built from fix/zk-v5-answer-profile at ad457bf4 (PR #6792 stacked on #6791 and #6789); the same deltas were later rebuilt on main as efd8cc7f with byte-identical diffs. The harness and its fixtures land on main with #6791 and #6792. Re-executions of the rejected n=4 runs (paper-executor-sweep-reruns.jsonl.gz) used the same guest image with the harness at efd8cc7f plus its guest_error field: paper_sweep --set sweep --n 4 --only CASE --execute.",
+  "harness": "zk/sparql-evaluator/host/examples/paper_sweep.rs",
+  "generator": "zk/sparql-evaluator/scripts/paper_executor_audit.py",
+  "set": "sweep",
+  "guest_image_id": "fbf681f7998bf23dabcc54ab0084360de3de8344e7e39a9ab02475ea0e53fd68",
+  "phase_measurement_image_id": "458152dbe6877a4e3ee446cb3301d7bde07251f7380f69ae8e6b86040d3d7238",
+  "r0vm": "risc0-r0vm 3.0.6",
+  "executor_only": true,
+  "proofs": 0,
+  "records_sha256": "fda077e464fb4bee5026890964670a318895b5f239fe07e2b19d67fd62df7124",
+  "records": 832,
+  "reruns_sha256": "4ec781382592887b2c2379a8cba8842744876e0e50034bcbcd7ad0e49cd16f13",
+  "reruns": 80,
+  "session_limit_cycles": 33554432,
+  "note": "RISC Zero executor runs of the accepted V5 image; user_cycles exclude padding, total_cycles are padded segment cycles. Phase cycles come from the separate phase measurement image and include its instrumentation. Wall-clock fields in the records are from a shared container and are not evidence.",
+  "cases": [
+    {
+      "id": "bgp-1",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "bgp-3-star",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "bgp-3-chain",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "bgp-6-star",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "bgp-6-chain",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "optional",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "union",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "minus",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "filter-exists",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "filter-not-exists",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "bind",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "values",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "subquery",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "cmp-iri-eq",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "cmp-string-eq",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "cmp-langstring-eq",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "cmp-integer",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "cmp-decimal",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "cmp-double",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "cmp-datetime",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "fn-strstarts",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "fn-contains",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "fn-regex",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "fn-langmatches",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "agg-count-group",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "agg-sum",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "agg-min-max",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "agg-having",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "distinct",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "order-limit-offset",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "path-sequence",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "path-alternative",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "path-inverse",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "path-one-or-more",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "path-zero-or-more",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "form-select",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "form-ask-true",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "form-ask-false",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "form-construct",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "form-describe",
+      "host_query_profile": "DESCRIBE is outside the V5 query profile"
+    },
+    {
+      "id": "blank-node-data",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-graph",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-from",
+      "host_query_profile": "FROM and FROM NAMED are outside the V5 query profile"
+    },
+    {
+      "id": "probe-from-named",
+      "host_query_profile": "FROM and FROM NAMED are outside the V5 query profile"
+    },
+    {
+      "id": "probe-service",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-query-blank-node",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-bnode-fn",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-now",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-rand",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-nested-exists",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-triple-term",
+      "host_query_profile": "accepted"
+    },
+    {
+      "id": "probe-custom-function",
+      "host_query_profile": "accepted"
+    }
+  ],
+  "configurations": [
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 8071413,
+        "min": 8008619,
+        "max": 14465989
+      },
+      "total_cycles": {
+        "median": 9437184,
+        "min": 9437184,
+        "max": 16777216
+      },
+      "segments": {
+        "median": 9,
+        "max": 16
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 10575018,
+        "min": 10507077,
+        "max": 19787201
+      },
+      "total_cycles": {
+        "median": 12582912,
+        "min": 12058624,
+        "max": 23068672
+      },
+      "segments": {
+        "median": 12,
+        "max": 22
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 42,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 27943133.5,
+        "min": 27778211,
+        "max": 28559207
+      },
+      "total_cycles": {
+        "median": 31719424.0,
+        "min": 31457280,
+        "max": 32505856
+      },
+      "segments": {
+        "median": 31.0,
+        "max": 31
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 0,
+      "over_session_limit": [
+        "agg-count-group",
+        "agg-having",
+        "agg-min-max",
+        "agg-sum",
+        "bgp-1",
+        "bgp-3-chain",
+        "bgp-3-star",
+        "bgp-6-chain",
+        "bgp-6-star",
+        "bind",
+        "blank-node-data",
+        "cmp-datetime",
+        "cmp-decimal",
+        "cmp-double",
+        "cmp-integer",
+        "cmp-iri-eq",
+        "cmp-langstring-eq",
+        "cmp-string-eq",
+        "distinct",
+        "fn-contains",
+        "fn-langmatches",
+        "fn-regex",
+        "fn-strstarts",
+        "form-ask-false",
+        "form-ask-true",
+        "form-construct",
+        "form-describe",
+        "form-select",
+        "minus",
+        "optional",
+        "order-limit-offset",
+        "path-alternative",
+        "path-inverse",
+        "path-one-or-more",
+        "path-sequence",
+        "probe-from",
+        "probe-from-named",
+        "probe-graph",
+        "probe-query-blank-node",
+        "subquery",
+        "union",
+        "values"
+      ],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "session_limit"
+        }
+      ]
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 4748304,
+        "min": 4666226,
+        "max": 11172626
+      },
+      "total_cycles": {
+        "median": 6291456,
+        "min": 5767168,
+        "max": 13631488
+      },
+      "segments": {
+        "median": 6,
+        "max": 13
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 7328924,
+        "min": 7253357,
+        "max": 16528704
+      },
+      "total_cycles": {
+        "median": 8912896,
+        "min": 8650752,
+        "max": 19398656
+      },
+      "segments": {
+        "median": 9,
+        "max": 19
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 42,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 14701396.0,
+        "min": 14519564,
+        "max": 15300947
+      },
+      "total_cycles": {
+        "median": 17825792.0,
+        "min": 17825792,
+        "max": 18350080
+      },
+      "segments": {
+        "median": 17.0,
+        "max": 18
+      }
+    },
+    {
+      "suite": "eddsa-rdfc-2022",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 42,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 24923744.5,
+        "min": 24770225,
+        "max": 26959988
+      },
+      "total_cycles": {
+        "median": 29360128.0,
+        "min": 28835840,
+        "max": 31457280
+      },
+      "segments": {
+        "median": 28.0,
+        "max": 30
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 7001824,
+        "min": 6934529,
+        "max": 13430343
+      },
+      "total_cycles": {
+        "median": 8388608,
+        "min": 7864320,
+        "max": 15728640
+      },
+      "segments": {
+        "median": 8,
+        "max": 15
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 1,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 8659407,
+        "min": 8589620,
+        "max": 17859878
+      },
+      "total_cycles": {
+        "median": 9961472,
+        "min": 9961472,
+        "max": 20971520
+      },
+      "segments": {
+        "median": 10,
+        "max": 20
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 42,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 23814424.5,
+        "min": 23683495,
+        "max": 24437891
+      },
+      "total_cycles": {
+        "median": 26476544.0,
+        "min": 26214400,
+        "max": 27262976
+      },
+      "segments": {
+        "median": 26.0,
+        "max": 26
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "hidden",
+      "credentials": 4,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 42,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 30249242.0,
+        "min": 30126746,
+        "max": 32360926
+      },
+      "total_cycles": {
+        "median": 33554432.0,
+        "min": 33554432,
+        "max": 36175872
+      },
+      "segments": {
+        "median": 32.0,
+        "max": 35
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 3721589,
+        "min": 3651604,
+        "max": 10138511
+      },
+      "total_cycles": {
+        "median": 4718592,
+        "min": 4456448,
+        "max": 12058624
+      },
+      "segments": {
+        "median": 5,
+        "max": 12
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 1,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 43,
+      "rejected": 9,
+      "executed": 43,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 5380737,
+        "min": 5313849,
+        "max": 14577354
+      },
+      "total_cycles": {
+        "median": 6291456,
+        "min": 6291456,
+        "max": 17039360
+      },
+      "segments": {
+        "median": 6,
+        "max": 17
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "statements_per_credential": 32,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 42,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 10589056.5,
+        "min": 10453872,
+        "max": 11214796
+      },
+      "total_cycles": {
+        "median": 12582912.0,
+        "min": 12582912,
+        "max": 13631488
+      },
+      "segments": {
+        "median": 12.0,
+        "max": 13
+      }
+    },
+    {
+      "suite": "eddsa-sha256-merkle-2026",
+      "signature_mode": "revealed",
+      "credentials": 4,
+      "statements_per_credential": 64,
+      "cases": 52,
+      "admitted": 42,
+      "rejected": 10,
+      "executed": 42,
+      "over_session_limit": [],
+      "rejected_runs": [
+        {
+          "case": "filter-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "filter-not-exists",
+          "rejection": "V3 EXISTS blank-node correlation is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "path-zero-or-more",
+          "rejection": "V3 table canonicalization rejected",
+          "rejection_cause": "session_limit"
+        },
+        {
+          "case": "probe-bnode-fn",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-custom-function",
+          "rejection": "custom function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-nested-exists",
+          "rejection": "nested EXISTS is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-now",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-rand",
+          "rejection": "nondeterministic or RDF 1.2 function is not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-service",
+          "rejection": "GRAPH, SERVICE and LATERAL are not admitted",
+          "rejection_cause": "guest_abort"
+        },
+        {
+          "case": "probe-triple-term",
+          "rejection": "query blank nodes and triple terms are not admitted",
+          "rejection_cause": "guest_abort"
+        }
+      ],
+      "user_cycles": {
+        "median": 17088546.5,
+        "min": 16960630,
+        "max": 19222429
+      },
+      "total_cycles": {
+        "median": 19922944.0,
+        "min": 19398656,
+        "max": 22020096
+      },
+      "segments": {
+        "median": 19.0,
+        "max": 21
+      }
+    }
+  ]
+}

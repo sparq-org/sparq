@@ -36,7 +36,7 @@
 # scripts/tests/test_check_release_aliases.sh (docs-quality.yml).
 #
 # Usage: check-release-aliases.sh <asset-list-file> [download-client.tsx]
-#   asset-list-file      one staged release asset filename per line (e.g. `ls -1 assets`)
+#   asset-list-file      one staged release asset filename per line (e.g. `ls -1 release-assets`)
 #   download-client.tsx  path to the site component (defaults to the in-repo path)
 
 set -euo pipefail

@@ -11,6 +11,9 @@ publish.workspace = true
 [features]
 default = []
 authenticated-rdf = []
+# Also build the measurement-only V5 image with per-phase cycle reporting and
+# generate SPARQ_AUTHRDF_PHASES_GUEST_{ELF,ID}. Never a production image.
+phase-cycles = ["authenticated-rdf"]
 
 [build-dependencies]
 risc0-build = { version = "=3.0.6", features = ["unstable"] }

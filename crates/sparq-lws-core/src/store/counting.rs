@@ -378,6 +378,16 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.list_children(container).await
     }
 
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
+        self.inner.list_children_within(container, max_bytes).await
+    }
+
     async fn referenced_blob_keys(&self) -> Result<HashSet<String>, SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);

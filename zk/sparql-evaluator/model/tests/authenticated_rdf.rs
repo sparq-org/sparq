@@ -1099,3 +1099,25 @@ fn merkle_suite_rejects_reordered_tampered_or_resalted_credentials() {
     short.signature.truncate(64);
     assert_eq!(reason(run_one(short)), "Merkle proof value must be the signature (hidden mode only) and salt");
 }
+
+#[test]
+fn phases_are_reported_in_order_and_do_not_change_the_journal() {
+    use auth::Phase::*;
+    let query = "SELECT ?n WHERE { ?s ex:name ?n }";
+    let witness = |policy: Policy, list| Witness {
+        request: request(query, DatasetAuthority::HolderDeclared, policy),
+        dataset: credentials(list),
+    };
+    let hidden = witness(Policy::new(table()), vec![alice(), bob()]);
+    let mut phases = Vec::new();
+    let journal = auth::evaluate_observed(&hidden, &mut |phase| phases.push(phase)).unwrap();
+    assert_eq!(journal, auth::evaluate(&hidden).unwrap());
+    let per = [ProofConfig, Document, Signature];
+    let expected: Vec<_> = [Request].into_iter().chain(per).chain(per).chain([Mapping, Query, Journal]).collect();
+    assert_eq!(phases, expected);
+    let (a, _) = strip(alice());
+    let revealed = witness(Policy::new(table()).with_signature_mode(auth::SignatureMode::Revealed), vec![a]);
+    phases.clear();
+    auth::evaluate_observed(&revealed, &mut |phase| phases.push(phase)).unwrap();
+    assert_eq!(phases, [Request, ProofConfig, Document, Mapping, Query, Journal]);
+}
