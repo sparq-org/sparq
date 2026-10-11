@@ -40,6 +40,11 @@ not rely on it.
 of UltraHonk, so both proof systems can be compared on the same statement; see
 [`vole/README.md`](vole/README.md).
 
+`acir` is a prototype that writes the ACIR for opening a committed
+`xsd:integer` literal by hand, with one variable-length BLAKE3 in place of
+the 20 fixed-length hashes the Noir result circuits constrain; see
+[`acir/README.md`](acir/README.md).
+
 `tee` runs the same relation inside an AWS Nitro Enclave. The enclave asks
 the Nitro Secure Module for an attestation document whose `user_data` is the
 SHA-256 statement digest and whose `nonce` is the request nonce; the verifier
