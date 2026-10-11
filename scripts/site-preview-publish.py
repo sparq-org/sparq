@@ -86,11 +86,16 @@ def eligible(run, n):
 def pick_run(n, head_sha, head_ref):
     """The PR's build to publish: its current head's, else its newest successful one."""
     base = f"repos/{SOURCE_REPO}/actions/workflows/{SOURCE_WORKFLOW}/runs?event=pull_request&status=success"
-    for query in (f"&head_sha={head_sha}&per_page=20",
-                  f"&branch={urllib.parse.quote(head_ref, safe='')}&per_page=50"):
-        for run in api(base + query)["workflow_runs"]:   # newest first
-            if eligible(run, n):
-                return run
+    for query in (f"&head_sha={head_sha}", f"&branch={urllib.parse.quote(head_ref, safe='')}"):
+        page = 1
+        while True:
+            runs = api(f"{base}{query}&per_page=100&page={page}")["workflow_runs"]  # newest first
+            for run in runs:
+                if eligible(run, n):
+                    return run
+            if len(runs) < 100:
+                break
+            page += 1
     return None
 
 

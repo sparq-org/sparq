@@ -113,7 +113,11 @@ class PickRun(unittest.TestCase):
         def fake_api(path):
             self.calls.append(path)
             key = "head_sha" if "head_sha=" in path else "branch"
-            return {"workflow_runs": self.responses.get(key, [])}
+            page = int(path.rsplit("page=", 1)[1])
+            pages = self.responses.get(key, [])
+            if pages and isinstance(pages[0], dict):
+                pages = [pages]
+            return {"workflow_runs": pages[page - 1] if page <= len(pages) else []}
 
         pub.api = fake_api
 
@@ -128,6 +132,12 @@ class PickRun(unittest.TestCase):
     def test_falls_back_to_the_newest_build_of_the_pr_while_the_head_builds(self):
         self.responses = {"branch": [run(4, "older", [5])]}
         self.assertEqual(pub.pick_run(5, "head", "feature")["id"], 4)
+
+    def test_finds_an_eligible_build_beyond_the_first_page(self):
+        other_prs = [run(100 + i, f"x{i}", [9]) for i in range(100)]
+        self.responses = {"branch": [other_prs, [run(4, "older", [5])]]}
+        self.assertEqual(pub.pick_run(5, "head", "feature")["id"], 4)
+        self.assertTrue(any("page=2" in c for c in self.calls))
 
     def test_rejects_runs_of_other_prs_forks_and_other_events(self):
         self.responses = {"head_sha": [run(1, "head", [6]),
