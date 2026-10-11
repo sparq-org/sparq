@@ -64,6 +64,25 @@ pub const SKEW_SECS: i64 = 60;
 pub struct Verified {
     pub subject: String,
     pub client: String,
+    /// When the subject token stops being valid (seconds since the epoch). The server checks it
+    /// again just before it issues, so a token that expired while a suite fetched documents is
+    /// refused, whatever the suite checked when it began.
+    pub expires: i64,
+}
+
+impl Verified {
+    /// Whether the subject token is still valid at `now`, within [`SKEW_SECS`] (as
+    /// [`check_times`] reads `exp`).
+    pub fn still_valid(&self, now: i64) -> bool {
+        self.expires > now.saturating_sub(SKEW_SECS)
+    }
+}
+
+/// A JWT subject token's `exp`, for [`Verified::expires`]: rounded down, so never later than the
+/// token says.
+pub fn jwt_expires(jws: &jose::Jws) -> Result<i64, String> {
+    let exp = jws.claim_time("exp")?.ok_or("exp is required")?;
+    Ok(exp.floor() as i64)
 }
 
 /// One token exchange, as a suite sees it.

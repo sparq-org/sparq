@@ -190,7 +190,7 @@ impl Suite for Saml {
         &[SAML2_TOKEN_TYPE]
     }
 
-    /// A SAML subject is the assertion's URI `NameID`; this declares the web identifiers.
+    /// A SAML subject is the assertion's `NameID`, an http(s) URL.
     fn identifier_types(&self) -> &[&'static str] {
         &["https"]
     }
@@ -245,7 +245,8 @@ fn verify_at(
             .and_then(parse_datetime)
             .ok_or_else(|| format!("Conditions {name} is missing or not an xsd:dateTime"))
     };
-    if time("NotBefore")? > now + SKEW_SECS || time("NotOnOrAfter")? <= now - SKEW_SECS {
+    let expires = time("NotOnOrAfter")?;
+    if time("NotBefore")? > now + SKEW_SECS || expires <= now - SKEW_SECS {
         return Err("the assertion is outside its validity period".into());
     }
     check_conditions(conditions, audience)?;
@@ -259,14 +260,20 @@ fn verify_at(
     if name_id.is_empty() {
         return Err("the assertion names no subject".into());
     }
-    // The NameID is the LWS subject, which an access token's sub carries: it MUST be a URI.
+    // The NameID is the LWS subject, which an access token's sub carries: it MUST be a URI, and
+    // this suite takes web identifiers (http(s) URLs, the `https` identifier type it declares),
+    // as the OpenID Connect and controlled identifier suites do.
     if !is_uri(&name_id) {
         return Err("the assertion's NameID is not a URI".into());
+    }
+    if !(name_id.starts_with("https://") || name_id.starts_with("http://")) {
+        return Err("the assertion's NameID is not an http(s) URL".into());
     }
     let client = bearer_recipient(subject, now)?;
     Ok(Verified {
         subject: name_id,
         client,
+        expires,
     })
 }
 
@@ -1634,6 +1641,41 @@ mod tests {
         // A Recipient that is not a URI.
         let bad = signed_assertion_to(&key, idp, cfg.issuer(), alice, Some("client"), false);
         assert!(verify(&cfg, &bad).unwrap_err().contains("Recipient"));
+    }
+
+    /// Review finding: the suite took any absolute URI as its subject while declaring only the
+    /// `https` identifier type. It takes http(s) URLs, which that type declares, and carries the
+    /// assertion's expiry for the server's last check.
+    #[test]
+    fn subjects_are_the_identifier_type_declared() {
+        let (cfg, key, idp) = saml_cfg();
+        assert_eq!(
+            Saml::new(cfg.saml_idps.clone()).unwrap().identifier_types(),
+            ["https"]
+        );
+        for name in [
+            "https://alice.example/#me",
+            "http://localhost:3001/alice#me",
+        ] {
+            let ok = verify(
+                &cfg,
+                &signed_assertion(&key, idp, cfg.issuer(), name, false),
+            )
+            .unwrap();
+            assert_eq!(ok.subject, name);
+            assert!(ok.still_valid(jose::now_secs()));
+            assert!(!ok.still_valid(ok.expires + SKEW_SECS));
+        }
+        for name in [
+            "urn:example:alice",
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+        ] {
+            let err = verify(
+                &cfg,
+                &signed_assertion(&key, idp, cfg.issuer(), name, false),
+            );
+            assert!(err.unwrap_err().contains("http(s) URL"), "{name}");
+        }
     }
 
     fn saml_cfg() -> (LwsConfig, jose::EcKey, &'static str) {

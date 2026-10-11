@@ -134,6 +134,14 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
             )
         }
     };
+    // Checked again now, in one place for every suite: a suite that fetched documents took time,
+    // and the subject token may have expired since it began.
+    if !verified.still_valid(super::jose::now_secs()) {
+        return oauth_error(
+            "invalid_request",
+            "invalid subject token: the credential expired while it was checked",
+        );
+    }
     // The access token's sub and client_id MUST be URIs (section 5.2.3).
     if !is_uri(&verified.subject) || !is_uri(&verified.client) {
         return oauth_error(
@@ -307,14 +315,100 @@ mod tests {
                 "good" => Ok(sparq_lws_authn::Verified {
                     subject: "https://alice.example/#me".into(),
                     client: "https://app.example/".into(),
+                    expires: x.now + 300,
                 }),
                 "no-uri" => Ok(sparq_lws_authn::Verified {
                     subject: "alice".into(),
                     client: "https://app.example/".into(),
+                    expires: x.now + 300,
+                }),
+                // Valid when the exchange began, expired (past the skew) by the time it ended.
+                "stale" => Ok(sparq_lws_authn::Verified {
+                    subject: "https://alice.example/#me".into(),
+                    client: "https://app.example/".into(),
+                    expires: x.now - sparq_lws_authn::SKEW_SECS,
                 }),
                 _ => Err("not good".into()),
             }
         }
+    }
+
+    /// Review finding: a subject token's expiry was checked before the suite fetched documents,
+    /// so one that expired during a slow fetch still got an access token. A controlled identifier
+    /// token valid (within the skew) when the exchange begins, whose document takes longer to
+    /// arrive than it has left, is refused; the same token with a prompt document is not.
+    #[cfg(feature = "authn-ssi")]
+    #[tokio::test]
+    async fn a_token_that_expires_during_its_fetch_is_refused() {
+        use super::super::jose::{self, Jws};
+        use super::super::test_store;
+        let key = jose::EcKey::generate("k");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let doc = |subject: &str| {
+            json!({"id": subject, "authentication": [{"id": format!("{subject}#k"),
+                "type": "JsonWebKey", "controller": subject,
+                "publicKeyJwk": jose::public_jwk_of(&key.public_key())}]})
+        };
+        let (prompt, slow) = (doc(&format!("{base}/prompt")), doc(&format!("{base}/slow")));
+        let app = axum::Router::new()
+            .route(
+                "/prompt",
+                axum::routing::get(move || async move { axum::Json(prompt) }),
+            )
+            .route(
+                "/slow",
+                axum::routing::get(move || async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    axum::Json(slow)
+                }),
+            );
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.allow_insecure_fetch = true;
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let resource =
+            url::form_urlencoded::byte_serialize(state.cfg.realm().as_bytes()).collect::<String>();
+        let exchange = |path: &str| {
+            let subject = format!("{base}{path}");
+            let now = jose::now_secs();
+            // One second short of the skew past its expiry.
+            let claims = json!({"sub": subject, "iss": subject, "client_id": subject,
+                "aud": [state.cfg.issuer()], "iat": now - 120,
+                "exp": now - sparq_lws_authn::SKEW_SECS + 1});
+            let header = json!({"alg": "ES256", "typ": "JWT", "kid": "k"});
+            let input = format!(
+                "{}.{}",
+                jose::b64url(header.to_string().as_bytes()),
+                jose::b64url(claims.to_string().as_bytes())
+            );
+            let token = format!("{input}.{}", jose::b64url(&key.sign(input.as_bytes())));
+            assert!(Jws::parse(&token).is_some());
+            let jwt =
+                url::form_urlencoded::byte_serialize(JWT_TOKEN_TYPE.as_bytes()).collect::<String>();
+            test_store::request(
+                Method::POST,
+                AS_TOKEN_PATH,
+                &[("content-type", "application/x-www-form-urlencoded")],
+                &format!(
+                    "{GRANT}&subject_token={token}&subject_token_type={jwt}&resource={resource}"
+                ),
+            )
+        };
+        let ok = handle(&state, &exchange("/prompt")).await;
+        assert_eq!(ok.status(), StatusCode::OK);
+        let late = handle(&state, &exchange("/slow")).await;
+        assert_eq!(late.status(), StatusCode::BAD_REQUEST);
+        let body = test_store::body_json(late).await;
+        assert!(
+            body["error_description"]
+                .as_str()
+                .unwrap()
+                .contains("expired while it was checked"),
+            "{body}"
+        );
     }
 
     /// Review finding: a SAML-only server advertised no subject identifier types. The metadata
@@ -440,6 +534,7 @@ mod tests {
         for (token, token_type) in [
             ("bad", "urn:example:fake"),
             ("no-uri", "urn:example:fake"),
+            ("stale", "urn:example:fake"),
             ("good", "urn:example:unknown"),
         ] {
             let r = handle(&state, &exchange(token, token_type)).await;

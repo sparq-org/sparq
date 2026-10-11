@@ -24,7 +24,9 @@ use serde_json::Value;
 use sparq_lws_authn::fetch;
 use sparq_lws_authn::jose::{self, Jws};
 pub use sparq_lws_authn::JWT_TOKEN_TYPE;
-use sparq_lws_authn::{check_times, parse_datetime, parse_jwt, Exchange, Suite, Verified};
+use sparq_lws_authn::{
+    check_times, jwt_expires, parse_datetime, parse_jwt, Exchange, Suite, Verified,
+};
 
 /// The self-issued suites: did:key and controlled identifier subjects of a JWT subject token.
 #[derive(Debug, Default, Clone, Copy)]
@@ -180,6 +182,7 @@ fn did_key(issuer: &str, jws: &Jws, now: i64) -> Result<Verified, String> {
     Ok(Verified {
         subject: did.clone(),
         client: did,
+        expires: jwt_expires(jws)?,
     })
 }
 
@@ -214,6 +217,7 @@ async fn cid(
     Ok(Verified {
         subject: subject.clone(),
         client: subject,
+        expires: jwt_expires(jws)?,
     })
 }
 
@@ -400,7 +404,8 @@ mod tests {
             did_key(cfg.issuer(), &jws, jose::now_secs()).unwrap(),
             Verified {
                 subject: did.clone(),
-                client: did.clone()
+                client: did.clone(),
+                expires: jwt_expires(&jws).unwrap(),
             }
         );
         let jws = sign(&key, &format!("{did}#{mb}"), claims(&did, &cfg));
