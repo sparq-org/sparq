@@ -74,12 +74,18 @@ implied by this entry; verify the tagged run and every registry and release arti
   update path. (#6759)
 - **sparq-lws-core:** `SOLID_SERVER_PROTOCOL=lws` serves the LWS 1.0 storage surface:
   storage description, paged containers, data resources with preconditions and byte ranges,
-  `POST` / `PUT` / `DELETE` and read-only linksets. Experimental. (#6728)
+  `POST` / `PUT` / `DELETE` and linksets. Experimental. (#6728) It also accepts JSON Patch on
+  data resources (#6805) and linksets (#6806), and serves access grants and access requests
+  (#6730) and webhook notifications (#6731).
 - **Research prototypes** (zk/ and proof-methods/, not part of the shipped runtime): the
   stacked ZK and credential-query work (#6647), a revealed-signature mode for the zkVM
   eddsa-rdfc-2022 relation (#6787), the `eddsa-sha256-merkle-2026` Merkle-root cryptosuite and
   spec (#6789), a disclosed-credential re-evaluation method (#6788), a QuickSilver prover for
-  the zk/compose circuits (#6790) and an AWS Nitro Enclaves attestation method (#6794).
+  the zk/compose circuits (#6790), an AWS Nitro Enclaves attestation method (#6794), a paper
+  measurement harness and executor evidence records (#6791, #6793), and a hand-written ACIR
+  prototype for the integer literal opening (#6803).
+- **sparq-proved-evaluator (research):** the V5 host rejects DESCRIBE and dataset clauses
+  (`FROM` / `FROM NAMED`). (#6792)
 - `sparq-vectors` can open canonical little-endian `.spqv` stores on big-endian hosts by
   validating the file and byte-swapping its dense f32 region into aligned owned storage; `.spqv`
   writers and the `.spqg` reader/writer remain little-endian-host only.
