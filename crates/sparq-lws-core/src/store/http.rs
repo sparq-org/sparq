@@ -122,9 +122,13 @@ pub enum SparqHttpError {
     /// The server returned a 4xx — fatal (a malformed query / rejected request; retrying won't help).
     #[error("client error (HTTP {status})")]
     ClientStatus { status: u16 },
-    /// The response body exceeded `MAX_RESPONSE_BYTES` or could not be read — fatal.
-    #[error("response too large or unreadable")]
+    /// The response body could not be read (the connection failed part way) — fatal.
+    #[error("response body unreadable")]
     Body,
+    /// The response body passed the size it may take (`MAX_RESPONSE_BYTES`, or a caller's
+    /// smaller cap) — fatal.
+    #[error("response too large")]
+    TooLarge,
     /// The response was not the expected shape (e.g. not valid sparql-results JSON) — fatal.
     #[error("malformed response: {0}")]
     Malformed(String),
@@ -209,7 +213,9 @@ impl HttpSparqClient {
         };
         let body = match self.query_raw_within(&q, ACCEPT_RESULTS_JSON, cap).await {
             Ok((body, _ct)) => body,
-            Err(SparqHttpError::Body) if rows.is_some() => return Ok(None),
+            // Only a response past the cap is a listing that does not fit; one that could not
+            // be read is a failure, whatever its size.
+            Err(SparqHttpError::TooLarge) if rows.is_some() => return Ok(None),
             Err(e) => return Err(e.into_sparq()),
         };
         let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
@@ -255,7 +261,7 @@ impl HttpSparqClient {
     }
 
     /// [`query_raw`](Self::query_raw), its response read up to `cap` bytes
-    /// ([`SparqHttpError::Body`] past that).
+    /// ([`SparqHttpError::TooLarge`] past that).
     async fn query_raw_within(
         &self,
         sparql: &str,
@@ -351,8 +357,9 @@ impl HttpSparqClient {
 /// Read an HTTP response body into [`Bytes`], failing closed if it exceeds [`MAX_RESPONSE_BYTES`].
 ///
 /// `B` is the concrete incoming body the hyper-util legacy client yields ([`hyper::body::Incoming`]);
-/// [`http_body_util::Limited`] bounds the read, so a runaway response is a fatal [`SparqHttpError::Body`]
-/// rather than an OOM.
+/// [`http_body_util::Limited`] bounds the read, so a runaway response is a fatal
+/// [`SparqHttpError::TooLarge`] rather than an OOM; a body that fails part way is
+/// [`SparqHttpError::Body`], never taken for one too large.
 async fn read_bounded<B>(body: B, cap: usize) -> Result<Bytes, SparqHttpError>
 where
     B: hyper::body::Body,
@@ -361,6 +368,7 @@ where
     let limited = http_body_util::Limited::new(body, cap);
     match limited.collect().await {
         Ok(collected) => Ok(collected.to_bytes()),
+        Err(e) if e.is::<http_body_util::LengthLimitError>() => Err(SparqHttpError::TooLarge),
         Err(_) => Err(SparqHttpError::Body),
     }
 }
@@ -726,6 +734,39 @@ impl HttpSparqClient {
 mod tests {
     use super::*;
 
+    /// Review finding: a body past the cap and a body that failed part way were one error, so a
+    /// connection reset on a small listing read as a listing too large to keep (`507`). They are
+    /// told apart.
+    #[tokio::test]
+    async fn a_body_past_the_cap_is_not_a_body_that_failed() {
+        struct Reset;
+        impl hyper::body::Body for Reset {
+            type Data = Bytes;
+            type Error = std::io::Error;
+            fn poll_frame(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Self::Error>>>
+            {
+                std::task::Poll::Ready(Some(Err(std::io::Error::other("connection reset"))))
+            }
+        }
+        assert!(matches!(
+            read_bounded(Reset, 1 << 20).await,
+            Err(SparqHttpError::Body)
+        ));
+        let big = Full::new(Bytes::from(vec![b'x'; 64]));
+        assert!(matches!(
+            read_bounded(big, 16).await,
+            Err(SparqHttpError::TooLarge)
+        ));
+        let small = Full::new(Bytes::from_static(b"ok"));
+        assert_eq!(
+            read_bounded(small, 16).await.unwrap(),
+            Bytes::from_static(b"ok")
+        );
+    }
+
     #[test]
     fn ask_json_parses_true_and_false() {
         assert!(parse_ask_json(br#"{"head":{},"boolean":true}"#).unwrap());
@@ -774,6 +815,7 @@ mod tests {
         assert!(!SparqHttpError::ClientStatus { status: 400 }.is_retryable());
         assert!(!SparqHttpError::Malformed("x".into()).is_retryable());
         assert!(!SparqHttpError::Body.is_retryable());
+        assert!(!SparqHttpError::TooLarge.is_retryable());
         assert!(!SparqHttpError::Build("x".into()).is_retryable());
     }
 

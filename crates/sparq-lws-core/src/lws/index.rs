@@ -226,8 +226,10 @@ enum Failed {
     Store,
     /// What it would keep is past [`MAX_INDEX_WORKING_SET`].
     TooLarge,
-    /// The storage root is set aside (a stuck change to it, or to a container under it, is
-    /// being put back): there is no index to give until it is back, rather than an empty one.
+    /// A resource the walk reached is set aside (a stuck change to it, or to a member it lists,
+    /// is being put back), or something was set aside while it walked: the walk cannot say what
+    /// is there until it is back, so there is no index to give rather than one that leaves out
+    /// what is under it.
     SetAside,
 }
 
@@ -280,6 +282,9 @@ async fn readable<S: Store + 'static>(
     kept: &Kept,
     mut visit: impl FnMut(&str, Vec<String>, &ResourceMeta) -> Result<(), Failed>,
 ) -> Result<(), Failed> {
+    // Whatever is set aside while the walk runs moves this count, the resources it already
+    // visited included, so a walk that ends with it moved fails (below), whatever it reached.
+    let set_asides = state.locks.set_asides();
     let root = state.cfg.storage();
     kept.charge(root.len())?;
     let mut stack = vec![root];
@@ -287,16 +292,16 @@ async fn readable<S: Store + 'static>(
         kept.refund(uri.len());
         // Each resource is read under its shared lock, its listing included: a change to it in
         // flight (a recursive delete part way, say) is waited for, never read half done. What a
-        // stuck change holds is skipped, with what is under it, rather than waited on until it
-        // is put back: the lock is given only while the resource is visible (see
-        // [`IriLocks::read`](super::resources::IriLocks::read)), and a stuck recursive delete
-        // sets aside everything it holds.
+        // stuck change holds fails the walk at once rather than being waited on until it is put
+        // back, or left out with what is under it: the lock is given only while the resource is
+        // visible (see [`IriLocks::read`](super::resources::IriLocks::read)), and a stuck
+        // recursive delete sets aside everything it holds.
         let Some(_guard) = state.locks.read(&uri).await else {
-            if uri == state.cfg.storage() {
-                return Err(Failed::SetAside);
-            }
-            continue;
+            return Err(Failed::SetAside);
         };
+        if state.locks.set_asides() != set_asides {
+            return Err(Failed::SetAside);
+        }
         // A resource removed since it was listed is not in the index: its existence is checked
         // under its lock (its metadata alone does not say, being read as a default when absent).
         match state.store.exists(&uri).await {
@@ -364,6 +369,9 @@ async fn readable<S: Store + 'static>(
             .collect();
         types.extend(more);
         visit(&uri, types, &meta)?;
+    }
+    if state.locks.set_asides() != set_asides {
+        return Err(Failed::SetAside);
     }
     Ok(())
 }
@@ -757,14 +765,19 @@ mod tests {
         assert_eq!(gone.status(), StatusCode::NOT_FOUND);
     }
 
-    /// Review finding: a resource removed after its container was listed and before its lock
-    /// was taken was still found (its metadata read as a default, its permission check passed),
-    /// with a made-up type. Its existence is checked under its lock.
-    /// Review finding: the walk waited on the lock of a resource whose change was set aside
-    /// (its locks held until it is put back), holding the request. It is skipped, as soon as it
-    /// is set aside, wait or no wait.
+    /// The type search of everything, as `state` answers it now.
+    async fn search_all<S: Store + 'static>(state: &LwsState<S>) -> Response {
+        let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
+        let get = super::super::test_store::request(Method::GET, &path, &[], "");
+        handle(state, &get, &Agent::anonymous()).await
+    }
+
+    /// Review findings: the walk waited on the lock of a resource whose change was set aside
+    /// (its locks held until it is put back), holding the request; then it skipped it, giving a
+    /// `200` that left out what the walk could not see. The walk fails with `503` as soon as
+    /// it is set aside, wait or no wait.
     #[tokio::test]
-    async fn a_set_aside_resource_is_skipped_not_waited_on() {
+    async fn a_set_aside_resource_fails_the_walk_not_waited_on() {
         use super::super::test_store;
         let (state, store) = test_store::state(100).await;
         let root = state.cfg.storage();
@@ -779,11 +792,7 @@ mod tests {
         let held = state.locks.lock(&b).await.unwrap();
         let task = {
             let state = state.clone();
-            tokio::spawn(async move {
-                let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
-                let get = test_store::request(Method::GET, &path, &[], "");
-                test_store::body_json(handle(&state, &get, &Agent::anonymous()).await).await
-            })
+            tokio::spawn(async move { search_all(&state).await.status() })
         };
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(
@@ -797,18 +806,86 @@ mod tests {
             prior: None,
         }]);
         state.set_aside(left, held);
-        let doc = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+        let status = tokio::time::timeout(std::time::Duration::from_secs(1), task)
             .await
-            .expect("the walk skipped it rather than wait")
+            .expect("the walk gave up rather than wait")
             .unwrap();
-        let ids: Vec<&str> = doc["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|i| i["id"].as_str())
-            .collect();
-        assert!(ids.contains(&format!("{root}a").as_str()), "{ids:?}");
-        assert!(!ids.contains(&b.as_str()), "{ids:?}");
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        *store.fail_delete_of.lock().unwrap() = None;
+    }
+
+    /// Review finding: a set-aside container below the root was skipped with everything under
+    /// it, and the walk answered `200`. It fails the walk.
+    #[tokio::test]
+    async fn a_set_aside_container_fails_the_walk() {
+        use super::super::test_store;
+        let (state, store) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        let (c, z) = (format!("{root}c/"), format!("{root}c/z"));
+        state
+            .store
+            .create_in_container(&root, &c, Bytes::new(), "application/lws+json")
+            .await
+            .unwrap();
+        state
+            .store
+            .create_in_container(&c, &z, "x".into(), "text/plain")
+            .await
+            .unwrap();
+        assert_eq!(search_all(&state).await.status(), StatusCode::OK);
+        // A stuck change to z sets aside z and the container listing it, not the root.
+        *store.fail_delete_of.lock().unwrap() = Some(z.clone());
+        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+            key: z.clone(),
+            prior: None,
+        }]);
+        state.set_aside(left, ());
+        assert!(!state.visible(&c) && state.visible(&root));
+        assert_eq!(
+            search_all(&state).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        *store.fail_delete_of.lock().unwrap() = None;
+    }
+
+    /// Review finding: what was set aside after the walk had visited it (an ancestor of what
+    /// it still had to visit, say) went unnoticed. Whatever is set aside while the walk runs
+    /// fails it.
+    #[tokio::test]
+    async fn a_set_aside_during_the_walk_fails_it() {
+        use super::super::test_store;
+        let (state, store) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        for name in ["a", "b"] {
+            state
+                .store
+                .create_in_container(&root, &format!("{root}{name}"), "x".into(), "text/plain")
+                .await
+                .unwrap();
+        }
+        let (a, b) = (format!("{root}a"), format!("{root}b"));
+        // The walk has visited the root and waits on b.
+        let held = state.locks.lock(&b).await.unwrap();
+        let task = {
+            let state = state.clone();
+            tokio::spawn(async move { search_all(&state).await.status() })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!task.is_finished());
+        // Meanwhile a stuck change to a sets aside a and the root, both already behind the
+        // walk (or a ahead of it); b is let go untouched.
+        *store.fail_delete_of.lock().unwrap() = Some(a.clone());
+        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+            key: a.clone(),
+            prior: None,
+        }]);
+        state.set_aside(left, ());
+        drop(held);
+        let status = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("answered")
+            .unwrap();
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         *store.fail_delete_of.lock().unwrap() = None;
     }
 
@@ -817,7 +894,7 @@ mod tests {
     /// rollback was set aside, the walk skipped the container but still visited (or waited on)
     /// what it had queued under it. Each container is listed under its lock, and a stuck
     /// recursive delete sets aside everything it holds: the walk waits out a delete that is put
-    /// back, and skips one that is stuck, at once.
+    /// back, and fails at once on one that is stuck.
     #[tokio::test]
     async fn the_walk_never_reads_a_recursive_delete_part_way() {
         use super::super::test_store;
@@ -917,6 +994,9 @@ mod tests {
         assert_eq!(walk().await.unwrap(), everything);
     }
 
+    /// Review finding: a resource removed after its container was listed and before its lock
+    /// was taken was still found (its metadata read as a default, its permission check passed),
+    /// with a made-up type. Its existence is checked under its lock.
     #[tokio::test]
     async fn a_removed_resource_is_not_found() {
         use super::super::test_store;

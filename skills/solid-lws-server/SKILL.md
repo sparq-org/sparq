@@ -450,9 +450,10 @@ What the server exposes, all discoverable from the storage description
   its distinct types) and the walk's own state (the listing in hand and the members still to
   visit), at most 16 MiB in all; past that the request gets `507`. Each resource, and each
   container's listing, is read under that resource's lock, so a change in flight (a recursive
-  delete part way) is waited out, never read half done. A resource a stuck change is to (set
-  aside) is left out, with what is under it, rather than waited on; when that is the storage
-  root, the request gets `503` (`Retry-After`) rather than an empty index.
+  delete part way) is waited out, never read half done. When the walk reaches a resource a
+  stuck change is to (set aside), or anything is set aside while it walks (what it already
+  visited included), the request gets `503` (`Retry-After`) at once, rather than waiting on
+  it or answering an index that leaves out what is under it.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
