@@ -29,7 +29,7 @@ pub mod access;
 pub mod authz_server;
 pub mod index;
 mod intents;
-pub mod jose;
+pub use sparq_lws_authn::jose;
 pub mod notify;
 mod records;
 pub mod resources;
@@ -115,6 +115,9 @@ pub struct LwsConfig {
     pub max_body: usize,
     /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
     pub delivery: notify::DeliveryLimits,
+    /// The authentication suites kept in their own packages that the authorization server offers,
+    /// besides the ones it holds (see [`authz_server::BUILT_IN_TOKEN_TYPES`]).
+    pub suites: sparq_lws_authn::Suites,
 }
 
 impl LwsConfig {
@@ -133,6 +136,7 @@ impl LwsConfig {
             trusted_oidc_issuers: Vec::new(),
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
             delivery: notify::DeliveryLimits::default(),
+            suites: Default::default(),
         }
     }
 
@@ -156,6 +160,9 @@ impl LwsConfig {
     ///   (development and conformance only);
     /// - `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS`: comma-separated OpenID Provider issuers whose
     ///   identities get the reserved half of the DPoP replay cache;
+    /// - `SOLID_SERVER_LWS_SAML_IDPS_FILE`: a JSON object of trusted SAML identity provider entity
+    ///   ids to their keys, which offers the SAML 2.0 suite (built with the `authn-saml` feature;
+    ///   without it, setting this is an error);
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
@@ -247,7 +254,28 @@ impl LwsConfig {
         if let Some(k) = key("SOLID_SERVER_LWS_NOTIFY_KEY_FILE", Some("notify-key"))? {
             cfg.notify_key = k;
         }
+        cfg.register_suites_from_env()?;
         Ok(cfg)
+    }
+
+    /// Offer the authentication suites the environment configures, of those built in.
+    fn register_suites_from_env(&mut self) -> Result<(), String> {
+        #[cfg(feature = "authn-saml")]
+        if let Some(saml) = sparq_lws_authn_saml::Saml::from_env()? {
+            self.suites.register(
+                std::sync::Arc::new(saml),
+                authz_server::BUILT_IN_TOKEN_TYPES,
+            )?;
+        }
+        #[cfg(not(feature = "authn-saml"))]
+        if std::env::var_os("SOLID_SERVER_LWS_SAML_IDPS_FILE").is_some_and(|v| !v.is_empty()) {
+            return Err(
+                "SOLID_SERVER_LWS_SAML_IDPS_FILE is set, but this server was built \
+                 without the SAML suite (the authn-saml feature)"
+                    .into(),
+            );
+        }
+        Ok(())
     }
 
     /// The storage URI, which is also the storage root container: `{base}/`.
@@ -1973,12 +2001,7 @@ pub fn has_lws_context(v: Option<&Value>) -> bool {
     }
 }
 
-/// Whether `v` is an absolute IRI (RFC 3987): a scheme, a colon and something after it, with
-/// every character and percent-encoding the grammar allows. One parser checks every IRI a client
-/// sends, so `%ZZ`, a space or a bare fragment is refused everywhere alike.
-pub fn is_uri(v: &str) -> bool {
-    v.split_once(':').is_some_and(|(_, rest)| !rest.is_empty()) && oxiri::Iri::parse(v).is_ok()
-}
+pub use sparq_lws_authn::is_uri;
 
 /// A JSON value that is a string holding an absolute URI.
 pub fn json_is_uri(v: &Value) -> bool {
