@@ -53,7 +53,14 @@ counts; compare timings only from one machine and one toolchain.
 `gates.sh` prints each circuit's UltraHonk gate count. `tamper.py` changes
 one prover-chosen witness at a time (in the hand-written circuit, an appended
 witness; in the Noir circuits, a hint output, sampled per hint function) and
-checks that the proof fails. Measurements are kept outside the repository.
+checks that the proof fails. It is a smoke test for hint outputs the circuit
+leaves unconstrained, not evidence that the constraints are complete: it does
+not re-solve the witnesses that depend on the changed one, so a rejection can
+come from those stale values rather than from the hint's own constraints, and
+it samples rather than covering every call site. Completeness rests on review
+of the generator and the Noir source, and, for the hand-written additions, on
+the unit test that bounds every addition result. Measurements are kept
+outside the repository.
 
 Research prototype, not externally audited. It covers the unsigned opening
 only; `full_i64_check` has the same structure.

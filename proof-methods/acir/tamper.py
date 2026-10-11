@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Soundness spot check for the openings, after run.sh.
+"""Smoke test for unconstrained hint outputs in the openings, after run.sh.
 
 Changes one prover-chosen witness of circuits/target/CIRCUIT.gz at a time
 (adds 1) and checks that UltraHonk proving or verification fails:
@@ -11,6 +11,11 @@ Changes one prover-chosen witness of circuits/target/CIRCUIT.gz at a time
   (`carry_split`) hints of noir_tuned and the compiler's division and
   inverse hints are each exercised. An inverse hint whose input is zero is
   skipped: an is-zero check leaves it free by design.
+
+This does not show that the constraints are complete. Witnesses that depend
+on the changed one are not re-solved, so a change can be rejected by an
+equation further on that sees a stale value, even if the hint's own range
+check were missing; and each group is sampled, not every call site.
 
 XOR outputs are skipped: Barretenberg recomputes them from the inputs, so
 changing one in the witness file changes nothing.
