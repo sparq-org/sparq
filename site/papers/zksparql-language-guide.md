@@ -91,7 +91,7 @@ Rules 1 to 6 are firm. Rules 7 to 16 are strong preferences, broken only where p
 
 **Beyond the spec:** say so; never rename a difference away. The spec allows `SELECT`, `ASK` and `CONSTRUCT` queries that read only the input dataset: no `DESCRIBE`, `FROM`, `FROM NAMED` or `SERVICE`, and no `NOW`, `RAND`, `UUID`, `STRUUID` or argument-less `BNODE`. The evaluator without signature checks proved `DESCRIBE` and `FROM NAMED` answers; state once which triples a `DESCRIBE` returns. Its disclosure policy *d* has no spec member: drop it from the rule.
 
-**Prior work:** make only claims that the prior-work research note (10 October 2026) lists as safe, and say exactly what each source supports, with a section or table pointer in the citation (`@braun26[Table 1]`). Never claim to be first to: run SPARQL, or negation or aggregates in `SELECT`, in a zkVM; check issuer signatures inside such a proof; offer zero-knowledge SPARQL over credentials; or prove absence or completeness in verifiable or zero-knowledge querying. Never claim that the earlier zkVM prototype cannot prove absence: it evaluated `SELECT` queries over whatever credentials the holder supplied, without stating that input, and had no `ASK`. Never claim "all of SPARQL", all four query forms, that prior work supports only basic graph patterns, or that we are faster than prior work. The authors' own preprint (zksparql.org) has an unknown status: mark where it would be cited (open question 3) and phrase the novelty so that it holds whatever that status.
+**Prior work:** make only claims that the prior-work research note (10 October 2026) lists as safe, and say exactly what each source supports, with a section or table pointer in the citation (`@braun26[Table 1]`). Never claim to be first to: run SPARQL, or negation or aggregates in `SELECT`, in a zkVM; check issuer signatures inside such a proof; offer zero-knowledge SPARQL over credentials; or prove absence or completeness in verifiable or zero-knowledge querying. Never claim that the earlier zkVM prototype cannot prove absence: it evaluated `SELECT` queries over whatever credentials the holder supplied, without stating that input, and had no `ASK`. Never claim "all of SPARQL", all four query forms, that prior work supports only basic graph patterns, or that we are faster than prior work. The zksparql.org draft was never submitted or published, so the paper does not cite it; keep the novelty phrased so that it claims no priority on proving absence.
 
 ## 4. Notation
 
@@ -210,7 +210,7 @@ Each appears in full once, in its home (rule 7).
 
 1. **Unpublished ISWC 2025 manuscript** (the earlier results-only interface): the paper now contrasts the published doctoral-consortium paper (Wright, ISWC 2025 Companion) and no longer describes the manuscript. Cite it anonymously, or leave it out?
 2. **Choices our evaluator fixes:** which open choices of decision 2 does the evaluator fix, and where is that published? Until then, a verifier can rely on a unique result only for queries that leave SPARQL no choice.
-3. **The zksparql.org preprint** (Wright, Shadbolt, Zhao, Zhao and Braun, labelled an ISWC 2026 submission; Noir circuits over Merkle-committed signed RDF, claiming `NOT EXISTS` and `MINUS` in the circuit for single-triple patterns): status unknown, author to confirm. The paper marks where it would be cited with `TODO(citation)`, and its novelty sentence claims no priority on proving absence.
+3. **The zksparql.org draft** (resolved 11 October 2026): never submitted or published, so it is not cited.
 
 ## 8. Sources
 

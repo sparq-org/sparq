@@ -148,7 +148,6 @@ We show how a holder can prove general SPARQL answers over its credentials: resu
 permits for a `SELECT`, `ASK` or `CONSTRUCT` query over a stated input dataset, with the issuers'
 signatures checked inside the proof (§#ref(<expressivity>, supplement: none) lists the features our
 evaluator excludes).
-// TODO(citation): status of the zksparql.org preprint (author to confirm)
 Such a result can rest on absence, as `false` does; we call it a closed-world answer, and it is only
 as useful as its input is complete. Because the holder chooses which credentials to include,
 `false` means only "no returned payment in the credentials I included". The verifier can fix the
@@ -947,7 +946,6 @@ triples (§5 of @wright25dc), and zkRDF reports proving three orders of magnitud
 small queries, under BBS+ signatures (§5.2 of @braun26); our proving times are pending. We add
 closed-world answers over a stated input of issuer-signed credentials, and request terms that say
 who fixed that input.
-// TODO(citation): status of the zksparql.org preprint (author to confirm)
 
 _Querying credentials without zero knowledge._ De Mulder et al. express a SPARQL subset in
 OpenID4VP; the holder returns an ordinary verifiable presentation, and the verifier checks the
