@@ -284,44 +284,22 @@ is about.
 
 == Answers <sec-answers>
 
-The result in a presentation MUST be a result that SPARQL 1.2 permits for $Q$ over $D$: for
-SELECT, a solution sequence $Q$ can produce over $D$, with every solution and duplicate; for
-ASK, `true` if and only if the solution sequence of $Q$ over $D$, after its solution
-modifiers, is not empty; for CONSTRUCT, the graph
-$Q$ can produce over $D$. Nothing is added and nothing is left out. If the result would exceed
-`maxResultSize` or a bound of the proof method, the holder service MUST NOT return a truncated
-result.
-
-For some queries SPARQL 1.2 permits more than one result over the same dataset, for example
-with OFFSET and LIMIT where ORDER BY does not fix the order of the solutions, with REDUCED,
-SAMPLE, GROUP_CONCAT, MIN or MAX over values SPARQL does not order, or with arithmetic whose
-precision is implementation-defined. The result is then one of the permitted results, and the
-holder chooses which. A proof method MAY fix these choices, and a verifier relies on that only
-where the method publishes it (@sec-methods).
-
-This one definition covers both kinds of question a verifier may ask. A query that only
-matches patterns, such as the ASK above when it returns `true`, gives a result that stays true
-over any larger dataset. A query whose answer depends on absence, such as an ASK that returns
-`false` or a query with `NOT EXISTS`, gives a result that may change if data is added. The
-query itself shows which kind it is, so neither the request nor the presentation states it.
-@sec-cwa explains what a verifier needs before relying on the second kind.
+The result in a presentation MUST be a result that SPARQL 1.2 #cite("SPARQL12-QUERY")
+permits for $Q$ over $D$, complete and untruncated: for SELECT a solution sequence with every
+solution and duplicate, for ASK `true` if and only if the solution sequence after its solution
+modifiers is not empty, and for CONSTRUCT the graph. Where SPARQL permits more than one result,
+for example LIMIT without ORDER BY, the holder chooses one; a proof method MAY fix that choice
+(@sec-methods). A result too large for `maxResultSize` or the proof method cannot be answered.
+Queries whose answer depends on absence are covered by the same definition; @sec-cwa says what
+a verifier needs before relying on them.
 
 == Input dataset <sec-input>
 
-The holder service chooses which of its credentials make up $D$, unless the request fixes it.
-
-- If the request has no `inputCommitment`, the holder chose $D$ when it answered. The
-  presentation's commitment fixes $D$, but the verifier did not choose it, and the holder could
-  have left a credential out.
-- If the request has an `inputCommitment`, the verifier agreed that dataset commitment before
-  sending the request, and the presentation's `inputCommitment` MUST equal it. The answer is
-  then about the dataset the verifier agreed to. How the verifier comes to agree a commitment
-  is outside this document; for example, it may receive the commitment in an earlier exchange
-  in which it also learned which credentials the dataset holds.
-
-A proof method may compute the dataset commitment differently in each signature mode. An
-agreed commitment is then valid only for the mode it was computed under, and a request that
-carries it MUST list only that mode in `signatureMode`.
+If the request has no `inputCommitment`, the holder chooses which of its credentials make up
+$D$, and could leave one out. If it has one, the verifier agreed that dataset commitment
+beforehand, by means outside this document, and the presentation's `inputCommitment` MUST
+equal it. Where a proof method computes the commitment differently in each signature mode, a
+request with an `inputCommitment` MUST list only the mode it was computed under.
 
 == Trust requirements <sec-trust>
 
@@ -332,17 +310,11 @@ show that every credential in $D$ carries a Data Integrity proof #cite("VC-DATA-
 using one of the request's cryptosuites, that verifies under a verification method of a
 trusted issuer.
 
-Who is trusted, which keys they use, and which cryptosuites are accepted are separate
-properties: a trust requirement identifies issuers and gives, or says where to find, their
-verification methods; the request's `cryptosuite` list says which proof algorithms are
-accepted for any of them.
-
-A proof cannot check a key it does not know, so every trust requirement MUST resolve to a
-finite set of verification methods, each with its public key, before the holder service
-proves and when the verifier service verifies. The statement binds the request digest, and so
-binds a trust requirement that lists its keys directly. A trust requirement that names an
-external source, such as a trusted list, MUST say how both sides obtain the same key set, and
-the proof method MUST bind a digest of that key set.
+A trust requirement identifies issuers and their verification methods; which cryptosuites are
+accepted is the separate `cryptosuite` list. Every trust requirement MUST resolve to a finite
+set of verification methods with public keys, the same for holder and verifier. A requirement
+that names an external source, such as a trusted list, MUST say how both sides obtain that set,
+and the proof method MUST bind a digest of it.
 
 This document defines one type of trust requirement and reserves others:
 
@@ -376,49 +348,25 @@ A reserved type is not yet defined well enough to be used: a verifier service MU
 one in a request, and a holder service MUST reject a request that has one or that has any
 type it does not implement.
 
-#note[
-  The reserved types follow the trust sources verifiers already use. Defining one needs three
-  things this document does not yet fix: which entries of the list count as issuers of
-  credentials; how holder and verifier agree on the same version of the list, for example by
-  the verifier resolving it at a stated time and putting a digest of the sorted key set in the
-  request; and how a proof shows that each credential's key is in that set, for example by a
-  Merkle membership proof against that digest, which also keeps hidden which listed issuer
-  signed. Until then a verifier that trusts the issuers on a list can resolve the list itself
-  and send the result as `IssuerKeys` entries. A vocabulary for verifier trust policies is
-  also planned by the W3C Verifiable Credentials Working Group ("Verifiable Issuers and
-  Verifiers"); a later version of this document should reuse it.
-]
-
 == Signature modes <sec-modes>
 
-When the request has `trustedIssuers`, the proof must show that every credential in $D$ is
-signed by a trusted issuer. There are three ways to do that, and the verifier chooses which it
-accepts. Their IRIs are `vcq:hidden`, `vcq:revealed` and `vcq:disclosed`.
+When the request has `trustedIssuers`, the signatures on the credentials in $D$ are shown to
+the verifier in one of three modes, which the request lists and a proof method supports per
+cryptosuite (@sec-methods):
 
-In the #emph[hidden] mode, the proof shows that the holder knows a valid signature from a
-trusted issuer on every credential in $D$. The signatures, the signed messages and which key
-signed which credential stay hidden. Checking a signature inside the proof is usually the most
-expensive part of proving.
+- #emph[hidden] (`vcq:hidden`): the proof shows that every credential in $D$ carries a valid
+  signature by a trusted issuer. Signatures, signed messages and keys stay hidden.
+- #emph[revealed] (`vcq:revealed`): `revealedSignature` gives each credential's signature and
+  signed message, the verifier checks them itself, and the proof shows that $D$ is exactly the
+  data those messages cover. `signatureValue` carries the signature bytes only; other values a
+  cryptosuite's `proofValue` carries, such as the salt the Merkle-root cryptosuites append
+  #cite("ZK-MERKLE-CRYPTOSUITE"), MUST NOT be sent.
+- #emph[disclosed] (`vcq:disclosed`): the proof carries the credentials, or presentations
+  derived from them by a selective-disclosure cryptosuite such as `bbs-2023`
+  #cite("VC-DI-BBS") or `ecdsa-sd-2023` #cite("VC-DI-ECDSA"); the verifier checks them, builds
+  $D$ from them and evaluates the query itself.
 
-In the #emph[revealed] mode, the presentation's `revealedSignature` list gives each
-credential's signature and signed message. The verifier checks each signature itself, outside
-the proof, against a trusted issuer's key. The proof then only has to show that $D$ is exactly
-the data those signed messages cover, and that the result is correct over $D$. This is cheaper
-to prove, but discloses the signatures, the signed messages, the issuer keys used and the
-number of credentials (@sec-learns). The `signatureValue` carries only the signature bytes.
-Where a cryptosuite's `proofValue` also carries other values, as the Merkle-root cryptosuites
-append the tree salt #cite("ZK-MERKLE-CRYPTOSUITE"), the holder service MUST NOT send them, and
-the salt stays private: the verifier checks the signature over `signedMessage` and does not
-need the salt.
-
-In the #emph[disclosed] mode, used only by proof methods whose evidence is disclosed
-credentials (@sec-methods), the proof carries the credentials, or presentations derived from
-them by a selective-disclosure cryptosuite such as `bbs-2023` #cite("VC-DI-BBS") or
-`ecdsa-sd-2023` #cite("VC-DI-ECDSA"). The verifier checks them against a trusted issuer's key,
-builds $D$ from what they disclose, and evaluates the query itself. The verifier sees all the
-disclosed data, so a verifier lists this mode only if it may see that data.
-
-A proof method states which modes it supports for each cryptosuite (@sec-methods).
+What each mode discloses is listed in @sec-learns.
 
 == Example <sec-example>
 

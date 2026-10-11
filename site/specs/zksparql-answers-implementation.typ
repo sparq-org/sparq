@@ -123,3 +123,16 @@ What differs or is missing:
 The older zkSPARQL proposal on this site describes the Noir proof manifest in detail. The data
 model replaces neither it nor the code; it fixes the data model that both sides should
 converge on.
+
+= Defining the reserved trust requirements <sec-impl-trust>
+
+The types the data model reserves (its §6.3) follow the trust sources verifiers already use. Defining one needs three
+things the data model does not yet fix: which entries of the list count as issuers of
+credentials; how holder and verifier agree on the same version of the list, for example by
+the verifier resolving it at a stated time and putting a digest of the sorted key set in the
+request; and how a proof shows that each credential's key is in that set, for example by a
+Merkle membership proof against that digest, which also keeps hidden which listed issuer
+signed. Until then a verifier that trusts the issuers on a list can resolve the list itself
+and send the result as `IssuerKeys` entries. A vocabulary for verifier trust policies is
+also planned by the W3C Verifiable Credentials Working Group ("Verifiable Issuers and
+Verifiers"); a later version of the data model should reuse it.
