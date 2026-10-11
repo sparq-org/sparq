@@ -193,7 +193,7 @@ pub(crate) async fn kept<S: Store>(store: &S, record: &str) -> Result<bool, Serv
 /// Remove the intent `record`; absent is fine. Its membership goes in the same step.
 pub(crate) async fn clear<S: Store>(store: &S, record: &str) -> Result<(), ServerError> {
     let container = record.rfind('/').map_or(record, |i| &record[..=i]);
-    super::delete_record(store, record, container).await
+    super::records::delete_record(store, record, container).await
 }
 
 /// Settle every intent a process stop left, when the server starts and before it serves
