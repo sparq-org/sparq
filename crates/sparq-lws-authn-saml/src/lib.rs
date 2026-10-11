@@ -190,6 +190,11 @@ impl Suite for Saml {
         &[SAML2_TOKEN_TYPE]
     }
 
+    /// A SAML subject is the assertion's `NameID`, an http(s) URL.
+    fn identifier_types(&self) -> &[&'static str] {
+        &["https", "http"]
+    }
+
     async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {
         self.verify_at(
             exchange.subject_token,
@@ -240,7 +245,8 @@ fn verify_at(
             .and_then(parse_datetime)
             .ok_or_else(|| format!("Conditions {name} is missing or not an xsd:dateTime"))
     };
-    if time("NotBefore")? > now + SKEW_SECS || time("NotOnOrAfter")? <= now - SKEW_SECS {
+    let expires = time("NotOnOrAfter")?;
+    if time("NotBefore")? > now + SKEW_SECS || expires <= now - SKEW_SECS {
         return Err("the assertion is outside its validity period".into());
     }
     check_conditions(conditions, audience)?;
@@ -254,14 +260,21 @@ fn verify_at(
     if name_id.is_empty() {
         return Err("the assertion names no subject".into());
     }
-    // The NameID is the LWS subject, which an access token's sub carries: it MUST be a URI.
+    // The NameID is the LWS subject, which an access token's sub carries: it MUST be a URI, and
+    // this suite takes web identifiers (http(s) URLs, the `https` identifier type it declares),
+    // as the OpenID Connect and controlled identifier suites do.
     if !is_uri(&name_id) {
         return Err("the assertion's NameID is not a URI".into());
     }
-    let client = bearer_recipient(subject, now)?;
+    if !(name_id.starts_with("https://") || name_id.starts_with("http://")) {
+        return Err("the assertion's NameID is not an http(s) URL".into());
+    }
+    let (client, confirmed_until) = bearer_recipient(subject, now)?;
     Ok(Verified {
         subject: name_id,
         client,
+        // The assertion holds until its Conditions or any bearer confirmation ends.
+        expires: expires.min(confirmed_until),
     })
 }
 
@@ -323,8 +336,9 @@ fn check_conditions(conditions: &Element, us: &str) -> Result<(), String> {
 /// past, and a `Recipient` that is a URI: the LWS client identifier ("The SAML token MUST use the
 /// Recipient parameter within a saml:SubjectConfirmationData assertion for the LWS client
 /// identifier"). When several confirmations are present they must all name the same client.
-fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
+fn bearer_recipient(subject: &Element, now: i64) -> Result<(String, i64), String> {
     let mut client: Option<String> = None;
+    let mut until = i64::MAX;
     for confirmation in subject
         .elements()
         .filter(|e| e.is(SAML_NS, "SubjectConfirmation"))
@@ -341,9 +355,10 @@ fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
         let limit = data
             .attr("NotOnOrAfter")
             .ok_or("the bearer subject confirmation has no NotOnOrAfter")?;
-        if parse_datetime(limit).is_none_or(|t| t <= now - SKEW_SECS) {
-            return Err("the subject confirmation has expired".into());
-        }
+        let limit = parse_datetime(limit)
+            .filter(|t| *t > now - SKEW_SECS)
+            .ok_or("the subject confirmation has expired")?;
+        until = until.min(limit);
         if let Some(start) = data.attr("NotBefore") {
             if parse_datetime(start).is_none_or(|t| t > now + SKEW_SECS) {
                 return Err("the subject confirmation is not yet valid".into());
@@ -367,7 +382,9 @@ fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
             _ => client = Some(recipient.to_string()),
         }
     }
-    client.ok_or_else(|| "the assertion has no bearer SubjectConfirmation".into())
+    client
+        .map(|c| (c, until))
+        .ok_or_else(|| "the assertion has no bearer SubjectConfirmation".into())
 }
 
 // ---------------------------------------------------------------- signature
@@ -1631,6 +1648,41 @@ mod tests {
         assert!(verify(&cfg, &bad).unwrap_err().contains("Recipient"));
     }
 
+    /// Review finding: the suite took any absolute URI as its subject while declaring only the
+    /// `https` identifier type. It takes http(s) URLs, which that type declares, and carries the
+    /// assertion's expiry for the server's last check.
+    #[test]
+    fn subjects_are_the_identifier_type_declared() {
+        let (cfg, key, idp) = saml_cfg();
+        assert_eq!(
+            Saml::new(cfg.saml_idps.clone()).unwrap().identifier_types(),
+            ["https", "http"]
+        );
+        for name in [
+            "https://alice.example/#me",
+            "http://localhost:3001/alice#me",
+        ] {
+            let ok = verify(
+                &cfg,
+                &signed_assertion(&key, idp, cfg.issuer(), name, false),
+            )
+            .unwrap();
+            assert_eq!(ok.subject, name);
+            assert!(ok.still_valid(jose::now_secs()));
+            assert!(!ok.still_valid(ok.expires + SKEW_SECS));
+        }
+        for name in [
+            "urn:example:alice",
+            "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK",
+        ] {
+            let err = verify(
+                &cfg,
+                &signed_assertion(&key, idp, cfg.issuer(), name, false),
+            );
+            assert!(err.unwrap_err().contains("http(s) URL"), "{name}");
+        }
+    }
+
     fn saml_cfg() -> (LwsConfig, jose::EcKey, &'static str) {
         let mut cfg = LwsConfig::new("http://localhost:3000");
         let key = jose::EcKey::generate("idp");
@@ -1671,6 +1723,21 @@ mod tests {
             verify_with(&confirmation(BEARER, &good)).unwrap().client,
             "https://client.example/"
         );
+        // Review finding: the expiry the server checks again before it issues was the
+        // Conditions' alone. A bearer confirmation that ends first (here, already within the
+        // skew past its end) ends the assertion.
+        let ending = confirmation_data(&format!(
+            " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
+            instant(now - SKEW_SECS + 1)
+        ));
+        let v = verify_with(&format!(
+            "{}{}",
+            confirmation(BEARER, &good),
+            confirmation(BEARER, &ending)
+        ))
+        .unwrap();
+        assert_eq!(v.expires, now - SKEW_SECS + 1);
+        assert!(v.still_valid(now) && !v.still_valid(now + 1));
         // Holder-of-key and sender-vouches carry no proof here: refused, alone or beside a bearer.
         for method in [
             "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key",

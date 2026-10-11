@@ -86,7 +86,7 @@ impl AuthnSuite for OpenId {
     }
 
     fn identifier_types(&self) -> &[&'static str] {
-        &["https"]
+        &["https", "http"]
     }
 
     async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {
@@ -592,6 +592,7 @@ async fn oidc(
     Ok(Verified {
         subject,
         client: azp,
+        expires: sparq_lws_authn::jwt_expires(jws)?,
     })
 }
 
@@ -1570,6 +1571,60 @@ mod tests {
             );
         tokio::spawn(async move { axum::serve(listener, app).await.ok() });
         (base, op)
+    }
+
+    /// Review finding: an ID Token's expiry was checked before discovery and the key fetch, so
+    /// one that expired while they were slow still verified. The suite reports the token's
+    /// expiry, and the server (`Verified::still_valid`, just before it issues) refuses it.
+    #[tokio::test]
+    async fn an_id_token_that_expires_during_its_fetches_is_not_still_valid() {
+        let op = jose::EcKey::generate("op-key");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let bob = format!("{base}/bob");
+        let doc = json!({"id": bob,
+            "service": [{"type": "OpenIdProvider", "serviceEndpoint": base}]});
+        let discovery = json!({"issuer": base, "jwks_uri": format!("{base}/jwks")});
+        let jwks = json!({"keys": [op.public_jwk()]});
+        let app = axum::Router::new()
+            .route(
+                "/bob",
+                axum::routing::get(move || async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    axum::Json(doc)
+                }),
+            )
+            .route(
+                "/.well-known/openid-configuration",
+                axum::routing::get(move || async move { axum::Json(discovery) }),
+            )
+            .route(
+                "/jwks",
+                axum::routing::get(move || async move { axum::Json(jwks) }),
+            );
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = cfg();
+        cfg.allow_insecure_fetch = true;
+        let http = fetch_client(&cfg.policy()).unwrap();
+        let now = jose::now_secs();
+        // One second short of the skew past its expiry when the exchange begins.
+        let exp = now - sparq_lws_authn::SKEW_SECS + 1;
+        let token = op.sign_jws(
+            serde_json::Map::new(),
+            &json!({"iss": base, "sub": bob, "aud": [cfg.issuer()],
+                "azp": "https://app.example/", "iat": now - 120, "exp": exp}),
+        );
+        let replay = DpopReplay::default();
+        let ctx = DpopContext {
+            proof: None,
+            replay: &replay,
+        };
+        let verified = verify(&cfg, &http, &token, ID_TOKEN_TYPE, &ctx)
+            .await
+            .unwrap();
+        assert_eq!(verified.expires, exp);
+        assert!(verified.still_valid(now));
+        assert!(!verified.still_valid(jose::now_secs()));
     }
 
     /// Review finding: a token carrying `webid` without `solid` among its audiences was taken

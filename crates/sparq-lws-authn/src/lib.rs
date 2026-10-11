@@ -64,6 +64,26 @@ pub const SKEW_SECS: i64 = 60;
 pub struct Verified {
     pub subject: String,
     pub client: String,
+    /// When the subject token stops being valid (seconds since the epoch). The server checks it
+    /// again just before it issues, so a token that expired while a suite fetched documents is
+    /// refused, whatever the suite checked when it began.
+    pub expires: i64,
+}
+
+impl Verified {
+    /// Whether the subject token is still valid at `now`, within [`SKEW_SECS`] (as
+    /// [`check_times`] reads `exp`).
+    pub fn still_valid(&self, now: i64) -> bool {
+        self.expires > now.saturating_sub(SKEW_SECS)
+    }
+}
+
+/// A JWT subject token's `exp`, for [`Verified::expires`]. A fractional `exp` is rounded up:
+/// against whole-second clocks, `ceil(exp) > t` exactly when `exp > t`, so
+/// [`Verified::still_valid`] agrees with [`check_times`].
+pub fn jwt_expires(jws: &jose::Jws) -> Result<i64, String> {
+    let exp = jws.claim_time("exp")?.ok_or("exp is required")?;
+    Ok(exp.ceil() as i64)
 }
 
 /// One token exchange, as a suite sees it.
@@ -121,12 +141,10 @@ impl std::fmt::Debug for Suites {
 
 impl Suites {
     /// Offer `suite` too. Refused when it takes a subject token type an offered suite already
-    /// takes, or one of `reserved` (the types the server checks itself): which suite checks a
-    /// token is never in doubt. A server registers through its own method, which passes its
-    /// reserved types, so no caller can leave them out.
-    pub fn register(&mut self, suite: Arc<dyn Suite>, reserved: &[&str]) -> Result<(), String> {
+    /// takes: which suite checks a token is never in doubt.
+    pub fn register(&mut self, suite: Arc<dyn Suite>) -> Result<(), String> {
         for t in suite.token_types() {
-            if reserved.contains(t) || self.find(t).is_some() {
+            if self.find(t).is_some() {
                 return Err(format!(
                     "suite {}: subject token type {t} is already taken",
                     suite.name()
@@ -293,6 +311,39 @@ mod tests {
     /// far-future `nbf` lifted the token's validity restriction. A claim present and out of
     /// range is refused, wherever it is read. Review finding: fractional times, which RFC 7519
     /// allows, were refused; they are read and compared as they are.
+    #[test]
+    fn the_last_check_reads_exp_as_check_times_does() {
+        let key = jose::EcKey::generate("x");
+        let now: i64 = 1_000;
+        let verified = |exp: Value| {
+            let jws = jose::Jws::parse(
+                &key.sign_jws(serde_json::Map::new(), &json!({"iat": now, "exp": exp})),
+            )
+            .unwrap();
+            let v = Verified {
+                subject: String::new(),
+                client: String::new(),
+                expires: jwt_expires(&jws).unwrap(),
+            };
+            (check_times(&jws, now).is_ok(), v.still_valid(now))
+        };
+        // Review finding: a fractional exp was rounded down, so the last check refused a token
+        // the first had just accepted. Either side of every boundary, the two agree.
+        let edge = now - SKEW_SECS;
+        for exp in [
+            json!(edge as f64 + 0.5),
+            json!(edge as f64 - 0.5),
+            json!(edge),
+            json!(edge + 1),
+            json!(edge as f64 + 0.999),
+        ] {
+            let (first, last) = verified(exp.clone());
+            assert_eq!(first, last, "exp {exp}");
+        }
+        assert_eq!(verified(json!(edge as f64 + 0.5)), (true, true));
+        assert_eq!(verified(json!(edge)), (false, false));
+    }
+
     #[test]
     fn out_of_range_times_are_refused_not_ignored() {
         let key = jose::EcKey::generate("x");

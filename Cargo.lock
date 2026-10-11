@@ -5303,6 +5303,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-lws-authn-ssi"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bs58",
+ "p256",
+ "serde_json",
+ "sparq-lws-authn",
+ "tokio",
+]
+
+[[package]]
 name = "sparq-lws-core"
 version = "0.1.0"
 dependencies = [
@@ -5312,7 +5325,6 @@ dependencies = [
  "axum",
  "axum-server",
  "base64 0.22.1",
- "bs58",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -5352,6 +5364,7 @@ dependencies = [
  "sparq-lws-authn",
  "sparq-lws-authn-openid",
  "sparq-lws-authn-saml",
+ "sparq-lws-authn-ssi",
  "sparq-policy",
  "sparq-solid",
  "sparq-spargebra",
