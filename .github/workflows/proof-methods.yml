@@ -66,6 +66,7 @@ jobs:
           python3 -m unittest proof-methods/vole/test_acir_to_sieve.py
           python3 -m py_compile proof-methods/acir/blake3_leaf.py proof-methods/acir/tamper.py
           bash -n proof-methods/acir/run.sh
+          bash -n proof-methods/acir/gates.sh
           python3 -m unittest proof-methods/acir/test_blake3_leaf.py
 
       - name: Measurement example runs

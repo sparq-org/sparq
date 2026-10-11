@@ -42,16 +42,25 @@ is written, and from writing ACIR by hand. `circuits/baseline` calls `full_u64_c
 # nargo and bb at the versions CI pins for zk/compose
 NARGO=nargo BB=bb proof-methods/acir/run.sh 0 9 10 999999999999999999 \
   1000000000000000000 9999999999999999999 10000000000000000000 18446744073709551615
-bb gates -s ultra_honk -b proof-methods/acir/circuits/target/hand.json
-BB=bb python3 proof-methods/acir/tamper.py 30
+BB=bb proof-methods/acir/gates.sh
+for c in hand noir_var noir_tuned; do BB=bb python3 proof-methods/acir/tamper.py "$c" 15; done
 python3 -m unittest proof-methods/acir/test_blake3_leaf.py
 ```
 
 `run.sh` proves and verifies all four circuits for the given values, with
 bounds that do not reveal them. It does not pin tool versions or thread
 counts; compare timings only from one machine and one toolchain.
-`tamper.py` changes one witness of the hand-written circuit at a time and
-checks that the proof fails. Measurements are kept outside the repository.
+`gates.sh` prints each circuit's UltraHonk gate count. `tamper.py` changes
+one prover-chosen witness at a time (in the hand-written circuit, an appended
+witness; in the Noir circuits, a hint output, sampled per hint function) and
+checks that the proof fails. It is a smoke test for hint outputs the circuit
+leaves unconstrained, not evidence that the constraints are complete: it does
+not re-solve the witnesses that depend on the changed one, so a rejection can
+come from those stale values rather than from the hint's own constraints, and
+it samples rather than covering every call site. Completeness rests on review
+of the generator and the Noir source, and, for the hand-written additions, on
+the unit test that bounds every addition result. Measurements are kept
+outside the repository.
 
 Research prototype, not externally audited. It covers the unsigned opening
 only; `full_i64_check` has the same structure.
