@@ -121,12 +121,10 @@ impl std::fmt::Debug for Suites {
 
 impl Suites {
     /// Offer `suite` too. Refused when it takes a subject token type an offered suite already
-    /// takes, or one of `reserved` (the types the server checks itself): which suite checks a
-    /// token is never in doubt. A server registers through its own method, which passes its
-    /// reserved types, so no caller can leave them out.
-    pub fn register(&mut self, suite: Arc<dyn Suite>, reserved: &[&str]) -> Result<(), String> {
+    /// takes: which suite checks a token is never in doubt.
+    pub fn register(&mut self, suite: Arc<dyn Suite>) -> Result<(), String> {
         for t in suite.token_types() {
-            if reserved.contains(t) || self.find(t).is_some() {
+            if self.find(t).is_some() {
                 return Err(format!(
                     "suite {}: subject token type {t} is already taken",
                     suite.name()

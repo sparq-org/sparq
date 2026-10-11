@@ -1,0 +1,20 @@
+[package]
+name = "sparq-lws-authn-ssi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "The self-issued authentication suites of the Linked Web Storage authorization server: JWTs signed by a did:key or a controlled identifier's key, as subject tokens."
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["solid", "lws", "did", "ssi", "jwt"]
+categories = ["authentication"]
+readme = "README.md"
+publish = false
+
+[dependencies]
+sparq-lws-authn = { path = "../sparq-lws-authn" }
+async-trait = "0.1"
+bs58 = "0.5"
+p256 = { version = "0.13", features = ["ecdsa", "jwk", "std"] }
+serde_json = "1"

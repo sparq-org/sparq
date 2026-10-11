@@ -33,7 +33,6 @@ pub use sparq_lws_authn::jose;
 pub mod notify;
 mod records;
 pub mod resources;
-pub mod subject_tokens;
 pub mod tokens;
 pub mod tracked;
 
@@ -110,22 +109,119 @@ pub struct LwsConfig {
     pub max_body: usize,
     /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
     pub delivery: notify::DeliveryLimits,
-    /// The authentication suites kept in their own packages that the authorization server offers,
-    /// besides the ones it holds (see [`LwsConfig::register_suite`]).
+    /// The authentication suites the authorization server offers (see
+    /// [`LwsConfig::register_suite`]).
     suites: sparq_lws_authn::Suites,
 }
 
+/// The environment variable naming the authentication suites to offer (see
+/// [`LwsConfig::from_env`]).
+pub const AUTHN_VAR: &str = "SOLID_SERVER_LWS_AUTHN";
+
+/// Every authentication suite a build can hold, by name, each with its feature.
+pub const SUITES: &[(&str, &str)] = &[
+    ("ssi", "authn-ssi"),
+    ("openid", "authn-openid"),
+    ("saml", "authn-saml"),
+];
+
+/// The names of the authentication suites this build holds.
+pub fn built_in_suites() -> Vec<&'static str> {
+    [
+        cfg!(feature = "authn-ssi"),
+        cfg!(feature = "authn-openid"),
+        cfg!(feature = "authn-saml"),
+    ]
+    .into_iter()
+    .zip(SUITES)
+    .filter_map(|(built, (name, _))| built.then_some(*name))
+    .collect()
+}
+
+/// The suites [`AUTHN_VAR`] names (`value`, comma-separated), or `None` for every suite built
+/// in. A name that is no suite, or one this build does not hold, is an error.
+fn chosen_suites(value: Option<&str>) -> Result<Option<Vec<String>>, String> {
+    let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        return Ok(None);
+    };
+    let built = built_in_suites();
+    let mut chosen = Vec::new();
+    for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        let Some((_, feature)) = SUITES.iter().find(|(n, _)| *n == name) else {
+            let known: Vec<&str> = SUITES.iter().map(|(n, _)| *n).collect();
+            return Err(format!(
+                "{AUTHN_VAR} names {name}, which is no authentication suite (one of {})",
+                known.join(", ")
+            ));
+        };
+        if !built.contains(&name) {
+            return Err(format!(
+                "{AUTHN_VAR} names {name}, but this server was built without it (the {feature} \
+                 feature)"
+            ));
+        }
+        if !chosen.iter().any(|c| c == name) {
+            chosen.push(name.to_string());
+        }
+    }
+    Ok(Some(chosen))
+}
+
+/// The suites to offer, by name, under the environment `env` reads: those [`AUTHN_VAR`] names
+/// (every one built in when it is unset), and SAML only with its identity providers. A suite's
+/// configuration set while the suite is not offered is an error, never silently ignored.
+fn offered_suites(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<&'static str>, String> {
+    let set = |k: &str| env(k).filter(|v| !v.trim().is_empty());
+    let chosen = chosen_suites(set(AUTHN_VAR).as_deref())?;
+    let built = built_in_suites();
+    let named = |name: &str| chosen.as_ref().is_none_or(|c| c.iter().any(|n| n == name));
+    for (name, var) in [
+        ("openid", "SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS"),
+        ("saml", "SOLID_SERVER_LWS_SAML_IDPS_FILE"),
+    ] {
+        if set(var).is_none() {
+            continue;
+        }
+        if !built.contains(&name) {
+            let (_, feature) = SUITES.iter().find(|(n, _)| *n == name).expect("known");
+            return Err(format!(
+                "{var} is set, but this server was built without the {name} suite (the {feature} \
+                 feature)"
+            ));
+        }
+        if !named(name) {
+            return Err(format!(
+                "{var} is set, but {AUTHN_VAR} leaves the {name} suite out"
+            ));
+        }
+    }
+    let saml_idps = set("SOLID_SERVER_LWS_SAML_IDPS_FILE").is_some();
+    if chosen.is_some() && named("saml") && !saml_idps {
+        return Err(format!(
+            "{AUTHN_VAR} names saml, but SOLID_SERVER_LWS_SAML_IDPS_FILE is not set"
+        ));
+    }
+    Ok(built
+        .into_iter()
+        .filter(|name| named(name) && (*name != "saml" || saml_idps))
+        .collect())
+}
+
 /// The suites a configuration offers before any is configured: those built in that need no
-/// configuration (OpenID Connect, with no trusted providers).
+/// configuration (did:key and controlled identifiers; OpenID Connect, with no trusted
+/// providers).
 fn default_suites() -> sparq_lws_authn::Suites {
     #[allow(unused_mut)]
     let mut suites = sparq_lws_authn::Suites::default();
+    #[cfg(feature = "authn-ssi")]
+    suites
+        .register(std::sync::Arc::new(sparq_lws_authn_ssi::Ssi))
+        .expect("the built-in suites take distinct token types");
     #[cfg(feature = "authn-openid")]
     suites
-        .register(
-            std::sync::Arc::new(sparq_lws_authn_openid::OpenId::default()),
-            authz_server::BUILT_IN_TOKEN_TYPES,
-        )
+        .register(std::sync::Arc::new(
+            sparq_lws_authn_openid::OpenId::default(),
+        ))
         .expect("the built-in suites take distinct token types");
     suites
 }
@@ -152,8 +248,7 @@ impl LwsConfig {
 
     /// A configuration like [`LwsConfig::new`] that offers `suites` and no others, for an
     /// embedder that configures its suites itself (an OpenID Connect suite with its trusted
-    /// providers, say). Refused when two suites take the same subject token type, or a suite
-    /// takes one the server checks itself.
+    /// providers, say). Refused when two suites take the same subject token type.
     pub fn with_suites(
         base_url: &str,
         suites: impl IntoIterator<Item = std::sync::Arc<dyn sparq_lws_authn::Suite>>,
@@ -184,12 +279,17 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
+    /// - `SOLID_SERVER_LWS_AUTHN`: the authentication suites to offer, comma-separated, of
+    ///   `ssi` (did:key and controlled identifiers, the default `authn-ssi` feature), `openid`
+    ///   (OpenID Connect, the default `authn-openid` feature) and `saml` (SAML 2.0, the
+    ///   `authn-saml` feature). Unset, every suite built in is offered (SAML when its identity
+    ///   providers are set). Naming a suite the build does not hold is an error;
     /// - `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS`: comma-separated OpenID Provider issuers whose
-    ///   identities get the reserved half of the DPoP replay cache (the OpenID Connect suite, built
-    ///   with the default `authn-openid` feature; without it, setting this is an error);
+    ///   identities get the reserved half of the DPoP replay cache (for the OpenID Connect suite;
+    ///   set when that suite is not offered, it is an error);
     /// - `SOLID_SERVER_LWS_SAML_IDPS_FILE`: a JSON object of trusted SAML identity provider entity
-    ///   ids to their keys, which offers the SAML 2.0 suite (built with the `authn-saml` feature;
-    ///   without it, setting this is an error);
+    ///   ids to their keys, which offers the SAML 2.0 suite (set when that suite is not offered,
+    ///   it is an error; `saml` in `SOLID_SERVER_LWS_AUTHN` without it is an error too);
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
@@ -278,32 +378,25 @@ impl LwsConfig {
 
     /// Offer the authentication suites the environment configures, of those built in.
     fn register_suites_from_env(&mut self) -> Result<(), String> {
+        let offered = offered_suites(&|k| std::env::var(k).ok())?;
         self.suites = sparq_lws_authn::Suites::default();
+        #[cfg(feature = "authn-ssi")]
+        if offered.contains(&"ssi") {
+            self.register_suite(std::sync::Arc::new(sparq_lws_authn_ssi::Ssi))?;
+        }
         #[cfg(feature = "authn-openid")]
-        self.register_suite(std::sync::Arc::new(
-            sparq_lws_authn_openid::OpenId::from_env(),
-        ))?;
-        #[cfg(not(feature = "authn-openid"))]
-        if std::env::var_os("SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS").is_some_and(|v| !v.is_empty())
-        {
-            return Err(
-                "SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS is set, but this server was built \
-                 without the OpenID Connect suite (the authn-openid feature)"
-                    .into(),
-            );
+        if offered.contains(&"openid") {
+            self.register_suite(std::sync::Arc::new(
+                sparq_lws_authn_openid::OpenId::from_env(),
+            ))?;
         }
         #[cfg(feature = "authn-saml")]
-        if let Some(saml) = sparq_lws_authn_saml::Saml::from_env()? {
-            self.register_suite(std::sync::Arc::new(saml))?;
+        if offered.contains(&"saml") {
+            if let Some(saml) = sparq_lws_authn_saml::Saml::from_env()? {
+                self.register_suite(std::sync::Arc::new(saml))?;
+            }
         }
-        #[cfg(not(feature = "authn-saml"))]
-        if std::env::var_os("SOLID_SERVER_LWS_SAML_IDPS_FILE").is_some_and(|v| !v.is_empty()) {
-            return Err(
-                "SOLID_SERVER_LWS_SAML_IDPS_FILE is set, but this server was built \
-                 without the SAML suite (the authn-saml feature)"
-                    .into(),
-            );
-        }
+        drop(offered);
         Ok(())
     }
 
@@ -329,17 +422,15 @@ impl LwsConfig {
             .collect()
     }
 
-    /// Offer `suite` too. Refused when it takes a subject token type the server checks itself
-    /// ([`authz_server::BUILT_IN_TOKEN_TYPES`]) or another offered suite takes.
+    /// Offer `suite` too. Refused when it takes a subject token type another offered suite takes.
     pub fn register_suite(
         &mut self,
         suite: std::sync::Arc<dyn sparq_lws_authn::Suite>,
     ) -> Result<(), String> {
-        self.suites
-            .register(suite, authz_server::BUILT_IN_TOKEN_TYPES)
+        self.suites.register(suite)
     }
 
-    /// The authentication suites in their own packages that the authorization server offers.
+    /// The authentication suites the authorization server offers.
     pub fn suites(&self) -> &sparq_lws_authn::Suites {
         &self.suites
     }
@@ -2689,6 +2780,68 @@ mod tests {
             .suites()
             .find(authz_server::ID_TOKEN_TYPE)
             .is_some());
+    }
+
+    /// `SOLID_SERVER_LWS_AUTHN` picks among the suites built in, and a suite's configuration is
+    /// never ignored: set for a suite that is not offered, or a named SAML suite with no
+    /// identity providers, it stops the start.
+    #[test]
+    fn the_environment_picks_the_suites_offered() {
+        let offered = |vars: &[(&str, &str)]| {
+            let vars: Vec<(String, String)> = vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            offered_suites(&move |k| vars.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()))
+        };
+        let built = built_in_suites();
+        let without_saml: Vec<&str> = built.iter().copied().filter(|n| *n != "saml").collect();
+        assert_eq!(offered(&[]).unwrap(), without_saml);
+        assert_eq!(offered(&[(AUTHN_VAR, " ")]).unwrap(), without_saml);
+        let idps = ("SOLID_SERVER_LWS_SAML_IDPS_FILE", "idps.json");
+        let issuers = (
+            "SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS",
+            "https://idp.example/",
+        );
+        assert!(offered(&[(AUTHN_VAR, "kerberos")])
+            .unwrap_err()
+            .contains("no authentication suite"));
+        for (name, feature) in SUITES {
+            let one = offered(&[(AUTHN_VAR, name), idps]);
+            if built.contains(name) {
+                if *name == "saml" {
+                    assert_eq!(one.unwrap(), vec!["saml"]);
+                } else {
+                    // The SAML identity providers are set, but saml is left out (or not built).
+                    let refused = if built.contains(&"saml") {
+                        "leaves the saml suite out"
+                    } else {
+                        "authn-saml"
+                    };
+                    assert!(one.unwrap_err().contains(refused));
+                    assert_eq!(offered(&[(AUTHN_VAR, name)]).unwrap(), vec![*name]);
+                }
+            } else {
+                assert!(one.unwrap_err().contains(feature), "{name}");
+            }
+        }
+        if built.contains(&"saml") {
+            assert_eq!(offered(&[idps]).unwrap(), built);
+            assert!(offered(&[(AUTHN_VAR, "saml")])
+                .unwrap_err()
+                .contains("SOLID_SERVER_LWS_SAML_IDPS_FILE is not set"));
+        } else {
+            assert!(offered(&[idps]).unwrap_err().contains("authn-saml"));
+        }
+        if built.contains(&"openid") && built.contains(&"ssi") {
+            assert!(offered(&[(AUTHN_VAR, "ssi"), issuers])
+                .unwrap_err()
+                .contains("leaves the openid suite out"));
+            assert_eq!(
+                offered(&[(AUTHN_VAR, "openid, ssi,openid"), issuers]).unwrap(),
+                vec!["ssi", "openid"]
+            );
+        }
     }
 
     /// Review finding: request caps were checked against what was registered, and the record

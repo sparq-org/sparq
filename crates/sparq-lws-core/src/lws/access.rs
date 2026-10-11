@@ -25,9 +25,8 @@ use serde_json::{json, Value};
 
 use super::{
     has_lws_context, has_type, is_uri, jose, json_is_uri, method_not_allowed, problem,
-    service_links, service_linkset, service_listing, set, subject_tokens, Agent, LwsConfig,
-    LwsRequest, LwsState, ResourceMeta, FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX,
-    REQUESTS_PATH,
+    service_links, service_linkset, service_listing, set, Agent, LwsConfig, LwsRequest, LwsState,
+    ResourceMeta, FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX, REQUESTS_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -1280,8 +1279,8 @@ async fn owner_inbox<S: Store + 'static>(state: &LwsState<S>) -> Option<String> 
     if !(owner.starts_with("https://") || owner.starts_with("http://")) {
         return None;
     }
-    let (_, body) = subject_tokens::fetch(
-        &state.cfg,
+    let (_, body) = sparq_lws_authn::fetch::fetch(
+        &state.cfg.fetch_policy(),
         &state.http,
         owner,
         "application/ld+json, application/json;q=0.9",

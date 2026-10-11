@@ -1,7 +1,6 @@
-//! Subject token verification for the self-issued suites the LWS authorization server holds
-//! (LWS 1.0 core section 5.2.3, "validate before issuing"); the others are packages of their own
-//! (see [`sparq_lws_authn`]). Each is checked the way its specification and the Touchstone
-//! reference authorization server check it:
+//! The self-issued authentication suites of the Linked Web Storage authorization server (LWS 1.0
+//! core section 5.2.3): a JWT the agent signs itself, as the subject token. Each is checked the way
+//! its specification and the Touchstone reference authorization server check it:
 //!
 //! - **did:key** (`lws10-authn-ssi-did-key`): a self-issued JWT whose subject is a did:key. The key
 //!   comes from the identifier itself (P-256, multicodec `0x1200`, signed ES256; or Ed25519,
@@ -16,56 +15,51 @@
 //! server, an `exp` in the future and an `iat` not ahead of now. `alg: none` is always refused.
 //!
 //! Documents are fetched under the server's fetch policy (see [`sparq_lws_authn::fetch`]).
+//! [`Ssi`] is the suite, for a server's [`Suites`](sparq_lws_authn::Suites).
+
+#![forbid(unsafe_code)]
 
 use serde_json::Value;
 
-use super::jose::{self, Jws};
-use super::LwsConfig;
+use sparq_lws_authn::fetch;
+use sparq_lws_authn::jose::{self, Jws};
+pub use sparq_lws_authn::JWT_TOKEN_TYPE;
+use sparq_lws_authn::{check_times, parse_datetime, parse_jwt, Exchange, Suite, Verified};
 
-pub use sparq_lws_authn::fetch::{
-    check_url_static, fetch_client, is_forbidden_ip, public_addrs, redirect_target,
-    PublicOnlyResolver, MAX_REDIRECTS,
-};
-pub use sparq_lws_authn::{
-    check_times, parse_datetime, parse_jwt as parse, Verified, ID_TOKEN_TYPE, JWT_TOKEN_TYPE,
-    SKEW_SECS,
-};
+/// The self-issued suites: did:key and controlled identifier subjects of a JWT subject token.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Ssi;
 
-/// GET `url` under the server's fetch policy (see [`sparq_lws_authn::fetch::fetch`]).
-pub async fn fetch(
-    cfg: &LwsConfig,
-    http: &reqwest::Client,
-    url: &str,
-    accept: &str,
-) -> Result<(String, Vec<u8>), String> {
-    sparq_lws_authn::fetch::fetch(&cfg.fetch_policy(), http, url, accept).await
-}
+#[async_trait::async_trait]
+impl Suite for Ssi {
+    fn name(&self) -> &'static str {
+        "ssi"
+    }
 
-/// Verify a self-issued JWT subject token for an exchange at this authorization server. The error
-/// is the reason, for `error_description`.
-pub async fn verify(
-    cfg: &LwsConfig,
-    http: &reqwest::Client,
-    token: &str,
-) -> Result<Verified, String> {
-    let jws = parse(token)?;
-    if jws
-        .claim_str("sub")
-        .is_some_and(|s| s.starts_with("did:key:"))
-    {
-        did_key(cfg, &jws)
-    } else {
-        cid(cfg, http, &jws).await
+    fn token_types(&self) -> &[&'static str] {
+        &[JWT_TOKEN_TYPE]
+    }
+
+    fn identifier_types(&self) -> &[&'static str] {
+        &["https", "did:key"]
+    }
+
+    async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {
+        let jws = parse_jwt(exchange.subject_token)?;
+        if jws
+            .claim_str("sub")
+            .is_some_and(|s| s.starts_with("did:key:"))
+        {
+            did_key(exchange.authorization_server, &jws, exchange.now)
+        } else {
+            cid(exchange, &jws).await
+        }
     }
 }
 
-/// Whether `aud` names this authorization server.
-fn addressed_to_us(cfg: &LwsConfig, jws: &Jws) -> bool {
-    sparq_lws_authn::addressed_to(cfg.issuer(), jws)
-}
-
-/// The self-issued credential checks shared by did:key and CID subjects; the subject on success.
-pub fn self_issued(cfg: &LwsConfig, jws: &Jws, now: i64) -> Result<String, String> {
+/// The self-issued credential checks shared by did:key and CID subjects, for the authorization
+/// server `issuer`; the subject on success.
+pub fn self_issued(issuer: &str, jws: &Jws, now: i64) -> Result<String, String> {
     let sub = jws.claim_str("sub").filter(|s| !s.is_empty());
     let Some(sub) = sub else {
         return Err("sub, iss and client_id must be the same identifier (sub is missing)".into());
@@ -74,7 +68,7 @@ pub fn self_issued(cfg: &LwsConfig, jws: &Jws, now: i64) -> Result<String, Strin
         return Err("sub, iss and client_id must be the same identifier".into());
     }
     check_times(jws, now)?;
-    if !addressed_to_us(cfg, jws) {
+    if !sparq_lws_authn::addressed_to(issuer, jws) {
         return Err("aud does not include this authorization server".into());
     }
     Ok(sub.to_string())
@@ -175,8 +169,8 @@ pub fn did_key_kid_matches(did: &str, kid: Option<&str>) -> bool {
     kid.is_some_and(|k| k == method || k == mb || k.strip_prefix('#') == Some(mb))
 }
 
-fn did_key(cfg: &LwsConfig, jws: &Jws) -> Result<Verified, String> {
-    let did = self_issued(cfg, jws, jose::now_secs())?;
+fn did_key(issuer: &str, jws: &Jws, now: i64) -> Result<Verified, String> {
+    let did = self_issued(issuer, jws, now)?;
     if !did_key_kid_matches(&did, jws.kid()) {
         return Err(format!(
             "the kid names no verification method of the DID document {did} derives"
@@ -191,8 +185,8 @@ fn did_key(cfg: &LwsConfig, jws: &Jws) -> Result<Verified, String> {
 
 // ---------------------------------------------------------------- controlled identifiers
 
-async fn cid(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Verified, String> {
-    let subject = self_issued(cfg, jws, jose::now_secs())?;
+async fn cid(ex: &Exchange<'_>, jws: &Jws) -> Result<Verified, String> {
+    let subject = self_issued(ex.authorization_server, jws, ex.now)?;
     if !(subject.starts_with("https://") || subject.starts_with("http://")) {
         return Err("a controlled identifier credential needs an https subject".into());
     }
@@ -200,16 +194,16 @@ async fn cid(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Verif
         .kid()
         .filter(|k| !k.is_empty())
         .ok_or("a CID credential names its verification method in kid, and this one has none")?;
-    let (_, body) = fetch(
-        cfg,
-        http,
+    let (_, body) = fetch::fetch(
+        &ex.fetch,
+        ex.http,
         &subject,
         "application/cid+json, application/ld+json, application/json",
     )
     .await?;
     let doc: Value = serde_json::from_slice(&body)
         .map_err(|_| format!("{subject} is not a JSON controlled identifier document"))?;
-    let key = cid_method_key(&doc, &subject, kid, jose::now_secs())?;
+    let key = cid_method_key(&doc, &subject, kid, ex.now)?;
     key.verify(jws)?;
     Ok(Verified {
         subject: subject.clone(),
@@ -347,8 +341,17 @@ mod tests {
     use super::*;
     use serde_json::{json, Map};
 
+    /// What the tests need of the server's configuration: its authorization server's id.
+    struct LwsConfig(&'static str);
+
+    impl LwsConfig {
+        fn issuer(&self) -> &str {
+            self.0
+        }
+    }
+
     fn cfg() -> LwsConfig {
-        LwsConfig::new("http://localhost:3000")
+        LwsConfig("http://localhost:3000/.lws/as")
     }
 
     fn did_for(key: &jose::EcKey) -> String {
@@ -388,18 +391,28 @@ mod tests {
         }
         let jws = sign(&key, &mb, claims(&did, &cfg));
         assert_eq!(
-            did_key(&cfg, &jws).unwrap(),
+            did_key(cfg.issuer(), &jws, jose::now_secs()).unwrap(),
             Verified {
                 subject: did.clone(),
                 client: did.clone()
             }
         );
         let jws = sign(&key, &format!("{did}#{mb}"), claims(&did, &cfg));
-        assert!(did_key(&cfg, &jws).is_ok());
+        assert!(did_key(cfg.issuer(), &jws, jose::now_secs()).is_ok());
         // Wrong kid, wrong key.
-        assert!(did_key(&cfg, &sign(&key, "other", claims(&did, &cfg))).is_err());
+        assert!(did_key(
+            cfg.issuer(),
+            &sign(&key, "other", claims(&did, &cfg)),
+            jose::now_secs()
+        )
+        .is_err());
         let other = jose::EcKey::generate("y");
-        assert!(did_key(&cfg, &sign(&other, &mb, claims(&did, &cfg))).is_err());
+        assert!(did_key(
+            cfg.issuer(),
+            &sign(&other, &mb, claims(&did, &cfg)),
+            jose::now_secs()
+        )
+        .is_err());
     }
 
     #[test]
@@ -438,7 +451,7 @@ mod tests {
         let check = |edit: &dyn Fn(&mut Map<String, Value>)| {
             let mut c = claims(&did, &cfg);
             edit(c.as_object_mut().unwrap());
-            self_issued(&cfg, &sign(&key, "k", c), now)
+            self_issued(cfg.issuer(), &sign(&key, "k", c), now)
         };
         assert!(check(&|_| {}).is_ok());
         assert!(check(&|c| {

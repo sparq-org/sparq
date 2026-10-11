@@ -7,23 +7,15 @@ use axum::http::{header, Method, StatusCode};
 use axum::response::Response;
 use serde_json::{json, Value};
 
-use super::subject_tokens;
-pub use super::subject_tokens::{ID_TOKEN_TYPE, JWT_TOKEN_TYPE};
 use super::{
     is_uri, json_response, method_not_allowed, set, tokens, LwsRequest, LwsState, AS_JWKS_PATH,
     AS_TOKEN_PATH, JSON,
 };
 use crate::store::Store;
+pub use sparq_lws_authn::{ID_TOKEN_TYPE, JWT_TOKEN_TYPE};
 
 pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
-
-/// The subject token types of the suites this server holds itself (did:key and controlled
-/// identifiers); the suites in their own packages ([`LwsConfig::register_suite`]) take the
-/// others, never these.
-///
-/// [`LwsConfig::register_suite`]: super::LwsConfig::register_suite
-pub const BUILT_IN_TOKEN_TYPES: &[&str] = &[JWT_TOKEN_TYPE];
 
 pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Response {
     if req.path == AS_TOKEN_PATH {
@@ -61,8 +53,8 @@ pub fn jwks(cfg: &super::LwsConfig) -> Value {
 /// excludes it, and the subject token and identifier types say which suites this server accepts.
 pub fn metadata<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
-    let mut token_types = BUILT_IN_TOKEN_TYPES.to_vec();
-    let mut identifier_types = vec!["https", "did:key"];
+    let mut token_types: Vec<&str> = Vec::new();
+    let mut identifier_types = Vec::new();
     for suite in cfg.suites().iter() {
         token_types.extend(suite.token_types());
         for t in suite.identifier_types() {
@@ -115,27 +107,23 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
             &format!("this server issues no tokens for {}", form.resource),
         );
     }
-    let verified = match form.subject_token_type.as_str() {
-        JWT_TOKEN_TYPE => {
-            subject_tokens::verify(&state.cfg, &state.http, &form.subject_token).await
+    let token_type = form.subject_token_type.as_str();
+    let verified = match state.cfg.suites().find(token_type) {
+        Some(suite) => {
+            suite
+                .verify(&sparq_lws_authn::Exchange {
+                    subject_token: &form.subject_token,
+                    subject_token_type: token_type,
+                    authorization_server: state.cfg.issuer(),
+                    token_endpoint: &state.cfg.absolute(AS_TOKEN_PATH),
+                    dpop: dpop_header(req),
+                    now: super::jose::now_secs(),
+                    fetch: state.cfg.fetch_policy(),
+                    http: &state.http,
+                })
+                .await
         }
-        other => match state.cfg.suites().find(other) {
-            Some(suite) => {
-                suite
-                    .verify(&sparq_lws_authn::Exchange {
-                        subject_token: &form.subject_token,
-                        subject_token_type: other,
-                        authorization_server: state.cfg.issuer(),
-                        token_endpoint: &state.cfg.absolute(AS_TOKEN_PATH),
-                        dpop: dpop_header(req),
-                        now: super::jose::now_secs(),
-                        fetch: state.cfg.fetch_policy(),
-                        http: &state.http,
-                    })
-                    .await
-            }
-            None => Err(format!("unsupported subject_token_type {other}")),
-        },
+        None => Err(format!("unsupported subject_token_type {token_type}")),
     };
     let verified = match verified {
         Ok(v) => v,
@@ -337,7 +325,8 @@ mod tests {
         let fake = std::sync::Arc::new(Fake(Default::default()));
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
         cfg.register_suite(fake.clone()).unwrap();
-        // The server's own token types are never a suite's.
+        // A token type an offered suite takes (with the default features, the self-issued JWT)
+        // is never another's.
         struct Jwt;
         #[async_trait::async_trait]
         impl sparq_lws_authn::Suite for Jwt {
@@ -354,18 +343,25 @@ mod tests {
                 unreachable!()
             }
         }
-        assert!(cfg.register_suite(std::sync::Arc::new(Jwt)).is_err());
+        assert_eq!(
+            cfg.register_suite(std::sync::Arc::new(Jwt)).is_err(),
+            cfg!(feature = "authn-ssi")
+        );
         let state = LwsState::new(test_store::FlakyStore::new(), cfg)
             .await
             .unwrap();
         let meta = metadata(&state);
         let types = meta["subject_token_types_supported"].as_array().unwrap();
         assert!(types.iter().any(|t| t == "urn:example:fake"));
+        // Offered by the self-issued suite, or by the test's own JWT suite without it.
         assert!(types.iter().any(|t| t == JWT_TOKEN_TYPE));
         let ids = meta["subject_identifier_types_supported"]
             .as_array()
             .unwrap();
-        assert!(ids.iter().any(|t| t == "urn") && ids.iter().any(|t| t == "did:key"));
+        assert!(ids.iter().any(|t| t == "urn"));
+        if cfg!(feature = "authn-ssi") {
+            assert!(ids.iter().any(|t| t == "did:key"));
+        }
 
         let resource =
             url::form_urlencoded::byte_serialize(state.cfg.realm().as_bytes()).collect::<String>();
@@ -410,12 +406,9 @@ mod tests {
             assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{token} {token_type}");
             assert_eq!(test_store::body_json(r).await["error"], "invalid_request");
         }
-        // A suite never takes a type another one (or the server itself) takes.
+        // A suite never takes a type another one takes.
         let mut suites = sparq_lws_authn::Suites::default();
-        assert!(suites
-            .register(fake.clone(), &["urn:example:fake"])
-            .is_err());
-        suites.register(fake.clone(), &[]).unwrap();
-        assert!(suites.register(fake, &[]).is_err());
+        suites.register(fake.clone()).unwrap();
+        assert!(suites.register(fake).is_err());
     }
 }

@@ -41,8 +41,9 @@ cargo test -p sparq-lws-authn
 ## 📚 Learn more
 
 - `skills/solid-lws-server/SKILL.md`: configuring the suites a server offers.
-- [`sparq-lws-authn-openid`](../sparq-lws-authn-openid) and
-  [`sparq-lws-authn-saml`](../sparq-lws-authn-saml): suites built on this crate.
+- [`sparq-lws-authn-ssi`](../sparq-lws-authn-ssi),
+  [`sparq-lws-authn-openid`](../sparq-lws-authn-openid) and
+  [`sparq-lws-authn-saml`](../sparq-lws-authn-saml): the suites built on this crate.
 
 ## License
 
