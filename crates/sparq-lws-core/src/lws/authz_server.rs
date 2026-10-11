@@ -18,6 +18,13 @@ use crate::store::Store;
 pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
 
+/// The subject token types of the suites this server holds itself (did:key, controlled
+/// identifiers and OpenID Connect); the suites in their own packages
+/// ([`LwsConfig::register_suite`]) take the others, never these.
+///
+/// [`LwsConfig::register_suite`]: super::LwsConfig::register_suite
+pub const BUILT_IN_TOKEN_TYPES: &[&str] = &[JWT_TOKEN_TYPE, ID_TOKEN_TYPE];
+
 pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Response {
     if req.path == AS_TOKEN_PATH {
         if req.method != Method::POST {
@@ -54,17 +61,33 @@ pub fn jwks(cfg: &super::LwsConfig) -> Value {
 /// excludes it, and the subject token and identifier types say which suites this server accepts.
 pub fn metadata<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
-    let token_types = vec![JWT_TOKEN_TYPE, ID_TOKEN_TYPE];
+    let mut token_types = BUILT_IN_TOKEN_TYPES.to_vec();
+    let mut identifier_types = vec!["https", "did:key"];
+    for suite in cfg.suites().iter() {
+        token_types.extend(suite.token_types());
+        for t in suite.identifier_types() {
+            if !identifier_types.contains(t) {
+                identifier_types.push(t);
+            }
+        }
+    }
     json!({
         "issuer": cfg.issuer(),
         "token_endpoint": cfg.absolute(AS_TOKEN_PATH),
         "jwks_uri": cfg.absolute(AS_JWKS_PATH),
         "grant_types_supported": [TOKEN_EXCHANGE],
         "subject_token_types_supported": token_types,
-        "subject_identifier_types_supported": ["https", "did:key"],
+        "subject_identifier_types_supported": identifier_types,
         "token_endpoint_auth_methods_supported": ["none"],
         "response_types_supported": [],
     })
+}
+
+/// The request's `DPoP` header, when it carries exactly one (RFC 9449 section 4.3).
+fn dpop_header(req: &LwsRequest) -> Option<&str> {
+    (req.headers.get_all("dpop").iter().count() == 1)
+        .then(|| req.header("dpop"))
+        .flatten()
 }
 
 /// An RFC 6749 error response.
@@ -100,16 +123,26 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
                 &form.subject_token,
                 &form.subject_token_type,
                 &subject_tokens::DpopContext {
-                    // Exactly one DPoP header (RFC 9449 section 4.3).
-                    proof: (req.headers.get_all("dpop").iter().count() == 1)
-                        .then(|| req.header("dpop"))
-                        .flatten(),
+                    proof: dpop_header(req),
                     replay: &state.dpop_replay,
                 },
             )
             .await
         }
-        other => Err(format!("unsupported subject_token_type {other}")),
+        other => match state.cfg.suites().find(other) {
+            Some(suite) => {
+                suite
+                    .verify(&sparq_lws_authn::Exchange {
+                        subject_token: &form.subject_token,
+                        subject_token_type: other,
+                        authorization_server: state.cfg.issuer(),
+                        dpop: dpop_header(req),
+                        now: super::jose::now_secs(),
+                    })
+                    .await
+            }
+            None => Err(format!("unsupported subject_token_type {other}")),
+        },
     };
     let verified = match verified {
         Ok(v) => v,
@@ -260,5 +293,136 @@ mod tests {
             code(FORM, &format!("{ok}&resource=again")),
             "invalid_request"
         );
+    }
+
+    /// A suite in its own package, as the server sees one: it takes one made-up token type and
+    /// records what it was asked.
+    struct Fake(std::sync::Mutex<Vec<(String, String, Option<String>)>>);
+
+    #[async_trait::async_trait]
+    impl sparq_lws_authn::Suite for Fake {
+        fn name(&self) -> &'static str {
+            "fake"
+        }
+
+        fn token_types(&self) -> &[&'static str] {
+            &["urn:example:fake"]
+        }
+
+        fn identifier_types(&self) -> &[&'static str] {
+            &["urn"]
+        }
+
+        async fn verify(
+            &self,
+            x: &sparq_lws_authn::Exchange<'_>,
+        ) -> Result<sparq_lws_authn::Verified, String> {
+            self.0.lock().unwrap().push((
+                x.subject_token.to_string(),
+                x.authorization_server.to_string(),
+                x.dpop.map(str::to_string),
+            ));
+            match x.subject_token {
+                "good" => Ok(sparq_lws_authn::Verified {
+                    subject: "https://alice.example/#me".into(),
+                    client: "https://app.example/".into(),
+                }),
+                "no-uri" => Ok(sparq_lws_authn::Verified {
+                    subject: "alice".into(),
+                    client: "https://app.example/".into(),
+                }),
+                _ => Err("not good".into()),
+            }
+        }
+    }
+
+    /// A registered suite is offered in the metadata and checks the tokens of its type; the
+    /// server still issues the token, and still requires URIs of it.
+    #[tokio::test]
+    async fn the_token_endpoint_offers_registered_suites() {
+        use super::super::test_store;
+        let fake = std::sync::Arc::new(Fake(Default::default()));
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.register_suite(fake.clone()).unwrap();
+        // The server's own token types are never a suite's.
+        struct Jwt;
+        #[async_trait::async_trait]
+        impl sparq_lws_authn::Suite for Jwt {
+            fn name(&self) -> &'static str {
+                "jwt"
+            }
+            fn token_types(&self) -> &[&'static str] {
+                &[JWT_TOKEN_TYPE]
+            }
+            async fn verify(
+                &self,
+                _: &sparq_lws_authn::Exchange<'_>,
+            ) -> Result<sparq_lws_authn::Verified, String> {
+                unreachable!()
+            }
+        }
+        assert!(cfg.register_suite(std::sync::Arc::new(Jwt)).is_err());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let meta = metadata(&state);
+        let types = meta["subject_token_types_supported"].as_array().unwrap();
+        assert!(types.iter().any(|t| t == "urn:example:fake"));
+        assert!(types.iter().any(|t| t == JWT_TOKEN_TYPE));
+        let ids = meta["subject_identifier_types_supported"]
+            .as_array()
+            .unwrap();
+        assert!(ids.iter().any(|t| t == "urn") && ids.iter().any(|t| t == "did:key"));
+
+        let resource =
+            url::form_urlencoded::byte_serialize(state.cfg.realm().as_bytes()).collect::<String>();
+        let exchange = |token: &str, token_type: &str| {
+            let body = format!(
+                "{GRANT}&subject_token={token}&subject_token_type={}&resource={resource}",
+                url::form_urlencoded::byte_serialize(token_type.as_bytes()).collect::<String>()
+            );
+            test_store::request(
+                Method::POST,
+                AS_TOKEN_PATH,
+                &[
+                    ("content-type", "application/x-www-form-urlencoded"),
+                    ("dpop", "proof"),
+                ],
+                &body,
+            )
+        };
+        let ok = handle(&state, &exchange("good", "urn:example:fake")).await;
+        assert_eq!(ok.status(), StatusCode::OK);
+        let token = test_store::body_json(ok).await["access_token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let agent = tokens::validate(&state.cfg, &token).unwrap();
+        assert_eq!(agent.subject.as_deref(), Some("https://alice.example/#me"));
+        assert_eq!(agent.client.as_deref(), Some("https://app.example/"));
+        assert_eq!(
+            fake.0.lock().unwrap()[0],
+            (
+                "good".to_string(),
+                state.cfg.issuer().to_string(),
+                Some("proof".to_string())
+            )
+        );
+        for (token, token_type) in [
+            ("bad", "urn:example:fake"),
+            ("no-uri", "urn:example:fake"),
+            ("good", "urn:example:unknown"),
+        ] {
+            let r = handle(&state, &exchange(token, token_type)).await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{token} {token_type}");
+            assert_eq!(test_store::body_json(r).await["error"], "invalid_request");
+        }
+        // A suite never takes a type another one (or the server itself) takes.
+        let mut suites = sparq_lws_authn::Suites::default();
+        assert!(suites
+            .register(fake.clone(), &["urn:example:fake"])
+            .is_err());
+        suites.register(fake.clone(), &[]).unwrap();
+        assert!(suites.register(fake, &[]).is_err());
     }
 }

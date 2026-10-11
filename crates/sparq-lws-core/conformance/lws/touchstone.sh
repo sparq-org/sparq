@@ -22,7 +22,7 @@ BIN=${BIN:-$repo/target/debug/sparq-lws-core}
 mkdir -p "$OUT"
 key="$OUT/as-key.json"
 rm -f "$key"
-[ -x "$BIN" ] || cargo build -q -p sparq-lws-core --manifest-path "$repo/Cargo.toml"
+[ -x "$BIN" ] || cargo build -q -p sparq-lws-core --features authn-saml --manifest-path "$repo/Cargo.toml"
 
 fixtures="http://localhost:$FIXTURES_PORT/"
 

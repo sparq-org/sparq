@@ -263,6 +263,7 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
 | `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Webhook delivery bounds: deliveries waiting or in flight (default 1024; past it a notification is dropped and logged), deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
 | `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
+| `SOLID_SERVER_LWS_SAML_IDPS_FILE` | A JSON object of trusted SAML identity provider entity ids to their signing keys (PEM certificate, PEM public key, or public JWK); offers the SAML 2.0 suite. Needs a build with `--features authn-saml`; set without it, the server refuses to start. A key that cannot be read also stops the start. |
 | `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS` | Comma-separated OpenID Provider issuers (exactly as their ID Tokens' `iss`, which must equal the discovery document's `issuer`) whose identities get the reserved half of the DPoP replay cache. Every other provider shares the other half, each provider and each identity held to its own share, so open registration elsewhere cannot lock out these providers' users. |
 
 What the server exposes, all discoverable from the storage description
@@ -337,6 +338,18 @@ What the server exposes, all discoverable from the storage description
   flattened, a graph, an inline or nested context) is not expanded and names no issuer. A token time
   (`exp`, `iat`, `nbf`) may carry a fraction (RFC 7519 NumericDate); one that is not a number
   between 1970 and 9999 is refused.
+  A SAML 2.0 assertion (`urn:ietf:params:oauth:token-type:saml2`, base64url) is taken from the
+  identity providers in `SOLID_SERVER_LWS_SAML_IDPS_FILE`: it needs an enveloped XML-DSig
+  signature over the whole assertion (exclusive canonicalization, SHA-2, RSA or ECDSA
+  SHA-256) under the issuer's key, a validity period around now, an audience restriction
+  naming this server, a URI `NameID` (the agent) and bearer confirmations whose `Recipient`
+  is the client.
+  Authentication suites other than did:key, controlled identifiers and OpenID Connect live in
+  their own packages (`sparq-lws-authn-*`, each an `authn-*` feature of `sparq-lws-core`)
+  and implement `sparq_lws_authn::Suite`; `LwsConfig::register_suite` offers one (never for a
+  token type the server checks itself), `LwsConfig::suites` lists them,
+  and the metadata lists their token types. SAML is `sparq-lws-authn-saml`
+  (`authn-saml`).
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and

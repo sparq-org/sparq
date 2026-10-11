@@ -37,8 +37,7 @@ use super::{has_type, is_uri, LwsConfig, LWS_NS};
 pub const JWT_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:jwt";
 pub const ID_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:id_token";
 
-/// Allowed clock skew, in seconds, for subject token times (the reference's).
-pub const SKEW_SECS: i64 = 60;
+pub use sparq_lws_authn::{parse_datetime, Verified, SKEW_SECS};
 
 /// Largest identity document, discovery document or JWKS read.
 const MAX_DOC: usize = 1024 * 1024;
@@ -334,13 +333,6 @@ pub fn check_dpop(
         return Err("the DPoP proof was used before".into());
     }
     Ok(())
-}
-
-/// Who a valid subject token authenticates, and the client presenting it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Verified {
-    pub subject: String,
-    pub client: String,
 }
 
 /// Verify a JWT-shaped subject token of `token_type` for an exchange at this authorization server.
@@ -684,68 +676,6 @@ pub fn cid_method_key(
     Err(format!(
         "verification method {method_id} carries no usable public key"
     ))
-}
-
-/// An xsd:dateTime / RFC 3339 timestamp (`YYYY-MM-DDThh:mm:ss[.frac](Z|±hh:mm)`; no zone is UTC)
-/// as seconds since the epoch.
-pub fn parse_datetime(s: &str) -> Option<i64> {
-    let s = s.trim();
-    let (date, rest) = s.split_once(['T', 't'])?;
-    // Every field must be ASCII digits of a bounded width (so no sign, no overflow on huge years,
-    // and nothing for the arithmetic below to wrap on).
-    let field = |f: &str, min: usize, max: usize| -> Option<i64> {
-        if f.len() < min || f.len() > max || !f.bytes().all(|c| c.is_ascii_digit()) {
-            return None;
-        }
-        f.parse().ok()
-    };
-    let mut d = date.splitn(3, '-');
-    let (y, mo, da) = (
-        field(d.next()?, 4, 4)?,
-        field(d.next()?, 2, 2)?,
-        field(d.next()?, 2, 2)?,
-    );
-    let zone_at = rest.find(['Z', 'z', '+', '-']).unwrap_or(rest.len());
-    let (time, zone) = rest.split_at(zone_at);
-    let mut time = time.splitn(2, '.');
-    let (time, frac) = (time.next()?, time.next());
-    if frac.is_some_and(|f| f.is_empty() || !f.bytes().all(|c| c.is_ascii_digit())) {
-        return None;
-    }
-    let mut t = time.splitn(3, ':');
-    let (h, mi, se) = (
-        field(t.next()?, 2, 2)?,
-        field(t.next()?, 2, 2)?,
-        field(t.next()?, 2, 2)?,
-    );
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&da) || h > 24 || mi > 59 || se > 60 {
-        return None;
-    }
-    let offset = match zone {
-        "" | "Z" | "z" => 0,
-        z => {
-            let sign = match z.as_bytes().first() {
-                Some(b'-') => -1,
-                Some(b'+') => 1,
-                _ => return None,
-            };
-            let (oh, om) = z.get(1..)?.split_once(':')?;
-            let (oh, om) = (field(oh, 2, 2)?, field(om, 2, 2)?);
-            if oh > 23 || om > 59 {
-                return None;
-            }
-            sign * (oh * 3600 + om * 60)
-        }
-    };
-    // Days from the civil date (Howard Hinnant's algorithm).
-    let y = if mo <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (mo + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + da - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    Some(days * 86_400 + h * 3600 + mi * 60 + se - offset)
 }
 
 // ---------------------------------------------------------------- OpenID Connect
@@ -2693,33 +2623,6 @@ mod tests {
         let mut doc = cid_doc(s, jwk);
         doc["authentication"][0]["expires"] = json!("2999-01-01T00:00:00Z");
         assert!(cid_method_key(&doc, s, "k", now).is_ok());
-    }
-
-    #[test]
-    fn datetimes() {
-        assert_eq!(parse_datetime("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(parse_datetime("2000-03-01T00:00:00Z"), Some(951_868_800));
-        assert_eq!(
-            parse_datetime("2000-03-01T01:00:00.123+01:00"),
-            Some(951_868_800)
-        );
-        assert_eq!(
-            parse_datetime("2000-02-29T23:00:00-01:00"),
-            Some(951_868_800)
-        );
-        assert_eq!(parse_datetime("yesterday"), None);
-        // Malformed (non-ASCII, signed, oversized) fields are `None`, never a panic or overflow.
-        for bad in [
-            "2000-03-01T00:00:00+0\u{e9}:00",
-            "2000-03-01T00:00:00Zjunk",
-            "2000-03-01T00:00:00.Z",
-            "2000-+3-01T00:00:00Z",
-            "99999999999999999999-03-01T00:00:00Z",
-            "9223372036854775807-03-01T00:00:00Z",
-            "2000-03-01T00:00:00+05",
-        ] {
-            assert_eq!(parse_datetime(bad), None, "{bad:?}");
-        }
     }
 
     #[test]

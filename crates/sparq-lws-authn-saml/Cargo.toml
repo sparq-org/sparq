@@ -1,0 +1,25 @@
+[package]
+name = "sparq-lws-authn-saml"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "The SAML 2.0 authentication suite of the Linked Web Storage authorization server: signed assertions from trusted identity providers as subject tokens."
+license = "MIT OR Apache-2.0"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["solid", "lws", "saml", "authentication"]
+categories = ["authentication"]
+readme = "README.md"
+publish = false
+
+[dependencies]
+sparq-lws-authn = { path = "../sparq-lws-authn" }
+async-trait = "0.1"
+aws-lc-rs = "1"
+base64 = "0.22"
+p256 = { version = "0.13", features = ["ecdsa", "jwk", "std"] }
+# XML parsing for enveloped XML-DSig with exclusive canonicalization. 0.37 is already in the
+# resolved graph, so this adds no new crate.
+quick-xml = "0.37"
+serde_json = "1"
+sha2 = "0.10"
