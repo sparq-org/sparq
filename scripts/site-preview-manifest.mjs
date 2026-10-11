@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Writes the `_preview.json` manifest that ships inside a PR site-preview artifact
-// (.github/workflows/site-preview.yml). The deploy side
-// (scripts/site-preview-overlay.sh + site-preview-deploy.yml) reads it to link the PR's
-// changed specs and papers straight from the preview comment.
+// (.github/workflows/site-preview.yml). site-preview-comment.yml reads it to link the PR's
+// changed specs and papers straight from the preview comment, after checking that its
+// `pr` and `sha` match the run's own trusted metadata.
 //
 // Usage: site-preview-manifest.mjs <out-file> <pr-number> <head-sha> < changed-paths.txt
 //   changed-paths.txt: one repo-relative path per line (the PR's changed files).

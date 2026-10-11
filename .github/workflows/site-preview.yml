@@ -1,19 +1,26 @@
 # Hosted PR previews, part 1 of 2: BUILD the site for a pull request.
 #
 # Builds the same Next.js static export pages.yml publishes (specs and papers rendered from
-# site/specs/*.typ and site/papers/*.typ), but with basePath /preview/pr-<N> so it can be
-# served under https://sparq.jeswr.org/preview/pr-<N>/, and uploads it as the
-# `site-preview-pr-<N>` artifact. It skips the /app GUI, the /guide mdBook and the /dev
-# dashboards, which have their own lanes.
+# site/specs/*.typ and site/papers/*.typ) with basePath /sparq-previews/pr-<N>, and uploads
+# it as the `site-preview-pr-<N>` artifact. It skips the /app GUI, the /guide mdBook and
+# the /dev dashboards, which have their own lanes.
 #
-# This job runs the PR's own code, so it gets a read-only token and no secrets. Publishing
-# is part 2, site-preview-deploy.yml: a workflow_run job that runs main's code, serves only
-# same-repository PRs (scripts/site-preview-overlay.sh), and comments the link on the PR.
+# Previews are served from a SEPARATE origin, https://sparq-org.github.io/sparq-previews/,
+# never from the production site: an unmerged PR's JavaScript must not run where the
+# production /app/ keeps users' workspaces in localStorage. The sparq-org/sparq-previews
+# repository's own workflow publishes them: it reads the open same-repository PRs and their
+# successful runs of THIS workflow through the API, so no credential for it lives here,
+# and a closed PR's preview drops out on its next pass. Fork PRs build here but are never
+# published.
+#
+# Part 2, site-preview-comment.yml, links the preview from the PR.
 #
 # workflow_dispatch rebuilds the preview for an existing same-repository PR without
 # touching its branch (for example a PR opened before this workflow existed).
 
 name: site-preview
+# The publisher and the comment job match dispatch runs to their PR by this title.
+run-name: site-preview #${{ github.event.pull_request.number || inputs.pr }}
 
 on:
   pull_request:
@@ -124,10 +131,10 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/typst" --version
 
-      - name: Build static site (basePath /preview/pr-N)
+      - name: Build static site (basePath /sparq-previews/pr-N)
         working-directory: site
         env:
-          NEXT_PUBLIC_BASE_PATH: /preview/pr-${{ env.PR }}
+          NEXT_PUBLIC_BASE_PATH: /sparq-previews/pr-${{ env.PR }}
         run: |
           npm ci
           npm run build
@@ -139,6 +146,7 @@ jobs:
           SHA: ${{ steps.pr.outputs.sha }}
         run: |
           set -euo pipefail
+          rm -f site/out/CNAME   # the production custom domain; meaningless under the previews site
           gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' \
             | node scripts/site-preview-manifest.mjs site/out/_preview.json "$PR" "$SHA"
           echo "Preview size: $(du -sh site/out | cut -f1)" >> "$GITHUB_STEP_SUMMARY"

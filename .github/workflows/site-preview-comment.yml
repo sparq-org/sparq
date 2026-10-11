@@ -1,0 +1,114 @@
+# Hosted PR previews, part 2 of 2: link a finished preview build from its PR.
+#
+# Runs main's code (workflow_run) after each successful site-preview build of a
+# same-repository PR. The PR number and revision come from the run's own metadata, never
+# from the artifact: a pull_request run carries its PR; a dispatch run on main is matched
+# by its run-name ("site-preview #<N>"), which main's workflow code sets. The artifact's
+# `_preview.json` only adds links to changed specs and papers, and only when its pr and
+# sha match that metadata.
+#
+# The preview itself is published by the sparq-org/sparq-previews repository (see
+# site-preview.yml); its publisher picks up new builds on a short schedule.
+
+name: site-preview-comment
+
+on:
+  workflow_run:
+    workflows: [site-preview]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-preview-comment-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_EVENT: ${{ github.event.workflow_run.event }}
+      RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+      PREVIEW_BASE: https://sparq-org.github.io/sparq-previews
+    steps:
+      - name: Resolve the PR from the run's metadata
+        id: pr
+        run: |
+          set -euo pipefail
+          case "$RUN_EVENT" in
+            pull_request)
+              pr="$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")"
+              sha="$RUN_SHA"
+              ;;
+            workflow_dispatch)
+              [ "$RUN_BRANCH" = main ] || { echo "dispatch run not on main; skipping"; exit 0; }
+              [[ "$RUN_TITLE" =~ ^site-preview\ \#([0-9]+)$ ]] || { echo "unexpected run title; skipping"; exit 0; }
+              pr="${BASH_REMATCH[1]}"
+              sha=""
+              ;;
+            *) echo "event $RUN_EVENT not handled"; exit 0 ;;
+          esac
+          [ -n "$pr" ] || { echo "run has no PR; skipping"; exit 0; }
+          read -r state head_repo head_sha < <(gh api "repos/$REPO/pulls/$pr" --jq '"\(.state) \(.head.repo.full_name) \(.head.sha)"')
+          if [ "$state" != open ] || [ "$head_repo" != "$REPO" ]; then
+            echo "PR #$pr is $state from $head_repo; skipping"; exit 0
+          fi
+          sha="${sha:-$head_sha}"
+          if [ "$sha" != "$head_sha" ]; then
+            echo "PR #$pr has moved on from $sha; its newer build will comment"; exit 0
+          fi
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Link the preview from the PR
+        if: steps.pr.outputs.number != ''
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          set -euo pipefail
+          marker='<!-- site-preview -->'
+          url="$PREVIEW_BASE/pr-$PR/"
+
+          # Changed spec/paper slugs from this run's own artifact, if its manifest agrees.
+          art="$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq ".artifacts[] | select(.name == \"site-preview-pr-$PR\" and (.expired | not)) | .id" | head -n1)"
+          manifest='{}'
+          if [ -n "$art" ]; then
+            gh api "repos/$REPO/actions/artifacts/$art/zip" > "$RUNNER_TEMP/preview.zip"
+            manifest="$(unzip -p "$RUNNER_TEMP/preview.zip" _preview.json 2>/dev/null || echo '{}')"
+            manifest="$(jq -c --argjson pr "$PR" --arg sha "$SHA" \
+              'if .pr == $pr and .sha == $sha then . else {} end' <<<"$manifest" 2>/dev/null || echo '{}')"
+          fi
+
+          {
+            echo "$marker"
+            echo "**Site preview** for ${SHA:0:7}: $url"
+            for kind in specs papers; do
+              jq -r --arg k "$kind" '.[$k][]? | strings | select(test("^[a-z0-9-]+$"))' <<<"$manifest" |
+                while read -r slug; do echo "- Changed ${kind%s}: $url$kind/$slug/"; done
+            done
+            echo
+            echo "Served from a separate preview site, refreshed every few minutes; removed after the PR closes."
+          } > body.md
+
+          existing="$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)"
+          if [ -z "$existing" ]; then
+            gh api "repos/$REPO/issues/$PR/comments" -F body=@body.md > /dev/null
+          else
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -F body=@body.md > /dev/null
+          fi
