@@ -352,7 +352,14 @@ fn answer_query(state: &MockState, sparql: &str) -> Response {
     if sparql.starts_with("SELECT ?child") {
         // select_children
         let container = first_graph_iri(sparql).unwrap_or_default();
-        let kids = store.children.get(&container).cloned().unwrap_or_default();
+        let mut kids = store.children.get(&container).cloned().unwrap_or_default();
+        // A `LIMIT n` suffix (the bounded listing) cuts the rows, as a real endpoint does.
+        if let Some(n) = sparql
+            .rsplit_once(" LIMIT ")
+            .and_then(|(_, n)| n.trim().parse::<usize>().ok())
+        {
+            kids.truncate(n);
+        }
         return results_json(&select_children_json(&kids));
     }
     if sparql.starts_with("CONSTRUCT") {
@@ -798,6 +805,42 @@ async fn create_child_is_atomic_and_lists() {
     assert!(c.exists(CHILD).await.unwrap());
     let kids = c.list_children(CONTAINER).await.unwrap();
     assert_eq!(kids, vec![CHILD.to_string()]);
+}
+
+/// Review finding: a bounded listing over HTTP buffered and parsed the whole result before
+/// checking its bound, and could not tell a listing cut by its LIMIT from a complete one. It
+/// asks for one row past the bound and refuses when it gets it, and reads the response only up
+/// to what such a listing could take.
+#[tokio::test]
+async fn a_listing_read_within_a_bound_is_refused_not_cut() {
+    let (url, _state) = spawn_mock().await;
+    let c = HttpSparqClient::new(url);
+    c.put_meta(CONTAINER, meta()).await.unwrap();
+    let kids: Vec<String> = (0..5).map(|i| format!("{CONTAINER}k{i}")).collect();
+    for kid in &kids {
+        c.create_child(CONTAINER, kid, meta()).await.unwrap();
+    }
+    let all: usize = kids.iter().map(String::len).sum();
+    let mut got = c
+        .list_children_within(CONTAINER, all)
+        .await
+        .unwrap()
+        .unwrap();
+    got.sort();
+    assert_eq!(got, kids);
+    // Room in bytes for three members: the fourth row shows the listing is longer.
+    let three = 3 * (CONTAINER.len() + 1);
+    assert_eq!(
+        c.list_children_within(CONTAINER, three).await.unwrap(),
+        None
+    );
+    // One member far longer than the bound: the response is not read past what fits.
+    let long = format!("{CONTAINER}{}", "x".repeat(64 * 1024));
+    c.create_child(CONTAINER, &long, meta()).await.unwrap();
+    assert_eq!(
+        c.list_children_within(CONTAINER, 4 * 1024).await.unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
