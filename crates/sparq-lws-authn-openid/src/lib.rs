@@ -86,7 +86,7 @@ impl AuthnSuite for OpenId {
     }
 
     fn identifier_types(&self) -> &[&'static str] {
-        &["https"]
+        &["https", "http"]
     }
 
     async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {

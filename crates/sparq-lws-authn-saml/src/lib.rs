@@ -192,7 +192,7 @@ impl Suite for Saml {
 
     /// A SAML subject is the assertion's `NameID`, an http(s) URL.
     fn identifier_types(&self) -> &[&'static str] {
-        &["https"]
+        &["https", "http"]
     }
 
     async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {
@@ -269,11 +269,12 @@ fn verify_at(
     if !(name_id.starts_with("https://") || name_id.starts_with("http://")) {
         return Err("the assertion's NameID is not an http(s) URL".into());
     }
-    let client = bearer_recipient(subject, now)?;
+    let (client, confirmed_until) = bearer_recipient(subject, now)?;
     Ok(Verified {
         subject: name_id,
         client,
-        expires,
+        // The assertion holds until its Conditions or any bearer confirmation ends.
+        expires: expires.min(confirmed_until),
     })
 }
 
@@ -335,8 +336,9 @@ fn check_conditions(conditions: &Element, us: &str) -> Result<(), String> {
 /// past, and a `Recipient` that is a URI: the LWS client identifier ("The SAML token MUST use the
 /// Recipient parameter within a saml:SubjectConfirmationData assertion for the LWS client
 /// identifier"). When several confirmations are present they must all name the same client.
-fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
+fn bearer_recipient(subject: &Element, now: i64) -> Result<(String, i64), String> {
     let mut client: Option<String> = None;
+    let mut until = i64::MAX;
     for confirmation in subject
         .elements()
         .filter(|e| e.is(SAML_NS, "SubjectConfirmation"))
@@ -353,9 +355,10 @@ fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
         let limit = data
             .attr("NotOnOrAfter")
             .ok_or("the bearer subject confirmation has no NotOnOrAfter")?;
-        if parse_datetime(limit).is_none_or(|t| t <= now - SKEW_SECS) {
-            return Err("the subject confirmation has expired".into());
-        }
+        let limit = parse_datetime(limit)
+            .filter(|t| *t > now - SKEW_SECS)
+            .ok_or("the subject confirmation has expired")?;
+        until = until.min(limit);
         if let Some(start) = data.attr("NotBefore") {
             if parse_datetime(start).is_none_or(|t| t > now + SKEW_SECS) {
                 return Err("the subject confirmation is not yet valid".into());
@@ -379,7 +382,9 @@ fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
             _ => client = Some(recipient.to_string()),
         }
     }
-    client.ok_or_else(|| "the assertion has no bearer SubjectConfirmation".into())
+    client
+        .map(|c| (c, until))
+        .ok_or_else(|| "the assertion has no bearer SubjectConfirmation".into())
 }
 
 // ---------------------------------------------------------------- signature
@@ -1651,7 +1656,7 @@ mod tests {
         let (cfg, key, idp) = saml_cfg();
         assert_eq!(
             Saml::new(cfg.saml_idps.clone()).unwrap().identifier_types(),
-            ["https"]
+            ["https", "http"]
         );
         for name in [
             "https://alice.example/#me",
@@ -1718,6 +1723,21 @@ mod tests {
             verify_with(&confirmation(BEARER, &good)).unwrap().client,
             "https://client.example/"
         );
+        // Review finding: the expiry the server checks again before it issues was the
+        // Conditions' alone. A bearer confirmation that ends first (here, already within the
+        // skew past its end) ends the assertion.
+        let ending = confirmation_data(&format!(
+            " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
+            instant(now - SKEW_SECS + 1)
+        ));
+        let v = verify_with(&format!(
+            "{}{}",
+            confirmation(BEARER, &good),
+            confirmation(BEARER, &ending)
+        ))
+        .unwrap();
+        assert_eq!(v.expires, now - SKEW_SECS + 1);
+        assert!(v.still_valid(now) && !v.still_valid(now + 1));
         // Holder-of-key and sender-vouches carry no proof here: refused, alone or beside a bearer.
         for method in [
             "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key",

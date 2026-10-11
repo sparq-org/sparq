@@ -43,7 +43,7 @@ impl Suite for Ssi {
     }
 
     fn identifier_types(&self) -> &[&'static str] {
-        &["https", "did:key"]
+        &["https", "http", "did:key"]
     }
 
     async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {

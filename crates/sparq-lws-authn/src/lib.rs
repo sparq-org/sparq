@@ -78,11 +78,12 @@ impl Verified {
     }
 }
 
-/// A JWT subject token's `exp`, for [`Verified::expires`]: rounded down, so never later than the
-/// token says.
+/// A JWT subject token's `exp`, for [`Verified::expires`]. A fractional `exp` is rounded up:
+/// against whole-second clocks, `ceil(exp) > t` exactly when `exp > t`, so
+/// [`Verified::still_valid`] agrees with [`check_times`].
 pub fn jwt_expires(jws: &jose::Jws) -> Result<i64, String> {
     let exp = jws.claim_time("exp")?.ok_or("exp is required")?;
-    Ok(exp.floor() as i64)
+    Ok(exp.ceil() as i64)
 }
 
 /// One token exchange, as a suite sees it.
@@ -310,6 +311,39 @@ mod tests {
     /// far-future `nbf` lifted the token's validity restriction. A claim present and out of
     /// range is refused, wherever it is read. Review finding: fractional times, which RFC 7519
     /// allows, were refused; they are read and compared as they are.
+    #[test]
+    fn the_last_check_reads_exp_as_check_times_does() {
+        let key = jose::EcKey::generate("x");
+        let now: i64 = 1_000;
+        let verified = |exp: Value| {
+            let jws = jose::Jws::parse(
+                &key.sign_jws(serde_json::Map::new(), &json!({"iat": now, "exp": exp})),
+            )
+            .unwrap();
+            let v = Verified {
+                subject: String::new(),
+                client: String::new(),
+                expires: jwt_expires(&jws).unwrap(),
+            };
+            (check_times(&jws, now).is_ok(), v.still_valid(now))
+        };
+        // Review finding: a fractional exp was rounded down, so the last check refused a token
+        // the first had just accepted. Either side of every boundary, the two agree.
+        let edge = now - SKEW_SECS;
+        for exp in [
+            json!(edge as f64 + 0.5),
+            json!(edge as f64 - 0.5),
+            json!(edge),
+            json!(edge + 1),
+            json!(edge as f64 + 0.999),
+        ] {
+            let (first, last) = verified(exp.clone());
+            assert_eq!(first, last, "exp {exp}");
+        }
+        assert_eq!(verified(json!(edge as f64 + 0.5)), (true, true));
+        assert_eq!(verified(json!(edge)), (false, false));
+    }
+
     #[test]
     fn out_of_range_times_are_refused_not_ignored() {
         let key = jose::EcKey::generate("x");

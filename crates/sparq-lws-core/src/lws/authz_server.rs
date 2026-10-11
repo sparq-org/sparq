@@ -447,7 +447,10 @@ mod tests {
                 only["subject_token_types_supported"],
                 json!([sparq_lws_authn_saml::SAML2_TOKEN_TYPE])
             );
-            assert_eq!(only["subject_identifier_types_supported"], json!(["https"]));
+            assert_eq!(
+                only["subject_identifier_types_supported"],
+                json!(["https", "http"])
+            );
         }
     }
 
