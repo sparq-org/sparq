@@ -1132,6 +1132,17 @@ class TestSlsaL3IsolationContract(unittest.TestCase):
                     f"mutation {name!r} was NOT caught — the assertion covering it is vacuous",
                 )
 
+    def test_release_staging_dir_starts_empty(self):
+        """Every file in the release job's staging dir is published, so the checkout must not
+        already put files there. v0.1.5 staged into assets/ and shipped the README logo with
+        no provenance."""
+        release_job = self.release.split("\n  release:\n", 1)[1].split("\n  verify-provenance:", 1)[0]
+        dirs = set(re.findall(r"^\s+path: (\S+)$", release_job, re.M))
+        dirs |= {m.rstrip("/*") for m in re.findall(r"^\s+files: (\S+)$", release_job, re.M)}
+        self.assertEqual(dirs, {"release-assets"}, f"release job stages into {sorted(dirs)}")
+        for d in dirs:
+            self.assertFalse((REPO_ROOT / d).exists(), f"{d}/ is in the repository checkout")
+
     # ---- #4572: the tag-pin review/bump policy. ----
     def test_pin_policy_holds(self):
         failures = check_pin_policy(*self.pin_state)
