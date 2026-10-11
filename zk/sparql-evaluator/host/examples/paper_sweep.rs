@@ -345,8 +345,11 @@ fn run(args: &Args, set: &str, id: &str, query: &str, config: &Config, guest: &A
                 // Guest-level evidence: the production image must abort on it too.
                 let outcome = execute(&witness, guest_artifact(), None);
                 record["guest_aborted"] = json!(outcome.as_ref().is_err_and(|e| e.contains(GUEST_ABORT)));
-                if let Ok(execution) = outcome {
-                    record["execution"] = execution;
+                match outcome {
+                    Ok(execution) => record["execution"] = execution,
+                    // Any other executor error (for example the session limit) is kept verbatim.
+                    Err(error) if !error.contains(GUEST_ABORT) => record["guest_error"] = json!(error),
+                    Err(_) => {}
                 }
             }
             return record;
