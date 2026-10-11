@@ -899,6 +899,10 @@ jobs:
       # Hermetic + stdlib-only (no PyYAML needed).
       - name: Cache/artifact posture (save-if + shared-key + archive diet — sq-6vshe.15)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
+      # Hosted PR previews: the publisher extracts PR-built archives into a public site, so
+      # its archive confinement and build selection are pinned by behavioural tests.
+      - name: Site-preview publisher (archive confinement + build selection)
+        run: python3 scripts/tests/test_site_preview_publish.py
       # #4935: the gating inference-conformance lane used to re-download the
       # OWL 2 corpus from web.archive.org over http:// on EVERY run, so a transient
       # outage there concluded `failure` with nothing measured and ejected an unrelated
