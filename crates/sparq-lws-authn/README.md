@@ -20,7 +20,7 @@ impl Suite for MySuite {
         todo!("check ex.subject_token")
     }
 }
-// In the server: cfg.register_suite(Box::new(MySuite))?;
+// In the server: cfg.register_suite(std::sync::Arc::new(MySuite))?;
 ```
 
 ```bash
