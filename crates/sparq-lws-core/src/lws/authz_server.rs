@@ -317,6 +317,46 @@ mod tests {
         }
     }
 
+    /// Review finding: a SAML-only server advertised no subject identifier types. The metadata
+    /// lists exactly what the offered suites take: nothing for none, SAML's for SAML alone.
+    #[tokio::test]
+    async fn the_metadata_lists_what_the_offered_suites_take() {
+        use super::super::test_store;
+        let meta_of = |cfg| async {
+            let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+                .await
+                .unwrap();
+            metadata(&state)
+        };
+        let none =
+            meta_of(super::super::LwsConfig::with_suites("http://localhost:3000", []).unwrap())
+                .await;
+        assert_eq!(none["subject_token_types_supported"], json!([]));
+        assert_eq!(none["subject_identifier_types_supported"], json!([]));
+        #[cfg(feature = "authn-saml")]
+        {
+            let idp = super::super::jose::EcKey::generate("idp")
+                .public_jwk()
+                .to_string();
+            let saml =
+                sparq_lws_authn_saml::Saml::new([("https://idp.example".to_string(), idp)].into())
+                    .unwrap();
+            let only = meta_of(
+                super::super::LwsConfig::with_suites(
+                    "http://localhost:3000",
+                    [std::sync::Arc::new(saml) as std::sync::Arc<dyn sparq_lws_authn::Suite>],
+                )
+                .unwrap(),
+            )
+            .await;
+            assert_eq!(
+                only["subject_token_types_supported"],
+                json!([sparq_lws_authn_saml::SAML2_TOKEN_TYPE])
+            );
+            assert_eq!(only["subject_identifier_types_supported"], json!(["https"]));
+        }
+    }
+
     /// A registered suite is offered in the metadata and checks the tokens of its type; the
     /// server still issues the token, and still requires URIs of it.
     #[tokio::test]

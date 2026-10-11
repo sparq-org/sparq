@@ -392,8 +392,16 @@ impl LwsConfig {
         }
         #[cfg(feature = "authn-saml")]
         if offered.contains(&"saml") {
-            if let Some(saml) = sparq_lws_authn_saml::Saml::from_env()? {
-                self.register_suite(std::sync::Arc::new(saml))?;
+            match sparq_lws_authn_saml::Saml::from_env()? {
+                Some(saml) => self.register_suite(std::sync::Arc::new(saml))?,
+                // An empty set of identity providers turns SAML off, unless it was asked for.
+                None if std::env::var(AUTHN_VAR).is_ok_and(|v| !v.trim().is_empty()) => {
+                    return Err(format!(
+                        "{AUTHN_VAR} names saml, but SOLID_SERVER_LWS_SAML_IDPS_FILE names no \
+                         identity providers"
+                    ))
+                }
+                None => {}
             }
         }
         drop(offered);
@@ -2780,6 +2788,27 @@ mod tests {
             .suites()
             .find(authz_server::ID_TOKEN_TYPE)
             .is_some());
+    }
+
+    /// Review finding: a SAML suite asked for by name, with an identity provider file that names
+    /// none, was left out without a word. It stops the start; unasked, an empty file still turns
+    /// SAML off. The only test that sets these variables.
+    #[cfg(feature = "authn-saml")]
+    #[test]
+    fn a_saml_suite_asked_for_needs_identity_providers() {
+        let file = std::env::temp_dir().join(format!("lws-idps-{}.json", std::process::id()));
+        std::fs::write(&file, "{}").unwrap();
+        std::env::set_var("SOLID_SERVER_LWS_SAML_IDPS_FILE", &file);
+        std::env::set_var(AUTHN_VAR, "saml");
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        let asked = cfg.register_suites_from_env();
+        std::env::remove_var(AUTHN_VAR);
+        let unasked = cfg.register_suites_from_env();
+        std::env::remove_var("SOLID_SERVER_LWS_SAML_IDPS_FILE");
+        std::fs::remove_file(&file).ok();
+        assert!(asked.unwrap_err().contains("names no identity providers"));
+        unasked.unwrap();
+        assert!(cfg.suites().iter().all(|s| s.name() != "saml"));
     }
 
     /// `SOLID_SERVER_LWS_AUTHN` picks among the suites built in, and a suite's configuration is

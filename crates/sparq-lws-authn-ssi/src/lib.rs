@@ -52,7 +52,7 @@ impl Suite for Ssi {
         {
             did_key(exchange.authorization_server, &jws, exchange.now)
         } else {
-            cid(exchange, &jws).await
+            cid(exchange, &jws, &jose::now_secs).await
         }
     }
 }
@@ -185,7 +185,13 @@ fn did_key(issuer: &str, jws: &Jws, now: i64) -> Result<Verified, String> {
 
 // ---------------------------------------------------------------- controlled identifiers
 
-async fn cid(ex: &Exchange<'_>, jws: &Jws) -> Result<Verified, String> {
+/// A controlled identifier subject. The method's revocation and expiry are checked at `clock`'s
+/// time once its document is fetched, not at the start of the exchange.
+async fn cid(
+    ex: &Exchange<'_>,
+    jws: &Jws,
+    clock: &(dyn Fn() -> i64 + Sync),
+) -> Result<Verified, String> {
     let subject = self_issued(ex.authorization_server, jws, ex.now)?;
     if !(subject.starts_with("https://") || subject.starts_with("http://")) {
         return Err("a controlled identifier credential needs an https subject".into());
@@ -203,7 +209,7 @@ async fn cid(ex: &Exchange<'_>, jws: &Jws) -> Result<Verified, String> {
     .await?;
     let doc: Value = serde_json::from_slice(&body)
         .map_err(|_| format!("{subject} is not a JSON controlled identifier document"))?;
-    let key = cid_method_key(&doc, &subject, kid, ex.now)?;
+    let key = cid_method_key(&doc, &subject, kid, clock())?;
     key.verify(jws)?;
     Ok(Verified {
         subject: subject.clone(),
@@ -498,6 +504,46 @@ mod tests {
             c.insert("aud".into(), json!(format!("{}/", cfg.issuer())));
         })
         .is_ok());
+    }
+
+    /// Review finding: a method's expiry was checked at the time the exchange began, so one that
+    /// expired while its document was being fetched still verified. It is checked after the
+    /// fetch.
+    #[tokio::test]
+    async fn cid_methods_are_checked_when_their_document_arrives() {
+        let key = jose::EcKey::generate("k");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let subject = format!("http://{}/id", listener.local_addr().unwrap());
+        let start = jose::now_secs();
+        let mut doc = cid_doc(&subject, jose::public_jwk_of(&key.public_key()));
+        doc["authentication"][0]["expires"] = json!("2001-01-01T00:00:10Z");
+        let served = doc.clone();
+        let app = axum::Router::new().route(
+            "/id",
+            axum::routing::get(move || async move { axum::Json(served) }),
+        );
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let claims = json!({"sub": subject, "iss": subject, "client_id": subject,
+            "aud": ["http://localhost:3000"], "iat": start, "exp": start + 300});
+        let token = sign(&key, "k", claims);
+        let policy = fetch::Policy {
+            allow_insecure_fetch: true,
+        };
+        let http = fetch::fetch_client(&policy).unwrap();
+        let ex = Exchange {
+            subject_token: "",
+            subject_token_type: JWT_TOKEN_TYPE,
+            authorization_server: "http://localhost:3000",
+            token_endpoint: "http://localhost:3000/token",
+            dpop: None,
+            now: start,
+            fetch: policy,
+            http: &http,
+        };
+        // 2001-01-01T00:00:10Z is 978307210: valid just before, expired from then on.
+        assert!(cid(&ex, &token, &|| 978_307_209).await.is_ok());
+        let err = cid(&ex, &token, &|| 978_307_210).await.unwrap_err();
+        assert!(err.contains("expires"), "{err}");
     }
 
     fn cid_doc(subject: &str, jwk: Value) -> Value {

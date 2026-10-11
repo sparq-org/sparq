@@ -18,3 +18,7 @@ async-trait = "0.1"
 bs58 = "0.5"
 p256 = { version = "0.13", features = ["ecdsa", "jwk", "std"] }
 serde_json = "1"
+
+[dev-dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }

@@ -190,6 +190,11 @@ impl Suite for Saml {
         &[SAML2_TOKEN_TYPE]
     }
 
+    /// A SAML subject is the assertion's URI `NameID`; this declares the web identifiers.
+    fn identifier_types(&self) -> &[&'static str] {
+        &["https"]
+    }
+
     async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {
         self.verify_at(
             exchange.subject_token,

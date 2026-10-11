@@ -5307,10 +5307,12 @@ name = "sparq-lws-authn-ssi"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
  "bs58",
  "p256",
  "serde_json",
  "sparq-lws-authn",
+ "tokio",
 ]
 
 [[package]]
