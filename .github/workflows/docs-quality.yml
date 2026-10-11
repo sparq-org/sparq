@@ -900,7 +900,7 @@ jobs:
       - name: Cache/artifact posture (save-if + shared-key + archive diet — sq-6vshe.15)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
       # Hosted PR previews: the publisher extracts PR-built archives into a public site, so
-      # its archive confinement and build selection are pinned by behavioural tests.
+      # its archive confinement (atomic, budgeted) and build selection are pinned by tests.
       - name: Site-preview publisher (archive confinement + build selection)
         run: python3 scripts/tests/test_site_preview_publish.py
       # #4935: the gating inference-conformance lane used to re-download the

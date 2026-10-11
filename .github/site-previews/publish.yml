@@ -4,9 +4,11 @@
 # SOURCE OF TRUTH: sparq-org/sparq .github/site-previews/publish.yml; this repository runs a
 # copy. sparq's site-preview.yml builds each preview with basePath /sparq-previews/pr-<N>;
 # sparq's scripts/site-preview-publish.py (checked out from sparq main on every pass) picks
-# the trusted builds through the public API, and this workflow deploys them. It holds no
-# credential for sparq: GITHUB_TOKEN reads sparq's public PRs, runs and artifacts. A closed
-# PR drops out on the next pass.
+# the trusted builds, and this workflow deploys them. A closed PR drops out on the next pass.
+#
+# CREDENTIAL: secret SPARQ_ACTIONS_READ_TOKEN, a fine-grained token limited to
+# sparq-org/sparq with Actions: read (GitHub requires it to download another repository's
+# artifacts, even a public one's). It grants nothing else.
 
 name: publish
 
@@ -57,9 +59,13 @@ jobs:
       - name: Assemble previews
         id: publish
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SPARQ_ACTIONS_READ_TOKEN }}
           FORCE_DEPLOY: ${{ github.event_name == 'push' || inputs.force }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::secret SPARQ_ACTIONS_READ_TOKEN is not set (see the header of this workflow)"
+            exit 1
+          fi
           set +e
           python3 -I scripts/site-preview-publish.py "$RUNNER_TEMP/site"
           code=$?

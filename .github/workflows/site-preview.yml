@@ -8,19 +8,15 @@
 # Previews are served from a SEPARATE origin, https://sparq-org.github.io/sparq-previews/,
 # never from the production site: an unmerged PR's JavaScript must not run where the
 # production /app/ keeps users' workspaces in localStorage. The sparq-org/sparq-previews
-# repository's own workflow publishes them: it reads the open same-repository PRs and their
-# successful runs of THIS workflow through the API, so no credential for it lives here,
-# and a closed PR's preview drops out on its next pass. Fork PRs build here but are never
-# published.
+# repository's own workflow publishes them (scripts/site-preview-publish.py): it reads the
+# open same-repository PRs and their successful pull_request runs of THIS workflow, and a
+# closed PR's preview drops out on its next pass. Fork PRs build here but are never
+# published. Only pull_request runs: they cannot write main's caches, and the publisher
+# trusts nothing but the PR association GitHub records on the run.
 #
 # Part 2, site-preview-comment.yml, links the preview from the PR.
-#
-# workflow_dispatch rebuilds the preview for an existing same-repository PR without
-# touching its branch (for example a PR opened before this workflow existed).
 
 name: site-preview
-# The publisher and the comment job match dispatch runs to their PR by this title.
-run-name: site-preview #${{ github.event.pull_request.number || inputs.pr }}
 
 on:
   pull_request:
@@ -32,19 +28,13 @@ on:
       - "package-lock.json"
       - "scripts/site-preview-manifest.mjs"
       - ".github/workflows/site-preview.yml"
-  workflow_dispatch:
-    inputs:
-      pr:
-        description: "Pull request number to build a preview for (same-repository PRs only)"
-        required: true
-        type: number
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: site-preview-${{ github.event.pull_request.number || inputs.pr }}
+  group: site-preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -52,28 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      PR: ${{ github.event.pull_request.number || inputs.pr }}
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.event.pull_request.head.sha }}
     steps:
-      - name: Resolve the PR head
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          read -r head_repo head_sha < <(gh api "repos/$REPO/pulls/$PR" --jq '"\(.head.repo.full_name) \(.head.sha)"')
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$head_repo" != "$REPO" ]; then
-            echo "::error::PR #$PR comes from $head_repo; previews are only built on request for same-repository PRs"
-            exit 1
-          fi
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            head_sha="${{ github.event.pull_request.head.sha }}"
-          fi
-          echo "sha=$head_sha" >> "$GITHUB_OUTPUT"
-
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ steps.pr.outputs.sha }}
+          ref: ${{ env.SHA }}
           persist-credentials: false
 
       # site/scripts/sync-benchmarks.mjs reads origin/benchmark-data:dev/bench/data.js, as on
@@ -84,7 +58,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: wasm32-unknown-unknown
-      # Restore-only on PRs: the shared site-wasm cache is saved from main only.
+      # Restore-only: this workflow runs only on pull_request refs, never main.
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: site-wasm
@@ -143,7 +117,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          SHA: ${{ steps.pr.outputs.sha }}
         run: |
           set -euo pipefail
           rm -f site/out/CNAME   # the production custom domain; meaningless under the previews site

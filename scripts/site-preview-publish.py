@@ -4,33 +4,36 @@
 Run by the sparq-org/sparq-previews repository's publish workflow, which checks out this
 file from sparq's main branch (.github/site-previews/publish.yml is that workflow's source).
 
-Reads, through the GitHub API, the open pull requests of SOURCE_REPO whose head branch
-lives in SOURCE_REPO, finds each one's newest successful run of SOURCE_WORKFLOW, and
-extracts that run's `site-preview-pr-<N>` artifact into <out>/pr-<N>/.
+For each open pull request of SOURCE_REPO whose head branch lives in SOURCE_REPO, it takes
+the successful `pull_request` run of SOURCE_WORKFLOW on the PR's current head SHA (or, while
+that build is still running, the newest successful run for the PR), and extracts that run's
+`site-preview-pr-<N>` artifact into <out>/pr-<N>/.
 
-Trust rules (fork PRs are never published, artifacts are bound to their run):
-  * a pull_request run counts for PR N only if the API lists N among the run's PRs;
-  * a workflow_dispatch run counts only on the default branch, matched by its run-name
-    "site-preview #<N>", which the source repo's main workflow code sets;
-  * the run's head repository must be SOURCE_REPO;
-  * a run on the PR's current head SHA wins over older ones, so re-running an old commit
-    cannot displace the current preview;
-  * archives may contain only regular files and directories confined to their pr-<N>/
-    directory, and each preview is size-checked before it is added.
+Trust rules (fork PRs are never published; artifacts are bound to their run):
+  * only `pull_request` runs whose head repository is SOURCE_REPO and whose PR list, as
+    reported by the API, contains N;
+  * a run on the PR's current head wins, so re-running an old commit cannot displace it;
+  * archives may contain only regular files and directories confined to pr-<N>/; each one
+    is extracted into a temporary directory and moved into place only when complete;
+  * each preview is size-checked against the remaining budget before anything is written.
 
-Writes <out>/state.json (what was published) and, when nothing changed since the live
-site's state.json, exits with code 3 so the workflow can skip the deploy.
+Writes <out>/state.json (what was published) and exits with code 3 when that equals the
+live site's state.json, so the workflow can skip the deploy.
 
-Usage: site-preview-publish.py <out-dir>   (env: GH_TOKEN, SOURCE_REPO, SOURCE_WORKFLOW, SITE_URL)
+Usage: site-preview-publish.py <out-dir>
+Env: GH_TOKEN (read access to SOURCE_REPO's Actions artifacts), SOURCE_REPO,
+     SOURCE_WORKFLOW, SITE_URL, PREVIEW_BUDGET_BYTES, FORCE_DEPLOY.
 """
 
-import io
 import json
 import os
 import pathlib
+import shutil
 import stat
 import sys
+import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -43,66 +46,52 @@ BUDGET = int(os.environ.get("PREVIEW_BUDGET_BYTES", str(900 * 1024 * 1024)))
 UNCHANGED = 3
 
 
-def request(url, accept="application/vnd.github+json"):
+class Refused(Exception):
+    pass
+
+
+def request(url):
     req = urllib.request.Request(url, headers={
-        "Accept": accept,
+        "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
         "X-GitHub-Api-Version": "2022-11-28",
     })
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return resp.read()
+    return urllib.request.urlopen(req, timeout=120)
 
 
 def api(path):
-    return json.loads(request(f"{API}/{path}"))
+    with request(f"{API}/{path}") as resp:
+        return json.loads(resp.read())
 
 
-def paginate(path, key=None):
+def open_prs():
     page = 1
     while True:
-        sep = "&" if "?" in path else "?"
-        data = api(f"{path}{sep}per_page=100&page={page}")
-        items = data[key] if key else data
-        yield from items
-        if len(items) < 100:
+        prs = api(f"repos/{SOURCE_REPO}/pulls?state=open&per_page=100&page={page}")
+        for pr in prs:
+            head_repo = (pr.get("head") or {}).get("repo") or {}
+            if head_repo.get("full_name") == SOURCE_REPO:
+                yield pr["number"], pr["head"]["sha"], pr["head"]["ref"]
+        if len(prs) < 100:
             return
         page += 1
 
 
-def open_prs():
-    for pr in paginate(f"repos/{SOURCE_REPO}/pulls?state=open"):
-        head_repo = (pr.get("head") or {}).get("repo") or {}
-        if head_repo.get("full_name") == SOURCE_REPO:
-            yield pr["number"], pr["head"]["sha"]
+def eligible(run, n):
+    return (run["event"] == "pull_request"
+            and (run.get("head_repository") or {}).get("full_name") == SOURCE_REPO
+            and n in [p["number"] for p in run.get("pull_requests") or []])
 
 
-def successful_runs(default_branch):
-    """Newest successful source-workflow runs, keyed by the PR each one previews."""
-    by_pr = {}
-    runs = api(f"repos/{SOURCE_REPO}/actions/workflows/{SOURCE_WORKFLOW}/runs"
-               "?status=success&per_page=100")["workflow_runs"]
-    for run in runs:
-        if (run.get("head_repository") or {}).get("full_name") != SOURCE_REPO:
-            continue
-        if run["event"] == "pull_request":
-            prs = [p["number"] for p in run.get("pull_requests") or []]
-        elif run["event"] == "workflow_dispatch" and run["head_branch"] == default_branch:
-            title = run.get("display_title") or ""
-            num = title.removeprefix("site-preview #")
-            prs = [int(num)] if title.startswith("site-preview #") and num.isdigit() else []
-        else:
-            prs = []
-        for n in prs:
-            by_pr.setdefault(n, []).append(run)
-    return by_pr
-
-
-def pick_run(runs, head_sha):
-    # API order is newest first. A pull_request run on the current head wins.
-    for run in runs:
-        if run["event"] == "pull_request" and run["head_sha"] == head_sha:
-            return run
-    return runs[0] if runs else None
+def pick_run(n, head_sha, head_ref):
+    """The PR's build to publish: its current head's, else its newest successful one."""
+    base = f"repos/{SOURCE_REPO}/actions/workflows/{SOURCE_WORKFLOW}/runs?event=pull_request&status=success"
+    for query in (f"&head_sha={head_sha}&per_page=20",
+                  f"&branch={urllib.parse.quote(head_ref, safe='')}&per_page=50"):
+        for run in api(base + query)["workflow_runs"]:   # newest first
+            if eligible(run, n):
+                return run
+    return None
 
 
 def run_artifact(run, n):
@@ -112,34 +101,51 @@ def run_artifact(run, n):
     return None
 
 
-def safe_extract(blob, dest, budget_left):
-    """Extract only confined regular files and directories; return bytes written.
-
-    Raises ValueError, leaving nothing behind, when the archive breaks a rule.
-    """
-    zf = zipfile.ZipFile(io.BytesIO(blob))
-    root = dest.resolve()
-    members, total = [], 0
+def check_archive(zf):
+    """Validate every entry; return the total uncompressed size."""
+    size = 0
     for info in zf.infolist():
-        mode = info.external_attr >> 16
-        kind = stat.S_IFMT(mode)
+        kind = stat.S_IFMT(info.external_attr >> 16)
         if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
-            raise ValueError(f"{info.filename}: not a regular file or directory")
-        target = (root / info.filename).resolve()
-        if root != target and root not in target.parents:
-            raise ValueError(f"{info.filename}: escapes the preview directory")
-        total += info.file_size
-        members.append((info, target))
-    if total > budget_left:
-        raise ValueError(f"{total} bytes exceeds the remaining budget of {budget_left}")
-    for info, target in members:
-        if info.is_dir():
-            target.mkdir(parents=True, exist_ok=True)
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with zf.open(info) as src, open(target, "wb") as dst:
-            dst.write(src.read())
-    return total
+            raise Refused(f"{info.filename}: not a regular file or directory")
+        parts = pathlib.PurePosixPath(info.filename.replace("\\", "/")).parts
+        if info.filename.startswith(("/", "\\")) or ".." in parts or (parts and ":" in parts[0]):
+            raise Refused(f"{info.filename}: escapes the preview directory")
+        size += info.file_size
+    return size
+
+
+def extract(archive, out, n, budget_left):
+    """Extract into <out>/pr-<n>/ atomically; return the bytes written."""
+    dest = pathlib.Path(out).resolve() / f"pr-{n}"
+    try:
+        zf = zipfile.ZipFile(archive)
+    except zipfile.BadZipFile as err:
+        raise Refused(f"not a zip archive: {err}") from err
+    with zf:
+        size = check_archive(zf)
+        if size > budget_left:
+            raise Refused(f"{size} bytes exceeds the remaining budget of {budget_left}")
+        staging = pathlib.Path(tempfile.mkdtemp(prefix=f".pr-{n}-", dir=dest.parent))
+        try:
+            for info in zf.infolist():
+                target = (staging / info.filename).resolve()
+                if staging != target and staging not in target.parents:
+                    raise Refused(f"{info.filename}: escapes the preview directory")
+                if info.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        except (zipfile.BadZipFile, OSError, EOFError, Refused) as err:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise Refused(f"extraction failed: {err}") from err
+    staging.chmod(0o755)
+    if dest.exists():
+        shutil.rmtree(dest)
+    staging.rename(dest)
+    return size
 
 
 def live_state():
@@ -174,16 +180,13 @@ The published site is <a href="https://sparq.jeswr.org/">sparq.jeswr.org</a>.</p
 def main():
     out = pathlib.Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    default_branch = api(f"repos/{SOURCE_REPO}")["default_branch"]
-    runs_by_pr = successful_runs(default_branch)
 
     wanted = []
-    for n, head_sha in sorted(open_prs(), reverse=True):
-        run = pick_run(runs_by_pr.get(n, []), head_sha)
+    for n, head_sha, head_ref in sorted(open_prs(), reverse=True):
+        run = pick_run(n, head_sha, head_ref)
         art = run and run_artifact(run, n)
         if art:
-            wanted.append({"pr": n, "run": run["id"], "artifact": art["id"],
-                           "sha": run["head_sha"] if run["event"] == "pull_request" else head_sha})
+            wanted.append({"pr": n, "run": run["id"], "artifact": art["id"], "sha": run["head_sha"]})
 
     state = {"previews": wanted}
     if live_state() == state and os.environ.get("FORCE_DEPLOY") != "true":
@@ -191,19 +194,23 @@ def main():
         return UNCHANGED
 
     published, used = [], 0
-    for p in wanted:
-        dest = out / f"pr-{p['pr']}"
-        blob = request(f"{API}/repos/{SOURCE_REPO}/actions/artifacts/{p['artifact']}/zip",
-                       accept="application/vnd.github+json")
-        try:
-            used += safe_extract(blob, dest, BUDGET - used)
-        except (ValueError, zipfile.BadZipFile) as err:
-            print(f"::warning::PR #{p['pr']} preview not published: {err}")
-            continue
-        published.append(p)
-        print(f"published PR #{p['pr']} from run {p['run']}")
+    with tempfile.TemporaryDirectory() as tmp:
+        for p in wanted:
+            archive = pathlib.Path(tmp) / f"pr-{p['pr']}.zip"
+            with request(f"{API}/repos/{SOURCE_REPO}/actions/artifacts/{p['artifact']}/zip") as resp, \
+                    open(archive, "wb") as fh:
+                shutil.copyfileobj(resp, fh)
+            try:
+                used += extract(archive, out, p["pr"], BUDGET - used)
+            except Refused as err:
+                print(f"::warning::PR #{p['pr']} preview not published: {err}")
+                continue
+            finally:
+                archive.unlink()
+            published.append(p)
+            print(f"published PR #{p['pr']} from run {p['run']}")
 
-    # state.json records what was asked for, so a skipped preview is not retried every pass.
+    # state.json records what was asked for, so a refused preview is not retried every pass.
     (out / "state.json").write_text(json.dumps(state, indent=2) + "\n")
     (out / ".nojekyll").write_text("")
     write_index(out, published)
