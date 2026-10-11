@@ -150,6 +150,22 @@ impl LwsConfig {
         }
     }
 
+    /// A configuration like [`LwsConfig::new`] that offers `suites` and no others, for an
+    /// embedder that configures its suites itself (an OpenID Connect suite with its trusted
+    /// providers, say). Refused when two suites take the same subject token type, or a suite
+    /// takes one the server checks itself.
+    pub fn with_suites(
+        base_url: &str,
+        suites: impl IntoIterator<Item = std::sync::Arc<dyn sparq_lws_authn::Suite>>,
+    ) -> Result<Self, String> {
+        let mut cfg = Self::new(base_url);
+        cfg.suites = sparq_lws_authn::Suites::default();
+        for suite in suites {
+            cfg.register_suite(suite)?;
+        }
+        Ok(cfg)
+    }
+
     /// Read the `SOLID_SERVER_LWS_*` environment:
     /// - `SOLID_SERVER_LWS_OWNER`: the storage owner's agent IRI;
     /// - `SOLID_SERVER_LWS_OPEN=1` (or `SOLID_SERVER_OPEN_MODE=1`): no authentication (development
@@ -2643,6 +2659,37 @@ pub(crate) mod test_store {
 mod tests {
     use super::*;
     use test_store::{body_json, links, request};
+
+    /// Review finding: the default OpenID Connect suite could not be swapped for one with
+    /// trusted providers, as a second suite for ID Tokens is refused. An embedder offers the one
+    /// it configured, and that instance is the one the token endpoint asks.
+    #[cfg(feature = "authn-openid")]
+    #[test]
+    fn an_embedder_offers_the_suites_it_configured() {
+        use sparq_lws_authn::Suite;
+        use sparq_lws_authn_openid::OpenId;
+        let openid = Arc::new(OpenId::new(vec!["https://op.example".into()]));
+        let cfg =
+            LwsConfig::with_suites("http://localhost:3000", [openid.clone() as Arc<dyn Suite>])
+                .unwrap();
+        let offered = cfg.suites().find(authz_server::ID_TOKEN_TYPE).unwrap();
+        assert!(std::ptr::addr_eq(offered, Arc::as_ptr(&openid)));
+        assert_eq!(cfg.suites().iter().count(), 1);
+        // Still one suite per token type.
+        assert!(LwsConfig::with_suites(
+            "http://localhost:3000",
+            [
+                openid.clone() as Arc<dyn Suite>,
+                Arc::new(OpenId::default())
+            ]
+        )
+        .is_err());
+        // And the default configuration still offers it, without trusted providers.
+        assert!(LwsConfig::new("http://localhost:3000")
+            .suites()
+            .find(authz_server::ID_TOKEN_TYPE)
+            .is_some());
+    }
 
     /// Review finding: request caps were checked against what was registered, and the record
     /// registered after an asynchronous create, so concurrent creates all passed. Places are

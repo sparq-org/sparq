@@ -10,6 +10,7 @@
 //!
 //! Documents are fetched under the server's fetch policy (see [`sparq_lws_authn::fetch`]).
 //! [`OpenId`] is the suite, for a server's [`Suites`](sparq_lws_authn::Suites).
+//! A server built without this suite may let another suite take the ID Token type.
 
 #![forbid(unsafe_code)]
 
