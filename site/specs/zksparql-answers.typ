@@ -1,8 +1,8 @@
 // Zero-knowledge SPARQL answers: the query request a verifier service sends and the answer
 // presentation a holder service returns, as RDF with a JSON-LD serialization. This is the data
-// model only; transport is left to the carrying protocol (the OpenID4VP section shows how
-// OpenID for Verifiable Presentations can carry it). The implementation-status section maps
-// the model to the code that exists today and lists what is not built yet.
+// model only; transport is left to the carrying protocol. Two informative companions sit
+// beside it: zksparql-answers-oid4vp.typ (carrying it over OpenID for Verifiable
+// Presentations) and zksparql-answers-implementation.typ (how the code compares).
 
 #import "_lib/spec.typ": spec-head, sotd, intro-section, references, dfn, note, cite
 
@@ -28,6 +28,12 @@
 ]
 
 #sotd()
+
+Two informative companion documents accompany this one: #emph[Zero-Knowledge SPARQL Answers
+over OpenID for Verifiable Presentations] (https://sparq.jeswr.org/specs/zksparql-answers-oid4vp)
+shows how OpenID4VP can carry the request and the presentation, and #emph[Zero-Knowledge SPARQL
+Answers: Implementation Status] (https://sparq.jeswr.org/specs/zksparql-answers-implementation)
+compares this document with the code in the sparq repository.
 
 = Introduction <sec-intro>
 
@@ -118,9 +124,9 @@ This document uses the RDF 1.2 terms #emph[RDF dataset], #emph[graph], #emph[IRI
 = Vocabulary and serialization <sec-vocab>
 
 Both resources are RDF graphs. This document defines their terms in the vocabulary
-`https://w3id.org/sparq/vcq#` (prefix `vcq:`, @sec-vocab-terms) and serializes them as
+`https://w3id.org/sparq/vcq#` (prefix `vcq:`, @sec-vocab-defs) and serializes them as
 JSON-LD 1.1 #cite("JSON-LD11") in compacted form with the context
-`https://w3id.org/sparq/vcq/v1` (@sec-context). It reuses existing terms where they have the
+`https://w3id.org/sparq/vcq/v1` (@sec-vocab-defs). It reuses existing terms where they have the
 meaning needed:
 
 - `cred:` (`https://www.w3.org/2018/credentials#`) for `VerifiablePresentation`, `validFrom`
@@ -135,7 +141,7 @@ meaning needed:
 
 Rules for both resources:
 
-+ A JSON-LD document of either resource MUST use the context of @sec-context, after the VC
++ A JSON-LD document of either resource MUST use the context of @sec-vocab-defs, after the VC
   base context `https://www.w3.org/ns/credentials/v2` where the resource is a verifiable
   presentation. Outside the value of `resultGraph`, a receiver MUST reject a document in which
   any property or type does not expand to an IRI defined by these contexts, as Data Integrity
@@ -610,7 +616,7 @@ cryptographic audit.
     `IssuerKeys`, inside the proof],
   [`urn:sparq:vcq:method:` \ `noir-selected-support-unsigned:v2` (Noir circuits)], [Only that
     returned solutions are solutions: ASK when `true`, and SELECT over basic graph patterns
-    with integer FILTERs; not usable with this document yet (@sec-impl)], [Schnorr
+    with integer FILTERs; not usable with this document yet], [Schnorr
     signatures over the sparq commitment format, inside the proof],
   [`urn:sparq:vcq:method:` \ `disclosed-reevaluation:v1` (`proof-methods/disclosed`)],
     [The full result; the holder sends the signed credentials and the salt, and the verifier
@@ -734,237 +740,22 @@ serializes, cannot express triple terms; JSON-LD 1.2 is planned to. RDF Dataset 
 result can contain one. And a proof method states which SPARQL 1.2 features it does not
 support (@sec-methods); the methods in this document support none of the features new in 1.2.
 
-= Implementation status <sec-impl>
-
-This section is informative. It compares this document with the code in the sparq repository
-on 2026-10-10.
-
-What matches: the two RISC Zero proof methods (`zk/sparql-evaluator`) prove the full result
-of a query over an input dataset and bind a request digest, the dataset commitment, whether
-the commitment was agreed, and the canonical result in their public output (the
-#emph[journal]). The `sparq-query-protocol` crate holds the verifier-side request, the
-admission check against declared proof-method capabilities and the one-time challenge store.
-Through the adapters in `zk/sparql-evaluator/host` (features `vcq` and `vcq-authenticated`),
-the challenge, domain and validity period reach the proof through a nonce derived from the
-request.
-
-What differs or is missing:
-
-+ No code produces or parses the JSON-LD documents of @sec-request and @sec-presentation, and
-  the context and vocabulary of @sec-context are not yet published at their IRIs. The
-  adapters pass Rust values, and the presentation is a descriptor digest plus the serialized
-  receipt.
-+ The request digest is computed over a project-specific binary encoding of the Rust values,
-  not over RDFC-1.0. Two implementations could not yet agree on a digest.
-+ The code still carries an answer kind (Supported or Exact), which this document no longer
-  has. The RISC Zero methods implement what is here the only kind; the Noir method implements
-  only the "returned solutions are solutions" results of @sec-methods.
-+ Results are in the proof's own canonical form (N-Triples term strings), not SPARQL Query
-  Results JSON or a JSON-LD graph; the conversion of @sec-result is not written.
-+ The evaluator implements SPARQL 1.1 and has no triple terms. The adapters also reject
-  SELECT queries with ORDER BY, and the evaluator does not support SERVICE, DESCRIBE, FROM or
-  nested EXISTS. Each method's published list of excluded features has still to be written.
-+ The version 5 RISC Zero method implements the hidden and revealed signature modes for
-  `eddsa-rdfc-2022`, and the zkVM relation implements `eddsa-sha256-merkle-2026`; the other
-  Merkle-root cryptosuites are specified only. The Noir circuits support both modes, but that method cannot yet produce a presentation for this document:
-  it keeps graph roots and salts private, so it has no dataset commitment to publish, and it
-  requires a credential-status root that this document has no property for.
-+ The version 5 policy (issuer keys and capacity bounds) has no RDF encoding yet, so the
-  mapping from `trustedIssuers` and `parameters` to the adapter's parameter digest is not
-  defined.
-+ The code names methods by an identifier without the `:vN` suffix plus a separate version
-  number; this document folds the version into the IRI.
-+ The methods in `proof-methods/` work on the internal version 5 request and statement, which
-  do not bind the domain, the validity period, the accepted methods or the signature mode,
-  and they define no canonical statement or proof encoding yet.
-+ The RISC Zero methods' image ID is eight 32-bit words; the code encodes it as the words in
-  order, each little-endian.
-+ Only one end-to-end proof of the version 5 adapter has been made and independently checked
-  (a SELECT over an agreed input); its other combinations have run only in tests without
-  proving.
-
-The older zkSPARQL proposal on this site describes the Noir proof manifest in detail. This
-document replaces neither it nor the code; it fixes the data model that both sides should
-converge on.
-
-= Use with OpenID for Verifiable Presentations <sec-oid4vp>
-
-This section is informative. It checks the data model against OpenID for Verifiable
-Presentations 1.0 #cite("OID4VP") (OpenID4VP), the protocol most wallets and verifiers use to
-request and return credentials. The conclusion is that OpenID4VP can carry a query request and
-an answer presentation without changing either, by defining a new credential format.
-@sec-oid4vp-gaps lists the gaps.
-
-== Mapping
-
-OpenID4VP lets a deployment define a new credential format identifier, with its own `meta`
-parameters in a DCQL credential query and its own presentation encoding. This document would
-define one, here called `sparql_answer`:
-
-#table(
-  columns: 2,
-  align: (left, left),
-  table.header[OpenID4VP element][Carries],
-  [Authorization request `dcql_query`], [One credential query with `"format": "sparql_answer"`,
-    `"multiple": false` and `"require_cryptographic_holder_binding": false`. Its `meta` object
-    holds the query request without `challenge` and `domain`, as the exact JSON-LD document.],
-  [Authorization request `nonce`], [`challenge`.],
-  [Authorization request `client_id`], [`domain`. Over the Digital Credentials API, the origin
-    prefixed with `origin:`, as OpenID4VP requires.],
-  [DCQL `trusted_authorities`], [Not needed for checking, because the request carries its
-    trust requirements. A wallet MAY use it to choose credentials; a `TrustedList` or
-    `FederationTrustAnchor` requirement corresponds to its `etsi_tl` or `openid_federation`
-    type.],
-  [`vp_formats_supported` metadata], [The proof method IRIs each side supports, under the
-    `sparql_answer` key.],
-  [Response `vp_token`], [`{ "<credential query id>": [ <answer presentation> ] }`, with the
-    answer presentation as a JSON-LD object.],
-  [Response mode], [Over HTTPS redirects, `direct_post` or `direct_post.jwt`; proofs can be
-    large, so the fragment and query modes are unsuitable. Over the Digital Credentials API,
-    `dc_api` or `dc_api.jwt`, as OpenID4VP requires there.],
-)
-
-Both sides rebuild the query request from `meta`, the nonce and the client identifier, and
-compute its request digest. Every property is either carried exactly or set by a fixed rule,
-and RDFC-1.0 is deterministic, so both reach the same digest.
-
-A wallet that does not support `sparql_answer` finds no credential of that format and returns
-an error (`access_denied` or `vp_formats_not_supported`). It cannot fall back to sending whole
-credentials, because no other credential query was made. This matters because DCQL tells
-implementations to ignore unknown properties: putting the query in an extra property of an
-ordinary credential query would let an unaware wallet return the full credential.
-
-== Gaps <sec-oid4vp-gaps>
-
-+ #strong[A presentation from several credentials.] OpenID4VP defines a presentation as
-  "derived from a Credential" and matches each one to a single credential query. An answer
-  presentation is derived from a set of credentials. Carrying it as one `sparql_answer`
-  presentation works, but stretches that definition. Wallet user interfaces that list "the
-  credential being shared" would need to show the query and the answer instead.
-+ #strong[Agreeing the input in advance.] An agreed input needs a step before the request in
-  which the verifier accepts a dataset commitment. OpenID4VP has no such step. It could be a
-  separate earlier exchange, but that is not specified anywhere.
-+ #strong[Holder binding.] OpenID4VP requires cryptographic holder binding by default and binds
-  replay protection to it. This document has no holder binding, so the credential query sets
-  `require_cryptographic_holder_binding` to false. Replay protection still holds because the
-  proof binds the challenge and domain, but OpenID4VP then requires the request to carry
-  `state` unless the Digital Credentials API is used.
-+ #strong[Selective disclosure rules.] DCQL `claims` and `claim_sets` select claims to reveal.
-  They have no meaning for an answer presentation and are omitted. The consent rules written
-  for them do not cover a query, so wallets need their own way to show the user what the query
-  reveals.
-+ #strong[Registration.] `sparql_answer` is not a registered format identifier. Until it is,
-  it works only between parties that agree on it, as OpenID4VP allows for deployment-defined
-  formats.
-
-None of these gaps needs a change to the query request or the answer presentation. They
-concern how the carrying protocol presents and agrees inputs, not what the holder sends.
-
 = Vocabulary and context <sec-vocab-defs>
 
 This section is normative.
 
-== Terms <sec-vocab-terms>
-
-The namespace is `https://w3id.org/sparq/vcq#`. Each term is listed with its JSON-LD term
-name. Terms reused from other vocabularies keep their own IRIs (@sec-vocab).
-
-#table(
-  columns: (1.4fr, 0.6fr, 2.6fr),
-  align: (left, left, left),
-  table.header[IRI][Kind][Meaning],
-  [`vcq:QueryRequest`], [class], [A query request (@sec-request).],
-  [`vcq:QueryAnswerPresentation`], [class], [An answer presentation; a subclass of
-    `cred:VerifiablePresentation` (@sec-presentation).],
-  [`vcq:QueryAnswerProof`], [class], [The proof of an answer presentation.],
-  [`vcq:query`], [property], [The SPARQL query text (`xsd:string`).],
-  [`vcq:inputCommitment`], [property], [A dataset commitment (`sec:multibase`).],
-  [`vcq:trustedIssuers`], [property], [A trust requirement (@sec-trust).],
-  [`vcq:IssuerKeys`], [class], [A trust requirement listing an issuer and its keys.],
-  [`vcq:TrustedList`, `vcq:FederationTrustAnchor`, `vcq:RecognitionCredential`,
-    `vcq:TrustFramework`], [class],
-    [Reserved trust requirements.],
-  [`vcq:issuer`], [property], [The issuer a trust requirement names (IRI).],
-  [`vcq:signatureMode`], [property], [A signature mode: `vcq:hidden`, `vcq:revealed` or
-    `vcq:disclosed`.],
-  [`vcq:proofMethod`], [property], [An accepted proof method entry (on a request) or the
-    method used (on a proof).],
-  [`vcq:method`], [property], [The IRI of the proof method an entry accepts.],
-  [`vcq:verificationKey`], [property], [The verification key or image ID of a proof method
-    (`sec:multibase`).],
-  [`vcq:parameters`], [property], [A proof method's parameters (`rdf:JSON`).],
-  [`vcq:maxPresentationBytes`, `vcq:maxResultSize`], [property], [Bounds
-    (`xsd:nonNegativeInteger`).],
-  [`vcq:requestDigest`], [property], [The request digest (`sec:multibase`).],
-  [`vcq:revealedSignature`], [property], [A revealed signature, with `sec:verificationMethod`,
-    `sec:cryptosuite`, `vcq:signedMessage` and `vcq:signatureValue`.],
-  [`vcq:result`], [property], [A SELECT or ASK result (`rdf:JSON`).],
-  [`vcq:resultGraph`], [property], [A CONSTRUCT result (a named graph).],
-)
-
-Each term SHOULD be dereferenceable to a description in RDF, published with this context.
-
-== Context <sec-context>
-
-The context `https://w3id.org/sparq/vcq/v1` is:
-
-```json
-{
-  "@context": {
-    "@protected": true,
-    "id": "@id",
-    "type": "@type",
-    "vcq": "https://w3id.org/sparq/vcq#",
-    "cred": "https://www.w3.org/2018/credentials#",
-    "sec": "https://w3id.org/security#",
-    "xsd": "http://www.w3.org/2001/XMLSchema#",
-    "QueryRequest": "vcq:QueryRequest",
-    "QueryAnswerPresentation": "vcq:QueryAnswerPresentation",
-    "QueryAnswerProof": "vcq:QueryAnswerProof",
-    "IssuerKeys": "vcq:IssuerKeys",
-    "Multikey": "sec:Multikey",
-    "hidden": "vcq:hidden",
-    "revealed": "vcq:revealed",
-    "disclosed": "vcq:disclosed",
-    "query": "vcq:query",
-    "inputCommitment": { "@id": "vcq:inputCommitment", "@type": "sec:multibase" },
-    "trustedIssuers": { "@id": "vcq:trustedIssuers", "@container": "@set" },
-    "issuer": { "@id": "vcq:issuer", "@type": "@id" },
-    "verificationMethod": { "@id": "sec:verificationMethod", "@type": "@id" },
-    "controller": { "@id": "sec:controller", "@type": "@id" },
-    "publicKeyMultibase": { "@id": "sec:publicKeyMultibase", "@type": "sec:multibase" },
-    "cryptosuite": { "@id": "sec:cryptosuite", "@type": "sec:cryptosuiteString" },
-    "signatureMode": { "@id": "vcq:signatureMode", "@type": "@vocab" },
-    "proofMethod": { "@id": "vcq:proofMethod", "@type": "@id" },
-    "method": { "@id": "vcq:method", "@type": "@id" },
-    "verificationKey": { "@id": "vcq:verificationKey", "@type": "sec:multibase" },
-    "parameters": { "@id": "vcq:parameters", "@type": "@json" },
-    "maxPresentationBytes": { "@id": "vcq:maxPresentationBytes",
-                              "@type": "xsd:nonNegativeInteger" },
-    "maxResultSize": { "@id": "vcq:maxResultSize", "@type": "xsd:nonNegativeInteger" },
-    "challenge": "sec:challenge",
-    "domain": "sec:domain",
-    "validFrom": { "@id": "cred:validFrom", "@type": "xsd:dateTime" },
-    "validUntil": { "@id": "cred:validUntil", "@type": "xsd:dateTime" },
-    "requestDigest": { "@id": "vcq:requestDigest", "@type": "sec:multibase" },
-    "revealedSignature": { "@id": "vcq:revealedSignature", "@container": "@set" },
-    "signedMessage": { "@id": "vcq:signedMessage", "@type": "sec:multibase" },
-    "signatureValue": { "@id": "vcq:signatureValue", "@type": "sec:multibase" },
-    "result": { "@id": "vcq:result", "@type": "@json" },
-    "resultGraph": { "@id": "vcq:resultGraph", "@container": "@graph" },
-    "proofValue": { "@id": "sec:proofValue", "@type": "sec:multibase" }
-  }
-}
-```
-
-In a request, each `proofMethod` value is a resource with `method`, `verificationKey` and
-`parameters`, because the key and parameters belong to this request's acceptance of the
-method, not to the method; in a proof, `proofMethod` is the IRI of the method used.
+The vocabulary `https://w3id.org/sparq/vcq#` defines every `vcq:` term in RDF, with its label,
+meaning, domain and range. The context `https://w3id.org/sparq/vcq/v1` maps the JSON-LD terms
+of @sec-request and @sec-presentation to those IRIs and to the reused terms of @sec-vocab, with
+the datatypes this document requires. Both are normative. Each term SHOULD be dereferenceable
+to its description in RDF.
 
 #note[
   The namespace and context IRIs are under `w3id.org` so that they can stay stable if the
-  documents move. The redirect is not yet registered; until it is, copies are published with
-  this document. A Working Group taking this design forward would decide the final IRIs.
+  documents move. The redirect is not yet registered; until it is, the vocabulary is at
+  https://sparq.jeswr.org/ns/vcq/vcq.ttl and the context at
+  https://sparq.jeswr.org/ns/vcq/v1.jsonld. A Working Group taking this design forward would
+  decide the final IRIs.
 ]
 
 = References <sec-refs>
