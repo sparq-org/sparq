@@ -12,8 +12,8 @@
 //! safe default is to treat **every** predicate as PRIVATE — disclosable only when the source
 //! has explicitly opted it in. [`SourcePrivacyDescriptor::default`] therefore discloses
 //! NOTHING, and [`SourcePrivacyDescriptor::may_disclose`] returns `false` for any predicate
-//! that was not explicitly marked [`Disclosability::Public`]. A planner cannot widen this: a
-//! later pass *reads* the descriptor, but the source re-enforces it fail-closed (the design
+//! that was not explicitly marked [`Disclosability::Public`]. A later pass *reads* the
+//! descriptor, and the source re-checks it fail-closed against the declared envelope (the design
 //! record's constraint C-B), so a plan whose envelope declares an over-disclosure is rejected,
 //! not honoured. That re-check covers the declared envelope only.
 //!

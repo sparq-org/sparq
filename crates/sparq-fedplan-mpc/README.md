@@ -47,7 +47,7 @@ assert!(sparq_fedplan_mpc::bind_plan_to_proof(&claimed, &statement).is_err()); /
 ## ✨ Features
 
 - **`SourcePrivacyDescriptor`** (Phase 1, sq-2q1x) — the per-source privacy declaration. Posture is **default-deny**: a predicate is disclosable only when
-  the source explicitly marks it `Public`; a planner cannot widen it, the source re-enforces fail-closed.
+  the source explicitly marks it `Public`; ratification re-checks it fail-closed against the declared envelope.
 - **`select_private_sources`** (Phase 2, sq-fix4) — the **source-selection adapter**: runs `sparq-fedplan::select_sources` over the BGP + descriptors, then
   **prunes** any source whose descriptor declares it will not participate (`participates == Some(false)`), surfacing the retained per-pattern candidates
   plus an **audit trail** (`pruned`) of what was dropped and why. Participation/authorisation is the **only** prune rule — a source holding a *private*
