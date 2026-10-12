@@ -933,7 +933,7 @@ impl<S: Store + 'static> LwsState<S> {
     }
 
     /// Store `meta` beside `iri`. What is written is checked to read back first (see
-    /// [`encode_meta`]), so metadata that could not be read again is never stored.
+    /// `encode_meta`), so metadata that could not be read again is never stored.
     pub async fn put_resource_meta(
         &self,
         iri: &str,
@@ -2079,7 +2079,7 @@ pub const MAX_DECLARED_LINK_BYTES: usize = 64 * 1024;
 pub const MAX_HEADER_MEMBERS: usize = 64;
 
 /// Largest metadata a resource may have, as stored: its types, links and linkset together. Every
-/// metadata write goes through [`encode_meta`], which refuses more, and a write of content and
+/// metadata write goes through `encode_meta`, which refuses more, and a write of content and
 /// metadata checks the metadata before writing either, so no sequence of writes grows a
 /// resource's metadata past it.
 pub const MAX_META_BYTES: usize = 256 * 1024;
