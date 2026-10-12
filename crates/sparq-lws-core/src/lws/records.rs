@@ -28,8 +28,9 @@ pub(crate) async fn delete_record<S: Store>(
 
 /// Whether the record `iri` is stored as a start would load it: listed in `container` and there
 /// to read. An error when that cannot be told. This is only an answer because a [`Store`] reads
-/// its own writes (see the trait): a listing that lagged a committed write would say `false` for
-/// a record the next start loads.
+/// its own completed writes (see the trait): a listing that lagged a committed write would say
+/// `false` for a record the next start loads. A write that timed out may still commit after this
+/// reads `false` (#6836).
 pub(crate) async fn still_listed<S: Store>(
     store: &S,
     iri: &str,

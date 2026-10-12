@@ -65,10 +65,13 @@ Set `PSS_SPARQ_BACKEND` to one of:
   ephemeral.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
   `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
-  read its own writes: a query sent after an update returns must see what the update
-  committed (one `sparq-server` does). An eventually consistent or replicated endpoint
-  that can lag is not supported, because the LWS server decides what a failed write
-  left behind by reading the store straight after it.
+  read its own writes: a query sent after an update has completed must see what the
+  update committed (one `sparq-server` does). An eventually consistent or replicated
+  endpoint that can lag is not supported, because the LWS server decides what a failed
+  write left behind by reading the store straight after it. An update that times out
+  can still commit on the service afterwards; until #6836 is fixed, a grant, request
+  or subscription whose create timed out this way can be answered `500` and still be
+  loaded at the next start.
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
