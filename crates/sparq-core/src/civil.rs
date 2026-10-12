@@ -1,10 +1,21 @@
-//! `xsd:dateTime` formatting from epoch seconds, dependency-free.
+//! Proleptic-Gregorian civil dates and UTC `xsd:dateTime` formatting, dependency-free.
 //!
-//! The workspace has no `chrono`/`time`, and pulling one in for two lines would
-//! bloat this opt-in crate, so we format the canonical UTC lexical ourselves.
-//! The civil-date conversion is Howard Hinnant's algorithm (the same one
-//! `sparq-core::temporal::parse_civil_date` inverts), so a formatted lexical
-//! parses back to the same instant. [OPUS-4.8] sq-ntcg.
+//! The workspace has no `chrono`/`time`, so crates that stamp or compare dates use these
+//! instead of keeping their own copy. The conversions are Howard Hinnant's algorithms
+//! (the same calendar [`crate::temporal::parse_civil_date`] uses), so a formatted lexical
+//! parses back to the same instant.
+
+/// Days since 1970-01-01 of a proleptic-Gregorian civil date (`month` 1–12, `day` 1–31).
+/// The inverse of [`civil_from_days`].
+pub fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = year - i64::from(month <= 2);
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = i64::from(if month > 2 { month - 3 } else { month + 9 }); // [0, 11]
+    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
+}
 
 /// Epoch seconds (UTC) → an `xsd:dateTime` lexical `YYYY-MM-DDTHH:MM:SSZ`.
 pub fn format_utc(epoch_secs: i64) -> String {
@@ -16,10 +27,10 @@ pub fn format_utc(epoch_secs: i64) -> String {
 }
 
 /// Days-from-epoch (1970-01-01 = 0) → `(year, month, day)`. The inverse of
-/// `days_from_civil`; from Howard Hinnant's `chrono`-compatible algorithms.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
+/// [`days_from_civil`]; from Howard Hinnant's `chrono`-compatible algorithms.
+pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097; // [0, 146096]
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
     let y = yoe + era * 400;
@@ -33,7 +44,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sparq_core::temporal::Timeline;
+    use crate::temporal::Timeline;
 
     #[test]
     fn epoch_zero_is_unix_epoch() {
@@ -109,6 +120,19 @@ mod tests {
             let tl = Timeline::parse_datetime(&lex)
                 .unwrap_or_else(|| panic!("month-boundary lexical must parse: {lex}"));
             assert_eq!(tl.instant() as i64, secs, "round-trip mismatch for {}", lex);
+        }
+    }
+
+    #[test]
+    fn days_and_civil_dates_are_inverse() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        assert_eq!(days_from_civil(2021, 1, 1), 18_628);
+        assert_eq!(days_from_civil(2000, 2, 29), 11_016);
+        assert_eq!(days_from_civil(1969, 12, 31), -1);
+        // Every day across several 400-year eras, including pre-epoch and year 0.
+        for days in (-800_000..800_000).step_by(7) {
+            let (y, m, d) = civil_from_days(days);
+            assert_eq!(days_from_civil(y, m, d), days, "{y}-{m}-{d}");
         }
     }
 }
