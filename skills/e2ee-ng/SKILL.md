@@ -170,7 +170,10 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   strictly ascending with duplicates removed (an in-memory list in any order is
   canonicalized by `encode`/`signing_bytes`), and `Commit::decode` fails with
   `Error::NonCanonical` on a reordered or duplicated parent list — so one logical
-  commit has exactly one `CommitId`.
+  commit has exactly one plaintext encoding. This does not make `CommitId`
+  unique: sealing is randomized, so sealing the same commit bytes twice gives two
+  envelopes and two `CommitId`s that both decrypt and verify. Commits written by
+  older code with unsorted or duplicate parents no longer decode.
 
 ## Learn more
 
