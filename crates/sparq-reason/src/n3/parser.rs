@@ -1629,7 +1629,9 @@ pub(super) mod parse_surface_tests {
     ];
 
     /// Run `f` on a thread with the smallest stack the parser supports.
-    pub(in crate::n3) fn on_small_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    pub(in crate::n3) fn on_small_stack<T: Send + 'static>(
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
         std::thread::Builder::new()
             .stack_size(2 << 20)
             .spawn(f)
@@ -1647,12 +1649,10 @@ pub(super) mod parse_surface_tests {
         for production in PRODUCTIONS {
             let past = past.clone();
             let (at, over, turtle) = on_small_stack(move || {
-                let turtle = matches!(production, "list" | "blank node object")
-                    .then(|| {
-                        let at = parse_turtle_with_base(&nested(production, limit), "").map(drop);
-                        let over = parse_turtle_with_base(&nested(production, limit + 1), "").map(drop);
-                        (at, over)
-                    });
+                let turtle = matches!(production, "list" | "blank node object").then(|| {
+                    let turtle = |n| parse_turtle_with_base(&nested(production, n), "").map(drop);
+                    (turtle(limit), turtle(limit + 1))
+                });
                 (
                     parse(&nested(production, limit)).map(drop),
                     parse(&nested(production, limit + 1)).map(drop),
@@ -1663,7 +1663,11 @@ pub(super) mod parse_surface_tests {
             assert_eq!(over, Err(past.clone()), "{production} past the limit");
             if let Some((at, over)) = turtle {
                 assert_eq!(at, Ok(()), "{production} at the limit, Turtle");
-                assert_eq!(over, Err(past.clone()), "{production} past the limit, Turtle");
+                assert_eq!(
+                    over,
+                    Err(past.clone()),
+                    "{production} past the limit, Turtle"
+                );
             }
         }
     }
