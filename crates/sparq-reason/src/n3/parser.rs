@@ -114,20 +114,24 @@ pub(crate) fn parse_with_extra_checked(
     parse_charged_checked(src, base, extra, None)
 }
 
-/// As [`parse_with_extra_checked`]; with `term_bytes_left`, every term the parse builds
-/// that can be larger than the source text it was read from (an expanded prefixed name, an
-/// IRI resolved against the base, and the subject and predicate copied into each statement
-/// of a `;` / `,` list) is charged against it before it is kept, and the parse stops
-/// ([`ParseFailure::Resource`]) once it is spent ([`super::bounded::charge_parse`]).
+/// As [`parse_with_extra_checked`]; with `allowance`, the parse is charged two ways, each
+/// against `allowance`, and stops ([`ParseFailure::Resource`]) once either is spent
+/// ([`super::bounded::charge_parse`]):
+/// * every term it builds, as it builds it (an expanded IRI, a literal, a list or formula
+///   node; [`super::bounded::node_bytes`]), so no list or formula grows past it;
+/// * every statement it keeps, each kept term once ([`super::bounded::kept_bytes`]), so the
+///   formula it returns fits, the subject and predicate copied into each statement of a
+///   `;` / `,` list included.
 pub(crate) fn parse_charged_checked(
     src: &str,
     base: &str,
     extra: impl IntoIterator<Item = [Term; 3]>,
-    term_bytes_left: Option<usize>,
+    allowance: Option<usize>,
 ) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
     p.base = base.to_string();
-    p.term_bytes_left = term_bytes_left;
+    p.built_left = allowance;
+    p.kept_left = allowance;
     let r = parse_document(&mut p, base, extra);
     r.map_err(|m| match p.stopped.take() {
         Some(e) => ParseFailure::Resource(e),
@@ -322,9 +326,10 @@ struct Parser<'a> {
     depth: usize,
     /// The limit the parse stopped on, if it did ([`ParseFailure::Resource`]).
     stopped: Option<super::bounded::LimitError>,
-    /// The bytes of expanded terms the parse may still build, when it is charged
-    /// ([`parse_charged_checked`]).
-    term_bytes_left: Option<usize>,
+    /// The bytes of terms a charged parse may still build ([`parse_charged_checked`]).
+    built_left: Option<usize>,
+    /// The bytes of statements a charged parse may still keep.
+    kept_left: Option<usize>,
 }
 
 
@@ -342,34 +347,53 @@ impl<'a> Parser<'a> {
             pathvar: 0,
             depth: 0,
             stopped: None,
-            term_bytes_left: None,
+            built_left: None,
+            kept_left: None,
         }
     }
 
-    /// Charge `bytes` of built terms to a charged parse ([`parse_charged_checked`]).
-    fn charge(&mut self, bytes: usize) -> Result<(), String> {
-        let Some(left) = self.term_bytes_left else {
+    /// Charge `bytes` to `left`, one of a charged parse's allowances
+    /// ([`parse_charged_checked`]); an uncharged parse (`None`) is not charged.
+    fn charge(
+        left: &mut Option<usize>,
+        stopped: &mut Option<super::bounded::LimitError>,
+        bytes: usize,
+    ) -> Result<(), String> {
+        let Some(l) = *left else {
             return Ok(());
         };
-        match super::bounded::charge_parse(left, bytes) {
-            Ok(left) => {
-                self.term_bytes_left = Some(left);
+        match super::bounded::charge_parse(l, bytes) {
+            Ok(l) => {
+                *left = Some(l);
                 Ok(())
             }
             Err(e) => {
                 let message = e.message().to_string();
-                self.stopped = Some(e);
+                *stopped = Some(e);
                 Err(message)
             }
         }
     }
 
-    /// `t`, charged to a charged parse.
-    fn charged(&mut self, t: Term) -> Result<Term, String> {
-        if self.term_bytes_left.is_some() {
-            self.charge(super::bounded::term_bytes(&t))?;
+    /// `t`, just built, charged to a charged parse's built allowance.
+    fn built(&mut self, t: Term) -> Result<Term, String> {
+        if self.built_left.is_some() {
+            Parser::charge(&mut self.built_left, &mut self.stopped, super::bounded::node_bytes(&t))?;
         }
         Ok(t)
+    }
+
+    /// Charge a statement of `parts` to a charged parse's kept allowance, BEFORE its
+    /// terms are copied into it.
+    fn keep(&mut self, parts: [&Term; 3]) -> Result<(), String> {
+        if self.kept_left.is_some() {
+            let bytes = parts
+                .iter()
+                .map(|t| super::bounded::kept_bytes(t))
+                .fold(0usize, usize::saturating_add);
+            Parser::charge(&mut self.kept_left, &mut self.stopped, bytes)?;
+        }
+        Ok(())
     }
 
     // ---- lexing helpers ------------------------------------------------------
@@ -586,12 +610,7 @@ impl<'a> Parser<'a> {
             let (pred, swapped) = self.verb(out)?;
             loop {
                 let obj = self.term(out)?;
-                if self.term_bytes_left.is_some() {
-                    // The subject and predicate are copied into every statement.
-                    let copies = super::bounded::term_bytes(subj)
-                        .saturating_add(super::bounded::term_bytes(&pred));
-                    self.charge(copies)?;
-                }
+                self.keep([subj, &pred, &obj])?;
                 if swapped {
                     out.push([obj, pred.clone(), subj.clone()]);
                 } else {
@@ -733,6 +752,7 @@ impl<'a> Parser<'a> {
                     self.i += 1;
                     let pred = self.atom(out)?;
                     let next = self.fresh_pathvar();
+                    self.keep([&base, &pred, &next])?;
                     out.push([base, pred, next.clone()]);
                     base = next;
                 }
@@ -746,6 +766,7 @@ impl<'a> Parser<'a> {
                     self.i += 1;
                     let pred = self.atom(out)?;
                     let next = self.fresh_pathvar();
+                    self.keep([&next, &pred, &base])?;
                     out.push([next.clone(), pred, base]);
                     base = next;
                 }
@@ -762,8 +783,13 @@ impl<'a> Parser<'a> {
         Term::Blank(format!("__path{}", self.pathvar))
     }
 
-    /// A single atomic term (no path operators).
+    /// A single atomic term (no path operators), charged to a charged parse as it is built.
     fn atom(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
+        let t = self.atom_uncharged(out)?;
+        self.built(t)
+    }
+
+    fn atom_uncharged(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
         self.ws();
         match self.peek() {
             // `<<` opens an RDF-star / RDF 1.2 quoted-triple term — never a valid
@@ -887,9 +913,7 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        let iri = resolve_iri(&self.base, &iri);
-        self.charge(iri.len())?;
-        Ok(iri)
+        Ok(resolve_iri(&self.base, &iri))
     }
 
     /// `\uXXXX` or `\UXXXXXXXX` with the backslash already consumed.
@@ -1000,7 +1024,7 @@ impl<'a> Parser<'a> {
                         Some(ns) => ns.clone(),
                         None => resolve_iri(&self.base, "#"),
                     };
-                    return self.charged(Term::Iri(format!("{ns}{tok}")));
+                    return Ok(Term::Iri(format!("{ns}{tok}")));
                 }
             }
             return Err(format!("bad token '{tok}' at {start}"));
@@ -1018,7 +1042,7 @@ impl<'a> Parser<'a> {
                 None => return Err(format!("unknown prefix '{pfx}:'")),
             },
         };
-        self.charged(Term::Iri(format!("{ns}{local}")))
+        Ok(Term::Iri(format!("{ns}{local}")))
     }
 
     fn read_name(&mut self) -> String {

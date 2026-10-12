@@ -14,7 +14,7 @@
 //! Every limit constant lives here and is private. `tests/n3_bounded_discipline.rs`
 //! fails if a limit or a raw `Regex::new` appears in another N3 evaluator source.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::model::Term;
@@ -67,7 +67,9 @@ pub(crate) trait Sink {
 /// of one logical evaluation (nested closures, an explicit-strata pipeline, a query and
 /// the closure it projects over) records into the SAME handle, and it is never reset.
 /// The record also carries the run's [`ClosureLimits`], so every forward closure of the
-/// run (nested ones included) gets the allowance its entry point was given.
+/// run (nested ones included) gets the allowance its entry point was given, and the run's
+/// refusal: the error of the first term refused for its size ([`derived_term`]), which
+/// fails every closure of the run that sees it.
 ///
 /// The fields are private and there is no `Default`: the only ways to make a fresh record
 /// are [`Truncation::top_level`] and [`Truncation::top_level_with`], which a top-level
@@ -76,12 +78,13 @@ pub(crate) trait Sink {
 #[derive(Clone)]
 pub(crate) struct Truncation {
     cut: Rc<Cell<Option<&'static str>>>,
+    refusal: Rc<RefCell<Option<String>>>,
     limits: ClosureLimits,
 }
 
 impl Truncation {
-    /// The cut record of a new TOP-LEVEL run under the default [`ClosureLimits`]. A nested
-    /// run must reuse its parent's.
+    /// The cut record of a new TOP-LEVEL run under the default [`ClosureLimits`]. A
+    /// nested run must reuse its parent's.
     pub(crate) fn top_level() -> Truncation {
         Truncation::top_level_with(ClosureLimits::default())
     }
@@ -90,6 +93,7 @@ impl Truncation {
     pub(crate) fn top_level_with(limits: ClosureLimits) -> Truncation {
         Truncation {
             cut: Rc::default(),
+            refusal: Rc::default(),
             limits,
         }
     }
@@ -97,6 +101,18 @@ impl Truncation {
     /// The first cut the run recorded, if any.
     pub(crate) fn get(&self) -> Option<&'static str> {
         self.cut.get()
+    }
+
+    /// The error of the first term the run refused for its size, if any: every closure of
+    /// the run that ends after it fails with it.
+    pub(crate) fn refusal(&self) -> Option<String> {
+        self.refusal.borrow().clone()
+    }
+
+    /// Refuse the run with `error` (the first refusal is kept) and record the cut.
+    fn refuse(&self, error: impl FnOnce() -> String) {
+        self.refusal.borrow_mut().get_or_insert_with(error);
+        self.record(CLOSURE_CUT);
     }
 }
 
@@ -273,11 +289,26 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// nested `log:conclusion` closure of a run gets the same limits as the run, not a share
 /// of them.
 ///
-/// `max_term_bytes` bounds each term the text engine derives (a builtin's argument list
-/// and result, a formula `log:parsedAsN3` / `log:semantics` parses or `log:conclusion`
-/// returns, and a rule conclusion's list, quoted triple or formula), each sized before it
-/// is built. It is not a bound on the closure's total memory: many distinct terms just
-/// under it are bounded only by `max_facts`.
+/// `max_term_bytes` (GH #6771) bounds each term the text engine would build: a functional
+/// builtin's argument list and result, any term substituted under a rule's bindings (a
+/// conclusion, a premise pattern, a scope or collection template, a list generator's
+/// member, a backward-rule projection), the list `log:collectAllIn` collects, the formula
+/// `log:conclusion` returns, and the formula `log:parsedAsN3` / `log:semantics` parses.
+/// Each is sized from borrowed inputs before it is built (the parser charges each term as
+/// it builds it and each statement it keeps). The size is approximate: string bytes plus a
+/// fixed cost per node.
+///
+/// What it does not bound:
+/// * the closure's total memory: many distinct terms just under the limit are bounded
+///   only by `max_facts`;
+/// * the text `log:content` returns, which the caller's resolver supplies;
+/// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
+///   fallback is bounded) and the opt-in `compiled-rules` evaluator (GH #6855), neither
+///   of which has the round and fact allowance either.
+///
+/// One over-refusal is deliberate: a builtin's argument list is a term it builds, so
+/// `log:conjunction` over many copies of one large formula is refused when the copies
+/// together pass the limit, even if the merged result would fit.
 ///
 /// The struct is `#[non_exhaustive]`: outside this crate, start from
 /// [`ClosureLimits::default`] and set the fields to change
@@ -348,36 +379,131 @@ pub(crate) fn string_term_bytes(lex: usize) -> usize {
 }
 
 /// The ONE checkpoint every term the text engine derives passes before it is built
-/// (GH #6771): a builtin's argument list and result, and a rule conclusion's terms.
-/// `bound` is an upper bound on the term's [`term_bytes`], computed from borrowed inputs
-/// without building anything; `exact` is its exact size, computed (again without building
-/// it) only when `bound` is over the limit, so a loose bound never refuses a term that fits.
+/// (GH #6771). `bound` is an upper bound on the term's [`term_bytes`], computed from
+/// borrowed inputs without building anything; `exact` is its exact size, computed (again
+/// without building it) only when `bound` is over the limit, so a loose bound never
+/// refuses a term that fits.
 ///
-/// Past the run's [`ClosureLimits::max_term_bytes`] the term is refused: a cut, and
-/// `Some(error)` the caller must fail the closure with, so no entry point returns the
-/// closure without the term as a result.
+/// Past the run's [`ClosureLimits::max_term_bytes`] the term is refused (`true`): a cut,
+/// and the run's refusal ([`Truncation::refusal`]), which fails every closure of the run,
+/// so no entry point returns the closure without the term as a result.
 pub(crate) fn derived_term(
     run: &Truncation,
     what: &dyn std::fmt::Display,
     bound: usize,
     exact: impl FnOnce() -> usize,
-) -> Bounded<Option<String>> {
+) -> Bounded<bool> {
     let limit = run.limits.max_term_bytes;
     if bound <= limit {
-        return Bounded::complete(None);
+        return Bounded::complete(false);
     }
     let size = exact();
     if size <= limit {
-        return Bounded::complete(None);
+        return Bounded::complete(false);
     }
-    Bounded::cut(
-        Some(format!(
+    run.refuse(|| {
+        format!(
             "n3: {CLOSURE_CUT}: {what} would be a term of about {size} bytes, over \
              max_term_bytes ({limit}): the rules build ever larger terms (raise \
              ClosureLimits::max_term_bytes to allow more)"
-        )),
-        CLOSURE_CUT,
-    )
+        )
+    });
+    Bounded::cut(true, CLOSURE_CUT)
+}
+
+/// The [`term_bytes`] of `t` with `b`'s bindings substituted, as [`substitute`] (or, with
+/// `deep`, [`substitute_deep`], through quoted formulae) would build it, read from the
+/// borrowed terms without building anything.
+pub(crate) fn resolved_bytes(t: &Term, b: &super::Binding, deep: bool) -> usize {
+    let all = |ts: &mut dyn Iterator<Item = &Term>| {
+        ts.fold(TERM_NODE_BYTES, |n, m| n.saturating_add(resolved_bytes(m, b, deep)))
+    };
+    match t {
+        Term::Var(v) => term_bytes(b.get(v).unwrap_or(t)),
+        Term::List(ms) => all(&mut ms.iter()),
+        Term::Triple(tr) => all(&mut tr.iter()),
+        Term::Formula(ts) if deep => all(&mut ts.iter().flatten()),
+        _ => term_bytes(t),
+    }
+}
+
+/// What a substitution refusal names.
+struct Substituted;
+
+impl std::fmt::Display for Substituted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a term built under a rule's bindings")
+    }
+}
+
+/// THE substitution of the text engine: `t` with `b`'s bound variables substituted
+/// (recursing into lists and quoted triples; a quoted formula is a value, kept as is).
+/// A compound `t` can name a bound term many times, so it is sized from the borrowed
+/// terms first ([`resolved_bytes`]) and refused past the run's term-size limit
+/// ([`derived_term`]): `None`, with the cut and the run's refusal recorded. A variable or
+/// atom is one copy of an existing term and is not sized. `tests/n3_bounded_discipline.rs`
+/// fails if an N3 evaluator substitutes any other way.
+pub(crate) fn substitute(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
+    substitute_checked(t, b, run, false)
+}
+
+/// [`substitute`], also substituting inside quoted formulae (a conclusion's
+/// instantiation): a variable left inside a formula after substitution is the formula's
+/// own.
+pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
+    substitute_checked(t, b, run, true)
+}
+
+fn substitute_checked(t: &Term, b: &super::Binding, run: &Truncation, deep: bool) -> Option<Term> {
+    let compound = match t {
+        Term::List(_) | Term::Triple(_) => true,
+        Term::Formula(_) => deep,
+        _ => false,
+    };
+    if compound {
+        let bytes = resolved_bytes(t, b, deep);
+        if settle(run, derived_term(run, &Substituted, bytes, || bytes)) {
+            return None;
+        }
+    }
+    Some(if deep { apply_deep(t, b) } else { apply(t, b) })
+}
+
+/// Substitute bound variables in `t` (recursing into list members and quoted triples);
+/// returns the term (possibly still containing free vars). Private: callers go through
+/// [`substitute`].
+fn apply(t: &Term, b: &super::Binding) -> Term {
+    match t {
+        Term::Var(v) => b.get(v).cloned().unwrap_or_else(|| t.clone()),
+        Term::List(ms) => Term::List(ms.iter().map(|m| apply(m, b)).collect()),
+        Term::Triple(tr) => {
+            Term::Triple(Box::new([apply(&tr[0], b), apply(&tr[1], b), apply(&tr[2], b)]))
+        }
+        _ => t.clone(),
+    }
+}
+
+/// [`apply`] through quoted formulae too. Private: callers go through
+/// [`substitute_deep`].
+fn apply_deep(t: &Term, b: &super::Binding) -> Term {
+    match t {
+        Term::Var(v) => match b.get(v) {
+            Some(val) => val.clone(),
+            None => t.clone(),
+        },
+        Term::List(ms) => Term::List(ms.iter().map(|m| apply_deep(m, b)).collect()),
+        Term::Formula(ts) => Term::Formula(
+            ts.iter()
+                .map(|r| [apply_deep(&r[0], b), apply_deep(&r[1], b), apply_deep(&r[2], b)])
+                .collect(),
+        ),
+        Term::Triple(tr) => Term::Triple(Box::new([
+            apply_deep(&tr[0], b),
+            apply_deep(&tr[1], b),
+            apply_deep(&tr[2], b),
+        ])),
+        _ => t.clone(),
+    }
 }
 
 /// The round and fact allowance of one forward closure (`run_closure`).
@@ -493,40 +619,62 @@ pub(crate) fn parse_n3_with_extra(
 /// Why a builtin's parse was stopped by [`ClosureLimits::max_term_bytes`].
 const PARSE_TERM_CUT: &str = "forward closure limit exceeded (a parsed formula)";
 
-/// Charge `bytes` of built terms to a charged parse with `left` bytes left: what is left
+/// Charge `bytes` to a charged parse's allowance with `left` bytes left: what is left
 /// after it, or the limit error once the parse would pass it.
 pub(crate) fn charge_parse(left: usize, bytes: usize) -> Result<usize, LimitError> {
     left.checked_sub(bytes).ok_or_else(|| LimitError {
         why: PARSE_TERM_CUT,
         message: format!(
-            "n3: {CLOSURE_CUT}: a parsed formula would build more than max_term_bytes of \
-             terms (raise ClosureLimits::max_term_bytes to allow more)"
+            "n3: {CLOSURE_CUT}: a parsed formula would take more than max_term_bytes \
+             (raise ClosureLimits::max_term_bytes to allow more)"
         ),
     })
 }
 
-/// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`): the
-/// terms the parse builds are charged against the run's
-/// [`ClosureLimits::max_term_bytes`] as it builds them, so a small source whose prefixes
-/// expand into a huge formula is refused while it is parsed. `Err(Some(error))` is that
-/// refusal (a cut on `cuts`, and an error the caller must fail the closure with);
-/// `Err(None)` is any other failure, a syntax error or the nesting limit (which is itself
-/// recorded as a cut).
+/// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`) under
+/// the run's [`ClosureLimits::max_term_bytes`]: the parser charges every term it builds
+/// as it builds it, and every statement it keeps, so a small source whose prefixes expand
+/// into a huge formula is refused while it is parsed. On that refusal the run is refused
+/// (a cut, and an error every closure of the run fails with). `None` for that and for any
+/// other failure: a syntax error, or the nesting limit (itself recorded as a cut).
 pub(crate) fn parse_n3_term(
     src: &str,
     base: &str,
     run: &Truncation,
     cuts: &impl Sink,
-) -> Result<super::parser::Parsed, Option<String>> {
+) -> Option<super::parser::Parsed> {
     use super::parser::{parse_charged_checked, ParseFailure};
-    let left = Some(run.limits.max_term_bytes);
-    match parse_charged_checked(src, base, std::iter::empty(), left) {
-        Ok(p) => Ok(p),
-        Err(ParseFailure::Syntax(_)) => Err(None),
+    let allowance = Some(run.limits.max_term_bytes);
+    match parse_charged_checked(src, base, std::iter::empty(), allowance) {
+        Ok(p) => Some(p),
+        Err(ParseFailure::Syntax(_)) => None,
         Err(ParseFailure::Resource(e)) => {
             cuts.record(e.why);
-            Err((e.why == PARSE_TERM_CUT).then_some(e.message))
+            if e.why == PARSE_TERM_CUT {
+                run.refuse(|| e.message);
+            }
+            None
         }
+    }
+}
+
+/// The bytes a parsed statement keeps for term `t`: its [`term_bytes`], except that a
+/// quoted formula counts one node (its statements were kept, and charged, one by one).
+pub(crate) fn kept_bytes(t: &Term) -> usize {
+    match t {
+        Term::Formula(_) => TERM_NODE_BYTES,
+        Term::List(ms) => ms.iter().map(kept_bytes).fold(TERM_NODE_BYTES, usize::saturating_add),
+        Term::Triple(tr) => tr.iter().map(kept_bytes).fold(TERM_NODE_BYTES, usize::saturating_add),
+        _ => term_bytes(t),
+    }
+}
+
+/// The bytes the parser allocates for `t` itself, not counting the terms inside it (each
+/// built, and charged, on its own).
+pub(crate) fn node_bytes(t: &Term) -> usize {
+    match t {
+        Term::Formula(_) | Term::List(_) | Term::Triple(_) => TERM_NODE_BYTES,
+        _ => term_bytes(t),
     }
 }
 
@@ -993,11 +1141,12 @@ mod tests {
         };
         let run = Truncation::top_level_with(limits);
         let never = || -> usize { panic!("the exact size is computed only past the bound") };
-        assert_eq!(cut_of(derived_term(&run, &"f", 100, never)), (None, false));
+        assert_eq!(cut_of(derived_term(&run, &"f", 100, never)), (false, false));
         // A loose bound over the limit, an exact size under it: allowed.
-        assert_eq!(cut_of(derived_term(&run, &"f", 101, || 100)), (None, false));
-        let (e, cut) = cut_of(derived_term(&run, &"f", 101, || 101));
-        assert!(cut && e.is_some_and(|e| e.contains(CLOSURE_CUT)));
+        assert_eq!(cut_of(derived_term(&run, &"f", 101, || 100)), (false, false));
+        assert!(run.refusal().is_none());
+        assert_eq!(cut_of(derived_term(&run, &"f", 101, || 101)), (true, true));
+        assert!(run.refusal().is_some_and(|e| e.contains(CLOSURE_CUT)));
 
         let s = Term::Lit("abc".into(), "http://www.w3.org/2001/XMLSchema#string".into(), None);
         assert_eq!(term_bytes(&s), string_term_bytes(3));

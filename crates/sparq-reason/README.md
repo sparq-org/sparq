@@ -53,6 +53,23 @@ let g = Graph::from_parts(dict, triples);
   exponentiation, floor/ceiling rendering, `i128` tier) stay in a thin adapter — closures
   byte-identical (`sq-pbz04.5.1`). `reason_n3_pass_all` = EYE `--pass-all`/`-ground` (closure **plus rules**, `sq-xqchl.2`);
   `reason_n3_query` = `--query` (`sq-xqchl.1`): a query rule evaluated over the closure by the chainer's OWN matcher — builtins/formulae/lists work there too.
+  Every forward closure is bounded by `ClosureLimits`: rounds, facts, and `max_term_bytes`
+  per derived term (default 16 MiB, GH #6771). Every term the text engine would build is
+  sized before it is built, and past a limit the call returns `Err("n3: forward closure limit
+  exceeded …")` instead of exhausting memory. Sized terms include substitutions under
+  bindings, builtin arguments and results, `log:collectAllIn` lists, `log:conclusion`
+  formulas, and `log:parsedAsN3` / `log:semantics` parses, which are charged term by term.
+  **Not bounded:**
+  - total memory: many distinct terms each just under the limit are bounded only by
+    `max_facts`;
+  - `log:content` text, which the caller's resolver supplies;
+  - the incremental counting engine behind `MaterializedN3Graph` (GH #6854);
+  - `compiled-rules` (GH #6855).
+
+  One over-refusal is deliberate: `log:conjunction` over many copies of one large formula is
+  refused when its argument list passes the limit, even if the merged result would fit.
+  `ClosureLimits` is `#[non_exhaustive]`: build it from `ClosureLimits::default()` and set
+  fields.
 - **RIF-Core** (opt-in `rif-core`) — W3C RIF **Core** dialect (monotone Horn subset of
   RIF-BLD/PRD) as `rif::Document` over the N3 chainer. Atoms: frame/membership/subclass
   plus numeric/string/list builtins. **Range-restriction safety enforced** (unsafe rules

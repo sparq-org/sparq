@@ -601,10 +601,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if conclusion_refused(&bw, &c, &b) {
-                    continue;
-                }
-                if let Some(g) = ground_triple(&c, &b) {
+                if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
                     if emitted.insert(g.clone()) {
                         out.push(g);
                     }
@@ -612,7 +609,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
             }
         }
     }
-    if let Some(e) = bw.nested_error.take() {
+    if let Some(e) = bw.nested_error.take().or_else(|| bw.truncated.refusal()) {
         return Err(e);
     }
     Ok(out)
@@ -1434,17 +1431,14 @@ fn run_closure(
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if conclusion_refused(&bw, &c, &b) {
-                            continue;
-                        }
-                        if let Some(g) = ground_triple(&c, &b) {
+                        if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
                             if !facts.contains(&g) {
                                 // The supporting facts: premise patterns instantiated under b that
                                 // are actual facts (excludes builtins / list structure).
                                 let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
                                     rule.premise
                                         .iter()
-                                        .filter_map(|p| ground_triple(p, &b))
+                                        .filter_map(|p| ground_triple(p, &b, &bw.truncated))
                                         .filter(|t| facts.contains(t))
                                         .collect()
                                 } else {
@@ -1515,7 +1509,7 @@ fn run_closure(
             delta = new_delta;
         }
     }
-    if let Some(e) = bw.nested_error.take() {
+    if let Some(e) = bw.nested_error.take().or_else(|| truncated.refusal()) {
         return Err(e);
     }
     let skipped = strata
@@ -1755,7 +1749,10 @@ fn match_premise_seeded(
             let is_not = matches!(op, ScopeOp::NotIncludes);
             let mut next = Vec::new();
             for b in bindings {
-                let matches: Vec<Binding> = match apply_deep(&pat[0], &b) {
+                let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
+                    continue;
+                };
+                let matches: Vec<Binding> = match scope_term {
                     Term::Formula(ts) => {
                         let scope: Vec<[Term; 3]> = if matches!(op, ScopeOp::Supports) {
                             formula_closure(&ts, bw)
@@ -1819,7 +1816,7 @@ fn match_premise_seeded(
                         Term::Lit(v, _, _) if v == "true" => &[],
                         _ => return None,
                     };
-                    Some(match apply_deep(&pat[2], seed) {
+                    Some(match bounded::substitute_deep(&pat[2], seed, &bw.truncated)? {
                         Term::Formula(scope) => formula_containment(&scope, atoms, seed, bw),
                         Term::Lit(v, _, _) if v == "true" => {
                             formula_containment(&[], atoms, seed, bw)
@@ -1827,7 +1824,7 @@ fn match_premise_seeded(
                         _ => match_premise_seeded(atoms, facts, seed, None, bw, depth),
                     })
                 };
-                let subj = apply(&pat[0], &b);
+                let Some(subj) = bounded::substitute(&pat[0], &b, &bw.truncated) else { continue };
                 let Term::List(members) = &subj else { continue };
                 match op {
                     CollectOp::CollectAll => {
@@ -1839,13 +1836,19 @@ fn match_premise_seeded(
                         // One copy of the template per solution, sized before it is built.
                         let bytes = sols
                             .iter()
-                            .map(|s| resolved_bytes(template, s, true))
+                            .map(|s| bounded::resolved_bytes(template, s, true))
                             .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
                         if refused_term(bw, &bw.truncated, Derived::Collected, bytes, || bytes) {
                             continue;
                         }
-                        let collected =
-                            Term::List(sols.iter().map(|s| apply_deep(template, s)).collect());
+                        let Some(items) = sols
+                            .iter()
+                            .map(|s| bounded::substitute_deep(template, s, &bw.truncated))
+                            .collect::<Option<Vec<Term>>>()
+                        else {
+                            continue;
+                        };
+                        let collected = Term::List(items);
                         let mut nb = b.clone();
                         if unify_term(list_pat, &collected, &mut nb) {
                             next.push(nb);
@@ -1877,7 +1880,7 @@ fn match_premise_seeded(
             };
             let mut next = Vec::new();
             for b in &bindings {
-                let head = apply(list_pos, b);
+                let Some(head) = bounded::substitute(list_pos, b, &bw.truncated) else { continue };
                 // A first-class `( … )` list value, hand-written rdf:first/rest
                 // rule structure, or a data list reached through a bound
                 // variable (walked from the fact store).
@@ -1887,7 +1890,7 @@ fn match_premise_seeded(
                 };
                 if let Some(members) = members {
                     for (ix, m) in members.iter().enumerate() {
-                        let mv = apply(m, b);
+                        let Some(mv) = bounded::substitute(m, b, &bw.truncated) else { continue };
                         let target = match gen {
                             ListGen::Member | ListGen::In => mv,
                             // (?index ?value) pairs, 0-based (EYE list:iterate).
@@ -1912,16 +1915,23 @@ fn match_premise_seeded(
         } else if let Some(op) = binder_builtin(&pat[1]) {
             bindings = bindings
                 .into_iter()
-                .filter_map(|b| bw.settle(eval_binder(op, &pat[0], &pat[2], b)))
+                .filter_map(|b| bw.settle(eval_binder(op, &pat[0], &pat[2], b, &bw.truncated)))
                 .collect();
         } else if let Some(op) = builtin(&pat[1]) {
-            bindings.retain(|b| bw.settle(eval_builtin(op, &pat[0], &pat[2], b)));
+            bindings.retain(|b| bw.settle(eval_builtin(op, &pat[0], &pat[2], b, &bw.truncated)));
         } else {
             // Join atom: selective FactIndex lookup (no full scan) for each current binding,
             // PLUS goal-directed resolution against the backward (`<=`) rules.
             let mut next = Vec::new();
             for b in &bindings {
-                let (s_a, p_a, o_a) = (apply(&pat[0], b), apply(&pat[1], b), apply(&pat[2], b));
+                let run = &bw.truncated;
+                let (Some(s_a), Some(p_a), Some(o_a)) = (
+                    bounded::substitute(&pat[0], b, run),
+                    bounded::substitute(&pat[1], b, run),
+                    bounded::substitute(&pat[2], b, run),
+                ) else {
+                    continue;
+                };
                 // Virtual rdf:first / rdf:rest over a first-class list value —
                 // cwm/EYE expose list structure to matching even though the
                 // list is a term, not triples (`?L rdf:first ?X` computes).
@@ -2073,7 +2083,15 @@ fn is_join_atom(pat: &[Term; 3]) -> bool {
 /// each proof back onto the goal's variables. SLD resolution with standardized-apart rule
 /// variables and a depth bound (`depth` counts REMAINING backward applications).
 fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, depth: usize) -> Vec<Binding> {
-    let goal = [apply(&pat[0], b), apply(&pat[1], b), apply(&pat[2], b)];
+    let run = &bw.truncated;
+    let (Some(g0), Some(g1), Some(g2)) = (
+        bounded::substitute(&pat[0], b, run),
+        bounded::substitute(&pat[1], b, run),
+        bounded::substitute(&pat[2], b, run),
+    ) else {
+        return Vec::new();
+    };
+    let goal = [g0, g1, g2];
     let mut out = Vec::new();
     for rule in bw.rules {
         for concl in &rule.conclusion {
@@ -2108,7 +2126,11 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                     if let Term::Var(_) = g {
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
-                        let val = apply(&walk(g, &sol), &sol);
+                        let Some(val) = bounded::substitute(&walk(g, &sol), &sol, &bw.truncated)
+                        else {
+                            ok = false;
+                            break;
+                        };
                         if (val.is_ground() || matches!(val, Term::Formula(_)))
                             && !unify_term(g, &val, &mut nb)
                         {
@@ -2317,18 +2339,6 @@ fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
     }
 }
 
-/// Substitute bound variables in `t` (recursing into list members); returns the
-/// term (possibly still containing free vars).
-fn apply(t: &Term, b: &Binding) -> Term {
-    match t {
-        Term::Var(v) => b.get(v).cloned().unwrap_or_else(|| t.clone()),
-        Term::List(ms) => Term::List(ms.iter().map(|m| apply(m, b)).collect()),
-        Term::Triple(tr) => {
-            Term::Triple(Box::new([apply(&tr[0], b), apply(&tr[1], b), apply(&tr[2], b)]))
-        }
-        _ => t.clone(),
-    }
-}
 
 /// Instantiate a conclusion triple under binding `b` (deeply — variables
 /// inside quoted formulae substitute too); `None` if any term stays non-ground.
@@ -2339,7 +2349,7 @@ fn apply(t: &Term, b: &Binding) -> Term {
 /// statements include rules — cwm keeps those rule variables quoted in the
 /// emitted formula). Only a variable at the triple level (or inside a list)
 /// leaves the conclusion genuinely uninstantiated.
-fn ground_triple(t: &[Term; 3], b: &Binding) -> Option<[Term; 3]> {
+fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 3]> {
     fn instantiated(t: &Term) -> bool {
         match t {
             Term::Var(_) => false,
@@ -2351,7 +2361,11 @@ fn ground_triple(t: &[Term; 3], b: &Binding) -> Option<[Term; 3]> {
             _ => true,
         }
     }
-    let g = [apply_deep(&t[0], b), apply_deep(&t[1], b), apply_deep(&t[2], b)];
+    let g = [
+        bounded::substitute_deep(&t[0], b, run)?,
+        bounded::substitute_deep(&t[1], b, run)?,
+        bounded::substitute_deep(&t[2], b, run)?,
+    ];
     if g.iter().all(instantiated) {
         Some(g)
     } else {
@@ -2689,9 +2703,9 @@ fn builtin(p: &Term) -> Option<Builtin> {
 
 /// Evaluate a filter builtin. Every fallible step inside settles into a local
 /// [`bounded::Pending`], so the caller gets a [`Bounded`] it must settle on the run.
-fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> Bounded<bool> {
+fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding, run: &Truncation) -> Bounded<bool> {
     let pending = bounded::Pending::default();
-    let v = eval_builtin_inner(op, s, o, b, &pending);
+    let v = eval_builtin_inner(op, s, o, b, run, &pending);
     pending.finish(v)
 }
 
@@ -2700,9 +2714,12 @@ fn eval_builtin_inner(
     s: &Term,
     o: &Term,
     b: &Binding,
+    run: &Truncation,
     pending: &bounded::Pending,
 ) -> bool {
-    let (s, o) = (apply(s, b), apply(o, b));
+    let (Some(s), Some(o)) = (bounded::substitute(s, b, run), bounded::substitute(o, b, run)) else {
+        return false;
+    };
     match op {
         Builtin::LogEq => s == o,
         Builtin::LogNe => s != o,
@@ -2789,9 +2806,9 @@ fn binder_builtin(p: &Term) -> Option<Bidi> {
 /// a variable or filtering on equality). `None` ⇒ the premise fails for this binding.
 /// Evaluate a bidirectional builtin. It has no fallible step today; it returns a
 /// [`Bounded`] like every builtin so that any future one must be settled.
-fn eval_binder(op: Bidi, s: &Term, o: &Term, b: Binding) -> Bounded<Option<Binding>> {
+fn eval_binder(op: Bidi, s: &Term, o: &Term, b: Binding, run: &Truncation) -> Bounded<Option<Binding>> {
     let pending = bounded::Pending::default();
-    let v = eval_binder_inner(op, s, o, b, &pending);
+    let v = eval_binder_inner(op, s, o, b, run, &pending);
     pending.finish(v)
 }
 
@@ -2800,9 +2817,10 @@ fn eval_binder_inner(
     s: &Term,
     o: &Term,
     b: Binding,
+    run: &Truncation,
     _pending: &bounded::Pending,
 ) -> Option<Binding> {
-    let (sv, ov) = (apply(s, &b), apply(o, &b));
+    let (sv, ov) = (bounded::substitute(s, &b, run)?, bounded::substitute(o, &b, run)?);
     let mut nb = b;
     match op {
         Bidi::LogUri => match (&sv, &ov) {
@@ -2889,29 +2907,6 @@ fn collect_op(p: &Term) -> Option<CollectOp> {
     }
 }
 
-/// Substitute bound variables in `t`, recursing into lists AND quoted
-/// formulae (used where a formula value must be fully instantiated:
-/// includes scopes, conclusion emission).
-fn apply_deep(t: &Term, b: &Binding) -> Term {
-    match t {
-        Term::Var(v) => match b.get(v) {
-            Some(val) => val.clone(),
-            None => t.clone(),
-        },
-        Term::List(ms) => Term::List(ms.iter().map(|m| apply_deep(m, b)).collect()),
-        Term::Formula(ts) => Term::Formula(
-            ts.iter()
-                .map(|r| [apply_deep(&r[0], b), apply_deep(&r[1], b), apply_deep(&r[2], b)])
-                .collect(),
-        ),
-        Term::Triple(tr) => Term::Triple(Box::new([
-            apply_deep(&tr[0], b),
-            apply_deep(&tr[1], b),
-            apply_deep(&tr[2], b),
-        ])),
-        _ => t.clone(),
-    }
-}
 
 /// SYNTACTIC containment of `pattern` in `scope` (log:includes): every
 /// pattern triple must match a scope triple (or be virtual list structure),
@@ -2937,7 +2932,7 @@ fn formula_containment(
         .collect();
     let mut out = Vec::new();
     let mut steps = bounded::StepBudget::containment();
-    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut steps);
+    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut steps, &bw.truncated);
     bw.settle(steps.finish(out))
 }
 
@@ -2948,6 +2943,7 @@ fn containment_search(
     defers_left: usize,
     out: &mut Vec<Binding>,
     steps: &mut bounded::StepBudget,
+    run: &Truncation,
 ) {
     if !steps.take() {
         return;
@@ -2960,7 +2956,8 @@ fn containment_search(
     // the formula's content for matching purposes (cwm builtins.n3 test2/4).
     if let Term::Iri(pi) = &pat[1] {
         if pi == parser::RDF_FIRST || pi == parser::RDF_REST {
-            match apply(&pat[0], &b) {
+            let Some(subject) = bounded::substitute(&pat[0], &b, run) else { return };
+            match subject {
                 Term::List(ms) => {
                     if !ms.is_empty() {
                         let val = if pi == parser::RDF_FIRST {
@@ -2970,7 +2967,7 @@ fn containment_search(
                         };
                         let mut nb = b.clone();
                         if unify_term(&pat[2], &val, &mut nb) {
-                            containment_search(rest, scope, nb, rest.len(), out, steps);
+                            containment_search(rest, scope, nb, rest.len(), out, steps, run);
                         }
                     }
                     return;
@@ -2979,7 +2976,7 @@ fn containment_search(
                     // Subject not yet bound — try the other triples first.
                     let mut rotated: Vec<[Term; 3]> = rest.to_vec();
                     rotated.push(pat.clone());
-                    containment_search(&rotated, scope, b, defers_left - 1, out, steps);
+                    containment_search(&rotated, scope, b, defers_left - 1, out, steps, run);
                     return;
                 }
                 _ => {} // fall through to plain scope matching
@@ -2989,7 +2986,7 @@ fn containment_search(
     for st in scope {
         let mut nb = b.clone();
         if (0..3).all(|k| unify_term(&pat[k], &st[k], &mut nb)) {
-            containment_search(rest, scope, nb, rest.len(), out, steps);
+            containment_search(rest, scope, nb, rest.len(), out, steps, run);
         }
     }
 }
@@ -3698,29 +3695,7 @@ fn parsed_term(
     bw: &BwCtx,
     pending: &bounded::Pending,
 ) -> Option<parser::Parsed> {
-    match bounded::parse_n3_term(src, base, &bw.truncated, pending) {
-        Ok(parsed) => Some(parsed),
-        Err(refused) => {
-            if let Some(e) = refused {
-                bw.nested_error.borrow_mut().get_or_insert(e);
-            }
-            None
-        }
-    }
-}
-
-/// Whether instantiating conclusion triple `c` under `b` would build a term past the
-/// run's term-size limit: a conclusion that nests a bound term in a list, quoted triple
-/// or formula (`{ :a :p ?s } => { :a :p (?s ?s) }`) copies it, so it can grow every round
-/// without any builtin. Sized from the borrowed terms; a refusal is a cut and an error
-/// that fails the closure.
-fn conclusion_refused(bw: &BwCtx, c: &[Term; 3], b: &Binding) -> bool {
-    c.iter()
-        .filter(|t| matches!(t, Term::List(_) | Term::Triple(_) | Term::Formula(_)))
-        .any(|t| {
-            let bytes = resolved_bytes(t, b, true);
-            refused_term(bw, &bw.truncated, Derived::Conclusion, bytes, || bytes)
-        })
+    bounded::parse_n3_term(src, base, &bw.truncated, pending)
 }
 
 /// What a term-size refusal names ([`bounded::derived_term`]).
@@ -3729,8 +3704,6 @@ enum Derived {
     Result(Func),
     /// The argument list a functional builtin is evaluated over.
     Arguments(Func),
-    /// A term of a rule conclusion, instantiated under a binding.
-    Conclusion,
     /// The list `log:collectAllIn` collects.
     Collected,
 }
@@ -3740,7 +3713,6 @@ impl std::fmt::Display for Derived {
         match self {
             Derived::Result(b) => write!(f, "the result of the builtin {b:?}"),
             Derived::Arguments(b) => write!(f, "the argument list of the builtin {b:?}"),
-            Derived::Conclusion => write!(f, "a rule conclusion's term"),
             Derived::Collected => write!(f, "the list log:collectAllIn collects"),
         }
     }
@@ -3748,7 +3720,7 @@ impl std::fmt::Display for Derived {
 
 /// The ONE term-size checkpoint of the text engine (GH #6771), over
 /// [`bounded::derived_term`]: `true` when the term is refused, its cut recorded on `cuts`
-/// and its error set to fail the closure (`bw.nested_error`).
+/// and the run refused, which fails every closure of the run ([`Truncation::refusal`]).
 fn refused_term(
     bw: &BwCtx,
     cuts: &impl bounded::Sink,
@@ -3756,30 +3728,7 @@ fn refused_term(
     bound: usize,
     exact: impl FnOnce() -> usize,
 ) -> bool {
-    match settle(cuts, bounded::derived_term(&bw.truncated, &what, bound, exact)) {
-        Some(e) => {
-            bw.nested_error.borrow_mut().get_or_insert(e);
-            true
-        }
-        None => false,
-    }
-}
-
-/// The [`bounded::term_bytes`] of `t` with `b`'s bindings substituted, as [`apply`] (or,
-/// with `deep`, [`apply_deep`], through quoted formulae) would build it, read from the
-/// borrowed terms without building it.
-fn resolved_bytes(t: &Term, b: &Binding, deep: bool) -> usize {
-    let node = bounded::TERM_NODE_BYTES;
-    let all = |ts: &mut dyn Iterator<Item = &Term>| {
-        ts.fold(node, |n, m| n.saturating_add(resolved_bytes(m, b, deep)))
-    };
-    match t {
-        Term::Var(v) => bounded::term_bytes(b.get(v).unwrap_or(t)),
-        Term::List(ms) => all(&mut ms.iter()),
-        Term::Triple(tr) => all(&mut tr.iter()),
-        Term::Formula(ts) if deep => all(&mut ts.iter().flatten()),
-        _ => bounded::term_bytes(t),
-    }
+    settle(cuts, bounded::derived_term(&bw.truncated, &what, bound, exact))
 }
 
 /// The [`bounded::term_bytes`] of the list builtin `args` member `a` stands for: a
@@ -4162,7 +4111,8 @@ fn eval_functional_inner(
         if members.len() != 2 {
             return None;
         }
-        let (m0, m1) = (apply(&members[0], &b), apply(&members[1], &b));
+        let run = &bw.truncated;
+        let (m0, m1) = (bounded::substitute(&members[0], &b, run)?, bounded::substitute(&members[1], &b, run)?);
         let mut nb = b;
         return match (&m0, &m1) {
             // forward: ( "lex" xsd:dt ) → "lex"^^xsd:dt
@@ -4172,7 +4122,7 @@ fn eval_functional_inner(
             }
             // reverse: decompose a ground object literal into its parts
             _ => {
-                let Term::Lit(v, dt, _) = apply(obj, &nb) else { return None };
+                let Some(Term::Lit(v, dt, _)) = bounded::substitute(obj, &nb, run) else { return None };
                 (unify_term(&members[0], &Term::Lit(v.clone(), XSD_STRING.into(), None), &mut nb)
                     && unify_term(&members[1], &Term::Iri(dt.clone()), &mut nb))
                 .then_some(nb)
@@ -4182,9 +4132,9 @@ fn eval_functional_inner(
     // math:negation is bidirectional in EYE: `?x math:negation 3` solves
     // ?x = -3 (the one reverse mode the suites rely on).
     if matches!(f, Func::Negation) && !subj.is_ground() && !matches!(subj, Term::List(_)) {
-        let s_applied = apply(subj, &b);
+        let s_applied = bounded::substitute(subj, &b, &bw.truncated)?;
         if !s_applied.is_ground() {
-            let o_applied = apply(obj, &b);
+            let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
             if let Some(v) = numval_in(&o_applied, pending) {
                 let negated = rep(pending, numval_negate(v))?;
                 let mut nb = b;
@@ -4196,8 +4146,11 @@ fn eval_functional_inner(
     // Reverse (object-bound) modes of the invertible unary builtins:
     // `?y math:sin 0` solves y = asin 0 (cwm trig.n3 test4), and
     // `?t time:inSeconds N` formats the epoch back to a UTC dateTime.
-    if !subj.is_ground() && !matches!(subj, Term::List(_)) && !apply(subj, &b).is_ground() {
-        let o_applied = apply(obj, &b);
+    if !subj.is_ground()
+        && !matches!(subj, Term::List(_))
+        && !bounded::substitute(subj, &b, &bw.truncated)?.is_ground()
+    {
+        let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
         if o_applied.is_ground() {
             let inverse = |v: f64| -> Option<f64> {
                 Some(match f {
@@ -4248,27 +4201,28 @@ fn eval_functional_inner(
         Term::Var(v) => b.get(v).unwrap_or(subj),
         _ => subj,
     };
+    let run = &bw.truncated;
     let (args, was_list): (Vec<Term>, bool) = if let Term::List(_) = subj_bound {
-        let bytes = resolved_bytes(subj, &b, false);
-        if refused_term(bw, pending, Derived::Arguments(f), bytes, || bytes) {
-            return None;
-        }
-        // First-class list value (substituted by `apply`).
-        let Term::List(members) = apply(subj, &b) else { return None };
+        // First-class list value (substituted, and sized first, by `substitute`).
+        let Some(Term::List(members)) = bounded::substitute(subj, &b, run) else { return None };
         (members, true)
     } else {
-        let subj_applied = apply(subj, &b);
+        let subj_applied = bounded::substitute(subj, &b, run)?;
         // A data list written as rdf:first/rest triples, via a bound variable.
         match settle(pending, fact_list_refs(&subj_applied, facts)) {
             Some(members) => {
                 let bytes = members
                     .iter()
-                    .map(|m| resolved_bytes(m, &b, false))
+                    .map(|m| bounded::resolved_bytes(m, &b, false))
                     .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
                 if refused_term(bw, pending, Derived::Arguments(f), bytes, || bytes) {
                     return None;
                 }
-                (members.iter().map(|m| apply(m, &b)).collect(), true)
+                let members = members
+                    .iter()
+                    .map(|m| bounded::substitute(m, &b, run))
+                    .collect::<Option<Vec<Term>>>()?;
+                (members, true)
             }
             None => (vec![subj_applied], false),
         }
@@ -4636,7 +4590,7 @@ fn eval_functional_inner(
     // exact-decimal results match their reference lexical forms), else
     // structurally.
     let mut nb = b;
-    let obj_applied = apply(obj, &nb);
+    let obj_applied = bounded::substitute(obj, &nb, &bw.truncated)?;
     if obj_applied.is_ground() {
         if let (Some(x), Some(y)) = (cmp_num(&obj_applied, true), cmp_num(&result, true)) {
             return (cmp_promoted(x, y) == Some(std::cmp::Ordering::Equal)).then_some(nb);

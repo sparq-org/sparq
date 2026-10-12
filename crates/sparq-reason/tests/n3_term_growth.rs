@@ -167,8 +167,7 @@ fn a_huge_argument_list_is_refused_before_it_is_built() {
          {{ :a :p ?s. ({refs}) string:concatenation ?t }} => {{ :a :q ?t }}.\n",
         "x".repeat(8 << 20)
     );
-    let e = close(&doc, ClosureLimits::default()).expect_err("refused");
-    assert!(e.contains("argument list"), "{e}");
+    assert_term_limit("128-reference argument list", close(&doc, ClosureLimits::default()));
 }
 
 /// Review finding 3: `list:append` over rdf:first/rest data lists is charged for the
@@ -243,8 +242,7 @@ fn conclusion_list_doubling_is_refused() {
         "{PREFIXES}:a :p \"x\".\n\
          {{ :a :p ?s }} => {{ :a :p (?s ?s) }}.\n"
     );
-    let e = close(&doc, term_limit(1 << 16)).expect_err("refused");
-    assert!(e.contains("conclusion"), "{e}");
+    assert_term_limit("list conclusion", close(&doc, term_limit(1 << 16)));
     let formula = format!(
         "{PREFIXES}:a :p \"x\".\n\
          {{ :a :p ?s }} => {{ :a :p {{ ?s :q ?s }} }}.\n"
@@ -267,4 +265,71 @@ fn a_large_collected_list_is_refused() {
     assert!(close(&doc, ClosureLimits::default()).is_ok());
     let e = close(&doc, term_limit(16 << 10)).expect_err("refused");
     assert!(e.contains("collectAllIn"), "{e}");
+}
+
+/// Review round 3, finding 1: every substitution is sized before it is built. A
+/// collection template naming an 8 MiB binding 128 times would be 1 GiB.
+#[test]
+fn a_huge_collection_template_is_refused_before_it_is_built() {
+    let refs = "?s ".repeat(128);
+    let doc = format!(
+        "{PREFIXES}:a :p \"{}\". :e :n 1.\n\
+         {{ :a :p ?s. (({refs}) {{ ?x :n ?i }} ?all) log:collectAllIn _:t }} => {{ :a :all ?all }}.\n",
+        "x".repeat(8 << 20)
+    );
+    assert_term_limit("collection template", close(&doc, ClosureLimits::default()));
+}
+
+/// Review round 3, finding 1: a list generator's members and a backward rule's
+/// projection are substituted through the same sized primitive.
+#[test]
+fn list_generator_and_backward_projection_are_sized() {
+    let refs = "?s ".repeat(128);
+    let generator = format!(
+        "{PREFIXES}:a :p \"{}\".\n\
+         {{ :a :p ?s. ?m list:in (({refs})) }} => {{ :a :m ?m }}.\n",
+        "x".repeat(8 << 20)
+    );
+    assert_term_limit("list generator", close(&generator, ClosureLimits::default()));
+    let backward = format!(
+        "{PREFIXES}:a :p \"{}\".\n\
+         {{ :a :q ?l }} <= {{ :a :p ?s. ?l log:equalTo ({refs}) }}.\n\
+         {{ :a :q ?l }} => {{ :a :r ?l }}.\n",
+        "x".repeat(8 << 20)
+    );
+    assert_term_limit("backward projection", close(&backward, ClosureLimits::default()));
+}
+
+/// Review round 3, finding 2: the parser charges every term it builds, a literal object
+/// included, so a parsed formula with one 64 KiB literal is refused under a 4 KiB limit.
+#[test]
+fn a_parsed_literal_object_is_charged() {
+    let src = format!("<http://ex/s> <http://ex/p> \"{}\" .", "z".repeat(64 << 10));
+    let doc = format!(
+        "{PREFIXES}:a :src \"\"\"{src}\"\"\".\n\
+         {{ :a :src ?s. ?s log:parsedAsN3 ?f }} => {{ :a :parsed ?f }}.\n"
+    );
+    assert_term_limit("parsed literal object", close(&doc, term_limit(4096)));
+    // Numeric list members and list nodes are charged too.
+    let list = format!("<http://ex/s> <http://ex/p> ({}) .", "1 ".repeat(4096));
+    let doc = format!(
+        "{PREFIXES}:a :src \"\"\"{list}\"\"\".\n\
+         {{ :a :src ?s. ?s log:parsedAsN3 ?f }} => {{ :a :parsed ?f }}.\n"
+    );
+    assert_term_limit("parsed numeric list", close(&doc, term_limit(16 << 10)));
+}
+
+/// Review round 3, finding 3: each kept term is charged once. A 64 KiB namespace used in
+/// 60 three-IRI triples is about 11 MiB of formula and fits under the 16 MiB default.
+#[test]
+fn a_parse_that_fits_is_not_double_charged() {
+    let mut src = format!("@prefix p: <http://ex/{}#>. ", "a".repeat(64 << 10));
+    for i in 0..60 {
+        src.push_str(&format!("p:s{i} p:p p:o . "));
+    }
+    let doc = format!(
+        "{PREFIXES}:a :src \"\"\"{src}\"\"\".\n\
+         {{ :a :src ?s. ?s log:parsedAsN3 ?f }} => {{ :a :parsed ?f }}.\n"
+    );
+    assert_eq!(close(&doc, ClosureLimits::default()), Ok(2));
 }
