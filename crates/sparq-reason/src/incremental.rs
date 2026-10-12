@@ -2502,7 +2502,10 @@ impl MaterializedN3Graph {
     /// graph's own node `label`. `None` for `{N3_GRAPH_BLANK}{base_ns}…`, which
     /// [`Self::outward`] never produces. Borrowed (no allocation) when the fact has no
     /// blank node.
-    fn inward<'a>(&self, t: &'a [N3Term; 3]) -> Option<std::borrow::Cow<'a, [N3Term; 3]>> {
+    pub(crate) fn inward<'a>(
+        &self,
+        t: &'a [N3Term; 3],
+    ) -> Option<std::borrow::Cow<'a, [N3Term; 3]>> {
         let ns = self.base_ns.as_str();
         let invalid = Cell::new(false);
         let to_ns = |l: &str| match l.strip_prefix(N3_GRAPH_BLANK) {
@@ -2531,7 +2534,7 @@ impl MaterializedN3Graph {
     /// own label back, every other blank (the rules document's, the engine's: none starts
     /// with `base_ns`) is shown as `{N3_GRAPH_BLANK}{label}`. Injective: a caller label is
     /// never in the reserved space, since [`Self::inward`] reads that space as the graph's.
-    fn outward(&self, t: &[N3Term; 3]) -> [N3Term; 3] {
+    pub(crate) fn outward(&self, t: &[N3Term; 3]) -> [N3Term; 3] {
         let ns = self.base_ns.as_str();
         let from_ns = |l: &str| {
             Some(match l.strip_prefix(ns) {
@@ -2998,10 +3001,14 @@ impl MaterializedN3Graph {
 
     /// Is `t` in the materialized closure (asserted or derived)?
     pub fn contains(&self, t: &[N3Term; 3]) -> bool {
-        let Some(t) = self.inward(t) else { return false };
+        self.inward(t).is_some_and(|t| self.holds(&t))
+    }
+
+    /// Is `t`, in the graph's own labels, in the materialized closure?
+    pub(crate) fn holds(&self, t: &[N3Term; 3]) -> bool {
         match self.mode {
-            N3Mode::Counting => self.index.contains(&t),
-            N3Mode::Fallback => self.fallback_closure.contains(t.as_ref()),
+            N3Mode::Counting => self.index.contains(t),
+            N3Mode::Fallback => self.fallback_closure.contains(t),
         }
     }
 

@@ -1123,16 +1123,31 @@ impl MaterializedN3Graph {
 
     /// [`why`](Self::why) with explicit depth/size caps.
     pub fn why_with(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
-        if !self.contains(fact) {
-            return None;
-        }
         // The graph holds the caller's blank labels in its own namespace (GH #6775); the
         // proof shows them as the caller wrote them.
         let inner = self.inward(fact)?;
-        let fact = inner.as_ref();
+        self.why_in(inner.as_ref(), opts, BlankView::Caller)
+    }
+
+    /// [`why_with`](Self::why_with) with `fact` and the proof in the rules document's own
+    /// blank labels, the labels the batch engine ([`reason_n3`](crate::reason_n3)) gives
+    /// the closure of the same document: a written `_:x` is `x`, a `[]` is the parser's
+    /// `_b<n>`, with no [`N3_GRAPH_BLANK`](crate::N3_GRAPH_BLANK) prefix. For a graph
+    /// built from a combined rules + facts document with no caller blank nodes, this
+    /// explains exactly the triples `reason_n3` prints (the WASM `whyN3` boundary). A
+    /// caller's blank node, if any, is shown in the graph's internal caller namespace.
+    pub fn why_document_with(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
+        self.why_in(fact, opts, BlankView::Document)
+    }
+
+    /// The proof of `fact`, given in the graph's own labels, shown through `view`.
+    fn why_in(&self, fact: &[N3Term; 3], opts: ExplainOpts, view: BlankView) -> Option<ProofTree> {
+        if !self.holds(fact) {
+            return None;
+        }
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
-            let shown = self.outward(fact);
+            let shown = view.show(self, fact);
             let root = b.push_keyed(
                 crate::n3::serialize::statement_display_lossy(&shown),
                 crate::n3::serialize::statement_keys(&shown),
@@ -1156,6 +1171,7 @@ impl MaterializedN3Graph {
         }
         let mut p = N3Prover {
             g: self,
+            view,
             base: &self.base,
             step_map,
             b,
@@ -1167,8 +1183,31 @@ impl MaterializedN3Graph {
     }
 }
 
+/// Which blank labels an N3 proof is shown in.
+#[derive(Clone, Copy)]
+enum BlankView {
+    /// The caller's: [`MaterializedN3Graph::outward`].
+    Caller,
+    /// The rules document's: the graph's own labels, unchanged.
+    Document,
+}
+
+impl BlankView {
+    fn show<'a>(
+        self,
+        g: &MaterializedN3Graph,
+        f: &'a [N3Term; 3],
+    ) -> std::borrow::Cow<'a, [N3Term; 3]> {
+        match self {
+            BlankView::Caller => std::borrow::Cow::Owned(g.outward(f)),
+            BlankView::Document => std::borrow::Cow::Borrowed(f),
+        }
+    }
+}
+
 struct N3Prover<'a> {
     g: &'a MaterializedN3Graph,
+    view: BlankView,
     base: &'a FxHashSet<[N3Term; 3]>,
     step_map: FxHashMap<&'a [N3Term; 3], (usize, &'a [[N3Term; 3]])>,
     b: ProofBuilder,
@@ -1193,7 +1232,7 @@ impl N3Prover<'_> {
         // Display strings for reading, and a lossless key per fact for identity: two
         // different facts can render alike, and `sparq-prov` addresses facts by `key`
         // (GH #6701 review round 6).
-        let shown = self.g.outward(f);
+        let shown = self.view.show(self.g, f);
         let rendered = crate::n3::serialize::statement_display_lossy(&shown);
         let key = crate::n3::serialize::statement_keys(&shown);
         if self.base.contains(f) {
