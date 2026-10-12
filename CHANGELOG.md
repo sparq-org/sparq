@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **sparq-trust (status lists):** `decode_encoded_list` now rejects a `u` (base64url) body
+  whose length is ≡ 1 mod 4 even when the leftover bits are zero (for example `ugAAAA`);
+  such a body has no byte-string meaning, and every other non-canonical form was already
+  refused. A list published by a conforming encoder is unaffected. (#6873)
+
 ## [0.1.5] - 2026-10-10
 
 Fix-forward release after the v0.1.4 release workflow failed before creating a GitHub

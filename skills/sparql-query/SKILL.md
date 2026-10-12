@@ -72,6 +72,10 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
+- `sparq_core::baseenc::{base58btc_encode, base58btc_encode_into, base58btc_decode, base64url_encode,
+  base64url_encode_into, base64url_decode}` are the shared multibase `z` / `u` body codecs; both
+  decoders return `Result<Vec<u8>, DecodeError>` and base64url accepts only the one canonical
+  unpadded text per byte string.
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
 - `pub struct QueryResult { pub vars: Vec<oxrdf::Variable>, pub rows: Vec<Vec<Option<oxrdf::Term>>> }`
