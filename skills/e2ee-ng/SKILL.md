@@ -165,7 +165,12 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   a single-branch grant omits the field and encodes exactly as it always did.
 - **Determinism is load-bearing.** `cap_id` and `CommitId` are hashes of canonical
   bytes; the golden vectors in `tests/vectors.rs` pin the exact wire format. A
-  change to those bytes is a wire-format break, not a refactor.
+  change to those bytes is a wire-format break, not a refactor. Set-valued fields
+  are canonical on the wire and rejected otherwise: a `Commit`'s `parents` encode
+  strictly ascending with duplicates removed (an in-memory list in any order is
+  canonicalized by `encode`/`signing_bytes`), and `Commit::decode` fails with
+  `Error::NonCanonical` on a reordered or duplicated parent list — so one logical
+  commit has exactly one `CommitId`.
 
 ## Learn more
 

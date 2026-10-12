@@ -336,7 +336,9 @@ pub struct Commit {
     pub branch: BranchId,
     /// Epoch.
     pub epoch: Epoch,
-    /// Causal parents (a frontier).
+    /// Causal parents (a frontier). A *set*: it is encoded sorted ascending
+    /// with duplicates removed, and [`Commit::decode`] rejects a wire list that
+    /// is not strictly ascending.
     pub parents: Vec<CommitId>,
     /// Author public-key id (raw Ed25519 public key).
     pub author: AuthorKeyId,
@@ -366,6 +368,18 @@ const C_SNAPSHOT: u64 = 10;
 const C_SIG: u64 = 11;
 const C_VERSION_VAL: u64 = 0;
 
+/// Canonicalize a parent frontier: it is a *set*, so it encodes sorted
+/// ascending (byte order of the 32-byte ids, which is also the order of their
+/// fixed-length CBOR byte strings) with duplicates removed. `CommitId` hashes
+/// the encrypted envelope of these bytes, so one logical commit must have
+/// exactly one encoding.
+fn canon_parents(parents: &[CommitId]) -> Vec<CommitId> {
+    let mut v = parents.to_vec();
+    v.sort();
+    v.dedup();
+    v
+}
+
 impl Commit {
     fn signing_entries(&self) -> Vec<(u64, Vec<u8>)> {
         let mut e = vec![
@@ -376,8 +390,7 @@ impl Commit {
             (
                 C_PARENTS,
                 enc_array(
-                    &self
-                        .parents
+                    &canon_parents(&self.parents)
                         .iter()
                         .map(|p| enc_bytes(p.as_bytes()))
                         .collect::<Vec<_>>(),
@@ -468,6 +481,15 @@ impl Commit {
                 let mut v = Vec::with_capacity(n);
                 for _ in 0..n {
                     v.push(CommitId::from_bytes(r.bytes_fixed::<32>()?));
+                }
+                // Bytes-level rule: the wire parent set must ALREADY be
+                // canonical (strictly ascending, so no duplicates). Normalizing
+                // here would let one logical commit carry several encodings and
+                // hence several CommitIds.
+                if v.windows(2).any(|w| w[1] <= w[0]) {
+                    return Err(Error::NonCanonical(
+                        "commit parents not strictly ascending",
+                    ));
                 }
                 parents = Some(v);
                 Ok(true)

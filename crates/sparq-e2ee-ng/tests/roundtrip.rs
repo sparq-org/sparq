@@ -1032,6 +1032,77 @@ fn commit_sign_verify_and_id_stable() {
     commit2.verify().unwrap();
 }
 
+// --- #4260: the parent list is a canonical set ------------------------------
+
+fn two_parent_commit(parents: Vec<CommitId>) -> Commit {
+    Commit {
+        repo: RepoId::from_bytes([1u8; 32]),
+        branch: BranchId::from_bytes([2u8; 32]),
+        epoch: Epoch(7),
+        parents,
+        author: AuthorKeyId::from_bytes([0u8; 32]),
+        clock: 42,
+        crdt_kind: "or-set-quads-v0".to_string(),
+        operations: vec![ObjectId::from_bytes([5u8; 32])],
+        snapshot: None,
+        author_sig: None,
+    }
+}
+
+/// Replace every occurrence of the 32-byte `from` run in `bytes` with `to`.
+fn splice32(bytes: &mut [u8], from: [u8; 32], to: [u8; 32]) {
+    let mut i = 0;
+    while i + 32 <= bytes.len() {
+        if bytes[i..i + 32] == from {
+            bytes[i..i + 32].copy_from_slice(&to);
+            i += 32;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+#[test]
+fn commit_decode_rejects_reordered_parents() {
+    let (lo, hi) = ([0x11u8; 32], [0x22u8; 32]);
+    let canonical = two_parent_commit(vec![CommitId::from_bytes(lo), CommitId::from_bytes(hi)]);
+    let mut bytes = canonical.encode();
+    Commit::decode(&bytes, lim()).unwrap();
+    // Swap the two parents on the wire: same logical commit, different bytes.
+    splice32(&mut bytes, lo, [0xEEu8; 32]);
+    splice32(&mut bytes, hi, lo);
+    splice32(&mut bytes, [0xEEu8; 32], hi);
+    assert!(matches!(Commit::decode(&bytes, lim()), Err(Error::NonCanonical(_))));
+}
+
+#[test]
+fn commit_decode_rejects_duplicate_parents() {
+    let (lo, hi) = ([0x11u8; 32], [0x22u8; 32]);
+    let canonical = two_parent_commit(vec![CommitId::from_bytes(lo), CommitId::from_bytes(hi)]);
+    let mut bytes = canonical.encode();
+    splice32(&mut bytes, hi, lo);
+    assert!(matches!(Commit::decode(&bytes, lim()), Err(Error::NonCanonical(_))));
+}
+
+#[test]
+fn commit_encode_canonicalizes_parent_set() {
+    let (a, b) = (CommitId::from_bytes([0x11u8; 32]), CommitId::from_bytes([0x22u8; 32]));
+    let canonical = two_parent_commit(vec![a, b]);
+    let author = SecretSigningKey::from_seed([3u8; 32]);
+    // Reordered and duplicated in memory: one logical commit, one encoding.
+    for parents in [vec![b, a], vec![a, b, a], vec![b, b, a, a]] {
+        let mut c = two_parent_commit(parents);
+        assert_eq!(c.encode(), canonical.encode());
+        assert_eq!(c.signing_bytes(), canonical.signing_bytes());
+        c.sign(&author);
+        c.verify().unwrap();
+        let decoded = Commit::decode(&c.encode(), lim()).unwrap();
+        assert_eq!(decoded.parents, vec![a, b]);
+        assert_eq!(decoded.encode(), c.encode());
+        decoded.verify().unwrap();
+    }
+}
+
 // ============================================================================
 // Epoch transitions
 // ============================================================================
