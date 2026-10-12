@@ -59,7 +59,8 @@
 //! later evaluation, not in this typed plan). The disclose decision is the design record's
 //! constraint C-B (§2.2): the planner here only *proposes* the partition; a later phase (Phase 4)
 //! has each source **re-enforce** its own policy fail-closed and the verifier ratify the declared
-//! leakage envelope, so a lying planner that over-discloses is rejected, not honoured. This pass
+//! leakage envelope assembled from these operators, so a declared over-disclosure is rejected,
+//! not honoured (a check of the declaration only; see [`crate::ratify_envelope`]). This pass
 //! does **not** perform that ratification — it computes the proposed partition only. See the
 //! crate `README.md` and `research/mpc-untrusted-planner-routing-design.md` §2.2 / §4.4 / §6.
 //!

@@ -42,8 +42,12 @@
 //! envelope is a *declaration* of what the plan reveals, and the ratification is a *policy check*
 //! over that declaration — neither is a cryptographic enforcement. The fail-closed holder check is
 //! the design record's constraint C-B (§2.2): the disclosure decision belongs to the data owners
-//! and the verifier, not the planner, so a lying planner that proposes an over-disclosing route is
-//! **rejected here, not honoured**. But this is a *plan-time policy gate*, not a runtime guarantee
+//! and the verifier, not the planner, so an envelope that *declares* a disclosure of a holder's
+//! private predicate is **rejected here, not honoured**. The check attests only the declared
+//! operand list: the caller must build the envelope from the actual operators with
+//! [`assemble_leakage_envelope`], keep it in step with what executes, and rebuild and re-ratify
+//! after any change. A planner that also writes the envelope can mislabel a disclosure, and
+//! nothing here detects that. This is a *plan-time policy gate*, not a runtime guarantee
 //! that a malicious holder/verifier honours it; it makes **NO** soundness/privacy/security claim.
 //! The MPC estate (`sparq-mpc`) is research-grade, **honest-majority semi-honest only**, and is
 //! **NOT** externally audited — the accredited-cryptographer sign-off (sq-qhy4) and the coZK
@@ -182,9 +186,8 @@ fn operand_disclosure_label(operand: &Operand) -> String {
 ///    re-derives whether the envelope discloses one of *its own* private predicates. If the plan
 ///    routes an operator `Disclosed` whose operands include a predicate the holder has **not**
 ///    marked [`Disclosability::Public`](crate::Disclosability::Public), the holder **rejects**
-///    (fail-closed) — the over-disclosing plan is *not honoured*. This is the load-bearing C-B
-///    discharge: the disclosure decision belongs to the data owners, not the planner, so a lying
-///    planner that over-discloses is caught here.
+///    (fail-closed) — the over-disclosing plan is *not honoured*. This checks the declaration
+///    only: it does not by itself enforce C-B against a planner that mislabels the envelope.
 /// 2. **Verifier acceptance policy.** The verifier rejects an **over-leaking** envelope — one
 ///    whose total count of distinct disclosed operands exceeds `verifier_budget`. `None` means
 ///    "no budget cap" (accept any envelope the holders cleared). This is the verifier-side
@@ -192,8 +195,12 @@ fn operand_disclosure_label(operand: &Operand) -> String {
 ///
 /// **No exemptions.** Every disclosed operand goes through the holder re-check, including the
 /// [`ANONYMOUS_GLOBAL_IRI`] label recorded for a disclosed global IRI that binds no predicate: a
-/// holder consents to that disclosure only by marking the label public. The re-check trusts the
-/// envelope's operand labels; it does not re-derive them from the typed operators.
+/// holder consents to that disclosure only by marking the label public.
+///
+/// **Trust boundary.** Ratification attests only the declared operand list; it does not
+/// re-derive labels from the typed operators. Build `envelope` with
+/// [`assemble_leakage_envelope`] from the operators that will run, keep that correspondence
+/// through execution, and rebuild and re-ratify after any change.
 ///
 /// Returns a [`RatificationOutcome`] enumerating, honestly, *which* ratification(s) failed and
 /// *why* — an over-disclosing plan is reported with the offending source + predicate (holder

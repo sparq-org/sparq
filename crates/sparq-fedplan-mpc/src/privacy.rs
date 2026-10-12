@@ -14,7 +14,8 @@
 //! NOTHING, and [`SourcePrivacyDescriptor::may_disclose`] returns `false` for any predicate
 //! that was not explicitly marked [`Disclosability::Public`]. A planner cannot widen this: a
 //! later pass *reads* the descriptor, but the source re-enforces it fail-closed (the design
-//! record's constraint C-B), so an over-disclosing plan is rejected, not honoured.
+//! record's constraint C-B), so a plan whose envelope declares an over-disclosure is rejected,
+//! not honoured. That re-check covers the declared envelope only.
 //!
 //! This module performs NO MPC and runs NO privacy-bearing computation — it is a typed policy
 //! declaration. It makes no soundness/privacy claim; the privacy-bearing phases that consume
