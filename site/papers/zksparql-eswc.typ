@@ -150,8 +150,7 @@ accepts. Our contributions are:
 - *An architecture* (§#ref(<architecture>, supplement: none)) in which one proof shows such an
   answer, bound to the verifier's request, with every credential's signature checked against the
   request's trusted issuers; signature modes, Merkle-based cryptosuites and a public-input rule set
-  what authenticating the input costs and discloses (§#ref(<modes>, supplement: none) to
-  §#ref(<cryptosuites>, supplement: none)).
+  what authenticating the input costs and discloses (§#ref(<modes>, supplement: none)–§#ref(<cryptosuites>, supplement: none)).
 - *An evaluation* (§#ref(<evidence>, supplement: none)) of a SPARQL evaluator in the RISC Zero zkVM
   @risc0: proofs with signature checks of `SELECT`, true and false `ASK` and `CONSTRUCT` answers;
   executions without proving of one query case per feature; and cycle counts by signature mode and
@@ -165,16 +164,15 @@ An RDF dataset has one default graph and zero or more named graphs @sparql12. SP
 forms: `SELECT` returns a sequence of solution mappings (rows), `ASK` a boolean, and `CONSTRUCT` and
 `DESCRIBE` an RDF graph. Pattern matching compares terms, whereas the `=` operator compares values
 @rdf11. The companion specification of §#ref(<architecture>, supplement: none) depends on SPARQL
-1.2 @sparql12 and RDF 1.2 @rdf12. RDF is usually read under an open-world assumption: an absent
-triple is not thereby false.
+1.2 @sparql12 and RDF 1.2 @rdf12. RDF is usually read open-world: an absent triple is not thereby
+false.
 
 A verifiable credential @vcdm2 is a set of claims that an issuer makes about a subject, secured so
 that its authorship can be verified. A holder presents it to a verifier in a verifiable
 presentation, which may instead carry data derived from credentials, such as a zero-knowledge proof.
-Here, a credential's Data Integrity proof @vcdi is a signature, in its `proofValue`, with the proof
-configuration: the proof's other properties. A cryptosuite specifies how to create and verify the
-proof, which names its verification method, here a public key, by an identifier
-(`verificationMethod`). The cryptosuite `eddsa-rdfc-2022` @vcdieddsa canonicalises the
+Here, a credential's Data Integrity proof @vcdi is a signature (`proofValue`) with the proof
+configuration, which names the verification method, here a public key (`verificationMethod`); a
+cryptosuite specifies how to create and verify the proof. The cryptosuite `eddsa-rdfc-2022` @vcdieddsa canonicalises the
 credential and the proof configuration with RDF Dataset Canonicalization (RDFC-1.0) @rdfc10;
 Ed25519 then signs the SHA-256 hash of the canonical proof configuration followed by that of the
 canonical document. A valid signature shows only that someone with the signing key signed these
@@ -221,9 +219,9 @@ credential's blank nodes apart. A proof method may instead put each credential i
 graph, and states its layout, because a query written for one does not match the other.
 
 The proof fixes $D$ through a _dataset commitment_: a digest of the included credentials and of a
-random salt that the holder chooses. It is binding if the hash is collision-resistant, and, while the
-salt stays secret and the hash is modelled as a random oracle, hiding: it reveals nothing about $D$
-to a computationally bounded verifier.
+random salt that the holder chooses. It is binding if the hash is collision-resistant and, while the
+salt stays secret and the hash is a random oracle, hiding: it reveals nothing about $D$ to a
+computationally bounded verifier.
 
 == Answers over the input dataset <answers>
 
@@ -236,9 +234,8 @@ isomorphism. A result that exceeds the request's limits is rejected, never trunc
 
 For some queries, such as those using `OFFSET` and `LIMIT` where `ORDER BY` does not fix the order,
 `REDUCED`, `SAMPLE` or `GROUP_CONCAT`, SPARQL permits several results over the same $D$, and the
-holder chooses one. A proof method may fix these choices, and a verifier can rely on that only
-where the method publishes them. Our evaluator does not yet publish its choices, so a verifier can
-rely on a unique result only for queries that leave SPARQL no choice.
+holder chooses one. A proof method may fix and publish these choices; ours does not yet, so a
+verifier can rely on a unique result only for queries that leave SPARQL no choice.
 // Source: ZK code landing addenda (10 October), item 3; a follow-up change documents the choices.
 An answer does not say who signed $D$ (§#ref(<linkage>, supplement: none)).
 
@@ -332,9 +329,8 @@ except in the disclosed mode.
   arch-paged,
   kind: image,
   caption: [
-    One proof per answer presentation. The query request travels from verifier to holder, and
-    the presentation travels back. Dataset construction, evaluation and, in the hidden mode, the
-    signature checks are inside the proof. The verifier's checks and marking the request as
+    One proof per answer presentation. Dataset construction, evaluation and, in the hidden mode, the
+    signature checks are inside the proof; the verifier's checks and marking the request as
     answered are outside it.
   ],
 ) <fig-architecture>
@@ -372,12 +368,12 @@ from the presentation.
       defined type gives an issuer and its verification methods with their public keys, so that
       both sides prove and verify against the same keys. Without trust requirements, no credential
       is checked against an issuer],
-    [`cryptosuite`, `signatureMode`], [With trust requirements: the cryptosuites accepted for the
+    [`cryptosuite`, \ `signatureMode`], [With trust requirements: the cryptosuites accepted for the
       issuers' signatures, such as `eddsa-rdfc-2022`, and the accepted signature modes, hidden,
       revealed or disclosed (§#ref(<modes>, supplement: none))],
     [`proofMethod`], [The accepted proof methods, in order of preference: each an IRI (`method`)
       with a verification key (`verificationKey`) and parameters],
-    [`maxPresentationBytes`, `maxResultSize`], [The largest presentation, in bytes; the most
+    [`maxPresentationBytes`, \ `maxResultSize`], [The largest presentation, in bytes; the most
       solutions, or triples, in the result],
     [`challenge`, `domain`], [Fresh randomness, and the verifier's identifier],
     [`validFrom`, `validUntil`], [The period in which the verifier accepts a presentation],
@@ -405,12 +401,12 @@ them all by one digest. The proof shows that:
   in the hidden mode the proof also verifies those signatures (§#ref(<modes>, supplement: none));
 + the result is an answer for $Q$ over $D$ (§#ref(<answers>, supplement: none)).
 
-Through the request digest, the proof binds every member of the request: as long as SHA-256 is
+Through the request digest, the proof binds every member of the request: if SHA-256 is
 collision-resistant, a proof made for one request does not verify for another.
 
 == Signature modes <modes>
 
-Each proof method states which signature modes it supports for each cryptosuite.
+Each proof method states the signature modes it supports per cryptosuite.
 
 - In the _hidden_ mode, the proof shows that the holder knows a valid signature from a trusted issuer
   on every credential in $D$. The signatures, the signed messages and which key signed which
@@ -418,9 +414,9 @@ Each proof method states which signature modes it supports for each cryptosuite.
   and the public inputs do not disclose them (§#ref(<leakage>, supplement: none)).
 - In the _revealed_ mode, the presentation carries each credential's signature and signed message,
   which the verifier checks itself. The proof then shows only that $D$ is exactly the data those
-  messages cover and that the result is correct. This mode reduced the cycles of our guest program
+  messages cover and that the result is correct. This mode reduced our guest program's cycles
   (§#ref(<cost>, supplement: none)) but discloses the signatures, the signed messages, the issuers'
-  keys and the number of credentials (§#ref(<security>, supplement: none)).
+  keys and the number of credentials.
 - In the _disclosed_ mode, for proof methods whose evidence is disclosed credentials, the holder
   sends the credentials or presentations derived from them by a selective-disclosure cryptosuite.
   The verifier checks them, builds $D$ from what they disclose and evaluates $Q$ itself, seeing
@@ -433,7 +429,7 @@ The verifier service checks a presentation against the request it sent, in this 
 it at the first check that fails @zksparqlspec:
 
 + Before parsing, reject a presentation larger than `maxPresentationBytes`; then reject it unless it
-  is a JSON-LD document that uses only the specification's terms.
+  is JSON-LD that uses only the specification's terms.
 + Reject it unless its request digest is that of the stored request, the time is within the
   request's validity period, the proof's challenge and domain equal the request's, and no
   presentation with this challenge has been accepted.
@@ -443,7 +439,7 @@ it at the first check that fails @zksparqlspec:
 + If the request has trust requirements, reject a signature mode that the request does not list. In
   the revealed mode, verify each signature under a trusted issuer's key and a listed cryptosuite.
 + Reject a result of the wrong form for the query, or larger than `maxResultSize`.
-+ Verify the proof against the statement computed from the stored request and the presentation.
++ Verify the proof against the statement computed from the stored request and presentation.
 
 The verifier service then marks the request as answered, in one atomic step that fails if it is
 already marked, and only then accepts. Checking first stops a malformed presentation from using up a
@@ -457,8 +453,7 @@ has the result. A proof method may make public any value that the verifier can c
 stored request and the result alone; no request member permits disclosing more. This public-input
 rule extends zkRDF's disclosure of query constants and projected terms @braun26. Our argument for it
 concerns disclosure only: such a value tells the verifier nothing that its request and the result do
-not. Whether it also reduces proving cost is not established; our pilot is too small to show a
-saving (§#ref(<proved>, supplement: none)).
+not. Our pilot is too small to show a saving in proving cost (§#ref(<proved>, supplement: none)).
 
 == The public-input rule <rule>
 
@@ -779,9 +774,9 @@ every configuration, the revealed mode needed fewer cycles and segments than the
   },
   caption: [
     Executor counts for the guest program with signature checks, as medians over the
-    #headline("zkexec.main_queries") queries: its cycles, without the prover's overhead and
-    padding per segment, and its segments. The counts are deterministic for a given guest program
-    and input; they are not proving times.
+    #headline("zkexec.main_queries") queries: cycles, without the prover's overhead and padding per
+    segment, and segments. The counts are deterministic for a given guest program and input; they
+    are not proving times.
   ],
 ) <cost-table>
 ]
@@ -828,9 +823,8 @@ signature.
     )
   },
   caption: [
-    Cycles in millions per phase for the payment `ASK` over one credential, by cryptosuite and
-    signature mode, from an instrumented build of the guest program. The counts include the
-    instrumentation and are not proving times.
+    Cycles in millions per phase for the payment `ASK` over one credential, from an instrumented
+    build of the guest program. The counts include the instrumentation; they are not proving times.
   ],
 ) <phase-table>
 ]
