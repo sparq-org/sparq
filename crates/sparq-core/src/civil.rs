@@ -6,13 +6,14 @@
 //! parses back to the same instant.
 
 /// Days since 1970-01-01 of a proleptic-Gregorian civil date (`month` 1–12, `day` 1–31).
-/// The inverse of [`civil_from_days`].
-pub fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-    let y = year - i64::from(month <= 2);
+/// The inverse of [`civil_from_days`]. Returned as `i128`, so every `i64` year is exact
+/// (the day count of a year near `i64::MAX` does not fit an `i64`).
+pub fn days_from_civil(year: i64, month: u32, day: u32) -> i128 {
+    let y = i128::from(year) - i128::from(month <= 2);
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400; // [0, 399]
-    let mp = i64::from(if month > 2 { month - 3 } else { month + 9 }); // [0, 11]
-    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1; // [0, 365]
+    let mp = i128::from(if month > 2 { month - 3 } else { month + 9 }); // [0, 11]
+    let doy = (153 * mp + 2) / 5 + i128::from(day) - 1; // [0, 365]
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
     era * 146_097 + doe - 719_468
 }
@@ -27,9 +28,10 @@ pub fn format_utc(epoch_secs: i64) -> String {
 }
 
 /// Days-from-epoch (1970-01-01 = 0) → `(year, month, day)`. The inverse of
-/// [`days_from_civil`]; from Howard Hinnant's `chrono`-compatible algorithms.
+/// [`days_from_civil`]; from Howard Hinnant's `chrono`-compatible algorithms. Exact for
+/// every `i64` (the arithmetic runs in `i128`; the year always fits an `i64`).
 pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
+    let z = i128::from(z) + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = z - era * 146_097; // [0, 146096]
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
@@ -38,7 +40,7 @@ pub fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let mp = (5 * doy + 2) / 153; // [0, 11]
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
     let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32; // [1, 12]
-    (if m <= 2 { y + 1 } else { y }, m, d)
+    ((if m <= 2 { y + 1 } else { y }) as i64, m, d)
 }
 
 #[cfg(test)]
@@ -132,7 +134,16 @@ mod tests {
         // Every day across several 400-year eras, including pre-epoch and year 0.
         for days in (-800_000..800_000).step_by(7) {
             let (y, m, d) = civil_from_days(days);
-            assert_eq!(days_from_civil(y, m, d), days, "{y}-{m}-{d}");
+            assert_eq!(days_from_civil(y, m, d), i128::from(days), "{y}-{m}-{d}");
+        }
+        // The whole i64 domain is exact: no overflow at either end.
+        for days in [i64::MIN, i64::MIN + 1, i64::MAX - 1, i64::MAX] {
+            let (y, m, d) = civil_from_days(days);
+            assert_eq!(days_from_civil(y, m, d), i128::from(days), "{y}-{m}-{d}");
+        }
+        for year in [i64::MIN, i64::MAX] {
+            let days = days_from_civil(year, 6, 15);
+            assert_eq!(days.signum(), year.signum() as i128);
         }
     }
 }
