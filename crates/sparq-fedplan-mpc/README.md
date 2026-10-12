@@ -27,10 +27,12 @@ let routing = sparq_fedplan_mpc::route_operators(
 )?;
 // routing.routing — Vec<OperatorRouting> the sparq-mpc pipeline consumes
 let envelope = sparq_fedplan_mpc::assemble_leakage_envelope(&routing, &operators, &selected)?;
-// dual ratification: each holder fail-closed + the verifier's disclosed-operand budget
-match sparq_fedplan_mpc::ratify_envelope(&envelope, &privacy, Some(budget)) {
+// dual ratification: each holder fail-closed + the verifier's disclosed-operand budget.
+// `holders` = exactly one descriptor per envelope.participating_sources entry, no others.
+match sparq_fedplan_mpc::ratify_envelope(&envelope, &holders, Some(budget)) {
     RatificationOutcome::Ratified => { /* cleared for execution */ }
-    rejected => { /* a holder vetoed a private-term disclosure, or the verifier rejected an over-leak */ }
+    rejected => { /* a holder policy was missing or extra, a holder vetoed a private-term disclosure,
+                     or the verifier rejected an over-leak */ }
 }
 // Phase 5 — commit, then fail-closed re-validate a recomputed plan. CANONICALITY ONLY, not soundness.
 let claimed = sparq_fedplan_mpc::commit_plan(&selected, &routing, &envelope)?;
@@ -53,13 +55,20 @@ assert!(sparq_fedplan_mpc::bind_plan_to_proof(&claimed, &statement).is_err()); /
 - **`route_operators`** (Phase 3, sq-i1wh2) — the **disclosed/hidden routing pass**: given the Phase-2 selection, the privacy descriptors and the query's
   `QueryOperator`s, it classifies each operator `Disclosed` (every operand disclosable in the clear) or `Hidden(class)` (default-deny otherwise — routes
   through the MPC path), emitting the `Vec<OperatorRouting>` the `sparq-mpc` pipeline today receives hand-written. The `RoutingPolicy` knob picks the cheap
-  default (disclose global-IRI operands) or the strict "hide even a public term" route; the most-private contributing source wins per operand.
+  default (disclose global-IRI operands) or the strict "hide even a public term" route, where a global IRI needs every contributing source to mark its
+  predicate public and an empty contributing set is never consent; the most-private contributing source wins per operand. Every participating source in
+  the Phase-2 selection must have exactly one descriptor: a missing one is refused (`SeamError::DescriptorMismatch`) before any operator is classified,
+  and descriptors for non-participants are ignored.
 - **`assemble_leakage_envelope` + `ratify_envelope`** (Phase 4, sq-pwr.2) — the **leakage-envelope assembly + dual-ratification** gate.
   `assemble_leakage_envelope` derives a declared `LeakageEnvelope` that **honestly enumerates** what the plan reveals — the operator structure
   (count/class/label), the disclose/hide partition, the operands each `Disclosed` operator exposes, and which sources participate — **over-counting, never
   under-counting**. `ratify_envelope` then runs the dual gate: each **holder** fail-closed-rejects a plan disclosing one of its own private predicates
   (constraint C-B — the most-private holder wins), AND the **verifier** rejects an over-leaking envelope (distinct disclosed operands exceeding its
-  budget), returning a `RatificationOutcome` naming *which* ratification failed and *why*.
+  budget), returning a `RatificationOutcome` naming *which* ratification failed and *why*. The holder policies must cover the envelope's participation
+  set exactly: a missing participant policy (including an empty list), a policy for a non-participant, or a disclosure with no participant at all is
+  `ParticipationMismatch`. The one exemption from the holder re-check is a disclosed anonymous global IRI (`ANONYMOUS_GLOBAL_IRI`, default routing
+  policy only), which names no predicate a holder can mark; it still counts against the verifier budget. These are plan-time policy checks over the
+  supplied descriptors, not cryptographic enforcement.
 - **`prune_source_combinations`** (Phase 6, sq-pwr.3 + sq-xkrt) — the FedUP-style **result-aware source-combination prune** over the Phase-2 selection. The
   seam's secure-join cost grows with the number of source *combinations* (one source per pattern) it considers, so this pass surfaces the combinations that
   **provably contribute no answer** and the seam routes fewer toward MPC. Two recall-safe rules:

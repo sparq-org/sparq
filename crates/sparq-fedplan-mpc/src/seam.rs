@@ -248,6 +248,17 @@ pub enum RatificationOutcome {
         /// A short human-readable explanation.
         detail: &'static str,
     },
+    /// The supplied holder policies do not cover the envelope's participation set exactly: a
+    /// participating source has no policy, a policy names a non-participating source, or the
+    /// envelope discloses an operand while declaring no participant at all. The plan is NOT
+    /// honoured — a missing policy fails closed rather than being skipped.
+    ParticipationMismatch {
+        /// The participating source with no policy, or the non-participating source a policy
+        /// names (empty when the envelope declares no participant).
+        source_id: String,
+        /// A short human-readable explanation.
+        detail: &'static str,
+    },
     /// The **verifier** rejected an over-leaking envelope: it discloses more operands than the
     /// verifier's declared acceptance budget.
     VerifierRejected {
