@@ -345,7 +345,7 @@ fn fetch_leaf(
         }
     }
     let tp = resolver.pattern(pattern)?;
-    let sub = lower_leaf(tp);
+    let sub = lower_leaf(tp)?;
     let body = source.execute(&sub)?;
     crate::operators::parse_srj(&body).map_err(InterpError::BadSrj)
 }

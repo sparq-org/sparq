@@ -632,7 +632,10 @@ impl<'a> PatternProbeSession<'a> {
         endpoint: &str,
         pattern: &sparq_fedplan::TriplePattern,
     ) -> PatternProbeOutcome {
-        let clause = crate::planner::render_pattern_clause(pattern);
+        // A pattern that cannot be written as SPARQL is never probed; the source is kept.
+        let Ok(clause) = crate::planner::render_pattern_clause(pattern) else {
+            return PatternProbeOutcome::Unknown;
+        };
         let key = format!("{}\0{}", endpoint, clause);
         if let Some(outcome) = self.cache.get(&key).copied() {
             self.stats.cache_hits += 1;
