@@ -3690,9 +3690,11 @@ fn output_bytes_bound(f: Func, args: &[Term]) -> usize {
     };
     let sum = |it: &mut dyn Iterator<Item = usize>| it.fold(0usize, usize::saturating_add);
     match f {
-        Func::Concat | Func::Format => {
-            bounded::string_term_bytes(sum(&mut args.iter().map(text)))
-        }
+        Func::Concat => bounded::string_term_bytes(sum(&mut args.iter().map(text))),
+        // `%d` / `%f` print any member read as a number, whatever its datatype.
+        Func::Format => bounded::string_term_bytes(sum(
+            &mut args.iter().map(|a| text(a).saturating_add(NUMERAL_TEXT_BYTES)),
+        )),
         Func::Replace => match &args[..] {
             // Every match (at most one per position, plus one) is replaced by the
             // replacement's text, and every `$` reference in it expands to text inside a
