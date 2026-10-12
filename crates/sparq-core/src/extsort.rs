@@ -40,9 +40,6 @@ fn drop_behind(map: &memmap2::Mmap, offset: usize, len: usize) {
     }
 }
 
-#[cfg(not(unix))]
-fn drop_behind(_map: &memmap2::Mmap, _offset: usize, _len: usize) {}
-
 /// Sorts a chunk (by its stored column order) and spills it to a fresh run file under
 /// `tmp`, clearing the buffer. The caller pushes triples already in the desired key
 /// order, so a plain lexicographic sort suffices.
@@ -114,7 +111,9 @@ fn kway_merge_to<S: FnMut([Id; 3]) -> io::Result<()>>(runs: &[PathBuf], mut sink
     // instead of letting the whole merge input (GBs at 100M+ triples) sit resident.
     // `Advice::Sequential` alone does NOT shrink residency on macOS, measured: the
     // sibling-merge phase peaked at 5.7 GiB on a 100M-triple build without this.
+    #[cfg(unix)]
     const DROP_STRIDE: usize = 32 << 20;
+    #[cfg(unix)]
     let mut dropped = vec![0usize; runs.len()];
 
     let mut last: Option<[Id; 3]> = None;
@@ -139,8 +138,6 @@ fn kway_merge_to<S: FnMut([Id; 3]) -> io::Result<()>>(runs: &[PathBuf], mut sink
             }
         }
     }
-    #[cfg(not(unix))]
-    let _ = &mut dropped;
     Ok(())
 }
 
