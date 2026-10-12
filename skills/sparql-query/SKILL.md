@@ -177,6 +177,10 @@ Update (data lives in the default + named graphs):
   replay it onto a second (e.g. durable mirror) graph WITHOUT re-executing the text. Use this when
   mirroring a sequence of updates so non-deterministic functions (`NOW()`/`RAND()`/`UUID()`/`BNODE()`)
   and `LOAD <remote>` are not re-rolled on the second graph (the server's `--persist` path uses it).
+- `where_update_effects(&Graph, &spargebra::Update, reads, &QueryBudget) -> Result<Option<Vec<UpdateEffect>>, String>`
+  — the effects of a request that is exactly one `DELETE`/`INSERT … WHERE`, computed read-only (the
+  WHERE evaluated once, nothing applied), so a caller can authorize them and then `apply_effects`
+  them with no fork. `Ok(None)` for any other request.
 
 Prepared (parse/plan once, execute many):
 
@@ -737,7 +741,8 @@ SPARQL Update `USING` identity behavior.
   When enabled, outbound `SERVICE` fetches go through a **default-deny SSRF egress filter**:
   an endpoint that resolves to a loopback / RFC1918 / link-local (incl. the `169.254.169.254`
   cloud-metadata IP) / unique-local / unspecified address is refused (checked on the *resolved* IP,
-  so DNS rebinding can't bypass it). To federate to a trusted internal endpoint, allowlist its host
+  so DNS rebinding can't bypass it; `sparq_engine::is_forbidden_ip(ip)` is that classifier,
+  also covering broadcast, CGNAT `100.64/10` and IPv4-mapped IPv6). To federate to a trusted internal endpoint, allowlist its host
   for the scope: `with_service_egress_allow([host.to_string()], || query(&g, q))`. Public endpoints
   need no opt-in. An allowlist entry may be **host-level** (`127.0.0.1` — every port) or
   **port-scoped** (`127.0.0.1:8053`, `[::1]:8053`, `.example.org:443` — that host on THAT port ONLY,
