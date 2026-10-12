@@ -1255,7 +1255,8 @@ impl Prior {
     }
 }
 
-/// What each resource `undo` puts back was before its change (see [`Prior`]).
+/// What each resource `undo` (newest step first, as it is put back) puts back was before its
+/// change (see [`Prior`]).
 fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) {
     let format = |iri: &str, meta: &StoredMeta| {
         Some(if iri.ends_with('/') {
@@ -1264,7 +1265,10 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
             meta.content_type.clone()
         })
     };
-    for step in undo {
+    // Put back newest first: a key written twice (metadata marked `pending`, then the new
+    // metadata) has two steps, the later one holding the intermediate state. The oldest
+    // step's prior, the state from before the change, is the one kept.
+    for step in undo.iter().rev() {
         let (iri, prior) = match step {
             Undo::Restore { key, prior } => match key.strip_suffix(META_SUFFIX) {
                 Some(iri) => {
@@ -2323,6 +2327,9 @@ pub(crate) mod test_store {
         /// commits, then reports a backend failure, as when a remote store's reply is lost after
         /// the update landed.
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// As `fail_after_write_of`, for the `n`th write (from 1) of the IRI named from now on
+        /// alone: `(iri, n)`.
+        pub lose_nth_write_of: Arc<std::sync::Mutex<Option<(String, usize)>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
         /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
@@ -2382,6 +2389,7 @@ pub(crate) mod test_store {
                 fail_list_of: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
+                lose_nth_write_of: Default::default(),
                 fail_list: Default::default(),
                 fail_meta: Default::default(),
                 exists_answers: Default::default(),
@@ -2531,7 +2539,18 @@ pub(crate) mod test_store {
                 if lost {
                     *slot = None;
                 }
-                lost
+                let mut nth = self.lose_nth_write_of.lock().unwrap();
+                let lost_nth = match nth.as_mut() {
+                    Some((of, n)) if of == iri => {
+                        *n -= 1;
+                        *n == 0
+                    }
+                    _ => false,
+                };
+                if lost_nth {
+                    *nth = None;
+                }
+                lost || lost_nth
             };
             if lost {
                 written?;
