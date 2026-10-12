@@ -27,12 +27,10 @@ let routing = sparq_fedplan_mpc::route_operators(
 )?;
 // routing.routing — Vec<OperatorRouting> the sparq-mpc pipeline consumes
 let envelope = sparq_fedplan_mpc::assemble_leakage_envelope(&routing, &operators, &selected)?;
-// dual ratification: each holder fail-closed + the verifier's disclosed-operand budget.
-// `holders` = exactly one descriptor per envelope.participating_sources entry, no others.
+// dual ratification: each holder fail-closed + the verifier's budget; `holders` = one descriptor per participating source, no others
 match sparq_fedplan_mpc::ratify_envelope(&envelope, &holders, Some(budget)) {
     RatificationOutcome::Ratified => { /* cleared for execution */ }
-    rejected => { /* a holder policy was missing or extra, a holder vetoed a private-term disclosure,
-                     or the verifier rejected an over-leak */ }
+    rejected => { /* a holder policy missing or extra, a holder vetoed a private-term disclosure, or the verifier rejected an over-leak */ }
 }
 // Phase 5 — commit, then fail-closed re-validate a recomputed plan. CANONICALITY ONLY, not soundness.
 let claimed = sparq_fedplan_mpc::commit_plan(&selected, &routing, &envelope)?;
@@ -55,20 +53,13 @@ assert!(sparq_fedplan_mpc::bind_plan_to_proof(&claimed, &statement).is_err()); /
 - **`route_operators`** (Phase 3, sq-i1wh2) — the **disclosed/hidden routing pass**: given the Phase-2 selection, the privacy descriptors and the query's
   `QueryOperator`s, it classifies each operator `Disclosed` (every operand disclosable in the clear) or `Hidden(class)` (default-deny otherwise — routes
   through the MPC path), emitting the `Vec<OperatorRouting>` the `sparq-mpc` pipeline today receives hand-written. The `RoutingPolicy` knob picks the cheap
-  default (disclose global-IRI operands) or the strict "hide even a public term" route, where a global IRI needs every contributing source to mark its
-  predicate public and an empty contributing set is never consent; the most-private contributing source wins per operand. Every participating source in
-  the Phase-2 selection must have exactly one descriptor: a missing one is refused (`SeamError::DescriptorMismatch`) before any operator is classified,
-  and descriptors for non-participants are ignored.
+  default (disclose global-IRI operands) or the strict "hide even a public term" route, where a global IRI needs every contributing source to mark its predicate public and an empty contributing set is never consent; the most-private contributing source wins per operand. Every participating source in the Phase-2 selection must have exactly one descriptor: a missing one is refused (`SeamError::DescriptorMismatch`) before any operator is classified; descriptors for non-participants are ignored.
 - **`assemble_leakage_envelope` + `ratify_envelope`** (Phase 4, sq-pwr.2) — the **leakage-envelope assembly + dual-ratification** gate.
   `assemble_leakage_envelope` derives a declared `LeakageEnvelope` that **honestly enumerates** what the plan reveals — the operator structure
   (count/class/label), the disclose/hide partition, the operands each `Disclosed` operator exposes, and which sources participate — **over-counting, never
   under-counting**. `ratify_envelope` then runs the dual gate: each **holder** fail-closed-rejects an envelope declaring a disclosure of one of its own private predicates
   (constraint C-B — the most-private holder wins), AND the **verifier** rejects an over-leaking envelope (distinct disclosed operands exceeding its
-  budget), returning a `RatificationOutcome` naming *which* ratification failed and *why*. The holder policies must cover the envelope's participation
-  set exactly: a missing participant policy (including an empty list), a policy for a non-participant, or a disclosure with no participant at all is
-  `ParticipationMismatch`. Ratification attests only the declared operand list (see the threat-model note below). There is no holder-check exemption: a disclosed anonymous global IRI is recorded as
-  `ANONYMOUS_GLOBAL_IRI`, which each holder must mark public to consent to. These are plan-time policy checks over the
-  supplied descriptors, not cryptographic enforcement.
+  budget), returning a `RatificationOutcome` naming *which* ratification failed and *why*. The holder policies must cover the envelope's participation set exactly: a missing participant policy (including an empty list), a policy for a non-participant, or a disclosure with no participant at all is `ParticipationMismatch`. Ratification attests only the declared operand list (see the threat-model note below). There is no holder-check exemption: a disclosed anonymous global IRI is recorded as `ANONYMOUS_GLOBAL_IRI`, which each holder must mark public to consent to. These are plan-time policy checks over the supplied descriptors, not cryptographic enforcement.
 - **`prune_source_combinations`** (Phase 6, sq-pwr.3 + sq-xkrt) — the FedUP-style **result-aware source-combination prune** over the Phase-2 selection. The
   seam's secure-join cost grows with the number of source *combinations* (one source per pattern) it considers, so this pass surfaces the combinations that
   **provably contribute no answer** and the seam routes fewer toward MPC. Two recall-safe rules:
@@ -113,9 +104,7 @@ assert!(sparq_fedplan_mpc::bind_plan_to_proof(&claimed, &statement).is_err()); /
 **Threat-model / leakage note (honest).** Phase 2 reads each source's *own* declared `SourcePrivacyDescriptor` to decide participation; Phase 6 reads only the (public) Phase-2 selection to decide
 which combinations are infeasible (revealing nothing beyond what the caller's own descriptors already imply, and making **no** value-overlap inference); Phase 3 reads `may_disclose` per operand to
 decide the route. Per constraint C-B (§2.2) the descriptor is the source's declaration — Phase 4's `ratify_envelope` has each holder **re-enforce** it fail-closed and the verifier ratify the leakage
-envelope, so an envelope that **declares** an over-disclosure is **rejected, not honoured**. Ratification attests only the declared operand list: build the envelope
-with `assemble_leakage_envelope` from the operators that run, keep it in step through execution, and rebuild and re-ratify after any change; a planner that
-also writes the envelope can mislabel a disclosure undetected. The plan **itself reveals** the **operator structure** (count, class, order), the **disclose/hide partition**, the
+envelope, so an envelope that **declares** an over-disclosure is **rejected, not honoured**. Ratification attests only the declared operand list: build the envelope with `assemble_leakage_envelope` from the operators that run, keep it in step through execution, and rebuild and re-ratify after any change; a planner that also writes the envelope can mislabel a disclosure undetected. The plan **itself reveals** the **operator structure** (count, class, order), the **disclose/hide partition**, the
 **disclosed operands** and the **participating sources** — enumerated honestly (over-counting) in the envelope — but **not** hidden-operand values or result cardinalities; nothing here claims what is
 learned once a query executes, because no query executes here. Phase 5's `PlanCommitment` carries **plan metadata only** — source ids, operator labels, operator classes and disclosed predicate ids,
 every one of which the Phase-4 envelope already declares as disclosed by the plan — so it widens the declared leakage envelope by nothing, and it carries no operand values, result rows or

@@ -783,6 +783,35 @@ mod tests {
         assert_eq!(out.routing[0].routing, Routing::Disclosed);
     }
 
+    /// `validate_operands` accepts ordinary and anonymous global-IRI operands and refuses the
+    /// reserved label or an empty predicate, naming the phase it was called for.
+    #[test]
+    fn validate_operands_refuses_only_ambiguous_predicate_ids() {
+        let ok = vec![QueryOperator::new(
+            "ok",
+            OperatorClass::EqualityJoin,
+            vec![
+                Operand::Predicate(MEMBER_OF.to_string()),
+                Operand::GlobalIri {
+                    predicate: String::new(),
+                },
+            ],
+        )];
+        assert_eq!(validate_operands(&ok, SeamPhase::Routing), Ok(()));
+        let bad = vec![QueryOperator::new(
+            "bad",
+            OperatorClass::EqualityJoin,
+            vec![Operand::Predicate(String::new())],
+        )];
+        assert!(matches!(
+            validate_operands(&bad, SeamPhase::LeakageEnvelope),
+            Err(SeamError::DescriptorMismatch {
+                phase: SeamPhase::LeakageEnvelope,
+                ..
+            })
+        ));
+    }
+
     /// An operand whose predicate id is empty or the reserved anonymous-global-IRI label is
     /// refused, so a predicate disclosure cannot be recorded as the anonymous-global-IRI label.
     #[test]
