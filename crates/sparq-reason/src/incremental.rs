@@ -1619,6 +1619,11 @@ pub struct MaterializedN3Graph {
     /// to the caller as `{N3_GRAPH_BLANK}{label}`. Facts cross the API boundary through
     /// [`Self::inward`] and [`Self::outward`] only.
     base_ns: String,
+    /// The table of documents the rules parse at run time (`log:parsedAsN3`), kept for the
+    /// graph's whole life and shared by every rebuild and proof re-derivation, so a
+    /// runtime-parsed blank keeps its label (and the caller its handle on it) across
+    /// mutations: an inserted fact naming that blank never moves the table's prefix.
+    runtime_docs: crate::n3::RuntimeDocs,
 }
 
 /// The reserved label space in which [`MaterializedN3Graph`] shows the blank nodes that
@@ -2453,6 +2458,7 @@ impl MaterializedN3Graph {
         let cuts = crate::n3::bounded::Truncation::top_level();
         let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
         let base_ns = crate::n3::fresh_base_blank_prefix(&parsed);
+        let runtime_docs = crate::n3::RuntimeDocs::for_sources(&[&parsed]);
         let (compiled, disqualified) = match n3_compile(&parsed) {
             Ok(c) => (Some(Rc::new(c)), None),
             Err(reason) => (None, Some(reason)),
@@ -2476,6 +2482,7 @@ impl MaterializedN3Graph {
             strat_warning: None,
             cuts: cuts.clone(),
             base_ns,
+            runtime_docs,
         };
         let mut caller = Vec::with_capacity(base_facts.len());
         for f in base_facts {
@@ -2645,6 +2652,7 @@ impl MaterializedN3Graph {
             self.base.iter().cloned(),
             crate::NegationCycles::Reject,
             &self.cuts,
+            &self.runtime_docs,
         ) {
             Ok(closure) => self.fallback_closure = closure.facts.into_iter().collect(),
             // The rules cannot be stratified (a negation cycle, possibly inside a nested
