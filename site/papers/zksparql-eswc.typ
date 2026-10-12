@@ -55,7 +55,9 @@
 #show: lncs.with(
   title: [Answers Instead of Documents: Private SPARQL Answers over Verifiable Credentials],
   running-title: [Answers Instead of Documents],
-  running-author: if anon { [Anonymous] } else { none },
+  running-author: if anon { [Anonymous] } else if coauthors == "wright-braun" {
+    [J. Wright and C. H.-J. Braun]
+  } else { none },
   authors: author-list,
   keywords: ("SPARQL", "Verifiable credentials", "Zero-knowledge proofs", "zkVM", "Data Integrity"),
   abstract: [
@@ -88,6 +90,7 @@
 // Tables: horizontal rules only, at the LNCS caption size.
 #set table(stroke: (x, y) => (top: 0.4pt, bottom: 0.4pt), inset: (x: 3pt, y: 2.5pt))
 #show raw.where(block: true): set text(size: 8.5pt)
+#show raw.where(block: true): set block(above: 0.8em, below: 0.8em, inset: (left: 1em))
 
 = Introduction <intro>
 
@@ -101,9 +104,9 @@ discloses every payment, balance and payee. If the bank issued it as a verifiabl
 the lender could check that the bank signed it, but the credential would still disclose everything.
 
 A zero-knowledge proof lets the applicant, as holder, return only the answer, with a proof that it
-is correct. The lender's agent cannot ask a person what an accepted answer guarantees, so the
-request must state it where software can check it. The lender writes its question as a SPARQL query
-@sparql12, our running example:
+is correct. The lender's agent cannot pause to ask a person what an accepted answer guarantees, so
+the lender's request must record that guarantee where software can check it. The lender writes its
+question as a SPARQL query @sparql12, our running example:
 ] else [
 A lender assessing a mortgage application asks the applicant one question: was any payment from the
 applicant's account returned unpaid? The usual answer is a bank statement, which also discloses
