@@ -584,90 +584,9 @@ struct SrjResults<'a> {
     bindings: Option<&'a serde_json::value::RawValue>,
 }
 
-/// Reconstruct one `oxrdf::Term` from an SRJ binding value object — the inbound counterpart
-/// of `sparq-engine`'s `json::term_to_json` writer (so a relation parsed here is identical,
-/// term-for-term, to what the engine emitted). [OPUS-4.8] sq-j27p.
-fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
-    let get = |k: &str| val.get(k).and_then(|s| s.as_str());
-    match get("type") {
-        Some("uri") => {
-            let iri = get("value").unwrap_or_default();
-            Ok(Term::NamedNode(
-                NamedNode::new(iri).map_err(|e| format!("bad IRI {:?}: {}", iri, e))?,
-            ))
-        }
-        Some("bnode") => {
-            let id = get("value").unwrap_or_default();
-            Ok(Term::BlankNode(
-                BlankNode::new(id).map_err(|e| format!("bad bnode {:?}: {}", id, e))?,
-            ))
-        }
-        Some("literal") | Some("typed-literal") | None => {
-            let value = get("value")
-                .ok_or_else(|| "literal binding without value".to_string())?
-                .to_string();
-            if let Some(lang) = get("xml:lang") {
-                // RDF 1.2 base direction (its:dir) is carried separately from xml:lang —
-                // reconstruct a directional literal when present + valid, else degrade to a
-                // plain language-tagged literal (the same decision the engine's parser makes).
-                match get("its:dir").and_then(parse_base_direction) {
-                    Some(dir) => Ok(Term::Literal(
-                        Literal::new_directional_language_tagged_literal(value, lang, dir)
-                            .map_err(|e| format!("bad language tag {:?}: {}", lang, e))?,
-                    )),
-                    None => Ok(Term::Literal(
-                        Literal::new_language_tagged_literal(value, lang)
-                            .map_err(|e| format!("bad language tag {:?}: {}", lang, e))?,
-                    )),
-                }
-            } else if let Some(dt) = get("datatype") {
-                let dt = NamedNode::new(dt).map_err(|e| format!("bad datatype {:?}: {}", dt, e))?;
-                Ok(Term::Literal(Literal::new_typed_literal(value, dt)))
-            } else {
-                Ok(Term::Literal(Literal::new_simple_literal(value)))
-            }
-        }
-        Some("triple") => {
-            let inner = val
-                .get("value")
-                .ok_or_else(|| "triple term without value".to_string())?;
-            let part = |k: &str| -> Result<Term, String> {
-                srj_term(
-                    inner
-                        .get(k)
-                        .ok_or_else(|| format!("triple term without {}", k))?,
-                )
-            };
-            let subject = match part("subject")? {
-                Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
-                Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
-                other => return Err(format!("invalid triple-term subject: {}", other)),
-            };
-            let predicate = match part("predicate")? {
-                Term::NamedNode(n) => n,
-                other => return Err(format!("invalid triple-term predicate: {}", other)),
-            };
-            Ok(Term::Triple(Box::new(Triple {
-                subject,
-                predicate,
-                object: part("object")?,
-            })))
-        }
-        Some(other) => Err(format!("unknown binding type {:?}", other)),
-    }
-}
-
-/// Parse the SPARQL-1.2 `its:dir` base-direction token. Mirrors
-/// `sparq_core::dict::parse_base_direction` (not re-exported through `sparq-engine`, and
-/// `sparq-core` is not a fedclient dependency), so the two-token grammar is inlined here.
-/// [OPUS-4.8] sq-j27p.
-fn parse_base_direction(s: &str) -> Option<oxrdf::BaseDirection> {
-    match s {
-        "ltr" => Some(oxrdf::BaseDirection::Ltr),
-        "rtl" => Some(oxrdf::BaseDirection::Rtl),
-        _ => None,
-    }
-}
+/// Reconstruct one `oxrdf::Term` from an SRJ binding value object: the engine's SERVICE
+/// decoder, so a relation parsed here is term-for-term what the engine would read.
+use sparq_engine::srj_term;
 
 // ─── Result-equivalence (the load-bearing invariant) ─────────────────────────────────
 
