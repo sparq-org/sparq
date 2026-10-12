@@ -1513,3 +1513,42 @@ async fn a_delete_that_times_out_and_commits_is_confirmed_after_its_fence() {
     );
     assert!(!c.exists(CHILD).await.unwrap());
 }
+
+/// Codex review of #6860: a decorator over the client (`CountingSparqClient`) forwarded the
+/// writes, and their unsettled failures, but not `fence`, so every fence through it hit the
+/// refusing default and a settlement retried forever. Fenced through the decorator and the
+/// composite store, the write is settled.
+#[tokio::test]
+async fn an_unsettled_write_is_fenced_through_the_counting_decorator() {
+    use sparq_lws_core::error::ServerError;
+    use sparq_lws_core::store::counting::{BackendCounters, CountingSparqClient};
+    use sparq_lws_core::store::{CompositeStore, InMemoryBlobStore, Store};
+    let (url, state) = spawn_mock().await;
+    let counters = BackendCounters::new();
+    let client = CountingSparqClient::new(
+        HttpSparqClient::with_timeout(url, Duration::from_millis(300)),
+        counters.clone(),
+    );
+    client.put_meta(CONTAINER, meta()).await.unwrap();
+    let store = CompositeStore::new(client, InMemoryBlobStore::new());
+    {
+        let mut mode = state.mode.lock().unwrap();
+        mode.commit_late = Some(Duration::from_millis(1500));
+        mode.fail_fences = true;
+    }
+    let fence = match store
+        .create_in_container(CONTAINER, CHILD, Bytes::from_static(b"x"), "text/plain")
+        .await
+    {
+        Err(ServerError::Unsettled { fence, .. }) => fence,
+        other => panic!("expected an unsettled write, got {other:?}"),
+    };
+    state.mode.lock().unwrap().fail_fences = false;
+    let before = counters.snapshot();
+    store.fence(&fence).await.unwrap();
+    assert_eq!(counters.snapshot().since(&before).sparql_updates, 1);
+    assert_eq!(state.store.lock().unwrap().fences.len(), 1);
+    // Fenced before it landed: it never does.
+    tokio::time::sleep(Duration::from_millis(1800)).await;
+    assert!(store.list_children(CONTAINER).await.unwrap().is_empty());
+}

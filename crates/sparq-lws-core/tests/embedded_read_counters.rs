@@ -410,6 +410,9 @@ impl<S: SparqClient> SparqClient for RawSeamCounter<S> {
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         self.inner.remove_child(container, child).await
     }
+    async fn fence(&self, fence: &sparq_lws_core::store::Fence) -> Result<(), SparqError> {
+        self.inner.fence(fence).await
+    }
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
         self.inner.list_children(container).await
     }
