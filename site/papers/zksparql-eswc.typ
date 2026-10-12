@@ -49,6 +49,14 @@
   (author("Jesse Wright", insts: inst-oxford),)
 }
 
+// fine-lncs joins the authors with commas and puts "and" before the last one, which prints
+// "A¹, and B²" for two authors; LNCS writes "A¹ and B²". Drop that comma for exactly two authors.
+#show: body => if author-list.len() == 2 {
+  let last = author-list.last().name
+  show ", and " + last: " and " + last
+  body
+} else { body }
+
 #show: lncs.with(
   title: [Answers Instead of Documents: Private SPARQL Answers over Verifiable Credentials],
   running-title: [Answers Instead of Documents],
