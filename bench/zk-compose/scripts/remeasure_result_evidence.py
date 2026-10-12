@@ -16,9 +16,12 @@ artifact, runs `bb gates -s ultra_honk`, and for the v1 members writes the noir-
 verification key. `apply` refuses to write unless the two runs agree (the artifact hash
 embeds the checkout path and is not compared), every v1 ACIR, ABI and key equals its
 713025dc baseline record, every size equals gate_counts_latest.json, and exactly the expected
-members and sources change. It validates all four files before replacing any of them. The
-result is always labelled non-canonical; the job manifest and run outputs are not part of
-the repository, so the two-run agreement it records is checked when `apply` runs, not later.
+members and sources change. It validates all four files before replacing any of them and
+restores any it replaced if a later replacement fails; an interruption of the process itself
+(a kill or power loss between renames) can still leave a mixed set, which `git checkout` of
+the four files undoes. The result is always labelled non-canonical; the job manifest and
+run outputs are not part of the repository, so the two-run agreement it records is checked
+when `apply` runs, not later.
 """
 
 from __future__ import annotations
@@ -161,21 +164,32 @@ def apply(args: argparse.Namespace) -> None:
         recorded = data.get("tool_versions") or {"nargo": data["nargo_version"], "bb": data["bb_version"]}
         if recorded["nargo"] != tools["nargo"] or recorded["bb"] != tools["bb"]:
             raise SystemExit(f"{name}: toolchain differs from the recorded one")
-    # Every check has passed: stage all four files, then replace them, so a failure never
-    # leaves a partly rewritten evidence set.
-    staged = []
-    for name, data in evidence.items():
-        data["source_files"] = new
-        data["measured_source"] = provenance
-        data["measurement_method"] = method
-        data["limitations"] = limitations
-        target = ROOT / "bench/zk-compose" / f"{name}.json"
-        handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{name}.", suffix=".json")
-        with os.fdopen(handle, "w") as output:
-            output.write(json.dumps(data, indent=2) + "\n")
-        staged.append((temporary, target))
-    for temporary, target in staged:
-        os.replace(temporary, target)
+    # Every check has passed. Stage all four files, then replace them one by one. Separate
+    # renames are not one atomic update, so if a replacement fails the files already replaced
+    # are restored from their original bytes, and staged temporaries are always removed.
+    originals, staged, replaced = {}, [], []
+    try:
+        for name, data in evidence.items():
+            data["source_files"] = new
+            data["measured_source"] = provenance
+            data["measurement_method"] = method
+            data["limitations"] = limitations
+            target = ROOT / "bench/zk-compose" / f"{name}.json"
+            originals[target] = target.read_bytes()
+            handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{name}.", suffix=".json")
+            staged.append((Path(temporary), target))
+            with os.fdopen(handle, "w") as output:
+                output.write(json.dumps(data, indent=2) + "\n")
+        for temporary, target in staged:
+            os.replace(temporary, target)
+            replaced.append(target)
+    except BaseException:
+        for target in replaced:
+            target.write_bytes(originals[target])
+        raise
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
     print("changed members:", ", ".join(sorted(changed)))
 
 
