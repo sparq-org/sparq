@@ -13,7 +13,8 @@
 //!    structure, the disclose/hide partition, the disclosed operands, and which sources
 //!    participate — **honestly over-counting rather than under-counting** what is revealed.
 //! 2. **Runs the dual ratification** ([`ratify_envelope`]): each **holder** fail-closed-rejects a
-//!    plan that would disclose one of *its own* private predicates (constraint C-B), AND the
+//!    envelope that *declares* a disclosure of one of *its own* private predicates (constraint
+//!    C-B; it checks the declared operand labels only, not the executed operators), AND the
 //!    **verifier** ratifies the envelope against an acceptance policy (an over-leaking envelope —
 //!    one whose disclosed-operand count exceeds the verifier's declared budget — is rejected).
 //!    Only a plan that survives **both** ratifications is cleared for execution.
@@ -203,7 +204,7 @@ fn operand_disclosure_label(operand: &Operand) -> String {
 /// through execution, and rebuild and re-ratify after any change.
 ///
 /// Returns a [`RatificationOutcome`] enumerating, honestly, *which* ratification(s) failed and
-/// *why* — an over-disclosing plan is reported with the offending source + predicate (holder
+/// *why* — a declared over-disclosure is reported with the offending source + predicate (holder
 /// rejection) or the budget overrun (verifier rejection), never silently dropped.
 ///
 /// This is a **plan-time policy gate, not a cryptographic enforcement.** It runs **no** MPC and
@@ -477,13 +478,12 @@ mod tests {
         assert!(outcome.is_ratified());
     }
 
-    /// NEGATIVE (holder): a plan that discloses a predicate a holder marked PRIVATE is rejected by
-    /// that holder, fail-closed — the over-disclosing plan is NOT honoured (constraint C-B).
+    /// NEGATIVE (holder): an envelope that declares a disclosure of a predicate a holder marked
+    /// PRIVATE is rejected by that holder, fail-closed (constraint C-B, over the declaration).
     #[test]
     fn holder_rejects_a_plan_disclosing_a_private_term() {
-        // Build an envelope that (dishonestly) discloses the SALARY predicate — exactly what a
-        // lying planner that over-discloses would propose. The holder marks salary PRIVATE, so its
-        // fail-closed re-check must reject it.
+        // Build an envelope that explicitly declares a disclosure of the SALARY predicate. The
+        // holder marks salary PRIVATE, so its fail-closed re-check must reject it.
         let leaking_env = LeakageEnvelope {
             operators: vec![OperatorDisclosure {
                 operator: "salary-threshold-DISCLOSED (over-disclosing)".to_string(),

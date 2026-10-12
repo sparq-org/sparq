@@ -49,8 +49,9 @@ constraint C-A — and the authenticated-input attestation stay deferred and aud
   (count, per-operator class + label), the disclose/hide partition, the operands each `Disclosed`
   operator exposes in the clear, and which sources participate — **over-counting, never
   under-counting** the leak. `ratify_envelope` then runs the dual gate: each **holder**
-  fail-closed-rejects a plan that would disclose one of its own private predicates (constraint
-  C-B), AND the **verifier** rejects an over-leaking envelope (one whose disclosed-operand count
+  fail-closed-rejects an envelope that *declares* a disclosure of one of its own private
+  predicates (constraint C-B; a check of the declared operand labels only — keeping them in step
+  with the executed operators is the caller's responsibility), AND the **verifier** rejects an over-leaking envelope (one whose disclosed-operand count
   exceeds its declared budget). The holder policies must cover the participation set exactly,
   so a missing participant policy fails closed. It is **leakage-accounting + a plan-time policy gate — not a
   cryptographic enforcement**: it runs NO MPC and makes NO soundness/privacy claim. See
