@@ -219,7 +219,7 @@ graph, and states its layout, because a query written for one does not match the
 
 The proof fixes $D$ through a _dataset commitment_: a digest of the included credentials and of a
 random salt that the holder chooses. It is binding if the hash is collision-resistant and, while the
-salt stays secret and the hash is a random oracle, hiding: it reveals nothing about $D$ to a
+salt stays secret and the hash is modelled as a random oracle, hiding: it reveals nothing about $D$ to a
 computationally bounded verifier.
 
 == Answers over the input dataset <answers>
@@ -471,10 +471,12 @@ no return-reason triple for `?p` matched; no triple stands for that absence. In
 which branch matched, so the matched triple is not computable. `FILTER(?a = 1250)` holds for both
 `"1250.00"^^xsd:decimal` and `"1250.0"^^xsd:decimal`, different terms with equal values, so a filter
 does not fix the term of an unprojected variable. And triples of the returned rows say nothing about
-rows not returned. A method with several rounds could send such a value before the result, and an exchange that then
-aborted would have disclosed facts that no answer did. We propose that a party receive these public
-inputs no earlier than the answer from which it can compute them. The prototype does not enforce
-this condition.
+rows not returned.
+
+A method with several rounds could send such a public input before the result, and an exchange
+that then aborted would have disclosed facts that no answer did. We propose that a party receive
+these public inputs no earlier than the answer from which it can compute them. The prototype does
+not enforce this condition.
 
 == What the verifier still learns <leakage>
 
@@ -611,7 +613,7 @@ dataset commitment and whether the input was agreed to the journal. A second bui
 checks in front of the same evaluator: in the hidden mode, it verifies each credential's
 `eddsa-rdfc-2022` signature under a trusted issuer's key and evaluates the query over the signed
 canonical N-Quads. Our holder and verifier services wrap both builds with query requests and the
-checks of §#ref(<validation>, supplement: none); the journal binds the stored request through a
+checks of §#ref(<validation>, supplement: none)\; the journal binds the stored request through a
 digest (supplementary §S2). We have not confirmed that the verifier service performs its checks in
 exactly that order.
 
