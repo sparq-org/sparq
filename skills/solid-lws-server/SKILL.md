@@ -387,7 +387,8 @@ What the server exposes, all discoverable from the storage description
   revoked; `500` "still stored" when the record is still listed (the grant back in force); `500` "not known" when it
   cannot be read again, with the grant left in force. A record holds its place in the request
   quota until the store confirms it is gone: while its create's outcome is not known and while
-  its withdrawal runs. Nothing a start puts back in the background begins until every step of
+  its withdrawal runs. (Over the `http` backend, a create whose update timed out can be
+  confirmed gone and still commit afterwards; see #6836.) Nothing a start puts back in the background begins until every step of
   the start that can fail has succeeded. A stored grant or request that cannot be read stops
   the start (a later start reads it again); one listed but gone is skipped; one whose stored
   body is not a record is quarantined at every start until the owner deletes it: it grants
