@@ -10,11 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
-  the same parsed input their labels (`__sk<n>_<label>`), and the statement keys and
-  `sparq-prov` entity IRIs of facts carrying them, no longer depend on hash-set traversal order
-  or hasher width (native vs `wasm32`). Existing labels are renumbered, so these keys and IRIs
-  differ from those minted by earlier versions; regenerate stored ones. `why()` proof trees
-  can still vary with traversal order. (#6749)
+  the same parsed input, and as long as the binding values and firing sets are themselves
+  stable, their labels (`__sk<n>_<label>`), and the statement keys and `sparq-prov` entity IRIs
+  of facts carrying them, no longer depend on hash-set traversal order or hasher width (native
+  vs `wasm32`). Bindings that still carry traversal order (for example a `log:collectAllIn`
+  list) can still change those keys (#6844). Existing labels are renumbered, so these keys and
+  IRIs differ from those minted by earlier versions; regenerate stored ones. `why()` proof
+  trees can still vary with traversal order. Ranking each round's existential firings adds a
+  small per-firing cost to rules with existential conclusions (#6843). (#6749)
 
 ### Fixed
 
