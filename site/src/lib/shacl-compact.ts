@@ -23,6 +23,18 @@
 //
 // Framework-free + side-effect-free (no React, no DOM, no wasm) so it unit-tests
 // directly under `node --test` against hand-built triples.
+//
+// Every IRI, literal, blank-node label and prefix binding is written through the shared
+// sparq-client term writer or checked against the shared grammar checks, so a term recovered from editable
+// shapes text cannot end its token early and add shapes or constraints to the output (#6719).
+
+import {
+  hasLoneSurrogate,
+  isLangTag,
+  isTurtleBlankNodeLabel,
+  isWritablePrefixBinding,
+  termToNTriples,
+} from "@sparq/client";
 
 const SH = "http://www.w3.org/ns/shacl#";
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -147,6 +159,8 @@ class Prefixer {
   constructor(prefixes: ScsPrefix[]) {
     const merged = new Map<string, string>();
     for (const p of [...WELL_KNOWN_PREFIXES, ...prefixes]) {
+      // A binding that cannot be declared as written is dropped; its IRIs stay in full form.
+      if (!isWritablePrefixBinding(p)) continue;
       // caller-supplied prefixes override the well-known fallback
       merged.set(p.prefix, p.iri);
     }
@@ -161,14 +175,16 @@ class Prefixer {
       if (value.startsWith(iri)) {
         const local = value.slice(iri.length);
         // Only use a prefixed name when the local part is a legal PN_LOCAL-ish token
-        // (no spaces / no chars that would need escaping). Otherwise fall back to <>.
-        if (/^[A-Za-z0-9_][A-Za-z0-9_.\-]*$/.test(local) || local === "") {
+        // (no spaces / no chars that would need escaping, no trailing '.'). Otherwise fall
+        // back to <>.
+        if (/^[A-Za-z0-9_](?:[A-Za-z0-9_.\-]*[A-Za-z0-9_\-])?$/.test(local) || local === "") {
           this.used.add(prefix);
           return `${prefix}:${local}`;
         }
       }
     }
-    return `<${value}>`;
+    // The shared writer throws on a character an IRIREF cannot hold.
+    return termToNTriples({ type: "uri", value });
   }
 
   prefixLines(): string[] {
@@ -186,23 +202,46 @@ class Prefixer {
 // Term -> SCS text.
 // ---------------------------------------------------------------------------
 
-function escapeString(s: string): string {
-  return s
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t");
+// SCS string literals follow SPARQL's STRING_LITERAL2: only `"`, `\`, LF and CR must be
+// escaped, ECHAR is the only escape form, and every other character may appear raw.
+const SCS_ECHAR: Record<string, string> = {
+  "\b": "\\b",
+  "\t": "\\t",
+  "\n": "\\n",
+  "\f": "\\f",
+  "\r": "\\r",
+  '"': '\\"',
+  "\\": "\\\\",
+};
+
+// A quoted string literal, optionally with a language tag checked against LANGTAG.
+function quoted(value: string, language?: string): string {
+  if (hasLoneSurrogate(value)) {
+    throw new Error(`shapesToCompact: literal ${JSON.stringify(value)} contains a lone surrogate`);
+  }
+  const lexical = `"${value.replace(/[\b\t\n\f\r"\\]/g, (c) => SCS_ECHAR[c])}"`;
+  if (!language) return lexical;
+  if (!isLangTag(language)) {
+    throw new Error(`shapesToCompact: language tag ${JSON.stringify(language)} is not a LANGTAG`);
+  }
+  return `${lexical}@${language}`;
+}
+
+function blankNode(label: string): string {
+  if (!isTurtleBlankNodeLabel(label)) {
+    throw new Error(`shapesToCompact: ${JSON.stringify(label)} is not a BLANK_NODE_LABEL`);
+  }
+  return `_:${label}`;
 }
 
 function termToScs(t: ScsTerm, p: Prefixer): string {
   if (t.termType === "NamedNode") return p.iri(t.value);
-  if (t.termType === "BlankNode") return `_:${t.value}`;
+  if (t.termType === "BlankNode") return blankNode(t.value);
   // Literal
-  if (t.language) return `"${escapeString(t.value)}"@${t.language}`;
+  if (t.language) return quoted(t.value, t.language);
   const dt = t.datatype;
   if (!dt || dt === `${XSD}string`) {
-    return `"${escapeString(t.value)}"`;
+    return quoted(t.value);
   }
   // numeric / boolean literals render bare per the grammar (numericLiteral/booleanLiteral)
   if (dt === `${XSD}integer` && /^[+-]?\d+$/.test(t.value)) return t.value;
@@ -214,7 +253,7 @@ function termToScs(t: ScsTerm, p: Prefixer): string {
   ) {
     return t.value;
   }
-  return `"${escapeString(t.value)}"^^${p.iri(dt)}`;
+  return `${quoted(t.value)}^^${p.iri(dt)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -406,6 +445,15 @@ function serializeProperty(
   // count: `[min..max]` (only when at least one is set).
   const minTerm = g.one(prop, `${SH}minCount`);
   const maxTerm = g.one(prop, `${SH}maxCount`);
+  // The count range takes an INTEGER token (`[+-]?[0-9]+`) whose value is non-negative.
+  const isCount = (t: ScsTerm): boolean =>
+    t.termType === "Literal" && /^(?:\+?\d+|-0+)$/.test(t.value);
+  if ([minTerm, maxTerm].some((t) => t && !isCount(t))) {
+    unsupported.push(
+      `${shapeLabel}: a sh:minCount/sh:maxCount that is not a non-negative integer — property omitted.`,
+    );
+    return undefined;
+  }
   if (minTerm || maxTerm) {
     const min = minTerm ? minTerm.value : "0";
     const max = maxTerm ? maxTerm.value : "*";
@@ -427,8 +475,7 @@ function serializeNodeShape(
   p: Prefixer,
   unsupported: string[],
 ): string {
-  const label =
-    shape.termType === "NamedNode" ? p.iri(shape.value) : `_:${shape.value}`;
+  const label = shape.termType === "NamedNode" ? p.iri(shape.value) : blankNode(shape.value);
   const shapeLabel = `shape ${label}`;
 
   // targets: `-> class1 class2` for sh:targetClass; sh:targetNode/objectsOf/subjectsOf
