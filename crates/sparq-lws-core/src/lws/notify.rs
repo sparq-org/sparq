@@ -1361,7 +1361,7 @@ async fn subscribe<S: Store + 'static>(
     // resource's authorization (as a GET of it is), so a topic naming one is checked as the
     // resource, under the resource's shared lock; the topic itself is kept as named.
     //
-    // The subscriber is checked once before the lock is taken, and only a topic it may read is
+    // The subscriber is checked before any wait for the lock, and only a topic it may read is
     // waited on, or said to be set aside: one it may not read is refused the same whatever its
     // state, so neither a stuck change to it nor a write holding its lock shows through. A
     // set-aside topic is decided as a request to it is (see [`access::aside`]): on what it was
@@ -1397,17 +1397,26 @@ async fn subscribe<S: Store + 'static>(
     };
     for topic in &topics {
         let resource = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
-        let aside = !state.visible(resource);
-        if !readable(resource, aside).await {
-            return cannot_read();
-        }
-        if aside {
-            return super::resources::set_aside_meanwhile();
-        }
-        // Waited for a bounded time, as every lock a request to a service container takes.
-        let _guard = match super::records::within_wait(state.locks.read(resource)).await {
-            Ok(guard) => guard,
-            Err(refused) => return refused,
+        // The lock of a visible topic that nobody is changing is taken at once, without a wait:
+        // then the one check under it says nothing of its state. Otherwise the topic is checked
+        // first, without it.
+        let _guard = match state.locks.try_read(resource) {
+            Some(guard) => guard,
+            None => {
+                let aside = !state.visible(resource);
+                if !readable(resource, aside).await {
+                    return cannot_read();
+                }
+                if aside {
+                    return super::resources::set_aside_meanwhile();
+                }
+                // Waited for a bounded time, as every lock a request to a service container
+                // takes.
+                match super::records::within_wait(state.locks.read(resource)).await {
+                    Ok(guard) => guard,
+                    Err(refused) => return refused,
+                }
+            }
         };
         if !readable(resource, false).await {
             return cannot_read();
