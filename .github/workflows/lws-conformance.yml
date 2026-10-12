@@ -14,11 +14,13 @@ on:
   pull_request:
     paths:
       - "crates/sparq-lws-core/**"
+      - "crates/sparq-lws-authn*/**"
       - ".github/workflows/lws-conformance.yml"
   push:
     branches: [main]
     paths:
       - "crates/sparq-lws-core/**"
+      - "crates/sparq-lws-authn*/**"
       - ".github/workflows/lws-conformance.yml"
   workflow_dispatch:
 
@@ -30,7 +32,7 @@ permissions:
   contents: read
 
 env:
-  TOUCHSTONE_REF: 971dc8def56200c3eb0f08348295ca545cf92a00
+  TOUCHSTONE_REF: 6a3206eb97d173a89b3ffeb790f2d1a3337cf535
   LWS_NET_REF: eca99a4a5beb949561a9989a183dd3216712bb79
   LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
 
@@ -59,8 +61,9 @@ jobs:
       - name: build touchstone
         working-directory: touchstone
         run: ./mvnw -q -B -ntp -pl harness-cli -am -Dmaven.test.skip=true package
+      # Every authentication suite, so the auth module tests each one.
       - name: build sparq-lws-core
-        run: cargo build -p sparq-lws-core
+        run: cargo build -p sparq-lws-core --features authn-saml
       - name: run touchstone
         env:
           TOUCHSTONE: ${{ github.workspace }}/touchstone

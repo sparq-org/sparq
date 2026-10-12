@@ -153,7 +153,20 @@ impl RdfsProver<'_> {
             return self.push(t, "asserted", vec![]);
         }
         if self.g.schema_facts.contains(&t) {
-            return self.prove_schema(t, depth);
+            if let Some(ix) = self.prove_schema(t, depth) {
+                return Some(ix);
+            }
+        }
+        if let Some(mc) = self.g.meta.as_deref() {
+            // Meta schema (#5090): replay the fixpoint's recorded first derivation. Its
+            // premises entered the closure earlier, so the recursion is well-founded.
+            let &(rule, [a, b]) = mc.prov.get(&t)?;
+            let pa = self.prove(a, depth + 1)?;
+            let pb = self.prove(b, depth + 1)?;
+            return match self.memo.get(&t) {
+                Some(&ix) => Some(ix),
+                None => self.push(t, rule, vec![pa, pb]),
+            };
         }
         if self.g.counts.contains_key(&t) {
             return self.prove_emitted(t, depth);

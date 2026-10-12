@@ -30,6 +30,7 @@ its row-bound case have not run. The research registry lists
 |---|---|---|
 | `sparq-proved-evaluator-methods` | `authenticated-rdf` (off) | Also builds `methods/guest-authrdf` (package `sparq-authrdf-guest`) and generates `SPARQ_AUTHRDF_GUEST_ELF` / `SPARQ_AUTHRDF_GUEST_ID` in their own `authrdf_methods.rs` |
 | `sparq-proved-evaluator` (host) | `authenticated-rdf` (off) | Enables the model and methods features, the `authenticated_rdf` module, `embedded_authrdf_artifact()`, `embedded_authrdf_pin()` and the `export_authrdf_guest` example |
+| `sparq-proved-evaluator-methods` and host | `phase-cycles` (off) | Also builds a measurement image, `SPARQ_AUTHRDF_PHASES_GUEST_ELF`, whose guest writes the cycle count at each `model::authenticated_rdf::Phase` boundary to stdout. It is never the accepted image; the production V5 image is built without it |
 
 The V5 guest is an independent Cargo workspace with its own manifest and its
 own lock. It uses the model features `graph-results` and `authenticated-rdf`,
@@ -91,6 +92,7 @@ it produces no presentation.
 |---|---|
 | `prove_with_artifact(&Witness, r0vm, &AcceptedGuest)` | Proves with an explicitly supplied local `r0vm` and an independently accepted V5 guest; returns an already verified and request-bound `Presentation` without consuming a nonce |
 | `verify_with_artifact(&Presentation, &Request, &mut impl Nonces, &AcceptedGuest)` | Verifies against the verifier's own `Request`, then consumes its nonce once |
+| `verify_revealed_with_artifact(&Presentation, &Request, &[Vec<u8>], &mut impl Nonces, &AcceptedGuest)` | Revealed mode only: as `verify_with_artifact`, and also checks one presented issuer signature per journal `signed_messages` entry before consuming the nonce |
 | `embedded_authrdf_artifact()`, `embedded_authrdf_pin()` | The locally built V5 image and its pin, for release review; operators must approve the pin |
 
 There is no embedded-default `prove` or `verify`. Load the guest with
@@ -127,11 +129,115 @@ Every earlier failure leaves the nonce unconsumed. A store error is returned
 unchanged. A crate-private checked-verification hook runs between steps 3 and 4
 for the vcq adapter. No public API exposes it.
 
+## Cryptosuites
+
+`Policy::cryptosuite` selects one suite for every credential of a request; set
+it with `Policy::with_cryptosuite`. The suite profile is framed into the policy
+digest.
+
+- `EddsaRdfc2022` (the default): W3C `eddsa-rdfc-2022`, as described above.
+- `EddsaSha256Merkle2026`: the `eddsa-sha256-merkle-2026` suite specified in
+  `site/specs/zk-merkle-cryptosuite.typ`. The issuer signs a salted SHA-256
+  Merkle root over typed quad leaves. Each literal leaf carries an
+  order-preserving comparison key. The guest canonicalizes only the proof
+  configuration: it recomputes each document quad's leaf, requires the leaves
+  to be strictly increasing, and rebuilds the 32-byte signed message. The
+  witness `signature` is the 64-byte signature (hidden mode only) followed by
+  the 32-byte tree salt. The model module `merkle_suite` holds the leaf, root,
+  message and comparison-key functions, plus `issue` for issuers and test harnesses.
+  Fixed vectors are in `model/tests/merkle_suite.rs` and the spec.
+
+The vcq adapter accepts only `EddsaRdfc2022` in hidden mode. The paper's
+canonical query set Q1–Q5 is in `fixtures/paper/`. A host test runs it over the
+payment credential under both suites and both modes.
+
+## Signature modes
+
+`Policy::signature_mode` selects what the proof hides. The names match the
+`signatureModes` request member and `signatureMode` presentation member of the
+ZK SPARQL answers spec (`site/specs/zksparql-answers.typ`).
+
+- `Hidden` (the default, and the only mode before this field existed): each
+  witness credential carries its 64-byte Ed25519 signature, and the guest
+  verifies it. The proof shows knowledge of a valid issuer signature, and the
+  journal's `signed_messages` is empty.
+- `Revealed`: witness credentials carry an empty signature, and the guest
+  verifies none. For each credential the guest still canonicalizes, hashes and
+  checks the table. It commits a `SignedMessage { verification_method, message }`
+  in credential order (by document hash, or by the salted message for the
+  Merkle suite), where `message` is SHA-256(canonical proof config) ||
+  SHA-256(canonical document), exactly the eddsa-rdfc-2022 signing input (for
+  the Merkle suite it is the salted 32-byte root message). The
+  verifier checks the presented signatures over those messages with
+  `check_revealed_signatures` (called by `verify_revealed_with_artifact`),
+  outside the proof.
+
+The mode is framed into the policy digest only when it is `Revealed`, so the
+request digests and commitments of hidden-mode requests are unchanged. A
+revealed request therefore has a different request digest and dataset
+commitment. A verifier-agreed anchor must be computed under the same policy.
+`bind_journal` rejects a journal whose `signed_messages` presence does not
+match the expected mode, and each verify entry point refuses the other mode.
+The vcq adapter (`vcq_authenticated`) offers only `Hidden`, because it checks no
+presented signatures.
+
+In revealed mode with `eddsa-rdfc-2022` the verifier learns each credential's
+verification method and its document and proof-config hashes. Presentations of the same credential are
+linkable through them, and a verifier can confirm a guess at a low-entropy
+document. With the Merkle suite the verifier learns the method and a salted message, which
+is just as linkable but does not let it confirm guesses. Hidden mode reveals
+none of these.
+
 Obtain the expected `Request`, including its authorization table and any agreed
 commitment, from verifier-owned configuration. Never take them from a
 presentation. For `VerifierAgreed`, the verifier computes the commitment with
 `authenticated_rdf::dataset_commitment` from its own copy of the credentials and
 salt.
+
+## Query coverage and measurement
+
+`host/examples/paper_sweep.rs` (feature `authenticated-rdf`) issues synthetic
+credentials under both cryptosuites, presents them in both signature modes and
+runs a query set through the accepted V5 image. `--set main` runs the paper's
+queries in `fixtures/paper/*.rq` over the payment credential; `--set sweep` runs
+the feature cases in `fixtures/paper/sweep.json`. `--execute` runs the RISC Zero
+executor and records cycles, segments and journal and witness sizes; `--prove N`
+also proves and verifies N times; `--phases` (feature `phase-cycles`) adds the
+per-phase cycle breakdown from the measurement image. `--blank-free` names the
+credential holder with an IRI so that the credential data has no blank node.
+Each case prints one JSON record.
+
+`zk/sparql-evaluator/coverage-authenticated-rdf.json` is generated from those
+records by `scripts/authenticated_rdf_coverage.py`. Each feature records whether
+the guest executed the case or aborted with an admission error, with credential
+data that contains a blank node and, where it differs, without one. Blank nodes
+in credential data are supported. `FILTER EXISTS` and `FILTER NOT EXISTS` are
+admitted only when no presented credential contains a blank node. The
+credentials form the default graph and there are no named graphs, so `GRAPH`
+matches nothing and `FROM` selects an empty default graph. `SERVICE`, `BNODE()`,
+`NOW()`, `RAND()`, nested `EXISTS`, triple terms and custom functions are
+rejected. The manifest records executions, not proofs.
+
+The host rejects `DESCRIBE`, `FROM` and `FROM NAMED` in the request
+(`authenticated_rdf::check_query_profile`) before proving and before both
+verification paths. The accepted image still evaluates them, so the check is
+the host's, not the guest's.
+
+A receipt shows that the pinned evaluator produced the journal's result. Where
+SPARQL 1.1 leaves a choice open, the result is the evaluator's choice, and no
+rule for it is published:
+
+- an unordered `SELECT` result is a bag, encoded with its rows sorted, so it is
+  unique up to row multiplicity;
+- with `ORDER BY`, the order of rows that tie on every sort key;
+- `LIMIT` and `OFFSET` without `ORDER BY`, which select rows from an order
+  SPARQL leaves unspecified;
+- the value `SAMPLE` returns;
+- the order of the values `GROUP_CONCAT` joins;
+- which duplicates `REDUCED` removes.
+
+A verifier can rely on a unique result only for queries that use none of these
+choices.
 
 ## Tests
 

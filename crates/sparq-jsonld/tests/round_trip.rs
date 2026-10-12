@@ -974,3 +974,168 @@ fn every_container_kind_reads_back_under_a_type_scoped_definition() {
         );
     }
 }
+
+/// Framing selects exactly the nodes an `@id` pattern names, for every valid pattern
+/// form: an IRI or compact IRI, a list of them, the wildcard `{}` (alone or listed) and
+/// the match-none `[]`; `@explicit` then keeps only the framed property. A `@type`
+/// pattern beside it must match too, in either member order and whatever `@requireAll`.
+#[test]
+fn generated_id_patterns_select_exactly_the_named_nodes() {
+    use sparq_jsonld::frame::{frame_match, FrameOptions};
+    let names = ["a", "b", "c", "d", "e"];
+    let input = Json::parse(&format!(
+        "[{}]",
+        names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| {
+                let t = if i % 2 == 0 { "T" } else { "U" };
+                format!(r#"{{"@id":"http://ex/{n}","@type":"http://ex/{t}","http://ex/p":"{n}","http://ex/q":"x"}}"#)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    ))
+    .expect("input");
+    for case in 0..2_000u64 {
+        let mut g = Gen(case.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x5851_F42D_4C95_7F2D);
+        let mut chosen: Vec<&str> = names.iter().copied().filter(|_| g.chance(40)).collect();
+        // Names outside the input select nothing.
+        if g.chance(20) {
+            chosen.push("z");
+        }
+        let spell = |g: &mut Gen, n: &str| {
+            if g.chance(50) {
+                format!(r#""ex:{n}""#)
+            } else {
+                format!(r#""http://ex/{n}""#)
+            }
+        };
+        let wildcard = g.chance(25);
+        let mut items: Vec<String> = chosen.iter().map(|n| spell(&mut g, n)).collect();
+        if wildcard {
+            let at = g.below(items.len() + 1);
+            items.insert(at, "{}".to_string());
+        }
+        let pattern = match items.as_slice() {
+            [one] if g.chance(50) => one.clone(),
+            _ => format!("[{}]", items.join(",")),
+        };
+        let explicit = g.chance(50);
+        // The @type pattern and which typed nodes (by index) it lets through.
+        let (type_pattern, type_ok): (Option<&str>, fn(usize) -> bool) = match g.below(5) {
+            0 => (None, |_| true),
+            1 => (Some(r#""ex:T""#), |i| i % 2 == 0),
+            2 => (Some(r#""http://ex/Missing""#), |_| false),
+            3 => (Some("{}"), |_| true),
+            _ => (Some("[]"), |_| false),
+        };
+        let id_member = format!(r#""@id":{pattern}"#);
+        let type_member = type_pattern.map(|t| format!(r#","@type":{t}"#)).unwrap_or_default();
+        let members = if g.chance(50) {
+            format!("{id_member}{type_member}")
+        } else {
+            format!("{}{}{id_member}", type_member.trim_start_matches(','), if type_member.is_empty() { "" } else { "," })
+        };
+        let frame = format!(
+            r#"{{"@context":{{"ex":"http://ex/"}},{members},"@requireAll":{}{}}}"#,
+            g.chance(50),
+            if explicit { r#","@explicit":true,"http://ex/p":{}"# } else { "" }
+        );
+        let out = frame_match(
+            &input,
+            &Json::parse(&frame).expect("frame"),
+            &JsonLdOptions::default(),
+            &FrameOptions::default(),
+            &NoopLoader,
+        )
+        .unwrap_or_else(|e| panic!("case {case}: {frame}: {e:?}"));
+        let Json::Arr(nodes) = &out else { panic!("case {case}: {}", render(&out)) };
+        let mut got: Vec<&str> = nodes
+            .iter()
+            .filter_map(|n| n.get("@id").and_then(Json::as_str))
+            .collect();
+        got.sort_unstable();
+        let mut want: Vec<String> = names
+            .iter()
+            .enumerate()
+            .filter(|(i, n)| (wildcard || chosen.contains(n)) && type_ok(*i))
+            .map(|(_, n)| format!("http://ex/{n}"))
+            .collect();
+        want.sort_unstable();
+        assert_eq!(got, want, "case {case}: {frame}");
+        for n in nodes {
+            assert_eq!(n.get("http://ex/q").is_some(), !explicit, "case {case}: {frame}: {}", render(n));
+        }
+    }
+}
+
+/// Value patterns follow the W3C framing suite (#t0045): for each of `@value`, `@type`
+/// and `@language`, an omitted or match-none `[]` constraint admits only values without
+/// that member, the wildcard `{}` only values with it, and a list the listed ones.
+#[test]
+fn generated_value_patterns_follow_the_framing_suite() {
+    use sparq_jsonld::frame::{frame_match, FrameOptions};
+    let values = [
+        r#""v""#,
+        r#"{"@value":"v","@type":"http://ex/T"}"#,
+        r#"{"@value":"v","@type":"http://ex/U"}"#,
+        r#"{"@value":"v","@language":"en"}"#,
+        r#"{"@value":"w","@language":"EN"}"#,
+    ];
+    // (value, type, language) of each input value, after expansion.
+    let members: [(&str, Option<&str>, Option<&str>); 5] = [
+        ("v", None, None),
+        ("v", Some("http://ex/T"), None),
+        ("v", Some("http://ex/U"), None),
+        ("v", None, Some("en")),
+        ("w", None, Some("en")),
+    ];
+    // Constraint spellings and what they admit (None = the member is absent).
+    type Admits = fn(Option<&str>) -> bool;
+    let value_forms: [(Option<&str>, Admits); 4] =
+        [(None, |v| v.is_none()), (Some("{}"), |v| v.is_some()), (Some(r#""v""#), |v| v == Some("v")), (Some(r#"["v","w"]"#), |v| v.is_some())];
+    let type_forms: [(Option<&str>, Admits); 4] = [
+        (None, |t| t.is_none()),
+        (Some("[]"), |t| t.is_none()),
+        (Some("{}"), |t| t.is_some()),
+        (Some(r#""http://ex/T""#), |t| t == Some("http://ex/T")),
+    ];
+    let language_forms: [(Option<&str>, Admits); 4] = [
+        (None, |l| l.is_none()),
+        (Some("[]"), |l| l.is_none()),
+        (Some("{}"), |l| l.is_some()),
+        (Some(r#""En""#), |l| l == Some("en")),
+    ];
+    for (vf, v_ok) in value_forms {
+        for (tf, t_ok) in type_forms {
+            for (lf, l_ok) in language_forms {
+                // A value pattern needs at least one member; an all-omitted one is a node pattern.
+                // and a value object can't constrain both its type and its language.
+                if (vf.is_none() && tf.is_none() && lf.is_none()) || (tf.is_some() && lf.is_some()) {
+                    continue;
+                }
+                let pattern: Vec<String> = [("@value", vf), ("@type", tf), ("@language", lf)]
+                    .iter()
+                    .filter_map(|(k, f)| f.map(|f| format!(r#""{k}":{f}"#)))
+                    .collect();
+                let frame = format!(r#"{{"@explicit":true,"http://ex/p":{{{}}}}}"#, pattern.join(","));
+                for (i, value) in values.iter().enumerate() {
+                    let input = format!(r#"{{"@id":"http://ex/s","http://ex/p":{value}}}"#);
+                    let out = frame_match(
+                        &Json::parse(&input).unwrap(),
+                        &Json::parse(&frame).unwrap(),
+                        &JsonLdOptions::default(),
+                        &FrameOptions::default(),
+                        &NoopLoader,
+                    )
+                    .unwrap_or_else(|e| panic!("{frame} over {value}: {e:?}"));
+                    let (v, t, l) = members[i];
+                    // The value matches exactly when it is kept on the framed node.
+                    let want = v_ok(Some(v)) && t_ok(t) && l_ok(l);
+                    let kept = render(&out).contains(r#""@value":""#);
+                    assert_eq!(kept, want, "{frame} over {value}: {}", render(&out));
+                }
+            }
+        }
+    }
+}

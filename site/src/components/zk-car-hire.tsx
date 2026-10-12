@@ -869,7 +869,7 @@ function DisclosurePanel() {
         <CardTitle className="text-base">What is revealed vs hidden</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
+        <div tabIndex={0} className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
           <table className="w-full text-left text-sm">
             <thead className="bg-muted/50">
               <tr>
@@ -1039,7 +1039,7 @@ function CircuitFamilyPanel() {
           compose into one <code className="font-mono">ProofManifest</code>. Wiring
           the remaining members into the browser is tracked as a follow-up.
         </p>
-        <div className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
+        <div tabIndex={0} className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
           <table className="w-full text-left text-sm">
             <thead className="bg-muted/50">
               <tr>

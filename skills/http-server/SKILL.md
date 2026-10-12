@@ -1421,8 +1421,9 @@ surface, `research/sparq-solid-scope.md` §4); this is exactly that missing shel
     request dataset carries ODRL policy rules (`odrl:permission`/`odrl:prohibition`), the handler
     parses them from the UNION of the dataset's graphs and runs the `sparq-solid` bridge
     (`PodStore::materialize_odrl_policy`, BOTH sides, deny-overrides) for
-    (party = session agent, action = `odrl:read`, target = each rule's target graph) BEFORE the
-    query — an ODRL prohibition beats a static WAC grant through the unchanged
+    (party = session agent, action = `odrl:read`, target = each rule's target graph, and each
+    member the dataset states `odrl:partOf` a target, with that edge as its asset evidence)
+    BEFORE the query — an ODRL prohibition beats a static WAC grant through the unchanged
     `∪ allow ∖ ∪ deny` enforcement. The lane runs on **all three endpoints** (sq-3mu76): the
     advisory `/authz/decide` and `/authz/wac-allow` never report an allow `/authz/query` would
     refuse to honour, and their advertisements are **read-scoped** while the lane evidences only

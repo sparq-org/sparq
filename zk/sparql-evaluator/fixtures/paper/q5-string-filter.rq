@@ -1,0 +1,2 @@
+PREFIX bank: <https://bank.example/vocab#>
+SELECT ?p WHERE { ?p a bank:Payment FILTER(STRSTARTS(STR(?p), "https://bank.example/payments/2026-07")) }

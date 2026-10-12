@@ -47,7 +47,9 @@ env:
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
   CORE_CRATES: >-
     -p sparq-core -p sparq-substrate -p sparq-engine -p sparq-cli
-    -p sparq-server -p sparq-lws-core -p sparq-solid
+    -p sparq-server -p sparq-lws-core -p sparq-lws-authn -p sparq-lws-authn-saml
+    -p sparq-lws-authn-openid -p sparq-lws-authn-ssi
+    -p sparq-solid
 
 jobs:
   lint:
@@ -67,6 +69,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: clippy (deny warnings, core crates)
         run: cargo clippy $CORE_CRATES --all-targets -- -D warnings
+      # The LWS server's opt-in SAML suite: its integration code is behind `authn-saml`.
+      - name: clippy (deny warnings, LWS server with the SAML suite)
+        run: cargo clippy -p sparq-lws-core --features authn-saml --all-targets -- -D warnings
       # Informational: `cargo fmt --all -- --check` FAILS on main today (the deferred
       # one-time workspace reformat has not landed — see rustfmt.toml and ci.yml's lint
       # job). Flip to gating (drop continue-on-error) once that reformat merges.
@@ -98,6 +103,8 @@ jobs:
       # test is reported FLAKY in the summary, a test failing every attempt reds the job).
       - name: Tests (nextest)
         run: cargo nextest run $CORE_CRATES --profile ci --no-fail-fast
+      - name: Tests (LWS server with the SAML suite)
+        run: cargo nextest run -p sparq-lws-core --features authn-saml --profile ci --no-fail-fast
       - name: Doctests (nextest does not run these)
         run: cargo test $CORE_CRATES --doc
 

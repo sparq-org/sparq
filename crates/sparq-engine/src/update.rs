@@ -601,6 +601,26 @@ pub fn update_in_place_algebra_with_budget(
     })
 }
 
+/// [`update_in_place_algebra_with_budget`] that ALSO returns the ordered, resolved
+/// [`UpdateEffect`] log of what it applied (see [`update_in_place_capturing`]), for a caller
+/// that runs the checked algebra on a fork and commits the effects to the store itself with
+/// [`apply_effects`]. The log is only produced on success.
+pub fn update_in_place_algebra_capturing(
+    graph: &mut Graph,
+    upd: &Update,
+    reads: Option<&std::sync::Arc<rustc_hash::FxHashSet<Term>>>,
+    authorize: Option<&mut WriteAuthorizer<'_>>,
+    budget: &crate::QueryBudget,
+) -> Result<Vec<UpdateEffect>, String> {
+    require_update_budget(budget)?;
+    let _view = reads.map(crate::exec::view::install_reads);
+    let mut effects = Vec::new();
+    crate::exec::budget::with_budget(budget, || {
+        apply_update_in_place(graph, upd, Some(&mut effects), authorize)
+    })?;
+    Ok(effects)
+}
+
 /// The graphs one `DELETE`/`INSERT … WHERE` is about to change, handed to the authorizer of
 /// [`update_in_place_algebra_with_budget`]: the distinct graphs it deletes from, then the
 /// distinct graphs it inserts into (`None` is the default graph). Only graphs a
@@ -668,7 +688,7 @@ fn apply_slot_delta(
 /// recorded as the operation itself and re-applied through the same in-place machinery — there
 /// is no value to re-roll. Only the data-bearing operations (INSERT/DELETE DATA, LOAD, and
 /// DELETE/INSERT … WHERE) carry resolved triples.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UpdateEffect {
     /// A resolved per-slot insert/delete batch — the deterministic delta the in-memory
     /// application produced for one graph slot (`None` = default graph, `Some` = named graph).
@@ -748,6 +768,39 @@ pub fn update_in_place_capturing(
     let mut effects = Vec::new();
     update_in_place_core(graph, sparql, budget, Some(&mut effects))?;
     Ok(effects)
+}
+
+/// The [`UpdateEffect`]s an update made only of `INSERT DATA` / `DELETE DATA` operations has,
+/// read from its text without touching a graph: the same log [`update_in_place_capturing`]
+/// returns for it (blank nodes in an `INSERT DATA` are freshened per operation), so a caller can
+/// authorize and [`apply_effects`] it with no fork. `Ok(None)` for any other update, whose
+/// effects depend on the graph.
+pub fn data_update_effects(
+    sparql: &str,
+    budget: &crate::QueryBudget,
+) -> Result<Option<Vec<UpdateEffect>>, String> {
+    require_update_budget(budget)?;
+    let upd = parse_update_rec2013(sparql)?;
+    let mut effects = Vec::new();
+    let mut sink: EffectSink = Some(&mut effects);
+    for op in &upd.operations {
+        match op {
+            GraphUpdateOperation::InsertData { data } => {
+                let mut fresh = FreshBnodes { map: FxHashMap::default() };
+                let triples: Vec<_> = data.iter().map(|q| quad_to_triple_fresh(q, &mut fresh)).collect();
+                for (slot, ins) in group_by_slot(triples) {
+                    record_delta(&mut sink, &slot, &ins, &[]);
+                }
+            }
+            GraphUpdateOperation::DeleteData { data } => {
+                for (slot, del) in group_by_slot(data.iter().map(ground_quad_to_triple).collect()) {
+                    record_delta(&mut sink, &slot, &[], &del);
+                }
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(effects))
 }
 
 /// [OPUS-4.8] (sq-o1wp) Request-ATOMIC variant of [`update_in_place`]: applies the whole
@@ -1223,6 +1276,30 @@ mod tests {
     fn captured(dataset: &str, sparql: &str) -> Vec<UpdateEffect> {
         let mut working = Graph::load_dataset(dataset, "nquads").unwrap();
         update_in_place_capturing(&mut working, sparql, &crate::QueryBudget::unlimited()).unwrap()
+    }
+
+    #[test]
+    fn data_effects_are_what_the_update_would_capture() {
+        let unlimited = crate::QueryBudget::unlimited();
+        let sparql = "PREFIX : <http://ex/> INSERT DATA { :a :b :c . GRAPH :x { :a :b 1 } } ; \
+                      DELETE DATA { GRAPH :x { :a :b 1 } } ; INSERT DATA { GRAPH :y { :d :e :f } }";
+        let read = data_update_effects(sparql, &unlimited).unwrap().expect("data only");
+        assert_eq!(read, captured("<http://ex/a> <http://ex/b> <http://ex/z> .\n", sparql));
+        // Blank nodes are fresh, one node per label within an operation.
+        let read = data_update_effects("INSERT DATA { _:b <http://ex/p> _:b }", &unlimited)
+            .unwrap()
+            .expect("data only");
+        let [UpdateEffect::Delta { inserts, .. }] = read.as_slice() else { panic!("{read:?}") };
+        assert!(matches!(&inserts[0][0], Term::BlankNode(b) if b.as_str() != "b"));
+        assert_eq!(inserts[0][0], inserts[0][2]);
+        // Anything whose effects depend on the graph is not read from the text.
+        for other in [
+            "INSERT { <http://ex/a> <http://ex/b> ?o } WHERE { ?s ?p ?o }",
+            "INSERT DATA { <http://ex/a> <http://ex/b> <http://ex/c> } ; CLEAR DEFAULT",
+        ] {
+            assert_eq!(data_update_effects(other, &unlimited).unwrap(), None, "{other}");
+        }
+        assert!(data_update_effects("INSERT DATA {", &unlimited).is_err());
     }
 
     /// The net per-slot membership a journal frame yields after a set-semantic redo (insert adds,

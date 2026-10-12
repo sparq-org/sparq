@@ -1,0 +1,99 @@
+# Publishes https://sparq-org.github.io/sparq-previews/: hosted previews of open
+# sparq-org/sparq pull requests, on an origin separate from the production site.
+#
+# SOURCE OF TRUTH: sparq-org/sparq .github/site-previews/publish.yml; this repository runs a
+# copy. sparq's site-preview.yml builds each preview with basePath /sparq-previews/pr-<N>;
+# sparq's scripts/site-preview-publish.py (checked out from sparq main on every pass) picks
+# the trusted builds, and this workflow deploys them. A closed PR drops out on the next pass.
+#
+# CREDENTIAL: secret SPARQ_ACTIONS_READ_TOKEN, a fine-grained token limited to
+# sparq-org/sparq with Actions: read (GitHub requires it to download another repository's
+# artifacts, even a public one's). It grants nothing else.
+
+name: publish
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Deploy even if the previews are unchanged
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write   # keep the schedule enabled (below)
+    outputs:
+      changed: ${{ steps.publish.outputs.changed }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: sparq-org/sparq
+          ref: main
+          sparse-checkout: scripts/site-preview-publish.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      # GitHub disables schedules in repositories with no commits for 60 days; re-enabling
+      # the workflow through the API on each pass keeps it alive.
+      - name: Keep the schedule enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/publish.yml/enable" || true
+
+      - name: Assemble previews
+        id: publish
+        env:
+          GH_TOKEN: ${{ secrets.SPARQ_ACTIONS_READ_TOKEN }}
+          FORCE_DEPLOY: ${{ github.event_name == 'push' || inputs.force }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::secret SPARQ_ACTIONS_READ_TOKEN is not set (see the header of this workflow)"
+            exit 1
+          fi
+          set +e
+          python3 -I scripts/site-preview-publish.py "$RUNNER_TEMP/site"
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "changed=true" >> "$GITHUB_OUTPUT" ;;
+            3) echo "changed=false" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$code" ;;
+          esac
+
+      - name: Upload Pages artifact
+        if: steps.publish.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    needs: assemble
+    if: needs.assemble.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

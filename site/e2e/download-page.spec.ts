@@ -17,13 +17,15 @@
 // for the exact assertion that fails when the mutation is applied.
 //
 // All GitHub API calls are MOCKED via page.route — the test is fully hermetic.
-import { test, expect, type Page, type ConsoleMessage } from "@playwright/test";
+import { test, expect, devices, type Page, type ConsoleMessage } from "@playwright/test";
 
 // Block the coi-serviceworker for this spec. The shim re-issues EVERY fetch (incl. cross-origin)
 // from inside the service worker, bypassing page.route — so the api.github.com mock would never
 // intercept. The /download page needs no cross-origin isolation (plain CORS fetch + static links),
 // so blocking the SW is safe here and makes the mock deterministic.
-test.use({ serviceWorkers: "block" });
+// The specs assert the Windows card is promoted, so pin a Windows UA: the nightly webkit
+// project's Desktop Safari UA would otherwise promote the macOS card.
+test.use({ serviceWorkers: "block", userAgent: devices["Desktop Chrome"].userAgent });
 
 // [SONNET-4.6] sq-vw3ax.11.2 — URLs updated to sparq-org/sparq (repo renamed).
 const API_LATEST_GLOB = "**/api.github.com/repos/sparq-org/sparq/releases/latest";

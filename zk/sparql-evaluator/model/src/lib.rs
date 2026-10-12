@@ -266,3 +266,5 @@ pub mod replay;
 // V5 model; its separate guest source is unbuilt, with no receipt yet.
 #[cfg(feature = "authenticated-rdf")]
 pub mod authenticated_rdf;
+#[cfg(feature = "authenticated-rdf")]
+pub mod merkle_suite;

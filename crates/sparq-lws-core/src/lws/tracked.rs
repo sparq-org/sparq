@@ -214,6 +214,14 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.list_children(container).await
     }
 
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+        self.inner.list_children_within(container, max_bytes).await
+    }
+
     async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {
         self.inner.read_plan(target, acl_candidates).await
     }

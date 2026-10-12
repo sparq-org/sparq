@@ -151,7 +151,7 @@ export function HttpPanelTable({
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
+      <div tabIndex={0} className="overflow-x-auto rounded-lg ring-1 ring-foreground/10">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b bg-muted/40 text-left">

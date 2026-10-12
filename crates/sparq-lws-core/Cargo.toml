@@ -224,8 +224,13 @@ itoa = "1"
 # (p256 as a dev-dependency, reqwest via solid-oidc-verifier), so these entries add no new crate.
 p256 = { version = "0.13", features = ["ecdsa", "jwk", "std"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-bs58 = "0.5"
 httpdate = "1"
+# The authentication suite interface and the JOSE helpers the suites share (`sparq-lws-authn`),
+# and the suites kept in their own packages, each behind its `authn-*` feature.
+sparq-lws-authn = { path = "../sparq-lws-authn" }
+sparq-lws-authn-saml = { path = "../sparq-lws-authn-saml", optional = true }
+sparq-lws-authn-openid = { path = "../sparq-lws-authn-openid", optional = true }
+sparq-lws-authn-ssi = { path = "../sparq-lws-authn-ssi", optional = true }
 # Preserve the native dependency graph and feature set exactly. The target split keeps listener,
 # runtime, verifier, filesystem, TLS, PoP, notification, and non-memory backend code out of wasm.
 axum = { version = "0.8", features = ["ws"] }
@@ -263,7 +268,7 @@ sparq-trust = { path = "../sparq-trust", optional = true }
 # already a transitive dep of sparq-trust, so the feature adds no crate; making it an optional
 # normal dep rather than an unconditional dev-dep keeps the research ZK estate out of the
 # default `cargo test` of this core crate. Run with `--features trust-graph`.
-sparq-zk = { path = "../sparq-zk", version = "0.1.4", optional = true }
+sparq-zk = { path = "../sparq-zk", version = "0.1.5", optional = true }
 object_store = "0.14"
 pin-project-lite = "0.2"
 hyper = { version = "1", features = ["client", "http1"] }
@@ -352,13 +357,24 @@ h3-quinn = "0.0.10"
 
 
 [features]
+# Linked Web Storage authentication suites, each in its own package; the server offers each one
+# compiled in that is configured (and that `SOLID_SERVER_LWS_AUTHN` names, when set). SAML 2.0
+# subject tokens (`sparq-lws-authn-saml`), offered when
+# `SOLID_SERVER_LWS_SAML_IDPS_FILE` names trusted identity providers.
+authn-saml = ["dep:sparq-lws-authn-saml"]
+# OpenID Connect and Solid-OIDC ID Tokens (`sparq-lws-authn-openid`), offered by default; on by
+# default, so a server takes ID Tokens unless built without it.
+authn-openid = ["dep:sparq-lws-authn-openid"]
+# Self-issued JWTs with did:key and controlled identifier subjects (`sparq-lws-authn-ssi`); on by
+# default.
+authn-ssi = ["dep:sparq-lws-authn-ssi"]
 # DEFAULT = the embedded in-process engine (sq-gg0qq.3): now that this crate lives IN the sparq
 # workspace, the in-process `sparq-core`/`sparq-engine` binding is the FIRST-CLASS data-path
 # backend — the whole point of the migration (handover §0) — so it is on by default for
 # in-workspace builds. Build with `--no-default-features` for the engine-free profile (the
 # in-memory double only — the former default), e.g. for an out-of-workspace consumer that wants
 # no engine dependency.
-default = ["embedded-sparq", "sparql-endpoint"]
+default = ["embedded-sparq", "sparql-endpoint", "authn-openid", "authn-ssi"]
 # Opt-in: compile the distributed Redis-backed DPoP-`jti` replay store (`src/redis_replay.rs`) + its
 # `redis`/`r2d2` deps. OFF by default so the standard build, tests, and conformance are byte-identical
 # and carry no extra dependency. Enable for a horizontally-scaled deployment that shares one replay set

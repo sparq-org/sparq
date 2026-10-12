@@ -207,7 +207,7 @@ fn root_ctx(
 /// True iff processing `context` never consults the document loader: no remote context
 /// IRI (a string context, at the top level or under any nested `@context`) and no
 /// `@import`. A context nested deeper than a parsed one can be is not checked (false).
-fn self_contained(context: &Json) -> bool {
+pub(crate) fn self_contained(context: &Json) -> bool {
     fn local(ctx: &Json, depth: usize) -> bool {
         match ctx {
             Json::Str(_) => false,

@@ -2269,10 +2269,10 @@ pub fn graph_to_jsonld_with(graph: &Graph, form: JsonLdForm, prefixes: &Prefixes
 }
 
 // ===========================================================================
-// W3C JSON-LD 1.1 Compaction against a caller-supplied `@context`.
-// `JsonLdForm::Compacted` above is only the *prefix* form; the `compact` submodule
-// adapts the native `sparq-jsonld` document pipeline (fromRdf → compact), the same
-// code the W3C conformance lane measures.
+// W3C JSON-LD 1.1 Compaction and Framing against a caller-supplied `@context` /
+// frame. `JsonLdForm::Compacted` above is only the *prefix* form; the `compact`
+// submodule adapts the native `sparq-jsonld` document pipeline (fromRdf →
+// compact / frame), the same code the W3C conformance lanes measure.
 // ===========================================================================
 mod compact;
 pub use compact::{parse_context_json, write_jsonld_compact, ActiveContext, Json as JsonLdValue};
@@ -2297,25 +2297,7 @@ pub fn graph_to_jsonld_compact(graph: &Graph, context: &JsonLdValue) -> String {
     write_jsonld_compact(&view, context)
 }
 
-// ===========================================================================
-// [OPUS-4.8] (sq-oy1f.17) W3C JSON-LD 1.1 Framing.
-//
-// The `frame` submodule implements the W3C JSON-LD 1.1 Framing Algorithm: it
-// reshapes an RDF dataset into a deterministic tree matching a caller-supplied
-// **frame** document — node-pattern matching (`@type`/property presence/value/
-// wildcard `{}`/match-none `[]`), recursive subtree framing with the `@embed`
-// link table (breaking blank-node cycles), `@explicit` pruning, `@default`/
-// `@omitDefault` fill, `@requireAll` (AND vs OR), and list / named-graph framing
-// — then compacts the framed model against the frame's `@context`. Hand-rolled
-// and dependency-free, reusing the `compact` submodule's `Json` AST + fromRdf
-// model builder (no `serde_json`, no `json-ld` crate), inside `serialize-rdf`.
-// ===========================================================================
-mod frame;
-// The pre-native compactor, kept only for the framer above until framing moves onto
-// `sparq_jsonld::frame` in its own change.
-#[allow(dead_code)]
-mod legacy_compact;
-pub use frame::write_jsonld_framed;
+pub use compact::write_jsonld_framed;
 
 /// Frames a [`Graph`] (dataset) against a caller-supplied JSON-LD **frame** document,
 /// applying the full W3C JSON-LD 1.1 Framing Algorithm, and returns the framed + compacted
@@ -2325,7 +2307,7 @@ pub use frame::write_jsonld_framed;
 /// subjects whose node pattern matches the frame (`@type` / property presence / specific
 /// value / wildcard `{}` / match-none `[]`, combined with AND under `@requireAll: true` else OR),
 /// embeds referenced nodes inline per the `@embed` flag (`@once`/`@always`/`@never`; `@link`
-/// treated as `@always`) while the blank-node link table breaks circular references, prunes
+/// treated as `@once`) while the blank-node link table breaks circular references, prunes
 /// each matched node to the framed properties when `@explicit: true`, and fills `@default` /
 /// a preserve-`null` marker for framed properties absent from the matched node (suppressed by
 /// `@omitDefault: true`). The framed model is then compacted against the frame's `@context`.
@@ -2333,11 +2315,8 @@ pub use frame::write_jsonld_framed;
 /// `frame` is the parsed frame JSON (build it with [`parse_context_json`] from a frame string,
 /// or construct the [`JsonLdValue`] directly). The output is a `{"@context": …, "@graph": […]}`
 /// document, collapsing to the bare framed node merged with `@context` for a single matched
-/// root (the `omitGraph` default). Named graphs in the dataset are each framed against the
-/// same pattern.
-///
-/// Hand-rolled and **dependency-free** — no `json-ld` crate, no `serde_json` (the same tiny
-/// `Json` AST as [`graph_to_jsonld_compact`]).
+/// root (the `omitGraph` default). Matching runs over the merged graph of the whole dataset,
+/// per the spec.
 pub fn graph_to_jsonld_framed(graph: &Graph, frame: &JsonLdValue) -> String {
     let owned = dataset_graphs(graph);
     let view: Vec<NamedGraph<'_>> = owned
@@ -4630,8 +4609,56 @@ ex:bob
 
     // A `@type` map whose scoped context re-aliases `@type`, and reuses the outer alias
     // for a data property, keeps that property and adds no type.
+    #[test]
+    fn frame_type_map_under_scoped_alias_keeps_data() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"type":"@type","p":{"@id":"http://ex/p","@container":"@type",
+                "@context":{"type":"http://ex/data","kind":"@type"}}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        // oxjsonld cannot read node objects inside a type map, so `p` is written as a plain
+        // property (still under its scoped context, where `type` is ex:data).
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+    }
+
     // A `@type` map item whose own type-scoped context re-aliases `@type`, and reuses
     // the outer alias for data, keeps that data and adds no type.
+    #[test]
+    fn frame_type_map_under_type_scoped_alias_keeps_data() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/","t":"@type","type":"@type",
+                "T":{"@id":"http://ex/T","@context":{"t":"http://ex/data"}},
+                "p":{"@id":"http://ex/p","@container":"@type"}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        // `p` becomes a plain property (sparq's reader can't read node objects in a type
+        // map); under `T`'s type-scoped context `t` is ex:data and `type` the type. The
+        // output is checked by expansion: oxjsonld doesn't apply a type-scoped context
+        // after `@id`.
+        assert!(framed.contains(r#""p":{"@id":"http://ex/b","#), "{framed}");
+        let doc = sparq_jsonld::Json::parse(&framed).unwrap();
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let mut exp = String::new();
+        sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+        assert!(exp.contains(r#""http://ex/data":[{"@value":"kept"}]"#), "{exp}");
+        assert!(!exp.contains("http://ex/kept"), "{exp}");
+    }
+
     // A type-scoped context's own `@type` alias is not used for the node's types: expansion
     // finds `@type` entries before applying type-scoped contexts. Checked through both
     // writers by expansion, since oxjsonld doesn't apply a type-scoped context after `@id`.
@@ -4661,7 +4688,55 @@ ex:bob
 
     // An embedded node under a property-scoped context that redefines the outer `@type`
     // alias keeps its type: expansion looks for `@type` under that context.
+    #[test]
+    fn framed_type_key_survives_a_property_scoped_redefinition() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/q> "v" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/","type":"@type",
+                "T":{"@id":"http://ex/T","@context":{"type":"@type","label":"http://ex/q"}},
+                "p":{"@id":"http://ex/p","@context":{"type":"http://ex/data","t":"@type"}}},
+                "@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let doc = sparq_jsonld::Json::parse(&framed).unwrap();
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let mut exp = String::new();
+        sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+        assert!(exp.contains(r#""@type":["http://ex/T"]"#), "{framed}\n{exp}");
+        assert!(exp.contains(r#""http://ex/q":[{"@value":"v"}]"#), "{framed}\n{exp}");
+        assert!(!exp.contains("http://ex/data"), "{framed}\n{exp}");
+    }
+
     // A property-scoped @vocab does not re-read an embedded node's type as another IRI.
+    #[test]
+    fn framed_type_survives_a_property_scoped_vocab() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/",
+                "p":{"@id":"http://ex/p","@context":{"@vocab":"http://other/"}}},
+                "@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let doc = sparq_jsonld::Json::parse(&framed).unwrap();
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let mut exp = String::new();
+        sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+        assert!(exp.contains(r#""@type":["http://ex/T"]"#), "{framed}\n{exp}");
+        assert!(!exp.contains("http://other/T"), "{framed}\n{exp}");
+    }
+
     // A list wrapper is read under the property's scoped context, so its @list alias
     // comes from there; the list survives as a list.
     #[test]
@@ -4675,6 +4750,31 @@ ex:bob
     }
 
     // A type-map key that the enclosing context reads as another type stays on the node.
+    #[test]
+    fn framed_type_map_key_reads_back() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/","T":"http://ex/T",
+                "p":{"@id":"http://ex/p","@container":"@type",
+                     "@context":{"T":"http://other/T","U":"http://ex/T"}}},
+                "@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let doc = sparq_jsonld::Json::parse(&framed).unwrap();
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let mut exp = String::new();
+        sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+        assert!(framed.contains(r#""@context""#), "{framed}");
+        assert!(exp.contains(r#""@type":["http://ex/T"]"#), "{framed}\n{exp}");
+        assert!(!exp.contains("http://ex/U"), "{framed}\n{exp}");
+    }
+
     // Lists nested far deeper than the walks allow are written without exhausting the
     // stack, and re-read with every triple.
     #[test]
@@ -4695,6 +4795,20 @@ ex:bob
 
     // A framed chain embedded deeper than the walks allow falls back to the expanded
     // document instead of exhausting the stack.
+    #[test]
+    fn deeply_embedded_frames_fall_back() {
+        let n = 2000;
+        let nt: String = (0..n)
+            .map(|i| format!("<http://ex/a{i}> <http://ex/p> <http://ex/a{}> .\n", i + 1))
+            .collect();
+        let g0 = Graph::load_str(&nt, "ntriples").unwrap();
+        let frame =
+            parse_context_json(r#"{"@context":{"@vocab":"http://ex/"},"@id":"http://ex/a0"}"#).unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let g1 = Graph::load_dataset(&framed, "jsonld").unwrap();
+        assert_eq!(triple_count(&g0), triple_count(&g1));
+    }
+
     // Same-document references with a colon in the query or fragment stay relative to
     // the whole base (no "./" that would drop its last segment).
     #[test]
@@ -4779,6 +4893,30 @@ ex:bob
 
     // The readable re-rendering keeps what the frame matched: a type-map frame still
     // selects by type, and a `["@type"]` container is dropped whole.
+    #[test]
+    fn readable_type_maps_keep_the_frame_match() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" .
+               <http://ex/z> <http://ex/data> "other" ."#,
+            "turtle",
+        )
+        .unwrap();
+        for container in [r#""@type""#, r#"["@type"]"#] {
+            let frame = parse_context_json(&format!(
+                r#"{{"@context":{{"@vocab":"http://ex/","p":{{"@id":"http://ex/p","@container":{container}}}}},
+                    "@id":"http://ex/a","p":{{"T":{{}}}}}}"#
+            ))
+            .unwrap();
+            let framed = graph_to_jsonld_framed(&g0, &frame);
+            assert!(!framed.contains("other"), "{framed}");
+            let back = Graph::load_str(&framed, "jsonld").unwrap();
+            let mut want = nt_sorted(&g0);
+            want.retain(|t| !t.contains("other"));
+            assert_eq!(nt_sorted(&back), want, "{framed}");
+        }
+    }
+
     // A property-valued index under a scoped context that renames the index property keys
     // on the right value and keeps the data property.
     #[test]
@@ -4804,6 +4942,25 @@ ex:bob
     }
 
     // The readable re-rendering of a type map keeps the frame's `@null` defaults.
+    #[test]
+    fn readable_type_maps_keep_null_defaults() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "D" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/","p":{"@container":"@type"}},
+                "@id":"http://ex/a","missing":{"@default":"@null"}}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        assert!(framed.contains(r#""missing":null"#), "{framed}");
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+    }
+
     // A property-valued index whose value reads as an `@none` alias stays on the node.
     #[test]
     fn frame_index_map_keeps_values_spelled_like_none() {

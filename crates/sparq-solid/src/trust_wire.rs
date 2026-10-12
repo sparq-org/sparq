@@ -114,16 +114,8 @@ impl PodStore {
         session: &TrustSession,
         target: &NamedNode,
     ) -> Result<TrustAdmissionOutcome, String> {
-        let admitted = admit(credential, rules, session, target);
-        let grants = derive_grants(&admitted, abac_rule_n3_for(self))?;
-        if !grants.is_empty() {
-            install_auth_grants(&mut self.graph, &grants);
-            self.reindex_with(crate::ReindexScope::Full);
-        }
-        Ok(TrustAdmissionOutcome {
-            admitted,
-            installed_grants: grants,
-        })
+        let rule = abac_rule_n3_for(self);
+        self.admit_trust_credential_with_rule(credential, rules, session, target, rule)
     }
 
     /// As [`PodStore::admit_trust_credential_and_materialize`] but with an explicit
@@ -145,10 +137,15 @@ impl PodStore {
         abac_rule_n3: &str,
     ) -> Result<TrustAdmissionOutcome, String> {
         let admitted = admit(credential, rules, session, target);
-        let grants = derive_grants(&admitted, abac_rule_n3)?;
-        if !grants.is_empty() {
-            install_auth_grants(&mut self.graph, &grants);
-            self.reindex_with(crate::ReindexScope::Full);
+        let mut grants = derive_grants(&admitted, abac_rule_n3)?;
+        // A dropped view is not rebuilt by trust grants (see `PodStore::grant_view`).
+        match self.grant_view() {
+            Some(view) if !grants.is_empty() => {
+                install_auth_grants(view, &grants);
+                self.reindex_with(crate::ReindexScope::Full);
+            }
+            Some(_) => {}
+            None => grants.clear(),
         }
         Ok(TrustAdmissionOutcome {
             admitted,
@@ -198,9 +195,12 @@ impl PodStore {
         let statics = admit_static(credential, rules, target);
         let conditional_grants = derive_conditional_grants(&statics, abac_rule_n3)?;
         let mut installed_count = 0usize;
-        for cg in &conditional_grants {
-            install_conditional_grant(&mut self.graph, target, cg);
-            installed_count += 1;
+        // A dropped view is not rebuilt by trust grants (see `PodStore::grant_view`).
+        if let Some(view) = self.grant_view() {
+            for cg in &conditional_grants {
+                install_conditional_grant(view, target, cg);
+                installed_count += 1;
+            }
         }
         if installed_count > 0 {
             self.reindex_with(crate::ReindexScope::Full);

@@ -32,7 +32,8 @@ does not change that; it makes the *disposition* checkable, not the *advisory fe
 
 The earlier entries are closed. `brace-expansion` (alerts #25/#26/#27/#46) moved to
 patched 1.1.21 / 2.1.7 / 5.0.12 with #6676. `postcss` (#45) moved to 8.5.29 through the
-root override, and `sharp` (#32) to 0.35.5 under next 15.5.27, both in #6692.
+root override, and `sharp` (#32) to 0.35.5 under next 15.5.27, both in #6692. `basic-ftp`
+(GHSA-c475-qrg2-pj4r) moved to patched 6.2.2 through a root override in #6751.
 
 ### Open, dev-only: no non-breaking fix upstream
 
@@ -43,11 +44,10 @@ published package or a built site/GUI bundle. Every row is asserted against the 
 |---|---|---|---|---|
 | `braces` | `node_modules/braces` | 3.0.3 | `node_modules/micromatch` 4.0.8 (`^3.0.3`), via `fast-glob` ← `@next/eslint-plugin-next` ← `eslint-config-next` | GHSA-vfj7-8cjw-p6xm |
 | `extract-zip` | `node_modules/extract-zip` | 2.0.1 | `node_modules/@puppeteer/browsers` 2.13.2 (`^2.0.1`), via `webdriverio` 9 (GUI e2e) | GHSA-jmr9-qjv8-65gv, GHSA-7pqw-9j4j-h8q3 |
-| `basic-ftp` | `node_modules/basic-ftp` | 5.3.1 | `node_modules/get-uri` 6.0.5 (`^5.0.2`), via `proxy-agent` ← `@puppeteer/browsers` | GHSA-c475-qrg2-pj4r |
 
 `braces` 3.0.3 and `extract-zip` 2.0.1 are the latest releases, so no resolver move can fix
-them. `basic-ftp` is fixed only in 6.x, outside `get-uri`'s `^5` range; the upstream route
-is webdriverio 10 (a major bump of the GUI e2e harness).
+them. The `extract-zip` upstream route is webdriverio 10 (a major bump of the GUI e2e
+harness).
 
 ## Do NOT add `dependabot.yml` `ignore:` entries
 
@@ -119,24 +119,6 @@ close the finding — *not* to relax the check.
             "path": "node_modules/@puppeteer/browsers",
             "version": "2.13.2",
             "range": "^2.0.1"
-          }
-        }
-      ]
-    },
-    {
-      "name": "basic-ftp",
-      "advisories": [
-        "GHSA-c475-qrg2-pj4r"
-      ],
-      "instances": [
-        {
-          "path": "node_modules/basic-ftp",
-          "version": "5.3.1",
-          "pinned_by": {
-            "kind": "package",
-            "path": "node_modules/get-uri",
-            "version": "6.0.5",
-            "range": "^5.0.2"
           }
         }
       ]

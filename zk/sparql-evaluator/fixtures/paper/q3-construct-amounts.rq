@@ -1,0 +1,2 @@
+PREFIX bank: <https://bank.example/vocab#>
+CONSTRUCT { ?p bank:amount ?amount } WHERE { ?p a bank:Payment ; bank:amount ?amount }

@@ -34,13 +34,19 @@
 //! fits the ceiling nor that the other five declared tuples have retained
 //! proofs.
 //!
+//! [`check_query_profile`] rejects `DESCRIBE` and dataset clauses (`FROM`,
+//! `FROM NAMED`), which version 1 of the ZK SPARQL answers specification
+//! excludes but the relation evaluates. Proving and both verification paths
+//! apply it to the request before any other work; the guest does not.
+//!
 //! Experimental, not externally audited. Neither provenance establishes
 //! credential status, holder binding, or wallet or world completeness.
 
 use crate::v3::CheckedFailure;
 use crate::{AcceptedGuest, Error, Nonces, Presentation, prove_serialized, verify_receipt};
 use sparq_proved_evaluator_model::authenticated_rdf::{
-    Journal, Request, Witness, bind_journal, dataset_commitment, validate_request,
+    Journal, Request, SignatureMode, Witness, bind_journal, check_revealed_signatures,
+    dataset_commitment, validate_request,
 };
 use std::{convert::Infallible, path::Path};
 
@@ -59,6 +65,7 @@ pub fn prove_with_artifact(
     r0vm: &Path,
     guest: &AcceptedGuest,
 ) -> Result<Presentation, Error> {
+    check_query_profile(&witness.request)?;
     validate_request(&witness.request).map_err(|_| Error("invalid V5 proof request"))?;
     dataset_commitment(&witness.dataset, &witness.request.policy)
         .map_err(|_| Error("V5 private credentials rejected"))?;
@@ -67,11 +74,36 @@ pub fn prove_with_artifact(
     Ok(presentation)
 }
 
+/// Rejects a request whose query uses `DESCRIBE` or a dataset clause (`FROM` or
+/// `FROM NAMED`).
+///
+/// Version 1 of the ZK SPARQL answers specification excludes these features, but
+/// the V5 relation evaluates them: `DESCRIBE` with the evaluator's own
+/// description, and dataset clauses against credentials that form only the
+/// default graph. The check runs on the host, on the verifier's own request, so
+/// the accepted V5 image is unchanged.
+///
+/// # Errors
+/// Rejects an unparsable query, `DESCRIBE` and any dataset clause.
+pub fn check_query_profile(request: &Request) -> Result<(), Error> {
+    let query = spargebra::SparqlParser::new()
+        .parse_query(&request.query)
+        .map_err(|_| Error("V5 query parse rejected"))?;
+    if matches!(query, spargebra::Query::Describe { .. }) {
+        return Err(Error("DESCRIBE is outside the V5 query profile"));
+    }
+    if query.dataset().is_some() {
+        return Err(Error("FROM and FROM NAMED are outside the V5 query profile"));
+    }
+    Ok(())
+}
+
 fn checked_journal(
     presentation: &Presentation,
     expected: &Request,
     image_id: [u32; 8],
 ) -> Result<Journal, Error> {
+    check_query_profile(expected)?;
     validate_request(expected).map_err(|_| Error("invalid V5 expected request"))?;
     verify_receipt(presentation, image_id)?;
     let journal: Journal = presentation
@@ -101,11 +133,42 @@ pub fn verify_with_artifact(
     nonces: &mut impl Nonces,
     guest: &AcceptedGuest,
 ) -> Result<Journal, Error> {
+    // A revealed-mode journal is unauthenticated until its signatures are checked.
+    if expected.policy.signature_mode == SignatureMode::Revealed {
+        return Err(Error("revealed-mode V5 requests use verify_revealed_with_artifact"));
+    }
     let no_check = |_: &Journal| Ok::<(), Infallible>(());
     match verify_checked(presentation, expected, nonces, guest.image_id, no_check) {
         Ok((journal, ())) => Ok(journal),
         Err(CheckedFailure::Verification(error)) => Err(error),
         Err(CheckedFailure::Check(never)) => match never {},
+    }
+}
+
+/// Verifies a revealed-mode V5 receipt and the presented issuer signatures.
+///
+/// As [`verify_with_artifact`], and before the nonce is consumed, checks each
+/// presented `proofValue` (journal order, 64 bytes each) with strict Ed25519
+/// against the journal's signed message and the request table key it names.
+///
+/// # Errors
+/// Everything [`verify_with_artifact`] rejects, hidden-mode requests, and any
+/// missing, extra, malformed or invalid signature.
+pub fn verify_revealed_with_artifact(
+    presentation: &Presentation,
+    expected: &Request,
+    signatures: &[Vec<u8>],
+    nonces: &mut impl Nonces,
+    guest: &AcceptedGuest,
+) -> Result<Journal, Error> {
+    if expected.policy.signature_mode != SignatureMode::Revealed {
+        return Err(Error("hidden-mode V5 requests use verify_with_artifact"));
+    }
+    let check = |journal: &Journal| check_revealed_signatures(journal, expected, signatures);
+    match verify_checked(presentation, expected, nonces, guest.image_id, check) {
+        Ok((journal, ())) => Ok(journal),
+        Err(CheckedFailure::Verification(error)) => Err(error),
+        Err(CheckedFailure::Check(_)) => Err(Error("revealed issuer signature rejected")),
     }
 }
 

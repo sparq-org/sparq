@@ -1,6 +1,6 @@
-//! Subject token verification for the LWS authorization server (LWS 1.0 core section 5.2.3,
-//! "validate before issuing"). Each authentication suite is checked the way its specification and
-//! the Touchstone reference authorization server check it:
+//! The self-issued authentication suites of the Linked Web Storage authorization server (LWS 1.0
+//! core section 5.2.3): a JWT the agent signs itself, as the subject token. Each is checked the way
+//! its specification and the Touchstone reference authorization server check it:
 //!
 //! - **did:key** (`lws10-authn-ssi-did-key`): a self-issued JWT whose subject is a did:key. The key
 //!   comes from the identifier itself (P-256, multicodec `0x1200`, signed ES256; or Ed25519,
@@ -14,98 +14,54 @@
 //! Self-issued credentials need `sub = iss = client_id`, an `aud` that includes this authorization
 //! server, an `exp` in the future and an `iat` not ahead of now. `alg: none` is always refused.
 //!
-//! Documents are fetched with the server's HTTP client. Unless `allow_insecure_fetch` is set, only
-//! `https:` URLs are fetched, and never from loopback, private, link-local or otherwise non-global
-//! addresses: every redirect hop is checked before it is requested (the client follows none
-//! itself), the client's resolver hands out public addresses only, so the connection goes where
-//! the check looked, and no proxy is used.
+//! Documents are fetched under the server's fetch policy (see [`sparq_lws_authn::fetch`]).
+//! [`Ssi`] is the suite, for a server's [`Suites`](sparq_lws_authn::Suites).
 
-use std::net::IpAddr;
+#![forbid(unsafe_code)]
 
 use serde_json::Value;
 
-use super::jose::{self, Jws};
-use super::LwsConfig;
+use sparq_lws_authn::fetch;
+use sparq_lws_authn::jose::{self, Jws};
+pub use sparq_lws_authn::JWT_TOKEN_TYPE;
+use sparq_lws_authn::{
+    check_times, jwt_expires, parse_datetime, parse_jwt, Exchange, Suite, Verified,
+};
 
-pub const JWT_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:jwt";
+/// The self-issued suites: did:key and controlled identifier subjects of a JWT subject token.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Ssi;
 
-/// Allowed clock skew, in seconds, for subject token times (the reference's).
-pub const SKEW_SECS: i64 = 60;
+#[async_trait::async_trait]
+impl Suite for Ssi {
+    fn name(&self) -> &'static str {
+        "ssi"
+    }
 
-/// Largest identity document, discovery document or JWKS read.
-const MAX_DOC: usize = 1024 * 1024;
+    fn token_types(&self) -> &[&'static str] {
+        &[JWT_TOKEN_TYPE]
+    }
 
-/// Who a valid subject token authenticates, and the client presenting it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Verified {
-    pub subject: String,
-    pub client: String,
-}
+    fn identifier_types(&self) -> &[&'static str] {
+        &["https", "http", "did:key"]
+    }
 
-/// Verify a JWT-shaped subject token of `token_type` for an exchange at this authorization server.
-/// The error is the reason, for `error_description`.
-pub async fn verify(
-    cfg: &LwsConfig,
-    http: &reqwest::Client,
-    token: &str,
-    token_type: &str,
-) -> Result<Verified, String> {
-    match token_type {
-        JWT_TOKEN_TYPE => {
-            let jws = parse(token)?;
-            if jws
-                .claim_str("sub")
-                .is_some_and(|s| s.starts_with("did:key:"))
-            {
-                did_key(cfg, &jws)
-            } else {
-                cid(cfg, http, &jws).await
-            }
+    async fn verify(&self, exchange: &Exchange<'_>) -> Result<Verified, String> {
+        let jws = parse_jwt(exchange.subject_token)?;
+        if jws
+            .claim_str("sub")
+            .is_some_and(|s| s.starts_with("did:key:"))
+        {
+            did_key(exchange.authorization_server, &jws, exchange.now)
+        } else {
+            cid(exchange, &jws, &jose::now_secs).await
         }
-        other => Err(format!("unsupported subject_token_type {other}")),
     }
 }
 
-/// A signed JWT: three parts, JSON header and claims, and an `alg` that is not `none`.
-pub fn parse(token: &str) -> Result<Jws, String> {
-    let jws = Jws::parse(token).ok_or("the subject token is not a compact JWS")?;
-    match jws.alg() {
-        None => Err("the subject token names no alg".into()),
-        Some(a) if a.eq_ignore_ascii_case("none") => Err("alg none is refused".into()),
-        Some(_) => Ok(jws),
-    }
-}
-
-/// `exp` present and not past, `iat` present and not ahead of now, `nbf` (when present) reached.
-pub fn check_times(jws: &Jws, now: i64) -> Result<(), String> {
-    let exp = jws.claim_time("exp").ok_or("exp is required")?;
-    if exp <= now - SKEW_SECS {
-        return Err("the credential has expired".into());
-    }
-    let iat = jws.claim_time("iat").ok_or("iat is required")?;
-    if iat > now + SKEW_SECS {
-        return Err("iat lies in the future".into());
-    }
-    if jws
-        .claim_time("nbf")
-        .is_some_and(|nbf| nbf > now + SKEW_SECS)
-    {
-        return Err("the credential is not valid yet".into());
-    }
-    Ok(())
-}
-
-/// Whether `aud` names this authorization server (its issuer identifier, with or without the
-/// trailing slash).
-fn addressed_to_us(cfg: &LwsConfig, jws: &Jws) -> bool {
-    let issuer = cfg.issuer();
-    jws.audiences()
-        .iter()
-        .any(|a| a == issuer || a.strip_suffix('/') == Some(issuer))
-}
-
-/// The self-issued credential checks shared by did:key and CID subjects; the subject on success.
-pub fn self_issued(cfg: &LwsConfig, jws: &Jws, now: i64) -> Result<String, String> {
+/// The self-issued credential checks shared by did:key and CID subjects, for the authorization
+/// server `issuer`; the subject on success.
+pub fn self_issued(issuer: &str, jws: &Jws, now: i64) -> Result<String, String> {
     let sub = jws.claim_str("sub").filter(|s| !s.is_empty());
     let Some(sub) = sub else {
         return Err("sub, iss and client_id must be the same identifier (sub is missing)".into());
@@ -114,7 +70,7 @@ pub fn self_issued(cfg: &LwsConfig, jws: &Jws, now: i64) -> Result<String, Strin
         return Err("sub, iss and client_id must be the same identifier".into());
     }
     check_times(jws, now)?;
-    if !addressed_to_us(cfg, jws) {
+    if !sparq_lws_authn::addressed_to(issuer, jws) {
         return Err("aud does not include this authorization server".into());
     }
     Ok(sub.to_string())
@@ -215,8 +171,8 @@ pub fn did_key_kid_matches(did: &str, kid: Option<&str>) -> bool {
     kid.is_some_and(|k| k == method || k == mb || k.strip_prefix('#') == Some(mb))
 }
 
-fn did_key(cfg: &LwsConfig, jws: &Jws) -> Result<Verified, String> {
-    let did = self_issued(cfg, jws, jose::now_secs())?;
+fn did_key(issuer: &str, jws: &Jws, now: i64) -> Result<Verified, String> {
+    let did = self_issued(issuer, jws, now)?;
     if !did_key_kid_matches(&did, jws.kid()) {
         return Err(format!(
             "the kid names no verification method of the DID document {did} derives"
@@ -226,13 +182,20 @@ fn did_key(cfg: &LwsConfig, jws: &Jws) -> Result<Verified, String> {
     Ok(Verified {
         subject: did.clone(),
         client: did,
+        expires: jwt_expires(jws)?,
     })
 }
 
 // ---------------------------------------------------------------- controlled identifiers
 
-async fn cid(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Verified, String> {
-    let subject = self_issued(cfg, jws, jose::now_secs())?;
+/// A controlled identifier subject. The method's revocation and expiry are checked at `clock`'s
+/// time once its document is fetched, not at the start of the exchange.
+async fn cid(
+    ex: &Exchange<'_>,
+    jws: &Jws,
+    clock: &(dyn Fn() -> i64 + Sync),
+) -> Result<Verified, String> {
+    let subject = self_issued(ex.authorization_server, jws, ex.now)?;
     if !(subject.starts_with("https://") || subject.starts_with("http://")) {
         return Err("a controlled identifier credential needs an https subject".into());
     }
@@ -240,20 +203,21 @@ async fn cid(cfg: &LwsConfig, http: &reqwest::Client, jws: &Jws) -> Result<Verif
         .kid()
         .filter(|k| !k.is_empty())
         .ok_or("a CID credential names its verification method in kid, and this one has none")?;
-    let (_, body) = fetch(
-        cfg,
-        http,
+    let (_, body) = fetch::fetch(
+        &ex.fetch,
+        ex.http,
         &subject,
         "application/cid+json, application/ld+json, application/json",
     )
     .await?;
     let doc: Value = serde_json::from_slice(&body)
         .map_err(|_| format!("{subject} is not a JSON controlled identifier document"))?;
-    let key = cid_method_key(&doc, &subject, kid, jose::now_secs())?;
+    let key = cid_method_key(&doc, &subject, kid, clock())?;
     key.verify(jws)?;
     Ok(Verified {
         subject: subject.clone(),
         client: subject,
+        expires: jwt_expires(jws)?,
     })
 }
 
@@ -382,212 +346,22 @@ pub fn cid_method_key(
     ))
 }
 
-/// An xsd:dateTime / RFC 3339 timestamp (`YYYY-MM-DDThh:mm:ss[.frac](Z|±hh:mm)`; no zone is UTC)
-/// as seconds since the epoch.
-pub fn parse_datetime(s: &str) -> Option<i64> {
-    let s = s.trim();
-    let (date, rest) = s.split_once(['T', 't'])?;
-    // Every field must be ASCII digits of a bounded width (so no sign, no overflow on huge years,
-    // and nothing for the arithmetic below to wrap on).
-    let field = |f: &str, min: usize, max: usize| -> Option<i64> {
-        if f.len() < min || f.len() > max || !f.bytes().all(|c| c.is_ascii_digit()) {
-            return None;
-        }
-        f.parse().ok()
-    };
-    let mut d = date.splitn(3, '-');
-    let (y, mo, da) = (
-        field(d.next()?, 4, 4)?,
-        field(d.next()?, 2, 2)?,
-        field(d.next()?, 2, 2)?,
-    );
-    let zone_at = rest.find(['Z', 'z', '+', '-']).unwrap_or(rest.len());
-    let (time, zone) = rest.split_at(zone_at);
-    let mut time = time.splitn(2, '.');
-    let (time, frac) = (time.next()?, time.next());
-    if frac.is_some_and(|f| f.is_empty() || !f.bytes().all(|c| c.is_ascii_digit())) {
-        return None;
-    }
-    let mut t = time.splitn(3, ':');
-    let (h, mi, se) = (
-        field(t.next()?, 2, 2)?,
-        field(t.next()?, 2, 2)?,
-        field(t.next()?, 2, 2)?,
-    );
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&da) || h > 24 || mi > 59 || se > 60 {
-        return None;
-    }
-    let offset = match zone {
-        "" | "Z" | "z" => 0,
-        z => {
-            let sign = match z.as_bytes().first() {
-                Some(b'-') => -1,
-                Some(b'+') => 1,
-                _ => return None,
-            };
-            let (oh, om) = z.get(1..)?.split_once(':')?;
-            let (oh, om) = (field(oh, 2, 2)?, field(om, 2, 2)?);
-            if oh > 23 || om > 59 {
-                return None;
-            }
-            sign * (oh * 3600 + om * 60)
-        }
-    };
-    // Days from the civil date (Howard Hinnant's algorithm).
-    let y = if mo <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (mo + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + da - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    Some(days * 86_400 + h * 3600 + mi * 60 + se - offset)
-}
-
-// ---------------------------------------------------------------- fetching
-
-pub use super::is_forbidden_ip;
-
-/// The scheme and host checks of the fetch policy, without name resolution.
-pub fn check_url_static(cfg: &LwsConfig, raw: &str) -> Result<url::Url, String> {
-    let u = url::Url::parse(raw).map_err(|_| format!("not a URL: {raw}"))?;
-    match u.scheme() {
-        "https" => {}
-        "http" if cfg.allow_insecure_fetch => {}
-        _ => {
-            return Err(format!(
-                "refusing to fetch {raw}: only https URLs are dereferenced"
-            ))
-        }
-    }
-    if cfg.allow_insecure_fetch {
-        return Ok(u);
-    }
-    match u.host() {
-        Some(url::Host::Ipv4(ip)) if is_forbidden_ip(IpAddr::V4(ip)) => {
-            Err(format!("refusing to fetch {raw}: non-public address"))
-        }
-        Some(url::Host::Ipv6(ip)) if is_forbidden_ip(IpAddr::V6(ip)) => {
-            Err(format!("refusing to fetch {raw}: non-public address"))
-        }
-        Some(url::Host::Domain(d))
-            if d.eq_ignore_ascii_case("localhost")
-                || d.to_ascii_lowercase().ends_with(".localhost") =>
-        {
-            Err(format!("refusing to fetch {raw}: non-public address"))
-        }
-        None => Err(format!("not a URL with a host: {raw}")),
-        _ => Ok(u),
-    }
-}
-
-/// The full fetch policy: the static checks, then every address the host resolves to.
-async fn check_url(cfg: &LwsConfig, raw: &str) -> Result<url::Url, String> {
-    let u = check_url_static(cfg, raw)?;
-    if cfg.allow_insecure_fetch {
-        return Ok(u);
-    }
-    if let Some(url::Host::Domain(d)) = u.host() {
-        let port = u.port_or_known_default().unwrap_or(443);
-        let addrs = tokio::net::lookup_host((d, port))
-            .await
-            .map_err(|_| format!("cannot resolve {d}"))?;
-        let mut any = false;
-        for a in addrs {
-            any = true;
-            if is_forbidden_ip(a.ip()) {
-                return Err(format!(
-                    "refusing to fetch {raw}: {d} resolves to a non-public address"
-                ));
-            }
-        }
-        if !any {
-            return Err(format!("cannot resolve {d}"));
-        }
-    }
-    Ok(u)
-}
-
-/// Redirects a fetch follows, each hop checked against the fetch policy before it is requested.
-pub const MAX_REDIRECTS: usize = 3;
-
-/// Where a redirect from `from` with `location` goes, resolved against `from`.
-pub fn redirect_target(from: &url::Url, location: Option<&str>) -> Result<url::Url, String> {
-    let location = location.ok_or_else(|| format!("{from} redirects without a Location"))?;
-    from.join(location)
-        .map_err(|_| format!("{from} redirects to an invalid location"))
-}
-
-/// GET `url` under the fetch policy: a 200 answer's media type and body (at most 1 MiB).
-///
-/// `http` must be built by [`super::fetch_client`]: it follows no redirects itself, so each hop is
-/// checked (scheme, host and resolved addresses) before it is requested, and its resolver only
-/// connects to public addresses, so a name cannot be re-pointed between check and connect.
-pub async fn fetch(
-    cfg: &LwsConfig,
-    http: &reqwest::Client,
-    url: &str,
-    accept: &str,
-) -> Result<(String, Vec<u8>), String> {
-    let mut u = check_url(cfg, url).await?;
-    u.set_fragment(None);
-    let mut hops = 0;
-    let mut resp = loop {
-        let resp = http
-            .get(u.clone())
-            .header(reqwest::header::ACCEPT, accept)
-            .send()
-            .await
-            .map_err(|e| format!("cannot dereference {url}: {}", e.without_url()))?;
-        if !resp.status().is_redirection() {
-            break resp;
-        }
-        hops += 1;
-        if hops > MAX_REDIRECTS {
-            return Err(format!("{url} redirects too many times"));
-        }
-        let next = redirect_target(
-            &u,
-            resp.headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|v| v.to_str().ok()),
-        )?;
-        u = check_url(cfg, next.as_str()).await?;
-        u.set_fragment(None);
-    };
-    if resp.status() != reqwest::StatusCode::OK {
-        return Err(format!("GET {url} answered {}", resp.status().as_u16()));
-    }
-    let content_type = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
-    if resp.content_length().is_some_and(|n| n as usize > MAX_DOC) {
-        return Err(format!("{url} is too large"));
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|_| format!("cannot read {url}"))?
-    {
-        body.extend_from_slice(&chunk);
-        if body.len() > MAX_DOC {
-            return Err(format!("{url} is too large"));
-        }
-    }
-    Ok((content_type, body))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::{json, Map};
 
+    /// What the tests need of the server's configuration: its authorization server's id.
+    struct LwsConfig(&'static str);
+
+    impl LwsConfig {
+        fn issuer(&self) -> &str {
+            self.0
+        }
+    }
+
     fn cfg() -> LwsConfig {
-        LwsConfig::new("http://localhost:3000")
+        LwsConfig("http://localhost:3000/.lws/as")
     }
 
     fn did_for(key: &jose::EcKey) -> String {
@@ -616,112 +390,6 @@ mod tests {
     }
 
     #[test]
-    fn redirect_hops_resolve_against_the_current_url() {
-        let from = url::Url::parse("https://id.example/a/b").unwrap();
-        assert_eq!(
-            redirect_target(&from, Some("/c")).unwrap().as_str(),
-            "https://id.example/c"
-        );
-        assert_eq!(
-            redirect_target(&from, Some("http://127.0.0.1/x"))
-                .unwrap()
-                .as_str(),
-            "http://127.0.0.1/x"
-        );
-        assert!(redirect_target(&from, None).is_err());
-        // Each hop then faces the policy: a redirect into loopback is refused before it is
-        // requested.
-        let cfg = cfg();
-        assert!(check_url_static(&cfg, "http://127.0.0.1/x").is_err());
-        assert!(check_url_static(&cfg, "https://127.0.0.1/x").is_err());
-        assert!(check_url_static(&cfg, "https://[::1]/x").is_err());
-    }
-
-    /// A redirect to a loopback address is never requested: the fetch client follows no
-    /// redirect, and the hop fails the policy check before any request goes out.
-    #[tokio::test]
-    async fn fetch_refuses_a_redirect_into_loopback() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        use std::sync::Arc;
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        // The internal target: counts the requests that reach it.
-        let internal = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let internal_addr = internal.local_addr().unwrap();
-        let hits = Arc::new(AtomicUsize::new(0));
-        let h = Arc::clone(&hits);
-        tokio::spawn(async move {
-            while let Ok((mut sock, _)) = internal.accept().await {
-                h.fetch_add(1, Ordering::SeqCst);
-                let mut buf = [0u8; 1024];
-                let _ = sock.read(&mut buf).await;
-                let _ = sock
-                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
-                    .await;
-            }
-        });
-        // The "attacker's" server redirects there.
-        let outer = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let outer_addr = outer.local_addr().unwrap();
-        tokio::spawn(async move {
-            while let Ok((mut sock, _)) = outer.accept().await {
-                let mut buf = [0u8; 1024];
-                let _ = sock.read(&mut buf).await;
-                let resp = format!(
-                    "HTTP/1.1 302 Found\r\nlocation: http://{internal_addr}/secret\r\ncontent-length: 0\r\n\r\n"
-                );
-                let _ = sock.write_all(resp.as_bytes()).await;
-            }
-        });
-        // The first hop is let through (as the insecure escape hatch would), but the policy is the
-        // secure one for every hop after: model that by checking the redirect against a secure
-        // configuration with the client the insecure one builds.
-        let mut insecure = cfg();
-        insecure.allow_insecure_fetch = true;
-        let client = super::super::fetch_client(&insecure).unwrap();
-        let resp = client
-            .get(format!("http://{outer_addr}/me"))
-            .send()
-            .await
-            .unwrap();
-        // The client does not follow the redirect itself.
-        assert_eq!(resp.status().as_u16(), 302);
-        let next = redirect_target(
-            &url::Url::parse(&format!("http://{outer_addr}/me")).unwrap(),
-            resp.headers()
-                .get(reqwest::header::LOCATION)
-                .and_then(|v| v.to_str().ok()),
-        )
-        .unwrap();
-        assert!(check_url(&cfg(), next.as_str()).await.is_err());
-        assert_eq!(hits.load(Ordering::SeqCst), 0);
-        // And a secure fetch of a non-https or loopback URL never leaves the process.
-        assert!(
-            fetch(&cfg(), &client, &format!("http://{outer_addr}/me"), "*/*")
-                .await
-                .is_err()
-        );
-        assert_eq!(hits.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn the_resolver_keeps_public_addresses_only() {
-        let addrs: Vec<std::net::SocketAddr> = [
-            "127.0.0.1:443",
-            "10.0.0.1:443",
-            "169.254.169.254:80",
-            "[::1]:443",
-            "93.184.216.34:443",
-        ]
-        .iter()
-        .map(|a| a.parse().unwrap())
-        .collect();
-        assert_eq!(
-            super::super::public_addrs(addrs),
-            vec!["93.184.216.34:443".parse::<std::net::SocketAddr>().unwrap()]
-        );
-    }
-
-    #[test]
     fn did_key_p256_decodes_and_verifies() {
         let cfg = cfg();
         let key = jose::EcKey::generate("x");
@@ -733,18 +401,29 @@ mod tests {
         }
         let jws = sign(&key, &mb, claims(&did, &cfg));
         assert_eq!(
-            did_key(&cfg, &jws).unwrap(),
+            did_key(cfg.issuer(), &jws, jose::now_secs()).unwrap(),
             Verified {
                 subject: did.clone(),
-                client: did.clone()
+                client: did.clone(),
+                expires: jwt_expires(&jws).unwrap(),
             }
         );
         let jws = sign(&key, &format!("{did}#{mb}"), claims(&did, &cfg));
-        assert!(did_key(&cfg, &jws).is_ok());
+        assert!(did_key(cfg.issuer(), &jws, jose::now_secs()).is_ok());
         // Wrong kid, wrong key.
-        assert!(did_key(&cfg, &sign(&key, "other", claims(&did, &cfg))).is_err());
+        assert!(did_key(
+            cfg.issuer(),
+            &sign(&key, "other", claims(&did, &cfg)),
+            jose::now_secs()
+        )
+        .is_err());
         let other = jose::EcKey::generate("y");
-        assert!(did_key(&cfg, &sign(&other, &mb, claims(&did, &cfg))).is_err());
+        assert!(did_key(
+            cfg.issuer(),
+            &sign(&other, &mb, claims(&did, &cfg)),
+            jose::now_secs()
+        )
+        .is_err());
     }
 
     #[test]
@@ -783,7 +462,7 @@ mod tests {
         let check = |edit: &dyn Fn(&mut Map<String, Value>)| {
             let mut c = claims(&did, &cfg);
             edit(c.as_object_mut().unwrap());
-            self_issued(&cfg, &sign(&key, "k", c), now)
+            self_issued(cfg.issuer(), &sign(&key, "k", c), now)
         };
         assert!(check(&|_| {}).is_ok());
         assert!(check(&|c| {
@@ -832,15 +511,44 @@ mod tests {
         .is_ok());
     }
 
-    #[test]
-    fn alg_none_is_refused() {
-        let t = format!(
-            "{}.{}.",
-            jose::b64url(br#"{"alg":"none"}"#),
-            jose::b64url(br#"{"sub":"a"}"#)
+    /// Review finding: a method's expiry was checked at the time the exchange began, so one that
+    /// expired while its document was being fetched still verified. It is checked after the
+    /// fetch.
+    #[tokio::test]
+    async fn cid_methods_are_checked_when_their_document_arrives() {
+        let key = jose::EcKey::generate("k");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let subject = format!("http://{}/id", listener.local_addr().unwrap());
+        let start = jose::now_secs();
+        let mut doc = cid_doc(&subject, jose::public_jwk_of(&key.public_key()));
+        doc["authentication"][0]["expires"] = json!("2001-01-01T00:00:10Z");
+        let served = doc.clone();
+        let app = axum::Router::new().route(
+            "/id",
+            axum::routing::get(move || async move { axum::Json(served) }),
         );
-        assert!(parse(&t).is_err());
-        assert!(parse("not.a").is_err());
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let claims = json!({"sub": subject, "iss": subject, "client_id": subject,
+            "aud": ["http://localhost:3000"], "iat": start, "exp": start + 300});
+        let token = sign(&key, "k", claims);
+        let policy = fetch::Policy {
+            allow_insecure_fetch: true,
+        };
+        let http = fetch::fetch_client(&policy).unwrap();
+        let ex = Exchange {
+            subject_token: "",
+            subject_token_type: JWT_TOKEN_TYPE,
+            authorization_server: "http://localhost:3000",
+            token_endpoint: "http://localhost:3000/token",
+            dpop: None,
+            now: start,
+            fetch: policy,
+            http: &http,
+        };
+        // 2001-01-01T00:00:10Z is 978307210: valid just before, expired from then on.
+        assert!(cid(&ex, &token, &|| 978_307_209).await.is_ok());
+        let err = cid(&ex, &token, &|| 978_307_210).await.unwrap_err();
+        assert!(err.contains("expires"), "{err}");
     }
 
     fn cid_doc(subject: &str, jwk: Value) -> Value {
@@ -905,49 +613,5 @@ mod tests {
         let mut doc = cid_doc(s, jwk);
         doc["authentication"][0]["expires"] = json!("2999-01-01T00:00:00Z");
         assert!(cid_method_key(&doc, s, "k", now).is_ok());
-    }
-
-    #[test]
-    fn datetimes() {
-        assert_eq!(parse_datetime("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(parse_datetime("2000-03-01T00:00:00Z"), Some(951_868_800));
-        assert_eq!(
-            parse_datetime("2000-03-01T01:00:00.123+01:00"),
-            Some(951_868_800)
-        );
-        assert_eq!(
-            parse_datetime("2000-02-29T23:00:00-01:00"),
-            Some(951_868_800)
-        );
-        assert_eq!(parse_datetime("yesterday"), None);
-        // Malformed (non-ASCII, signed, oversized) fields are `None`, never a panic or overflow.
-        for bad in [
-            "2000-03-01T00:00:00+0\u{e9}:00",
-            "2000-03-01T00:00:00Zjunk",
-            "2000-03-01T00:00:00.Z",
-            "2000-+3-01T00:00:00Z",
-            "99999999999999999999-03-01T00:00:00Z",
-            "9223372036854775807-03-01T00:00:00Z",
-            "2000-03-01T00:00:00+05",
-        ] {
-            assert_eq!(parse_datetime(bad), None, "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn fetch_policy() {
-        let mut cfg = cfg();
-        assert!(check_url_static(&cfg, "http://example.org/").is_err());
-        assert!(check_url_static(&cfg, "https://127.0.0.1/").is_err());
-        assert!(check_url_static(&cfg, "https://[::1]/").is_err());
-        assert!(check_url_static(&cfg, "https://10.1.2.3/").is_err());
-        assert!(check_url_static(&cfg, "https://169.254.169.254/").is_err());
-        assert!(check_url_static(&cfg, "https://localhost/").is_err());
-        assert!(check_url_static(&cfg, "file:///etc/passwd").is_err());
-        assert!(check_url_static(&cfg, "https://example.org/").is_ok());
-        assert!(check_url_static(&cfg, "https://8.8.8.8/").is_ok());
-        cfg.allow_insecure_fetch = true;
-        assert!(check_url_static(&cfg, "http://localhost:3918/agents/alice").is_ok());
-        assert!(check_url_static(&cfg, "file:///etc/passwd").is_err());
     }
 }

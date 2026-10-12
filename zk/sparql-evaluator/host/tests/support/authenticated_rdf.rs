@@ -296,6 +296,20 @@ pub const PAYMENT_PROOF_SHA256: &str = "b76ec93a8c2f2121288bc717aaad5ffc5fda6e65
 /// Ed25519 over `SHA-256(PAYMENT_PROOF) || SHA-256(PAYMENT_DOCUMENT)`.
 pub const PAYMENT_SIGNATURE: &str = "0091a31ff65b96f9ec4fde510c5cc083691182e7fd3743b3b8a19dc0209523341e7534a4aee5fa29136407dcc6d8d6d9d09cfece61b0d70eeaad8701e2899405";
 
+/// The payment credential's verifier table: the RFC 8032 TEST 1 key.
+pub fn payment_policy() -> Policy {
+    Policy::new(vec![authorized(PAYMENT_ISSUER, PAYMENT_VM, RFC8032_TEST1_PUBLIC_KEY)])
+}
+
+/// The payment credential, split into its signed parts.
+pub fn payment_credential() -> SignedCredential {
+    SignedCredential {
+        document: PAYMENT_DOCUMENT.into(),
+        proof_config: PAYMENT_PROOF.into(),
+        signature: hex::<64>(PAYMENT_SIGNATURE).to_vec(),
+    }
+}
+
 /// "Was any payment returned?" False: every payment in the credential is settled.
 pub const ASK_PAYMENT_RETURNED: &str = "ASK { ?p a <https://bank.example/vocab#Payment> ; \
      <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Returned> }";

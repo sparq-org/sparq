@@ -2925,3 +2925,54 @@ fn a_wildcard_party_is_never_granted() {
         assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "{party}");
     }
 }
+
+/// Materializing a policy for many requests rebuilds the authorization index once, and
+/// leaves the same auth view as materializing each request on its own.
+#[test]
+fn materializing_for_each_request_rebuilds_the_index_once() {
+    let docs: Vec<String> = (0..200).map(|i| format!("https://pod.ex/notes/m{i}")).collect();
+    let nq: String = docs
+        .iter()
+        .map(|d| format!("<{d}#it> <https://ex.dev/ns#title> \"t\" <{d}> .\n"))
+        .collect();
+    let policy = parse_policy_str(
+        r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/c> a odrl:Set ; odrl:prohibition [
+    odrl:action odrl:read ;
+    odrl:target <https://pod.ex/coll> ;
+    odrl:assignee <https://alice.ex/card#me> ] .
+"#,
+        "turtle",
+    )
+    .unwrap();
+    let requests: Vec<Request> = docs
+        .iter()
+        .map(|d| Request::new(odrl("read")).on(d.as_str()).by(ALICE).with_asset_membership(d.as_str(), "https://pod.ex/coll"))
+        .collect();
+
+    let mut batched = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
+    let before = batched.auth_generation();
+    let outcomes = batched.materialize_odrl_policy_for_each(&policy, &requests);
+    assert_eq!(batched.auth_generation(), before + 1, "one rebuild for {} requests", requests.len());
+    assert!(outcomes.iter().all(|o| o.prohibited));
+
+    let mut single = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
+    let before = single.auth_generation();
+    for r in &requests {
+        single.materialize_odrl_policy(&policy, r);
+    }
+    assert_eq!(single.auth_generation(), before + requests.len() as u64);
+    for agent in [ALICE, BOB] {
+        let s = Session { agent: Some(agent), client: None, issuer: None, now: None };
+        for mode in [Mode::Read, Mode::Write] {
+            assert_eq!(batched.accessible(&s, mode), single.accessible(&s, mode), "{agent} {mode:?}");
+        }
+    }
+
+    // Nothing materialized: no rebuild at all.
+    let gen = batched.auth_generation();
+    let unrelated = Request::new(odrl("read")).on("https://pod.ex/elsewhere").by(BOB);
+    batched.materialize_odrl_policy_for_each(&policy, &[unrelated]);
+    assert_eq!(batched.auth_generation(), gen);
+}
