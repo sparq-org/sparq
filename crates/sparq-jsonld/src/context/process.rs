@@ -9,6 +9,7 @@
 //! Spec: <https://www.w3.org/TR/json-ld11-api/#context-processing-algorithm> and
 //! <https://www.w3.org/TR/json-ld11-api/#create-term-definition>.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::iri::{expand_iri_in_context, is_absolute_iri, is_blank_node, resolve_iri};
@@ -447,7 +448,8 @@ pub(crate) fn create_term_definition(
     defined.insert(term.to_string(), false);
 
     // step 3: the raw value for this term (a missing key defaults to null).
-    let raw = local.get(term).cloned().unwrap_or_else(json_null);
+    let null = json_null();
+    let raw = local.get(term).unwrap_or(&null);
 
     // steps 4/5: keyword handling.
     if term == "@type" {
@@ -455,7 +457,7 @@ pub(crate) fn create_term_definition(
             return Err(JsonLdError::new(E::KeywordRedefinition));
         }
         // Redefining @type is allowed only with @container: @set and/or @protected.
-        let ok = match &raw {
+        let ok = match raw {
             Json::Obj(members) => {
                 !members.is_empty()
                     && members.iter().all(|(k, v)| {
@@ -480,13 +482,13 @@ pub(crate) fn create_term_definition(
     let previous_definition = active.term_definitions_mut().remove(term);
 
     // steps 7–9: normalise the value to a map and record whether it was a simple term.
-    let (value, simple_term) = match &raw {
+    let (value, simple_term) = match raw {
         Json::Str(s) => (
-            Json::Obj(vec![("@id".to_string(), Json::Str(s.clone()))]),
+            Cow::Owned(Json::Obj(vec![("@id".to_string(), Json::Str(s.clone()))])),
             true,
         ),
-        Json::Obj(_) => (raw.clone(), false),
-        j if is_null(j) => (Json::Obj(vec![("@id".to_string(), json_null())]), false),
+        Json::Obj(_) => (Cow::Borrowed(raw), false),
+        j if is_null(j) => (Cow::Owned(Json::Obj(vec![("@id".to_string(), json_null())])), false),
         _ => return Err(JsonLdError::new(E::InvalidTermDefinition)),
     };
 

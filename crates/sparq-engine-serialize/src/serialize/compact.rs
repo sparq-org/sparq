@@ -250,11 +250,12 @@ fn holds_typed_nodes(doc: &Json, terms: &[String]) -> bool {
 pub fn write_jsonld_framed(graphs: &[NamedGraph<'_>], frame_doc: &Json) -> String {
     let opts = JsonLdOptions::default();
     let fopts = FrameOptions::default();
-    let ctx = frame_doc.get("@context").cloned().unwrap_or_default();
+    let no_context = Json::default();
+    let ctx = frame_doc.get("@context").unwrap_or(&no_context);
     let out = frame_match_from_rdf(expanded(graphs), frame_doc, &opts, &fopts, &NoopLoader).and_then(|matched| {
-        let framed = compact_framed(&matched, &ctx, &opts, &fopts, &NoopLoader)?;
+        let framed = compact_framed(&matched, ctx, &opts, &fopts, &NoopLoader)?;
         // The match stands; only its compaction is redone for a readable shape.
-        Ok(match readable_type_maps(&framed, &ctx) {
+        Ok(match readable_type_maps(&framed, ctx) {
             None => framed,
             Some(stripped) => compact_framed(&matched, &stripped, &opts, &fopts, &NoopLoader)
                 .unwrap_or(framed),

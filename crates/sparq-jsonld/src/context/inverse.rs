@@ -24,6 +24,7 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use super::{has_keyword_form, is_keyword, ActiveContext, Direction, Override, TermDefinition};
 use super::iri::relativize_iri;
@@ -44,11 +45,35 @@ use crate::json::Json;
 #[derive(Clone, Debug, Default)]
 struct TypeLangMap {
     /// `@language` sub-map: language tag (and direction suffix) to term.
-    language: BTreeMap<String, String>,
+    language: SubMap,
     /// `@type` sub-map: type IRI / `@reverse` / `@none` / `@any` to term.
-    type_: BTreeMap<String, String>,
+    type_: SubMap,
     /// `@any` sub-map: `"@none"` to an unconstrained catch-all term.
-    any: BTreeMap<String, String>,
+    any: SubMap,
+}
+
+/// A type/language sub-map. Keys are mostly keywords, so they borrow a static string
+/// where they can; each term is allocated once and shared by every slot it fills.
+type SubMap = BTreeMap<Cow<'static, str>, Rc<str>>;
+
+/// `s` as a sub-map or container key, borrowing the keywords the inverse context uses.
+fn slot_key(s: &str) -> Cow<'static, str> {
+    match s {
+        "@none" => Cow::Borrowed("@none"),
+        "@any" => Cow::Borrowed("@any"),
+        "@null" => Cow::Borrowed("@null"),
+        "@reverse" => Cow::Borrowed("@reverse"),
+        "@id" => Cow::Borrowed("@id"),
+        "@vocab" => Cow::Borrowed("@vocab"),
+        "@json" => Cow::Borrowed("@json"),
+        "@set" => Cow::Borrowed("@set"),
+        "@list" => Cow::Borrowed("@list"),
+        "@index" => Cow::Borrowed("@index"),
+        "@language" => Cow::Borrowed("@language"),
+        "@graph" => Cow::Borrowed("@graph"),
+        "@type" => Cow::Borrowed("@type"),
+        _ => Cow::Owned(s.to_string()),
+    }
 }
 
 /// The **inverse context** (JSON-LD 1.1 API §4.3): a multi-level map from
@@ -60,7 +85,7 @@ struct TypeLangMap {
 #[derive(Clone, Debug, Default)]
 pub struct InverseContext {
     /// iri → container-key → type-language map.
-    inner: FxMap<String, BTreeMap<String, TypeLangMap>>,
+    inner: FxMap<String, BTreeMap<Cow<'static, str>, TypeLangMap>>,
     /// `@prefix`-flagged `(term, iri)` pairs in (length, lexicographic) term order,
     /// precomputed for §7.1 step 5 so IRI Compaction does not re-sort them per call.
     prefixes: Vec<(String, String)>,
@@ -90,7 +115,7 @@ impl ActiveContext {
     /// [SONNET-4.6] (sq-90mu3)
     pub fn inverse_context(&self) -> InverseContext {
         // §4.3 step 1: initialise result.
-        let mut result: FxMap<String, BTreeMap<String, TypeLangMap>> = FxMap::default();
+        let mut result: FxMap<String, BTreeMap<Cow<'static, str>, TypeLangMap>> = FxMap::default();
 
         // §4.3 steps 2–3: default_language is the active context's default
         // language (lower-cased), optionally suffixed with "_" + direction.
@@ -119,85 +144,65 @@ impl ActiveContext {
 
         for &(term, term_def) in &terms {
             // §4.3 step 4.1: skip terms with a null IRI mapping.
-            let iri = match &term_def.iri {
-                Some(i) => i.clone(),
-                None => continue,
+            let Some(iri) = term_def.iri.as_deref() else {
+                continue;
             };
+            let term: Rc<str> = Rc::from(term);
 
             // §4.3 step 4.2: compute the container key — sort the container
             // keywords and join them; use "@none" for an empty container.
-            let container: String = if term_def.container.is_empty() {
-                "@none".to_string()
-            } else {
-                let mut sorted = term_def.container.clone();
-                sorted.sort();
-                sorted.join("")
+            let container: Cow<'static, str> = match term_def.container.as_slice() {
+                [] => Cow::Borrowed("@none"),
+                [one] => slot_key(one),
+                many => {
+                    let mut sorted: Vec<&str> = many.iter().map(String::as_str).collect();
+                    sorted.sort_unstable();
+                    Cow::Owned(sorted.concat())
+                }
             };
 
             // §4.3 steps 4.3–4.4: ensure the result entries exist.
-            let container_map = result.entry(iri.clone()).or_default();
-            let tl_map = container_map
-                .entry(container)
-                .or_default();
+            if !result.contains_key(iri) {
+                result.insert(iri.to_string(), BTreeMap::new());
+            }
+            let container_map = result.get_mut(iri).expect("inserted above");
+            let tl_map = container_map.entry(container).or_default();
+            // First write wins in every slot: `terms` is in the spec's shortest, then
+            // lexicographic order.
+            let fill = |map: &mut SubMap, key: Cow<'static, str>| {
+                map.entry(key).or_insert_with(|| Rc::clone(&term));
+            };
 
             // §4.3 step 4.5 ("@any"): record this term as an unconstrained
-            // fallback — first-write-wins (shortest/lexicographic guarantee
-            // comes from the sort above).
-            tl_map.any.entry("@none".to_string()).or_insert_with(|| term.to_string());
+            // fallback.
+            fill(&mut tl_map.any, Cow::Borrowed("@none"));
 
             if term_def.reverse {
                 // §4.3 step 4.6: reverse property — store in type map under
                 // "@reverse".
-                tl_map
-                    .type_
-                    .entry("@reverse".to_string())
-                    .or_insert_with(|| term.to_string());
+                fill(&mut tl_map.type_, Cow::Borrowed("@reverse"));
             } else if term_def.type_mapping.as_deref() == Some("@none") {
                 // §4.3 step 4.7: type mapping "@none" — this term accepts any
                 // type or language; mark it with "@any" in both maps.
-                tl_map
-                    .language
-                    .entry("@any".to_string())
-                    .or_insert_with(|| term.to_string());
-                tl_map
-                    .type_
-                    .entry("@any".to_string())
-                    .or_insert_with(|| term.to_string());
+                fill(&mut tl_map.language, Cow::Borrowed("@any"));
+                fill(&mut tl_map.type_, Cow::Borrowed("@any"));
             } else if let Some(type_mapping) = &term_def.type_mapping {
                 // §4.3 step 4.8: concrete type mapping — register under that
                 // type IRI.
-                tl_map
-                    .type_
-                    .entry(type_mapping.clone())
-                    .or_insert_with(|| term.to_string());
+                fill(&mut tl_map.type_, slot_key(type_mapping));
             } else {
                 // §4.3 step 4.9: no type mapping — use language/direction.
-                let lang_key = language_dir_key(&term_def.language, &term_def.direction);
-                match lang_key {
-                    Some(key) => {
-                        // An explicit language and/or direction was given.
-                        tl_map
-                            .language
-                            .entry(key)
-                            .or_insert_with(|| term.to_string());
-                    }
+                match language_dir_key(&term_def.language, &term_def.direction) {
+                    // An explicit language and/or direction was given.
+                    Some(key) => fill(&mut tl_map.language, Cow::Owned(key)),
                     None => {
                         // §4.3 step 4.9.x: no explicit language or direction —
                         // fall back to the context default(s), then "@none".
                         if self.default_language.is_some() || self.default_base_direction.is_some() {
-                            tl_map
-                                .language
-                                .entry(default_language.clone())
-                                .or_insert_with(|| term.to_string());
+                            fill(&mut tl_map.language, Cow::Owned(default_language.clone()));
                         }
-                        tl_map
-                            .language
-                            .entry("@none".to_string())
-                            .or_insert_with(|| term.to_string());
-                        tl_map
-                            .type_
-                            .entry("@none".to_string())
-                            .or_insert_with(|| term.to_string());
+                        fill(&mut tl_map.language, Cow::Borrowed("@none"));
+                        fill(&mut tl_map.type_, Cow::Borrowed("@none"));
                     }
                 }
             }
@@ -284,7 +289,7 @@ pub(crate) fn select_term(
             None => continue,
         };
         // §7.2 step 3.5: choose the sub-map by type_language.
-        let value_map: &BTreeMap<String, String> = match type_language {
+        let value_map: &SubMap = match type_language {
             "@type" | "@reverse" => &tl_map.type_,
             "@language" => &tl_map.language,
             _ => &tl_map.any, // "@any" and anything else falls through to any
@@ -292,7 +297,7 @@ pub(crate) fn select_term(
         // §7.2 step 3.6: check each preferred value in order.
         for pv in preferred_values {
             if let Some(term) = value_map.get(*pv) {
-                return Some(term.clone());
+                return Some(term.to_string());
             }
         }
     }
@@ -772,16 +777,16 @@ mod tests {
         let iri_map = inv.inner.get("http://ex/foo").expect("iri present");
         let tl = iri_map.get("@none").expect("@none container present");
         assert_eq!(
-            tl.any.get("@none").map(String::as_str),
+            tl.any.get("@none").map(|t| &**t),
             Some("z"),
             "shorter term 'z' must beat 'aa'"
         );
         assert_eq!(
-            tl.language.get("@none").map(String::as_str),
+            tl.language.get("@none").map(|t| &**t),
             Some("z")
         );
         assert_eq!(
-            tl.type_.get("@none").map(String::as_str),
+            tl.type_.get("@none").map(|t| &**t),
             Some("z")
         );
     }
@@ -801,7 +806,7 @@ mod tests {
             .get("@none")
             .unwrap();
         assert_eq!(
-            tl.any.get("@none").map(String::as_str),
+            tl.any.get("@none").map(|t| &**t),
             Some("aa"),
             "lexicographic least 'aa' must beat 'ab'"
         );
@@ -821,7 +826,7 @@ mod tests {
             .get("@none")
             .unwrap();
         assert_eq!(
-            tl.type_.get("http://ex/T").map(String::as_str),
+            tl.type_.get("http://ex/T").map(|t| &**t),
             Some("typed")
         );
     }
@@ -841,7 +846,7 @@ mod tests {
             .get("@none")
             .unwrap();
         assert_eq!(
-            tl.language.get("en").map(String::as_str),
+            tl.language.get("en").map(|t| &**t),
             Some("label")
         );
     }
@@ -871,7 +876,7 @@ mod tests {
         let inv = ac.inverse_context();
         // A null-mapped term has no IRI: nothing should appear in the inverse.
         assert!(inv.inner.is_empty() || !inv.inner.values().any(|cm| {
-            cm.values().any(|tl| tl.any.values().any(|t| t == "dropped"))
+            cm.values().any(|tl| tl.any.values().any(|t| &**t == "dropped"))
         }));
     }
 
