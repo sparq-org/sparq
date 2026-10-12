@@ -87,6 +87,9 @@
   page-config: (paper: "a4", margin: (x: 44mm, y: 52mm)),
 )
 
+// Floats: LNCS-like spacing around figures and tables (the template's default is wider).
+#show figure: it => { set block(above: 1.4em, below: 1.4em); it }
+#set figure(placement: auto)
 // Tables: horizontal rules only, at the LNCS caption size.
 #set table(stroke: (x, y) => (top: 0.4pt, bottom: 0.4pt), inset: (x: 3pt, y: 2.5pt))
 #show raw.where(block: true): set text(size: 8.5pt)
@@ -190,9 +193,9 @@ discloses only selected claims.
 
 A zero-knowledge proof convinces a verifier of a statement: that, for given public inputs, some
 witness satisfies a relation @zkproof. Here the result is a public input and the credentials are
-part of the witness. A proof system has knowledge soundness if an efficient extractor can obtain a
-valid witness from any prover that convinces the verifier. It is zero-knowledge if a proof reveals
-nothing about the witness beyond the statement. Circuit-based systems, such as Noir @noir with the
+part of the witness. A proof system is knowledge-sound if an efficient extractor can obtain a valid
+witness from any prover that convinces the verifier, and zero-knowledge if a proof reveals nothing
+about the witness beyond the statement. Circuit-based systems, such as Noir @noir with the
 UltraHonk backend @barretenberg, implement a relation as constraints. A zero-knowledge virtual
 machine (zkVM) such as RISC Zero @risc0 instead proves that a guest program, identified by its image
 ID, ran on some input and wrote a public output, the journal. Its proof is a receipt: the journal,
@@ -223,10 +226,9 @@ credential's blank nodes apart. A proof method may instead put each credential i
 graph, and states its layout, because a query written for one does not match the other.
 
 The proof fixes $D$ through a _dataset commitment_: a digest of the included credentials and of a
-random salt that the holder chooses. It is binding if the hash is collision-resistant, so the holder
-cannot later claim another $D$ for it. While the salt stays secret, it is also hiding: if the hash
-is modelled as a random oracle, the commitment reveals nothing about $D$ to a computationally
-bounded verifier.
+random salt that the holder chooses. It is binding if the hash is collision-resistant, and, while the
+salt stays secret and the hash is modelled as a random oracle, hiding: it reveals nothing about $D$
+to a computationally bounded verifier.
 
 == Answers over the input dataset <answers>
 
@@ -305,8 +307,7 @@ except in the disclosed mode.
       #set par(justify: false)
       #set text(size: 0.85em)
       *Issuers* \
-      Sign credentials, for example with `eddsa-rdfc-2022`. May vouch for a dataset commitment
-      that a verifier agrees in advance.
+      Sign credentials, for example with `eddsa-rdfc-2022`. May vouch for an agreed dataset commitment.
     ],
     [→],
     rect(width: 100%, inset: 6pt)[
@@ -336,6 +337,7 @@ except in the disclosed mode.
   )
 #figure(
   arch-paged,
+  kind: image,
   caption: [
     One proof per answer presentation. The query request travels from verifier to holder, and
     the presentation travels back. Dataset construction, evaluation and, in the hidden mode, the
@@ -377,14 +379,13 @@ from the presentation.
       defined type gives an issuer and its verification methods with their public keys, so that
       both sides prove and verify against the same keys. Without trust requirements, no credential
       is checked against an issuer],
-    [`cryptosuite`], [With trust requirements: the cryptosuites accepted for the issuers'
-      signatures, such as `eddsa-rdfc-2022`],
-    [`signatureMode`], [With trust requirements: the accepted signature modes, hidden, revealed or
-      disclosed (§#ref(<modes>, supplement: none))],
+    [`cryptosuite`, `signatureMode`], [With trust requirements: the cryptosuites accepted for the
+      issuers' signatures, such as `eddsa-rdfc-2022`, and the accepted signature modes, hidden,
+      revealed or disclosed (§#ref(<modes>, supplement: none))],
     [`proofMethod`], [The accepted proof methods, in order of preference: each an IRI (`method`)
       with a verification key (`verificationKey`) and parameters],
-    [`maxPresentationBytes`], [The largest presentation, in bytes],
-    [`maxResultSize`], [The most solutions, or triples, in the result],
+    [`maxPresentationBytes`, `maxResultSize`], [The largest presentation, in bytes; the most
+      solutions, or triples, in the result],
     [`challenge`, `domain`], [Fresh randomness, and the verifier's identifier],
     [`validFrom`, `validUntil`], [The period in which the verifier accepts a presentation],
   ),
@@ -465,7 +466,7 @@ stored request and the result alone; no request member permits disclosing more. 
 rule extends zkRDF's disclosure of query constants and projected terms @braun26. Our argument for it
 concerns disclosure only: such a value tells the verifier nothing that its request and the result do
 not. Whether it also reduces proving cost is not established; our pilot is too small to show a
-saving (§#ref(<pilot-evidence>, supplement: none)).
+saving (§#ref(<proved>, supplement: none)).
 
 == The public-input rule <rule>
 
@@ -493,26 +494,22 @@ this condition.
 
 == What the verifier still learns <leakage>
 
-Beyond its result, an accepted answer reveals:
-
-- the dataset commitment, which links presentations if the holder reuses a salt over the same
-  credentials; an agreed commitment links them by design, to the verifier that agreed it;
-- the proof method, whose capacity limits bound the size of the input;
-- the issuers: in the hidden mode, only that a trusted issuer signed each credential, which
-  identifies the issuer if the request trusts only one; in the revealed mode, each key and the
-  number of credentials;
-- the size of the result, such as how many payments matched;
+Beyond its result, an accepted answer reveals the dataset commitment, which links presentations if
+the holder reuses a salt over the same credentials (an agreed commitment links them by design, to the
+verifier that agreed it); the proof method, whose capacity limits bound the size of the input; the
+issuers: in the hidden mode, only that a trusted issuer signed each credential, which identifies the
+issuer if the request trusts only one, and in the revealed mode, each key and the number of
+credentials; and the size of the result, such as how many payments matched.
 // Source: security-table-addenda.md, item 4a (ZK code landing, 10 October 2026): succinct receipts
 // expose the recursion control ID, which can reveal part of the execution's shape
 // (zk/sparql-evaluator/README.md); RISC Zero's zero-knowledge is its claim, not established.
-- from a RISC Zero receipt, part of the shape of the execution; the zero-knowledge of these receipts
-  is RISC Zero's claim, not an established property;
-- where SPARQL permits several results, the holder's choice (§#ref(<answers>, supplement: none)):
-  for `SELECT ?x WHERE { VALUES ?x { 0 1 } } LIMIT 1`, the returned value can encode one bit of the
-  holder's choosing, a covert channel that zero-knowledge does not prevent because the result is
-  public. It matters when the holder does not fully trust its holder service.
-
-A sequence of queries can also reveal together what no single query reveals.
+A RISC Zero receipt also reveals part of the shape of the execution; the zero-knowledge of these
+receipts is RISC Zero's claim, not an established property. Where SPARQL permits several results,
+the holder's choice can carry information (§#ref(<answers>, supplement: none)): for
+`SELECT ?x WHERE { VALUES ?x { 0 1 } } LIMIT 1`, the returned value can encode one bit of the
+holder's choosing, a covert channel that zero-knowledge does not prevent because the result is
+public. It matters when the holder does not fully trust its holder service. A sequence of queries
+can also reveal together what no single query reveals.
 
 = Cryptosuites and signature modes <cryptosuites>
 
@@ -563,14 +560,12 @@ ML-DSA-44; we have not implemented these two.
 
 == Security and disclosure <security>
 
-@security-table compares what the verifier learns in each signature mode, and supplementary
-Table S1 lists the assumptions behind each signature scheme and proof system. In the
-hidden mode, what the verifier learns depends on the public inputs and on the zero-knowledge of the
-proof system, not on the cryptosuite. In the revealed mode, a credential's repeated signature links
-its presentations, and with an RDFC cryptosuite the verifier can also confirm a guessed credential.
-Whether a quantum adversary can forge a signature depends on the cryptosuite, not on the mode.
-Outside the disclosed mode, the proof system's knowledge soundness must also hold: a quantum
-adversary could forge UltraHonk proofs, even ones made earlier, whereas we infer that Shor's
+@security-table compares what the verifier learns in each signature mode, and supplementary Table S1
+lists the assumptions behind each signature scheme and proof system. In the hidden mode, what the
+verifier learns depends on the public inputs and on the zero-knowledge of the proof system, not on
+the cryptosuite. Whether a quantum adversary can forge a signature depends on the cryptosuite, not on
+the mode. Outside the disclosed mode, the proof system's knowledge soundness must also hold: a
+quantum adversary could forge UltraHonk proofs, even ones made earlier, whereas we infer that Shor's
 algorithm does not break the knowledge soundness of RISC Zero's STARK-based succinct receipts. Our
 zkVM proof method accepts only these, not RISC Zero's Groth16 receipts, which are knowledge-sound
 only against a classical adversary.
@@ -637,7 +632,7 @@ canonical N-Quads. Our holder and verifier services wrap both builds with query 
 checks of §#ref(<validation>, supplement: none). The journal binds the stored request through a
 digest (§S2 of the supplementary material). We have not confirmed that the verifier service
 performs its checks in exactly that order. Separately, we built two Noir circuits
-(§#ref(<pilot-evidence>, supplement: none)).
+(§#ref(<proved>, supplement: none)).
 
 We used only synthetic credentials signed with test keys. We generated all receipts with development
 mode disabled and verified them against the expected guest image ID. For experiments without † in
@@ -725,8 +720,8 @@ _Not supported._ The evaluator rejected `SERVICE`; `NOW`, `RAND` and `BNODE`, wh
 query and the data do not fix; a custom function; a triple term; a nested `EXISTS`; and `EXISTS`
 and `NOT EXISTS` over any credential with a blank node, as each generated credential has. With four
 credentials, it also rejected a zero-or-more property path whose result exceeded its limits. The
-guest program rejected every case that the evaluator rejected, except in some runs over four
-credentials that reached the session limit first. The evaluator admitted `DESCRIBE`, `FROM` and
+guest program rejected the same cases, except in some runs over four credentials that reached the
+session limit first. The evaluator admitted `DESCRIBE`, `FROM` and
 `FROM NAMED`, but with signature checks the credentials form the default graph, and our prover and
 verifier reject these three before proving and before verification. Our services also reject a
 `SELECT` query with a top-level `ORDER BY`, so they return `SELECT` results only as multisets. The build with signature
@@ -751,22 +746,15 @@ With signature checks and our services, the evaluator produced one receipt per t
 one credential. For the payment question, the credential lists three settled payments and is signed
 with the public RFC 8032 test key in place of a bank's key. With both kinds of input, the journal
 reports `false`, and the verifier accepted the answer. Each accepted receipt came with negative
-tests, each with its expected outcome (§S3 of the supplementary material). We report no
-timings for these runs.
-
-== The public-triple circuit pilot <pilot-evidence>
+tests, each with its expected outcome (supplementary §S3). We report no timings for these runs.
 
 Our two Noir circuits prove, for `SELECT DISTINCT` queries over one basic graph pattern, that each
 returned row is a solution, not that none is missing; such a proof gives an answer only where those
-rows form a permitted result, as when they reach the query's `LIMIT`. In the baseline circuit the
-matched triple is part of the witness, and in the public-triple circuit a public input. Both check
-Schnorr signatures over their own commitment format and credential status against a snapshot that
-the verifier accepted. We produced #headline("zkvcq.pp_genuine_proofs") UltraHonk proofs,
-alternating the two circuits over the same query, rows, credentials and capacity; all tampering and
-replay tests were rejected. Both circuits made the same numbers of signature and membership checks,
-so the comparison isolates the effect of making the triple public. Preliminary:
-#headline("zkvcq.pp_n_per_cell") timed runs per circuit and capacity, on a shared machine
-(supplementary §S4), are too few to show a saving.
+rows form a permitted result, as when they reach the query's `LIMIT`. The matched triple is part of
+the witness in the baseline circuit and a public input in the public-triple circuit; both make the
+same signature and membership checks (@evidence-table). Preliminary timings, from
+#headline("zkvcq.pp_n_per_cell") runs per circuit and capacity on a shared machine (supplementary
+§S4), are too few to show a saving.
 
 == Cost by signature mode and cryptosuite <cost>
 
@@ -815,9 +803,8 @@ every configuration, the revealed mode needed fewer cycles and segments than the
 ) <cost-table>
 ]
 
-An instrumented build of the same guest program reads the cycle counter at the end of each phase,
-so its counts include the instrumentation. @phase-table shows the phases for the payment `ASK` over
-one credential. In the hidden mode, verifying the Ed25519 signature was the largest phase with both
+An instrumented build reads the cycle counter at the end of each phase (@phase-table, the payment
+`ASK` over one credential). In the hidden mode, verifying the Ed25519 signature was the largest phase with both
 cryptosuites; revealing the signatures removed it and left the others almost unchanged. The
 Merkle-based cryptosuite replaces canonicalising and hashing the document with building its Merkle
 tree, which took fewer cycles, but its signature verification took no fewer, as it also uses
@@ -846,8 +833,7 @@ signature.
         [Hidden], [Revealed], [Hidden], [Revealed],
       ),
       [Reading and decoding the input], ..phase-cells("input"),
-      [Checking the request, the trusted issuers' keys and the input sizes],
-        ..phase-cells("request"),
+      [Checking the request, issuers' keys and input sizes], ..phase-cells("request"),
       [Canonicalising and hashing the proof configuration], ..phase-cells("proof_config"),
       [Canonicalising and hashing the document, or building its Merkle tree; checking its issuer],
         ..phase-cells("document"),
@@ -1065,4 +1051,4 @@ substituting the row into the pattern is in the default graph of $D$. A circuit 
 triples as public inputs, and checks that each is in $D$ and signed, therefore shows the same
 statement as one that finds them in its witness. It discloses nothing that the verifier cannot
 compute from the row. The baseline and public-triple circuits of
-§#ref(<pilot-evidence>, supplement: none) differ in exactly this way.
+§#ref(<proved>, supplement: none) differ in exactly this way.
