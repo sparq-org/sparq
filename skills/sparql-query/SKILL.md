@@ -72,6 +72,9 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
+- `sparq_core::percent::{decode, encode}` are the shared percent-encoding helpers: lenient
+  `decode(s, plus_as_space)` (malformed escapes kept verbatim, UTF-8 read lossily) and `encode`
+  (everything outside the RFC 3986 unreserved set becomes uppercase `%XX`).
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
 - `pub struct QueryResult { pub vars: Vec<oxrdf::Variable>, pub rows: Vec<Vec<Option<oxrdf::Term>>> }`
