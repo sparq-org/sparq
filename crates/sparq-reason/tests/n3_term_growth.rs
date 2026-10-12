@@ -181,8 +181,9 @@ fn data_list_append_doubling_is_refused() {
     assert_term_limit("data-list list:append", close(&doc, term_limit(1 << 16)));
 }
 
-/// Review finding 4: `log:parsedAsN3` charges the terms it builds while it parses. One
-/// 64 KiB namespace used in 128 triples expands to 24 MiB of IRIs.
+/// Review finding 4: the formula `log:parsedAsN3` returns is sized before it is derived.
+/// One 64 KiB namespace used in 128 triples expands to 24 MiB of IRIs. (The parse itself
+/// is bounded by its input, not by `max_term_bytes`.)
 #[test]
 fn a_parse_that_expands_past_the_limit_is_refused() {
     let mut src = format!("@prefix p: <http://ex/{}#>. ", "a".repeat(64 << 10));
@@ -300,8 +301,8 @@ fn list_generator_and_backward_projection_are_sized() {
     assert_term_limit("backward projection", close(&backward, ClosureLimits::default()));
 }
 
-/// Review round 3, finding 2: the parser charges every term it builds, a literal object
-/// included, so a parsed formula with one 64 KiB literal is refused under a 4 KiB limit.
+/// Review round 3, finding 2: the parsed formula is sized with every term in it, a
+/// literal object included, so one with a 64 KiB literal is refused under a 4 KiB limit.
 #[test]
 fn a_parsed_literal_object_is_charged() {
     let src = format!("<http://ex/s> <http://ex/p> \"{}\" .", "z".repeat(64 << 10));
@@ -310,7 +311,7 @@ fn a_parsed_literal_object_is_charged() {
          {{ :a :src ?s. ?s log:parsedAsN3 ?f }} => {{ :a :parsed ?f }}.\n"
     );
     assert_term_limit("parsed literal object", close(&doc, term_limit(4096)));
-    // Numeric list members and list nodes are charged too.
+    // Numeric list members and list nodes are counted too.
     let list = format!("<http://ex/s> <http://ex/p> ({}) .", "1 ".repeat(4096));
     let doc = format!(
         "{PREFIXES}:a :src \"\"\"{list}\"\"\".\n\
@@ -319,8 +320,9 @@ fn a_parsed_literal_object_is_charged() {
     assert_term_limit("parsed numeric list", close(&doc, term_limit(16 << 10)));
 }
 
-/// Review round 3, finding 3: each kept term is charged once. A 64 KiB namespace used in
-/// 60 three-IRI triples is about 11 MiB of formula and fits under the 16 MiB default.
+/// Review round 3, finding 3: each term of the parsed formula is counted once. A 64 KiB
+/// namespace used in 60 three-IRI triples is about 11 MiB of formula and fits under the
+/// 16 MiB default.
 #[test]
 fn a_parse_that_fits_is_not_double_charged() {
     let mut src = format!("@prefix p: <http://ex/{}#>. ", "a".repeat(64 << 10));
@@ -332,4 +334,23 @@ fn a_parse_that_fits_is_not_double_charged() {
          {{ :a :src ?s. ?s log:parsedAsN3 ?f }} => {{ :a :parsed ?f }}.\n"
     );
     assert_eq!(close(&doc, ClosureLimits::default()), Ok(2));
+}
+
+/// Review round 4, finding 3: `log:dtlit` builds its literal by an early return; the
+/// literal is sized from the borrowed lexical form and datatype IRI before it is copied.
+/// Each is 9 MiB, under the 16 MiB default; the literal would be 18 MiB.
+#[test]
+fn a_dtlit_over_the_limit_is_refused() {
+    let doc = format!(
+        "{PREFIXES}:a :p \"{}\". :a :d <http://ex/{}>.\n\
+         {{ :a :p ?s. :a :d ?d. (?s ?d) log:dtlit ?t }} => {{ :a :lit ?t }}.\n",
+        "x".repeat(9 << 20),
+        "y".repeat(9 << 20)
+    );
+    assert_term_limit("log:dtlit", close(&doc, ClosureLimits::default()));
+    let small = format!(
+        "{PREFIXES}:a :p \"7\". :a :d <http://www.w3.org/2001/XMLSchema#integer>.\n\
+         {{ :a :p ?s. :a :d ?d. (?s ?d) log:dtlit ?t }} => {{ :a :lit ?t }}.\n"
+    );
+    assert_eq!(close(&small, ClosureLimits::default()), Ok(3));
 }

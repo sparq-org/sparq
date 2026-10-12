@@ -58,8 +58,12 @@ let g = Graph::from_parts(dict, triples);
   sized before it is built, and past a limit the call returns `Err("n3: forward closure limit
   exceeded …")` instead of exhausting memory. Sized terms include substitutions under
   bindings, builtin arguments and results, `log:collectAllIn` lists, `log:conclusion`
-  formulas, and `log:parsedAsN3` / `log:semantics` parses, which are charged term by term.
+  formulas, and `log:parsedAsN3` / `log:semantics` formulas (sized once the parse returns).
+  Substitution is sized because the raw substitution functions are private to `n3/bounded.rs`;
+  the guard test is a lexical tripwire, not the guarantee.
   **Not bounded:**
+  - parser input size: a parse allocates its terms before the result is sized, so its memory
+    is bounded by its input text (a short prefix used many times expands first);
   - total memory: many distinct terms each just under the limit are bounded only by
     `max_facts`;
   - `log:content` text, which the caller's resolver supplies;

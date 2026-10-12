@@ -3685,17 +3685,30 @@ const NUMERAL_TEXT_BYTES: usize = 400;
 /// The datatype of a language-tagged literal.
 const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 
-/// N3 text a builtin parses into a formula (`log:parsedAsN3`, `log:semantics`), its terms
-/// charged against the run's term-size limit as the parser builds them
-/// ([`bounded::parse_n3_term`]). `None` when it is not N3 (a no-match; a parser limit is
-/// a cut) or when the limit refused it (a cut, and an error that fails the closure).
-fn parsed_term(
+/// The formula a builtin parses N3 text into (`log:parsedAsN3`, `log:semantics`), sized
+/// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
+/// cut) or when the formula is past the run's term-size limit (a cut, and the run
+/// refused). The parse itself is not charged as it runs: it allocates in proportion to
+/// its expanded input before the formula is sized (GH #6771 follow-up).
+fn parsed_formula(
+    f: Func,
     src: &str,
     base: &str,
     bw: &BwCtx,
     pending: &bounded::Pending,
-) -> Option<parser::Parsed> {
-    bounded::parse_n3_term(src, base, &bw.truncated, pending)
+) -> Option<Term> {
+    // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
+    let parsed = bounded::parse_n3(src, base, pending).ok()?;
+    let statements = reencode_statements(parsed);
+    let bytes = statements
+        .iter()
+        .flatten()
+        .map(bounded::term_bytes)
+        .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
+    if refused_term(bw, pending, Derived::Result(f), bytes, || bytes) {
+        return None;
+    }
+    Some(Term::Formula(statements))
 }
 
 /// What a term-size refusal names ([`bounded::derived_term`]).
@@ -3875,13 +3888,13 @@ fn output_bytes(
                 .saturating_add(lang.len()),
             _ => 0,
         },
-        // Sized where they are built, or supplied by the caller.
-        Func::LogConclusion | Func::ParsedAsN3 | Func::Semantics | Func::Content => 0,
+        // Sized where they are built (`log:dtlit` before its own early return), or
+        // supplied by the caller.
+        Func::Dtlit | Func::LogConclusion | Func::ParsedAsN3 | Func::Semantics | Func::Content => 0,
         // A part of an input, a number, or a fixed-size value.
         Func::Scrape
         | Func::First
         | Func::Last
-        | Func::Dtlit
         | Func::TimeZone
         | Func::Length
         | Func::StrLength
@@ -4112,12 +4125,30 @@ fn eval_functional_inner(
             return None;
         }
         let run = &bw.truncated;
+        // The members as bound, borrowed: the forward result is sized before any copy.
+        let resolve = |t: &Term| -> Option<(usize, bool)> {
+            let r = match t {
+                Term::Var(v) => b.get(v)?,
+                other => other,
+            };
+            match r {
+                Term::Lit(v, _, _) => Some((v.len(), true)),
+                Term::Iri(i) => Some((i.len(), false)),
+                _ => None,
+            }
+        };
+        if let (Some((lex, true)), Some((dt, false))) = (resolve(&members[0]), resolve(&members[1])) {
+            let bytes = bounded::TERM_NODE_BYTES.saturating_add(lex).saturating_add(dt);
+            if refused_term(bw, pending, Derived::Result(f), bytes, || bytes) {
+                return None;
+            }
+        }
         let (m0, m1) = (bounded::substitute(&members[0], &b, run)?, bounded::substitute(&members[1], &b, run)?);
         let mut nb = b;
-        return match (&m0, &m1) {
-            // forward: ( "lex" xsd:dt ) → "lex"^^xsd:dt
+        return match (m0, m1) {
+            // forward: ( "lex" xsd:dt ) → "lex"^^xsd:dt (sized above; the parts are moved)
             (Term::Lit(v, _, _), Term::Iri(dt)) => {
-                let lit = Term::Lit(v.clone(), dt.clone(), None);
+                let lit = Term::Lit(v, dt, None);
                 unify_term(obj, &lit, &mut nb).then_some(nb)
             }
             // reverse: decompose a ground object literal into its parts
@@ -4146,10 +4177,13 @@ fn eval_functional_inner(
     // Reverse (object-bound) modes of the invertible unary builtins:
     // `?y math:sin 0` solves y = asin 0 (cwm trig.n3 test4), and
     // `?t time:inSeconds N` formats the epoch back to a UTC dateTime.
-    if !subj.is_ground()
-        && !matches!(subj, Term::List(_))
-        && !bounded::substitute(subj, &b, &bw.truncated)?.is_ground()
-    {
+    // The subject with the binding substituted, computed once: it may be a large bound
+    // string, and each copy is held while the result is sized.
+    let subj_applied = match subj {
+        Term::List(_) => None,
+        _ => Some(bounded::substitute(subj, &b, &bw.truncated)?),
+    };
+    if !subj.is_ground() && subj_applied.as_ref().is_some_and(|s| !s.is_ground()) {
         let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
         if o_applied.is_ground() {
             let inverse = |v: f64| -> Option<f64> {
@@ -4204,10 +4238,14 @@ fn eval_functional_inner(
     let run = &bw.truncated;
     let (args, was_list): (Vec<Term>, bool) = if let Term::List(_) = subj_bound {
         // First-class list value (substituted, and sized first, by `substitute`).
-        let Some(Term::List(members)) = bounded::substitute(subj, &b, run) else { return None };
+        let applied = match subj_applied {
+            Some(t) => t,
+            None => bounded::substitute(subj, &b, run)?,
+        };
+        let Term::List(members) = applied else { return None };
         (members, true)
     } else {
-        let subj_applied = bounded::substitute(subj, &b, run)?;
+        let subj_applied = subj_applied?;
         // A data list written as rdf:first/rest triples, via a bound variable.
         match settle(pending, fact_list_refs(&subj_applied, facts)) {
             Some(members) => {
@@ -4370,16 +4408,14 @@ fn eval_functional_inner(
                     // taken later by `log:supports` / `log:conclusion`, which is where the
                     // import-cycle guard ([`VisitedDocs`]) applies. Resolution itself does no
                     // recursion, so no marking is needed here.
-                    let parsed = parsed_term(&text, doc, bw, pending)?;
-                    Term::Formula(reencode_statements(parsed))
+                    parsed_formula(f, &text, doc, bw, pending)?
                 }
             }
             _ => return None,
         },
         Func::ParsedAsN3 => match &args[..] {
             [Term::Lit(src, _, _)] => {
-                let parsed = parsed_term(src, &bw.base, bw, pending)?;
-                Term::Formula(reencode_statements(parsed))
+                parsed_formula(f, src, &bw.base, bw, pending)?
             }
             _ => return None,
         },

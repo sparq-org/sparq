@@ -294,13 +294,21 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// conclusion, a premise pattern, a scope or collection template, a list generator's
 /// member, a backward-rule projection), the list `log:collectAllIn` collects, the formula
 /// `log:conclusion` returns, and the formula `log:parsedAsN3` / `log:semantics` parses.
-/// Each is sized from borrowed inputs before it is built (the parser charges each term as
-/// it builds it and each statement it keeps). The size is approximate: string bytes plus a
-/// fixed cost per node.
+/// Each is sized from borrowed inputs before it is built, except the parsed formula, which
+/// is sized once the parse returns it. The size is approximate: string bytes plus a fixed
+/// cost per node.
+///
+/// Substitution is sized because the raw substitution functions are private to this
+/// module; the guard test `substitution_goes_through_the_bounded_module` is a lexical
+/// tripwire for a crate-internal copy, not the guarantee.
 ///
 /// What it does not bound:
 /// * the closure's total memory: many distinct terms just under the limit are bounded
 ///   only by `max_facts`;
+/// * the parser input size: a parse (the document's own, or a `log:parsedAsN3` /
+///   `log:semantics` one) allocates the terms it builds before its result is sized, so
+///   its memory is bounded by its input text, and a short prefix used many times
+///   expands before the formula is refused;
 /// * the text `log:content` returns, which the caller's resolver supplies;
 /// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
 ///   fallback is bounded) and the opt-in `compiled-rules` evaluator (GH #6855), neither
@@ -614,68 +622,6 @@ pub(crate) fn parse_n3_with_extra(
         Err(ParseFailure::Resource(e)) => Bounded::cut(Err(e.message), e.why),
     };
     settle(cuts, parsed)
-}
-
-/// Why a builtin's parse was stopped by [`ClosureLimits::max_term_bytes`].
-const PARSE_TERM_CUT: &str = "forward closure limit exceeded (a parsed formula)";
-
-/// Charge `bytes` to a charged parse's allowance with `left` bytes left: what is left
-/// after it, or the limit error once the parse would pass it.
-pub(crate) fn charge_parse(left: usize, bytes: usize) -> Result<usize, LimitError> {
-    left.checked_sub(bytes).ok_or_else(|| LimitError {
-        why: PARSE_TERM_CUT,
-        message: format!(
-            "n3: {CLOSURE_CUT}: a parsed formula would take more than max_term_bytes \
-             (raise ClosureLimits::max_term_bytes to allow more)"
-        ),
-    })
-}
-
-/// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`) under
-/// the run's [`ClosureLimits::max_term_bytes`]: the parser charges every term it builds
-/// as it builds it, and every statement it keeps, so a small source whose prefixes expand
-/// into a huge formula is refused while it is parsed. On that refusal the run is refused
-/// (a cut, and an error every closure of the run fails with). `None` for that and for any
-/// other failure: a syntax error, or the nesting limit (itself recorded as a cut).
-pub(crate) fn parse_n3_term(
-    src: &str,
-    base: &str,
-    run: &Truncation,
-    cuts: &impl Sink,
-) -> Option<super::parser::Parsed> {
-    use super::parser::{parse_charged_checked, ParseFailure};
-    let allowance = Some(run.limits.max_term_bytes);
-    match parse_charged_checked(src, base, std::iter::empty(), allowance) {
-        Ok(p) => Some(p),
-        Err(ParseFailure::Syntax(_)) => None,
-        Err(ParseFailure::Resource(e)) => {
-            cuts.record(e.why);
-            if e.why == PARSE_TERM_CUT {
-                run.refuse(|| e.message);
-            }
-            None
-        }
-    }
-}
-
-/// The bytes a parsed statement keeps for term `t`: its [`term_bytes`], except that a
-/// quoted formula counts one node (its statements were kept, and charged, one by one).
-pub(crate) fn kept_bytes(t: &Term) -> usize {
-    match t {
-        Term::Formula(_) => TERM_NODE_BYTES,
-        Term::List(ms) => ms.iter().map(kept_bytes).fold(TERM_NODE_BYTES, usize::saturating_add),
-        Term::Triple(tr) => tr.iter().map(kept_bytes).fold(TERM_NODE_BYTES, usize::saturating_add),
-        _ => term_bytes(t),
-    }
-}
-
-/// The bytes the parser allocates for `t` itself, not counting the terms inside it (each
-/// built, and charged, on its own).
-pub(crate) fn node_bytes(t: &Term) -> usize {
-    match t {
-        Term::Formula(_) | Term::List(_) | Term::Triple(_) => TERM_NODE_BYTES,
-        _ => term_bytes(t),
-    }
 }
 
 /// A document a builtin asked the resolver for (`log:semantics`, `log:content`). No
