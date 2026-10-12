@@ -11,6 +11,8 @@
 // (which graphs are authorized) is the materialized `sparq-solid` output, precomputed at
 // build time per the honesty framing; the RESTRICTION is the real SPARQL engine.
 
+import { termToNTriples } from "@sparq/client";
+
 /** Guaranteed-absent graph used when a session has no authorized graphs (fail-closed). */
 export const NOTHING_SENTINEL = "urn:sparq:nothing";
 
@@ -20,11 +22,15 @@ export const NOTHING_SENTINEL = "urn:sparq:nothing";
  *
  * The clause is inserted after the SELECT projection and before the WHERE clause, which
  * is where SPARQL 1.1 expects dataset clauses. An empty `allowed` set injects the
- * sentinel graph so the query matches nothing (no grant ⇒ no data).
+ * sentinel graph so the query matches nothing (no grant ⇒ no data). Each graph IRI goes
+ * through the shared `termToNTriples` writer, which throws on a character an IRIREF cannot
+ * hold, so a graph name cannot close its `<…>` early and add clauses to the query (#6719).
  */
 export function rewriteForGraphs(sparql: string, allowed: string[]): string {
   const graphs = allowed.length > 0 ? allowed : [NOTHING_SENTINEL];
-  const fromNamed = graphs.map((g) => `FROM NAMED <${g}>`).join("\n");
+  const fromNamed = graphs
+    .map((g) => `FROM NAMED ${termToNTriples({ type: "uri", value: g })}`)
+    .join("\n");
 
   // Find the WHERE keyword (case-insensitive) at a clause boundary and insert before it.
   const whereIdx = findWhereIndex(sparql);

@@ -61,6 +61,7 @@ const TABLE: &[(&str, bool)] = &[
     ("203.0.114.1", false),
     ("223.255.255.255", false),
     ("8.8.8.8", false),
+    ("1.1.1.1", false),
     ("93.184.216.34", false),
     // ── IPv6 Special-Purpose Address Registry ──
     ("::1", true),                    // loopback
@@ -69,6 +70,7 @@ const TABLE: &[(&str, bool)] = &[
     ("::ffff:10.0.0.1", true),
     ("::ffff:169.254.169.254", true),
     ("::ffff:192.0.2.1", true),
+    ("::ffff:100.64.0.1", true),
     ("::ffff:8.8.8.8", false),
     ("::ffff:0:7f00:1", true),        // IPv4-translated ::ffff:0:127.0.0.1
     ("::ffff:0:808:808", false),      // IPv4-translated public
