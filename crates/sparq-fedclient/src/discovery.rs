@@ -52,9 +52,8 @@
 //! uses**: it resolves the host itself and refuses to dial loopback / RFC1918 / link-local
 //! (incl. the `169.254.169.254` cloud-metadata IP) / unique-local / CGNAT addresses, vetting
 //! the *resolved* IP just before connect so a DNS-rebind cannot smuggle an internal address
-//! through. The IP classifier (`is_forbidden_ip`) mirrors
-//! `sparq_engine::service::is_forbidden_ip` (which is `pub(crate)` there, so it is
-//! re-derived here rather than imported); an embedder may relax the policy per-host with
+//! through. The IP classifier (`is_forbidden_ip`) is the engine's own
+//! (`sparq_engine::is_forbidden_ip`); an embedder may relax the policy per-host with
 //! `HttpFetcher::allow_private_host`.
 //!
 //! The network is behind the [`Fetcher`](crate::discovery::Fetcher) trait seam, so the parser
@@ -727,39 +726,10 @@ impl Fetcher for MapFetcher {
 }
 
 /// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden (private / internal /
-/// non-global) destination for a discovery fetch — the SSRF default-deny set.
-///
-/// This **mirrors `sparq_engine::service::is_forbidden_ip`** (which is `pub(crate)` in the
-/// engine, hence re-derived here rather than imported). Forbidden ranges: loopback
-/// (`127/8`, `::1`); RFC1918 private (`10/8`, `172.16/12`, `192.168/16`); link-local
-/// (`169.254/16`, incl. the `169.254.169.254` cloud-metadata IP, and IPv6 `fe80::/10`);
-/// unique-local IPv6 (`fc00::/7`); unspecified (`0.0.0.0`, `::`); broadcast; CGNAT
-/// (`100.64/10`). IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped and re-classified as the
-/// embedded IPv4, so a private v4 cannot ride in through a v6 host literal.
+/// non-global) destination for a discovery fetch: the engine's SERVICE classification (see
+/// [`crate::source::is_forbidden_ip`]).
 #[cfg(not(target_arch = "wasm32"))]
-pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || matches!(v4.octets(), [100, b, ..] if (64..=127).contains(&b))
-            // 100.64/10 CGNAT
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(IpAddr::V4(v4));
-            }
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
-        }
-    }
-}
+pub use sparq_engine::is_forbidden_ip;
 
 /// The production network fetcher: a blocking ureq GET behind the **same default-deny SSRF
 /// egress filter the engine's SERVICE transport uses**. Native-only — neither ureq nor its

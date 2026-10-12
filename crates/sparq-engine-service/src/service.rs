@@ -956,9 +956,10 @@ mod srj_stream {
 }
 
 /// Reconstruct one term from an SRJ binding value object. Mirrors the conformance
-/// suite's `srj_term` (uri / bnode / literal / SPARQL-1.2 triple terms).
+/// suite's `srj_term` (uri / bnode / literal / SPARQL-1.2 triple terms). Public so
+/// `sparq-fedclient` decodes remote results with the same function as SERVICE.
 #[cfg(feature = "service")]
-fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
+pub fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
     let get = |k: &str| val.get(k).and_then(|s| s.as_str());
     match get("type") {
         Some("uri") => {
@@ -1127,16 +1128,59 @@ fn srx_term(
 /// The quick-xml event loop was already streaming; the only sq-my8wd.4 change is that
 /// a finished row goes to the sink instead of a collected `Vec` — same projection,
 /// same order, same errors. [FABLE-5]
+///
+/// In memory this borrows events straight from `text`; [`parse_srx_into_read`] runs the
+/// same loop over a `BufRead` stream, so a response body is never buffered into a
+/// `String` first (bead sq-my8wd.5).
 #[cfg(feature = "service")]
 pub(crate) fn parse_srx_into<F: RowSink>(
     text: &str,
     on_row: &mut F,
 ) -> Result<Vec<Variable>, String> {
-    use quick_xml::events::Event;
-    use quick_xml::Reader;
-
-    let mut reader = Reader::from_str(text);
+    let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().trim_text(false);
+    parse_srx_events(&mut reader, on_row)
+}
+
+/// Streaming form of [`parse_srx_into`].
+#[cfg(feature = "service")]
+pub(crate) fn parse_srx_into_read<R: std::io::BufRead, F: RowSink>(
+    reader: R,
+    on_row: &mut F,
+) -> Result<Vec<Variable>, String> {
+    let mut reader = quick_xml::Reader::from_reader(reader);
+    reader.config_mut().trim_text(false);
+    parse_srx_events(&mut (reader, Vec::new()), on_row)
+}
+
+/// The XML event source behind [`parse_srx_events`]: zero-copy over a `&[u8]`, or a
+/// reader plus the scratch buffer its events are decoded into.
+#[cfg(feature = "service")]
+trait SrxEvents {
+    fn next_event(&mut self) -> Result<quick_xml::events::Event<'_>, quick_xml::Error>;
+}
+
+#[cfg(feature = "service")]
+impl SrxEvents for quick_xml::Reader<&[u8]> {
+    fn next_event(&mut self) -> Result<quick_xml::events::Event<'_>, quick_xml::Error> {
+        self.read_event()
+    }
+}
+
+#[cfg(feature = "service")]
+impl<R: std::io::BufRead> SrxEvents for (quick_xml::Reader<R>, Vec<u8>) {
+    fn next_event(&mut self) -> Result<quick_xml::events::Event<'_>, quick_xml::Error> {
+        self.1.clear();
+        self.0.read_event_into(&mut self.1)
+    }
+}
+
+#[cfg(feature = "service")]
+fn parse_srx_events<E: SrxEvents, F: RowSink>(
+    events: &mut E,
+    on_row: &mut F,
+) -> Result<Vec<Variable>, String> {
+    use quick_xml::events::Event;
 
     let mut vars: Vec<Variable> = Vec::new();
     // Per-row map of variable-name → term; projected positionally over `vars` at </result>.
@@ -1172,8 +1216,8 @@ pub(crate) fn parse_srx_into<F: RowSink>(
     }
 
     loop {
-        match reader
-            .read_event()
+        match events
+            .next_event()
             .map_err(|e| format!("SERVICE: invalid results XML: {e}"))?
         {
             Event::Eof => break,
@@ -1349,211 +1393,6 @@ pub(crate) fn parse_srx(text: &str) -> Result<ServiceRelation, String> {
     Ok(ServiceRelation { vars, rows })
 }
 
-/// Reader-seam variant of [`parse_srx_into`]: parse a SPARQL-Results-XML document
-/// from a `BufRead` stream WITHOUT buffering the body into a `String`. Uses
-/// `quick_xml::Reader::from_reader` with the same event-driven logic as
-/// [`parse_srx_into`]; the only difference is that events are delivered via
-/// `read_event_into(&mut buf)` (a `Vec<u8>` working buffer) rather than
-/// `read_event()`. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
-///
-/// Result-semantics are IDENTICAL to [`parse_srx_into`] on the same byte sequence.
-#[cfg(feature = "service")]
-pub(crate) fn parse_srx_into_read<R: std::io::BufRead, F: RowSink>(
-    reader: R,
-    on_row: &mut F,
-) -> Result<Vec<Variable>, String> {
-    use quick_xml::events::Event;
-    use quick_xml::Reader;
-
-    let mut qr = Reader::from_reader(reader);
-    qr.config_mut().trim_text(false);
-
-    // Event scratch buffer — reused across calls; event data is eagerly cloned out.
-    let mut buf: Vec<u8> = Vec::new();
-
-    let mut vars: Vec<Variable> = Vec::new();
-    let mut cur_row: rustc_hash::FxHashMap<String, Term> = rustc_hash::FxHashMap::default();
-    let mut cur_var: Option<String> = None;
-    #[allow(clippy::type_complexity)]
-    let mut cur_val: Option<(String, Option<String>, Option<String>, Option<String>, String)> =
-        None;
-    let mut triple_stack: Vec<(usize, [Option<Term>; 3])> = Vec::new();
-    let mut in_boolean = false;
-    let mut boolean: Option<bool> = None;
-
-    // Identical helper closures to the `from_str` parser.
-    fn commit_r(
-        term: Term,
-        triple_stack: &mut [(usize, [Option<Term>; 3])],
-        cur_row: &mut rustc_hash::FxHashMap<String, Term>,
-        cur_var: &Option<String>,
-    ) {
-        if let Some((slot, parts)) = triple_stack.last_mut() {
-            parts[*slot] = Some(term);
-        } else if let Some(var) = cur_var.clone() {
-            cur_row.insert(var, term);
-        }
-    }
-    fn set_slot_r(triple_stack: &mut [(usize, [Option<Term>; 3])], slot: usize) {
-        if let Some((s, _)) = triple_stack.last_mut() {
-            *s = slot;
-        }
-    }
-
-    loop {
-        buf.clear();
-        match qr
-            .read_event_into(&mut buf)
-            .map_err(|e| format!("SERVICE: invalid results XML: {e}"))?
-        {
-            Event::Eof => break,
-            ev @ (Event::Start(_) | Event::Empty(_)) => {
-                let is_empty = matches!(ev, Event::Empty(_));
-                let e = match &ev {
-                    Event::Start(e) | Event::Empty(e) => e,
-                    _ => unreachable!(),
-                };
-                let name = e.local_name();
-                let name = std::str::from_utf8(name.as_ref()).unwrap_or("").to_string();
-                let attr = |key: &str| -> Option<String> {
-                    e.attributes().filter_map(|a| a.ok()).find_map(|a| {
-                        let k = std::str::from_utf8(a.key.as_ref()).ok()?;
-                        if k == key || k.ends_with(&format!(":{key}")) {
-                            quick_xml::escape::unescape(std::str::from_utf8(&a.value).ok()?)
-                                .ok()
-                                .map(std::borrow::Cow::into_owned)
-                        } else {
-                            None
-                        }
-                    })
-                };
-                match name.as_str() {
-                    "variable" => {
-                        if let Some(v) = attr("name") {
-                            vars.push(Variable::new(&v).map_err(|e| {
-                                format!("SERVICE: bad result variable {v:?}: {e}")
-                            })?);
-                        }
-                    }
-                    "result" => cur_row.clear(),
-                    "binding" => cur_var = attr("name"),
-                    "uri" | "bnode" => cur_val = Some((name, None, None, None, String::new())),
-                    "literal" => {
-                        cur_val = Some((
-                            name,
-                            attr("lang"),
-                            attr("dir"),
-                            attr("datatype"),
-                            String::new(),
-                        ))
-                    }
-                    "triple" => triple_stack.push((0, [None, None, None])),
-                    "subject" => set_slot_r(&mut triple_stack, 0),
-                    "predicate" => set_slot_r(&mut triple_stack, 1),
-                    "object" => set_slot_r(&mut triple_stack, 2),
-                    "boolean" => in_boolean = true,
-                    _ => {}
-                }
-                if is_empty {
-                    if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                        commit_r(
-                            srx_term(&kind, lang, dir, dt, t)?,
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
-                    }
-                }
-            }
-            Event::Text(t) => {
-                let s = t.decode().map_err(|e| e.to_string())?;
-                if in_boolean {
-                    boolean = Some(s.trim() == "true");
-                } else if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&s);
-                }
-            }
-            Event::GeneralRef(r) => {
-                if let Some(v) = cur_val.as_mut() {
-                    let name = r.decode().map_err(|e| e.to_string())?;
-                    v.4.push_str(&resolve_xml_entity(&name)?);
-                }
-            }
-            Event::CData(t) => {
-                if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&String::from_utf8_lossy(&t));
-                }
-            }
-            Event::End(e) => {
-                let name = e.local_name();
-                match name.as_ref() {
-                    b"uri" | b"bnode" | b"literal" => {
-                        if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                            commit_r(
-                                srx_term(&kind, lang, dir, dt, t)?,
-                                &mut triple_stack,
-                                &mut cur_row,
-                                &cur_var,
-                            );
-                        }
-                    }
-                    b"triple" => {
-                        let Some((_, [s, p, o])) = triple_stack.pop() else {
-                            return Err("SERVICE: stray </triple> in results XML".into());
-                        };
-                        let subject = match s {
-                            Some(Term::NamedNode(n)) => NamedOrBlankNode::NamedNode(n),
-                            Some(Term::BlankNode(b)) => NamedOrBlankNode::BlankNode(b),
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term subject: {other:?}"
-                                ))
-                            }
-                        };
-                        let predicate = match p {
-                            Some(Term::NamedNode(n)) => n,
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term predicate: {other:?}"
-                                ))
-                            }
-                        };
-                        let object = o
-                            .ok_or_else(|| "SERVICE: triple term without object".to_string())?;
-                        commit_r(
-                            Term::Triple(Box::new(Triple {
-                                subject,
-                                predicate,
-                                object,
-                            })),
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
-                    }
-                    b"binding" => cur_var = None,
-                    b"result" => {
-                        let row: Vec<Option<Term>> =
-                            vars.iter().map(|v| cur_row.remove(v.as_str())).collect();
-                        cur_row.clear();
-                        on_row(row)?;
-                    }
-                    b"boolean" => in_boolean = false,
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if boolean.is_some() {
-        return Err(
-            "SERVICE: endpoint returned an ASK boolean, expected SELECT bindings".into(),
-        );
-    }
-    Ok(vars)
-}
-
 // ---------------------------------------------------------------------------
 // SSRF egress policy (default-deny private / internal ranges) [OPUS-4.8]
 // ---------------------------------------------------------------------------
@@ -1601,7 +1440,7 @@ pub const SERVICE_EGRESS_REFUSED_MARKER: &str = "SERVICE egress refused";
 /// * IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped and re-classified as the
 ///   embedded IPv4 address, so a private v4 cannot be smuggled through a v6 host.
 #[cfg(feature = "service")]
-pub(crate) fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
+pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
     use std::net::IpAddr;
     match ip {
         IpAddr::V4(v4) => {

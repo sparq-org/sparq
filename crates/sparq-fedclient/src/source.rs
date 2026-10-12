@@ -303,37 +303,15 @@ pub trait Transport: Send + Sync {
     fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String>;
 }
 
-// ─── SSRF egress guard (default-deny; mirrors the engine's `is_forbidden_ip`) ───────
+// ─── SSRF egress guard (default-deny; the engine's `is_forbidden_ip`) ───────
 
 /// Classifies a resolved [`IpAddr`] as a forbidden (private / internal / non-global)
-/// federation destination. This is the **same default-deny classification** as
-/// `sparq-engine`'s `service.rs::is_forbidden_ip` (which is `pub(crate)` and cannot be
-/// imported): loopback, RFC1918, link-local (incl. the `169.254.169.254` cloud-metadata
-/// IP), unique-local IPv6, unspecified, broadcast, and CGNAT (`100.64/10`) are refused;
-/// IPv4-mapped IPv6 is unwrapped and re-classified so a private v4 cannot ride in through
-/// a v6 literal. Returns `true` when the address must be refused. [OPUS-4.8] sq-rsxf.
-pub fn is_forbidden_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()                 // 127.0.0.0/8
-                || v4.is_private()           // 10/8, 172.16/12, 192.168/16
-                || v4.is_link_local()        // 169.254.0.0/16 (incl. 169.254.169.254)
-                || v4.is_unspecified()       // 0.0.0.0
-                || v4.is_broadcast()         // 255.255.255.255
-                || matches!(v4.octets(), [100, b, ..] if (64..=127).contains(&b))
-            // 100.64/10 CGNAT
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(IpAddr::V4(v4));
-            }
-            v6.is_loopback()                              // ::1
-                || v6.is_unspecified()                    // ::
-                || (v6.segments()[0] & 0xffc0) == 0xfe80  // fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
-        }
-    }
-}
+/// federation destination: the engine's SERVICE classification, re-exported so the two
+/// guards cannot drift. Loopback, RFC1918, link-local (incl. the `169.254.169.254`
+/// cloud-metadata IP), unique-local IPv6, unspecified, broadcast, and CGNAT (`100.64/10`)
+/// are refused; IPv4-mapped IPv6 is unwrapped and re-classified so a private v4 cannot ride
+/// in through a v6 literal. Returns `true` when the address must be refused.
+pub use sparq_engine::is_forbidden_ip;
 
 /// The SSRF egress policy the [`Endpoint`] adapter enforces **before** any request is
 /// issued — the client-side analogue of the engine's `with_service_egress_allow`
