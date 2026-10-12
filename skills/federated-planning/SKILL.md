@@ -363,7 +363,7 @@ since:
   same order, and range-checks every lookup). `lower_leaf` lowers one BGP pattern to a
   single-pattern `SELECT` and returns `Result<SubQuery, RenderError>`: each position is
   rendered strictly as one SPARQL term (a `VARNAME` variable, an IRI with no character
-  `IRIREF` forbids, a pre-rendered `"…"` literal that parses as one RDF literal and is
+  `IRIREF` forbids, a pre-rendered `"…"` literal that parses as exactly one SPARQL literal and is
   re-serialised, or a bare value as an escaped string), and anything else is a
   `RenderError` (`InterpError::Render` in the interpreters, `None` from `push_group`) so
   nothing is sent; `materialize_single_source` walks the `JoinTree`, fetches each

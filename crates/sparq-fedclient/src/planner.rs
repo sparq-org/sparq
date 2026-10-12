@@ -41,7 +41,6 @@
 
 use crate::source::{FederatedSource, FragPattern, FragTerm, PatternTerm, SubQuery};
 use sparq_fedplan::{Bgp, Term, TriplePattern};
-use std::str::FromStr;
 
 #[cfg(feature = "pattern_probe")]
 use crate::discovery::{PatternProbeOutcome, PatternProbeSession};
@@ -344,7 +343,7 @@ pub enum RenderError {
     /// An IRI containing a character SPARQL's `IRIREF` forbids: a control or space, or one of
     /// `<`, `>`, `"`, `{`, `}`, `|`, `^`, `\`, or the backtick.
     Iri(String),
-    /// A literal that starts with `"` but is not one well-formed RDF literal.
+    /// A literal that starts with `"` but is not exactly one SPARQL literal.
     Literal(String),
 }
 
@@ -353,7 +352,7 @@ impl std::fmt::Display for RenderError {
         match self {
             RenderError::Var(v) => write!(f, "not a SPARQL variable name: {v:?}"),
             RenderError::Iri(i) => write!(f, "IRI has a character SPARQL forbids: {i:?}"),
-            RenderError::Literal(l) => write!(f, "not a well-formed RDF literal: {l:?}"),
+            RenderError::Literal(l) => write!(f, "not exactly one SPARQL literal: {l:?}"),
         }
     }
 }
@@ -366,8 +365,9 @@ impl std::error::Error for RenderError {}
 /// * an IRI is wrapped in `<>` when it has no character `IRIREF` forbids, else
 ///   [`RenderError::Iri`];
 /// * a literal that starts with `"` is `sparq-fedplan`'s "already rendered" form: it is parsed
-///   as one RDF literal (lexical form, then an optional language tag or `^^<datatype>`) and
-///   re-serialised with canonical escaping, else [`RenderError::Literal`]. Any other literal is
+///   with the SPARQL parser as exactly one literal (short or long quotes, then an optional
+///   language tag or `^^<datatype>`) and re-serialised with canonical escaping, else
+///   [`RenderError::Literal`]. Any other literal is
 ///   a bare lexical value and becomes an escaped plain string.
 ///
 /// So whatever the pattern holds, the rendered text is exactly one SPARQL term.
@@ -377,10 +377,40 @@ pub(crate) fn render_term(t: &Term) -> Result<String, RenderError> {
         Term::Var(v) => Err(RenderError::Var(v.0.clone())),
         Term::Iri(iri) if is_iriref_body(iri) => Ok(format!("<{iri}>")),
         Term::Iri(iri) => Err(RenderError::Iri(iri.clone())),
-        Term::Literal(lit) if lit.starts_with('"') => oxrdf::Literal::from_str(lit)
+        Term::Literal(lit) if lit.starts_with('"') => parse_sparql_literal(lit)
             .map(|l| l.to_string())
-            .map_err(|_| RenderError::Literal(lit.clone())),
+            .ok_or_else(|| RenderError::Literal(lit.clone())),
         Term::Literal(lit) => Ok(oxrdf::Literal::new_simple_literal(lit.as_str()).to_string()),
+    }
+}
+
+/// Parse `lit` as exactly one SPARQL literal, in any of SPARQL's literal forms (short or long
+/// quotes, a language tag or `^^` datatype), by parsing it with the SPARQL parser in the object
+/// position of a one-pattern query and requiring that the whole query is that one pattern with
+/// a literal object. Anything else, including extra syntax after the literal, is `None`.
+fn parse_sparql_literal(lit: &str) -> Option<oxrdf::Literal> {
+    use spargebra::algebra::GraphPattern;
+    use spargebra::term::TermPattern;
+    let query = spargebra::SparqlParser::new()
+        .parse_query(&format!("ASK {{ ?s ?p {lit} }}"))
+        .ok()?;
+    // ASK wraps its group in a projection; anything but one BGP inside it is extra syntax.
+    let spargebra::Query::Ask {
+        pattern: GraphPattern::Project { inner, .. },
+        ..
+    } = query
+    else {
+        return None;
+    };
+    let GraphPattern::Bgp { patterns } = *inner else {
+        return None;
+    };
+    match patterns.as_slice() {
+        [tp] => match &tp.object {
+            TermPattern::Literal(l) => Some(l.clone()),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -717,6 +747,12 @@ mod tests {
             "\"a",
             "\"a\"^^<http://ex/d d>",
             "\"a\"@",
+            "\"a\" # } UNION { ?x ?y ?z",
+            "\"a\" . ?x ?y \"b\"",
+            "\"a\" , \"b\"",
+            "\"a\" FILTER(true)",
+            "\"\"\"a\"\"\" } . { ?x ?y ?z",
+            "\"a\"^^xsd:string",
         ] {
             let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(bad.into()));
             assert_eq!(lower_leaf(&tp), Err(RenderError::Literal(bad.to_string())), "{bad:?}");
@@ -739,6 +775,21 @@ mod tests {
                 Literal::new_typed_literal("q\"} \\", NamedNode::new("http://ex/d").unwrap()).into(),
             ),
             (Term::Literal("\"x\"".into()), Literal::new_simple_literal("x").into()),
+            // Long-string forms, which the SPARQL grammar accepts in every literal position.
+            (
+                Term::Literal("\"\"\"line 1\nline \"2\" }\"\"\"".into()),
+                Literal::new_simple_literal("line 1\nline \"2\" }").into(),
+            ),
+            (
+                Term::Literal("\"\"\"it's\nhere\"\"\"@en".into()),
+                Literal::new_language_tagged_literal("it's\nhere", "en").unwrap().into(),
+            ),
+            (
+                Term::Literal("\"\"\"a\nb\"\"\"^^<http://ex/d>".into()),
+                Literal::new_typed_literal("a\nb", NamedNode::new("http://ex/d").unwrap()).into(),
+            ),
+            // Only a leading `"` marks a pre-rendered literal; anything else is a bare value.
+            (Term::Literal("'''x'''".into()), Literal::new_simple_literal("'''x'''").into()),
         ];
         for (term, want) in cases {
             let tp = TriplePattern::new(var("s"), iri("http://ex/p"), term.clone());

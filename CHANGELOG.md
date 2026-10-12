@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
   report `InterpError::Render`, and `push_group` returns `None` for a pattern holding a
   variable name that is not a SPARQL `VARNAME`, an IRI with a character `IRIREF` forbids, or a
-  `"`-prefixed literal that is not one well-formed RDF literal. Pre-rendered literals are
+  `"`-prefixed literal that is not exactly one SPARQL literal. Pre-rendered literals are
   re-serialised with canonical escaping. (#6877)
 
 ## [0.1.5] - 2026-10-10
