@@ -361,6 +361,47 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # Dispatch-only companion to the re-baseline path above: publishes the re-minted PNGs to a
+  # throwaway `vr-refresh/<run id>` branch, so a reviewer (or an agent session whose network
+  # cannot reach artifact storage) can read them from git, eyeball each one, and open a PR with
+  # only the intended changes. Nothing is merged here; main is never written. `contents: write`
+  # is scoped to this job alone, and the job runs only for a manual dispatch from main.
+  push-refreshed-baselines:
+    name: push refreshed visual baselines to a review branch (dispatch-only)
+    needs: [config, visual-sweep]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.config.outputs.vr_refresh == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download the re-minted baselines
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: refreshed-visual-baselines
+          path: site/e2e/visual/baselines
+      - name: Commit them to vr-refresh/<run id>
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="vr-refresh/${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add site/e2e/visual/baselines
+          if git diff --cached --quiet; then
+            echo "No baseline changed; nothing to push."
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m "chore(site): re-minted visual baselines from run ${GITHUB_RUN_ID} (unreviewed)"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${branch}"
+          echo "Pushed ${branch}. Review every changed PNG before taking any into a PR." >> "$GITHUB_STEP_SUMMARY"
+
   # ── Category 3: cross-browser P1 journeys (firefox + webkit) ─────────────────────────────
   cross-browser:
     name: cross-browser P1 journeys firefox+webkit (advisory)
