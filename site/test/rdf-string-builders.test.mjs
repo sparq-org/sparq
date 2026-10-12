@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import N3 from "n3";
+import { parse as parseShaclc } from "shaclc-parse";
 
 import {
   declaredPrefixBindings,
@@ -146,13 +147,13 @@ test("shapesToCompact rejects a blank-node label that is not a BLANK_NODE_LABEL"
   assert.throws(() => shapesToCompact(triples), /not a BLANK_NODE_LABEL/);
 });
 
-test("shapesToCompact escapes every control character in a string literal", () => {
+test("shapesToCompact escapes quotes, backslashes and line breaks in a string literal", () => {
   const message = 'line1\nline2\r\t\b\f"\\\u0001end';
   const { text } = shapesToCompact(shapeWith([["message", lit(message)]]));
   assert.equal(shapeCount(text), 1);
   const written = /message=("(?:[^"\\]|\\.)*")/.exec(text)?.[1];
   assert.ok(written, text);
-  assert.doesNotMatch(written, /[\u0000-\u001F]/);
+  assert.doesNotMatch(written, /[\n\r]/);
   // The written form is a Turtle string literal that decodes back to the original message.
   const [q] = new N3.Parser().parse(`<urn:s> <urn:p> ${written} .`);
   assert.equal(q.object.value, message);
@@ -160,7 +161,7 @@ test("shapesToCompact escapes every control character in a string literal", () =
 
 test("shapesToCompact rejects a language tag that is not a LANGTAG", () => {
   const triples = shapeWith([["message", lit("hi", undefined, "en .\n}\nshape <http://evil/S> {")]]);
-  assert.throws(() => shapesToCompact(triples), /not an N-Triples LANGTAG/);
+  assert.throws(() => shapesToCompact(triples), /not a LANGTAG/);
 });
 
 test("shapesToCompact omits a property whose count is not a non-negative integer", () => {
@@ -172,6 +173,44 @@ test("shapesToCompact omits a property whose count is not a non-negative integer
   assert.doesNotMatch(text, /evil/);
   assert.equal(unsupported.length, 1);
   assert.match(unsupported[0], /not a non-negative integer/);
+});
+
+test("shapesToCompact keeps a signed count whose value is non-negative", () => {
+  const XSD_INT = "http://www.w3.org/2001/XMLSchema#integer";
+  for (const [min, max] of [["+1", "-0"], ["0", "+00"]]) {
+    const { text, unsupported } = shapesToCompact(
+      shapeWith([["minCount", lit(min, XSD_INT)], ["maxCount", lit(max, XSD_INT)]]),
+    );
+    assert.deepEqual(unsupported, []);
+    assert.ok(text.includes(`[${min}..${max}]`), text);
+  }
+  const { unsupported } = shapesToCompact(shapeWith([["minCount", lit("-1", XSD_INT)]]));
+  assert.equal(unsupported.length, 1);
+});
+
+test("shapesToCompact output parses as a whole SHACLC document", () => {
+  const XSD = "http://www.w3.org/2001/XMLSchema#";
+  const triples = shapeWith([
+    ["minCount", lit("+1", `${XSD}integer`)],
+    ["maxCount", lit("-0", `${XSD}integer`)],
+    ["datatype", nn(`${XSD}string`)],
+    ["message", lit("raw \u0001 control")],
+    ["class", nn("http://example.org/C.")],
+  ]);
+  const { text, unsupported } = shapesToCompact(triples, [
+    { prefix: "ex", iri: "http://example.org/" },
+    { prefix: "ex.", iri: "http://dot.example/" },
+  ]);
+  assert.deepEqual(unsupported, []);
+  const quads = parseShaclc(text, { extendedSyntax: true });
+  const has = (p, test) => quads.some((q) => q.predicate.value === `${SH}${p}` && test(q.object));
+  assert.ok(has("path", (o) => o.value === "http://example.org/p"));
+  assert.ok(has("minCount", (o) => o.value === "+1"));
+  assert.ok(has("maxCount", (o) => o.value === "-0"));
+  assert.ok(has("datatype", (o) => o.value === `${XSD}string`));
+  assert.ok(has("message", (o) => o.value === "raw \u0001 control"));
+  assert.ok(has("class", (o) => o.value === "http://example.org/C."));
+  assert.ok(quads.some((q) => q.subject.value === "http://example.org/S" && q.object.value === `${SH}NodeShape`));
 });
 
 test("shapesToCompact drops caller prefixes that cannot be declared and keeps full IRIs", () => {

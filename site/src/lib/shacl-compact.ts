@@ -25,10 +25,16 @@
 // directly under `node --test` against hand-built triples.
 //
 // Every IRI, literal, blank-node label and prefix binding is written through the shared
-// sparq-client term writer or checked against its grammar, so a term recovered from editable
+// sparq-client term writer or checked against the shared grammar checks, so a term recovered from editable
 // shapes text cannot end its token early and add shapes or constraints to the output (#6719).
 
-import { isTurtleBlankNodeLabel, isWritablePrefixBinding, termToNTriples } from "@sparq/client";
+import {
+  hasLoneSurrogate,
+  isLangTag,
+  isTurtleBlankNodeLabel,
+  isWritablePrefixBinding,
+  termToNTriples,
+} from "@sparq/client";
 
 const SH = "http://www.w3.org/ns/shacl#";
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -196,12 +202,29 @@ class Prefixer {
 // Term -> SCS text.
 // ---------------------------------------------------------------------------
 
-// A quoted string literal (ECHAR / UCHAR escapes, as SCS's Turtle-derived STRING_LITERAL_QUOTE
-// allows), optionally with a language tag the shared writer checks against LANGTAG.
+// SCS string literals follow SPARQL's STRING_LITERAL2: only `"`, `\`, LF and CR must be
+// escaped, ECHAR is the only escape form, and every other character may appear raw.
+const SCS_ECHAR: Record<string, string> = {
+  "\b": "\\b",
+  "\t": "\\t",
+  "\n": "\\n",
+  "\f": "\\f",
+  "\r": "\\r",
+  '"': '\\"',
+  "\\": "\\\\",
+};
+
+// A quoted string literal, optionally with a language tag checked against LANGTAG.
 function quoted(value: string, language?: string): string {
-  return termToNTriples(
-    language ? { type: "literal", value, "xml:lang": language } : { type: "literal", value },
-  );
+  if (hasLoneSurrogate(value)) {
+    throw new Error(`shapesToCompact: literal ${JSON.stringify(value)} contains a lone surrogate`);
+  }
+  const lexical = `"${value.replace(/[\b\t\n\f\r"\\]/g, (c) => SCS_ECHAR[c])}"`;
+  if (!language) return lexical;
+  if (!isLangTag(language)) {
+    throw new Error(`shapesToCompact: language tag ${JSON.stringify(language)} is not a LANGTAG`);
+  }
+  return `${lexical}@${language}`;
 }
 
 function blankNode(label: string): string {
@@ -422,8 +445,10 @@ function serializeProperty(
   // count: `[min..max]` (only when at least one is set).
   const minTerm = g.one(prop, `${SH}minCount`);
   const maxTerm = g.one(prop, `${SH}maxCount`);
-  // The count range takes bare non-negative integers only.
-  if ([minTerm, maxTerm].some((t) => t && !(t.termType === "Literal" && /^\d+$/.test(t.value)))) {
+  // The count range takes an INTEGER token (`[+-]?[0-9]+`) whose value is non-negative.
+  const isCount = (t: ScsTerm): boolean =>
+    t.termType === "Literal" && /^(?:\+?\d+|-0+)$/.test(t.value);
+  if ([minTerm, maxTerm].some((t) => t && !isCount(t))) {
     unsupported.push(
       `${shapeLabel}: a sh:minCount/sh:maxCount that is not a non-negative integer — property omitted.`,
     );

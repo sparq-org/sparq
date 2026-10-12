@@ -50,7 +50,7 @@ import type {
   InitOutput,
 } from "./generated/sparq_wasm.js";
 
-import { IRI_FORBIDDEN, LONE_SURROGATE, PN_CHARS_BASE } from "./rdf-syntax.js";
+import { IRI_FORBIDDEN, LANGTAG, LONE_SURROGATE, PN_CHARS_BASE } from "./rdf-syntax.js";
 
 /**
  * A forward-only cursor over a SELECT result's solution rows — the wasm-pack-generated
@@ -164,8 +164,6 @@ const BLANK_NODE_LABEL = new RegExp(
   `^[${PN_CHARS_BASE}_:0-9](?:[${PN_CHARS}.]*[${PN_CHARS}])?$`,
   "u",
 );
-// N-Triples LANGTAG without the leading '@'; the RDF 1.2 direction is checked separately.
-const LANGTAG = /^[a-zA-Z]+(?:-[a-zA-Z0-9]+)*$/;
 
 /** Throws when `value` cannot be written as an N-Triples IRIREF without changing it. */
 function checkIri(value: string, what: string): string {
@@ -949,6 +947,8 @@ export {
 
 // #6719 — the grammar checks the RDF / SPARQL text writers validate interpolated pieces with.
 export {
+  hasLoneSurrogate,
+  isLangTag,
   isPrefixLabel,
   isTurtleBlankNodeLabel,
   isWritableIri,

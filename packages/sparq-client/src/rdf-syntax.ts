@@ -10,6 +10,8 @@ export const LONE_SURROGATE =
   /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 // Characters IRIREF forbids unescaped (N-Triples, Turtle, SPARQL): controls, space, <>"{}|^`\.
 export const IRI_FORBIDDEN = /[\u0000- <>"{}|^`\\]/;
+// LANGTAG without the leading '@' (N-Triples, Turtle, SPARQL); an RDF 1.2 direction is separate.
+export const LANGTAG = /^[a-zA-Z]+(?:-[a-zA-Z0-9]+)*$/;
 // PN_CHARS_BASE, as a character-class body for a `u`-flag RegExp.
 export const PN_CHARS_BASE =
   "A-Za-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF" +
@@ -28,6 +30,16 @@ const TURTLE_BLANK_NODE_LABEL = new RegExp(
 /** True when `value` can be written between `<` and `>` as an IRIREF without escaping. */
 export function isWritableIri(value: string): boolean {
   return !IRI_FORBIDDEN.test(value) && !LONE_SURROGATE.test(value);
+}
+
+/** True when `value` holds a lone UTF-16 surrogate, which no RDF syntax can write. */
+export function hasLoneSurrogate(value: string): boolean {
+  return LONE_SURROGATE.test(value);
+}
+
+/** True when `tag` is a `LANGTAG` (without the leading `@`). */
+export function isLangTag(tag: string): boolean {
+  return LANGTAG.test(tag);
 }
 
 /** True when `label` is a Turtle / SPARQL `PN_PREFIX` (the empty string is the `:` prefix). */
