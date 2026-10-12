@@ -643,42 +643,59 @@ pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[
 }
 
 /// A rule conclusion's EXISTENTIALS (its blank labels — instantiated fresh once per firing) and
-/// its VARIABLES (the firing key: one instantiation per distinct conclusion-relevant binding,
-/// so a rule re-evaluated against the same bindings does not mint endless new blanks).
+/// its CONCLUSION-RELEVANT VARIABLES ([`conclusion_relevant_vars`], the firing key: one
+/// instantiation per distinct conclusion-relevant binding, so a rule re-evaluated against the
+/// same bindings does not mint endless new blanks).
 ///
-/// Quoted triples are transparent structure — their blanks are conclusion existentials and
-/// their variables part of the firing key — whereas a quoted `{ … }` formula is an opaque VALUE
-/// whose inner terms are formula-scoped, so it is not descended into.
+/// Quoted triples are transparent structure — their blanks are conclusion existentials —
+/// whereas a quoted `{ … }` formula is an opaque VALUE whose blanks are formula-scoped, so it
+/// is not searched for existentials.
 fn conclusion_existentials(conclusion: &[[Term; 3]]) -> (Vec<String>, Vec<String>) {
-    fn scan(
-        t: &Term,
-        blanks: &mut FxHashSet<String>,
-        vars: &mut std::collections::BTreeSet<String>,
-    ) {
+    fn blanks_of(t: &Term, blanks: &mut FxHashSet<String>) {
         match t {
             Term::Blank(l) => {
                 blanks.insert(l.clone());
             }
-            Term::Var(v) => {
-                vars.insert(v.clone());
-            }
-            Term::List(ms) => ms.iter().for_each(|m| scan(m, blanks, vars)),
-            Term::Triple(t) => t.iter().for_each(|m| scan(m, blanks, vars)),
+            Term::List(ms) => ms.iter().for_each(|m| blanks_of(m, blanks)),
+            Term::Triple(t) => t.iter().for_each(|m| blanks_of(m, blanks)),
             _ => {}
         }
     }
     let mut blanks = FxHashSet::default();
-    let mut vars = std::collections::BTreeSet::new();
     for row in conclusion {
         for t in row {
-            scan(t, &mut blanks, &mut vars);
+            blanks_of(t, &mut blanks);
         }
     }
-    (blanks.into_iter().collect(), vars.into_iter().collect())
+    (blanks.into_iter().collect(), conclusion_relevant_vars(conclusion))
 }
 
-/// The firing key of binding `b` for a rule whose conclusion variables are `concl_vars`
-/// ([`conclusion_existentials`]): one existential instantiation per distinct key.
+/// Every variable whose binding can change the instantiated conclusion, sorted: exactly the
+/// variables [`ground_triple`] substitutes ([`apply_deep`]), at any depth — inside lists,
+/// quoted triples AND quoted `{ … }` formulas. This is the one definition of the firing key
+/// ([`firing_key`]), so the dedup of firings, their ranking, and the proof-mode choice of
+/// binding cannot disagree about which bindings instantiate the same conclusion. A variable
+/// a binding leaves unbound (a formula's own quantified variable) keys as unbound.
+fn conclusion_relevant_vars(conclusion: &[[Term; 3]]) -> Vec<String> {
+    fn scan(t: &Term, vars: &mut std::collections::BTreeSet<String>) {
+        match t {
+            Term::Var(v) => {
+                vars.insert(v.clone());
+            }
+            Term::List(ms) => ms.iter().for_each(|m| scan(m, vars)),
+            Term::Triple(t) => t.iter().for_each(|m| scan(m, vars)),
+            Term::Formula(rows) => rows.iter().flatten().for_each(|m| scan(m, vars)),
+            _ => {}
+        }
+    }
+    let mut vars = std::collections::BTreeSet::new();
+    conclusion.iter().flatten().for_each(|t| scan(t, &mut vars));
+    vars.into_iter().collect()
+}
+
+/// The firing key of binding `b` for a rule whose conclusion-relevant variables are
+/// `concl_vars` ([`conclusion_relevant_vars`]): one existential instantiation per distinct
+/// key. Two bindings with one key instantiate the same conclusion.
 fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
     concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect()
 }
@@ -694,53 +711,56 @@ fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
 /// get distinct ranks, so labels stay injective. Only the numbering is canonical: the
 /// firings keep their arrival order, so the facts they derive are inserted as before.
 ///
-/// Of several bindings with one key, the first to arrive is kept; with `tie_break`, the
-/// least by its full canonical encoding is kept instead, so the premises a proof step
-/// records are reproducible too. The conclusion they instantiate is the same either way.
+/// Bindings are deduplicated by key before sorting. Of several bindings with one key, the
+/// first to arrive is kept; with `tie_break`, the least by its full canonical encoding is
+/// kept instead, so the premises a proof step records are reproducible too. The key covers
+/// every conclusion-relevant variable, so the conclusion they instantiate — and hence the
+/// closure — is the same either way.
 fn canonical_new_firings(
     bindings: Vec<Binding>,
     concl_vars: &[String],
     fired: &FxHashSet<String>,
     tie_break: bool,
 ) -> Vec<(usize, String, Binding)> {
-    let fresh: Vec<(String, Binding)> = bindings
-        .into_iter()
-        .filter_map(|b| {
-            let key = firing_key(&b, concl_vars);
-            (!fired.contains(&key)).then_some((key, b))
-        })
-        .collect();
-    let mut order: Vec<usize> = (0..fresh.len()).collect();
-    if tie_break {
-        let full: Vec<Vec<String>> = fresh
-            .iter()
-            .map(|(_, b)| {
-                let mut f: Vec<String> =
-                    b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
-                f.sort_unstable();
-                f
-            })
-            .collect();
-        order.sort_unstable_by(|&x, &y| {
-            fresh[x].0.cmp(&fresh[y].0).then_with(|| full[x].cmp(&full[y]))
-        });
-    } else {
-        order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0).then(x.cmp(&y)));
-    }
-    let mut rank: Vec<Option<usize>> = vec![None; fresh.len()];
-    let mut next = 0;
-    for (j, &i) in order.iter().enumerate() {
-        if j > 0 && fresh[order[j - 1]].0 == fresh[i].0 {
-            continue; // a later binding of a key already ranked
+    let full_encoding = |b: &Binding| -> Vec<String> {
+        let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+        f.sort_unstable();
+        f
+    };
+    // One entry per fresh key, in the arrival order of the key's first binding.
+    let mut fresh: Vec<(String, Binding)> = Vec::new();
+    let mut full: Vec<Vec<String>> = Vec::new(); // tie_break only
+    let mut slot: FxHashMap<String, usize> = FxHashMap::default();
+    for b in bindings {
+        let key = firing_key(&b, concl_vars);
+        if fired.contains(&key) {
+            continue;
         }
-        rank[i] = Some(next);
-        next += 1;
+        match slot.get(&key) {
+            None => {
+                slot.insert(key.clone(), fresh.len());
+                if tie_break {
+                    full.push(full_encoding(&b));
+                }
+                fresh.push((key, b));
+            }
+            Some(&i) if tie_break => {
+                let f = full_encoding(&b);
+                if f < full[i] {
+                    full[i] = f;
+                    fresh[i].1 = b;
+                }
+            }
+            Some(_) => {} // a later binding of a key already kept
+        }
     }
-    fresh
-        .into_iter()
-        .zip(rank)
-        .filter_map(|((key, b), r)| Some((r?, key, b)))
-        .collect()
+    let mut order: Vec<usize> = (0..fresh.len()).collect();
+    order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0)); // keys are distinct
+    let mut rank = vec![0; fresh.len()];
+    for (r, &i) in order.iter().enumerate() {
+        rank[i] = r;
+    }
+    fresh.into_iter().zip(rank).map(|((key, b), r)| (r, key, b)).collect()
 }
 
 /// A stratified run's result ([`reason_n3_stratified`]).
@@ -6309,6 +6329,47 @@ mod tests {
             let r = render(d);
             assert_eq!(r.0, base.0, "statement keys are order-independent");
             assert_eq!(r.1, base.1, "proof steps are order-independent");
+        }
+    }
+
+    #[test]
+    fn proof_recording_does_not_change_the_closure() {
+        // Review of GH #6749: a variable substituted inside a concluded `{ … }` formula was
+        // left out of the firing key, so both bindings below shared one (empty) key. Plain
+        // runs kept the first binding to arrive and proof runs the least, so recording a
+        // proof changed the derived formula and `why()` could miss a materialized fact.
+        // Every variable the conclusion substitutes is now in the key: each binding fires.
+        let run = |src: &str, mode: StepMode| {
+            let cuts = Truncation::top_level();
+            let parsed = bounded::parse_n3(src, "", &cuts).unwrap();
+            let (facts, steps, _) =
+                run_closure(parsed, None, None, &cuts, mode, NegationCycles::Reject)
+                    .unwrap()
+                    .top_level();
+            let mut all: Vec<String> = facts.all.iter().map(|f| format!("{f:?}")).collect();
+            all.sort();
+            let derived: FxHashSet<String> =
+                steps.iter().map(|(g, _, _)| format!("{g:?}")).collect();
+            (all, derived)
+        };
+        let docs = [
+            "@prefix : <http://ex/> .\n:b :p :v . :a :p :v .\n\
+             { ?x :p :v } => { _:e :q { ?x :r :v } } .\n",
+            "@prefix : <http://ex/> .\n:a :p :v . :b :p :v .\n\
+             { ?x :p :v } => { _:e :q { ?x :r :v } } .\n",
+            // Nested formula, list and quoted triple inside the formula.
+            "@prefix : <http://ex/> .\n:b :p :w . :a :p :w . :c :p :w .\n\
+             { ?x :p ?y } => { _:e :q { :g :h { ( ?x ) :r << ?y :s :t >> } } } .\n",
+        ];
+        for src in docs {
+            let (plain, _) = run(src, StepMode::None);
+            let (proved, derived) = run(src, StepMode::Full);
+            assert_eq!(plain, proved, "proof recording changed the closure of {src}");
+            let input = bounded::parse_n3(src, "", &Truncation::top_level()).unwrap();
+            let n_in = input.facts.len();
+            assert_eq!(derived.len() + n_in, proved.len(), "every derived fact has a step");
+            let n_fired = proved.iter().filter(|f| f.contains("http://ex/q")).count();
+            assert_eq!(n_fired, n_in, "one existential per binding of {src}");
         }
     }
 

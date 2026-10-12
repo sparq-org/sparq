@@ -215,10 +215,15 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 //   (e.g. () and an rdf:nil IRI); explain::n3_proof_tree_for_key(dict, &run.steps, &key, opts) roots by key.
 // statement_keys is injective w.r.t. Term's own Eq: formula rows keep their order and duplicates (as the
 // engine compares them); blank labels and __bw copies are not normalized. So a key is only as
-// reproducible as the engine's terms. Skolem labels (__sk<n>_e) are numbered in the canonical
-// (sorted-binding) order of each round's firings, not hash-set order, so they, their keys and
-// why() strings are reproducible across runs/platforms (GH #6749); a log:conclusion formula's
-// row order still follows the nested closure's set order.
+// reproducible as the engine's terms. Skolem labels (__sk<n>_e) are numbered in the sorted order
+// of each round's firing keys (every variable the conclusion substitutes), so for the SAME parsed
+// input they, their keys and why() strings do not depend on hash-set traversal or hasher width
+// (native vs wasm32; GH #6749). Only that: they are NOT canonical across reordered isomorphic
+// documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
+// and a label depends on the other firings in its round), and they hold only while the binding
+// values and firing sets are themselves stable. Values that still carry traversal order -
+// log:collectAllIn lists, log:conclusion formulas (rows in nested-closure set order),
+// backward-renamed __bw<n> terms - can reorder ranks and so labels (GH #6844).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
