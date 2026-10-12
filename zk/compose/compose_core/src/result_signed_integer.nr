@@ -3,7 +3,9 @@
 //! private within one fixed capacity. This module alone is not a result-proof API.
 
 use crate::filter_int::OP_NE;
-use crate::filter_signed::{literal_encoding, signed_verdict};
+use crate::blake3_literal::integer_literal_hs;
+use crate::filter_signed::signed_verdict;
+use crate::hashes::{h2, TYPE_CODE_LITERAL};
 use crate::result::ResultInteger;
 
 global SIGN_BIT: u64 = 9223372036854775808;
@@ -28,15 +30,6 @@ impl ResultInteger for SignedInteger {
     }
 }
 
-fn check_lexical<let LEN: u32>(operand: Field, negative: bool, digits: [u8; 20]) {
-    // One token hash per total length, not separate public sign/length buckets.
-    let mut lexical = [0; LEN];
-    for i in 0..LEN { lexical[i] = digits[20 - LEN + i]; }
-    if negative { lexical[0] = 45; }
-    let suffix = "^^<http://www.w3.org/2001/XMLSchema#integer>".as_bytes();
-    assert_eq(literal_encoding(lexical, suffix), operand, "signed operand encoding mismatch");
-}
-
 /// Opens the exact canonical xsd:integer token and checks a biased signed bound.
 /// The caller derives that bound from its separately admitted signed query.
 pub fn full_i64_check(operand: Field, op: u32, bound: u64, biased: u64) {
@@ -45,58 +38,10 @@ pub fn full_i64_check(operand: Field, op: u32, bound: u64, biased: u64) {
     // Both active subtractions are in range; MIN has magnitude 2^63, not a
     // signed absolute value. Noir constrains the chosen branch's arithmetic.
     let magnitude = if negative { SIGN_BIT - biased } else { biased - SIGN_BIT };
-    let mut digits: [u8; 20] = [48; 20];
-    let mut remaining = magnitude;
-    let mut digit_count: u32 = 1;
-    for i in 0..19 {
-        digits[19 - i] = 48 + (remaining % 10) as u8;
-        if remaining >= 10 { digit_count = digit_count + 1; }
-        remaining = remaining / 10;
-    }
-    assert_eq(remaining, 0, "signed magnitude exceeds lexical capacity");
-    let length = digit_count + if negative { 1 } else { 0 };
-    if length == 1 {
-        check_lexical::<1>(operand, negative, digits);
-    } else if length == 2 {
-        check_lexical::<2>(operand, negative, digits);
-    } else if length == 3 {
-        check_lexical::<3>(operand, negative, digits);
-    } else if length == 4 {
-        check_lexical::<4>(operand, negative, digits);
-    } else if length == 5 {
-        check_lexical::<5>(operand, negative, digits);
-    } else if length == 6 {
-        check_lexical::<6>(operand, negative, digits);
-    } else if length == 7 {
-        check_lexical::<7>(operand, negative, digits);
-    } else if length == 8 {
-        check_lexical::<8>(operand, negative, digits);
-    } else if length == 9 {
-        check_lexical::<9>(operand, negative, digits);
-    } else if length == 10 {
-        check_lexical::<10>(operand, negative, digits);
-    } else if length == 11 {
-        check_lexical::<11>(operand, negative, digits);
-    } else if length == 12 {
-        check_lexical::<12>(operand, negative, digits);
-    } else if length == 13 {
-        check_lexical::<13>(operand, negative, digits);
-    } else if length == 14 {
-        check_lexical::<14>(operand, negative, digits);
-    } else if length == 15 {
-        check_lexical::<15>(operand, negative, digits);
-    } else if length == 16 {
-        check_lexical::<16>(operand, negative, digits);
-    } else if length == 17 {
-        check_lexical::<17>(operand, negative, digits);
-    } else if length == 18 {
-        check_lexical::<18>(operand, negative, digits);
-    } else if length == 19 {
-        check_lexical::<19>(operand, negative, digits);
-    } else {
-        assert_eq(length, 20, "signed lexical length outside capacity");
-        check_lexical::<20>(operand, negative, digits);
-    }
+    // One variable-length opening covers every sign and length; neither is
+    // selected or revealed. A negative value has a nonzero magnitude.
+    let hs = integer_literal_hs(magnitude, negative);
+    assert_eq(h2(TYPE_CODE_LITERAL, hs), operand, "signed operand encoding mismatch");
     // False signs reduce the existing shared comparator to unsigned order,
     // which is signed order after the monotonic bias. No new comparison table.
     assert(signed_verdict(false, biased, false, bound, op), "signed filter verdict mismatch");
