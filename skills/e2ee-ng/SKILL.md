@@ -99,7 +99,7 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   ephemeral-*static* ECDH: **not forward-secret** — compromise of the recipient's
   long-term private key exposes previously recorded wraps.
 - **`capability`** — `PublicGrant` (deterministic encode/decode, `cap_id`,
-  admin `sign`/`verify`, and a **branch set**: `ScopedBranch` +
+  admin `sign`/`verify`, exercise-time `check_epoch`, and a **branch set**: `ScopedBranch` +
   `branch_scope`/`set_branch_scope`/`covers_branch`), `Capability`
   (`new_read`/`new_write`/`new_admin`, `validate`,
   `encode_secret`/`decode_secret`), `wrap_capability`/`unwrap_capability` (the
@@ -153,6 +153,12 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   The epoch bound is the child's own signed `PublicGrant::max_epoch` ceiling — the
   child keeps the parent's exact `epoch`, so a narrowed grant never claims an epoch
   that disagrees with the topics it carries.
+- **`max_epoch` is enforced only where you call `check_epoch`.** `verify` checks
+  the admin signature, not the epoch: a signed grant past its `max_epoch` still
+  verifies. This crate never sees a "current epoch", so whoever admits a grant
+  (the broker/sync tier) must also call `PublicGrant::check_epoch(current)`,
+  which accepts the inclusive range `epoch ..= max_epoch` (unbounded above when
+  `max_epoch` is `None`) and otherwise fails with `Error::EpochOutOfRange`.
 - **A branch set is authorization, not key distribution.** A grant is scoped to one
   or more branches (`Delegation::branches` selects a subset out of the parent's set;
   `None` inherits it), and each branch in scope carries its own epoch-specific topic,
