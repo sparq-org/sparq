@@ -6,7 +6,7 @@
 // "Supplementary material" part of zksparql-architecture.typ, whose section and table numbers
 // (S1 to S8, Table S1 to S9) the references below follow. The language guide
 // (zksparql-language-guide.md) binds this file as it binds the source. Every number comes from
-// paper-evidence.json through the shared helpers (headline, ev) of _lib/bench.typ; none is typed.
+// paper-evidence.json through the shared headline helper of _lib/bench.typ; none is typed.
 //
 // Build: typst compile --root site --input data="$(cat site/src/data/paper-evidence.json)" \
 //   site/papers/zksparql-eswc.typ out.pdf
@@ -23,7 +23,7 @@
 #assert(opening in ("credentials", "agents"), message: "opening must be credentials or agents")
 #assert(coauthors in ("wright", "wright-braun"), message: "coauthors must be wright or wright-braun")
 
-#import "_lib/bench.typ": headline, ev
+#import "_lib/bench.typ": headline
 #import "@preview/fine-lncs:0.6.5": lncs, author, institute
 
 // Display helpers shared in form with the source paper: the value always comes from the evidence
@@ -921,7 +921,7 @@ audit remain to be done.
 security assumptions behind each signature scheme and proof system (§S1), what our proof methods
 support (§S2), the experiment records with every test case, run and negative test (§S3), the
 timings of the circuit pilot (§S4), the executor cycle counts of every sweep configuration (§S5),
-an earlier fixed-circuit design (§S6), an experiment combining BBS+ proofs with circuits (§S7), and
+an earlier fixed-circuit design (§S6), a design for combining BBS+ proofs with circuits (§S7), and
 the software behind each experiment (§S8).
 #if anon [For double-blind review, it withholds the proof-method identifiers, commits, and the
 digests and image IDs of guest binaries, which identify our repository.]
