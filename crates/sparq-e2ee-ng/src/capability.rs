@@ -25,7 +25,8 @@
 //! ceiling (§4.2), never widen any of them.
 
 use crate::cbor::{
-    enc_array, enc_bytes, enc_map, enc_text, enc_uint, read_struct_map, Limits, Reader,
+    enc_array, enc_bytes, enc_map, enc_text, enc_uint, push_head, read_struct_map, Limits,
+    Reader, MAJOR_BYTES, MAJOR_MAP, MAJOR_UINT, MAX_HEAD_LEN,
 };
 use crate::error::{Error, Result};
 use crate::ids::{BranchId, CapId, Epoch, RepoId, Secret32, TopicId};
@@ -34,6 +35,7 @@ use crate::suite::{check_suite, SUITE_V0};
 use crate::wrap::{self, RecipientPublicKey, RecipientSecretKey, WrappedSecret};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use zeroize::Zeroizing;
 
 /// One of the three separated authorities (§4.2). The set carried by a
 /// capability is canonicalized to this order (`read < publish < admin`) with no
@@ -759,21 +761,69 @@ impl Capability {
     /// Canonical CBOR including secret fields, for recipient-wrapped / out-of-band
     /// transfer ONLY. The result is a bearer secret; wrap it ([`crate::wrap`])
     /// before it leaves protected local storage.
-    pub fn encode_secret(&self) -> Vec<u8> {
-        let mut e = self.grant.signing_entries();
+    ///
+    /// Returned as a [`Zeroizing`] buffer that erases itself on drop. The secret
+    /// fields are written straight into that one buffer, which is reserved up
+    /// front so it never reallocates: no intermediate CBOR fragment or freed
+    /// allocation ever holds `K_read` or a private-key seed. (The public grant
+    /// fields are still built as ordinary fragments; they carry no secret.)
+    pub fn encode_secret(&self) -> Zeroizing<Vec<u8>> {
+        // A map value is either an already-encoded public fragment or a raw
+        // 32-byte secret, encoded below as a byte string directly into `out`.
+        enum Value<'a> {
+            Public(Vec<u8>),
+            Secret(&'a [u8; 32]),
+        }
+        let mut entries: Vec<(u64, Value<'_>)> = self
+            .grant
+            .signing_entries()
+            .into_iter()
+            .map(|(k, v)| (k, Value::Public(v)))
+            .collect();
         if let Some(sig) = &self.grant.admin_sig {
-            e.push((K_ADMIN_SIG, enc_bytes(sig)));
+            entries.push((K_ADMIN_SIG, Value::Public(enc_bytes(sig))));
         }
         if let Some(rs) = &self.read_secret {
-            e.push((K_READ_SECRET, enc_bytes(rs.expose())));
+            entries.push((K_READ_SECRET, Value::Secret(rs.expose())));
         }
         if let Some(sk) = &self.publisher_sk {
-            e.push((K_PUBLISHER_SK, enc_bytes(sk)));
+            entries.push((K_PUBLISHER_SK, Value::Secret(sk)));
         }
         if let Some(sk) = &self.admin_sk {
-            e.push((K_ADMIN_SK, enc_bytes(sk)));
+            entries.push((K_ADMIN_SK, Value::Secret(sk)));
         }
-        enc_map(e)
+        // Canonical map order: unsigned-int keys ascending (as `enc_map`).
+        entries.sort_by_key(|(k, _)| *k);
+        debug_assert!(entries.windows(2).all(|w| w[0].0 < w[1].0), "duplicate map key");
+
+        let capacity = MAX_HEAD_LEN
+            + entries
+                .iter()
+                .map(|(_, v)| {
+                    MAX_HEAD_LEN
+                        + match v {
+                            Value::Public(b) => b.len(),
+                            Value::Secret(s) => MAX_HEAD_LEN + s.len(),
+                        }
+                })
+                .sum::<usize>();
+        let mut out = Zeroizing::new(Vec::with_capacity(capacity));
+        let reserved = out.capacity();
+        push_head(&mut out, MAJOR_MAP, entries.len() as u64);
+        for (k, v) in &entries {
+            push_head(&mut out, MAJOR_UINT, *k);
+            match v {
+                Value::Public(b) => out.extend_from_slice(b),
+                Value::Secret(s) => {
+                    push_head(&mut out, MAJOR_BYTES, s.len() as u64);
+                    out.extend_from_slice(&s[..]);
+                }
+            }
+        }
+        // The capacity bound above is an over-estimate, so the buffer holding
+        // secrets was never moved (a move would leave a stale copy behind).
+        debug_assert_eq!(out.capacity(), reserved, "secret buffer reallocated");
+        out
     }
 
     /// Decode a full (possibly secret-bearing) capability and validate separation.
@@ -900,9 +950,9 @@ pub const CAPABILITY_WRAP_AAD: &[u8] = b"urn:jeswr:w3id:e2ee-ng:draft:2026-07 ca
 /// suite, an inverted validity window, a `max_epoch` behind its epoch, or a
 /// non-canonical branch set.
 ///
-/// Zeroizing covers this function's plaintext buffer; it does not retroactively
-/// erase the intermediate CBOR fragments `encode_secret` allocates internally —
-/// that exposure is unchanged from calling `encode_secret` directly.
+/// The plaintext is the [`Zeroizing`] buffer `encode_secret` returns, which
+/// holds the secret fields without intermediate fragments and is erased when
+/// this function returns.
 ///
 /// ```
 /// use sparq_e2ee_ng::capability::{
@@ -928,13 +978,11 @@ pub const CAPABILITY_WRAP_AAD: &[u8] = b"urn:jeswr:w3id:e2ee-ng:draft:2026-07 ca
 /// assert_eq!(opened.grant, cap.grant);
 /// ```
 pub fn wrap_capability(cap: &Capability, recipient: &RecipientPublicKey) -> Result<WrappedSecret> {
-    use zeroize::Zeroize;
     cap.validate()?;
     cap.grant.validate_structure()?;
-    let mut plaintext = cap.encode_secret();
-    let wrapped = wrap::wrap(recipient, &plaintext, CAPABILITY_WRAP_AAD);
-    plaintext.zeroize();
-    wrapped
+    // `encode_secret` returns a zeroizing buffer, erased when it drops here.
+    let plaintext = cap.encode_secret();
+    wrap::wrap(recipient, &plaintext, CAPABILITY_WRAP_AAD)
 }
 
 /// Open a capability wrapped by [`wrap_capability`], with the recipient's private
@@ -1362,5 +1410,89 @@ mod tests {
         ));
         // validate() itself must also catch it, independent of decoding.
         assert!(matches!(cap.validate(), Err(Error::Separation(_))));
+    }
+
+    /// The pre-#5267 construction of `encode_secret` (one CBOR fragment per
+    /// field, merged by `enc_map`), kept as the byte-level reference the
+    /// single-buffer writer must reproduce exactly.
+    fn reference_encode_secret(cap: &Capability) -> Vec<u8> {
+        let mut e = cap.grant.signing_entries();
+        if let Some(sig) = &cap.grant.admin_sig {
+            e.push((K_ADMIN_SIG, enc_bytes(sig)));
+        }
+        if let Some(rs) = &cap.read_secret {
+            e.push((K_READ_SECRET, enc_bytes(rs.expose())));
+        }
+        if let Some(sk) = &cap.publisher_sk {
+            e.push((K_PUBLISHER_SK, enc_bytes(sk)));
+        }
+        if let Some(sk) = &cap.admin_sk {
+            e.push((K_ADMIN_SK, enc_bytes(sk)));
+        }
+        enc_map(e)
+    }
+
+    fn secret_test_grant() -> PublicGrant {
+        let mut g = base_grant(
+            RepoId::from_bytes([1u8; 32]),
+            BranchId::from_bytes([2u8; 32]),
+            Epoch(7),
+            TopicId::from_bytes([3u8; 32]),
+            Validity { not_before: 100, not_after: 200 },
+            vec!["wss://broker.example".to_string()],
+        );
+        g.max_epoch = Some(Epoch(9));
+        g.parent_grant_id = Some(CapId::from_bytes([6u8; 32]));
+        g
+    }
+
+    /// Every capability shape (read, write, admin; signed and unsigned grant;
+    /// a multi-branch grant) encodes byte-for-byte as the reference, and
+    /// round-trips through `decode_secret`.
+    #[test]
+    fn encode_secret_matches_reference_bytes() {
+        let admin = SecretSigningKey::from_seed([1u8; 32]);
+        let publisher = SecretSigningKey::from_seed([2u8; 32]);
+        let mut caps = vec![
+            Capability::new_read(secret_test_grant(), Secret32([9u8; 32])).unwrap(),
+            Capability::new_write(secret_test_grant(), Secret32([8u8; 32]), &publisher)
+                .unwrap(),
+            Capability::new_admin(secret_test_grant(), &admin).unwrap(),
+        ];
+        let mut multi = secret_test_grant();
+        multi
+            .set_branch_scope(vec![
+                ScopedBranch {
+                    branch: BranchId::from_bytes([2u8; 32]),
+                    topic: TopicId::from_bytes([3u8; 32]),
+                },
+                ScopedBranch {
+                    branch: BranchId::from_bytes([5u8; 32]),
+                    topic: TopicId::from_bytes([4u8; 32]),
+                },
+            ])
+            .unwrap();
+        caps.push(Capability::new_read(multi, Secret32([7u8; 32])).unwrap());
+        for mut cap in caps {
+            for signed in [false, true] {
+                if signed {
+                    cap.grant.sign(&admin);
+                }
+                let bytes = cap.encode_secret();
+                assert_eq!(bytes.as_slice(), reference_encode_secret(&cap).as_slice());
+                let back = Capability::decode_secret(&bytes, Limits::default()).unwrap();
+                assert_eq!(back.grant, cap.grant);
+                assert_eq!(back.encode_secret(), bytes);
+            }
+        }
+    }
+
+    /// The secret-bearing encoding is handed back in a buffer that zeroizes on
+    /// drop, so a direct caller cannot forget to erase it.
+    #[test]
+    fn encode_secret_returns_zeroizing_buffer() {
+        let cap = Capability::new_read(secret_test_grant(), Secret32([9u8; 32])).unwrap();
+        let bytes: zeroize::Zeroizing<Vec<u8>> = cap.encode_secret();
+        assert!(!bytes.is_empty());
     }
 }
