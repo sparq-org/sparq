@@ -372,13 +372,23 @@ What the server exposes, all discoverable from the storage description
   stored, and writes the record. A write that reports a failure is checked against the listing:
   listed, the create answers `201` and the record is in force; not listed, `500`; not known
   (the listing cannot be read), `500` "not known" with the request open to retry, and the
-  record is put in force once the listing shows it. A record is announced (`Create`) as it is
+  record is put in force once the listing shows it. A write whose outcome can still change
+  (over the `http` backend, an update that timed out or failed in transit, which `sparq-server`
+  may still apply) is fenced first: the client writes a fence that the update, if it has not
+  been applied yet, finds and then does nothing. Only a listing read after the fence counts
+  as "not listed"; until the fence lands, the create answers `500` "not known" and keeps the
+  record's lock and quota place, and the record is put in force if it landed. A fence is
+  one triple, kept in the index's reserved `urn:pss:index#fences` graph (the update it fences
+  may still arrive at any time). A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
   takes the record's lock and the container's the same way (at most two seconds, then `503`),
   and takes the grant out of force while the removal runs, and keeps it out only once the removal
   is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
   revoked; `500` "still stored" when the record is still listed (the grant back in force); `500` "not known" when it
-  cannot be read again, with the grant left in force. A record holds its place in the request
+  cannot be read again, with the grant left in force. A removal whose outcome can still change
+  is fenced the same way: until its fence lands, the answer is `500` "not known yet", the grant
+  stays out of force, and it is removed or put back once the listing read after the fence
+  says which. A record holds its place in the request
   quota until the store confirms it is gone: while its create's outcome is not known and while
   its withdrawal runs. Nothing a start puts back in the background begins until every step of
   the start that can fail has succeeded. A stored grant or request that cannot be read stops

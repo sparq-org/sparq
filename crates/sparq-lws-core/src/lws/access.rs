@@ -2827,6 +2827,217 @@ mod tests {
         assert_eq!(r.status(), StatusCode::CREATED);
     }
 
+    /// Issue #6836: a create whose write failed unsettled (an HTTP update that timed out, still
+    /// running on the store) was answered `500` with its place freed when the listing did not
+    /// show it yet; the write then committed, leaving a record stored, not in force, and outside
+    /// its author's share until the next start. It keeps its place, unregistered, until its fence
+    /// lands; then it is put in force, as the write landed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_create_that_may_still_commit_keeps_its_place_until_it_is_settled() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(REQUESTS_PATH);
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = || {
+            test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[],
+                &access_doc("AccessRequest", "https://a/", None),
+            )
+        };
+        let stored = || async { state.store.list_children(&container).await.unwrap().len() };
+        let registered = || state.access.requests.read().unwrap().len();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("not known"), "{body}");
+        // Not listed, and not in force, but not taken as absent: its place is held.
+        assert_eq!(stored().await, 0);
+        assert_eq!(registered(), 0);
+        for _ in 1..MAX_REQUESTS_PER_AUTHOR {
+            let r = handle(&state, &post(), &asker).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        // The write lands while the store cannot be reached to fence it: still not in force,
+        // and still holding its place.
+        gate.add_permits(1);
+        for _ in 0..250 {
+            if stored().await == MAX_REQUESTS_PER_AUTHOR {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(stored().await, MAX_REQUESTS_PER_AUTHOR);
+        assert_eq!(registered(), MAX_REQUESTS_PER_AUTHOR - 1);
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        // Once the store answers, the fence settles it: stored, so in force.
+        store.fail_fence.store(false, Ordering::SeqCst);
+        eventually("the stored request is put in force", || {
+            registered() == MAX_REQUESTS_PER_AUTHOR
+        })
+        .await;
+        assert_eq!(
+            state.access.request_quota.in_flight.lock().unwrap().total,
+            0
+        );
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        // A start loads the same.
+        let state = restart(&store).await;
+        assert_eq!(
+            state.access.requests.read().unwrap().len(),
+            MAX_REQUESTS_PER_AUTHOR
+        );
+    }
+
+    /// Issue #6836: a create whose fence lands before its write does can no longer commit: it is
+    /// settled as not stored, its place is freed, and the write, when it arrives, changes nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_create_fenced_before_it_commits_is_settled_as_not_stored() {
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(REQUESTS_PATH);
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        let r = handle(&state, &post, &asker).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        eventually("the place is freed", || {
+            state.access.request_quota.in_flight.lock().unwrap().total == 0
+        })
+        .await;
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(state
+            .store
+            .list_children(&container)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(state.access.requests.read().unwrap().is_empty());
+        let state = restart(&store).await;
+        assert!(state.access.requests.read().unwrap().is_empty());
+    }
+
+    /// Issue #6836, the mirror: a revocation whose delete failed unsettled could be answered
+    /// "still stored", the grant put back in force, and the delete then commit, leaving a grant
+    /// in force that is not stored. It stays out of force until the delete is fenced, and is then
+    /// removed as the delete landed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_revocation_that_may_still_commit_is_settled_once_fenced() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let iri = granted(&state).await;
+        assert_eq!(state.access.grant_policies().len(), 1);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let delete = test_store::request(
+            Method::DELETE,
+            iri.strip_prefix(&state.cfg.base_url).unwrap(),
+            &[],
+            "",
+        );
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("not known"), "{body}");
+        // Still listed, but not taken as kept: out of force until settled.
+        assert_eq!(
+            state.store.list_children(&container).await.unwrap().len(),
+            1
+        );
+        assert!(state.access.grant_policies().is_empty());
+        gate.add_permits(1);
+        for _ in 0..250 {
+            if state
+                .store
+                .list_children(&container)
+                .await
+                .unwrap()
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(state
+            .store
+            .list_children(&container)
+            .await
+            .unwrap()
+            .is_empty());
+        store.fail_fence.store(false, Ordering::SeqCst);
+        eventually("the revoked grant is removed", || {
+            state.access.grants.read().unwrap().is_empty()
+        })
+        .await;
+        let state = restart(&store).await;
+        assert!(state.access.grants.read().unwrap().is_empty());
+    }
+
+    /// Issue #6836, the mirror: a revocation fenced before its delete lands is settled as not
+    /// removed: the grant is put back in force, and the delete, when it arrives, changes nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_revocation_fenced_before_it_commits_puts_the_grant_back() {
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let iri = granted(&state).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        let delete = test_store::request(
+            Method::DELETE,
+            iri.strip_prefix(&state.cfg.base_url).unwrap(),
+            &[],
+            "",
+        );
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        eventually("the grant is put back in force", || {
+            state.access.grant_policies().len() == 1
+        })
+        .await;
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(
+            state.store.list_children(&container).await.unwrap().len(),
+            1
+        );
+        assert_eq!(state.access.grant_policies().len(), 1);
+        // And it can be revoked.
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
     /// Review finding: a create waited for its container inside a task of its own, so requests
     /// queued behind a container held while a change was put back. A create waits a bounded time
     /// in the request and then answers 503.

@@ -20,9 +20,9 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use super::{resources, META_SUFFIX};
-use crate::error::ServerResult;
+use crate::error::{ServerError, ServerResult};
 use crate::store::sparq::{DeleteOutcome, ResourceMeta};
-use crate::store::{ReadPlan, Resource, Store, ValidatedChildIri};
+use crate::store::{Fence, ReadPlan, Resource, Store, ValidatedChildIri};
 
 /// How many counters the resources are spread over.
 const SLOTS: usize = 256;
@@ -119,6 +119,10 @@ impl Drop for Mutating<'_> {
 pub struct Tracked<S> {
     inner: S,
     gens: Generations,
+    /// The keys each write not settled yet ([`ServerError::Unsettled`]) changes, by its fence:
+    /// the write may still land after its call returned, so its fence ([`Store::fence`]), after
+    /// which it no longer can, is marked as a change to them.
+    unsettled: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
 impl<S: Store> Tracked<S> {
@@ -127,6 +131,17 @@ impl<S: Store> Tracked<S> {
         Self {
             inner,
             gens: Generations::new(root),
+            unsettled: Default::default(),
+        }
+    }
+
+    /// Note the keys a write changes when it failed not settled, for its fence.
+    fn note<T>(&self, outcome: &ServerResult<T>, keys: &[&str]) {
+        if let Err(ServerError::Unsettled { fence, .. }) = outcome {
+            self.unsettled.lock().expect("lock").insert(
+                fence.nonce().to_string(),
+                keys.iter().map(|k| k.to_string()).collect(),
+            );
         }
     }
 
@@ -177,9 +192,12 @@ impl<S: Store> Store for Tracked<S> {
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
         let _m = self.gens.mutating(&[container, child]);
-        self.inner
+        let created = self
+            .inner
             .create_in_container(container, child, body, content_type)
-            .await
+            .await;
+        self.note(&created, &[container, child]);
+        created
     }
 
     async fn restore(
@@ -207,7 +225,30 @@ impl<S: Store> Store for Tracked<S> {
     ) -> ServerResult<DeleteOutcome> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let _m = self.gens.mutating(&keys);
-        self.inner.delete_container_if_empty(iri, parent).await
+        let deleted = self.inner.delete_container_if_empty(iri, parent).await;
+        self.note(&deleted, &keys);
+        deleted
+    }
+
+    async fn fence(&self, fence: &Fence) -> ServerResult<()> {
+        let keys = self
+            .unsettled
+            .lock()
+            .expect("lock")
+            .remove(fence.nonce())
+            .unwrap_or_default();
+        let fenced = {
+            let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+            let _m = self.gens.mutating(&refs);
+            self.inner.fence(fence).await
+        };
+        if fenced.is_err() && !keys.is_empty() {
+            self.unsettled
+                .lock()
+                .expect("lock")
+                .insert(fence.nonce().to_string(), keys);
+        }
+        fenced
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

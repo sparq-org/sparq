@@ -1077,7 +1077,12 @@ type StoredMeta = crate::store::ResourceMeta;
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
 /// the backend, where the change may have landed before the failure was reported.
 pub(crate) fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
-    matches!(outcome, Ok(_) | Err(crate::error::ServerError::Storage(_)))
+    matches!(
+        outcome,
+        Ok(_)
+            | Err(crate::error::ServerError::Storage(_))
+            | Err(crate::error::ServerError::Unsettled { .. })
+    )
 }
 
 /// How to put back one change a [`Journal`] made.
@@ -1446,7 +1451,9 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         // Only a member that went, or may have, is recreated.
         if matches!(
             outcome,
-            Ok(crate::store::DeleteOutcome::Deleted) | Err(crate::error::ServerError::Storage(_))
+            Ok(crate::store::DeleteOutcome::Deleted)
+                | Err(crate::error::ServerError::Storage(_))
+                | Err(crate::error::ServerError::Unsettled { .. })
         ) {
             self.undo.push(Undo::Recreate {
                 iri: iri.to_string(),
@@ -2249,6 +2256,19 @@ pub(crate) mod test_store {
         pub fail_restore_of: Arc<std::sync::Mutex<Option<String>>>,
         /// How many times `restore` was called.
         pub restores: Arc<std::sync::atomic::AtomicUsize>,
+        /// The next `create_in_container` of a resource (not of an intent) answers at once that
+        /// it failed unsettled ([`ServerError::Unsettled`]), as an HTTP update that timed out:
+        /// the write is still sent, and commits once the gate opens, unless it has been fenced
+        /// ([`Store::fence`]) by then.
+        pub unsettle_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// As `unsettle_next_create`, for the next `delete_container_if_empty` of the IRI named.
+        pub unsettle_next_delete_of: GateOf,
+        /// `fence` fails, as while the remote store cannot be reached.
+        pub fail_fence: Arc<AtomicBool>,
+        /// Each unsettled write by its fence's nonce: whether it is fenced, locked while it
+        /// commits (a fence and the write it fences are each atomic).
+        unsettled:
+            Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<bool>>>>>,
         /// When set to `n`, the store step (write, create, delete) after the next `n` fails, once,
         /// before it changes anything; then it is cleared. See [`each_failure_changes_nothing`].
         pub fail_step: Arc<std::sync::Mutex<Option<usize>>>,
@@ -2295,6 +2315,10 @@ pub(crate) mod test_store {
                 two_step_deletes: Default::default(),
                 fail_restore_of: Default::default(),
                 restores: Default::default(),
+                unsettle_next_create: Default::default(),
+                unsettle_next_delete_of: Default::default(),
+                fail_fence: Default::default(),
+                unsettled: Default::default(),
                 fail_step: Default::default(),
                 fail_then: Default::default(),
                 dead_after: Default::default(),
@@ -2331,6 +2355,34 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("the injected failure".into()));
             }
             Ok(())
+        }
+    }
+
+    impl FlakyStore {
+        /// Answer that a write failed unsettled, and send `write` once `gate` opens, unless it
+        /// was fenced by then.
+        fn unsettle<F>(&self, gate: Arc<tokio::sync::Semaphore>, write: F) -> ServerError
+        where
+            F: std::future::Future + Send + 'static,
+        {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let nonce = format!("flaky-{}", NEXT.fetch_add(1, Ordering::SeqCst));
+            let fenced = Arc::new(tokio::sync::Mutex::new(false));
+            self.unsettled
+                .lock()
+                .unwrap()
+                .insert(nonce.clone(), fenced.clone());
+            tokio::spawn(async move {
+                gate.acquire().await.expect("gate").forget();
+                let fenced = fenced.lock().await;
+                if !*fenced {
+                    write.await;
+                }
+            });
+            ServerError::Unsettled {
+                detail: "the update timed out".into(),
+                fence: crate::store::Fence::new(nonce),
+            }
         }
     }
 
@@ -2451,6 +2503,22 @@ pub(crate) mod test_store {
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
             self.step()?;
+            if !container.starts_with(super::intents::PREFIX) {
+                let gate = self.unsettle_next_create.lock().unwrap().take();
+                if let Some(gate) = gate {
+                    let (inner, container, child, ct) = (
+                        self.inner.clone(),
+                        container.to_string(),
+                        child.to_string(),
+                        ct.to_string(),
+                    );
+                    return Err(self.unsettle(gate, async move {
+                        let _ = inner
+                            .create_in_container(&container, &child, body, &ct)
+                            .await;
+                    }));
+                }
+            }
             let gate = self.hold_next_create.lock().unwrap().take();
             if let Some(gate) = gate {
                 let (inner, container, child, ct) = (
@@ -2537,6 +2605,18 @@ pub(crate) mod test_store {
         ) -> ServerResult<DeleteOutcome> {
             // The same failures as `delete`: a resource is removed by either.
             self.step()?;
+            if let Some(gate) = held(&self.unsettle_next_delete_of, iri) {
+                let (inner, iri, parent) = (
+                    self.inner.clone(),
+                    iri.to_string(),
+                    parent.map(str::to_string),
+                );
+                return Err(self.unsettle(gate, async move {
+                    let _ = inner
+                        .delete_container_if_empty(&iri, parent.as_deref())
+                        .await;
+                }));
+            }
             if self.fail_delete.load(Ordering::SeqCst)
                 || self.fail_delete_of.lock().unwrap().as_deref() == Some(iri)
             {
@@ -2561,6 +2641,17 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("blob cleanup failed".into()));
             }
             Ok(outcome)
+        }
+        async fn fence(&self, fence: &crate::store::Fence) -> ServerResult<()> {
+            if self.fail_fence.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("the store cannot be reached".into()));
+            }
+            let write = self.unsettled.lock().unwrap().get(fence.nonce()).cloned();
+            let Some(write) = write else {
+                return Err(ServerError::Storage("no such write".into()));
+            };
+            *write.lock().await = true;
+            Ok(())
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             if self.fail_list.load(Ordering::SeqCst)
