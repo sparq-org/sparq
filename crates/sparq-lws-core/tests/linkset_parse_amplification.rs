@@ -65,7 +65,13 @@ fn parsing_allocates_within_the_measured_bound() {
     let nested = format!("{}{}", "[".repeat(120), "]".repeat(120));
     let nested_objects = format!("{}0{}", r#"{"":"#.repeat(60), "}".repeat(60));
     let op = r#"{"op":"add","path":"/linkset/0/x","value":[{"href":"h","":[0,"\u0000"]}]}"#;
+    let marker = format!(
+        r#"{{"$serde_json::private::RawValue":"{}{}"}}"#,
+        "[".repeat(100),
+        "]".repeat(100)
+    );
     let mut units: Vec<&str> = vec![
+        &marker,
         r#""""#,
         "[]",
         "{}",
@@ -131,7 +137,15 @@ fn a_linkset_put_reads_within_what_its_scan_charged() {
     let nested = format!("{}{}", "[".repeat(120), "]".repeat(120));
     let nested_objects = format!("{}\"\"{}", r#"{"":"#.repeat(60), "}".repeat(60));
     let target = r#"{"href":"https://e.example/a","title*":[{"value":"v","language":"en"}]}"#;
+    // A member name `serde_json`'s own `Value` parse treats as a raw value, parsing its string
+    // as JSON again: read here as a name and a string, as the scan charged them.
+    let marker = format!(
+        r#"{{"$serde_json::private::RawValue":"{}{}"}}"#,
+        "[".repeat(100),
+        "]".repeat(100)
+    );
     let mut units: Vec<&str> = vec![
+        &marker,
         r#""""#,
         "[]",
         "{}",

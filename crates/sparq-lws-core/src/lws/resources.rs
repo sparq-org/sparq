@@ -3699,47 +3699,53 @@ enum LinksetUnread {
 /// The body is first scanned without keeping anything, and every value charged what parsing it
 /// allocates, as [`value_cost`] charges a parsed one: [`VALUE_COST`] each, [`OBJECT_COST`] and
 /// [`MEMBER_COST`] a member more for objects, and its string bytes. Past `budget` the scan stops
-/// there; only a body within it is parsed. A number refuses it, since no linkset holds one.
+/// there; only a body within it is parsed, by the same visitor, now keeping what it reads, so
+/// the parse builds exactly what the scan charged (no member name means anything to it, as one
+/// may to a [`Value`]'s own parse). A number refuses it, since no linkset holds one.
 fn read_linkset(body: &[u8], budget: usize) -> Result<Value, LinksetUnread> {
-    scan_linkset(body, budget)?;
-    serde_json::from_slice(body).map_err(|_| LinksetUnread::NotJson)
+    walk_linkset(body, budget, false)?;
+    walk_linkset(body, budget, true).map(|(document, _)| document)
 }
 
-/// The scan [`read_linkset`] makes: what parsing `body` allocates, or why it is not read.
-fn scan_linkset(body: &[u8], budget: usize) -> Result<usize, LinksetUnread> {
+/// One pass of [`read_linkset`] over `body`: the document, when `keep`, and what it charged.
+fn walk_linkset(body: &[u8], budget: usize, keep: bool) -> Result<(Value, usize), LinksetUnread> {
     use serde::de::DeserializeSeed;
     let cost = std::cell::Cell::new(0usize);
     let why = std::cell::Cell::new(None);
-    let scan = LinksetScan {
+    let walk = LinksetWalk {
         cost: &cost,
         budget,
         why: &why,
+        keep,
     };
     let mut de = serde_json::Deserializer::from_slice(body);
-    match scan.deserialize(&mut de).and_then(|()| de.end()) {
-        Ok(()) => Ok(cost.get()),
+    match walk.deserialize(&mut de).and_then(|v| de.end().map(|()| v)) {
+        Ok(v) => Ok((v, cost.get())),
         Err(_) => Err(why.get().unwrap_or(LinksetUnread::NotJson)),
     }
 }
 
 /// Read `body` as a linkset PUT reads it ([`read_linkset`]), within [`LINKSET_PUT_SCAN_BUDGET`],
-/// keeping nothing: what the scan charged, when it is read. Public only so the bound the scan
-/// charges is measured (`tests/linkset_parse_amplification.rs`).
+/// dropping the document: what the scan charged, when it is read. Public only so the bound the
+/// scan charges is measured (`tests/linkset_parse_amplification.rs`).
 #[doc(hidden)]
 pub fn reads_as_linkset(body: &[u8]) -> Option<usize> {
-    let cost = scan_linkset(body, LINKSET_PUT_SCAN_BUDGET).ok()?;
-    serde_json::from_slice::<Value>(body).ok().map(|_| cost)
+    let (_, cost) = walk_linkset(body, LINKSET_PUT_SCAN_BUDGET, false).ok()?;
+    walk_linkset(body, LINKSET_PUT_SCAN_BUDGET, true)
+        .ok()
+        .map(|_| cost)
 }
 
-/// One value of the scan [`read_linkset`] makes.
+/// One value of a pass [`read_linkset`] makes, kept when `keep` (else [`Value::Null`]).
 #[derive(Clone, Copy)]
-struct LinksetScan<'a> {
+struct LinksetWalk<'a> {
     cost: &'a std::cell::Cell<usize>,
     budget: usize,
     why: &'a std::cell::Cell<Option<LinksetUnread>>,
+    keep: bool,
 }
 
-impl LinksetScan<'_> {
+impl LinksetWalk<'_> {
     fn charge<E: serde::de::Error>(&self, n: usize) -> Result<(), E> {
         let cost = self.cost.get().saturating_add(n);
         self.cost.set(cost);
@@ -3749,73 +3755,98 @@ impl LinksetScan<'_> {
         Ok(())
     }
 
-    fn refuse<E: serde::de::Error>(&self, why: LinksetUnread) -> Result<(), E> {
+    fn refuse<T, E: serde::de::Error>(&self, why: LinksetUnread) -> Result<T, E> {
         self.why.set(Some(why));
         Err(E::custom("not read"))
     }
+
+    fn kept(&self, v: impl FnOnce() -> Value) -> Value {
+        if self.keep {
+            v()
+        } else {
+            Value::Null
+        }
+    }
 }
 
-impl<'de> serde::de::DeserializeSeed<'de> for LinksetScan<'_> {
-    type Value = ();
-    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+impl<'de> serde::de::DeserializeSeed<'de> for LinksetWalk<'_> {
+    type Value = Value;
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
         d.deserialize_any(self)
     }
 }
 
-impl<'de> serde::de::Visitor<'de> for LinksetScan<'_> {
-    type Value = ();
+impl<'de> serde::de::Visitor<'de> for LinksetWalk<'_> {
+    type Value = Value;
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a JSON value")
     }
-    fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<(), E> {
-        self.charge(VALUE_COST)
-    }
-    fn visit_unit<E: serde::de::Error>(self) -> Result<(), E> {
-        self.charge(VALUE_COST)
-    }
-    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<(), E> {
-        self.charge(VALUE_COST.saturating_add(v.len()))
-    }
-    fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<(), E> {
-        self.refuse(LinksetUnread::Number)
-    }
-    fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<(), E> {
-        self.refuse(LinksetUnread::Number)
-    }
-    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<(), E> {
-        self.refuse(LinksetUnread::Number)
-    }
-    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
+    fn visit_bool<E: serde::de::Error>(self, b: bool) -> Result<Value, E> {
         self.charge(VALUE_COST)?;
-        while seq.next_element_seed(self)?.is_some() {}
-        Ok(())
+        Ok(self.kept(|| Value::Bool(b)))
     }
-    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
-        self.charge(VALUE_COST.saturating_add(OBJECT_COST))?;
-        while map.next_key_seed(LinksetKey(self))?.is_some() {
-            map.next_value_seed(self)?;
+    fn visit_unit<E: serde::de::Error>(self) -> Result<Value, E> {
+        self.charge(VALUE_COST)?;
+        Ok(Value::Null)
+    }
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Value, E> {
+        self.charge(VALUE_COST.saturating_add(v.len()))?;
+        Ok(self.kept(|| Value::String(v.to_owned())))
+    }
+    fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Value, E> {
+        self.refuse(LinksetUnread::Number)
+    }
+    fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Value, E> {
+        self.refuse(LinksetUnread::Number)
+    }
+    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Value, E> {
+        self.refuse(LinksetUnread::Number)
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        self.charge(VALUE_COST)?;
+        let mut items = Vec::new();
+        while let Some(v) = seq.next_element_seed(self)? {
+            if self.keep {
+                items.push(v);
+            }
         }
-        Ok(())
+        Ok(self.kept(|| Value::Array(items)))
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        self.charge(VALUE_COST.saturating_add(OBJECT_COST))?;
+        let mut members = serde_json::Map::new();
+        while let Some(k) = map.next_key_seed(LinksetKey(self))? {
+            let v = map.next_value_seed(self)?;
+            if self.keep {
+                members.insert(k, v);
+            }
+        }
+        Ok(self.kept(|| Value::Object(members)))
     }
 }
 
-/// A member name in the scan [`read_linkset`] makes.
-struct LinksetKey<'a>(LinksetScan<'a>);
+/// A member name in a pass [`read_linkset`] makes, kept when the pass keeps (else empty).
+struct LinksetKey<'a>(LinksetWalk<'a>);
 
 impl<'de> serde::de::DeserializeSeed<'de> for LinksetKey<'_> {
-    type Value = ();
-    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+    type Value = String;
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<String, D::Error> {
         d.deserialize_str(self)
     }
 }
 
 impl<'de> serde::de::Visitor<'de> for LinksetKey<'_> {
-    type Value = ();
+    type Value = String;
     fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("a member name")
     }
-    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<(), E> {
-        self.0.charge(MEMBER_COST.saturating_add(v.len()))
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<String, E> {
+        self.0.charge(MEMBER_COST.saturating_add(v.len()))?;
+        Ok(if self.0.keep {
+            v.to_owned()
+        } else {
+            String::new()
+        })
     }
 }
 
@@ -4393,6 +4424,14 @@ async fn linkset<S: Store + 'static>(
             // body is held to what the metadata may hold, and read only once a scan that keeps
             // nothing has charged it what parsing it allocates ([`read_linkset`]), so a body of
             // any shape costs at most [`LINKSET_COST_BUDGET`].
+            // A partial PUT (RFC 9110 section 14.5) is refused here as for any resource: taken as
+            // a whole linkset, it would replace the linkset with the part.
+            if req.headers.contains_key(header::CONTENT_RANGE) {
+                return problem(
+                    StatusCode::BAD_REQUEST,
+                    Some("a partial PUT (Content-Range) is not supported"),
+                );
+            }
             if req.body.len() > LINKSET_PUT_BODY {
                 return problem(
                     StatusCode::PAYLOAD_TOO_LARGE,
@@ -5406,6 +5445,53 @@ mod tests {
         // Nothing was written.
         let r = call(&st, "GET", &meta, &[], "").await;
         assert!(json_of(r).await["linkset"][0].get("next").is_none());
+    }
+
+    /// Review finding (#6875): a PUT to a linkset with `Content-Range` replaced the whole linkset
+    /// with the part (RFC 9110 section 14.5). It is refused, and the linkset and its tag are kept.
+    #[tokio::test]
+    async fn a_partial_linkset_put_is_refused() {
+        let st = state().await;
+        let uri = post(&st, "c.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let r = call(&st, "GET", &meta, &[], "").await;
+        let tag = hdr(&r, "etag");
+        let before = json_of(r).await;
+        let doc = json!({"linkset": [{"anchor": uri, "next": [{"href": "n"}]}]}).to_string();
+        let range = format!("bytes 0-{}/{}", doc.len() - 1, doc.len() * 2);
+        let r = call(
+            &st,
+            "PUT",
+            &meta,
+            &[("content-type", LINKSET_JSON), ("content-range", &range)],
+            &doc,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        let r = call(&st, "GET", &meta, &[], "").await;
+        assert_eq!(hdr(&r, "etag"), tag);
+        assert_eq!(json_of(r).await, before);
+    }
+
+    /// Review finding (#6875): a body was scanned and then parsed into a [`Value`], whose own
+    /// parse gives some member names a meaning the scan did not (`serde_json`'s raw-value marker,
+    /// whose string it parses as JSON again), so the parse could build more than the scan charged.
+    /// One visitor makes both passes, so every member name is a name and its string a string.
+    #[test]
+    fn a_linkset_is_read_as_the_scan_charged_it() {
+        let marker = r#"{"$serde_json::private::RawValue":"[[[[]]]]"}"#;
+        let read = read_linkset(marker.as_bytes(), LINKSET_PUT_SCAN_BUDGET).unwrap();
+        assert_eq!(read, json!({"$serde_json::private::RawValue": "[[[[]]]]"}));
+        let doc = json!({"linkset": [{"anchor": "a", "next": [{"href": "n", "x": [true, null]}]}]});
+        let text = doc.to_string();
+        assert_eq!(
+            read_linkset(text.as_bytes(), LINKSET_PUT_SCAN_BUDGET).unwrap(),
+            doc
+        );
+        assert_eq!(
+            read_linkset(br#"{"a":"","a":"b"}"#, LINKSET_PUT_SCAN_BUDGET).unwrap(),
+            json!({"a": "b"})
+        );
     }
 
     /// Review findings: a Turtle representation stating thousands of types was stored, but its
