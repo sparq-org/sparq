@@ -107,17 +107,29 @@ pub enum SparqError {
 /// write has either committed or never will, so a read tells which and that no longer changes.
 /// Opaque: only the client that failed the write can use it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fence(String);
+pub struct Fence {
+    nonce: String,
+    touches: Vec<String>,
+}
 
 impl Fence {
-    /// The fence of the write tagged `nonce`.
-    pub fn new(nonce: impl Into<String>) -> Self {
-        Self(nonce.into())
+    /// The fence of the write tagged `nonce`, which changes the resources `touches` (a create's
+    /// container and child; a delete's resource and parent).
+    pub fn new(nonce: impl Into<String>, touches: Vec<String>) -> Self {
+        Self {
+            nonce: nonce.into(),
+            touches,
+        }
     }
 
     /// The nonce of the write it fences.
     pub fn nonce(&self) -> &str {
-        &self.0
+        &self.nonce
+    }
+
+    /// The resources the write it fences changes, if it lands.
+    pub fn touches(&self) -> &[String] {
+        &self.touches
     }
 }
 

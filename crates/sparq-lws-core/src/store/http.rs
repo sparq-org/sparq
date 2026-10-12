@@ -82,19 +82,21 @@ const CT_SPARQL_UPDATE: &str = "application/sparql-update";
 const ACCEPT_RESULTS_JSON: &str = "application/sparql-results+json";
 const ACCEPT_NTRIPLES: &str = "application/n-triples";
 
-/// A process-unique nonce for the race-resistant create marker: a monotonic counter combined with
-/// the boot-time nanos, so two `create_child`s (even same-IRI) get distinct markers and the success
-/// confirm is operation-scoped. Not security-sensitive (it gates no auth) — only uniqueness matters.
-fn next_nonce() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("op-{nanos:x}-{n:x}")
+/// A unique nonce for one write: the race-resistant create and delete markers, and the fence of a
+/// write that may still commit ([`sparql::update_fence`]). Fences share one graph across every
+/// resource and every client process, and stay, so a nonce must not repeat across processes or
+/// their restarts: it is 128 bits from the OS RNG. When that is unavailable, the write fails
+/// closed (as `CompositeStore::mint_blob_key` does) rather than use a nonce that could collide
+/// and let one write's fence suppress another's.
+fn next_nonce() -> Result<String, SparqError> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|e| SparqError::Backend(format!("fatal: OS RNG unavailable for a nonce: {e}")))?;
+    Ok(bytes.iter().fold(String::from("op-"), |mut acc, b| {
+        use std::fmt::Write as _;
+        let _ = write!(acc, "{b:02x}");
+        acc
+    }))
 }
 
 /// A typed SPARQ-over-HTTP error, carrying whether the failure is worth retrying.
@@ -313,7 +315,12 @@ impl HttpSparqClient {
     /// now been fenced ([`sparql::update_fence`]), so its outcome is final and a read tells it.
     /// When the fence fails too, the outcome is not known: [`SparqError::Unsettled`], with what
     /// settles it later.
-    async fn update_fenced(&self, u: &str, nonce: &str) -> Result<bool, SparqError> {
+    async fn update_fenced(
+        &self,
+        u: &str,
+        nonce: &str,
+        touches: &[&str],
+    ) -> Result<bool, SparqError> {
         match self.update_raw(u).await {
             Ok(()) => Ok(false),
             Err(e) if e.may_commit_later() => {
@@ -321,7 +328,10 @@ impl HttpSparqClient {
                     Ok(()) => Ok(true),
                     Err(fence) => Err(SparqError::Unsettled {
                         detail: format!("{e}; fencing it failed: {fence}"),
-                        fence: super::sparq::Fence::new(nonce),
+                        fence: super::sparq::Fence::new(
+                            nonce,
+                            touches.iter().map(|t| t.to_string()).collect(),
+                        ),
                     }),
                 }
             }
@@ -532,7 +542,7 @@ impl SparqClient for HttpSparqClient {
         // A per-operation nonce so the success confirm is RACE-RESISTANT — no concurrent op writes or
         // removes THIS delete marker, so a containment mutation between the update and the confirm
         // cannot flip the result (the same pattern as the create-marker).
-        let nonce = next_nonce();
+        let nonce = next_nonce()?;
 
         // ONE SPARQL 1.1 `DELETE { } INSERT { } WHERE { }` modify: its WHERE (container-EXISTS AND
         // `ldp:contains`-empty) is evaluated ONCE pre-modification, then the multi-graph DELETE (the
@@ -546,7 +556,8 @@ impl SparqClient for HttpSparqClient {
         // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
         // the ASKs below read is final.
         let u = sparql::update_delete_container_if_empty_fenced(iri, parent, &nonce)?;
-        let fenced = self.update_fenced(&u, &nonce).await?;
+        let touches: Vec<&str> = std::iter::once(iri).chain(parent).collect();
+        let fenced = self.update_fenced(&u, &nonce, &touches).await?;
 
         // Disambiguate the outcome with bounded follow-up ASKs (the protocol can't return rows from an
         // UPDATE; documented). FIRST: did the guard match (⇒ the delete ran)? ASK for OUR marker — a
@@ -588,7 +599,7 @@ impl SparqClient for HttpSparqClient {
         // confirm is RACE-RESISTANT: no concurrent remove_child / sibling create ever touches this
         // marker, so a containment-edge mutation between the update and the confirm cannot flip the
         // result (the round-4 finding — confirming on the mutable containment edge was racy).
-        let nonce = next_nonce();
+        let nonce = next_nonce()?;
 
         // ONE atomic update: DELETE any stale child record + marker, INSERT the child record + the
         // containment edge + THIS operation's marker, guarded by the container-record EXISTS in the
@@ -606,7 +617,7 @@ impl SparqClient for HttpSparqClient {
             modified.as_deref(),
             &nonce,
         )?;
-        let fenced = self.update_fenced(&u, &nonce).await?;
+        let fenced = self.update_fenced(&u, &nonce, &[container, child]).await?;
 
         // CONFIRM the guard matched by ASKing for OUR marker (not the shared containment edge):
         // the marker is present iff the guarded INSERT ran (container existed) AND no later op removed

@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use super::{resources, META_SUFFIX};
-use crate::error::{ServerError, ServerResult};
+use crate::error::ServerResult;
 use crate::store::sparq::{DeleteOutcome, ResourceMeta};
 use crate::store::{Fence, ReadPlan, Resource, Store, ValidatedChildIri};
 
@@ -119,10 +119,6 @@ impl Drop for Mutating<'_> {
 pub struct Tracked<S> {
     inner: S,
     gens: Generations,
-    /// The keys each write not settled yet ([`ServerError::Unsettled`]) changes, by its fence:
-    /// the write may still land after its call returned, so its fence ([`Store::fence`]), after
-    /// which it no longer can, is marked as a change to them.
-    unsettled: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
 impl<S: Store> Tracked<S> {
@@ -131,17 +127,6 @@ impl<S: Store> Tracked<S> {
         Self {
             inner,
             gens: Generations::new(root),
-            unsettled: Default::default(),
-        }
-    }
-
-    /// Note the keys a write changes when it failed not settled, for its fence.
-    fn note<T>(&self, outcome: &ServerResult<T>, keys: &[&str]) {
-        if let Err(ServerError::Unsettled { fence, .. }) = outcome {
-            self.unsettled.lock().expect("lock").insert(
-                fence.nonce().to_string(),
-                keys.iter().map(|k| k.to_string()).collect(),
-            );
         }
     }
 
@@ -192,12 +177,9 @@ impl<S: Store> Store for Tracked<S> {
         content_type: &str,
     ) -> ServerResult<ResourceMeta> {
         let _m = self.gens.mutating(&[container, child]);
-        let created = self
-            .inner
+        self.inner
             .create_in_container(container, child, body, content_type)
-            .await;
-        self.note(&created, &[container, child]);
-        created
+            .await
     }
 
     async fn restore(
@@ -225,30 +207,16 @@ impl<S: Store> Store for Tracked<S> {
     ) -> ServerResult<DeleteOutcome> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let _m = self.gens.mutating(&keys);
-        let deleted = self.inner.delete_container_if_empty(iri, parent).await;
-        self.note(&deleted, &keys);
-        deleted
+        self.inner.delete_container_if_empty(iri, parent).await
     }
 
+    /// A write not settled ([`crate::error::ServerError::Unsettled`]) may still land after its
+    /// call returned, until its fence has succeeded: the fence is marked as a change to what that
+    /// write changes (the fence carries it, so nothing is kept per unsettled write).
     async fn fence(&self, fence: &Fence) -> ServerResult<()> {
-        let keys = self
-            .unsettled
-            .lock()
-            .expect("lock")
-            .remove(fence.nonce())
-            .unwrap_or_default();
-        let fenced = {
-            let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-            let _m = self.gens.mutating(&refs);
-            self.inner.fence(fence).await
-        };
-        if fenced.is_err() && !keys.is_empty() {
-            self.unsettled
-                .lock()
-                .expect("lock")
-                .insert(fence.nonce().to_string(), keys);
-        }
-        fenced
+        let keys: Vec<&str> = fence.touches().iter().map(String::as_str).collect();
+        let _m = self.gens.mutating(&keys);
+        self.inner.fence(fence).await
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
@@ -276,6 +244,41 @@ impl<S: Store> Store for Tracked<S> {
 mod tests {
     use super::super::test_store::state;
     use super::*;
+
+    /// Codex review of #6836: an unsettled write was remembered until its fence, so one settled
+    /// by a read instead leaked its entry. Nothing is kept per write now: the fence carries what
+    /// the write changes, and fencing it moves those snapshots and leaves nothing in flight.
+    #[tokio::test]
+    async fn a_fence_moves_the_snapshot_of_what_its_write_changes() {
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        let c = st.cfg.absolute("/c/");
+        st.store
+            .create_in_container(&root, &c, Bytes::new(), "application/lws+json")
+            .await
+            .unwrap();
+        let d = format!("{c}d");
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        let fence = match st
+            .store
+            .create_in_container(&c, &d, Bytes::from_static(b"d"), "text/plain")
+            .await
+        {
+            Err(crate::error::ServerError::Unsettled { fence, .. }) => fence,
+            other => panic!("expected an unsettled write, got {other:?}"),
+        };
+        assert_eq!(fence.touches(), [c.clone(), d.clone()]);
+        let before = [st.generation(&c), st.generation(&d)];
+        st.store.fence(&fence).await.unwrap();
+        assert!(st.generation(&c) >= before[0] + 2);
+        assert!(st.generation(&d) >= before[1] + 2);
+        assert!(!st.in_flight(&c) && !st.in_flight(&d));
+        // Fenced first: the write, when it arrives, changes nothing.
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!st.store.exists(&d).await.unwrap());
+    }
 
     /// Every mutating [`Store`] method, and a journal's rollback, moves the snapshot of the
     /// container listing what it changes, and of what it changes, and leaves nothing in flight.

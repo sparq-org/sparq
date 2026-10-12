@@ -998,9 +998,9 @@ pub async fn handle<S: Store + 'static>(
                 }
             };
             let settle = {
-                let (state, id) = (state.clone(), id.to_string());
+                let id = id.to_string();
                 let author = record.author.clone();
-                move |gone: bool, held| {
+                move |state: &LwsState<S>, gone: bool, held| {
                     {
                         let mut map = state.access.map(grants).write().expect("lock");
                         if gone {
@@ -1169,8 +1169,7 @@ async fn create<S: Store + 'static>(
     // The record is put in force, counted and announced in one step, once it is stored: a client
     // that goes away after the store committed cannot keep it from being announced.
     let register = {
-        let state = state.clone();
-        move || {
+        move |state: &LwsState<S>| {
             state
                 .access
                 .map(grants)
@@ -1180,7 +1179,7 @@ async fn create<S: Store + 'static>(
             state.access.bump(grants);
             // Counted as registered from here on.
             drop(slot);
-            announce(&state, grants, &document, own_inbox, activity);
+            announce(state, grants, &document, own_inbox, activity);
         }
     };
     let created = super::records::create_record(
@@ -3036,6 +3035,82 @@ mod tests {
         // And it can be revoked.
         let r = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// Codex review of #6836: settlement tasks had no bound, so creates (grants have no quota)
+    /// against a store that keeps failing piled up tasks, records and locks. A change holds a
+    /// place among those being settled from its request until it is settled; past the bound, a
+    /// new one is refused with `503`, and once the store answers again, the places come back.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn record_changes_being_settled_are_bounded() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let post = || {
+            test_store::request(
+                Method::POST,
+                GRANTS_PATH,
+                &[],
+                &access_doc("AccessGrant", "https://a/", None),
+            )
+        };
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_creates.lock().unwrap() = Some(gate.clone());
+        store.fail_fence.store(true, Ordering::SeqCst);
+        for _ in 0..super::super::records::MAX_SETTLING {
+            let r = handle(&state, &post(), &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        assert_eq!(
+            state.settlements.pending(),
+            super::super::records::MAX_SETTLING
+        );
+        let r = handle(&state, &post(), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // The store answers again: every one is fenced (before its write, still held), so none
+        // is stored, and the places come back.
+        *store.unsettle_creates.lock().unwrap() = None;
+        store.fail_fence.store(false, Ordering::SeqCst);
+        eventually("every change is settled", || {
+            state.settlements.pending() == 0
+        })
+        .await;
+        gate.add_permits(super::super::records::MAX_SETTLING);
+        let r = handle(&state, &post(), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert_eq!(state.access.grant_policies().len(), 1);
+    }
+
+    /// Codex review of #6836: a settlement task held the state, so a server dropped on a
+    /// runtime that goes on kept it, and the task, running. The tasks hold the state only
+    /// weakly: dropping it ends them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dropping_the_state_ends_its_settlements() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let post = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        *store.unsettle_next_create.lock().unwrap() =
+            Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let r = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        eventually("the settlement is retrying", || {
+            store.fences_tried.load(Ordering::SeqCst) >= 2
+        })
+        .await;
+        let weak = state.downgrade();
+        drop(state);
+        eventually("the state is dropped", || weak.upgrade().is_none()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let tried = store.fences_tried.load(Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), tried);
     }
 
     /// Review finding: a create waited for its container inside a task of its own, so requests

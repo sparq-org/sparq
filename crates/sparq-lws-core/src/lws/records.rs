@@ -95,6 +95,9 @@ pub(crate) async fn within_wait<T>(
 ///   worker may still be running) is fenced first ([`Store::fence`]), so a listing that does not
 ///   show it is final: its quota place is released only once it can no longer commit. A start
 ///   loads whatever the listing holds.
+/// - The change holds a place among those being made or settled ([`Settlements`]) from the
+///   request until it is settled: `503` when there is none. The task that settles one is the
+///   state's, and ends when the state is dropped.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
@@ -108,20 +111,23 @@ pub(crate) async fn create_record<S, F>(
 ) -> Result<(), Response>
 where
     S: Store + 'static,
-    F: FnOnce() + Send + 'static,
+    F: FnOnce(&LwsState<S>) + Send + 'static,
 {
     // Announced as it is put in force, wherever that happens (in the request's task, or in the
     // task that settles a write whose outcome was not known), so no record in force goes
     // unannounced, and none is announced that is not.
     let register = {
-        let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
-        move || {
-            register();
-            announce_record(&state, "Create", &iri, &container, author);
+        let (container, iri) = (container.to_string(), iri.to_string());
+        move |state: &LwsState<S>| {
+            register(state);
+            announce_record(state, "Create", &iri, &container, author);
         }
     };
     use crate::error::ServerError;
     let failed = |e: ServerError| problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+    let Some(place) = state.settlements.reserve() else {
+        return Err(settlements_full());
+    };
     let shared = match held {
         Some(_) => None,
         None => Some(within_wait(state.locks.read(container)).await?),
@@ -149,7 +155,7 @@ where
             .create_in_container(&container, &iri, body, LWS_JSON)
             .await;
         let Err(e) = written else {
-            register();
+            register(&state);
             return Ok(());
         };
         // A record listed is stored for good (its lock keeps a revocation of it out). One not
@@ -162,30 +168,48 @@ where
         };
         match still_listed(&state.store, &iri, &container).await {
             Ok(true) => {
-                register();
+                register(&state);
                 Ok(())
             }
             Ok(false) if unsettled.is_none() => Err(e),
             Ok(false) | Err(_) => {
-                // Settled holding the record's own lock (a revocation of it waits) and the
-                // quota place (`register` holds it); the container's lock is taken only to
-                // register it. An unsettled write is fenced first, so the listing it then
-                // reads is final.
-                let state = state.clone();
-                tokio::spawn(async move {
-                    let _own = own;
+                // Settled by a task the state owns, holding the record's own lock (a
+                // revocation of it waits), the quota place (`register` holds it) and this
+                // change's place among those being settled; the container's lock is taken
+                // only to register it. An unsettled write is fenced first, so the listing it
+                // then reads is final.
+                let weak = state.downgrade();
+                state.settlements.spawn(async move {
+                    let _held = (own, place);
                     if let Some(fence) = unsettled {
-                        until_done(|| state.store.fence(&fence)).await;
+                        let fenced = settling(&weak, |state| {
+                            let fence = fence.clone();
+                            async move { state.store.fence(&fence).await }
+                        });
+                        if fenced.await.is_none() {
+                            return;
+                        }
                     }
-                    if until_done(|| still_listed(&state.store, &iri, &container)).await {
-                        // Registered under the container's lock, shared (taken after the
-                        // record's, as a revocation takes them), so no conditional create sees
-                        // the listing change between its check and its own registration. This
-                        // task holds no admission, so it may wait for it.
-                        let _listing =
-                            until_done(|| async { state.locks.read(&container).await.ok_or(()) })
-                                .await;
-                        register();
+                    let listed = settling(&weak, |state| {
+                        let (iri, container) = (iri.clone(), container.clone());
+                        async move { still_listed(&state.store, &iri, &container).await }
+                    });
+                    if listed.await != Some(true) {
+                        return;
+                    }
+                    // Registered under the container's lock, shared (taken after the record's,
+                    // as a revocation takes them), so no conditional create sees the listing
+                    // change between its check and its own registration. This task holds no
+                    // admission, so it may wait for it.
+                    let listing = settling(&weak, |state| {
+                        let container = container.clone();
+                        async move { state.locks.read(&container).await.ok_or(()) }
+                    });
+                    let Some(_listing) = listing.await else {
+                        return;
+                    };
+                    if let Some(state) = weak.upgrade() {
+                        register(&state);
                     }
                 });
                 Err(ServerError::Storage(
@@ -256,6 +280,9 @@ pub(crate) enum Removed {
 ///   its own lock held, until the delete is fenced ([`Store::fence`]) and the listing read
 ///   again; `settle` is then told the outcome under the container's lock, shared, and a record
 ///   gone is announced. The answer is `500`, saying this is not known yet.
+/// - As for a create, the removal holds a place among those being made or settled
+///   ([`Settlements`]) until it is settled (`503` when there is none), and the task that settles
+///   it is the state's.
 /// - Only a record confirmed gone is announced (`Delete`, [`announce_record`]), once its locks
 ///   are released. Otherwise the answer is `500`, saying whether it is still stored or that this
 ///   is not known (it is left as it was, and the request may be retried).
@@ -273,8 +300,11 @@ where
     S: Store + 'static,
     H: Send + 'static,
     A: FnOnce() -> Option<H> + Send + 'static,
-    Z: FnOnce(bool, H) -> Option<String> + Send + 'static,
+    Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
+    let Some(place) = state.settlements.reserve() else {
+        return Err(settlements_full());
+    };
     let own = within_wait(state.locks.lock(iri)).await?;
     let listing = within_wait(state.locks.read(container)).await?;
     let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
@@ -292,23 +322,42 @@ where
                 match still_listed(&state.store, &iri, &container).await {
                     Ok(false) => Some(true),
                     Ok(true) | Err(_) => {
-                        // Settled in the background, holding the record's own lock and with
-                        // the record out of force until then; the container's lock is taken
-                        // again only to settle it.
+                        // Settled by a task the state owns, holding the record's own lock and
+                        // this change's place among those being settled, with the record out
+                        // of force until then; the container's lock is taken again only to
+                        // settle it.
                         drop(listing);
-                        let (state, iri, container) =
-                            (state.clone(), iri.clone(), container.clone());
-                        tokio::spawn(async move {
-                            until_done(|| state.store.fence(&fence)).await;
-                            let gone =
-                                !until_done(|| still_listed(&state.store, &iri, &container)).await;
-                            let listing = until_done(|| async {
-                                state.locks.read(&container).await.ok_or(())
-                            })
-                            .await;
-                            let author = settle(gone, held);
+                        let weak = state.downgrade();
+                        let (iri, container) = (iri.clone(), container.clone());
+                        state.settlements.spawn(async move {
+                            let _place = place;
+                            let fenced = settling(&weak, |state| {
+                                let fence = fence.clone();
+                                async move { state.store.fence(&fence).await }
+                            });
+                            if fenced.await.is_none() {
+                                return;
+                            }
+                            let listed = settling(&weak, |state| {
+                                let (iri, container) = (iri.clone(), container.clone());
+                                async move { still_listed(&state.store, &iri, &container).await }
+                            });
+                            let Some(listed) = listed.await else {
+                                return;
+                            };
+                            let listing = settling(&weak, |state| {
+                                let container = container.clone();
+                                async move { state.locks.read(&container).await.ok_or(()) }
+                            });
+                            let Some(listing) = listing.await else {
+                                return;
+                            };
+                            let Some(state) = weak.upgrade() else {
+                                return;
+                            };
+                            let author = settle(&state, !listed, held);
                             drop((own, listing));
-                            if gone {
+                            if !listed {
                                 announce_record(&state, "Delete", &iri, &container, author);
                             }
                         });
@@ -324,8 +373,8 @@ where
                 .ok()
                 .map(|listed| !listed),
         };
-        let author = settle(gone == Some(true), held);
-        drop((own, listing));
+        let author = settle(&state, gone == Some(true), held);
+        drop((own, listing, place));
         match gone {
             Some(true) => {
                 announce_record(&state, "Delete", &iri, &container, author);
@@ -347,6 +396,84 @@ where
             StatusCode::INTERNAL_SERVER_ERROR,
             Some(&e.to_string()),
         )),
+    }
+}
+
+/// How many record changes (creates and removals of grants, requests and subscriptions) may be
+/// in progress or waiting to be settled at once. Past it, a new one is refused with `503`: a
+/// store that keeps failing cannot pile up settlement tasks, and the records and locks they hold.
+pub(crate) const MAX_SETTLING: usize = 256;
+
+/// The record changes in progress or being settled, owned by the state: each change holds a
+/// place ([`Settlements::reserve`]) from its request until it is settled, and the tasks that
+/// settle a change whose outcome was not known ([`Settlements::spawn`]) are the state's. They
+/// hold it only weakly ([`settling`]), between store calls, so dropping every other handle drops
+/// the state, and with it these tasks (a [`tokio::task::JoinSet`] aborts its tasks when dropped).
+/// A change whose settlement is cut short that way is left as the store has it, which the next
+/// start loads.
+pub(crate) struct Settlements {
+    places: Arc<tokio::sync::Semaphore>,
+    tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
+}
+
+impl Default for Settlements {
+    fn default() -> Self {
+        Self::with_capacity(MAX_SETTLING)
+    }
+}
+
+impl Settlements {
+    /// At most `places` changes at once.
+    pub(crate) fn with_capacity(places: usize) -> Self {
+        Self {
+            places: Arc::new(tokio::sync::Semaphore::new(places)),
+            tasks: Default::default(),
+        }
+    }
+
+    /// A place for one record change, held until it is settled: `None` when there is none
+    /// (answered with [`settlements_full`]).
+    pub(crate) fn reserve(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.places.clone().try_acquire_owned().ok()
+    }
+
+    /// Run `settle` as a task the state owns.
+    pub(crate) fn spawn(&self, settle: impl std::future::Future<Output = ()> + Send + 'static) {
+        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        while tasks.try_join_next().is_some() {}
+        tasks.spawn(settle);
+    }
+
+    /// How many settlement tasks have not finished.
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> usize {
+        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        while tasks.try_join_next().is_some() {}
+        tasks.len()
+    }
+}
+
+/// The answer to a record change when [`Settlements`] has no place for it.
+fn settlements_full() -> Response {
+    resources::retry_later("too many changes to records are still being settled")
+}
+
+/// Run `step` against the state until it succeeds, waiting between attempts (growing to a
+/// minute, as [`until_done`]), holding the state only while a step runs: `None` once the state
+/// is gone.
+async fn settling<S, T, E, F, Fut>(state: &WeakState<S>, mut step: F) -> Option<T>
+where
+    S: Store,
+    F: FnMut(LwsState<S>) -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+{
+    let mut wait = std::time::Duration::from_millis(100);
+    loop {
+        if let Ok(done) = step(state.upgrade()?).await {
+            return Some(done);
+        }
+        tokio::time::sleep(wait).await;
+        wait = (wait * 2).min(std::time::Duration::from_secs(60));
     }
 }
 

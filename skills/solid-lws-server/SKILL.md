@@ -233,7 +233,9 @@ Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
-because a remote write reported as failed may still commit later and nothing fences it yet.
+because a remote write reported as failed may still commit later. Only the creates and
+removals of service records (grants, requests, subscriptions) are fenced against that (see
+below); resource writes, and putting a failed change back, are not.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), the server at most 512 of each (507),
 and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
@@ -380,8 +382,12 @@ What the server exposes, all discoverable from the storage description
   been applied yet, finds and then does nothing. Only a listing read after the fence counts
   as "not listed"; until the fence lands, the create answers `500` "not known" and keeps the
   record's lock and quota place, and the record is put in force if it landed. A fence is
-  one triple, kept in the index's reserved `urn:pss:index#fences` graph (the update it fences
-  may still arrive at any time). A record is announced (`Create`) as it is
+  one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
+  fences may still arrive at any time): the graph grows by one triple per write that failed this
+  way. At most 256 record changes are in progress or being settled at once; past that, a new
+  create or removal answers `503` with `Retry-After`. The tasks that settle them belong to the
+  server's state and end when it is dropped, leaving the record as the store has it for the next
+  start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
   takes the record's lock and the container's the same way (at most two seconds, then `503`),
   and takes the grant out of force while the removal runs, and keeps it out only once the removal
