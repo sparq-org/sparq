@@ -50,7 +50,7 @@ JavaScript/WASM.
 ### v0.1.6 release install paths
 
 These are the install commands for the planned `v0.1.6` release. Use them only after
-the tagged release and corresponding registry publications have succeeded. `v0.1.6`
+the tagged release and corresponding registry publications have succeeded. `v0.1.5`
 published the three npm packages but not the PyPI wheels, and the crates.io bootstrap is
 still pending. Until then, build from source.
 

@@ -24,9 +24,18 @@ and every registry and release artifact.
   OpenID Connect suite and `sparq-lws-authn-ssi` the did:key and controlled identifier
   suites. A deployment chooses which suites the token endpoint offers. Experimental, not
   published to crates.io. (#6819, #6820, #6821)
+- **CI:** hosted previews of the site, specs and papers for pull requests that change them.
+  (#6818)
 - **Research prototypes** (proof-methods/, not part of the shipped runtime): a Noir opening
   written with field-constraint rotations and additions (#6815), and tamper checks for both
   Noir openings plus a gate-count script (#6816).
+
+### Changed
+
+- **LWS token endpoint:** a SAML 2.0 subject token is refused unless the assertion's
+  `NameID` is an http(s) URL. Every subject token's expiry is checked again just before an
+  access token is issued, still with the clock-skew allowance, so a token that expires while
+  its documents are fetched is refused. (#6819, #6821)
 
 ### Fixed
 
