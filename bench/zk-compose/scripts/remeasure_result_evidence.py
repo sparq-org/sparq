@@ -16,7 +16,9 @@ artifact, runs `bb gates -s ultra_honk`, and for the v1 members writes the noir-
 verification key. `apply` refuses to write unless the two runs agree (the artifact hash
 embeds the checkout path and is not compared), every v1 ACIR, ABI and key equals its
 713025dc baseline record, every size equals gate_counts_latest.json, and exactly the expected
-members and sources change. The result is always labelled non-canonical.
+members and sources change. It validates all four files before replacing any of them. The
+result is always labelled non-canonical; the job manifest and run outputs are not part of
+the repository, so the two-run agreement it records is checked when `apply` runs, not later.
 """
 
 from __future__ import annotations
@@ -146,7 +148,11 @@ def apply(args: argparse.Namespace) -> None:
               "`bb gates -s ultra_honk` and, for the v1 members, regenerated the noir-recursive verification key "
               "(bench/zk-compose/scripts/remeasure_result_evidence.py). The two runs agreed on every circuit "
               "size, ACIR, ABI, key and gate log hash; every v1 ACIR, ABI and key equalled its baseline record. "
-              "The compiled artifact embeds its checkout path, so artifact_sha256 is kept as recorded.")
+              "The compiled artifact embeds its checkout path, so artifact_sha256 is kept as recorded. The "
+              "two-run agreement was checked outside the repository and cannot be reproduced from it alone: "
+              "job_sha256 and independent_handoff_sha256 identify the job manifest and the second run's output, "
+              "which are retained outside the repository, and that output includes path-dependent artifact "
+              "hashes, so a rerun will not reproduce its digest.")
     limitations = ("Non-canonical: measured on a shared work box, not a dedicated machine; future CI replays are "
                    "still required. Static compile, circuit size and key identity only; no timing, soundness or "
                    "external-audit claim. source_files, not source_commit, binds the Noir bytes.")
@@ -155,11 +161,21 @@ def apply(args: argparse.Namespace) -> None:
         recorded = data.get("tool_versions") or {"nargo": data["nargo_version"], "bb": data["bb_version"]}
         if recorded["nargo"] != tools["nargo"] or recorded["bb"] != tools["bb"]:
             raise SystemExit(f"{name}: toolchain differs from the recorded one")
+    # Every check has passed: stage all four files, then replace them, so a failure never
+    # leaves a partly rewritten evidence set.
+    staged = []
+    for name, data in evidence.items():
         data["source_files"] = new
         data["measured_source"] = provenance
         data["measurement_method"] = method
         data["limitations"] = limitations
-        (ROOT / "bench/zk-compose" / f"{name}.json").write_text(json.dumps(data, indent=2) + "\n")
+        target = ROOT / "bench/zk-compose" / f"{name}.json"
+        handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{name}.", suffix=".json")
+        with os.fdopen(handle, "w") as output:
+            output.write(json.dumps(data, indent=2) + "\n")
+        staged.append((temporary, target))
+    for temporary, target in staged:
+        os.replace(temporary, target)
     print("changed members:", ", ".join(sorted(changed)))
 
 
