@@ -1126,117 +1126,116 @@ impl MaterializedN3Graph {
         // The graph holds the caller's blank labels in its own namespace (GH #6775); the
         // proof shows them as the caller wrote them.
         let inner = self.inward(fact)?;
-        self.why_in(inner.as_ref(), opts, BlankView::Caller, &self.cuts)
+        self.why_in(inner.as_ref(), opts)
     }
 
     /// [`why_with`](Self::why_with) with `fact` and the proof in the rules document's own
     /// blank labels, the labels the batch engine ([`reason_n3`](crate::reason_n3)) gives
     /// the closure of the same document: a written `_:x` is `x`, a `[]` is the parser's
-    /// `_b<n>`, with no [`N3_GRAPH_BLANK`](crate::N3_GRAPH_BLANK) prefix. For a graph
-    /// built from a combined rules + facts document with no caller blank nodes, this
-    /// explains exactly the triples `reason_n3` prints (the WASM `whyN3` boundary). A
-    /// caller's blank node, if any, is shown in the graph's internal caller namespace.
+    /// `_b<n>`, with no [`N3_GRAPH_BLANK`](crate::N3_GRAPH_BLANK) prefix. A caller's blank
+    /// node, if any, is shown in the graph's internal caller namespace.
     ///
     /// The proof is a BATCH evaluation of the rules over the base, on a cut record and a
-    /// runtime-document table of its own, exactly as `reason_n3` evaluates: `fact` is
-    /// explained when that batch closure holds it, whatever the graph's own closure says.
+    /// runtime-document table of its own, and `fact` is explained when that batch closure
+    /// holds it, whatever the graph's own closure says. For a standalone document (no
+    /// graph, no caller) use [`why_n3_document`].
     pub fn why_document_with(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
         let batch = crate::n3::bounded::Truncation::top_level();
-        self.why_in(fact, opts, BlankView::Document, &batch)
+        prove_n3(&self.rules_src, &self.base, fact, opts, &|f| f.clone(), &batch, None)
     }
 
-    /// The proof of `fact`, given in the graph's own labels, shown through `view`.
-    /// `cuts` is the run record of the re-derivation.
-    fn why_in(
-        &self,
-        fact: &[N3Term; 3],
-        opts: ExplainOpts,
-        view: BlankView,
-        cuts: &crate::n3::bounded::Truncation,
-    ) -> Option<ProofTree> {
+    /// The proof of `fact`, given in the graph's own labels, shown in the caller's.
+    fn why_in(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
         // A graph explanation is of the graph's closure, evaluated as the graph evaluates
-        // (with its lifetime runtime-document table); a document explanation is of the
-        // batch closure, with a table of its own as `reason_n3` has.
-        let runtime = match view {
-            BlankView::Caller => {
-                if !self.holds(fact) {
-                    return None;
-                }
-                Some(&self.runtime_docs)
-            }
-            BlankView::Document => None,
-        };
-        let mut b = ProofBuilder::new(opts);
-        if self.base.contains(fact) {
-            let shown = view.show(self, fact);
-            let root = b.push_keyed(
-                crate::n3::serialize::statement_display_lossy(&shown),
-                crate::n3::serialize::statement_keys(&shown),
-                "asserted",
-                vec![],
-            )?;
-            return Some(b.finish(root));
-        }
-        // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
-        // therefore the chosen witness) is stable across calls — as terms, not re-parsed
-        // text (see `rematerialize`).
-        let mut keyed: Vec<([String; 3], &[N3Term; 3])> =
-            self.base.iter().map(|f| (crate::n3::serialize::statement_keys(f), f)).collect();
-        keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let (facts, steps) = crate::n3::reason_n3_terms_proof(
-            &self.rules_src,
-            keyed.into_iter().map(|(_, f)| f.clone()),
-            cuts,
-            runtime,
-        )
-        .ok()?;
-        if !facts.contains(fact) {
+        // (with its lifetime runtime-document table).
+        if !self.holds(fact) {
             return None;
         }
-        // One step per derived fact (first derivation wins).
-        let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
-        for (conclusion, rule, premises) in &steps {
-            step_map.entry(conclusion).or_insert((*rule, premises.as_slice()));
-        }
-        let mut p = N3Prover {
-            g: self,
-            view,
-            base: &self.base,
-            step_map,
-            b,
-            memo: FxHashMap::default(),
-            stack: FxHashSet::default(),
-        };
-        let root = p.prove(fact, 0)?;
-        Some(p.b.finish(root))
+        let show = |f: &[N3Term; 3]| self.outward(f);
+        let runtime = Some(&self.runtime_docs);
+        prove_n3(&self.rules_src, &self.base, fact, opts, &show, &self.cuts, runtime)
     }
 }
 
-/// Which blank labels an N3 proof is shown in.
-#[derive(Clone, Copy)]
-enum BlankView {
-    /// The caller's: [`MaterializedN3Graph::outward`].
-    Caller,
-    /// The rules document's: the graph's own labels, unchanged.
-    Document,
+/// One derivation of `fact` under the standalone N3 document `src` (rules and facts, no
+/// caller, no [`MaterializedN3Graph`]): a BATCH evaluation exactly as
+/// [`reason_n3`](crate::reason_n3) evaluates `src`, with `fact` and the proof in the
+/// document's own blank labels (as `reason_n3` prints them). `Ok(None)` when the batch
+/// closure does not hold `fact` (or holds it with no matchable derivation, e.g. a freshly
+/// minted existential blank), or the evaluation fails; `Err` when `src` does not parse.
+/// This is the WASM `whyN3` boundary.
+pub fn why_n3_document(
+    src: &str,
+    fact: &[N3Term; 3],
+    opts: ExplainOpts,
+) -> Result<Option<ProofTree>, String> {
+    let cuts = crate::n3::bounded::Truncation::top_level();
+    let parsed = crate::n3::bounded::parse_n3(src, "", &cuts)?;
+    let base: FxHashSet<[N3Term; 3]> = parsed.facts.into_iter().collect();
+    let batch = crate::n3::bounded::Truncation::top_level();
+    Ok(prove_n3(src, &base, fact, opts, &|f| f.clone(), &batch, None))
 }
 
-impl BlankView {
-    fn show<'a>(
-        self,
-        g: &MaterializedN3Graph,
-        f: &'a [N3Term; 3],
-    ) -> std::borrow::Cow<'a, [N3Term; 3]> {
-        match self {
-            BlankView::Caller => std::borrow::Cow::Owned(g.outward(f)),
-            BlankView::Document => std::borrow::Cow::Borrowed(f),
-        }
+/// The proof of `fact` (in the evaluation's own labels) under the rules `rules_src` over
+/// the asserted `base`, each fact shown through `show`. A fact in `base` is asserted;
+/// otherwise the base is re-derived as a batch run recording into `cuts`, drawing on the
+/// graph's lifetime runtime-document table `runtime` if a graph's run is being explained
+/// (a table of its own otherwise, as `reason_n3` has).
+fn prove_n3(
+    rules_src: &str,
+    base: &FxHashSet<[N3Term; 3]>,
+    fact: &[N3Term; 3],
+    opts: ExplainOpts,
+    show: &dyn Fn(&[N3Term; 3]) -> [N3Term; 3],
+    cuts: &crate::n3::bounded::Truncation,
+    runtime: Option<&crate::n3::RuntimeDocs>,
+) -> Option<ProofTree> {
+    let mut b = ProofBuilder::new(opts);
+    if base.contains(fact) {
+        let shown = show(fact);
+        let root = b.push_keyed(
+            crate::n3::serialize::statement_display_lossy(&shown),
+            crate::n3::serialize::statement_keys(&shown),
+            "asserted",
+            vec![],
+        )?;
+        return Some(b.finish(root));
     }
+    // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
+    // therefore the chosen witness) is stable across calls — as terms, not re-parsed
+    // text (see `rematerialize`).
+    let mut keyed: Vec<([String; 3], &[N3Term; 3])> =
+        base.iter().map(|f| (crate::n3::serialize::statement_keys(f), f)).collect();
+    keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let (facts, steps) = crate::n3::reason_n3_terms_proof(
+        rules_src,
+        keyed.into_iter().map(|(_, f)| f.clone()),
+        cuts,
+        runtime,
+    )
+    .ok()?;
+    if !facts.contains(fact) {
+        return None;
+    }
+    // One step per derived fact (first derivation wins).
+    let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
+    for (conclusion, rule, premises) in &steps {
+        step_map.entry(conclusion).or_insert((*rule, premises.as_slice()));
+    }
+    let mut p = N3Prover {
+        show,
+        base,
+        step_map,
+        b,
+        memo: FxHashMap::default(),
+        stack: FxHashSet::default(),
+    };
+    let root = p.prove(fact, 0)?;
+    Some(p.b.finish(root))
 }
 
 struct N3Prover<'a> {
-    g: &'a MaterializedN3Graph,
-    view: BlankView,
+    show: &'a dyn Fn(&[N3Term; 3]) -> [N3Term; 3],
     base: &'a FxHashSet<[N3Term; 3]>,
     step_map: FxHashMap<&'a [N3Term; 3], (usize, &'a [[N3Term; 3]])>,
     b: ProofBuilder,
@@ -1261,7 +1260,7 @@ impl N3Prover<'_> {
         // Display strings for reading, and a lossless key per fact for identity: two
         // different facts can render alike, and `sparq-prov` addresses facts by `key`
         // (GH #6701 review round 6).
-        let shown = self.view.show(self.g, f);
+        let shown = (self.show)(f);
         let rendered = crate::n3::serialize::statement_display_lossy(&shown);
         let key = crate::n3::serialize::statement_keys(&shown);
         if self.base.contains(f) {

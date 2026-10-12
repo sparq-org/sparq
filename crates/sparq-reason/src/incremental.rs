@@ -75,6 +75,8 @@ use sparq_core::dict::{Dict, Id};
 mod incremental_explain;
 #[cfg(feature = "explain")]
 use incremental_explain::{OwlExplain, RdfsExplain};
+#[cfg(feature = "explain")]
+pub use incremental_explain::why_n3_document;
 
 use crate::rdfs::meta::MetaClosure;
 

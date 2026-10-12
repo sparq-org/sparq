@@ -15,7 +15,7 @@ use sparq_core::dict::{Dict, Id, NO_ID};
 use sparq_core::Graph;
 use sparq_reason::n3::parser as n3_parser;
 use sparq_reason::{
-    ExplainOpts, MaterializedGraph, MaterializedN3Graph, MaterializedOwlGraph, ProofTree,
+    why_n3_document, ExplainOpts, MaterializedGraph, MaterializedOwlGraph, ProofTree,
 };
 use wasm_bindgen::prelude::*;
 
@@ -73,14 +73,10 @@ fn why_n3_impl(n3: &str, s: &str, p: &str, o: &str) -> Result<String, String> {
         // COULD be in the closure, so there is nothing to explain.
         return Ok("null".to_string());
     };
-    // `new` joins the document's facts to the base and fully materializes the closure; `why`
-    // then re-runs the batch engine with proof recording (cost paid only when asked — see
-    // `MaterializedN3Graph::why`'s own docs). Every blank here is the document's, named as
-    // `reasonN3` prints it, so the query and the proof use the document's own labels.
-    let g = MaterializedN3Graph::new(n3, &[])?;
-    Ok(proof_to_json(
-        g.why_document_with(fact, ExplainOpts::default()),
-    ))
+    // A standalone document is evaluated exactly as `reasonN3` evaluates it: a batch run with
+    // proof recording (cost paid only when asked), no `MaterializedN3Graph` and no caller
+    // namespace. Every blank here is the document's, named as `reasonN3` prints it.
+    Ok(proof_to_json(why_n3_document(n3, fact, ExplainOpts::default())?))
 }
 
 #[wasm_bindgen]
@@ -381,28 +377,37 @@ mod tests {
         );
     }
 
-    /// PR #6779 review round 5: a standalone document is not a graph with caller blanks, so
-    /// `whyN3` refuses no runtime parse that `reasonN3New` accepts. A text spelling
-    /// `_:__bs0_x` (the caller prefix an internal graph would pick) is parsed by both, and
-    /// every triple `reasonN3New` derives is explained.
+    /// PR #6779 review rounds 5 and 6: `whyN3` evaluates a standalone document as
+    /// `reasonN3New` does, with no graph and no caller namespace, so it refuses no runtime
+    /// parse that `reasonN3New` accepts: a text spelling `_:__bs0_x` (the caller prefix an
+    /// internal graph would pick), alone and followed by a store-scoped `log:notIncludes`
+    /// rule. Both succeed, and every triple `reasonN3New` derives is explained.
     #[test]
     fn why_n3_explains_what_reason_n3_new_derives_from_a_bs_text() {
-        let doc = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
-                   { \"_:__bs0_x <urn:p> <urn:o> .\" log:parsedAsN3 ?f } \
-                   => { <urn:s> <urn:parsed> true } .";
-        let derived = crate::n3_new_ntriples(doc).expect("reason");
-        let lines: Vec<&str> = derived.lines().filter(|l| !l.trim().is_empty()).collect();
-        assert_eq!(lines.len(), 1, "{derived}");
-        let terms: Vec<&str> = lines[0].trim_end_matches(" .").split(' ').collect();
-        let [s, p, o] = terms[..] else {
-            panic!("{derived}")
-        };
-        assert_eq!((s, p), ("<urn:s>", "<urn:parsed>"), "{derived}");
-        let json = why_n3_impl(doc, s, p, o).expect("explain");
-        assert_ne!(
-            json, "null",
-            "reasonN3New derived {derived} but whyN3 cannot explain it"
+        let parse = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     { \"_:__bs0_x <urn:p> <urn:o> .\" log:parsedAsN3 ?f } \
+                     => { <urn:s> <urn:parsed> true } .\n";
+        let negate = format!(
+            "{parse}{{ <urn:s> <urn:parsed> true . \
+             ?scope log:notIncludes {{ <urn:s> <urn:blocked> true }} }} \
+             => {{ <urn:s> <urn:clear> true }} ."
         );
-        assert!(json.contains("n3-rule-0"), "{json}");
+        for (doc, n) in [(parse.to_string(), 1), (negate, 2)] {
+            let derived = crate::n3_new_ntriples(&doc).expect("reasonN3New succeeds");
+            let lines: Vec<&str> = derived.lines().filter(|l| !l.trim().is_empty()).collect();
+            assert_eq!(lines.len(), n, "{derived}");
+            for line in lines {
+                let terms: Vec<&str> = line.trim_end_matches(" .").split(' ').collect();
+                let [s, p, o] = terms[..] else {
+                    panic!("{derived}")
+                };
+                let json = why_n3_impl(&doc, s, p, o).expect("whyN3 succeeds");
+                assert_ne!(
+                    json, "null",
+                    "reasonN3New derived {line} but whyN3 cannot explain it"
+                );
+                assert!(json.contains("n3-rule-"), "{json}");
+            }
+        }
     }
 }
