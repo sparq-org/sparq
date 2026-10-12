@@ -17,6 +17,8 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use super::model::Term;
+
 /// Backward (`<=`) proof search depth, counted in rule applications. It bounds runaway
 /// recursion (e.g. a rule whose premise re-poses its own goal); a search it stops is a cut.
 const BW_DEPTH: usize = 64;
@@ -243,23 +245,28 @@ const CLOSURE_ROUNDS: usize = 1_000_000;
 /// Default [`ClosureLimits::max_facts`]: facts one forward closure may hold, asserted and
 /// derived together.
 const CLOSURE_FACTS: usize = 50_000_000;
+/// Default [`ClosureLimits::max_term_bytes`]: 16 MiB, far past any literal or list a
+/// rule set builds on purpose, and small enough that a term which doubles each round
+/// (GH #6771) is refused while the closure's copies of it still fit in memory.
+const CLOSURE_TERM_BYTES: usize = 16 << 20;
 
 /// Why a forward closure was stopped by its [`ClosureLimits`].
 const CLOSURE_CUT: &str = "forward closure limit exceeded";
 
-/// The iteration allowance of one N3 forward closure: how many rounds it may run and how
-/// many facts it may hold before it is refused.
+/// The allowance of one N3 forward closure: how many rounds it may run, how many facts it
+/// may hold, and how large a term a functional builtin may derive, before it is refused.
 ///
 /// A rule set that never reaches a fixpoint (each round derives a new, syntactically
-/// distinct fact) would otherwise run forever. When either allowance is spent the closure
-/// fails with an `Err` naming the limit (`"forward closure limit exceeded"`) and records
-/// it as a cut, so no entry point returns the truncated closure as a result. Each forward
-/// closure gets the allowance afresh: a nested `log:conclusion` closure of a run gets the
-/// same limits as the run, not a share of them.
+/// distinct fact) would otherwise run forever, and one whose derived terms grow (a string
+/// that doubles each round, GH #6771) would exhaust memory within a few dozen rounds and
+/// facts. When any allowance is spent the closure fails with an `Err` naming the limit
+/// (`"forward closure limit exceeded"`) and records it as a cut, so no entry point returns
+/// the truncated closure as a result. Each forward closure gets the allowance afresh: a
+/// nested `log:conclusion` closure of a run gets the same limits as the run, not a share
+/// of them.
 ///
-/// This is an ITERATION bound, not a memory bound: a few rounds over terms that grow (a
-/// string that doubles each round) can still exhaust memory well inside both allowances
-/// (GH #6771).
+/// `max_term_bytes` bounds each term a builtin derives, not the closure's total memory:
+/// many distinct terms just under it are bounded only by `max_facts`.
 ///
 /// Pass one to [`reason_n3_with_limits`](crate::n3::reason_n3_with_limits) or
 /// [`reason_n3_terms_with_limits`](crate::n3::reason_n3_terms_with_limits); every other
@@ -271,16 +278,91 @@ pub struct ClosureLimits {
     /// Facts one forward closure may hold, asserted and derived together. Default
     /// 50,000,000.
     pub max_facts: usize,
+    /// Approximate bytes of one term a functional builtin (`string:concatenation`,
+    /// `string:format`, `string:replace`, `list:append`, `log:conjunction`, …) may derive:
+    /// its strings plus a fixed cost per node, counted through nested lists, formulas and
+    /// quoted triples. The builtin is checked before it builds the result, from the sizes
+    /// of its inputs. Default 16 MiB.
+    pub max_term_bytes: usize,
 }
 
 impl Default for ClosureLimits {
-    /// 1,000,000 rounds and 50,000,000 facts.
+    /// 1,000,000 rounds, 50,000,000 facts and 16 MiB per derived term.
     fn default() -> Self {
         ClosureLimits {
             max_rounds: CLOSURE_ROUNDS,
             max_facts: CLOSURE_FACTS,
+            max_term_bytes: CLOSURE_TERM_BYTES,
         }
     }
+}
+
+/// The fixed cost [`term_bytes`] charges each node of a term.
+const TERM_NODE_BYTES: usize = std::mem::size_of::<Term>();
+
+/// The approximate size of `t` that [`ClosureLimits::max_term_bytes`] bounds: the bytes
+/// of its strings plus [`TERM_NODE_BYTES`] per node, through nested lists, formulas and
+/// quoted triples (walked with an explicit stack, so a deep term cannot overflow it).
+pub(crate) fn term_bytes(t: &Term) -> usize {
+    let flat = |t: &Term| match t {
+        Term::Iri(s) | Term::Blank(s) | Term::Var(s) => Some(s.len()),
+        Term::Lit(v, dt, lang) => Some(v.len() + dt.len() + lang.as_ref().map_or(0, String::len)),
+        Term::Formula(_) | Term::List(_) | Term::Triple(_) => None,
+    };
+    if let Some(n) = flat(t) {
+        return n.saturating_add(TERM_NODE_BYTES);
+    }
+    let mut total = 0usize;
+    let mut stack = vec![t];
+    while let Some(t) = stack.pop() {
+        total = total.saturating_add(TERM_NODE_BYTES);
+        match t {
+            Term::Formula(ts) => stack.extend(ts.iter().flatten()),
+            Term::List(ms) => stack.extend(ms),
+            Term::Triple(b) => stack.extend(b.iter()),
+            leaf => total = total.saturating_add(flat(leaf).unwrap_or(0)),
+        }
+    }
+    total
+}
+
+/// The [`term_bytes`] of an `xsd:string` literal whose lexical form has `lex` bytes.
+pub(crate) fn string_term_bytes(lex: usize) -> usize {
+    const XSD_STRING_LEN: usize = "http://www.w3.org/2001/XMLSchema#string".len();
+    lex.saturating_add(XSD_STRING_LEN + TERM_NODE_BYTES)
+}
+
+/// The ONE checkpoint a functional builtin passes before it builds its result (GH #6771).
+/// `bound` is an upper bound on the result's [`term_bytes`], computed from the sizes of
+/// its inputs without allocating the result; `exact` is the result's exact size, computed
+/// (again without building it) only when `bound` is over the limit, for a builtin whose
+/// bound is loose (`string:replace`).
+///
+/// Past the run's [`ClosureLimits::max_term_bytes`] the result is refused: a cut, and
+/// `Some(error)` the caller must fail the closure with, so no entry point returns the
+/// closure without the term as a result.
+pub(crate) fn derived_term(
+    run: &Truncation,
+    builtin: &dyn std::fmt::Debug,
+    bound: usize,
+    exact: impl FnOnce() -> usize,
+) -> Bounded<Option<String>> {
+    let limit = run.limits.max_term_bytes;
+    if bound <= limit {
+        return Bounded::complete(None);
+    }
+    let size = exact();
+    if size <= limit {
+        return Bounded::complete(None);
+    }
+    Bounded::cut(
+        Some(format!(
+            "n3: {CLOSURE_CUT}: the builtin {builtin:?} would derive a term of about {size} \
+             bytes, over max_term_bytes ({limit}): the rules build ever larger terms (raise \
+             ClosureLimits::max_term_bytes to allow more)"
+        )),
+        CLOSURE_CUT,
+    )
 }
 
 /// The round and fact allowance of one forward closure (`run_closure`).
@@ -300,6 +382,7 @@ impl ClosureRounds {
             |(max_rounds, max_facts)| ClosureLimits {
                 max_rounds,
                 max_facts,
+                ..run.limits
             },
         );
         #[cfg(not(test))]
@@ -656,7 +739,8 @@ mod tests {
             ClosureLimits::default(),
             ClosureLimits {
                 max_rounds: 1_000_000,
-                max_facts: 50_000_000
+                max_facts: 50_000_000,
+                max_term_bytes: 16 << 20,
             }
         );
         let sink = Cell::new(false);
@@ -669,6 +753,7 @@ mod tests {
         let small = ClosureLimits {
             max_rounds: 2,
             max_facts: 10,
+            ..ClosureLimits::default()
         };
         let sink = Truncation::top_level_with(small);
         let mut allowance = ClosureRounds::forward(&sink);
@@ -809,6 +894,70 @@ mod tests {
             n3::reason_n3_terms_with_limits(&doc, None, None, NegationCycles::Reject, tight)
                 .map(|c| c.facts.len()),
         );
+    }
+
+    /// GH #6771: each round doubles a literal, so the closure holds a few dozen facts
+    /// after a few dozen rounds when the term outgrows memory.
+    const STRING_DOUBLING: &str = "@prefix : <http://ex/>.\n\
+         @prefix string: <http://www.w3.org/2000/10/swap/string#>.\n\
+         :a :p \"x\".\n\
+         { :a :p ?s. (?s ?s) string:concatenation ?t } => { :a :p ?t }.\n";
+
+    #[test]
+    fn a_growing_term_is_refused_with_a_cut() {
+        // The default limits: refused, with the cut recorded, long before memory runs out.
+        let (r, cut) = close_under(STRING_DOUBLING, ClosureLimits::default());
+        assert_closure_limit("string doubling", r);
+        assert_eq!(cut, Some(CLOSURE_CUT));
+        // The largest term derived is the last doubling at or under the limit: under a
+        // limit of 4096 bytes that is a 2048-character string (its successor would take
+        // 4096 bytes of text plus the literal's datatype and node).
+        let small = ClosureLimits {
+            max_term_bytes: 4096,
+            ..ClosureLimits::default()
+        };
+        let run = Truncation::top_level_with(small);
+        let e = crate::n3::reason_n3_terms_in(
+            STRING_DOUBLING,
+            None,
+            None,
+            crate::n3::NegationCycles::Reject,
+            &run,
+        )
+        .map(|c| c.facts.len())
+        .expect_err("refused");
+        assert!(e.contains("max_term_bytes (4096)"), "{e}");
+        assert_eq!(run.get(), Some(CLOSURE_CUT));
+    }
+
+    #[test]
+    fn the_term_checkpoint_refuses_only_past_the_limit() {
+        let limits = ClosureLimits {
+            max_term_bytes: 100,
+            ..ClosureLimits::default()
+        };
+        let run = Truncation::top_level_with(limits);
+        let never = || -> usize { panic!("the exact size is computed only past the bound") };
+        assert_eq!(cut_of(derived_term(&run, &"f", 100, never)), (None, false));
+        // A loose bound over the limit, an exact size under it: allowed.
+        assert_eq!(cut_of(derived_term(&run, &"f", 101, || 100)), (None, false));
+        let (e, cut) = cut_of(derived_term(&run, &"f", 101, || 101));
+        assert!(cut && e.is_some_and(|e| e.contains(CLOSURE_CUT)));
+
+        let s = Term::Lit("abc".into(), "http://www.w3.org/2001/XMLSchema#string".into(), None);
+        assert_eq!(term_bytes(&s), string_term_bytes(3));
+        let list = Term::List(vec![s.clone(), Term::List(vec![s.clone()])]);
+        assert_eq!(term_bytes(&list), 2 * TERM_NODE_BYTES + 2 * term_bytes(&s));
+        let formula = Term::Formula(vec![[s.clone(), s.clone(), s.clone()]]);
+        assert_eq!(term_bytes(&formula), TERM_NODE_BYTES + 3 * term_bytes(&s));
+        // A deep term is walked without recursion.
+        let mut deep = Term::List(vec![]);
+        for _ in 0..200_000 {
+            deep = Term::List(vec![deep]);
+        }
+        assert_eq!(term_bytes(&deep), 200_001 * TERM_NODE_BYTES);
+        // Dropping it would recurse; leak it instead.
+        std::mem::forget(deep);
     }
 
     #[test]

@@ -1311,7 +1311,7 @@ fn run_closure(
     let mut delta: FxHashSet<[Term; 3]> = facts.all.clone(); // round 0: every fact is "new"
     // The closure's round and fact allowance (the run's `ClosureLimits`): a rule set that
     // never saturates (GH #6757) stops with a cut and an error instead of running forever.
-    // An iteration bound, not a memory bound (GH #6771).
+    // Its term-size allowance is checked where builtins derive terms (GH #6771).
     let mut allowance = bounded::ClosureRounds::forward(truncated);
     for (stratum, &close_naively) in close_naively.iter().enumerate() {
         if stratum > 0 {
@@ -3664,6 +3664,93 @@ fn functional_builtin(p: &Term) -> Option<Func> {
     }
 }
 
+/// Text a numeric argument may print as in `string:concatenation` / `string:format`, past
+/// its lexical form's length: an `f64` in plain decimal notation takes at most about 330
+/// bytes (`1e308`, or the smallest subnormal), an `i128` 40.
+const NUMERAL_TEXT_BYTES: usize = 400;
+
+/// An upper bound on the [`bounded::term_bytes`] of the term builtin `f` derives from
+/// `args`, from the input sizes alone. 0 for a builtin whose result is never larger than
+/// one of its inputs (a part of one, a number, a fixed-size value) or whose size is
+/// bounded elsewhere (`log:conclusion` runs its own closure under the same limits;
+/// `log:content` / `log:semantics` read a document the caller's resolver supplies).
+fn output_bytes_bound(f: Func, args: &[Term]) -> usize {
+    // The text a string builtin copies from a member: a literal's lexical form (and, if
+    // it may be printed as a number, room for that), or an IRI's text.
+    let text = |t: &Term| match t {
+        Term::Lit(v, dt, _)
+            if dt
+                .strip_prefix("http://www.w3.org/2001/XMLSchema#")
+                .is_some_and(|local| local != "string") =>
+        {
+            v.len().saturating_add(NUMERAL_TEXT_BYTES)
+        }
+        Term::Lit(v, _, _) | Term::Iri(v) => v.len(),
+        _ => 0,
+    };
+    let sum = |it: &mut dyn Iterator<Item = usize>| it.fold(0usize, usize::saturating_add);
+    match f {
+        Func::Concat | Func::Format => {
+            bounded::string_term_bytes(sum(&mut args.iter().map(text)))
+        }
+        Func::Replace => match &args[..] {
+            // Every match (at most one per position, plus one) is replaced by the
+            // replacement's text, and every `$` reference in it expands to text inside a
+            // match; matches do not overlap, so each reference adds at most the input.
+            [Term::Lit(s, _, _), _, Term::Lit(r, _, _)] => {
+                let refs = r.bytes().filter(|&c| c == b'$').count();
+                let per_match = s.len().saturating_add(1).saturating_mul(r.len());
+                bounded::string_term_bytes(
+                    s.len()
+                        .saturating_add(per_match)
+                        .saturating_add(refs.saturating_mul(s.len())),
+                )
+            }
+            _ => 0,
+        },
+        // Unicode case mapping and %XX-encoding at most triple the bytes.
+        Func::LowerCase
+        | Func::UpperCase
+        | Func::EncodeForUri
+        | Func::EncodeForUriCwm
+        | Func::EncodeForFragId => match args.first() {
+            Some(Term::Lit(v, _, _)) => bounded::string_term_bytes(v.len().saturating_mul(3)),
+            _ => 0,
+        },
+        // A merge of its members (`list:append` over data lists walks the store, whose
+        // members each passed this checkpoint or were asserted).
+        Func::Append | Func::Conjunction | Func::Langlit => {
+            sum(&mut args.iter().map(bounded::term_bytes))
+        }
+        _ => 0,
+    }
+}
+
+/// The exact [`bounded::term_bytes`] of what builtin `f` derives from `args`, computed
+/// without building it, for a builtin whose [`output_bytes_bound`] is loose; otherwise
+/// the bound itself.
+fn output_bytes_exact(f: Func, args: &[Term], pending: &bounded::Pending) -> usize {
+    let Func::Replace = f else {
+        return output_bytes_bound(f, args);
+    };
+    let [Term::Lit(s, _, _), Term::Lit(pattern, _, _), Term::Lit(r, _, _)] = args else {
+        return 0;
+    };
+    // A pattern that does not compile is the builtin's own cut, below.
+    let Some(re) = settle(pending, bounded::regex(pattern)) else {
+        return 0;
+    };
+    let mut out = s.len();
+    let mut expanded = String::new();
+    for caps in re.captures_iter(s) {
+        let matched = caps.get(0).map_or(0, |m| m.len());
+        expanded.clear();
+        caps.expand(r, &mut expanded);
+        out = out.saturating_sub(matched).saturating_add(expanded.len());
+    }
+    bounded::string_term_bytes(out)
+}
+
 /// Evaluate a functional builtin `(members) op object`: resolve the list members under `b`,
 /// compute, then either bind the object variable to the result or filter if it is ground.
 /// Evaluate a functional builtin. Every fallible step inside settles into a local
@@ -3806,6 +3893,20 @@ fn eval_functional_inner(
                 | Func::Concat
         )
     {
+        return None;
+    }
+    // The ONE term-size checkpoint (GH #6771): a builtin whose result can be larger than
+    // its inputs is sized from them BEFORE it builds the result, so a term that grows
+    // every round is refused (a cut, and an error that fails the closure) instead of
+    // exhausting memory.
+    let refused = settle(
+        pending,
+        bounded::derived_term(&bw.truncated, &f, output_bytes_bound(f, &args), || {
+            output_bytes_exact(f, &args, pending)
+        }),
+    );
+    if let Some(e) = refused {
+        bw.nested_error.borrow_mut().get_or_insert(e);
         return None;
     }
     let result: Term = match f {
