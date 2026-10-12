@@ -1039,7 +1039,7 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
     extra: impl IntoIterator<Item = [Term; 3]>,
     cuts: &Truncation,
-    runtime: &RuntimeDocs,
+    runtime: Option<&RuntimeDocs>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
     let (facts, steps, _) = run_closure(
@@ -1049,7 +1049,7 @@ pub(crate) fn reason_n3_terms_proof(
         cuts,
         StepMode::Full,
         NegationCycles::Reject,
-        Some(runtime),
+        runtime,
     )?
     .top_level();
     Ok((facts.all, steps))

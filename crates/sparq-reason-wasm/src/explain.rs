@@ -380,4 +380,29 @@ mod tests {
             "{asserted}"
         );
     }
+
+    /// PR #6779 review round 5: a standalone document is not a graph with caller blanks, so
+    /// `whyN3` refuses no runtime parse that `reasonN3New` accepts. A text spelling
+    /// `_:__bs0_x` (the caller prefix an internal graph would pick) is parsed by both, and
+    /// every triple `reasonN3New` derives is explained.
+    #[test]
+    fn why_n3_explains_what_reason_n3_new_derives_from_a_bs_text() {
+        let doc = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   { \"_:__bs0_x <urn:p> <urn:o> .\" log:parsedAsN3 ?f } \
+                   => { <urn:s> <urn:parsed> true } .";
+        let derived = crate::n3_new_ntriples(doc).expect("reason");
+        let lines: Vec<&str> = derived.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 1, "{derived}");
+        let terms: Vec<&str> = lines[0].trim_end_matches(" .").split(' ').collect();
+        let [s, p, o] = terms[..] else {
+            panic!("{derived}")
+        };
+        assert_eq!((s, p), ("<urn:s>", "<urn:parsed>"), "{derived}");
+        let json = why_n3_impl(doc, s, p, o).expect("explain");
+        assert_ne!(
+            json, "null",
+            "reasonN3New derived {derived} but whyN3 cannot explain it"
+        );
+        assert!(json.contains("n3-rule-0"), "{json}");
+    }
 }
