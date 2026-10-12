@@ -64,7 +64,11 @@ Set `PSS_SPARQ_BACKEND` to one of:
   `SOLID_SERVER_SPARQ_DIR` for a directory-backed graph; without it the graph is
   ephemeral.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
-  `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL.
+  `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
+  read its own writes: a query sent after an update returns must see what the update
+  committed (one `sparq-server` does). An eventually consistent or replicated endpoint
+  that can lag is not supported, because the LWS server decides what a failed write
+  left behind by reading the store straight after it.
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not

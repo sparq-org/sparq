@@ -125,6 +125,20 @@ impl ValidatedChildIri {
 /// writes. Container delete is supported for EMPTY containers — the handler refuses a non-empty one
 /// with 409 (the conservative spec choice); an opt-in recursive/cascade delete is intentionally not
 /// offered yet.
+///
+/// # Consistency: read your writes
+///
+/// Once a mutating call (`write`, `create_in_container`, `restore`, `delete`,
+/// `delete_container_if_empty`) returns, successfully or not, every read made after it
+/// ([`read`](Store::read), [`meta`](Store::meta), [`exists`](Store::exists),
+/// [`list_children`](Store::list_children), ...) must see everything that call committed. The LWS
+/// service containers (access grants and requests, subscriptions) depend on this: when a create
+/// reports a failure, the server reads the container listing to tell whether the record was
+/// stored anyway, answering `201` if it is listed and `500` (releasing the client's quota) if it
+/// is not. A listing that lagged a committed write would make that answer wrong, and the record
+/// would reappear at the next start. The in-memory and embedded backends are authoritative this
+/// way, as is one `sparq-server` behind the `http-sparq` client. A backend that cannot promise it
+/// (an eventually consistent or replicated remote store) must not be used for an LWS server.
 #[async_trait]
 pub trait Store: Send + Sync {
     /// Read a resource by IRI: its authoritative metadata (SPARQ) + its bytes (blob store).
@@ -217,6 +231,9 @@ pub trait Store: Send + Sync {
     /// (atomically, with no filtering), so a malformed edge still keeps the container non-empty and it
     /// is NOT deleted. Do NOT introduce an emptiness check over this filtered list — use the atomic
     /// path.
+    ///
+    /// The listing must reflect every write that has returned (see the trait's "read your writes"
+    /// section): the LWS service containers read it to settle a create that reported a failure.
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>>;
 
     /// [`list_children`](Store::list_children) while it fits (see
