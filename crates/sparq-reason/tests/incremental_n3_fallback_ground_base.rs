@@ -317,7 +317,7 @@ fn reserved_label_naming_no_node_is_refused() {
 /// caller's node.
 #[test]
 fn runtime_parsed_blanks_do_not_alias_caller_blanks() {
-    for text in ["_:x", "_:__bs0_x"] {
+    for text in ["_:x", "_:__bs0_x", "_:__bs1_x", "_:__bsmith"] {
         let rules = format!(
             "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
              {{ \"{text} <http://ex/r> <http://ex/o9> .\" log:parsedAsN3 ?f . \
@@ -540,5 +540,29 @@ fn runtime_parsed_blank_label_is_specified() {
         doc_blank("__rp0_36e2d3c73471b49f_x"),
         "{:?}",
         g.closure()
+    );
+}
+
+/// A batch run parses a text spelling `_:__bs0_x` (its blank is standardized apart, so
+/// nothing needs refusing), as on main.
+#[test]
+fn batch_runtime_parse_of_a_bs_label_is_not_refused() {
+    let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+               { \"_:__bs0_x <urn:p> <urn:o> .\" log:parsedAsN3 ?f } \
+               => { <urn:s> <urn:parsed> true } .";
+    let closure = sparq_reason::reason_n3_terms(src, None).expect("reason");
+    let marker = [
+        Term::Iri("urn:s".into()),
+        Term::Iri("urn:parsed".into()),
+        Term::Lit(
+            "true".into(),
+            "http://www.w3.org/2001/XMLSchema#boolean".into(),
+            None,
+        ),
+    ];
+    assert!(
+        closure.facts.contains(&marker),
+        "the parse was refused: {:?}",
+        closure.facts
     );
 }
