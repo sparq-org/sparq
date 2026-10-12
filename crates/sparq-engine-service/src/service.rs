@@ -1429,14 +1429,19 @@ pub const SERVICE_EGRESS_REFUSED_MARKER: &str = "SERVICE egress refused";
 /// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden destination for
 /// SERVICE federation: `true` unless the address is globally reachable unicast.
 ///
-/// The rule is table-driven from the IANA IPv4 and IPv6 Special-Purpose Address
-/// Registries ([`V4_DENY`], [`V6_DENY`]), honouring their "Globally Reachable" column
-/// ([`V4_GLOBAL`], [`V6_GLOBAL`] re-allow the reachable entries inside a denied block),
+/// The rule is table-driven from the [IANA IPv4] and [IANA IPv6] Special-Purpose Address
+/// Registries (`V4_DENY`, `V6_DENY`), honouring their "Globally Reachable" column
+/// (`V4_GLOBAL`, `V6_GLOBAL` re-allow the reachable entries inside a denied block),
 /// plus multicast, the reserved space, and on IPv6 everything outside global unicast
-/// `2000::/3`. Addresses that carry an IPv4 address are judged by it: IPv4-mapped
+/// `2000::/3`. As a policy exclusion beyond the registry, ORCHIDv2 `2001:20::/28` and
+/// drone remote ID tags `2001:30::/28` are refused too: they are identifiers, never
+/// endpoint locators. Addresses that carry an IPv4 address are judged by it: IPv4-mapped
 /// `::ffff:0:0/96`, IPv4-translated `::ffff:0:0:0/96`, NAT64 `64:ff9b::/96`, 6to4
 /// `2002::/16` and Teredo `2001::/32` (forbidden if its server or de-obfuscated client
 /// address is), so a private IPv4 cannot be smuggled through an IPv6 form.
+///
+/// [IANA IPv4]: https://www.iana.org/assignments/iana-ipv4-special-registry/
+/// [IANA IPv6]: https://www.iana.org/assignments/iana-ipv6-special-registry/
 #[cfg(feature = "service")]
 pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
     match ip {
@@ -1479,7 +1484,7 @@ const V4_DENY: &[(u32, u8)] = &[
     (v4(240, 0, 0, 0), 4),     // reserved (incl. limited broadcast 255.255.255.255)
 ];
 
-/// Registry entries marked globally reachable that sit inside a [`V4_DENY`] block.
+/// Registry entries marked globally reachable that sit inside a `V4_DENY` block.
 #[cfg(feature = "service")]
 const V4_GLOBAL: &[(u32, u8)] = &[
     (v4(192, 0, 0, 9), 32),  // Port Control Protocol anycast
@@ -1496,7 +1501,7 @@ const V6_DENY: &[(u128, u8)] = &[
     (v6(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20),      // documentation
 ];
 
-/// Registry entries marked globally reachable that sit inside a [`V6_DENY`] block.
+/// Registry entries marked globally reachable that sit inside a `V6_DENY` block.
 #[cfg(feature = "service")]
 const V6_GLOBAL: &[(u128, u8)] = &[
     (v6(0x2001, 1, 0, 0, 0, 0, 0, 1), 128),     // Port Control Protocol anycast

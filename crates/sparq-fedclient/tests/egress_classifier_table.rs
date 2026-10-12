@@ -31,6 +31,7 @@ const TABLE: &[(&str, bool)] = &[
     ("192.31.196.1", false),     // AS112-v4 (globally reachable)
     ("192.52.193.1", false),     // AMT (globally reachable)
     ("192.88.99.1", true),       // deprecated 6to4 relay anycast
+    ("192.88.99.2", true),       // 6a44 relay anycast (inside the deprecated block)
     ("192.168.0.1", true),       // private-use
     ("192.175.48.1", false),     // direct delegation AS112 (globally reachable)
     ("198.18.0.1", true),        // benchmarking
