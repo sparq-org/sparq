@@ -74,6 +74,9 @@ The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_
 
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
+- `sparq_core::json::escape_into(&mut String, &str)` appends JSON string escaping (no quotes) and
+  `sparq_core::json::push_string(&mut String, &str)` appends a quoted JSON string literal; every
+  hand-written JSON serialiser in the workspace (results, reports, explain, change streams) uses them.
 - `pub struct QueryResult { pub vars: Vec<oxrdf::Variable>, pub rows: Vec<Vec<Option<oxrdf::Term>>> }`
   — `len()` / `is_empty()` count solution rows. The layout is **columnar** (the `vars` header is
   stored once, not per cell); index a cell as `result.rows[row][col]` where `col` is the position of
