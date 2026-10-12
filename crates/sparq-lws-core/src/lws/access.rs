@@ -628,6 +628,26 @@ pub async fn allowed<S: Store + 'static>(
     decide(state, action, uri, agent, &meta, None).await
 }
 
+/// As [`allowed`], for a resource that is set aside (a stuck change to it is being put back), to
+/// decide only whether the caller may learn so: never to serve or change it. The `pending` mark
+/// a change part way leaves on the metadata ([`ResourceMeta::pending`]) is taken off first: the
+/// marked metadata is the resource's from before the change, which is what the caller's access
+/// rested on until the change began. A resource that is not set aside is decided by
+/// [`allowed`], the mark failing closed.
+pub async fn allowed_set_aside<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<bool, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(true);
+    }
+    let mut meta = state.resource_meta(uri).await?;
+    meta.pending = false;
+    decide(state, action, uri, agent, &meta, None).await
+}
+
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
 /// and its format. A Delete is announced once the resource is gone, so each delivery of it is
 /// authorized against this snapshot (and the grants as they stand then).
@@ -895,6 +915,14 @@ pub async fn handle<S: Store + 'static>(
         id = &id[..id.len() - META_SUFFIX.len()];
     }
     let owner = state.cfg.open || (agent.subject.is_some() && agent.subject == state.cfg.owner);
+    // Whether what the request is to is set aside is said only to a caller that may act on it:
+    // the owner, who may act on every record, at once; anyone else once authorized below.
+    let unavailable = || super::resources::unavailable(state, req);
+    if owner {
+        if let Some(refused) = unavailable() {
+            return refused;
+        }
+    }
     if id.is_empty() {
         if linkset {
             return if owner {
@@ -913,6 +941,9 @@ pub async fn handle<S: Store + 'static>(
             Method::POST => {
                 if !state.cfg.open && (agent.subject.is_none() || (grants && !owner)) {
                     return state.deny(agent);
+                }
+                if let Some(refused) = unavailable() {
+                    return refused;
                 }
                 // A conditional create is evaluated against the listing.
                 let held =
@@ -946,6 +977,9 @@ pub async fn handle<S: Store + 'static>(
     let mine = owner || (agent.subject.is_some() && agent.subject == record.author);
     if !mine {
         return state.deny(agent);
+    }
+    if let Some(refused) = unavailable() {
+        return refused;
     }
     // A quarantined record (unreadable at the start) is never served; the owner deletes it.
     if record.quarantined && matches!(req.method, Method::GET | Method::HEAD) {

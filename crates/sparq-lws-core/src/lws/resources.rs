@@ -51,9 +51,6 @@ pub async fn handle<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
-    if let Some(refused) = unavailable(state, req) {
-        return refused;
-    }
     // A write or a delete waits for its locks and checks its preconditions in the request, where
     // a client that goes away (or a timeout) cancels the wait; only its store calls run in a
     // task of their own, once they are ready to start (see [`hold_locks`]).
@@ -93,13 +90,21 @@ pub(crate) fn set_aside_meanwhile() -> Response {
 }
 
 /// [`set_aside`] for the resource `req` is to (a linkset's resource for the linkset): the check
-/// every route makes first.
+/// a service route makes once it has authorized the request, so that only a caller that may act
+/// on the resource learns it is set aside.
 pub(crate) fn unavailable<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
 ) -> Option<Response> {
     let target = req.path.strip_suffix(META_SUFFIX).unwrap_or(&req.path);
     set_aside(state, &state.cfg.absolute(target), &req.method)
+}
+
+/// The refusal of a new change while set-aside changes hold as much as they may
+/// ([`may_write`](super::LwsState::may_write)), for an authorized request.
+fn full<S: Store + 'static>(state: &LwsState<S>, method: &Method) -> Option<Response> {
+    (!method.is_safe() && !state.may_write())
+        .then(|| retry_later("failed changes are still being put back"))
 }
 
 async fn handle_now<S: Store + 'static>(
@@ -137,9 +142,12 @@ async fn handle_now<S: Store + 'static>(
         // was authorized on a missing target, so nothing is served or changed: every method on it
         // is a 404, and answering it here (rather than in the handler) means a resource that
         // appears after this check is never read or written without its permission check.
-        if let Some(refused) = authorize_unlocked(state, action, &uri, agent).await {
+        if let Some(refused) = authorize_unlocked(state, action, &uri, agent, &req.method).await {
             return refused;
         }
+    } else if let Some(refused) = set_aside(state, &uri, &req.method) {
+        // The storage description is public: anyone may learn the root is set aside.
+        return refused;
     }
     match req.method {
         Method::GET | Method::HEAD => read(state, req, agent, &uri).await,
@@ -178,19 +186,68 @@ async fn recheck<S: Store + 'static>(
 /// The existence and permission check a request passes before it takes a lock: `None` when it may
 /// go on, else the response refusing it (a missing target is a challenge or a 404, as in
 /// [`handle_now`]). The check that counts is repeated under the lock.
+///
+/// Only once the request is authorized does it learn that `uri` is set aside, or that new
+/// changes wait while set-aside ones are put back ([`set_aside`]): a caller that may not act on
+/// the resource gets the same `401`/`403`/`404` whatever its state. A set-aside resource is
+/// [`authorized_aside`].
 async fn authorize_unlocked<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
     uri: &str,
     agent: &Agent,
+    method: &Method,
 ) -> Option<Response> {
+    if !state.visible(uri) {
+        return Some(authorized_aside(state, action, uri, agent).await);
+    }
     match state.store.exists(uri).await {
         Ok(true) => {}
         Ok(false) if state.needs_auth(agent) => return Some(state.challenge(None)),
         Ok(false) => return Some(problem(StatusCode::NOT_FOUND, None)),
         Err(e) => return Some(store_error(e)),
     }
-    recheck(state, action, uri, agent).await.err()
+    if let Err(refused) = recheck(state, action, uri, agent).await {
+        return Some(refused);
+    }
+    full(state, method)
+}
+
+/// The answer to a request for `uri` while it is set aside: `503` (with a `Retry-After`) to a
+/// caller that may act on it, and to anyone else what it would get were the resource not set
+/// aside (a challenge, a `403`, or the `404` of a missing resource).
+///
+/// What the decision rests on is the resource's own metadata (its creator and types), which the
+/// stuck change may itself be part way through: a change to the metadata first marks the old
+/// metadata `pending` ([`write_with_meta`]), and that mark denies every grant. Here, where all
+/// a caller can learn is that the resource is set aside (nothing is served or changed), the
+/// decision is made against the metadata as it stands with the mark set aside
+/// ([`access::allowed_set_aside`](super::access::allowed_set_aside)): the metadata from before
+/// the change, while it is part way. A grantee that could read the resource before the change
+/// is told to retry, as before, and a caller that could not is refused. What cannot be decided
+/// (the store fails while the change is stuck) refuses: it fails closed, revealing nothing.
+async fn authorized_aside<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Response {
+    // The owner may act on anything there is or may be: nothing is read to decide.
+    if !(state.cfg.open || super::access::is_owner(state, agent)) {
+        match state.store.exists(uri).await {
+            Ok(true) => {}
+            Ok(false) if state.needs_auth(agent) => return state.challenge(None),
+            Ok(false) => return problem(StatusCode::NOT_FOUND, None),
+            Err(_) => return state.deny(agent),
+        }
+        if !super::access::allowed_set_aside(state, action, uri, agent)
+            .await
+            .unwrap_or(false)
+        {
+            return state.deny(agent);
+        }
+    }
+    set_aside_meanwhile()
 }
 
 fn allow_for(uri: &str, is_root: bool) -> String {
@@ -1839,7 +1896,7 @@ pub struct IriLocks {
     /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
     hid: tokio::sync::Notify,
     /// How many times anything was set aside: a walk over many resources reads it before and
-    /// after, and fails if it moved ([`IriLocks::set_asides`]).
+    /// after, and checks what is set aside if it moved ([`IriLocks::set_asides`]).
     set_asides: std::sync::atomic::AtomicU64,
 }
 
@@ -1898,10 +1955,21 @@ impl IriLocks {
             .contains_key(iri)
     }
 
+    /// Every IRI set aside now.
+    pub fn hidden(&self) -> Vec<String> {
+        self.hidden
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect()
+    }
+
     /// How many times anything was set aside so far. A walk that reads it before it starts and
-    /// again when it ends, and finds it the same, met no resource set aside during it: one set
-    /// aside before was not visible when the walk reached it, and one set aside after its visit
-    /// moved the count.
+    /// again when it ends, and finds it the same (and passed over nothing set aside), met no
+    /// resource set aside during it: one set aside before was not visible when the walk reached
+    /// it, and one set aside after its visit moved the count. Otherwise the walk checks what is
+    /// set aside once it is over.
     pub fn set_asides(&self) -> u64 {
         self.set_asides.load(std::sync::atomic::Ordering::SeqCst)
     }
@@ -4096,7 +4164,7 @@ async fn linkset<S: Store + 'static>(
     };
     // A request is authorized once before it waits for the resource's lock, so one that may not
     // touch the resource never queues behind a write (holding its admission slot while it waits).
-    if let Some(refused) = authorize_unlocked(state, action, uri, agent).await {
+    if let Some(refused) = authorize_unlocked(state, action, uri, agent, &req.method).await {
         return refused;
     }
     // The resource's lock is taken before the permission check that counts, so the decision holds
@@ -9581,6 +9649,174 @@ mod tests {
                 PATCH_BUDGET
             ),
             Ok(json!({"a": [1, 2, 3]}))
+        );
+    }
+
+    /// Issue #6814: a request to a set-aside resource was answered `503` before it was
+    /// authorized, so a caller that may not act on the resource could tell a stuck change to it
+    /// from a resource it simply may not read. It is authorized first: whoever may not act on the
+    /// resource is refused the same whatever its state, and only whoever may is told to retry.
+    #[tokio::test]
+    async fn only_a_caller_that_may_act_learns_a_resource_is_set_aside() {
+        use super::super::test_store::{agent, closed_state, data, grant_read, stick, OWNER};
+        let (st, store) = closed_state(100).await;
+        let (a, b) = (data(&st, "a").await, data(&st, "b").await);
+        let reader = agent("https://reader.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let owner = agent(OWNER);
+        let anonymous = Agent::anonymous();
+        grant_read(&st, "https://reader.example/#me", &[&a, &b]).await;
+        let ask = |m: Method, p: &str, who: &Agent| {
+            let (st, r, who) = (
+                st.clone(),
+                super::super::test_store::request(m, p, &[("content-type", "text/plain")], "z"),
+                who.clone(),
+            );
+            async move {
+                let r = tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    super::super::test_store::route_as(&st, r, &who),
+                )
+                .await
+                .expect("answered at once");
+                let retry = r.headers().contains_key(header::RETRY_AFTER);
+                (r.status(), retry, body_of(r).await)
+            }
+        };
+        // a is set aside (and the root listing it); b is not.
+        stick(&st, &store, &a);
+        let reads = [Method::GET, Method::HEAD, Method::OPTIONS];
+        let writes = [Method::PUT, Method::PATCH, Method::DELETE];
+        for m in reads.iter().chain(&writes) {
+            for (path, same) in [("/a", "/b"), ("/a.meta", "/b.meta")] {
+                // Whoever may not act on it gets what it gets for a resource that is not set
+                // aside: the same status and body, and no Retry-After.
+                for who in [&stranger, &anonymous] {
+                    let (got, want) = (
+                        ask(m.clone(), path, who).await,
+                        ask(m.clone(), same, who).await,
+                    );
+                    assert!(got.0.is_client_error(), "{m} {path}: {:?}", got.0);
+                    assert!(!got.1, "{m} {path}");
+                    assert_eq!(got, want, "{m} {path}");
+                }
+                // The owner may: it is told to retry.
+                let got = ask(m.clone(), path, &owner).await;
+                assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m} {path}");
+                assert!(got.1);
+            }
+        }
+        // The reader may read a, so it learns a is set aside; it may not change it.
+        for m in &reads {
+            let got = ask(m.clone(), "/a", &reader).await;
+            assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m}");
+        }
+        for m in &writes {
+            let got = ask(m.clone(), "/a", &reader).await;
+            assert_eq!(got, ask(m.clone(), "/b", &reader).await, "{m}");
+            assert_eq!(got.0, StatusCode::FORBIDDEN, "{m}");
+        }
+        // The root lists a, so it is set aside too: only who may create in it hears so.
+        let post = ask(Method::POST, "/", &reader).await;
+        assert_eq!(post.0, StatusCode::FORBIDDEN);
+        assert!(!post.1);
+        assert_eq!(
+            ask(Method::POST, "/", &owner).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // The storage description is public: anyone may learn its root is set aside.
+        let description =
+            super::super::test_store::request(Method::GET, "/", &[("accept", LWS_CID)], "");
+        assert_eq!(
+            handle(&st, &description, &anonymous).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // While set-aside changes hold as much as they may, a write is refused with `503` only
+        // to whoever may make it.
+        st.set_aside_bytes.store(
+            super::super::MAX_SET_ASIDE_BYTES,
+            std::sync::atomic::Ordering::Release,
+        );
+        assert_eq!(
+            ask(Method::PUT, "/b", &stranger).await.0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ask(Method::PUT, "/b", &reader).await.0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            ask(Method::PUT, "/b", &owner).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(ask(Method::GET, "/b", &reader).await.0, StatusCode::OK);
+        st.set_aside_bytes
+            .store(0, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Issue #6814: what decides whether a caller may act on a set-aside resource is the
+    /// resource's own metadata, which the stuck change may be part way through. A change to
+    /// the metadata marks the old metadata `pending` first, and the mark fails every grant
+    /// closed; for a set-aside resource the decision is made against the marked metadata (the
+    /// resource's from before the change), so a grantee is still told to retry and a stranger
+    /// is still refused. When it cannot be read at all, everyone but the owner is refused.
+    #[tokio::test]
+    async fn a_set_aside_resource_is_decided_by_its_metadata_from_before_the_change() {
+        use super::super::test_store::{agent, closed_state, data, grant_read, stick, OWNER};
+        let (st, store) = closed_state(100).await;
+        let a = data(&st, "a").await;
+        let reader = agent("https://reader.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        grant_read(&st, "https://reader.example/#me", &[&a]).await;
+        let get = |who: &Agent| {
+            let (st, who) = (st.clone(), who.clone());
+            async move {
+                let r = super::super::test_store::request(Method::GET, "/a", &[], "");
+                handle(&st, &r, &who).await.status()
+            }
+        };
+        // A change to the metadata part way: the old metadata, marked.
+        let mut meta = st.resource_meta(&a).await.unwrap();
+        meta.pending = true;
+        st.put_resource_meta(&a, &meta).await.unwrap();
+        // Not set aside (a process that stopped mid-way), the mark fails closed, as before.
+        assert_eq!(get(&reader).await, StatusCode::FORBIDDEN);
+        stick(&st, &store, &a);
+        assert_eq!(get(&reader).await, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(get(&stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(get(&agent(OWNER)).await, StatusCode::SERVICE_UNAVAILABLE);
+        // Whether it is there cannot be read: nobody but the owner is told anything of it.
+        *store.fail_exists_of.lock().unwrap() = Some(a.clone());
+        assert_eq!(get(&reader).await, StatusCode::FORBIDDEN);
+        assert_eq!(get(&stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(get(&Agent::anonymous()).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(get(&agent(OWNER)).await, StatusCode::SERVICE_UNAVAILABLE);
+        *store.fail_exists_of.lock().unwrap() = None;
+    }
+
+    /// Issue #6814: a set-aside resource that is not there (a stuck delete took it away) is,
+    /// to whoever may not act on it, the `404` (or challenge) of any missing resource.
+    #[tokio::test]
+    async fn a_missing_set_aside_resource_is_missing_to_a_stranger() {
+        use super::super::test_store::{agent, closed_state, stick, OWNER};
+        let (st, store) = closed_state(100).await;
+        let gone = st.cfg.absolute("/gone");
+        stick(&st, &store, &gone);
+        let get = |path: &str, who: &Agent| {
+            let (st, who) = (st.clone(), who.clone());
+            let r = super::super::test_store::request(Method::GET, path, &[], "");
+            async move { handle(&st, &r, &who).await.status() }
+        };
+        let stranger = agent("https://stranger.example/#me");
+        assert_eq!(get("/gone", &stranger).await, StatusCode::NOT_FOUND);
+        assert_eq!(get("/never", &stranger).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            get("/gone", &Agent::anonymous()).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get("/gone", &agent(OWNER)).await,
+            StatusCode::SERVICE_UNAVAILABLE
         );
     }
 }

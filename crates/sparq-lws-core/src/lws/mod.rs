@@ -757,9 +757,10 @@ impl<S: Store + 'static> LwsState<S> {
 
     /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
     /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). Every
-    /// route checks it before anything else, and every lock is taken only while it holds
+    /// route checks it once it has authorized the request (so only a caller that may act on the
+    /// resource learns it is set aside), and every lock is taken only while it holds
     /// ([`resources::IriLocks::lock`]), so one that is not visible is answered `503` at once, or
-    /// skipped by a walk over many, and never waited on.
+    /// passed over by a walk over many, and never waited on.
     pub(crate) fn visible(&self, uri: &str) -> bool {
         self.locks.visible(uri)
     }
@@ -1825,18 +1826,12 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Err(error) => return state.challenge(Some(error)),
     };
     if path.starts_with(SUBSCRIPTIONS_PATH) {
-        if let Some(unavailable) = resources::unavailable(state, &req) {
-            return unavailable;
-        }
         return notify::handle(state, &req, &agent).await;
     }
     if path == TYPE_INDEX_PATH || path == TYPE_SEARCH_PATH {
         return index::handle(state, &req, &agent).await;
     }
     if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
-        if let Some(unavailable) = resources::unavailable(state, &req) {
-            return unavailable;
-        }
         return access::handle(state, &req, &agent).await;
     }
     if path.starts_with("/.lws/") || path == "/.lws" {
@@ -2732,6 +2727,118 @@ pub(crate) mod test_store {
         cfg.page_size = page_size;
         let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
         (state, store)
+    }
+
+    /// The owner of a [`closed_state`]'s storage.
+    pub const OWNER: &str = "https://owner.example/#me";
+
+    /// An authenticated agent.
+    pub fn agent(subject: &str) -> super::Agent {
+        super::Agent {
+            subject: Some(subject.into()),
+            ..super::Agent::anonymous()
+        }
+    }
+
+    /// A state over a [`FlakyStore`] that is not open: only its owner ([`OWNER`]), a resource's
+    /// creator and the grants decide who may do what.
+    pub async fn closed_state(page_size: usize) -> (super::LwsState<FlakyStore>, FlakyStore) {
+        let store = FlakyStore::new();
+        let mut cfg = super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some(OWNER.into());
+        cfg.allow_insecure_fetch = true;
+        cfg.page_size = page_size;
+        let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
+        (state, store)
+    }
+
+    /// Store a data resource `name` in the root; its IRI.
+    pub async fn data(state: &super::LwsState<FlakyStore>, name: &str) -> String {
+        let root = state.cfg.storage();
+        let iri = format!("{root}{name}");
+        state
+            .store
+            .create_in_container(&root, &iri, Bytes::from("x"), "text/plain")
+            .await
+            .unwrap();
+        iri
+    }
+
+    /// As the owner, grant `assignee` read access to `targets`, and nothing else; the grant's
+    /// IRI.
+    pub async fn grant_read(
+        state: &super::LwsState<FlakyStore>,
+        assignee: &str,
+        targets: &[&str],
+    ) -> String {
+        let grant = serde_json::json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": assignee,
+                "target": {"type": "StorageResource", "value": targets}}],
+        });
+        let r = super::access::handle(
+            state,
+            &request(
+                axum::http::Method::POST,
+                super::GRANTS_PATH,
+                &[("content-type", super::LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &agent(OWNER),
+        )
+        .await;
+        assert_eq!(r.status(), axum::http::StatusCode::CREATED);
+        r.headers()[axum::http::header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// `req` routed as the server routes it, sent with an access token for `agent`'s subject
+    /// (none for an anonymous one).
+    pub async fn route_as(
+        state: &super::LwsState<FlakyStore>,
+        mut req: super::LwsRequest,
+        agent: &super::Agent,
+    ) -> axum::response::Response {
+        if let Some(subject) = &agent.subject {
+            let token = super::tokens::mint(
+                &state.cfg,
+                subject,
+                "https://client.example/id",
+                &state.cfg.realm(),
+            );
+            req.headers.insert(
+                axum::http::header::AUTHORIZATION,
+                axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+            );
+        }
+        super::route(state, req).await
+    }
+
+    /// Set `iri` aside, as a stuck change to it is: putting it back (removing it) keeps failing
+    /// until `store.fail_delete_of` is cleared.
+    pub fn stick(state: &super::LwsState<FlakyStore>, store: &FlakyStore, iri: &str) {
+        *store.fail_delete_of.lock().unwrap() = Some(iri.to_string());
+        let left = super::Unsettled(vec![super::Undo::Restore {
+            key: iri.to_string(),
+            prior: None,
+        }]);
+        state.set_aside(left, ());
+        assert!(!state.visible(iri));
+    }
+
+    /// Wait (a few seconds at most) until `iri` is no longer set aside.
+    pub async fn put_back(state: &super::LwsState<FlakyStore>, iri: &str) {
+        for _ in 0..300 {
+            if state.visible(iri) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("{iri} was never put back");
     }
 
     /// The `Link` targets of `resp` with relation `rel`.

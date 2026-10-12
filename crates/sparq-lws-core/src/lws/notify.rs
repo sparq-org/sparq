@@ -1038,25 +1038,30 @@ pub async fn handle<S: Store + 'static>(
         id = &id[..id.len() - META_SUFFIX.len()];
     }
     let owner = state.cfg.open || (agent.subject.is_some() && agent.subject == state.cfg.owner);
+    // Whether what the request is to is set aside is said only to a caller that may act on it:
+    // the owner, who may act on every subscription, at once; anyone else once authorized below.
+    let unavailable = || super::resources::unavailable(state, req);
+    if owner {
+        if let Some(refused) = unavailable() {
+            return refused;
+        }
+    }
     if id.is_empty() {
+        if !linkset && !matches!(req.method, Method::GET | Method::HEAD | Method::POST) {
+            return method_not_allowed("GET, HEAD, POST");
+        }
+        if state.needs_auth(agent) {
+            return state.challenge(None);
+        }
+        if let Some(refused) = unavailable() {
+            return refused;
+        }
         if linkset {
-            return if state.needs_auth(agent) {
-                state.challenge(None)
-            } else {
-                service_linkset(&state.cfg, req, &state.cfg.absolute(SUBSCRIPTIONS_PATH))
-            };
+            return service_linkset(&state.cfg, req, &state.cfg.absolute(SUBSCRIPTIONS_PATH));
         }
         return match req.method {
-            Method::GET | Method::HEAD => {
-                if state.needs_auth(agent) {
-                    return state.challenge(None);
-                }
-                listing(state, req, agent, owner)
-            }
+            Method::GET | Method::HEAD => listing(state, req, agent, owner),
             Method::POST => {
-                if state.needs_auth(agent) {
-                    return state.challenge(None);
-                }
                 // Expired subscriptions still hold their place in the store until they are
                 // removed: a few go now, before the listing a conditional create is evaluated
                 // against is held, and before this one is counted.
@@ -1081,6 +1086,9 @@ pub async fn handle<S: Store + 'static>(
             problem(StatusCode::NOT_FOUND, None)
         };
     };
+    if let Some(refused) = unavailable() {
+        return refused;
+    }
     if linkset {
         let iri = state.cfg.absolute(&format!("{SUBSCRIPTIONS_PATH}{id}"));
         return service_linkset(&state.cfg, req, &iri);
@@ -1352,28 +1360,59 @@ async fn subscribe<S: Store + 'static>(
     // or naming nothing, is refused the same way. A resource's linkset is read under the
     // resource's authorization (as a GET of it is), so a topic naming one is checked as the
     // resource, under the resource's shared lock; the topic itself is kept as named.
+    //
+    // The subscriber is checked once before the lock is taken, and only a topic it may read is
+    // waited on, or said to be set aside: one it may not read is refused the same whatever its
+    // state, so neither a stuck change to it nor a write holding its lock shows through. A
+    // set-aside topic is decided as a request to it is (see
+    // [`access::allowed_set_aside`](super::access::allowed_set_aside)): against its metadata
+    // from before the stuck change, failing closed when that cannot be read. The check that
+    // counts is made again under the lock.
     let storage = state.cfg.storage();
+    let cannot_read = || {
+        if agent.is_authenticated() || state.cfg.open {
+            problem(
+                StatusCode::FORBIDDEN,
+                Some("the subscriber cannot read every topic"),
+            )
+        } else {
+            state.challenge(None)
+        }
+    };
+    let storage = storage.as_str();
+    let readable = |resource: &str, aside: bool| {
+        let resource = resource.to_string();
+        async move {
+            if !resource.starts_with(storage)
+                || !state.store.exists(&resource).await.unwrap_or(false)
+            {
+                return false;
+            }
+            if aside {
+                access::allowed_set_aside(state, Action::Read, &resource, agent)
+                    .await
+                    .unwrap_or(false)
+            } else {
+                state.allowed(Action::Read, &resource, agent).await
+            }
+        }
+    };
     for topic in &topics {
         let resource = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
-        if let Some(unavailable) = super::resources::set_aside(state, resource, &Method::GET) {
-            return unavailable;
+        let aside = !state.visible(resource);
+        if !readable(resource, aside).await {
+            return cannot_read();
+        }
+        if aside {
+            return super::resources::set_aside_meanwhile();
         }
         // Waited for a bounded time, as every lock a request to a service container takes.
         let _guard = match super::records::within_wait(state.locks.read(resource)).await {
             Ok(guard) => guard,
             Err(refused) => return refused,
         };
-        let exists =
-            resource.starts_with(&storage) && state.store.exists(resource).await.unwrap_or(false);
-        if !exists || !state.allowed(Action::Read, resource, agent).await {
-            return if agent.is_authenticated() || state.cfg.open {
-                problem(
-                    StatusCode::FORBIDDEN,
-                    Some("the subscriber cannot read every topic"),
-                )
-            } else {
-                state.challenge(None)
-            };
+        if !readable(resource, false).await {
+            return cannot_read();
         }
     }
     // A conditional create is evaluated against the listing, held exclusively from here until
@@ -2906,5 +2945,170 @@ mod tests {
             .starts_with("urn:uuid:"));
         assert!(parse_rfc3339(e["activity"]["published"].as_str().unwrap()).is_some());
         assert!(e["activity"].get("actor").is_none());
+    }
+
+    /// Issue #6814: a webhook subscription took each topic's lock (waiting while a write held
+    /// it) and answered `503` on a set-aside one, before it checked the subscriber may read the
+    /// topic: a subscriber that may not read it could tell a stuck change to it, or a write in
+    /// progress, from a resource it may not read. Whoever may not read a topic is refused at
+    /// once, the same whatever its state; only whoever may is told to retry, or waits.
+    #[tokio::test]
+    async fn a_topic_is_authorized_before_its_lock_or_state_shows() {
+        use test_store::{agent, closed_state, data, grant_read, stick, OWNER};
+        let (state, store) = closed_state(100).await;
+        let (a, b) = (data(&state, "a").await, data(&state, "b").await);
+        let reader = agent("https://reader.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        grant_read(&state, "https://reader.example/#me", &[&a, &b]).await;
+        let subscribe = |topic: &str, who: &Agent| {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [topic],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let (state, who) = (state.clone(), who.clone());
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                let r = tokio::time::timeout(
+                    Duration::from_millis(500),
+                    test_store::route_as(&state, req, &who),
+                )
+                .await
+                .ok()?;
+                let retry = r.headers().contains_key(header::RETRY_AFTER);
+                let status = r.status();
+                let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                Some((status, retry, body))
+            }
+        };
+        let refused = subscribe(&b, &stranger).await.expect("answered at once");
+        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+        // A write holds b's lock: the stranger is refused at once, as before; the reader waits.
+        let held = state.locks.lock(&b).await.unwrap();
+        assert_eq!(subscribe(&b, &stranger).await.as_ref(), Some(&refused));
+        assert_eq!(
+            subscribe(&b, &reader).await,
+            None,
+            "the reader waits on the write"
+        );
+        drop(held);
+        // a is set aside: the stranger is refused as for b; the reader is told to retry.
+        stick(&state, &store, &a);
+        assert_eq!(subscribe(&a, &stranger).await.as_ref(), Some(&refused));
+        let got = subscribe(&a, &reader).await.expect("answered at once");
+        assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(got.1);
+        assert_eq!(
+            subscribe(&a, &agent(OWNER)).await.expect("answered").0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // Anonymous, the challenge, whatever the state.
+        assert_eq!(
+            subscribe(&a, &Agent::anonymous())
+                .await
+                .expect("answered")
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let ok = subscribe(&b, &reader).await.expect("answered");
+        assert_eq!(ok.0, StatusCode::CREATED);
+    }
+
+    /// Issue #6814: the service routes answered `503` for a set-aside record before they
+    /// checked the caller may see it. A subscription (or a grant) is said to be set aside only
+    /// to its subscriber (its author) and the owner; to anyone else it is as any record they
+    /// may not see.
+    #[tokio::test]
+    async fn a_set_aside_record_shows_only_to_who_may_see_it() {
+        use test_store::{agent, closed_state, stick, OWNER};
+        let (state, store) = closed_state(100).await;
+        let reader = agent("https://reader.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let owner = agent(OWNER);
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let r = handle(&state, &post, &owner).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let iri = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        let path = iri
+            .strip_prefix(state.cfg.storage().trim_end_matches('/'))
+            .unwrap()
+            .to_string();
+        let ask = |path: &str, m: Method, who: &Agent| {
+            let (state, who) = (state.clone(), who.clone());
+            let req = test_store::request(m, path, &[], "");
+            async move { test_store::route_as(&state, req, &who).await.status() }
+        };
+        stick(&state, &store, &iri);
+        let unknown = format!("{SUBSCRIPTIONS_PATH}unknown");
+        for m in [Method::GET, Method::DELETE] {
+            for who in [&reader, &stranger] {
+                assert_eq!(
+                    ask(&path, m.clone(), who).await,
+                    StatusCode::NOT_FOUND,
+                    "{m}"
+                );
+                assert_eq!(ask(&unknown, m.clone(), who).await, StatusCode::NOT_FOUND);
+            }
+            assert_eq!(
+                ask(&path, m.clone(), &Agent::anonymous()).await,
+                StatusCode::UNAUTHORIZED
+            );
+            assert_eq!(
+                ask(&path, m.clone(), &owner).await,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{m}"
+            );
+        }
+        // The container lists it, so it is set aside too: any subscriber may act on it.
+        let container = SUBSCRIPTIONS_PATH;
+        assert_eq!(
+            ask(container, Method::GET, &Agent::anonymous()).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            ask(container, Method::GET, &reader).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // A grant record, likewise: only its author and the owner hear it is set aside.
+        *store.fail_delete_of.lock().unwrap() = None;
+        test_store::put_back(&state, &iri).await;
+        let grant = test_store::grant_read(
+            &state,
+            "https://reader.example/#me",
+            &[&state.cfg.storage()],
+        )
+        .await;
+        let grant_path = grant
+            .strip_prefix(state.cfg.storage().trim_end_matches('/'))
+            .unwrap()
+            .to_string();
+        stick(&state, &store, &grant);
+        let ask_grant = |who: &Agent| {
+            let (state, who) = (state.clone(), who.clone());
+            let req = test_store::request(Method::GET, &grant_path, &[], "");
+            async move { test_store::route_as(&state, req, &who).await.status() }
+        };
+        assert_eq!(ask_grant(&reader).await, StatusCode::FORBIDDEN);
+        assert_eq!(ask_grant(&stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(ask_grant(&owner).await, StatusCode::SERVICE_UNAVAILABLE);
     }
 }
