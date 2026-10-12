@@ -25,7 +25,9 @@
 //! (the TurtleTests suite passes 297/297 in this mode).
 
 use super::model::{Rule, Term};
-use super::serialize::{PREMISE_BLANK_VAR, UNIVERSAL_VAR};
+use super::serialize::{
+    formula_universal, CONCLUSION_UNIVERSAL, FORMULA_UNIVERSAL, PREMISE_BLANK_VAR, PREMISE_UNIVERSAL, UNIVERSAL_VAR,
+};
 
 pub const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 pub const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
@@ -193,7 +195,67 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
         rewrite_terms(&mut r.premise, false, &rename);
         rewrite_terms(&mut r.conclusion, false, &rename);
     }
+    rules.iter_mut().chain(backward_rules.iter_mut()).for_each(scope_rule);
     Ok(Parsed { facts, rules, backward_rules, base: base.to_string() })
+}
+
+/// Rewrite every formula-level universal of `stmts` (the content of one formula) that the
+/// formula ITSELF declares — a mention whose de Bruijn distance equals its depth below
+/// `stmts` — to the depth-free name `prefix + iri`. Universals of inner formulae are left
+/// as they are.
+pub(super) fn own_universals_to(stmts: &mut [[Term; 3]], prefix: &str) {
+    fn go(t: &mut Term, depth: usize, prefix: &str) {
+        match t {
+            Term::Var(v) => {
+                if let Some((n, iri)) = formula_universal(v) {
+                    if n == depth {
+                        *t = Term::Var(format!("{prefix}{iri}"));
+                    }
+                }
+            }
+            Term::Formula(ts) => ts.iter_mut().flatten().for_each(|m| go(m, depth + 1, prefix)),
+            Term::List(ms) => ms.iter_mut().for_each(|m| go(m, depth, prefix)),
+            Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, depth, prefix)),
+            _ => {}
+        }
+    }
+    stmts.iter_mut().flatten().for_each(|t| go(t, 0, prefix));
+}
+
+/// The inverse of [`own_universals_to`]: every `prefix + iri` variable in `stmts` becomes
+/// the formula-level universal `stmts`' formula declares, named for its depth.
+pub(super) fn own_universals_from(stmts: &mut [[Term; 3]], prefix: &str) {
+    fn go(t: &mut Term, depth: usize, prefix: &str) {
+        match t {
+            Term::Var(v) => {
+                if let Some(iri) = v.strip_prefix(prefix) {
+                    *t = Term::Var(format!("{FORMULA_UNIVERSAL}{depth}.{iri}"));
+                }
+            }
+            Term::Formula(ts) => ts.iter_mut().flatten().for_each(|m| go(m, depth + 1, prefix)),
+            Term::List(ms) => ms.iter_mut().for_each(|m| go(m, depth, prefix)),
+            Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, depth, prefix)),
+            _ => {}
+        }
+    }
+    stmts.iter_mut().flatten().for_each(|t| go(t, 0, prefix));
+}
+
+/// Give a rule's two sides their own universals (GH #6754): the premise's become the rule's
+/// matching variables ([`PREMISE_UNIVERSAL`]) and the conclusion's become
+/// [`CONCLUSION_UNIVERSAL`]. Every other formula-level universal stays a quoted formula's
+/// own, which the engine matches only by identity and never substitutes.
+pub(super) fn scope_rule(r: &mut Rule) {
+    own_universals_to(&mut r.premise, PREMISE_UNIVERSAL);
+    own_universals_to(&mut r.conclusion, CONCLUSION_UNIVERSAL);
+}
+
+/// [`scope_rule`] undone: the rule's two sides as the formulae the source wrote.
+pub(super) fn unscope_rule(r: &Rule) -> Rule {
+    let mut r = r.clone();
+    own_universals_from(&mut r.premise, PREMISE_UNIVERSAL);
+    own_universals_from(&mut r.conclusion, CONCLUSION_UNIVERSAL);
+    r
 }
 
 /// The prefixes cwm resolves without declaration (its reference outputs rely
@@ -405,10 +467,11 @@ impl<'a> Parser<'a> {
     /// blank (forSome) within that scope. Names derive from the IRI so the
     /// same declaration in two documents (action vs reference) compares equal.
     ///
-    /// Every `@forAll` of one IRI — at document level or inside any formula — reads as the
-    /// SAME variable, `__ua.<iri>`: a formula-level declaration is treated as document-scoped
-    /// (which mentions become the variable is still lexical). This is a known limitation
-    /// (GH #6754), unchanged from before the name carried the full IRI.
+    /// A DOCUMENT-level `@forAll` of an IRI reads as `__ua.<iri>`. A FORMULA-level one binds
+    /// only in its formula (GH #6754): each mention reads as `__uf.<n>.<iri>`
+    /// ([`FORMULA_UNIVERSAL`]), `n` counting the formula boundaries up to the declaring
+    /// formula, so sibling formulae, a nested re-declaration and a rule's two sides never
+    /// share one, while copies of one closed formula stay equal terms.
     fn directive_quantifier(&mut self) -> Result<(), String> {
         let universal = self.starts_with("@forAll");
         self.i += if universal { 7 } else { 8 };
@@ -424,8 +487,10 @@ impl<'a> Parser<'a> {
             // A universal is keyed by its FULL IRI under an unforgeable prefix (GH #5391):
             // two `@forAll` IRIs sharing a local name stay two variables, and no source
             // quickvar can spell it (a `.` cannot occur in a VARNAME), so none can collide
-            // with or capture it. One IRI is one variable in every scope (GH #6754).
-            let term = if universal {
+            // with or capture it. A formula-level one is named per mention ([`Self::quantified`]).
+            let term = if universal && self.quants.len() > 1 {
+                Term::Var(FORMULA_UNIVERSAL.into())
+            } else if universal {
                 Term::Var(format!("{UNIVERSAL_VAR}{iri}"))
             } else {
                 let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri);
@@ -440,9 +505,17 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// The quantified stand-in for `iri`, innermost scope first.
+    /// The quantified stand-in for `iri`, innermost scope first. A formula-level universal
+    /// (its frame holds the bare [`FORMULA_UNIVERSAL`] marker) is named by its de Bruijn
+    /// distance from this mention to the declaring formula.
     fn quantified(&self, iri: &str) -> Option<Term> {
-        self.quants.iter().rev().find_map(|frame| frame.get(iri).cloned())
+        let top = self.quants.len() - 1;
+        self.quants.iter().enumerate().rev().find_map(|(k, frame)| {
+            frame.get(iri).map(|t| match t {
+                Term::Var(v) if v == FORMULA_UNIVERSAL => Term::Var(format!("{FORMULA_UNIVERSAL}{}.{iri}", top - k)),
+                other => other.clone(),
+            })
+        })
     }
 
     fn directive_prefix(&mut self) -> Result<(), String> {

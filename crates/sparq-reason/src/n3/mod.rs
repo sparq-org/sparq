@@ -2116,6 +2116,8 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
 /// (recursing into quoted formulae).
 fn rename_vars(t: &Term, n: usize) -> Term {
     match t {
+        // A quoted formula's own universal is not a rule variable (GH #6754).
+        Term::Var(v) if quoted_universal(v) => t.clone(),
         Term::Var(v) => Term::Var(format!("__bw{n}_{v}")),
         Term::Formula(ts) => Term::Formula(
             ts.iter().map(|tr| [rename_vars(&tr[0], n), rename_vars(&tr[1], n), rename_vars(&tr[2], n)]).collect(),
@@ -2155,11 +2157,17 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
         return true;
     }
     match (&aw, &cw) {
-        (Term::Var(v), _) => {
+        (Term::Var(v), _) if !quoted_universal(v) => {
+            if frees_quoted_universal(&cw) {
+                return false;
+            }
             s.insert(v.clone(), cw.clone());
             true
         }
-        (_, Term::Var(v)) => {
+        (_, Term::Var(v)) if !quoted_universal(v) => {
+            if frees_quoted_universal(&aw) {
+                return false;
+            }
             s.insert(v.clone(), aw.clone());
             true
         }
@@ -2231,11 +2239,37 @@ fn unify(pat: &[Term; 3], f: &[Term; 3], b: &Binding) -> Option<Binding> {
     Some(nb)
 }
 
+/// Is `v` a quoted formula's own `@forAll` universal (GH #6754)? Such a variable is bound
+/// inside its formula, so matching treats it as a constant (copies of one closed formula
+/// carry the same name) and no rule substitution ever reaches it.
+fn quoted_universal(v: &str) -> bool {
+    v.starts_with(serialize::FORMULA_UNIVERSAL)
+}
+
+/// Would binding a rule variable to `t` take a quoted formula's universal out of the formula
+/// that binds it — does `t` mention one whose declaring formula is not inside `t`?
+fn frees_quoted_universal(t: &Term) -> bool {
+    fn go(t: &Term, depth: usize) -> bool {
+        match t {
+            Term::Var(v) => serialize::formula_universal(v).is_some_and(|(n, _)| n >= depth),
+            Term::Formula(ts) => ts.iter().flatten().any(|m| go(m, depth + 1)),
+            Term::List(ms) => ms.iter().any(|m| go(m, depth)),
+            Term::Triple(tr) => tr.iter().any(|m| go(m, depth)),
+            _ => false,
+        }
+    }
+    go(t, 0)
+}
+
 fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
     match (pat, val) {
+        (Term::Var(v), _) if quoted_universal(v) => pat == val,
         (Term::Var(v), _) => match b.get(v) {
             Some(existing) => existing == val,
             None => {
+                if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
+                    return false;
+                }
                 b.insert(v.clone(), val.clone());
                 true
             }
@@ -2335,11 +2369,31 @@ fn ground_triple(t: &[Term; 3], b: &Binding) -> Option<[Term; 3]> {
             _ => true,
         }
     }
-    let g = [apply_deep(&t[0], b), apply_deep(&t[1], b), apply_deep(&t[2], b)];
+    let mut g = [apply_deep(&t[0], b), apply_deep(&t[1], b), apply_deep(&t[2], b)];
+    // The conclusion's own `@forAll` universals, now asserted, are document-level ones
+    // (GH #6754). After substitution, so no binding can reach them.
+    g.iter_mut().for_each(assert_conclusion_universals);
     if g.iter().all(instantiated) {
         Some(g)
     } else {
         None
+    }
+}
+
+/// Rename a conclusion's own universals (`__uc.<iri>`, [`parser::scope_rule`]) to the
+/// document-level `__ua.<iri>`: asserting `∀x. S(x)` beside a document under `∀x` is the
+/// same as conjoining `S(x)` under it, since `x` does not occur in what is already there.
+fn assert_conclusion_universals(t: &mut Term) {
+    match t {
+        Term::Var(v) => {
+            if let Some(iri) = v.strip_prefix(serialize::CONCLUSION_UNIVERSAL) {
+                *t = Term::Var(format!("{}{iri}", serialize::UNIVERSAL_VAR));
+            }
+        }
+        Term::Formula(ts) => ts.iter_mut().flatten().for_each(assert_conclusion_universals),
+        Term::List(ms) => ms.iter_mut().for_each(assert_conclusion_universals),
+        Term::Triple(tr) => tr.iter_mut().for_each(assert_conclusion_universals),
+        _ => {}
     }
 }
 
@@ -2897,6 +2951,11 @@ fn apply_deep(t: &Term, b: &Binding) -> Term {
     }
 }
 
+/// The prefix of a `log:includes` pattern blank turned wildcard ([`formula_containment`]).
+/// Unforgeable (no source variable contains a `.`), and the one variable that may match a
+/// scope's own `@forAll` universal: its binding never leaves the containment test.
+const PATTERN_WILDCARD: &str = "__w.";
+
 /// SYNTACTIC containment of `pattern` in `scope` (log:includes): every
 /// pattern triple must match a scope triple (or be virtual list structure),
 /// with pattern blanks as wildcards, pattern variables binding, and scope
@@ -2913,7 +2972,7 @@ fn formula_containment(
         .iter()
         .map(|r| {
             let w = |t: &Term| match t {
-                Term::Blank(l) => Term::Var(format!("__w_{l}")),
+                Term::Blank(l) => Term::Var(format!("{PATTERN_WILDCARD}{l}")),
                 other => other.clone(),
             };
             [w(&r[0]), w(&r[1]), w(&r[2])]
@@ -2990,10 +3049,10 @@ fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
         }
     };
     let mut ts = parsed.facts;
-    for r in &parsed.rules {
+    for r in parsed.rules.iter().map(parser::unscope_rule) {
         ts.push([quote(&r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(&r.conclusion)]);
     }
-    for r in &parsed.backward_rules {
+    for r in parsed.backward_rules.iter().map(parser::unscope_rule) {
         ts.push([
             quote(&r.conclusion),
             Term::Iri(parser::LOG_IMPLIED_BY.into()),
@@ -3002,6 +3061,12 @@ fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
     }
     ts
 }
+
+/// A closed formula's own universal while its statements are reasoned over as a document
+/// ([`formula_closure`]): `__ul.<k>.<iri>`, unforgeable like every engine-internal name,
+/// with `k` the number of closures in progress (this one included), so a nested closure
+/// never takes an enclosing closure's universals for its own.
+const LIFTED_UNIVERSAL: &str = "__ul.";
 
 /// The forward closure of a quoted formula under its own `=>` rules
 /// (log:supports / log:conclusion): the original triples plus everything a
@@ -3024,15 +3089,25 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     let mut facts: Vec<[Term; 3]> = Vec::new();
     let mut rules: Vec<Rule> = Vec::new();
     let mut backward: Vec<Rule> = Vec::new();
-    for row in ts {
+    // The formula's own `@forAll` universals quantify its statements, rules included, so
+    // the run reads them as that document's universals (GH #6754); the derivations get
+    // them back named for their place in the result formula.
+    let lift = format!("{LIFTED_UNIVERSAL}{}.", bw.visited.borrow().len());
+    let mut lifted = ts.to_vec();
+    parser::own_universals_to(&mut lifted, &lift);
+    for row in lifted {
         match (&row[0], &row[1], &row[2]) {
             (Term::Formula(p), Term::Iri(i), Term::Formula(c)) if i == parser::LOG_IMPLIES => {
-                rules.push(Rule { premise: p.clone(), conclusion: c.clone() });
+                let mut r = Rule { premise: p.clone(), conclusion: c.clone() };
+                parser::scope_rule(&mut r);
+                rules.push(r);
             }
             (Term::Formula(c), Term::Iri(i), Term::Formula(p)) if i == parser::LOG_IMPLIED_BY => {
-                backward.push(Rule { premise: p.clone(), conclusion: c.clone() });
+                let mut r = Rule { premise: p.clone(), conclusion: c.clone() };
+                parser::scope_rule(&mut r);
+                backward.push(r);
             }
-            _ => facts.push(row.clone()),
+            _ => facts.push(row),
         }
     }
     let parsed =
@@ -3069,7 +3144,9 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // log:conclusion output) plus the derivations.
     let mut seen: FxHashSet<[Term; 3]> = ts.iter().cloned().collect();
     let mut result: Vec<[Term; 3]> = ts.to_vec();
-    for f in closed.all {
+    let mut derived: Vec<[Term; 3]> = closed.all.into_iter().collect();
+    parser::own_universals_from(&mut derived, &lift);
+    for f in derived {
         if seen.insert(f.clone()) {
             result.push(f);
         }
