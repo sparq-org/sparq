@@ -422,11 +422,11 @@ fn depth(t: &super::Term) -> usize {
 /// the run's term allowance ([`generated`]) is raised to the deepest of them. Rules still
 /// cannot build past it.
 pub(crate) fn given_terms<'a>(run: &Truncation, terms: impl IntoIterator<Item = &'a super::Term>) {
-    use super::Term;
-    let compound = |t: &&Term| matches!(t, Term::List(_) | Term::Formula(_) | Term::Triple(_));
+    let room = run.term_depth.get();
+    // Only a term that does not fit already is measured.
     let deepest = terms
         .into_iter()
-        .filter(compound)
+        .filter(|t| !fits(t, room))
         .map(depth)
         .max()
         .unwrap_or(0);

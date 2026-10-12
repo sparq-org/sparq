@@ -2319,7 +2319,8 @@ fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
     let mut used = vec![false; vs.len()];
     // `stack[i]`: the binding after matching `ps[..i]`, and the next value statement to
     // try for `ps[i]`.
-    let mut stack: Vec<(Binding, usize)> = vec![(b.clone(), 0)];
+    let mut stack: Vec<(Binding, usize)> = Vec::with_capacity(ps.len() + 1);
+    stack.push((b.clone(), 0));
     while !stack.is_empty() {
         let i = stack.len() - 1;
         let (cur, next) = &mut stack[i];
@@ -2994,24 +2995,52 @@ fn containment_search(
     out: &mut Vec<Binding>,
     steps: &mut bounded::StepBudget,
 ) {
-    /// A visit: the pattern statements still to match (`order[at..]`, as indices into
-    /// `pat`), the binding so far, and how many more times a statement whose list
-    /// subject is unbound may be deferred behind the others.
+    /// The order the pattern statements are matched in, as indices into `pat`: as
+    /// written, until a statement is deferred behind the others.
+    #[derive(Clone)]
+    enum Order {
+        Written(usize),
+        Deferred(std::rc::Rc<[usize]>),
+    }
+    impl Order {
+        fn len(&self) -> usize {
+            match self {
+                Order::Written(n) => *n,
+                Order::Deferred(o) => o.len(),
+            }
+        }
+        fn get(&self, at: usize) -> Option<usize> {
+            match self {
+                Order::Written(n) => (at < *n).then_some(at),
+                Order::Deferred(o) => o.get(at).copied(),
+            }
+        }
+        /// The statements after `at`, then the one at `at`.
+        fn defer(&self, at: usize) -> Order {
+            let order = (at + 1..self.len()).chain([at]).filter_map(|k| self.get(k));
+            Order::Deferred(order.collect())
+        }
+    }
+    /// A visit: the pattern statements still to match (`order` from `at`), the binding
+    /// so far, and how many more times a statement whose list subject is unbound may be
+    /// deferred behind the others.
     struct Visit {
-        order: std::rc::Rc<[usize]>,
+        order: Order,
         at: usize,
         b: Binding,
         defers_left: usize,
     }
-    /// A pattern statement being matched against the scope: the visit, and the next
+    /// Pattern statement `pi` being matched against the scope: its visit, and the next
     /// scope statement to try.
     struct Scan {
         visit: Visit,
+        pi: usize,
         next: usize,
     }
-    let mut scans: Vec<Scan> = Vec::new();
+    // At most one scan per pattern statement is in progress.
+    let mut scans: Vec<Scan> = Vec::with_capacity(pat.len());
     let mut visit = Some(Visit {
-        order: (0..pat.len()).collect(),
+        order: Order::Written(pat.len()),
         at: 0,
         b: seed,
         defers_left: pat.len(),
@@ -3027,7 +3056,7 @@ fn containment_search(
             if !steps.take() {
                 return;
             }
-            let Some(&pi) = order.get(at) else {
+            let Some(pi) = order.get(at) else {
                 out.push(b);
                 continue;
             };
@@ -3060,11 +3089,7 @@ fn containment_search(
                         }
                         Term::Var(_) if rest > 0 && defers_left > 0 => {
                             // Subject not yet bound — try the other triples first.
-                            let order = order[at + 1..]
-                                .iter()
-                                .chain([&order[at]])
-                                .copied()
-                                .collect();
+                            let order = order.defer(at);
                             let defers_left = defers_left - 1;
                             visit = Some(Visit {
                                 order,
@@ -3085,6 +3110,7 @@ fn containment_search(
                     b,
                     defers_left,
                 },
+                pi,
                 next: 0,
             });
         }
@@ -3093,7 +3119,7 @@ fn containment_search(
             return;
         };
         let v = &scan.visit;
-        let p = &pat[v.order[v.at]];
+        let p = &pat[scan.pi];
         while let Some(st) = scope.get(scan.next) {
             scan.next += 1;
             let mut nb = v.b.clone();
