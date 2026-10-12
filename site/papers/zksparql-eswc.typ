@@ -673,8 +673,7 @@ supplementary material lists the test cases and records (§S3) and the software 
 
 == Which queries the evaluator answers <expressivity>
 
-Our evaluator implements SPARQL 1.1 @sparql11, without the additions of SPARQL 1.2 such as triple
-terms. _Proved._ With signature checks, our proofs cover `SELECT` results that keep duplicate rows, true and
+_Proved._ With signature checks, our proofs cover `SELECT` results that keep duplicate rows, true and
 false `ASK`, and `CONSTRUCT`, each over one credential and a basic graph pattern
 (§#ref(<proved>, supplement: none)); the false `ASK` is a closed-world answer. Without signature
 checks, they also cover `UNION`, `VALUES`, `OPTIONAL`, `MINUS`, `EXISTS`, `NOT EXISTS`, a counting
@@ -697,7 +696,8 @@ alternative, inverse, one-or-more and zero-or-more property paths; and `SELECT`,
 // are equal in every one-credential configuration; asserts beside the sweep table (supplementary
 // material) keep these two sentences true if the evidence changes.
 
-_Not supported._ The evaluator rejected `SERVICE`; `NOW`, `RAND` and `BNODE`, whose values the
+_Not supported._ Our evaluator implements SPARQL 1.1 @sparql11, without the additions of SPARQL 1.2
+such as triple terms. It rejected `SERVICE`; `NOW`, `RAND` and `BNODE`, whose values the
 query and the data do not fix; a custom function; a triple term; a nested `EXISTS`; and `EXISTS`
 and `NOT EXISTS` over any credential with a blank node, as each generated credential has. With four
 credentials, it also rejected a zero-or-more property path whose result exceeded its limits. The
@@ -733,7 +733,8 @@ Our two Noir circuits prove, for `SELECT DISTINCT` queries over one basic graph 
 returned row is a solution, not that none is missing; such a proof gives an answer only where those
 rows form a permitted result, as when they reach the query's `LIMIT`. The matched triple is part of
 the witness in the baseline circuit and a public input in the public-triple circuit; both make the
-same signature and membership checks (@evidence-table). Preliminary timings, from
+same numbers of signature and membership checks, so their comparison isolates the effect of making
+the triple public. @evidence-table gives their proofs and tests. Preliminary timings, from
 #headline("zkvcq.pp_n_per_cell") runs per circuit and capacity on a shared machine (supplementary
 §S4), are too few to show a saving.
 
