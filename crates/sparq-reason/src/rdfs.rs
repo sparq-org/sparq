@@ -636,21 +636,27 @@ pub(crate) fn closure_derived(
     emit_dr_closure: bool,
     mono: &MonoOwl,
 ) -> Vec<[Id; 3]> {
-    let first = closure_round(original, None, v, emit_dr_closure, mono);
-    if !first.meta || first.derived.is_empty() {
-        return first.derived;
-    }
-    // Plain RDFS (no OWL axioms, no scm-dom/rng output): the semi-naive fixpoint, which is
-    // linear in the joins it performs. The round loop below stays for the OWL caller, whose
-    // monotone axioms (equivalence, inverse, symmetric) it alone understands.
-    if !emit_dr_closure && mono.is_empty() {
+    // Plain RDFS (no OWL axioms, no scm-dom/rng output) on a meta schema: the semi-naive
+    // fixpoint, which is linear in the joins it performs. Deciding "meta" needs only the
+    // subPropertyOf closure and the raw domains/ranges, so no single-pass round runs first.
+    // The round loop below stays for the OWL caller, whose monotone axioms (equivalence,
+    // inverse, symmetric) it alone understands.
+    let plain = !emit_dr_closure && mono.is_empty();
+    if plain && plain_schema_is_meta(original, v) {
         let mut d: Vec<[Id; 3]> = meta::MetaClosure::build(original, v)
             .facts
             .into_iter()
             .filter(|t| !original.contains(t))
             .collect();
+        #[cfg(feature = "parallel")]
+        rayon::slice::ParallelSliceMut::par_sort_unstable(&mut d[..]);
+        #[cfg(not(feature = "parallel"))]
         d.sort_unstable();
         return d;
+    }
+    let first = closure_round(original, None, v, emit_dr_closure, mono);
+    if !first.meta || first.derived.is_empty() {
+        return first.derived;
     }
     // Later rounds saturate the schema from its RAW edges only — the asserted schema triples
     // plus the schema triples a rule derived by sweeping (rdfs7 / the OWL property rewrite).
@@ -678,6 +684,23 @@ pub(crate) fn closure_derived(
         .collect();
     d.sort_unstable();
     d
+}
+
+/// [`schema_is_meta`] of `original`'s own schema, with no monotone-OWL axioms.
+fn plain_schema_is_meta(original: &FxHashSet<[Id; 3]>, v: &Vocab) -> bool {
+    let mut sp: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+    let mut dom: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+    let mut rng: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+    for &[s, p, o] in original {
+        if p == v.sub_prop {
+            sp.entry(s).or_default().push(o);
+        } else if p == v.domain {
+            dom.entry(s).or_default().push(o);
+        } else if p == v.range {
+            rng.entry(s).or_default().push(o);
+        }
+    }
+    schema_is_meta(v, &transitive_closure(&sp), &dom, &rng, &MonoOwl::default())
 }
 
 /// Whether the schema is "meta" (see [`ClosureRound::meta`]): some RDFS schema property is in
