@@ -603,7 +603,8 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                 };
                 if let Some(g) = ground_triple(&c, &b) {
                     // A conclusion past the term-depth limit is dropped, as a cut.
-                    if bw.settle(bounded::generated(&g)) && emitted.insert(g.clone()) {
+                    if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
+                    {
                         out.push(g);
                     }
                 }
@@ -1125,6 +1126,15 @@ fn run_closure(
     // initial-source guarantee.
     let sk_prefix = fresh_blank_prefix(&document_blank_labels(&parsed), "__sk");
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
+    // A top-level run keeps terms as deep as those it was handed (terms built in code can
+    // nest past the parser's limit); rules cannot build deeper ([`bounded::given_terms`]).
+    if inherit.is_none() {
+        let rule_terms = rules
+            .iter()
+            .chain(&backward_rules)
+            .flat_map(|r| r.premise.iter().chain(&r.conclusion).flatten());
+        bounded::given_terms(truncated, facts0.iter().flatten().chain(rule_terms));
+    }
     // Premises evaluate left-to-right with no coroutining — reorder each
     // premise so a builtin runs only after the atoms that produce its inputs
     // (cwm evaluates builtins "when ready"; concat.n3 test13f writes the
@@ -1441,7 +1451,9 @@ fn run_closure(
                         };
                         if let Some(g) = ground_triple(&c, &b) {
                             // A conclusion past the term-depth limit is dropped, as a cut.
-                            if !facts.contains(&g) && bw.settle(bounded::generated(&g)) {
+                            if !facts.contains(&g)
+                                && bw.settle(bounded::generated(&bw.truncated, &g))
+                            {
                                 // The supporting facts: premise patterns instantiated under b that
                                 // are actual facts (excludes builtins / list structure).
                                 let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
@@ -1986,7 +1998,7 @@ fn match_premise_seeded(
 /// generators, virtual list access, scoped operators, backward proofs) filter their
 /// bindings through here, so every binding a premise carries forward is within it.
 fn within_depth(b: &Binding, bw: &BwCtx) -> bool {
-    bw.settle(bounded::generated(b.values()))
+    bw.settle(bounded::generated(&bw.truncated, b.values()))
 }
 
 /// Whether a premise reads the fact store outside its join atoms, from each relation's

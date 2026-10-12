@@ -70,6 +70,9 @@ pub(crate) struct Truncation {
     limits: ClosureLimits,
     /// Units of the run's stack allowance held by steps in progress ([`RUN_STACK`]).
     stack: Rc<Cell<usize>>,
+    /// How deep a term the run keeps ([`generated`]): [`TERM_DEPTH`], or the deepest term
+    /// it was given ([`given_terms`]).
+    term_depth: Rc<Cell<usize>>,
 }
 
 impl Truncation {
@@ -85,6 +88,7 @@ impl Truncation {
             cut: Rc::default(),
             limits,
             stack: Rc::default(),
+            term_depth: Rc::new(Cell::new(TERM_DEPTH)),
         }
     }
 
@@ -363,7 +367,9 @@ const PARSE_DEPTH: usize = 64;
 /// shallow document builds terms deep enough that substitution, matching, hashing and
 /// dropping them exhaust the stack. A term evaluation builds past this is dropped as a
 /// cut ([`generated`]); everything evaluation keeps is at most this deep, and what it
-/// builds before the check is at most this plus the nesting of the rule text. Twice
+/// builds before the check is at most this plus the nesting of the rule text. A run
+/// handed deeper terms directly (as terms, not text: [`given_terms`]) keeps terms as
+/// deep as those, and no deeper. Twice
 /// [`PARSE_DEPTH`], so a parsed document (`log:semantics`, `log:parsedAsN3`) quoted as a
 /// formula value, and rules over it, stay inside. Pinned on a 2 MiB thread by the
 /// `n3::tests` small-stack tests (#6732).
@@ -384,10 +390,62 @@ fn fits(t: &super::Term, room: usize) -> bool {
     }
 }
 
-/// Terms evaluation built (a conclusion, the values of a binding): `true` when every one
-/// is within [`TERM_DEPTH`]; otherwise `false` and a cut, and the caller drops them.
-pub(crate) fn generated<'a>(terms: impl IntoIterator<Item = &'a super::Term>) -> Bounded<bool> {
-    if terms.into_iter().all(|t| fits(t, TERM_DEPTH)) {
+/// The nesting of `t` (0 for an IRI, literal, blank node or variable), walked with an
+/// explicit stack, so it takes no stack per level.
+fn depth(t: &super::Term) -> usize {
+    use super::Term;
+    fn children(t: &Term) -> Vec<&Term> {
+        match t {
+            Term::List(ms) => ms.iter().collect(),
+            Term::Formula(ts) => ts.iter().flatten().collect(),
+            Term::Triple(tr) => tr.iter().collect(),
+            Term::Iri(_) | Term::Lit(..) | Term::Blank(_) | Term::Var(_) => Vec::new(),
+        }
+    }
+    let mut deepest = 0;
+    let mut stack: Vec<(&Term, usize)> = children(t).into_iter().map(|c| (c, 1)).collect();
+    if !stack.is_empty() {
+        deepest = 1;
+    }
+    while let Some((t, d)) = stack.pop() {
+        let below = children(t);
+        if !below.is_empty() {
+            deepest = deepest.max(d + 1);
+            stack.extend(below.into_iter().map(|c| (c, d + 1)));
+        }
+    }
+    deepest
+}
+
+/// The terms a TOP-LEVEL run was handed (its facts and rules). Parsed text is within
+/// [`PARSE_DEPTH`], but a caller can hand a run terms built in code (the incremental
+/// graph's base facts): a rule that copies one builds nothing deeper than its input, so
+/// the run's term allowance ([`generated`]) is raised to the deepest of them. Rules still
+/// cannot build past it.
+pub(crate) fn given_terms<'a>(run: &Truncation, terms: impl IntoIterator<Item = &'a super::Term>) {
+    use super::Term;
+    let compound = |t: &&Term| matches!(t, Term::List(_) | Term::Formula(_) | Term::Triple(_));
+    let deepest = terms
+        .into_iter()
+        .filter(compound)
+        .map(depth)
+        .max()
+        .unwrap_or(0);
+    if deepest > run.term_depth.get() {
+        run.term_depth.set(deepest);
+    }
+}
+
+/// Terms evaluation built (a conclusion, the values of a binding) in the run `run`:
+/// `true` when every one is within the run's term allowance ([`TERM_DEPTH`], or the
+/// deepest term the run was given); otherwise `false` and a cut, and the caller drops
+/// them.
+pub(crate) fn generated<'a>(
+    run: &Truncation,
+    terms: impl IntoIterator<Item = &'a super::Term>,
+) -> Bounded<bool> {
+    let room = run.term_depth.get();
+    if terms.into_iter().all(|t| fits(t, room)) {
         Bounded::complete(true)
     } else {
         Bounded::cut(false, TERM_DEPTH_CUT)
