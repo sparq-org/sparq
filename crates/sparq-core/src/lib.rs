@@ -2354,6 +2354,8 @@ impl Graph {
             finalize.join().map_err(|_| "dict-finalize thread panicked".to_string())??;
             Ok(())
         })?;
+        // memmap2's non-unix stub has no Drop impl; on unix this unmaps the input.
+        #[allow(clippy::drop_non_drop)]
         drop(map);
         #[cfg(all(feature = "mmap", feature = "parallel"))]
         if build_timing::enabled() {
@@ -4939,7 +4941,10 @@ fn compress_perm_file_in_place(path: &std::path::Path) -> Result<(), String> {
         w.push(row).map_err(|e| e.to_string())?;
     }
     w.finish(&tmp).map_err(|e| e.to_string())?;
-    drop(map); // release the raw mapping before replacing the file underneath it
+    // Release the raw mapping before replacing the file underneath it (memmap2's
+    // non-unix stub has no Drop impl, hence the allow).
+    #[allow(clippy::drop_non_drop)]
+    drop(map);
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     Ok(())
 }
