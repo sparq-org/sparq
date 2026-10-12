@@ -715,12 +715,15 @@ fn canonical_new_firings(
         let full: Vec<Vec<String>> = fresh
             .iter()
             .map(|(_, b)| {
-                let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+                let mut f: Vec<String> =
+                    b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
                 f.sort_unstable();
                 f
             })
             .collect();
-        order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0).then_with(|| full[x].cmp(&full[y])));
+        order.sort_unstable_by(|&x, &y| {
+            fresh[x].0.cmp(&fresh[y].0).then_with(|| full[x].cmp(&full[y]))
+        });
     } else {
         order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0).then(x.cmp(&y)));
     }
