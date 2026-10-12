@@ -3670,11 +3670,11 @@ fn has_scheme(s: &str) -> bool {
 pub const LINKSET_COST_BUDGET: usize = 2 << 20;
 
 /// The most a linkset PUT body may be: what the resource's metadata, which stores the linkset,
-/// may hold. What reading it may allocate is bounded apart from its size ([`read_linkset`]).
+/// may hold. What reading it may allocate is bounded apart from its size (`read_linkset`).
 pub const LINKSET_PUT_BODY: usize = LINKSET_SERVED_BYTES;
 
 /// The most memory parsing a linkset PUT body holds at once per byte its scan charged
-/// ([`read_linkset`]): measured as peak live bytes with a counting allocator over the smallest
+/// (`read_linkset`): measured as peak live bytes with a counting allocator over the smallest
 /// syntactic units, escapes, long keys, deep nesting and mixes of them, repeated
 /// (`tests/linkset_parse_amplification.rs`), whose worst is arrays nested in arrays (about twice
 /// the charge, an array's first growth each), and doubled.
