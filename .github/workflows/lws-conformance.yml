@@ -107,11 +107,15 @@ jobs:
       - name: build sparq-lws-core
         run: cargo build -p sparq-lws-core
       # LWS.net's own definitions first: the run below overwrites them with the YAML-LD suite.
+      # A ratchet: of its 57 tests, one fails on purpose ("Delete returns 999"), and "Container
+      # response varies by Accept" fails in the harness (its header extractor takes a single
+      # value, and .NET splits our list-valued Vary, "Accept, Origin", into two). Raise the floor
+      # with the change that earns it.
       - name: run lws-net (LWS.net's own definitions)
         env:
           LWS_NET: ${{ github.workspace }}/LWS.net
           LWS_TESTS: builtin
-          LWS_NET_MIN_PASSED: "0"
+          LWS_NET_MIN_PASSED: "55"
           OUT: ${{ github.workspace }}/target/lws-net-builtin
         run: crates/sparq-lws-core/conformance/lws/lws-net.sh
       - name: run lws-net
