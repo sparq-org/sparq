@@ -296,7 +296,7 @@ fn operand_disclosable(
             // per-source mark as a predicate. An empty contributing set is not consent, and an
             // anonymous global IRI (empty predicate) has no predicate a source can mark public,
             // so both stay hidden.
-            RoutingPolicy::Strict => all_sources_disclose,
+            RoutingPolicy::Strict => !predicate.is_empty() && all_sources_disclose,
         },
         // A predicate operand is disclosable only by the affirmative per-source public mark,
         // identically under both policies (default-deny — no convention shortcut for a predicate).
@@ -305,16 +305,16 @@ fn operand_disclosable(
 }
 
 /// The envelope label recorded for a disclosed [`Operand::GlobalIri`] that binds no predicate
-/// (an anonymous global IRI). It is the one disclosed operand
-/// [`ratify_envelope`](crate::ratify_envelope) exempts from the holder re-check, so no real
-/// operand may carry it as a predicate id: [`route_operators`] and
+/// (an anonymous global IRI). [`ratify_envelope`](crate::ratify_envelope) treats it like any
+/// other disclosed operand: each participating holder must mark this label public to consent.
+/// No real operand may carry it as a predicate id: [`route_operators`] and
 /// [`assemble_leakage_envelope`](crate::assemble_leakage_envelope) refuse one that does.
 pub const ANONYMOUS_GLOBAL_IRI: &str = "<global-iri>";
 
 /// Refuse operands whose predicate id would be ambiguous in the leakage envelope: a
 /// [`Operand::Predicate`] with an empty id, or any operand whose predicate id is the
 /// [`ANONYMOUS_GLOBAL_IRI`] label. Either would let a predicate disclosure be recorded as, or
-/// confused with, the anonymous global IRI that the holder re-check exempts.
+/// confused with, an anonymous global IRI.
 pub(crate) fn validate_operands(
     operators: &[QueryOperator],
     phase: SeamPhase,
@@ -676,6 +676,29 @@ mod tests {
         );
     }
 
+    /// A descriptor that marks the empty predicate public does not make an anonymous global IRI
+    /// disclosable under the strict policy: the empty predicate is never consent.
+    #[test]
+    fn strict_policy_ignores_a_public_mark_on_the_empty_predicate() {
+        let privacy = vec![SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(MEMBER_OF)
+            .public_predicate("")
+            .build()];
+        let selected = membership_selection(&["http://a/"], &privacy);
+        let ops = vec![QueryOperator::new(
+            "anonymous-iri-join",
+            OperatorClass::EqualityJoin,
+            vec![Operand::GlobalIri {
+                predicate: String::new(),
+            }],
+        )];
+        let out = route_operators(&selected, &privacy, &ops, RoutingPolicy::Strict).unwrap();
+        assert_eq!(
+            out.routing[0].routing,
+            Routing::Hidden(OperatorClass::EqualityJoin)
+        );
+    }
+
     /// A selected participant with NO privacy descriptor is refused before any operator is
     /// classified, under both policies and for both operand kinds. Without this check the empty
     /// contributing set made a strict global IRI disclosable.
@@ -760,7 +783,7 @@ mod tests {
     }
 
     /// An operand whose predicate id is empty or the reserved anonymous-global-IRI label is
-    /// refused, so a predicate disclosure cannot be recorded as the holder-exempt placeholder.
+    /// refused, so a predicate disclosure cannot be recorded as the anonymous-global-IRI label.
     #[test]
     fn reserved_or_empty_operand_predicate_is_refused() {
         let privacy = vec![SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))

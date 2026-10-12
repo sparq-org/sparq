@@ -66,8 +66,8 @@ assert!(sparq_fedplan_mpc::bind_plan_to_proof(&claimed, &statement).is_err()); /
   (constraint C-B — the most-private holder wins), AND the **verifier** rejects an over-leaking envelope (distinct disclosed operands exceeding its
   budget), returning a `RatificationOutcome` naming *which* ratification failed and *why*. The holder policies must cover the envelope's participation
   set exactly: a missing participant policy (including an empty list), a policy for a non-participant, or a disclosure with no participant at all is
-  `ParticipationMismatch`. The one exemption from the holder re-check is a disclosed anonymous global IRI (`ANONYMOUS_GLOBAL_IRI`, default routing
-  policy only), which names no predicate a holder can mark; it still counts against the verifier budget. These are plan-time policy checks over the
+  `ParticipationMismatch`. There is no holder-check exemption: a disclosed anonymous global IRI is recorded as
+  `ANONYMOUS_GLOBAL_IRI`, which each holder must mark public to consent to. These are plan-time policy checks over the
   supplied descriptors, not cryptographic enforcement.
 - **`prune_source_combinations`** (Phase 6, sq-pwr.3 + sq-xkrt) — the FedUP-style **result-aware source-combination prune** over the Phase-2 selection. The
   seam's secure-join cost grows with the number of source *combinations* (one source per pattern) it considers, so this pass surfaces the combinations that

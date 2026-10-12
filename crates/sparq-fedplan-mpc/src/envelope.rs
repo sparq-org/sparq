@@ -177,8 +177,7 @@ fn operand_disclosure_label(operand: &Operand) -> String {
 ///    for a non-participating source are both rejected as
 ///    [`RatificationOutcome::ParticipationMismatch`], so a holder can neither be skipped nor be
 ///    substituted by an unrelated one. An envelope with no participating source that discloses
-///    any operand other than [`ANONYMOUS_GLOBAL_IRI`] is rejected the same way: with no holder,
-///    nobody consented to the disclosure.
+///    any operand is rejected the same way: with no holder, nobody consented to the disclosure.
 /// 1. **Holder fail-closed re-check (constraint C-B).** Each `holder` descriptor independently
 ///    re-derives whether the envelope discloses one of *its own* private predicates. If the plan
 ///    routes an operator `Disclosed` whose operands include a predicate the holder has **not**
@@ -191,11 +190,10 @@ fn operand_disclosure_label(operand: &Operand) -> String {
 ///    "no budget cap" (accept any envelope the holders cleared). This is the verifier-side
 ///    "the leak is bounded and declared" check.
 ///
-/// **Public-input exception.** The [`ANONYMOUS_GLOBAL_IRI`] operand (a disclosed global IRI that
-/// binds no predicate, which only [`RoutingPolicy::Default`](crate::RoutingPolicy::Default) can
-/// produce) is the single operand exempt from the holder re-check: it names no predicate a holder
-/// can mark. It still counts against `verifier_budget`. A caller that wants holders to gate such
-/// operands uses [`RoutingPolicy::Strict`](crate::RoutingPolicy::Strict), which hides them.
+/// **No exemptions.** Every disclosed operand goes through the holder re-check, including the
+/// [`ANONYMOUS_GLOBAL_IRI`] label recorded for a disclosed global IRI that binds no predicate: a
+/// holder consents to that disclosure only by marking the label public. The re-check trusts the
+/// envelope's operand labels; it does not re-derive them from the typed operators.
 ///
 /// Returns a [`RatificationOutcome`] enumerating, honestly, *which* ratification(s) failed and
 /// *why* — an over-disclosing plan is reported with the offending source + predicate (holder
@@ -249,12 +247,7 @@ pub fn ratify_envelope(
             detail: "SourcePrivacyDescriptor for a source outside the envelope's participation set",
         };
     }
-    if participants.is_empty()
-        && envelope
-            .distinct_disclosed_operands()
-            .iter()
-            .any(|p| p != ANONYMOUS_GLOBAL_IRI)
-    {
+    if participants.is_empty() && !envelope.distinct_disclosed_operands().is_empty() {
         return RatificationOutcome::ParticipationMismatch {
             source_id: String::new(),
             detail: "plan discloses an operand but declares no participating holder to consent",
@@ -269,11 +262,6 @@ pub fn ratify_envelope(
             continue;
         }
         for predicate in &op.disclosed_operands {
-            // A global-IRI placeholder operand binds no predicate a holder can object to; skip it
-            // (it is disclosed by convention, not over a holder's private term).
-            if predicate == ANONYMOUS_GLOBAL_IRI {
-                continue;
-            }
             for (id, holder) in &by_id {
                 if !holder.may_disclose(predicate) {
                     return RatificationOutcome::HolderRejected {
@@ -741,40 +729,74 @@ mod tests {
         );
     }
 
-    /// The load-bearing C-B soundness boundary for the placeholder: a `<global-iri>` disclosure is
-    /// disclosed BY CONVENTION (it binds no holder's named predicate), so a holder's fail-closed
-    /// re-check must NOT spuriously reject it — even a deny-all holder ratifies. A regression that
-    /// dropped the `<global-iri>` skip would falsely reject every plan that discloses an anonymous
-    /// global IRI. [OPUS-4.8] sq-bif.
+    /// The placeholder gets no holder-check exemption: a deny-all holder rejects a disclosed
+    /// anonymous global IRI, and a holder that explicitly marks the label public consents. A
+    /// relabelled envelope therefore cannot use the label to skip a holder's veto.
     #[test]
-    fn placeholder_global_iri_is_not_held_against_a_deny_all_holder() {
+    fn placeholder_global_iri_needs_explicit_holder_consent() {
         let (routing, ops) = disclosed_empty_global_iri_plan();
         let mut env =
             assemble_leakage_envelope(&routing, &ops, &SelectedPrivateSources::default()).unwrap();
         env.participating_sources = vec!["http://a/".to_string()];
-        // A maximally-private holder discloses NOTHING — yet it must still ratify the placeholder,
-        // because the placeholder is not over any named predicate it could object to.
         let deny_all = SourcePrivacyDescriptor::deny_all(SourceId::new("http://a/"));
+        match ratify_envelope(&env, &[deny_all], None) {
+            RatificationOutcome::HolderRejected { predicate, .. } => {
+                assert_eq!(predicate, ANONYMOUS_GLOBAL_IRI)
+            }
+            other => panic!("expected a holder rejection, got {other:?}"),
+        }
+        let consenting = SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(ANONYMOUS_GLOBAL_IRI)
+            .build();
         assert_eq!(
-            ratify_envelope(&env, &[deny_all], None),
-            RatificationOutcome::Ratified,
-            "an anonymous global IRI is disclosed by convention; no holder can veto it"
+            ratify_envelope(&env, &[consenting], None),
+            RatificationOutcome::Ratified
         );
     }
 
-    /// The placeholder is skipped by the HOLDER check but still COUNTS against the VERIFIER budget:
-    /// it is a real disclosure (the verifier bounds total operand disclosure), so a budget of 0
-    /// rejects it on the verifier side even though every holder accepted. This pins the precise
-    /// asymmetry — holder-exempt, verifier-counted. [OPUS-4.8] sq-bif.
+    /// A private predicate relabelled as the placeholder in a hand-edited envelope is still vetoed
+    /// by a holder that has not consented to the label.
+    #[test]
+    fn relabelled_private_predicate_is_still_vetoed() {
+        let env = LeakageEnvelope {
+            operators: vec![OperatorDisclosure {
+                operator: "salary-threshold".to_string(),
+                class: OperatorClass::Comparison,
+                disclosed: true,
+                disclosed_operands: vec![ANONYMOUS_GLOBAL_IRI.to_string()],
+            }],
+            participating_sources: vec!["http://a/".to_string()],
+        };
+        assert!(matches!(
+            ratify_envelope(&env, &[flatmate_privacy("http://a/")], Some(1)),
+            RatificationOutcome::HolderRejected { .. }
+        ));
+    }
+
+    /// A disclosed placeholder with no participant is a disclosure nobody consented to: rejected.
+    #[test]
+    fn placeholder_disclosure_without_any_participant_is_rejected() {
+        let (routing, ops) = disclosed_empty_global_iri_plan();
+        let env =
+            assemble_leakage_envelope(&routing, &ops, &SelectedPrivateSources::default()).unwrap();
+        assert!(env.participating_sources.is_empty());
+        assert!(matches!(
+            ratify_envelope(&env, &[], Some(1)),
+            RatificationOutcome::ParticipationMismatch { .. }
+        ));
+    }
+
+    /// The placeholder counts against the VERIFIER budget like any disclosed operand: a budget of
+    /// 0 rejects it even though the (consenting) holder accepted. [OPUS-4.8] sq-bif.
     #[test]
     fn placeholder_global_iri_counts_against_the_verifier_budget() {
         let (routing, ops) = disclosed_empty_global_iri_plan();
         let mut env =
             assemble_leakage_envelope(&routing, &ops, &SelectedPrivateSources::default()).unwrap();
         env.participating_sources = vec!["http://a/".to_string()];
-        let holders = [SourcePrivacyDescriptor::deny_all(SourceId::new(
-            "http://a/",
-        ))];
+        let holders = [SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(ANONYMOUS_GLOBAL_IRI)
+            .build()];
         // Budget 0: one distinct disclosed operand (`<global-iri>`) exceeds it ⇒ verifier rejects.
         match ratify_envelope(&env, &holders, Some(0)) {
             RatificationOutcome::VerifierRejected {
@@ -986,7 +1008,7 @@ mod tests {
     }
 
     /// Assembly refuses an operand that would be recorded under the reserved placeholder label,
-    /// so a predicate disclosure cannot pass as the holder-exempt anonymous global IRI.
+    /// so a predicate disclosure cannot be recorded as an anonymous global IRI.
     #[test]
     fn assembly_refuses_the_reserved_placeholder_as_a_predicate() {
         let ops = vec![QueryOperator::new(
