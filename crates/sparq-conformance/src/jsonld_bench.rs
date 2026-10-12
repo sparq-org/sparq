@@ -188,9 +188,9 @@ fn json_ld_array_equal_unordered(xs: &[Value], ys: &[Value]) -> bool {
 ///
 /// Each document is expanded with its own embedded `@context`, under `opts` with
 /// `expand_context` cleared (that option only applies to the lane's INPUT) and
-/// `frame_expansion` off. If both expansions fail with the same error code the
-/// re-expanded check has no evidence either way and only the document-level
-/// result counts; a one-sided or different failure is a mismatch.
+/// `frame_expansion` off. If either expansion fails the comparison fails: a
+/// shared failure gives no evidence that the payloads agree, so accepting it
+/// would let a reordered `@json` payload through.
 ///
 /// # Errors
 /// `Err(reason)` describing the first comparison that failed.
@@ -217,7 +217,6 @@ pub fn json_ld_output_equal(
     match (reexpand(got), reexpand(want)) {
         (Ok(g), Ok(w)) if json_ld_equal(&g, &w) => Ok(()),
         (Ok(_), Ok(_)) => Err("re-expanded documents differ".to_string()),
-        (Err(g), Err(w)) if g == w => Ok(()),
         (g, w) => Err(format!(
             "re-expansion disagrees: got {:?}, want {:?}",
             g.err(),
@@ -391,6 +390,19 @@ mod tests {
         assert!(json_ld_output_equal(
             &coerced(json!([1, 2])),
             &coerced(json!([2, 1])),
+            &opts,
+            &loader
+        )
+        .is_err());
+        // A context both sides fail to load must not wave the reordering through.
+        let remote = |payload: Value| {
+            json!({"@context": ["https://example.org/context",
+                                {"p": {"@id": "https://example.org/p", "@type": "@json"}}],
+                   "p": payload})
+        };
+        assert!(json_ld_output_equal(
+            &remote(json!([1, 2])),
+            &remote(json!([2, 1])),
             &opts,
             &loader
         )
