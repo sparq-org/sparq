@@ -415,15 +415,20 @@ fn forbidden_ip_table() -> Vec<(&'static str, bool)> {
         // v6 link-local fe80::/10 boundaries
         ("fe80::1", true),
         ("febf::1", true),
-        ("fe7f::1", false),
+        ("fe7f::1", true), // outside global unicast 2000::/3
         // v6 site-local fec0::/10 (deprecated, still internal)
         ("fec0::1", true),
         ("feff::1", true),
         // v6 unique-local fc00::/7 boundaries
         ("fc00::1", true),
         ("fdff::1", true),
-        ("fbff::1", false),
-        ("fe00::1", false),
+        ("fbff::1", true), // outside global unicast 2000::/3
+        ("fe00::1", true),
+        // global unicast 2000::/3 edges
+        ("1fff:ffff::1", true),
+        ("2000::1", false),
+        ("3fff:ffff::1", false),
+        ("4000::1", true),
         // v4-mapped v6 unwraps to the embedded v4
         ("::ffff:10.0.0.1", true),
         ("::ffff:8.8.8.8", false),
