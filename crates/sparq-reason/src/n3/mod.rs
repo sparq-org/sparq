@@ -195,77 +195,7 @@ pub type Resolver = dyn Fn(&str) -> Option<String>;
 /// Keying on formula CONTENT (not the document IRI) means the guard needs no extra plumbing
 /// through the lazy `log:semantics` → `log:supports` evaluation hand-off, and is exact for
 /// the recursion that actually loops (a formula closing itself, transitively).
-///
-/// The same shared state carries the run's runtime-parse blank allocator, so every nested
-/// closure draws those labels from ONE allocator ([`run_shared::RunShared`]).
-type VisitedDocs = std::rc::Rc<std::cell::RefCell<run_shared::RunShared>>;
-
-/// The state one top-level run shares with all of its nested closures. Private fields and
-/// one constructor ([`RunShared::for_sources`](run_shared::RunShared::for_sources)): a run
-/// cannot hold an allocator that was not made fresh against its sources.
-mod run_shared {
-    use super::{document_blank_labels, fresh_blank_prefix, parser, VisitedDocs};
-    use rustc_hash::{FxHashMap, FxHashSet};
-
-    pub(super) struct RunShared {
-        /// Content keys of the formulas whose closure is in progress (the import-cycle
-        /// guard, [`VisitedDocs`]).
-        pub(super) docs: FxHashSet<u64>,
-        /// Blank labels for documents parsed at run time.
-        parsed: ParsedBlanks,
-    }
-
-    /// The ONE allocator of blank labels for documents parsed at run time
-    /// (`log:parsedAsN3`, `log:semantics`). Such a document's blanks are its own: they are
-    /// standardized apart into `{prefix}{key:016x}_{label}`, `key` a hash of the
-    /// document's text and base (its scope). So the label depends on the document alone,
-    /// never on the order a run meets documents in: the same text under the same base
-    /// always parses to the same formula, in every run over the same sources (a
-    /// materialization and a proof re-derivation agree). Two documents never share a
-    /// blank: a second document whose key is already taken is refused, failing the run.
-    /// No runtime text can spell a label of the run's sources (which include a
-    /// `MaterializedN3Graph` caller's `__bs{k}_` labels): `prefix` is the smallest
-    /// `__rp{k}_` no blank of any source starts with.
-    struct ParsedBlanks {
-        prefix: String,
-        docs: FxHashMap<u64, (String, String)>,
-    }
-
-    impl RunShared {
-        /// The shared state of a top-level run over `sources` (every document whose
-        /// blanks the run holds: a query run passes its data and its query document).
-        pub(super) fn for_sources(sources: &[&parser::Parsed]) -> VisitedDocs {
-            let mut labels = FxHashSet::default();
-            for p in sources {
-                labels.extend(document_blank_labels(p));
-            }
-            let parsed = ParsedBlanks {
-                prefix: fresh_blank_prefix(&labels, "__rp"),
-                docs: FxHashMap::default(),
-            };
-            let shared = RunShared { docs: FxHashSet::default(), parsed };
-            std::rc::Rc::new(std::cell::RefCell::new(shared))
-        }
-
-        /// The label prefix for the blanks of the document parsed from `text` under
-        /// `base`; `Err` when another document has its key.
-        pub(super) fn parsed_prefix(&mut self, text: &str, base: &str) -> Result<String, String> {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            (text, base).hash(&mut h);
-            let key = h.finish();
-            let pb = &mut self.parsed;
-            let owner = pb.docs.entry(key).or_insert_with(|| (text.to_string(), base.to_string()));
-            if owner.0 != text || owner.1 != base {
-                return Err(format!(
-                    "n3: two documents parsed at run time share the blank-node scope key \
-                     {key:016x}; refused rather than let their blank nodes alias"
-                ));
-            }
-            Ok(format!("{}{key:016x}_", pb.prefix))
-        }
-    }
-}
+type VisitedDocs = std::rc::Rc<std::cell::RefCell<FxHashSet<u64>>>;
 
 /// A stable structural key for a quoted formula, used by the import-cycle guard
 /// ([`VisitedDocs`]) to recognise a closure that is already in progress up the stack.
@@ -297,26 +227,6 @@ struct BwCtx<'a> {
 }
 
 impl BwCtx<'_> {
-    /// The statements of a document parsed at run time from `text` (under `base`), with
-    /// its blanks standardized apart through the run's allocator
-    /// ([`run_shared::RunShared::parsed_prefix`]). `None` when the allocator refuses the
-    /// document; the refusal fails the run.
-    fn standardize_parsed(
-        &self,
-        text: &str,
-        base: &str,
-        ts: Vec<[Term; 3]>,
-    ) -> Option<Vec<[Term; 3]>> {
-        let prefix = self.visited.borrow_mut().parsed_prefix(text, base);
-        match prefix {
-            Ok(prefix) => Some(ts.iter().map(|t| stratum_blanks(t, &prefix)).collect()),
-            Err(e) => {
-                self.nested_error.borrow_mut().get_or_insert(e);
-                None
-            }
-        }
-    }
-
     /// Use a budgeted or fallible step's result, recording a cut on the run
     /// ([`bounded::settle`]).
     fn settle<T>(&self, b: Bounded<T>) -> T {
@@ -351,14 +261,13 @@ fn negation_gate(bw: &BwCtx) -> bool {
 }
 
 impl<'a> BwCtx<'a> {
-    /// A context sharing `visited` with the run it belongs to.
-    fn new(rules: &'a [Rule], truncated: Truncation, visited: VisitedDocs) -> BwCtx<'a> {
+    fn new(rules: &'a [Rule], truncated: Truncation) -> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
             base: String::new(),
             resolver: None,
-            visited,
+            visited: VisitedDocs::default(),
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
             truncated,
@@ -652,19 +561,16 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
     // One run: the data closure and the query premises share one cut record.
     let truncated = cuts;
-    // ... and one runtime-parse allocator, fresh against both documents: a text the query
-    // parses never spells a blank of the data closure.
-    let shared = run_shared::RunShared::for_sources(&[&data_parsed, &query_parsed]);
     let facts = run_closure(
         data_parsed,
         None,
-        Some(shared.clone()),
+        Some(VisitedDocs::default()),
         &truncated,
         StepMode::None,
         NegationCycles::Reject,
     )?
     .read_further(&truncated);
-    let mut bw = BwCtx::new(&backward, truncated, shared);
+    let mut bw = BwCtx::new(&backward, truncated);
     bw.base = base;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
@@ -865,13 +771,10 @@ fn stratified_in(
         parsed.facts.append(&mut carried);
         // An incomplete closure (rules FailClosed skipped) taints the whole rest of the
         // pipeline: every later document's negation gate reads `truncated`.
-        // Each stratum's runtime parses are standardized apart against its own source,
-        // which holds the earlier strata's carried (renamed) closure.
-        let shared = run_shared::RunShared::for_sources(&[&parsed]);
         let closure = run_closure(
             parsed,
             None,
-            Some(shared),
+            Some(VisitedDocs::default()),
             &truncated,
             StepMode::None,
             cycles,
@@ -902,13 +805,43 @@ fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
     fresh_blank_prefix(&seen, "__st")
 }
 
+/// The label family [`MaterializedN3Graph`](crate::MaterializedN3Graph) holds its
+/// caller's blank nodes in (`__bs{k}_<label>`, GH #6775).
+const CALLER_BLANK_FAMILY: &str = "__bs";
+
 /// The namespace [`MaterializedN3Graph`](crate::MaterializedN3Graph) gives its caller's
 /// blank labels (GH #6775): the smallest `__bs{k}_` prefix no blank label of the rules
 /// document starts with. The parser's own labels (`_b<n>` for `[]`, `_:x` as written,
 /// `__path<n>`, `__ex_<local>`) are all in `parsed`, so none starts with it, and the
-/// `__sk…`/`__st…`/`__rp…` labels the engine mints are other families.
+/// `__sk…`/`__st…` labels the engine mints are other families. A document parsed at run
+/// time cannot spell it either ([`runtime_document`]).
 pub(crate) fn fresh_base_blank_prefix(parsed: &parser::Parsed) -> String {
-    fresh_blank_prefix(&document_blank_labels(parsed), "__bs")
+    fresh_blank_prefix(&document_blank_labels(parsed), CALLER_BLANK_FAMILY)
+}
+
+/// The statements of a document parsed at run time (`log:parsedAsN3`, `log:semantics`),
+/// or `None`, recording a cut on the run, when one of its blank labels is in the
+/// [`CALLER_BLANK_FAMILY`]: such a text could otherwise name a `MaterializedN3Graph`
+/// caller's blank node, which only the caller introduces. The document's other blanks keep
+/// their labels as written; standardizing runtime documents apart is a separate change.
+fn runtime_document(
+    parsed: parser::Parsed,
+    pending: &bounded::Pending,
+) -> Option<Vec<[Term; 3]>> {
+    let spells_caller = document_blank_labels(&parsed)
+        .iter()
+        .any(|l| l.starts_with(CALLER_BLANK_FAMILY));
+    if spells_caller {
+        return settle(
+            pending,
+            Bounded::cut(
+                None,
+                "a document parsed at run time spells a blank label reserved for a \
+                 MaterializedN3Graph caller (__bs…); it was refused",
+            ),
+        );
+    }
+    Some(reencode_statements(parsed))
 }
 
 /// Every blank label reachable in `t`, including nested list members, formula
@@ -1210,11 +1143,9 @@ impl Closure {
 fn run_closure(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
-    // The import-cycle guard and runtime-parse allocator ([`VisitedDocs`]). `None` for a
-    // TOP-LEVEL run (made fresh against `parsed`); a nested run reached through
-    // `formula_closure` passes the PARENT's, so a `log:semantics` / `log:content` document
-    // IRI active up the stack is still recognised, and a query or a pipeline stratum passes
-    // the one its entry point made.
+    // The import-cycle guard ([`VisitedDocs`]). `None` for a TOP-LEVEL run (a fresh,
+    // empty set); a nested run reached through `formula_closure` passes the PARENT's set so
+    // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
     // `Some` also means a caller reads this closure further (a query, the next document
     // of an explicit pipeline, a nested closure's consumer).
     inherit: Option<VisitedDocs>,
@@ -1231,13 +1162,6 @@ fn run_closure(
     // through document builtins or nested closure evaluation are outside this
     // initial-source guarantee.
     let sk_prefix = fresh_blank_prefix(&document_blank_labels(&parsed), "__sk");
-    // A caller reads this closure further (a query, the next document of an explicit
-    // pipeline, a nested closure's consumer).
-    let read_further = inherit.is_some();
-    let visited = match inherit {
-        Some(v) => v,
-        None => run_shared::RunShared::for_sources(&[&parsed]),
-    };
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
     // Premises evaluate left-to-right with no coroutining — reorder each
     // premise so a builtin runs only after the atoms that produce its inputs
@@ -1252,10 +1176,16 @@ fn run_closure(
     // loop below. Rules on a cycle through negation follow `cycles`.
     let strata = strata::stratify(&rules, &backward_rules, cycles)?;
     let mut facts = FactIndex::from_iter(facts0);
-    let mut bw = BwCtx::new(&backward_rules, truncated.clone(), visited);
+    let mut bw = BwCtx::new(&backward_rules, truncated.clone());
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
+    // A caller reads this closure further (a query, the next document of an explicit
+    // pipeline, a nested closure's consumer).
+    let read_further = inherit.is_some();
+    if let Some(v) = inherit {
+        bw.visited = v;
+    }
     // Derivation steps at the term level (interned to ids once at the end).
     let mut steps: Vec<DerivationStep> = Vec::new();
 
@@ -3123,7 +3053,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // lost that a finite closure would have added, and reasoning terminates. (No resolver, no
     // cycle: with `bw.resolver` `None` the set stays empty and this is a no-op.)
     let key = formula_key(ts);
-    if !bw.visited.borrow_mut().docs.insert(key) {
+    if !bw.visited.borrow_mut().insert(key) {
         return bw.settle(Bounded::cut(
             ts.to_vec(),
             "a nested closure re-entered a document already being closed and was left unclosed",
@@ -3170,7 +3100,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
             bw.nested_error
                 .borrow_mut()
                 .get_or_insert(format!("in a nested closure: {e}"));
-            bw.visited.borrow_mut().docs.remove(&key);
+            bw.visited.borrow_mut().remove(&key);
             return ts.to_vec();
         }
     };
@@ -3183,7 +3113,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
             result.push(f);
         }
     }
-    bw.visited.borrow_mut().docs.remove(&key);
+    bw.visited.borrow_mut().remove(&key);
     result
 }
 
@@ -4097,7 +4027,7 @@ fn eval_functional_inner(
                     // recursion, so no marking is needed here.
                     // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                     let parsed = bounded::parse_n3(&text, doc, pending).ok()?;
-                    Term::Formula(bw.standardize_parsed(&text, doc, reencode_statements(parsed))?)
+                    Term::Formula(runtime_document(parsed, pending)?)
                 }
             }
             _ => return None,
@@ -4106,7 +4036,7 @@ fn eval_functional_inner(
             [Term::Lit(src, _, _)] => {
                 // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                 let parsed = bounded::parse_n3(src, &bw.base, pending).ok()?;
-                Term::Formula(bw.standardize_parsed(src, &bw.base, reencode_statements(parsed))?)
+                Term::Formula(runtime_document(parsed, pending)?)
             }
             _ => return None,
         },
