@@ -137,6 +137,15 @@ Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (Keep-a-Changelog form
 Added / Changed / Fixed / Removed). Performance claims go in only with a pointer to the
 measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the bottom.
 
+### v0.1.6
+
+`v0.1.5` (e6b65b63) published its GitHub Release, container image and all three npm packages
+with provenance. Its `sparq-rdf` wheel builds failed (maturin rejects `--release` with
+`--profile`, fixed in #6817), so nothing reached PyPI, and it attached the repository's
+`assets/logo.svg` without provenance (fixed in #6812). A dispatch runs the workflow as tagged,
+so both fixes need a new tag: **v0.1.6**, following the same sequence below with 0.1.6 in place
+of 0.1.4. It is the first PyPI release, and the crates.io bootstrap targets it.
+
 ### v0.1.5 fix-forward
 
 The `v0.1.4` tag (a3871259) ran `release.yml` on 2026-10-08 and stopped at "collect archive

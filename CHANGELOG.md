@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-12
+
+First release with the `sparq-rdf` PyPI wheels (the v0.1.5 wheel builds failed; npm 0.1.5
+packages were published). Publication is not implied by this entry; verify the tagged run
+and every registry and release artifact.
+
+### Added
+
+- **sparq-lws-core:** the type index and `QUERY` type search, paged, listed in the storage
+  description. Experimental. (#6650)
+- **sparq-lws-core:** the token endpoint accepts OpenID Connect ID tokens, with DPoP proofs
+  for bound ones. (#6721)
+- **LWS authentication suites as packages:** `sparq-lws-authn` defines the suite interface;
+  `sparq-lws-authn-saml` adds SAML 2.0 subject tokens, `sparq-lws-authn-openid` holds the
+  OpenID Connect suite and `sparq-lws-authn-ssi` the did:key and controlled identifier
+  suites. A deployment chooses which suites the token endpoint offers. Experimental, not
+  published to crates.io. (#6819, #6820, #6821)
+- **Research prototypes** (proof-methods/, not part of the shipped runtime): a Noir opening
+  written with field-constraint rotations and additions (#6815), and tamper checks for both
+  Noir openings plus a gate-count script (#6816).
+
+### Fixed
+
+- **Release pipeline:** release files are staged in an empty `release-assets/` directory.
+  v0.1.5 published the repository's `assets/logo.svg` as an extra asset with no provenance;
+  every other v0.1.5 asset is covered by the isolated-builder bundles. (#6812)
+- **Publish pipeline:** the `sparq-rdf` wheel build no longer passes `--release` with
+  `--profile`, which current maturin rejects, and the npm provenance checks wait for the
+  registry to serve the new version. (#6817)
+
 ## [0.1.5] - 2026-10-10
 
 Fix-forward release after the v0.1.4 release workflow failed before creating a GitHub
@@ -740,7 +770,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sparq-org/sparq/compare/v0.1.2...v0.1.3
