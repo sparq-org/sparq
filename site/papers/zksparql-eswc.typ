@@ -105,12 +105,13 @@ the lender could check that the bank signed it, but the credential would still d
 
 A zero-knowledge proof lets the applicant, as holder, return only the answer, with a proof that it
 is correct. The lender's agent cannot pause to ask a person what an accepted answer guarantees, so
-the lender's request must record that guarantee where software can check it. The lender writes its
+the request must state, where software can check it, which input the answer covers and which
+issuers the verifier trusts. The lender writes its
 question as a SPARQL query @sparql12, our running example:
 ] else [
 A lender assessing a mortgage application asks the applicant one question: was any payment from the
-applicant's account returned unpaid? The usual answer is a bank statement, which also discloses
-every payment, balance and payee that the lender did not ask about. If the bank issued it as a
+applicant's account returned unpaid? A bank statement answers it but also discloses every payment,
+balance and payee that the lender did not ask about. If the bank issued it as a
 verifiable credential @vcdm2, the lender could check that the bank signed it, but the credential
 would still disclose everything in it.
 
@@ -148,8 +149,10 @@ accepts. Our contributions are:
   1.2 permits over the input dataset; closed-world answers depend on who fixed the input.
 - *An architecture* (§#ref(<architecture>, supplement: none)) in which one proof shows such an
   answer, bound to the verifier's request, with every credential's signature checked against the
-  request's trusted issuers; signature modes, Merkle-based cryptosuites and a public-input rule set
-  what authenticating the input costs and discloses (§#ref(<modes>, supplement: none)–§#ref(<cryptosuites>, supplement: none)).
+  request's trusted issuers (Appendix #ref(<app-relation>, supplement: none)); signature modes and
+  Merkle-based cryptosuites set what authenticating the input costs and discloses, and a
+  public-input rule limits what the proof discloses
+  (§#ref(<modes>, supplement: none)–§#ref(<cryptosuites>, supplement: none)).
 - *An evaluation* (§#ref(<evidence>, supplement: none)) of a SPARQL evaluator in the RISC Zero zkVM
   @risc0: proofs with signature checks of `SELECT`, true and false `ASK` and `CONSTRUCT` answers;
   executions without proving of one query case per feature; and cycle counts by signature mode and
@@ -170,15 +173,15 @@ A verifiable credential @vcdm2 is a set of claims that an issuer makes about a s
 that its authorship can be verified. A holder presents it to a verifier in a verifiable
 presentation, which may instead carry data derived from credentials, such as a zero-knowledge proof.
 Here, a credential's Data Integrity proof @vcdi is a signature (`proofValue`) with the proof
-configuration, which names the verification method, here a public key (`verificationMethod`); a
-cryptosuite specifies how to create and verify the proof. The cryptosuite `eddsa-rdfc-2022` @vcdieddsa canonicalises the
+configuration: the proof's other properties, among them `verificationMethod`, which identifies the
+verification method, here a public key. A cryptosuite specifies how to create and verify the proof. The cryptosuite `eddsa-rdfc-2022` @vcdieddsa canonicalises the
 credential and the proof configuration with RDF Dataset Canonicalization (RDFC-1.0) @rdfc10;
 Ed25519 then signs the SHA-256 hash of the canonical proof configuration followed by that of the
 canonical document. A valid signature shows only that someone with the signing key signed these
 bytes. Whether the issuer authorised the key, through its controlled identifier document @vcdi, is
 a separate check, as are credential status (revocation or suspension), the validity period, and
-holder binding: that the presenter is the subject or controls a key bound to the credential.
-Selective-disclosure cryptosuites such as `bbs-2023` @vcdibbs let the holder derive a proof that
+holder binding: that the presenter is the subject or controls a key bound to the credential. None of
+these checks makes the claims true. Selective-disclosure cryptosuites such as `bbs-2023` @vcdibbs let the holder derive a proof that
 discloses only selected claims.
 
 == Zero-knowledge proofs and zkVMs <bg-zk>
@@ -214,7 +217,7 @@ state the input over which it holds, and `ASK` and `CONSTRUCT` were left to futu
 Suppose the bank issues the applicant a credential that lists payments, each with the type
 `ex:Payment`, an amount, a date and a status. The input dataset $D$ is the RDF merge @rdf11mt of the
 graphs of the credentials the holder includes, as the default graph; the merge keeps each
-credential's blank nodes apart. A proof method may instead put each credential in its own named
+credential's blank nodes apart. A proof method (§#ref(<request>, supplement: none)) may instead put each credential in its own named
 graph, and states its layout, because a query written for one does not match the other.
 
 The proof fixes $D$ through a _dataset commitment_: a digest of the included credentials and of a
@@ -233,8 +236,9 @@ isomorphism. A result that exceeds the request's limits is rejected, never trunc
 
 For some queries, such as those using `OFFSET` and `LIMIT` where `ORDER BY` does not fix the order,
 `REDUCED`, `SAMPLE` or `GROUP_CONCAT`, SPARQL permits several results over the same $D$, and the
-holder chooses one. A proof method may fix and publish these choices; ours does not yet, so a
-verifier can rely on a unique result only for queries that leave SPARQL no choice.
+holder chooses one. A proof method may fix these choices, but a verifier can rely on them only where
+the method publishes them. Our evaluator does not yet publish its choices, so a verifier can rely
+on a unique result only for queries that leave SPARQL no choice.
 // Source: ZK code landing addenda (10 October), item 3; a follow-up change documents the choices.
 An answer does not say who signed $D$ (§#ref(<linkage>, supplement: none)).
 
@@ -262,9 +266,8 @@ what the holder chose to show.
 
 == Who fixed the input <who-fixed>
 
-A closed-world answer reads $D$ as complete, and someone chose $D$. If the request has no
-`inputCommitment` (§#ref(<request>, supplement: none)), the input dataset is _chosen by the
-holder_: the holder decided which credentials make up $D$ when it answered, and could have left one
+If the request has no `inputCommitment` (§#ref(<request>, supplement: none)), the input dataset is
+_chosen by the holder_: the holder decided which credentials make up $D$ when it answered, and could have left one
 out. Over an input dataset chosen by the holder, a closed-world answer covers only the included
 credentials; a count, for instance, counts only those.
 
@@ -481,11 +484,11 @@ not enforce this condition.
 == What the verifier still learns <leakage>
 
 Beyond its result, an accepted answer reveals the dataset commitment, which links presentations if
-the holder reuses a salt over the same credentials (an agreed commitment links them by design, to the
-verifier that agreed it); the proof method, whose capacity limits bound the size of the input; the
-issuers: in the hidden mode, only that a trusted issuer signed each credential, which identifies the
-issuer if the request trusts only one, and in the revealed mode, each key and the number of
-credentials; and the size of the result, such as how many payments matched.
+the holder reuses a salt over the same credentials; an agreed commitment links them by design, to
+the verifier that agreed it. It reveals the proof method, whose capacity limits bound the size of
+the input. In the hidden mode, it reveals only that a trusted issuer signed each credential, which
+identifies the issuer if the request trusts only one; in the revealed mode, each key and the number
+of credentials. The size of the result can reveal, for example, how many payments matched.
 // Source: security-table-addenda.md, item 4a (ZK code landing, 10 October 2026): succinct receipts
 // expose the recursion control ID, which can reveal part of the execution's shape
 // (zk/sparql-evaluator/README.md); RISC Zero's zero-knowledge is its claim, not established.
@@ -502,8 +505,8 @@ can also reveal together what no single query reveals.
 == Existing cryptosuites <existing-suites>
 
 Two RDF cryptosuites sign the same structure as `eddsa-rdfc-2022`
-(§#ref(<bg-sparql>, supplement: none)), which every zkVM experiment with signature checks in
-§#ref(<evidence>, supplement: none) uses.
+(§#ref(<bg-sparql>, supplement: none)), which every proved zkVM experiment with signature checks
+in §#ref(<evidence>, supplement: none) uses.
 `ecdsa-rdfc-2019` uses ECDSA, with P-256 and SHA-256 or P-384 and SHA-384 @vcdiecdsa; we verify it
 only outside the zkVM.
 // TODO(evidence): bind to the implementation state reported by the ZK code landing thread
@@ -663,7 +666,8 @@ supplementary material lists the test cases and records (§S3) and the software 
   },
   caption: [
     Strongest result per experiment: tests outside the zkVM, executed without proving, or proof
-    verified. Each zkVM experiment with signature checks used one credential per test case. Cases
+    verified. Each zkVM experiment with signature checks in this table used one credential per test
+    case. Cases
     with an input chosen by the holder have two fewer negative tests, because swapping the agreed
     commitment does not apply to them. † No internal check (§#ref(<prototype>, supplement: none)).
     Counts are per experiment and are never added across rows.
@@ -904,8 +908,8 @@ A holder can answer a verifier's SPARQL query over credentials without handing t
 can show that the answer is a result SPARQL 1.2 permits over a stated input dataset, closed-world
 answers included, and that trusted issuers signed every credential in it. Because closed-world
 answers are only as meaningful as the verifier's reason to believe the input complete, the request
-states who fixed it. A prototype evaluator running in a zkVM has proved such answers with signature
-checks, each over one synthetic credential. Realistic credentials, proving times and an external
+states who fixed it. Our zkVM prototype proved `SELECT`, true and false `ASK` and `CONSTRUCT` answers
+with signature checks, each over one synthetic credential and a basic graph pattern. Realistic credentials, proving times and an external
 audit remain to be done.
 
 // ---------------------------------------------------------------------------------------------
