@@ -1389,10 +1389,11 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
     let mut targets = 0usize;
-    for (target, params) in parse_links(&req.header_all(header::LINK)) {
-        let Some(rel) = params.get("rel") else {
+    for link in parse_links(&req.header_all(header::LINK)) {
+        let Some(rel) = link.param("rel") else {
             continue;
         };
+        let target = link.target.to_string();
         // Every target is a URI reference (RFC 8288 section 3), resolved by the one IRI parser;
         // one that is not refuses the request before anything is written.
         let Some(resolved) = resolve_reference(uri, &target) else {
@@ -1534,13 +1535,11 @@ async fn create<S: Store + 'static>(
     if !parent.ends_with('/') {
         return method_not_allowed(&allow_for(parent, false));
     }
-    let is_container = parse_links(&req.header_all(header::LINK))
-        .iter()
-        .any(|(t, p)| {
-            t == &format!("{LWS_NS}Container")
-                && p.get("rel")
-                    .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
-        });
+    let is_container = parse_links(&req.header_all(header::LINK)).any(|l| {
+        l.target.strip_prefix(LWS_NS) == Some("Container")
+            && l.param("rel")
+                .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
+    });
     let base_name = sanitize_slug(req.header("slug"))
         .unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     // The container's lock is held shared from the choice of a free name through the create and

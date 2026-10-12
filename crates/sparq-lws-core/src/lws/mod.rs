@@ -2105,12 +2105,12 @@ pub(crate) fn check_headers(headers: &HeaderMap) -> Result<(), Response> {
             .join(", ")
     };
     let (mut count, mut bytes) = (0usize, 0usize);
-    for (target, params) in parse_links(&all(header::LINK)) {
-        let rels = params
-            .get("rel")
+    for link in parse_links(&all(header::LINK)) {
+        let rels = link
+            .param("rel")
             .map_or(0, |r| r.split_whitespace().count());
         count = count.saturating_add(rels.max(1));
-        bytes = bytes.saturating_add(rels.max(1).saturating_mul(target.len()));
+        bytes = bytes.saturating_add(rels.max(1).saturating_mul(link.target.len()));
         if count > MAX_DECLARED_LINKS || bytes > MAX_DECLARED_LINK_BYTES {
             return Err(too_large("the Link header"));
         }
@@ -2128,20 +2128,40 @@ pub(crate) fn check_headers(headers: &HeaderMap) -> Result<(), Response> {
     Ok(())
 }
 
-/// Parse a Link header value into `(target, params)` pairs, params lower-cased by name.
-pub fn parse_links(value: &str) -> Vec<(String, BTreeMap<String, String>)> {
-    let mut out = Vec::new();
+/// One link of a Link header value: its target and its parameters, both borrowed from the value.
+#[derive(Clone, Copy, Debug)]
+pub struct Link<'a> {
+    /// The target, between `<` and `>`, trimmed.
+    pub target: &'a str,
+    /// The parameters' text, up to the next comma outside quotes.
+    params: &'a str,
+}
+
+impl<'a> Link<'a> {
+    /// The value of the parameter `name` (matched case-insensitively), unquoted; the first when
+    /// it repeats.
+    pub fn param(&self, name: &str) -> Option<&'a str> {
+        self.params.split(';').find_map(|p| {
+            let (k, v) = p.split_once('=')?;
+            k.trim()
+                .eq_ignore_ascii_case(name)
+                .then(|| v.trim().trim_matches('"'))
+        })
+    }
+}
+
+/// The links of a Link header value, parsed as they are read. Nothing is allocated, so a caller
+/// that stops at a bound (see [`check_headers`]) has spent nothing on what lies past it.
+pub fn parse_links(value: &str) -> impl Iterator<Item = Link<'_>> {
     let mut rest = value;
-    while let Some(start) = rest.find('<') {
-        let Some(end) = rest[start..].find('>') else {
-            break;
-        };
-        let target = rest[start + 1..start + end].trim().to_string();
+    std::iter::from_fn(move || {
+        let start = rest.find('<')?;
+        let end = rest[start..].find('>')?;
+        let target = rest[start + 1..start + end].trim();
         rest = &rest[start + end + 1..];
-        let mut params = BTreeMap::new();
         // Parameters run until the next comma outside quotes.
-        let mut i = 0;
         let bytes = rest.as_bytes();
+        let mut i = 0;
         let mut in_quotes = false;
         while i < bytes.len() {
             match bytes[i] {
@@ -2151,18 +2171,10 @@ pub fn parse_links(value: &str) -> Vec<(String, BTreeMap<String, String>)> {
             }
             i += 1;
         }
-        for p in rest[..i].split(';') {
-            if let Some((k, v)) = p.split_once('=') {
-                params.insert(
-                    k.trim().to_ascii_lowercase(),
-                    v.trim().trim_matches('"').to_string(),
-                );
-            }
-        }
-        rest = &rest[i.min(rest.len())..];
-        out.push((target, params));
-    }
-    out
+        let params = &rest[..i];
+        rest = &rest[i..];
+        Some(Link { target, params })
+    })
 }
 
 /// A store for unit tests: the in-memory store, with deletes that fail on demand.
@@ -2741,8 +2753,8 @@ pub(crate) mod test_store {
             .iter()
             .filter_map(|v| v.to_str().ok())
             .flat_map(super::parse_links)
-            .filter(|(_, p)| p.get("rel").map(String::as_str) == Some(rel))
-            .map(|(t, _)| t)
+            .filter(|l| l.param("rel") == Some(rel))
+            .map(|l| l.target.to_string())
             .collect()
     }
 
@@ -3323,13 +3335,45 @@ mod tests {
 
     #[test]
     fn links_parse_with_quoted_commas() {
-        let l = parse_links(r#"<https://a/x>; rel="type", <b>; rel="up next"; title="a, b", <c>"#);
+        let l: Vec<_> =
+            parse_links(r#"<https://a/x>; rel="type", <b>; rel="up next"; title="a, b", <c>"#)
+                .collect();
         assert_eq!(l.len(), 3);
-        assert_eq!(l[0].0, "https://a/x");
-        assert_eq!(l[0].1["rel"], "type");
-        assert_eq!(l[1].1["rel"], "up next");
-        assert_eq!(l[1].1["title"], "a, b");
-        assert_eq!(l[2].0, "c");
+        assert_eq!(l[0].target, "https://a/x");
+        assert_eq!(l[0].param("rel"), Some("type"));
+        assert_eq!(l[1].param("rel"), Some("up next"));
+        assert_eq!(l[1].param("title"), Some("a, b"));
+        assert_eq!(l[2].target, "c");
+        assert_eq!(l[2].param("rel"), None);
+    }
+
+    /// RFC 8288 section 3.3: occurrences of `rel` after the first are ignored. Parameter names
+    /// are case-insensitive.
+    #[test]
+    fn a_link_takes_its_first_rel() {
+        let l = parse_links(r#"<a>; REL=type; rel="next""#).next().unwrap();
+        assert_eq!(l.param("rel"), Some("type"));
+    }
+
+    /// Review finding (#6808): every link was parsed, each with its own map of owned strings,
+    /// before the caps on declared links applied, so what parsing allocated was bounded only by
+    /// the server's header limit. Links are now read one at a time, borrowing the header, and
+    /// the check stops at its cap: a header far past the cap is refused, and parsing it takes
+    /// only the links up to the cap.
+    #[test]
+    fn links_past_the_cap_are_not_parsed() {
+        let header = vec!["<https://e/t>; rel=\"next\""; 1 << 16].join(", ");
+        let mut read = 0;
+        let refused = parse_links(&header)
+            .inspect(|_| read += 1)
+            .try_fold(0usize, |n, _| (n < MAX_DECLARED_LINKS).then_some(n + 1))
+            .is_none();
+        assert!(refused);
+        assert_eq!(read, MAX_DECLARED_LINKS + 1);
+        let mut headers = HeaderMap::new();
+        headers.insert(header::LINK, header.parse().unwrap());
+        let resp = check_headers(&headers).unwrap_err();
+        assert_eq!(resp.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
     }
 
     /// Review finding: the check took any scheme and a few excluded characters, so malformed
