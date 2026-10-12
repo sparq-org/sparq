@@ -3113,6 +3113,57 @@ mod tests {
         assert_eq!(store.fences_tried.load(Ordering::SeqCst), tried);
     }
 
+    /// Codex review of #6836: a settlement step held the state across a store call, so one that
+    /// stalled kept the state, its tasks, the record's lock and its quota place alive after every
+    /// other handle was dropped. A settlement waits on the store and locks through their own
+    /// handles: dropping the state ends it even while its fence never answers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dropping_the_state_ends_a_settlement_whose_store_call_stalls() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        *store.unsettle_next_create.lock().unwrap() =
+            Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let r = handle(&state, &post, &asker).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let child = store.last_unsettled.lock().unwrap()[1].clone();
+        // The settlement's next fence stalls for good.
+        store.hang_fence.store(true, Ordering::SeqCst);
+        let tried = store.fences_tried.load(Ordering::SeqCst);
+        eventually("the settlement's fence is stalled", || {
+            store.fences_tried.load(Ordering::SeqCst) > tried
+        })
+        .await;
+        let (locks, quota) = (
+            state.locks.clone(),
+            state.access.request_quota.in_flight.clone(),
+        );
+        assert_eq!(quota.lock().unwrap().total, 1);
+        assert!(locks.try_lock(&child).is_none(), "the settlement holds it");
+        let weak = state.downgrade();
+        drop(state);
+        eventually("the state is dropped", || weak.upgrade().is_none()).await;
+        eventually("the record's lock is released", || {
+            locks.try_lock(&child).is_some()
+        })
+        .await;
+        eventually("the quota place is released", || {
+            quota.lock().unwrap().total == 0
+        })
+        .await;
+    }
+
     /// Review finding: a create waited for its container inside a task of its own, so requests
     /// queued behind a container held while a change was put back. A create waits a bounded time
     /// in the request and then answers 503.

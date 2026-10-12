@@ -609,7 +609,9 @@ pub struct Inner<S: Store> {
     /// Fetches identity documents, OpenID provider metadata and JWKS.
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
-    pub locks: resources::IriLocks,
+    /// Shared, so a task that must not keep the state alive can hold them (see
+    /// [`records::Settlements`]).
+    pub locks: Arc<resources::IriLocks>,
     /// The bytes set-aside changes hold to put back (see [`LwsState::may_write`]).
     set_aside_bytes: std::sync::atomic::AtomicUsize,
     /// The containers whose own modification time may be behind a change to them: each with
@@ -2294,6 +2296,10 @@ pub(crate) mod test_store {
         pub fail_fence: Arc<AtomicBool>,
         /// How many times `fence` was called.
         pub fences_tried: Arc<std::sync::atomic::AtomicUsize>,
+        /// `fence` never answers, as a call to a store that stalls.
+        pub hang_fence: Arc<AtomicBool>,
+        /// What the last write reported unsettled changes (its fence's `touches`).
+        pub last_unsettled: Arc<std::sync::Mutex<Vec<String>>>,
         /// Each unsettled write by its fence's nonce: whether it is fenced, locked while it
         /// commits (a fence and the write it fences are each atomic).
         unsettled:
@@ -2349,6 +2355,8 @@ pub(crate) mod test_store {
                 unsettle_creates: Default::default(),
                 fail_fence: Default::default(),
                 fences_tried: Default::default(),
+                hang_fence: Default::default(),
+                last_unsettled: Default::default(),
                 unsettled: Default::default(),
                 fail_step: Default::default(),
                 fail_then: Default::default(),
@@ -2403,6 +2411,7 @@ pub(crate) mod test_store {
         {
             static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let nonce = format!("flaky-{}", NEXT.fetch_add(1, Ordering::SeqCst));
+            *self.last_unsettled.lock().unwrap() = touches.clone();
             let fenced = Arc::new(tokio::sync::Mutex::new(false));
             self.unsettled
                 .lock()
@@ -2687,6 +2696,9 @@ pub(crate) mod test_store {
         }
         async fn fence(&self, fence: &crate::store::Fence) -> ServerResult<()> {
             self.fences_tried.fetch_add(1, Ordering::SeqCst);
+            if self.hang_fence.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
             if self.fail_fence.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("the store cannot be reached".into()));
             }

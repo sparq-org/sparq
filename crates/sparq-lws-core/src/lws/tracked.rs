@@ -116,17 +116,29 @@ impl Drop for Mutating<'_> {
 
 /// A [`Store`] whose every change moves the snapshot counters of what it changes (see the
 /// module docs).
+///
+/// Cloning it gives another handle to the same store and counters: what a task that must not keep
+/// the server's state alive holds (see `records::Settlements`).
 pub struct Tracked<S> {
-    inner: S,
-    gens: Generations,
+    inner: std::sync::Arc<S>,
+    gens: std::sync::Arc<Generations>,
+}
+
+impl<S> Clone for Tracked<S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            gens: self.gens.clone(),
+        }
+    }
 }
 
 impl<S: Store> Tracked<S> {
     /// Track `inner`, whose storage root is `root`.
     pub fn new(inner: S, root: String) -> Self {
         Self {
-            inner,
-            gens: Generations::new(root),
+            inner: std::sync::Arc::new(inner),
+            gens: std::sync::Arc::new(Generations::new(root)),
         }
     }
 
