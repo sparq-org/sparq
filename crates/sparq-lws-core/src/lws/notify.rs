@@ -111,6 +111,41 @@ pub struct Pending {
     watch: Watch,
 }
 
+/// The notifications one change makes, addressed but not yet sent ([`Notifier::prepare`]), and
+/// what preparing them left out. What was left out is counted ([`Notifier::dropped`],
+/// [`Notifier::unprepared`]) only when they are [`Notifier::send`]t: a change that does not
+/// happen (a delete that fails) sends nothing and counts nothing.
+#[derive(Debug, Default)]
+#[must_use = "prepared notifications go out, and are counted, only through Notifier::send"]
+pub struct Prepared {
+    pending: Vec<Pending>,
+    /// The resource the change is to.
+    uri: String,
+    /// The bound the deliveries were prepared to.
+    limit: usize,
+    /// Authorized deliveries past the bound: owed, and dropped.
+    dropped: usize,
+    /// Subscriptions past the bound: neither authorized nor notified.
+    unprepared: usize,
+}
+
+impl Prepared {
+    /// The notifications prepared.
+    pub fn pending(&self) -> &[Pending] {
+        &self.pending
+    }
+
+    /// How many notifications were prepared.
+    pub fn len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Whether none was.
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
+}
+
 /// What a delivery for a subscription is checked against before every attempt: the subscription
 /// must still stand, and its subscriber still be allowed to read the resource the notification is
 /// about.
@@ -264,6 +299,9 @@ pub struct Notifier {
     /// Subscriptions that heard of a change once its deliveries were already at their bound:
     /// neither authorized nor notified, so whether each was owed a notification is not known.
     unprepared: AtomicU64,
+    /// Preparations that had a subscription to weigh, for tests to see whether one ran.
+    #[cfg(test)]
+    pub(crate) prepared_for: AtomicUsize,
     /// The worker pool: one permit per delivery in flight.
     workers: Arc<tokio::sync::Semaphore>,
     /// Per inbox origin, its own limit (dropped once no delivery holds it).
@@ -337,6 +375,8 @@ impl Notifier {
             admitted: Arc::new(AtomicUsize::new(0)),
             dropped: AtomicU64::new(0),
             unprepared: AtomicU64::new(0),
+            #[cfg(test)]
+            prepared_for: AtomicUsize::new(0),
             workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
             inboxes: Mutex::new(HashMap::new()),
             quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER),
@@ -565,7 +605,7 @@ impl Notifier {
         &self,
         state: &LwsState<S>,
         event: &Event,
-    ) -> Vec<Pending> {
+    ) -> Prepared {
         self.prepare_at_most(state, event, self.limits.queue).await
     }
 
@@ -576,7 +616,7 @@ impl Notifier {
         state: &LwsState<S>,
         event: &Event,
         limit: usize,
-    ) -> Vec<Pending> {
+    ) -> Prepared {
         self.prepare_for(state, event, limit, None).await
     }
 
@@ -603,7 +643,7 @@ impl Notifier {
         event: &Event,
         limit: usize,
         service: Option<Option<String>>,
-    ) -> Vec<Pending> {
+    ) -> Prepared {
         let now = jose::now_secs();
         // A resource's linkset changes with it, and is read under its authorization: a
         // subscription to the linkset itself hears of it as of the resource.
@@ -627,8 +667,12 @@ impl Notifier {
         // reached. The work is bounded instead by the subscriptions in force, which the quotas
         // bound: at most MAX_SUBSCRIPTIONS held by subscribers other than the owner and as many
         // by the owner, so one authorization each for at most 2 * MAX_SUBSCRIPTIONS candidates,
-        // and none past the `limit`-th delivery prepared. Stored subscriptions loaded past a quota
-        // are reported at the start, and admit no new one to that share until it is under it.
+        // and none past the `limit`-th delivery prepared. That is a ceiling on the number of
+        // checks, not on their work: each takes the resource's access from one snapshot taken
+        // for the change ([`access::ResourceAccess`]), so the resource's metadata is read and the
+        // grants (which have no quota) are scanned once per change, not once per check. Stored
+        // subscriptions loaded past a quota are reported at the start, and admit no new one to
+        // that share until it is under it.
         let candidates: Vec<Subscription> = {
             let subs = self.subs.read().expect("lock");
             subs.values()
@@ -636,7 +680,15 @@ impl Notifier {
                 .cloned()
                 .collect()
         };
-        let mut out = Vec::new();
+        #[cfg(test)]
+        if !candidates.is_empty() {
+            self.prepared_for.fetch_add(1, Ordering::SeqCst);
+        }
+        let mut out = Prepared {
+            uri: event.uri.clone(),
+            limit,
+            ..Prepared::default()
+        };
         // A Delete is prepared while the resource is still there; its deliveries, made once it
         // is gone, are authorized against what it was.
         let snapshot = if event.kind == "Delete" && !candidates.is_empty() && service.is_none() {
@@ -648,19 +700,30 @@ impl Notifier {
             None
         };
         let total = candidates.len();
+        // The resource's access, taken at the first check that needs it.
+        let mut resource: Option<access::ResourceAccess> = None;
         for (i, sub) in candidates.into_iter().enumerate() {
             // Once the bound is reached the rest are not authorized (that work is what the bound
             // saves), so whether each was owed a notification is not known: they are counted
             // apart from the dropped ones, each of which was.
             if out.len() == limit {
-                self.note_unprepared(total - i, limit, &event.uri);
+                out.unprepared = total - i;
                 break;
             }
             // Delivery-time authorization (section 10.3.3): a subscriber that may not read the
             // resource now hears nothing about it.
+            let agent = sub.agent();
             let allowed = match &service {
-                Some(author) => reads_service_record(state, &sub.agent(), author),
-                None => state.allowed(Action::Read, &event.uri, &sub.agent()).await,
+                Some(author) => reads_service_record(state, &agent, author),
+                None if state.cfg.open || access::is_owner(state, &agent) => true,
+                None => {
+                    if resource.is_none() {
+                        resource = Some(
+                            access::ResourceAccess::take(state, Action::Read, &event.uri).await,
+                        );
+                    }
+                    resource.as_ref().is_some_and(|r| r.allows(state, &agent))
+                }
             };
             if !allowed {
                 continue;
@@ -686,10 +749,10 @@ impl Notifier {
             // linkset brings two, and what is past the bound is dropped and counted so.
             for activity in activities {
                 if out.len() == limit {
-                    self.note_dropped(1, &event.uri);
+                    out.dropped += 1;
                     continue;
                 }
-                out.push(Pending {
+                out.pending.push(Pending {
                     inbox: sub.inbox.clone(),
                     activity,
                     // Checked as the resource the linkset describes: its lock and who may
@@ -707,9 +770,16 @@ impl Notifier {
         out
     }
 
-    /// Deliver notifications [`Notifier::prepare`]d earlier.
-    pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, pending: Vec<Pending>) {
-        for p in pending {
+    /// Deliver notifications [`Notifier::prepare`]d earlier, and count what preparing them left
+    /// out.
+    pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, prepared: Prepared) {
+        if prepared.dropped > 0 {
+            self.note_dropped(prepared.dropped, &prepared.uri);
+        }
+        if prepared.unprepared > 0 {
+            self.note_unprepared(prepared.unprepared, prepared.limit, &prepared.uri);
+        }
+        for p in prepared.pending {
             self.deliver(state, &p.inbox, p.activity, Some(p.watch));
         }
     }
@@ -887,13 +957,15 @@ impl Notifier {
 
     /// Notifications dropped because the queue was full (or a change's deliveries were at their
     /// bound), each one known to be owed: authorized for its subscriber when it was prepared, or
-    /// belonging to no subscription.
+    /// belonging to no subscription. Counted in memory since this notifier was made (each start
+    /// begins at zero), and for a change only once it happened.
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::SeqCst)
     }
 
     /// Subscriptions that heard of a change once its deliveries were at their bound: neither
-    /// authorized nor notified, so some may not have been owed a notification at all.
+    /// authorized nor notified, so some may not have been owed a notification at all. Counted as
+    /// [`Notifier::dropped`] is: since this notifier was made, for changes that happened.
     pub fn unprepared(&self) -> u64 {
         self.unprepared.load(Ordering::SeqCst)
     }
@@ -2075,6 +2147,7 @@ mod tests {
                 .notify
                 .prepare(&state, &event)
                 .await
+                .pending
                 .into_iter()
                 .map(|p| {
                     (
@@ -2140,7 +2213,7 @@ mod tests {
         };
         let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
         assert_eq!(prepared.len(), 1);
-        let watch = prepared.into_iter().next().unwrap().watch;
+        let watch = prepared.pending.into_iter().next().unwrap().watch;
         // A write holds the resource; the delivery waits for it, and the write's rollback is
         // then set aside with the lock.
         let held = state.locks.lock(&file).await.unwrap();
@@ -2810,7 +2883,7 @@ mod tests {
         };
         let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
         assert_eq!(prepared.len(), 1);
-        assert_eq!(prepared[0].watch.subscription, "b");
+        assert_eq!(prepared.pending[0].watch.subscription, "b");
     }
 
     /// Review finding (#6810): once a change's deliveries reached their bound, the subscriptions
@@ -2855,27 +2928,208 @@ mod tests {
             uri: root.clone(),
             relation: None,
         };
+        // What preparing left out is counted once the notifications are sent (here, none).
+        let send = |mut prepared: Prepared| {
+            prepared.pending.clear();
+            state.notify.send(&state, prepared);
+        };
         // Bob may not read the root, the owner may: `a` is passed over, `b` fills the bound, and
         // `c`, `d` and `e` are neither checked nor notified, whoever they belong to.
         let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
         assert_eq!(prepared.len(), 1);
-        assert_eq!(prepared[0].watch.subscription, "b");
+        assert_eq!(prepared.pending[0].watch.subscription, "b");
+        assert_eq!((prepared.dropped, prepared.unprepared), (0, 3));
+        assert_eq!(state.notify.unprepared(), 0, "counted only once sent");
+        send(prepared);
         assert_eq!(state.notify.dropped(), 0);
         assert_eq!(state.notify.unprepared(), 3);
         // With room for all three of the owner's, `e` brings two (the root and its linkset),
         // the second past the bound: authorized, so owed, and counted dropped.
         let prepared = state.notify.prepare_at_most(&state, &event, 3).await;
         assert_eq!(prepared.len(), 3);
+        send(prepared);
         assert_eq!(state.notify.dropped(), 1);
         assert_eq!(state.notify.unprepared(), 3);
         // A shared bound already spent (a recursive delete's) checks nothing at all.
-        assert!(state
-            .notify
-            .prepare_at_most(&state, &event, 0)
-            .await
-            .is_empty());
+        let prepared = state.notify.prepare_at_most(&state, &event, 0).await;
+        assert!(prepared.is_empty());
+        send(prepared);
         assert_eq!(state.notify.unprepared(), 8);
         assert_eq!(state.notify.dropped(), 1);
+    }
+
+    /// Codex review of #6841: each check scanned every grant (and read the resource's metadata)
+    /// again. One snapshot of the resource's access serves a change's checks; it decides as a
+    /// read does, grant by grant and constraint by constraint.
+    #[tokio::test]
+    async fn preparation_decides_as_a_read_does() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let root = state.cfg.storage();
+        let r = state.cfg.absolute("/r");
+        state
+            .store
+            .write(&r, Bytes::from("r"), "text/plain")
+            .await
+            .unwrap();
+        let grant = |access: Value| access::policies(&access, &root).unwrap();
+        state.access.put_grant_for_test(
+            "read",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://bob.example/#me"}])),
+        );
+        state.access.put_grant_for_test(
+            "modify",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["modify"],
+                "assignee": "https://dave.example/#me"}])),
+        );
+        state.access.put_grant_for_test(
+            "client",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://erin.example/#me",
+                "constraint": [{"leftOperand": "client", "operator": "eq", "rightOperand": "https://app.example/"}]}])),
+        );
+        state.access.put_grant_for_test(
+            "elsewhere",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://frank.example/#me",
+                "target": {"type": "DataResource", "value": [format!("{root}other")]}}])),
+        );
+        let agents = [
+            ("bob", Some("https://bob.example/#me"), None),
+            ("carol", Some("https://carol.example/#me"), None),
+            ("dave", Some("https://dave.example/#me"), None),
+            (
+                "erin-app",
+                Some("https://erin.example/#me"),
+                Some("https://app.example/"),
+            ),
+            (
+                "erin-other",
+                Some("https://erin.example/#me"),
+                Some("https://other.example/"),
+            ),
+            ("frank", Some("https://frank.example/#me"), None),
+            ("owner", Some("https://owner.example/#me"), None),
+            ("anonymous", None, None),
+        ];
+        for (id, subject, client) in agents {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: subject.map(str::to_string),
+                client: client.map(str::to_string),
+                topics: vec![root.clone()],
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        let event = Event {
+            kind: "Update",
+            uri: r.clone(),
+            is_container: false,
+            relation: None,
+        };
+        let mut prepared: Vec<String> = state
+            .notify
+            .prepare(&state, &event)
+            .await
+            .pending
+            .iter()
+            .map(|p| p.watch.subscription.clone())
+            .collect();
+        prepared.sort();
+        let mut reads = Vec::new();
+        for (id, subject, client) in agents {
+            let agent = Agent {
+                subject: subject.map(str::to_string),
+                client: client.map(str::to_string),
+            };
+            if state.allowed(Action::Read, &r, &agent).await {
+                reads.push(id.to_string());
+            }
+        }
+        reads.sort();
+        assert_eq!(prepared, reads);
+        assert_eq!(prepared, ["bob", "erin-app", "owner"]);
+    }
+
+    /// Codex review of #6841: a delete prepares its notifications before the removal is tried,
+    /// and preparing counted what it left out at once, so a delete that failed (nothing removed,
+    /// nothing announced) still moved both counters. They move only for a delete that happened.
+    #[tokio::test]
+    async fn a_failed_delete_counts_nothing() {
+        use std::sync::atomic::Ordering;
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.delivery = DeliveryLimits {
+            queue: 1,
+            workers: 1,
+            per_inbox: 1,
+        };
+        let store = test_store::FlakyStore::new();
+        let state = LwsState::new(store.clone(), cfg).await.unwrap();
+        let root = state.cfg.storage();
+        let created = super::super::route(
+            &state,
+            test_store::request(
+                Method::POST,
+                "/",
+                &[("slug", "f"), ("content-type", "text/plain")],
+                "x",
+            ),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let f = format!("{root}f");
+        // `a` hears of `f` and of its linkset, `b` of everything: with room for one delivery,
+        // a Delete of `f` prepares `a`'s first, drops `a`'s second (owed) and leaves `b` out.
+        for (id, topics) in [
+            ("a", vec![f.clone(), format!("{f}{META_SUFFIX}")]),
+            ("b", vec![root.clone()]),
+        ] {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: None,
+                client: None,
+                topics,
+                inbox: "http://127.0.0.1:9/inbox".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        let delete =
+            || super::super::route(&state, test_store::request(Method::DELETE, "/f", &[], ""));
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let r = delete().await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        store.fail_delete.store(false, Ordering::SeqCst);
+        for _ in 0..250 {
+            if state.visible(&f) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(state.store.exists(&f).await.unwrap());
+        assert_eq!(
+            state.notify.prepared_for.load(Ordering::SeqCst),
+            1,
+            "prepared"
+        );
+        assert_eq!(state.notify.dropped(), 0);
+        assert_eq!(state.notify.unprepared(), 0);
+        let r = delete().await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(state.notify.dropped(), 1);
+        assert_eq!(state.notify.unprepared(), 1);
     }
 
     /// Review finding (#6810): stored subscriptions can exceed their quotas (stored before a

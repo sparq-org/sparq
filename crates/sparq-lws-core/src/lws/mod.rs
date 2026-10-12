@@ -2304,10 +2304,15 @@ pub(crate) mod test_store {
 
     impl FlakyStore {
         pub fn new() -> Self {
+            Self::with_limits(crate::store::InMemoryStoreLimits::default())
+        }
+
+        /// Holding at most what `limits` allow.
+        pub fn with_limits(limits: crate::store::InMemoryStoreLimits) -> Self {
             Self {
                 inner: Arc::new(CompositeStore::new(
-                    InMemorySparqClient::default(),
-                    InMemoryBlobStore::default(),
+                    InMemorySparqClient::with_limits(limits),
+                    InMemoryBlobStore::with_limits(limits),
                 )),
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),

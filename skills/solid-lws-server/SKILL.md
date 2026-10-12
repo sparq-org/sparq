@@ -417,9 +417,14 @@ What the server exposes, all discoverable from the storage description
   subscriber that may not read the resource takes no place from one that may. Once it is reached
   the subscriptions left are neither authorized nor notified, and are logged and counted apart
   (`Notifier::unprepared`) from dropped deliveries (`Notifier::dropped`), each of which was owed.
-  The authorization work for one change has no budget of its own (one party's subscriptions
-  that may not read the resource could spend it before an authorized one is reached): it is
-  bounded by the subscription quotas, one check per subscription in force.
+  Both are counted in memory from the start, and only for a change that happened (a delete that
+  fails counts nothing). The authorization for one change has no budget of its own (one party's
+  subscriptions that may not read the resource could spend it before an authorized one is
+  reached): the subscription quotas cap it at one check per subscription in force (at most
+  1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
+  resource's access taken for the change, so its metadata is read and the grants are scanned
+  once per change. A recursive delete too large to put back is refused before any of its
+  notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,

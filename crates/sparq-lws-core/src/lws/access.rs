@@ -606,6 +606,18 @@ impl AccessStore {
         .expect("lock") = new_etag();
     }
 
+    /// The policies of every grant that cover `uri` for `action`, whoever they are assigned to.
+    pub(crate) fn policies_covering(&self, action: Action, uri: &str) -> Vec<Policy> {
+        self.grants
+            .read()
+            .expect("lock")
+            .values()
+            .flat_map(|r| r.policies.iter())
+            .filter(|p| p.actions.contains(&action) && p.covers(uri))
+            .cloned()
+            .collect()
+    }
+
     /// Every policy of every grant, for an authorization decision.
     pub fn grant_policies(&self) -> Vec<Policy> {
         self.grants
@@ -732,11 +744,29 @@ async fn decide<S: Store + 'static>(
     if candidates.is_empty() {
         return Ok(false);
     }
-    let is_container = uri.ends_with('/');
     let format = match format {
         Some(f) => f,
         None => format_of(state, uri).await?,
     };
+    Ok(grants_allow(
+        candidates.iter(),
+        agent,
+        uri,
+        format.as_deref(),
+        meta,
+    ))
+}
+
+/// Whether one of `candidates` (grant policies that apply to `agent` for the action on `uri`)
+/// has every constraint satisfied, against the resource's `format` and `meta`.
+fn grants_allow<'p>(
+    mut candidates: impl Iterator<Item = &'p Policy>,
+    agent: &Agent,
+    uri: &str,
+    format: Option<&str>,
+    meta: &ResourceMeta,
+) -> bool {
+    let is_container = uri.ends_with('/');
     let mut types = vec![format!(
         "{LWS_NS}{}",
         if is_container {
@@ -748,12 +778,79 @@ async fn decide<S: Store + 'static>(
     types.extend(meta.types.iter().cloned());
     let ctx = ConstraintContext {
         client: agent.client.as_deref(),
-        format: format.as_deref(),
+        format,
         types: &types,
     };
-    Ok(candidates
-        .iter()
-        .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx))))
+    candidates.any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx)))
+}
+
+/// One resource's access for one action, read once and decided for many agents as [`allowed`]
+/// decides for one: a change's deliveries are each authorized against it, so the resource's
+/// metadata is read, and the grants scanned, once per change rather than once per subscriber.
+/// The grants are those in force when it is taken.
+pub(crate) struct ResourceAccess {
+    uri: String,
+    /// `None` when the metadata could not be read: past the owner, everyone is refused.
+    meta: Option<ResourceMeta>,
+    /// The grant policies covering `uri` for the action, whoever they are assigned to.
+    policies: Vec<Policy>,
+    /// The resource's format, looked up only when a policy may apply; `Err` when it could not be.
+    format: Result<Option<String>, ()>,
+}
+
+impl ResourceAccess {
+    /// `uri`'s access for `action` as it stands now.
+    pub(crate) async fn take<S: Store + 'static>(
+        state: &LwsState<S>,
+        action: Action,
+        uri: &str,
+    ) -> Self {
+        let meta = state.resource_meta(uri).await.ok();
+        let policies = match &meta {
+            Some(m) if !m.pending => state.access.policies_covering(action, uri),
+            _ => Vec::new(),
+        };
+        let format = if policies.is_empty() {
+            Ok(None)
+        } else {
+            format_of(state, uri).await.map_err(|_| ())
+        };
+        Self {
+            uri: uri.to_string(),
+            meta,
+            policies,
+            format,
+        }
+    }
+
+    /// Whether `agent` may take the action on the resource, as [`allowed`] decides.
+    pub(crate) fn allows<S: Store + 'static>(&self, state: &LwsState<S>, agent: &Agent) -> bool {
+        if state.cfg.open || is_owner(state, agent) {
+            return true;
+        }
+        let Some(meta) = &self.meta else {
+            return false;
+        };
+        let subject = agent.subject.as_deref();
+        if subject.is_some() && subject == meta.creator.as_deref() {
+            return true;
+        }
+        if meta.pending {
+            return false;
+        }
+        let mut candidates = self
+            .policies
+            .iter()
+            .filter(|p| p.assignee == FOAF_AGENT || Some(p.assignee.as_str()) == subject)
+            .peekable();
+        if candidates.peek().is_none() {
+            return false;
+        }
+        let Ok(format) = &self.format else {
+            return false;
+        };
+        grants_allow(candidates, agent, &self.uri, format.as_deref(), meta)
+    }
 }
 
 /// Whether a constraint's right operand is one its operator can be evaluated against: `isAnyOf` a
