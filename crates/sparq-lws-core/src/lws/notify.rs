@@ -1,7 +1,7 @@
 //! Notifications (LWS 1.0 core section 10) and the webhook subscription type
 //! (lws10-notifications-webhook).
 //!
-//! The NotificationService lives at [`SUBSCRIPTIONS_PATH`](super::SUBSCRIPTIONS_PATH) and offers
+//! The NotificationService lives at [`SUBSCRIPTIONS_PATH`] and offers
 //! one subscription type, `WebhookSubscription`. An authenticated agent subscribes with an
 //! `application/lws+json` request naming a `topic` (an array of resource URIs, each of which it
 //! must be able to read now) and an `inbox`; a topic covers itself and, for a container,

@@ -250,7 +250,7 @@ pub trait SparqClient: Send + Sync {
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError>;
 
     /// [`list_children`](SparqClient::list_children) while it fits: at most
-    /// [`max_rows`]`(container, max_bytes)` members whose IRIs come to at most `max_bytes`;
+    /// `max_rows``(container, max_bytes)` members whose IRIs come to at most `max_bytes`;
     /// `None` past either. A backend reads no more of the listing than that, and establishes
     /// that nothing was left out (an exact count, or one row past the bound asked for), so a
     /// listing too large to keep is refused without being held whole. A backend that cannot
