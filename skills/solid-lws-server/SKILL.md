@@ -343,8 +343,10 @@ What the server exposes, all discoverable from the storage description
   identity providers in `SOLID_SERVER_LWS_SAML_IDPS_FILE`: it needs an enveloped XML-DSig
   signature over the whole assertion (exclusive canonicalization, SHA-2, RSA or ECDSA
   SHA-256) under the issuer's key, a validity period around now, an audience restriction
-  naming this server, an http(s) URL `NameID` (the agent) and bearer confirmations whose `Recipient`
-  is the client.
+  naming this server, an http(s) URL `NameID` (the agent) and at least one satisfied bearer
+  confirmation, whose `Recipient` is the client. Subject confirmations are alternatives (SAML
+  core 2.4.1): unsatisfied ones (expired, holder-of-key, ...) are ignored, the satisfied ones
+  must name one client, and the assertion holds until the latest of them ends.
   The token endpoint checks the subject token's expiry once more just before it issues, so
   a token that expires while a suite fetches documents is refused.
   Each authentication suite lives in its own package (`sparq-lws-authn-*`, each an `authn-*`

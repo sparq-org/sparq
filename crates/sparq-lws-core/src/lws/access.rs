@@ -10,7 +10,7 @@
 //! `storage`.
 //!
 //! The access grant service and the access request service are LWS containers at
-//! [`GRANTS_PATH`](super::GRANTS_PATH) and [`REQUESTS_PATH`](super::REQUESTS_PATH). Only the owner
+//! [`GRANTS_PATH`] and [`REQUESTS_PATH`]. Only the owner
 //! may grant access or list grants; any authenticated agent may ask for access, and may read and
 //! withdraw what it asked. Both are stored through the [`Store`], so they survive a restart on a
 //! durable backend, and kept in memory for authorization.

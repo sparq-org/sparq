@@ -12,10 +12,11 @@
 //!
 //! Then, as the reference authorization server checks: `Conditions` with `NotBefore` and
 //! `NotOnOrAfter` around now, every `AudienceRestriction` naming this authorization server and no
-//! condition this server cannot evaluate, and a `Subject/NameID`, which is the LWS subject. Every
-//! `SubjectConfirmation` must be bearer (holder-of-key and sender-vouches need a proof this
-//! endpoint does not take), with an unexpired `SubjectConfirmationData` whose `Recipient`, which
-//! is required, is the client. Subject and client must be URIs.
+//! condition this server cannot evaluate, and a `Subject/NameID`, which is the LWS subject. At
+//! least one `SubjectConfirmation` must be satisfied (they are alternatives): a bearer one
+//! (holder-of-key and sender-vouches need a proof this endpoint does not take) with an unexpired
+//! `SubjectConfirmationData` whose `Recipient`, which is required, is the client. Subject and
+//! client must be URIs.
 //!
 //! The XML is parsed with quick-xml into a small tree; a DOCTYPE (and so any entity but the
 //! predefined ones) or a processing instruction is refused, and exclusive XML canonicalization
@@ -273,15 +274,15 @@ fn verify_at(
     Ok(Verified {
         subject: name_id,
         client,
-        // The assertion holds until its Conditions or any bearer confirmation ends.
+        // The assertion holds until its Conditions end or its last satisfied confirmation does.
         expires: expires.min(confirmed_until),
     })
 }
 
 /// SAML 2.0 core 2.4.1.1: the bearer confirmation method, the one an assertion presented by
 /// whoever holds it may use. Holder-of-key needs proof of a key and sender-vouches an
-/// authenticated attesting party; this endpoint has neither, so an assertion confirmed that way
-/// is refused rather than accepted without its proof.
+/// authenticated attesting party; this endpoint has neither, so such a confirmation is never
+/// satisfied, and an assertion with no satisfied bearer confirmation is refused.
 const BEARER: &str = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 
 /// Check the assertion's `Conditions` beyond its validity period (SAML 2.0 core 2.5.1):
@@ -328,63 +329,81 @@ fn check_conditions(conditions: &Element, us: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The client an assertion was issued to: the `Recipient` of its bearer subject confirmation.
+/// The client an assertion was issued to, and until when it is confirmed: the `Recipient` and
+/// `NotOnOrAfter` of its satisfied bearer subject confirmations.
 ///
-/// Every `SubjectConfirmation` must use the bearer method (holder-of-key, sender-vouches and
-/// anything else are refused, not skipped), and there must be at least one. Each must carry
-/// `SubjectConfirmationData` with a `NotOnOrAfter` in the future, a `NotBefore` (if any) in the
-/// past, and a `Recipient` that is a URI: the LWS client identifier ("The SAML token MUST use the
-/// Recipient parameter within a saml:SubjectConfirmationData assertion for the LWS client
-/// identifier"). When several confirmations are present they must all name the same client.
+/// SAML 2.0 core 2.4.1: when an assertion carries several `SubjectConfirmation` elements they are
+/// alternatives, and satisfying any one of them confirms the subject. A confirmation is satisfied
+/// here when it uses the bearer method (holder-of-key needs proof of a key and sender-vouches an
+/// authenticated attesting party; this endpoint has neither, so those are never satisfied) and
+/// its `SubjectConfirmationData` has a `NotOnOrAfter` in the future, a `NotBefore` (if any) in
+/// the past, and a `Recipient` that is a URI: the LWS client identifier ("The SAML token MUST use
+/// the Recipient parameter within a saml:SubjectConfirmationData assertion for the LWS client
+/// identifier"). Unsatisfied confirmations are ignored. The satisfied ones must all name the same
+/// client, since nothing else at this endpoint says which client is meant; the assertion is then
+/// confirmed until the latest of their `NotOnOrAfter`. With none satisfied, the first one's reason
+/// is reported.
 fn bearer_recipient(subject: &Element, now: i64) -> Result<(String, i64), String> {
-    let mut client: Option<String> = None;
-    let mut until = i64::MAX;
+    let mut confirmed: Option<(String, i64)> = None;
+    let mut first_failure: Option<String> = None;
     for confirmation in subject
         .elements()
         .filter(|e| e.is(SAML_NS, "SubjectConfirmation"))
     {
-        if confirmation.attr("Method") != Some(BEARER) {
-            return Err(format!(
-                "the assertion's subject confirmation method {} is not accepted; only bearer is",
-                confirmation.attr("Method").unwrap_or("(none)")
-            ));
-        }
-        let data = confirmation
-            .child(SAML_NS, "SubjectConfirmationData")
-            .ok_or("the bearer subject confirmation has no SubjectConfirmationData")?;
-        let limit = data
-            .attr("NotOnOrAfter")
-            .ok_or("the bearer subject confirmation has no NotOnOrAfter")?;
-        let limit = parse_datetime(limit)
-            .filter(|t| *t > now - SKEW_SECS)
-            .ok_or("the subject confirmation has expired")?;
-        until = until.min(limit);
-        if let Some(start) = data.attr("NotBefore") {
-            if parse_datetime(start).is_none_or(|t| t > now + SKEW_SECS) {
-                return Err("the subject confirmation is not yet valid".into());
+        match satisfied_bearer(confirmation, now) {
+            Ok((recipient, limit)) => {
+                match &mut confirmed {
+                    Some((client, _)) if *client != recipient => return Err(
+                        "the assertion's satisfied subject confirmations name different Recipients"
+                            .into(),
+                    ),
+                    Some((_, until)) => *until = (*until).max(limit),
+                    None => confirmed = Some((recipient, limit)),
+                }
             }
-        }
-        // Without a Recipient the client is unknown.
-        let recipient = data
-            .attr("Recipient")
-            .map(str::trim)
-            .filter(|r| !r.is_empty())
-            .ok_or("the assertion's SubjectConfirmationData names no Recipient (the client)")?;
-        if !is_uri(recipient) {
-            return Err("the assertion's Recipient is not a URI".into());
-        }
-        match &client {
-            Some(c) if c != recipient => {
-                return Err(
-                    "the assertion's subject confirmations name different Recipients".into(),
-                )
+            Err(reason) => {
+                first_failure.get_or_insert(reason);
             }
-            _ => client = Some(recipient.to_string()),
         }
     }
-    client
-        .map(|c| (c, until))
-        .ok_or_else(|| "the assertion has no bearer SubjectConfirmation".into())
+    confirmed.ok_or_else(|| {
+        first_failure.unwrap_or_else(|| "the assertion has no bearer SubjectConfirmation".into())
+    })
+}
+
+/// One subject confirmation, checked as `bearer_recipient` describes: its client and the instant
+/// it ends, or why it is not satisfied.
+fn satisfied_bearer(confirmation: &Element, now: i64) -> Result<(String, i64), String> {
+    if confirmation.attr("Method") != Some(BEARER) {
+        return Err(format!(
+            "the assertion's subject confirmation method {} is not accepted; only bearer is",
+            confirmation.attr("Method").unwrap_or("(none)")
+        ));
+    }
+    let data = confirmation
+        .child(SAML_NS, "SubjectConfirmationData")
+        .ok_or("the bearer subject confirmation has no SubjectConfirmationData")?;
+    let limit = data
+        .attr("NotOnOrAfter")
+        .ok_or("the bearer subject confirmation has no NotOnOrAfter")?;
+    let limit = parse_datetime(limit)
+        .filter(|t| *t > now - SKEW_SECS)
+        .ok_or("the subject confirmation has expired")?;
+    if let Some(start) = data.attr("NotBefore") {
+        if parse_datetime(start).is_none_or(|t| t > now + SKEW_SECS) {
+            return Err("the subject confirmation is not yet valid".into());
+        }
+    }
+    // Without a Recipient the client is unknown.
+    let recipient = data
+        .attr("Recipient")
+        .map(str::trim)
+        .filter(|r| !r.is_empty())
+        .ok_or("the assertion's SubjectConfirmationData names no Recipient (the client)")?;
+    if !is_uri(recipient) {
+        return Err("the assertion's Recipient is not a URI".into());
+    }
+    Ok((recipient.to_string(), limit))
 }
 
 // ---------------------------------------------------------------- signature
@@ -1723,22 +1742,53 @@ mod tests {
             verify_with(&confirmation(BEARER, &good)).unwrap().client,
             "https://client.example/"
         );
-        // Review finding: the expiry the server checks again before it issues was the
-        // Conditions' alone. A bearer confirmation that ends first (here, already within the
-        // skew past its end) ends the assertion.
+        // SAML core 2.4.1: confirmations are alternatives. One that ends first (here, already
+        // within the skew past its end) beside one that holds: the later one confirms, so the
+        // assertion holds until it ends, capped by the Conditions.
         let ending = confirmation_data(&format!(
             " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
             instant(now - SKEW_SECS + 1)
         ));
+        let pair = format!(
+            "{}{}",
+            confirmation(BEARER, &ending),
+            confirmation(BEARER, &good)
+        );
+        let v = verify_with(&pair).unwrap();
+        assert_eq!(v.expires, now + 300);
+        assert!(v.still_valid(now + 1));
+        let later = confirmation_data(&format!(
+            " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
+            instant(now + 3600)
+        ));
+        let capped = format!(
+            "{}{}",
+            confirmation(BEARER, &later),
+            confirmation(BEARER, &good)
+        );
+        assert_eq!(verify_with(&capped).unwrap().expires, now + 300);
+        // The only satisfied confirmation ending soon bounds the assertion.
+        let soon = confirmation_data(&format!(
+            " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
+            instant(now + 30)
+        ));
+        let v = verify_with(&confirmation(BEARER, &soon)).unwrap();
+        assert_eq!(v.expires, now + 30);
+        assert!(!v.still_valid(now + 30 + SKEW_SECS));
+        // An expired confirmation does not extend the assertion either.
+        let expired = confirmation_data(&format!(
+            " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
+            instant(now - 3600)
+        ));
         let v = verify_with(&format!(
             "{}{}",
-            confirmation(BEARER, &good),
-            confirmation(BEARER, &ending)
+            confirmation(BEARER, &soon),
+            confirmation(BEARER, &expired)
         ))
         .unwrap();
-        assert_eq!(v.expires, now - SKEW_SECS + 1);
-        assert!(v.still_valid(now) && !v.still_valid(now + 1));
-        // Holder-of-key and sender-vouches carry no proof here: refused, alone or beside a bearer.
+        assert_eq!(v.expires, now + 30);
+        // Holder-of-key and sender-vouches carry no proof here: never satisfied. Alone they leave
+        // nothing confirmed; beside a satisfied bearer they are ignored.
         for method in [
             "urn:oasis:names:tc:SAML:2.0:cm:holder-of-key",
             "urn:oasis:names:tc:SAML:2.0:cm:sender-vouches",
@@ -1747,10 +1797,13 @@ mod tests {
             assert!(err.contains("not accepted"), "{err}");
             let both = format!(
                 "{}{}",
-                confirmation(BEARER, &good),
-                confirmation(method, &good)
+                confirmation(method, &good),
+                confirmation(BEARER, &good)
             );
-            assert!(verify_with(&both).is_err());
+            assert_eq!(
+                verify_with(&both).unwrap().client,
+                "https://client.example/"
+            );
         }
         // No confirmation, or one without a method.
         assert!(verify_with("").unwrap_err().contains("no bearer"));
@@ -1764,10 +1817,6 @@ mod tests {
         assert!(verify_with(&confirmation(BEARER, &no_limit))
             .unwrap_err()
             .contains("NotOnOrAfter"));
-        let expired = confirmation_data(&format!(
-            " NotOnOrAfter=\"{}\" Recipient=\"https://client.example/\"",
-            instant(now - 3600)
-        ));
         assert!(verify_with(&confirmation(BEARER, &expired))
             .unwrap_err()
             .contains("expired"));
@@ -1776,7 +1825,15 @@ mod tests {
             instant(now + 3600)
         ));
         assert!(verify_with(&confirmation(BEARER, &early)).is_err());
-        // Two bearer confirmations naming different clients.
+        // None satisfied among several: refused, with the first one's reason.
+        let none = format!(
+            "{}{}",
+            confirmation(BEARER, &expired),
+            confirmation(BEARER, &early)
+        );
+        assert!(verify_with(&none).unwrap_err().contains("expired"));
+        // Two satisfied bearer confirmations naming different clients: which client is meant is
+        // unknown, so refused.
         let other = confirmation_data(&format!(
             " NotOnOrAfter=\"{exp}\" Recipient=\"https://other.example/\""
         ));
@@ -1786,6 +1843,20 @@ mod tests {
             confirmation(BEARER, &other)
         );
         assert!(verify_with(&two).unwrap_err().contains("different"));
+        // An unsatisfied confirmation naming another client is ignored.
+        let other_expired = confirmation_data(&format!(
+            " NotOnOrAfter=\"{}\" Recipient=\"https://other.example/\"",
+            instant(now - 3600)
+        ));
+        let mixed = format!(
+            "{}{}",
+            confirmation(BEARER, &other_expired),
+            confirmation(BEARER, &good)
+        );
+        assert_eq!(
+            verify_with(&mixed).unwrap().client,
+            "https://client.example/"
+        );
     }
 
     #[test]

@@ -1795,7 +1795,7 @@ async fn create<S: Store + 'static>(
 }
 
 /// A member name in `parent` that is free, with the locks of both its spellings (`name/`, then
-/// `name`, in [`lock_order`]): `base_name`, else `base_name-2`, `-3`, ... and past
+/// `name`, in `lock_order`): `base_name`, else `base_name-2`, `-3`, ... and past
 /// [`NUMBERED_NAMES`] a random suffix, [`RANDOM_NAMES`] times, then a 409. A name is free when
 /// its locks can be taken now and, under them, neither spelling exists; a reserved name
 /// ([`RESERVED_ROOT_NAMES`]) never is. Under the locks the answer holds: only a create makes a
@@ -1871,7 +1871,7 @@ async fn current<S: Store + 'static>(
 /// A create takes its container's lock (shared: creates in one container exclude each other by
 /// the new member's lock alone) across the choice of a free name and the create, and the new
 /// member's lock across its content and metadata (as a delete holds it across their removal),
-/// and a recursive delete takes the lock of every resource it removes (see [`lock_subtree`]), so neither
+/// and a recursive delete takes the lock of every resource it removes (see `lock_subtree`), so neither
 /// can interleave with the other or with a conditional write.
 ///
 /// Limit: the locks live in this process. Several server processes over one store do not see each
@@ -1905,7 +1905,7 @@ const LOCK_SWEEP_FLOOR: usize = 1024;
 
 impl IriLocks {
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
-    /// IRI first, ties in byte order ([`lock_order`]), so a child always before its container and
+    /// IRI first, ties in byte order (`lock_order`), so a child always before its container and
     /// never the other way, and two writers cannot deadlock.
     ///
     /// Every lock is taken only while `iri` is [visible](Self::visible): `None` at once when it
@@ -1925,7 +1925,7 @@ impl IriLocks {
     }
 
     /// Take the lock of `iri` if it is free and visible, without waiting: the one way to take a
-    /// lock out of [`lock_order`], since it cannot deadlock.
+    /// lock out of `lock_order`, since it cannot deadlock.
     pub fn try_lock(&self, iri: &str) -> Option<IriGuard> {
         let guard = self.mutex(iri).try_write_owned().ok()?;
         self.visible(iri).then_some(guard)
@@ -2580,7 +2580,7 @@ fn read_json_patch(body: &[u8]) -> Result<Value, Response> {
     Ok(patch)
 }
 
-/// Read `body` as a PATCH reads it ([`read_json_patch`]), keeping nothing: whether it is a
+/// Read `body` as a PATCH reads it (`read_json_patch`), keeping nothing: whether it is a
 /// JSON Patch. Public only so the measured bound [`LINKSET_PARSE_AMPLIFICATION`] is tested on
 /// the parsing a linkset PATCH does.
 #[doc(hidden)]
@@ -2820,7 +2820,7 @@ fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, Patch
 }
 
 /// [`json_patch`], with every value measured, when `in_memory`, by what it allocates as well as
-/// its serialized size ([`value_cost`]). The target is charged before it is copied, and each
+/// its serialized size (`value_cost`). The target is charged before it is copied, and each
 /// value an operation adds before it is cloned, so a patch past the budget allocates nothing
 /// to find that out.
 fn json_patch_within(
@@ -3544,7 +3544,7 @@ async fn subtree<S: Store + 'static>(
 /// The exclusive lock of one IRI (see [`IriLocks`]).
 pub type IriGuard = tokio::sync::OwnedRwLockWriteGuard<()>;
 
-/// Lock `uri` and everything under it, in [`lock_order`], and return the guards with the subtree
+/// Lock `uri` and everything under it, in `lock_order`, and return the guards with the subtree
 /// (as [`subtree`] lists it) that holds while they are held. The subtree is listed, locked, and
 /// listed again; when a member arrived or left in between, the locks are released and it starts
 /// over. A create holds its container's lock (shared) until its member exists, so once every
@@ -3709,7 +3709,7 @@ fn target_attribute_ok(key: &str, value: &Value) -> bool {
 enum Unresolved {
     /// An anchor or href is not a URI reference, or a target attribute is misshapen.
     Invalid,
-    /// The document passes a cap, or resolving it could pass the budget ([`linkset_cost`]).
+    /// The document passes a cap, or resolving it could pass the budget (`linkset_cost`).
     TooLarge,
 }
 
@@ -3717,7 +3717,7 @@ enum Unresolved {
 /// metadata, which stores the linkset, may hold.
 const LINKSET_SERVED_BYTES: usize = super::MAX_META_BYTES;
 
-/// The most memory reading a JSON Patch body ([`read_json_patch`]) holds at once per byte of
+/// The most memory reading a JSON Patch body (`read_json_patch`) holds at once per byte of
 /// it, at most: measured as peak live bytes with a counting allocator over the smallest
 /// syntactic units, numbers, escapes, long keys, deep nesting and mixes of them, repeated
 /// (`tests/linkset_parse_amplification.rs`), whose worst is objects nested in objects (about
@@ -3741,8 +3741,8 @@ fn has_scheme(s: &str) -> bool {
 }
 
 /// What a linkset PATCH may allocate for any one document it holds: the patch as parsed, the
-/// stored linkset as patched (every clone checked first, [`value_cost`]), and resolving and
-/// indexing the result ([`linkset_cost`]).
+/// stored linkset as patched (every clone checked first, `value_cost`), and resolving and
+/// indexing the result (`linkset_cost`).
 pub const LINKSET_COST_BUDGET: usize = 2 << 20;
 
 /// Restore, in place, the strings of a document read with its numbers as text
@@ -3809,7 +3809,7 @@ fn value_cost(v: &Value) -> usize {
 /// deriving its indexed links ([`links_of`]), can allocate. Every string the document holds is
 /// copied at most twice (into the resolved document, and into the indexed links), so its
 /// serialized size is charged twice; every value it holds is charged what it allocates
-/// ([`value_cost`]), so empty relations, long attribute arrays and objects count; and every
+/// (`value_cost`), so empty relations, long attribute arrays and objects count; and every
 /// relative anchor and href may grow by the base when it is resolved. Computed from the parsed
 /// document before any of that work is done; `None` when the document passes a cap (entries, targets, or an
 /// anchor's, relation's or href's length).
@@ -3884,7 +3884,7 @@ impl Resolved {
 /// delivers it, not the resource it describes). [`Unresolved::Invalid`] when one is not a URI
 /// reference (RFC 3986), or a target attribute has not the shape RFC 9264 gives it
 /// ([`target_attribute_ok`]), which the document may not hold. Before anything is resolved, the
-/// document is held to the caps and its [`linkset_cost`] to `budget`: past either it is
+/// document is held to the caps and its `linkset_cost` to `budget`: past either it is
 /// [`Unresolved::TooLarge`], and nothing is built.
 fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, Unresolved> {
     use Unresolved::Invalid;
@@ -4113,7 +4113,7 @@ fn served_linkset(
 /// Whether a linkset document, as served, is one a PATCH may change: what a PATCH checks its
 /// target against before it applies anything, and what applying none of it (`[]`) and resolving
 /// the result against the linkset's own URI (`base_len` bytes long) then costs and is capped by
-/// ([`linkset_cost`], which charges at least the target's size and [`value_cost`]), with the
+/// (`linkset_cost`, which charges at least the target's size and `value_cost`), with the
 /// document within what the metadata holds ([`LINKSET_SERVED_BYTES`]). Every write that changes
 /// a linkset (POST, PUT and PATCH) checks the document it would serve with this, so whatever it
 /// stores can be patched within [`LINKSET_COST_BUDGET`]. Metadata stored before this was checked
