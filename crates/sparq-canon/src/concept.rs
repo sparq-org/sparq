@@ -211,8 +211,8 @@ impl Multibase {
         let mut s = String::new();
         s.push(self.prefix());
         match self {
-            Multibase::Base16Lower => base16_encode(bytes, false, &mut s),
-            Multibase::Base16Upper => base16_encode(bytes, true, &mut s),
+            Multibase::Base16Lower => sparq_core::hex::encode_into(bytes, false, &mut s),
+            Multibase::Base16Upper => sparq_core::hex::encode_into(bytes, true, &mut s),
             Multibase::Base32Lower => base32_encode(bytes, false, &mut s),
             Multibase::Base32Upper => base32_encode(bytes, true, &mut s),
             Multibase::Base58Btc => base58btc_encode(bytes, &mut s),
@@ -669,15 +669,6 @@ fn base16_decode(s: &str, upper: bool) -> Result<Vec<u8>, ConceptError> {
     Ok(out)
 }
 
-fn base16_encode(bytes: &[u8], upper: bool, out: &mut String) {
-    const LOWER: &[u8; 16] = b"0123456789abcdef";
-    const UPPER: &[u8; 16] = b"0123456789ABCDEF";
-    let table = if upper { UPPER } else { LOWER };
-    for &b in bytes {
-        out.push(table[usize::from(b >> 4)] as char);
-        out.push(table[usize::from(b & 0x0f)] as char);
-    }
-}
 
 fn base32_decode(s: &str, upper: bool) -> Result<Vec<u8>, ConceptError> {
     let table = if upper { BASE32_UPPER } else { BASE32_LOWER };

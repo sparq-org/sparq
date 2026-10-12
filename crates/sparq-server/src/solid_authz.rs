@@ -1026,27 +1026,7 @@ fn parse_wire_credential(obj: &serde_json::Map<String, serde_json::Value>) -> Re
 /// [SONNET-4.6] (sq-pfae.17) Decode a 64-hex-char (32-byte) salt from a hex string. Fail-closed.
 #[cfg(feature = "solid-authz-trust")]
 fn decode_salt_hex(hex: &str) -> Option<[u8; 32]> {
-    if hex.len() != 64 {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
-        let hi = hex_nibble(chunk[0])?;
-        let lo = hex_nibble(chunk[1])?;
-        out[i] = (hi << 4) | lo;
-    }
-    Some(out)
-}
-
-/// [SONNET-4.6] (sq-pfae.17) Decode a single hex nibble. Fail-closed.
-#[cfg(feature = "solid-authz-trust")]
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    sparq_core::hex::decode(hex)?.try_into().ok()
 }
 
 /// [SONNET-4.6] (sq-pfae.17) Build a `sparq_trust::policy::ShapeRef` for a `trust:forPredicate`

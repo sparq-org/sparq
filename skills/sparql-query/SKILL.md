@@ -74,6 +74,8 @@ The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_
 
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
+- `sparq_core::hex::{encode, encode_into, decode}` are the shared base16 helpers (lowercase
+  `encode`, either case via `encode_into`, case-insensitive `decode` returning `None` on bad input).
 - `pub struct QueryResult { pub vars: Vec<oxrdf::Variable>, pub rows: Vec<Vec<Option<oxrdf::Term>>> }`
   — `len()` / `is_empty()` count solution rows. The layout is **columnar** (the `vars` header is
   stored once, not per cell); index a cell as `result.rows[row][col]` where `col` is the position of
