@@ -803,6 +803,50 @@ pub fn data_update_effects(
     Ok(Some(effects))
 }
 
+/// The [`UpdateEffect`]s of a request that is exactly one `DELETE`/`INSERT … WHERE`, computed
+/// READ-ONLY against `graph`: the WHERE is evaluated once (under the `reads` view and `budget`,
+/// as [`update_in_place_algebra_capturing`] evaluates it) and the templates instantiated, but
+/// nothing is applied. The log is the one [`update_in_place_algebra_capturing`] would return for
+/// the same request on the same graph, so a caller can authorize it and only then commit it with
+/// [`apply_effects`], with no fork: a refusal, or an error here, leaves `graph` untouched.
+/// `Ok(None)` for any other request (several operations see each other's writes, so their
+/// effects cannot be read off the graph as it stands).
+pub fn where_update_effects(
+    graph: &Graph,
+    upd: &Update,
+    reads: Option<&std::sync::Arc<rustc_hash::FxHashSet<Term>>>,
+    budget: &crate::QueryBudget,
+) -> Result<Option<Vec<UpdateEffect>>, String> {
+    let [GraphUpdateOperation::DeleteInsert { delete, insert, using, pattern }] =
+        upd.operations.as_slice()
+    else {
+        return Ok(None);
+    };
+    require_update_budget(budget)?;
+    let _view = reads.map(crate::exec::view::install_reads);
+    let (dels, inss) = crate::exec::budget::with_budget(budget, || match using {
+        // As `apply_update_in_place` evaluates it: a USING dataset is decoded from the
+        // visible graphs, and the view is suspended over the re-scoped dataset.
+        Some(u) => {
+            let active = Dataset::decode_visible(graph).build_using(u);
+            let _folded = crate::exec::view::suspend_all();
+            instantiate_templates(&active, delete, insert, pattern)
+        }
+        None => instantiate_templates(graph, delete, insert, pattern),
+    })?;
+    let mut effects = Vec::new();
+    let mut sink: EffectSink = Some(&mut effects);
+    // All deletes first, then all inserts, per graph slot: the order the in-place apply
+    // records them in.
+    for (slot, del) in group_by_slot(dels) {
+        record_delta(&mut sink, &slot, &[], &del);
+    }
+    for (slot, ins) in group_by_slot(inss) {
+        record_delta(&mut sink, &slot, &ins, &[]);
+    }
+    Ok(Some(effects))
+}
+
 /// [OPUS-4.8] (sq-o1wp) Request-ATOMIC variant of [`update_in_place`]: applies the whole
 /// `;`-separated update request to a private [`fork`](Graph::fork) and only commits it back into
 /// `graph` (by replacing `*graph`) when EVERY operation succeeds. On any error — a parse failure,

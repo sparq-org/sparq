@@ -177,6 +177,10 @@ Update (data lives in the default + named graphs):
   replay it onto a second (e.g. durable mirror) graph WITHOUT re-executing the text. Use this when
   mirroring a sequence of updates so non-deterministic functions (`NOW()`/`RAND()`/`UUID()`/`BNODE()`)
   and `LOAD <remote>` are not re-rolled on the second graph (the server's `--persist` path uses it).
+- `where_update_effects(&Graph, &spargebra::Update, reads, &QueryBudget) -> Result<Option<Vec<UpdateEffect>>, String>`
+  — the effects of a request that is exactly one `DELETE`/`INSERT … WHERE`, computed read-only (the
+  WHERE evaluated once, nothing applied), so a caller can authorize them and then `apply_effects`
+  them with no fork. `Ok(None)` for any other request.
 
 Prepared (parse/plan once, execute many):
 
