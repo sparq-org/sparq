@@ -1369,13 +1369,11 @@ fn sanitize_slug(slug: Option<&str>) -> Option<String> {
 /// User-managed links by relation.
 type Links = std::collections::BTreeMap<String, Vec<String>>;
 
-/// A relation's key: an extension relation (a URI) as it is, a registered one lower-cased.
+/// A relation's key, lower-cased: registered relation types and extension ones (URIs) alike
+/// are compared case-insensitively (RFC 8288 section 2.1.1 and 2.1.2), so two spellings of
+/// one relation are one key.
 fn rel_key(r: &str) -> String {
-    if r.contains(':') {
-        r.to_string()
-    } else {
-        r.to_ascii_lowercase()
-    }
+    r.to_ascii_lowercase()
 }
 
 /// The types and user-managed links a request declared in its Link headers. What they hold once
@@ -4562,6 +4560,46 @@ mod tests {
 
     fn path_of(uri: &str) -> &str {
         uri.strip_prefix(BASE).unwrap()
+    }
+
+    /// Review finding: a `;` inside a quoted parameter split it, so a title holding
+    /// `; rel=type` beside a container type link made a POST create a container (dropping its
+    /// body) though the link's relation is `describedby`.
+    #[tokio::test]
+    async fn a_quoted_semicolon_declares_nothing() {
+        let st = state().await;
+        let link =
+            r#"<https://www.w3.org/ns/lws#Container>; title="note; rel=type"; rel=describedby"#;
+        let uri = post(&st, "n.txt", "text/plain", "kept", &[("link", link)]).await;
+        let r = call(&st, "GET", path_of(&uri), &[], "").await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(&body_of(r).await[..], b"kept");
+    }
+
+    /// RFC 8288 section 2.1.2: extension relation types are compared case-insensitively, so two
+    /// spellings of one are one relation, holding the target once.
+    #[tokio::test]
+    async fn extension_relations_are_case_insensitive() {
+        let st = state().await;
+        let link = r#"<https://t.example/x>; rel="https://E.example/Rel", <https://t.example/x>; rel="https://e.example/rel""#;
+        let uri = post(&st, "e.txt", "text/plain", "x", &[("link", link)]).await;
+        let r = call(&st, "GET", &format!("{}.meta", path_of(&uri)), &[], "").await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let doc: Value = serde_json::from_slice(&body_of(r).await).unwrap();
+        let entry = doc["linkset"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["anchor"] == uri.as_str())
+            .unwrap();
+        let rels: Vec<_> = entry
+            .as_object()
+            .unwrap()
+            .keys()
+            .filter(|k| k.contains("e.example"))
+            .collect();
+        assert_eq!(rels, ["https://e.example/rel"]);
+        assert_eq!(entry["https://e.example/rel"].as_array().unwrap().len(), 1);
     }
 
     #[tokio::test]

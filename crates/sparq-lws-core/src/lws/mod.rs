@@ -2128,52 +2128,132 @@ pub(crate) fn check_headers(headers: &HeaderMap) -> Result<(), Response> {
     Ok(())
 }
 
-/// One link of a Link header value: its target and its parameters, both borrowed from the value.
+/// One link of a Link header value (RFC 8288 section 3): its target and its parameters, both
+/// borrowed from the value.
 #[derive(Clone, Copy, Debug)]
 pub struct Link<'a> {
     /// The target, between `<` and `>`, trimmed.
     pub target: &'a str,
-    /// The parameters' text, up to the next comma outside quotes.
+    /// The parameters' text, every one a `link-param` ([`link_param`]).
     params: &'a str,
 }
 
 impl<'a> Link<'a> {
-    /// The value of the parameter `name` (matched case-insensitively), unquoted; the first when
-    /// it repeats.
-    pub fn param(&self, name: &str) -> Option<&'a str> {
-        self.params.split(';').find_map(|p| {
-            let (k, v) = p.split_once('=')?;
-            k.trim()
-                .eq_ignore_ascii_case(name)
-                .then(|| v.trim().trim_matches('"'))
-        })
+    /// The value of the parameter `name` (matched case-insensitively, RFC 8288 section 3), a
+    /// quoted string unquoted with its escapes undone; the first when it repeats ("occurrences
+    /// after the first MUST be ignored"). A parameter without a value has the empty one.
+    pub fn param(&self, name: &str) -> Option<std::borrow::Cow<'a, str>> {
+        let mut rest = self.params;
+        while let Some((key, value, next)) = link_param(rest) {
+            if key.eq_ignore_ascii_case(name) {
+                return Some(unescape(value));
+            }
+            rest = next;
+        }
+        None
     }
 }
 
-/// The links of a Link header value, parsed as they are read. Nothing is allocated, so a caller
-/// that stops at a bound (see [`check_headers`]) has spent nothing on what lies past it.
+/// Whether `b` is a `tchar` (RFC 9110 section 5.6.2), of which a `token` is made.
+fn is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
+}
+
+/// `s` past its leading spaces and tabs (`OWS`, `BWS`).
+fn skip_ows(s: &str) -> &str {
+    s.trim_start_matches([' ', '\t'])
+}
+
+/// A `token` at the start of `s`, and what follows it; `None` when there is none.
+fn token(s: &str) -> Option<(&str, &str)> {
+    let n = s.bytes().take_while(|b| is_tchar(*b)).count();
+    (n > 0).then(|| s.split_at(n))
+}
+
+/// A `quoted-string` at the start of `s` (RFC 9110 section 5.6.4): its text between the quotes,
+/// `quoted-pair`s still escaped, and what follows it; `None` when `s` does not start with one
+/// or it is never closed.
+fn quoted_string(s: &str) -> Option<(&str, &str)> {
+    let inner = s.strip_prefix('"')?;
+    let bytes = inner.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            // A quoted-pair: the backslash and the octet it escapes, whatever that is.
+            b'\\' => i += 2,
+            b'"' => return Some((&inner[..i], &inner[i + 1..])),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// The text of a quoted string with its `quoted-pair`s undone; borrowed when it has none.
+fn unescape(raw: &str) -> std::borrow::Cow<'_, str> {
+    if !raw.contains('\\') {
+        return std::borrow::Cow::Borrowed(raw);
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// One `OWS ";" OWS link-param` at the start of `s` (RFC 8288 section 3): its name, its value
+/// (`token` or `quoted-string`, still escaped; empty when it has none) and what follows.
+/// `None` when `s` does not start with `;`, or what follows is not a `link-param`.
+fn link_param(s: &str) -> Option<(&str, &str, &str)> {
+    let s = skip_ows(s).strip_prefix(';')?;
+    let (name, s) = token(skip_ows(s))?;
+    let s = skip_ows(s);
+    let Some(v) = s.strip_prefix('=') else {
+        return Some((name, "", s));
+    };
+    let v = skip_ows(v);
+    if v.starts_with('"') {
+        quoted_string(v).map(|(value, rest)| (name, value, rest))
+    } else {
+        token(v).map(|(value, rest)| (name, value, rest))
+    }
+}
+
+/// The links of a Link header value (RFC 8288 section 3), read as they are needed: a caller that
+/// stops at a bound (see [`check_headers`]) has spent nothing on what lies past it, and nothing
+/// is allocated. Reading stops at the first part that is not a `link-value`: a target without its
+/// `>` or with a `<` in it, or parameters that are not `link-param`s (a quoted string never
+/// closed among them); nothing after it is read as a link.
 pub fn parse_links(value: &str) -> impl Iterator<Item = Link<'_>> {
     let mut rest = value;
     std::iter::from_fn(move || {
-        let start = rest.find('<')?;
-        let end = rest[start..].find('>')?;
-        let target = rest[start + 1..start + end].trim();
-        rest = &rest[start + end + 1..];
-        // Parameters run until the next comma outside quotes.
-        let bytes = rest.as_bytes();
-        let mut i = 0;
-        let mut in_quotes = false;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'"' => in_quotes = !in_quotes,
-                b',' if !in_quotes => break,
-                _ => {}
-            }
-            i += 1;
+        // Empty list elements and the whitespace around them are skipped (RFC 9110 5.6.1).
+        let after = rest.trim_start_matches([' ', '\t', ',']).strip_prefix('<');
+        rest = "";
+        let after = after?;
+        let end = after.find('>')?;
+        let target = &after[..end];
+        if target.contains('<') {
+            return None;
         }
-        let params = &rest[..i];
-        rest = &rest[i..];
-        Some(Link { target, params })
+        let params = &after[end + 1..];
+        let mut cursor = params;
+        while let Some((_, _, next)) = link_param(cursor) {
+            cursor = next;
+        }
+        // The link ends at the end of the value or at the `,` before the next one.
+        let tail = skip_ows(cursor);
+        if !(tail.is_empty() || tail.starts_with(',')) {
+            return None;
+        }
+        rest = tail;
+        Some(Link {
+            target: target.trim(),
+            params: &params[..params.len() - cursor.len()],
+        })
     })
 }
 
@@ -2753,7 +2833,7 @@ pub(crate) mod test_store {
             .iter()
             .filter_map(|v| v.to_str().ok())
             .flat_map(super::parse_links)
-            .filter(|l| l.param("rel") == Some(rel))
+            .filter(|l| l.param("rel").as_deref() == Some(rel))
             .map(|l| l.target.to_string())
             .collect()
     }
@@ -3340,19 +3420,63 @@ mod tests {
                 .collect();
         assert_eq!(l.len(), 3);
         assert_eq!(l[0].target, "https://a/x");
-        assert_eq!(l[0].param("rel"), Some("type"));
-        assert_eq!(l[1].param("rel"), Some("up next"));
-        assert_eq!(l[1].param("title"), Some("a, b"));
+        assert_eq!(l[0].param("rel").as_deref(), Some("type"));
+        assert_eq!(l[1].param("rel").as_deref(), Some("up next"));
+        assert_eq!(l[1].param("title").as_deref(), Some("a, b"));
         assert_eq!(l[2].target, "c");
         assert_eq!(l[2].param("rel"), None);
     }
 
-    /// RFC 8288 section 3.3: occurrences of `rel` after the first are ignored. Parameter names
+    /// RFC 8288 section 3: occurrences of `rel` after the first are ignored. Parameter names
     /// are case-insensitive.
     #[test]
     fn a_link_takes_its_first_rel() {
         let l = parse_links(r#"<a>; REL=type; rel="next""#).next().unwrap();
-        assert_eq!(l.param("rel"), Some("type"));
+        assert_eq!(l.param("rel").as_deref(), Some("type"));
+    }
+
+    /// Review finding: parameters were split at every `;`, inside quoted strings too, so a
+    /// `title` holding `; rel=type` declared a relation the link does not have.
+    #[test]
+    fn a_semicolon_in_a_quoted_string_is_text() {
+        let l = parse_links(
+            r#"<https://www.w3.org/ns/lws#Container>; title="note; rel=type"; rel=describedby"#,
+        )
+        .next()
+        .unwrap();
+        assert_eq!(l.param("rel").as_deref(), Some("describedby"));
+        assert_eq!(l.param("title").as_deref(), Some("note; rel=type"));
+    }
+
+    /// Quoted pairs (RFC 9110 section 5.6.4) are undone, and an escaped quote does not close
+    /// the string.
+    #[test]
+    fn quoted_pairs_are_undone() {
+        let l: Vec<_> =
+            parse_links(r#"<a>; title="say \"hi\", \\ok"; rel=next, <b>; rel=up"#).collect();
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].param("title").as_deref(), Some(r#"say "hi", \ok"#));
+        assert_eq!(l[0].param("rel").as_deref(), Some("next"));
+        assert_eq!(l[1].param("rel").as_deref(), Some("up"));
+    }
+
+    /// What is not a `link-value` ends the reading there: a quoted string never closed does not
+    /// swallow the links after it into its text, a target without its `>` does not take a later
+    /// link's, and nothing after either is read as a link.
+    #[test]
+    fn a_malformed_link_ends_the_reading() {
+        let unclosed: Vec<_> =
+            parse_links(r#"<a>; rel=next, <b>; title="open; rel=type, <c>; rel=up"#).collect();
+        assert_eq!(unclosed.len(), 1);
+        assert_eq!(unclosed[0].target, "a");
+        let unbracketed: Vec<_> = parse_links("<a; rel=type, <b>; rel=up").collect();
+        assert!(unbracketed.is_empty());
+        let junk: Vec<_> = parse_links("<a>; rel=next junk, <b>; rel=up").collect();
+        assert!(junk.is_empty());
+        // Empty list elements and parameters without a value are fine.
+        let l: Vec<_> = parse_links(" , <a>;rel=next ;  anchor ,, <b>").collect();
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].param("anchor").as_deref(), Some(""));
     }
 
     /// Review finding (#6808): every link was parsed, each with its own map of owned strings,
