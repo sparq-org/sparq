@@ -2,9 +2,9 @@
 // (zksparql-architecture.typ): Springer LNCS format through the fine-lncs template, double-blind
 // by default. The text is copied from the source paper and cut to fit the ESWC limits: a main body
 // of at most 15 pages without references, an appendix of at most 2 pages, then the supplemental
-// material and generative-AI statements. The supplementary material is a separate document: the
-// "Supplementary material" part of zksparql-architecture.typ, whose section and table numbers
-// (S1 to S8, Table S1 to S9) the references below follow. The language guide
+// material and generative-AI statements. The supplementary material is a separate document,
+// zksparql-eswc-supplement.typ, whose section and table numbers (S1 to S8, Table S1 to S9) the
+// references below follow; it cites this file's numbers by hand. The language guide
 // (zksparql-language-guide.md) binds this file as it binds the source. Every number comes from
 // paper-evidence.json through the shared headline helper of _lib/bench.typ; none is typed.
 //
@@ -925,8 +925,8 @@ audit remain to be done.
 #set text(size: 9pt)
 #set par(first-line-indent: 0pt)
 #v(1em)
-*Supplemental Material Statement.* The supplementary material
-(#if anon [anonymous link: #author-todo[anonymised URL]] else [#author-todo[URL]]) gives the
+*Supplemental Material Statement.* The supplementary material, a separate document
+(#if anon [anonymous link: #author-todo[anonymised URL]] else [#author-todo[URL]]), gives the
 security assumptions behind each signature scheme and proof system (§S1), what our proof methods
 support (§S2), the experiment records with every test case, run and negative test (§S3), the
 timings of the circuit pilot (§S4), the executor cycle counts of every sweep configuration (§S5),

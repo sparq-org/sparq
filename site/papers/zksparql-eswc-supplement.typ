@@ -45,17 +45,14 @@
 
 #let title = [Answers Instead of Documents: Private SPARQL Answers over Verifiable Credentials]
 #let author-names = if anon {
-  none
+  ()
 } else if coauthors == "wright-braun" {
-  "Jesse Wright and Christoph H.-J. Braun"
+  ("Jesse Wright", "Christoph H.-J. Braun")
 } else {
-  "Jesse Wright"
+  ("Jesse Wright",)
 }
 
-#set document(
-  title: "Supplementary material: Answers Instead of Documents",
-  author: if anon { () } else { author-names },
-)
+#set document(title: "Supplementary material: Answers Instead of Documents", author: author-names)
 #set page(paper: "a4", numbering: "1")
 #set text(size: 11pt)
 #set par(justify: true)
@@ -91,7 +88,7 @@
   #v(0.2em)
   #text(size: 12pt)[#title]
   #v(0.4em)
-  #if anon [#text(style: "italic")[Anonymous author(s), for double-blind review]] else [#author-names]
+  #if anon [#text(style: "italic")[Anonymous author(s), for double-blind review]] else [#author-names.join(" and ")]
 ]
 
 #v(0.5em)
