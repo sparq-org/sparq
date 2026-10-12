@@ -26,13 +26,10 @@
 #import "_lib/bench.typ": headline
 #import "@preview/fine-lncs:0.6.5": lncs, author, institute
 
-// Display helpers shared in form with the source paper: the value always comes from the evidence
-// file. Executor cycle counts in millions, rounded to two decimals for display only.
-#let mcycles(key) = {
-  let s = str(calc.round(headline(key) / 1000000, digits: 2))
-  let parts = s.split(".")
-  if parts.len() == 1 { s + ".00" } else { s + "0" * calc.max(0, 2 - parts.at(1).len()) }
-}
+// Display helpers shared with the source paper and the supplementary material: the value always
+// comes from the evidence file. mcycles shows executor cycle counts in millions, rounded to two
+// decimals for display only.
+#import "_lib/zksparql.typ": mcycles
 
 // A visible placeholder for a planned measurement that is not yet an evidence record, or for text
 // the authors must still supply.
