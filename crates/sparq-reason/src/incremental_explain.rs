@@ -1126,7 +1126,7 @@ impl MaterializedN3Graph {
         // The graph holds the caller's blank labels in its own namespace (GH #6775); the
         // proof shows them as the caller wrote them.
         let inner = self.inward(fact)?;
-        self.why_in(inner.as_ref(), opts, BlankView::Caller)
+        self.why_in(inner.as_ref(), opts, BlankView::Caller, &self.cuts)
     }
 
     /// [`why_with`](Self::why_with) with `fact` and the proof in the rules document's own
@@ -1136,15 +1136,36 @@ impl MaterializedN3Graph {
     /// built from a combined rules + facts document with no caller blank nodes, this
     /// explains exactly the triples `reason_n3` prints (the WASM `whyN3` boundary). A
     /// caller's blank node, if any, is shown in the graph's internal caller namespace.
+    ///
+    /// The proof is a BATCH evaluation of the rules over the base, on a cut record of its
+    /// own and with no caller namespace: a runtime-parsed document is never refused for
+    /// spelling the graph's caller prefix, exactly as in `reason_n3`, and `fact` is
+    /// explained when that batch closure holds it, whatever the graph's own closure says.
     pub fn why_document_with(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
-        self.why_in(fact, opts, BlankView::Document)
+        let batch = crate::n3::bounded::Truncation::top_level();
+        self.why_in(fact, opts, BlankView::Document, &batch)
     }
 
     /// The proof of `fact`, given in the graph's own labels, shown through `view`.
-    fn why_in(&self, fact: &[N3Term; 3], opts: ExplainOpts, view: BlankView) -> Option<ProofTree> {
-        if !self.holds(fact) {
-            return None;
-        }
+    /// `cuts` is the run record of the re-derivation.
+    fn why_in(
+        &self,
+        fact: &[N3Term; 3],
+        opts: ExplainOpts,
+        view: BlankView,
+        cuts: &crate::n3::bounded::Truncation,
+    ) -> Option<ProofTree> {
+        // A graph explanation is of the graph's closure, evaluated as the graph evaluates
+        // (with its caller namespace); a document explanation is of the batch closure.
+        let caller_ns = match view {
+            BlankView::Caller => {
+                if !self.holds(fact) {
+                    return None;
+                }
+                Some(self.base_ns.as_str())
+            }
+            BlankView::Document => None,
+        };
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
             let shown = view.show(self, fact);
@@ -1162,14 +1183,16 @@ impl MaterializedN3Graph {
         let mut keyed: Vec<([String; 3], &[N3Term; 3])> =
             self.base.iter().map(|f| (crate::n3::serialize::statement_keys(f), f)).collect();
         keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let (_facts, steps) =
-            crate::n3::reason_n3_terms_proof(
-                &self.rules_src,
-                keyed.into_iter().map(|(_, f)| f.clone()),
-                &self.cuts,
-                &self.base_ns,
-            )
-            .ok()?;
+        let (facts, steps) = crate::n3::reason_n3_terms_proof(
+            &self.rules_src,
+            keyed.into_iter().map(|(_, f)| f.clone()),
+            cuts,
+            caller_ns,
+        )
+        .ok()?;
+        if !facts.contains(fact) {
+            return None;
+        }
         // One step per derived fact (first derivation wins).
         let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
         for (conclusion, rule, premises) in &steps {
