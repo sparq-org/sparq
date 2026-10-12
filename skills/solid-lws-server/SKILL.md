@@ -277,7 +277,8 @@ What the server exposes, all discoverable from the storage description
   which take `PATCH` with JSON Patch and `PUT` of a whole `application/linkset+json` document
   (both advertised in `Allow`, the patch format in `Accept-Patch`; a failed precondition gets
   `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link
-  in one write and is checked as a `PATCH` result is; its body is at most what the metadata may
+  in one write and is checked as a `PATCH` result is (its `204` carries no `ETag`, since what is
+  stored is the document resolved and with the server-managed links; a `GET` reads the tag); its body is at most what the metadata may
   hold, 256 KiB (`413` past it, unread), and before it is parsed a scan that keeps nothing
   charges it as the patch is charged and refuses it (`413`) past 512 KiB, so parsing it (the same
   reader again, keeping what it reads), which

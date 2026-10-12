@@ -3721,7 +3721,14 @@ fn walk_linkset(body: &[u8], budget: usize, keep: bool) -> Result<(Value, usize)
     let mut de = serde_json::Deserializer::from_slice(body);
     match walk.deserialize(&mut de).and_then(|v| de.end().map(|()| v)) {
         Ok(v) => Ok((v, cost.get())),
-        Err(_) => Err(why.get().unwrap_or(LinksetUnread::NotJson)),
+        // A number too large for the parser fails before the visitor sees it: a number still.
+        Err(e) => Err(why
+            .get()
+            .unwrap_or(if e.to_string().starts_with("number out of range") {
+                LinksetUnread::Number
+            } else {
+                LinksetUnread::NotJson
+            })),
     }
 }
 
@@ -4472,7 +4479,14 @@ async fn linkset<S: Store + 'static>(
             let Some(locks) = exclusive.take().map(|guard| (guard, listing.take())) else {
                 return store_error(ServerError::Storage("the lock is not held".into()));
             };
-            store_linkset(state, req, uri, meta, document, locks).await
+            // What is stored is not what was sent (references resolved, the server-managed links
+            // restored), so a successful PUT carries no validator (RFC 9110 section 9.3.4): the
+            // linkset and its tag are read with a GET.
+            let mut r = store_linkset(state, req, uri, meta, document, locks).await;
+            if r.status().is_success() {
+                r.headers_mut().remove(header::ETAG);
+            }
+            r
         }
         _ => method_not_allowed(LINKSET_ALLOW),
     };
@@ -5363,10 +5377,11 @@ mod tests {
         };
         let r = put(tag.clone()).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        // What is stored is not what was sent, so no validator (RFC 9110 section 9.3.4).
+        assert!(r.headers().get("etag").is_none());
+        let r = call(&st, "GET", &meta, &[], "").await;
         let new_tag = hdr(&r, "etag");
         assert!(!new_tag.is_empty() && new_tag != tag);
-        let r = call(&st, "GET", &meta, &[], "").await;
-        assert_eq!(hdr(&r, "etag"), new_tag);
         let e = json_of(r).await["linkset"][0].clone();
         assert!(e.get("license").is_none());
         assert_eq!(e["describedby"][0]["href"], format!("{BASE}/d.ttl"));
@@ -5426,6 +5441,16 @@ mod tests {
             put(LINKSET_JSON, number).await,
             StatusCode::UNPROCESSABLE_ENTITY
         );
+        // However large: one past what the parser converts is a number still.
+        for huge in ["1e400", "-1e400", "1E+999"] {
+            let number =
+                format!(r#"{{"linkset":[{{"anchor":"{uri}","next":[{{"href":{huge}}}]}}]}}"#);
+            assert_eq!(
+                put(LINKSET_JSON, number).await,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{huge}"
+            );
+        }
         let shape = json!({"linkset": [{"anchor": uri, "next": "n"}]}).to_string();
         assert_eq!(
             put(LINKSET_JSON, shape).await,
