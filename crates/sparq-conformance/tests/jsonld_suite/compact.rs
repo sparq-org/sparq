@@ -40,7 +40,9 @@ pub struct CompactScores {
 /// 5. Deep-compare against the suite's EXPECTED document via `json_ld_equal` (object key
 ///    order insignificant; array order significant only inside explicit `@list` values
 ///    and a `@json` payload;
-///    numbers compared as in the expand lane).
+///    numbers compared as in the expand lane), AND compare the two documents'
+///    re-expansions the same way (`json_ld_output_equal`), so a `@json` payload
+///    hidden behind a coerced term or aliased keywords is still order-checked.
 ///
 /// ## Honest oracle caveat
 ///
@@ -260,9 +262,10 @@ pub fn run_compact(root: &Path) -> CompactScores {
                 "compacted JSON differs under strict array ordering".to_string(),
             );
         }
-        if json_ld_equal(&got, &want) {
-            s.pass();
-        } else {
+        // Document-level equality AND re-expanded equality (#4264): a context can
+        // coerce a term to `@json` or alias `@value`/`@type`, hiding a `@json`
+        // payload from the document-level comparator's ordered-array rule.
+        if let Err(why) = json_ld_output_equal(&got, &want, &opts, &loader) {
             // Truncated got/want dumps keep a regression diagnosable from the
             // failure log without re-running locally.
             let mut g = got.to_string();
@@ -271,8 +274,13 @@ pub fn run_compact(root: &Path) -> CompactScores {
             w.truncate(240);
             s.fail(
                 &e.id,
-                format!("compacted JSON differs\n    got:  {}\n    want: {}", g, w),
+                format!(
+                    "compacted JSON differs ({})\n    got:  {}\n    want: {}",
+                    why, g, w
+                ),
             );
+        } else {
+            s.pass();
         }
     }
     CompactScores {

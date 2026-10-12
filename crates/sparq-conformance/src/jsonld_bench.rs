@@ -173,6 +173,59 @@ fn json_ld_array_equal_unordered(xs: &[Value], ys: &[Value]) -> bool {
     true
 }
 
+/// The compact / frame lanes' oracle: `got` passes iff it equals `want` under
+/// [`json_ld_equal`] AND the two documents' re-expansions also agree under
+/// [`json_ld_equal`].
+///
+/// Why both (#4264 follow-up): in a compacted or framed document a `@json` literal
+/// need not have the `{"@value":…,"@type":"@json"}` shape the document-level
+/// comparator recognises. A context can coerce a term to `@json`
+/// (`"payload": [1,2]`) or alias the keywords (`{"v": [1,2], "t": "@json"}`), and
+/// those payload arrays would compare as unordered sets. Expansion puts every
+/// `@json` literal in canonical form, so the re-expanded comparison applies the
+/// `JsonExact` rule to them. The document-level comparison is kept because it is
+/// the stricter check on everything else (term choice, compaction shape).
+///
+/// Each document is expanded with its own embedded `@context`, under `opts` with
+/// `expand_context` cleared (that option only applies to the lane's INPUT) and
+/// `frame_expansion` off. If both expansions fail with the same error code the
+/// re-expanded check has no evidence either way and only the document-level
+/// result counts; a one-sided or different failure is a mismatch.
+///
+/// # Errors
+/// `Err(reason)` describing the first comparison that failed.
+pub fn json_ld_output_equal(
+    got: &Value,
+    want: &Value,
+    opts: &sparq_jsonld::JsonLdOptions,
+    loader: &dyn sparq_jsonld::DocumentLoader,
+) -> Result<(), String> {
+    if !json_ld_equal(got, want) {
+        return Err("document-level JSON differs".to_string());
+    }
+    let mut eopts = opts.clone();
+    eopts.expand_context = None;
+    eopts.frame_expansion = false;
+    let reexpand = |v: &Value| -> Result<Value, String> {
+        let j = sparq_jsonld::Json::parse(&v.to_string())
+            .map_err(|e| format!("re-parse as Json: {e}"))?;
+        match sparq_jsonld::expand(&j, &eopts, loader) {
+            Ok(x) => sparq_json_to_serde(&x),
+            Err(e) => Err(format!("expand error {}", e.code().as_str())),
+        }
+    };
+    match (reexpand(got), reexpand(want)) {
+        (Ok(g), Ok(w)) if json_ld_equal(&g, &w) => Ok(()),
+        (Ok(_), Ok(_)) => Err("re-expanded documents differ".to_string()),
+        (Err(g), Err(w)) if g == w => Ok(()),
+        (g, w) => Err(format!(
+            "re-expansion disagrees: got {:?}, want {:?}",
+            g.err(),
+            w.err()
+        )),
+    }
+}
+
 /// Convert a `sparq_jsonld::Json` value to a `serde_json::Value` by
 /// round-tripping through a JSON string.  Used to bridge the two ASTs so the
 /// `json_ld_equal` comparator can operate on both the expand() output and the
@@ -314,6 +367,72 @@ mod tests {
             &json!({"http://example.com/p": [{"@value": "x"}, {"@value": "y"}]}),
             &json!({"http://example.com/p": [{"@value": "y"}, {"@value": "x"}]})
         ));
+    }
+
+    /// (#4264 follow-up) In a COMPACTED / FRAMED document a `@json` literal need
+    /// not look like `{"@value":…,"@type":"@json"}`: the context can coerce a
+    /// term to `@json`, or alias `@value` / `@type`. The document-level
+    /// comparator cannot see those payloads, so the output oracle also compares
+    /// the re-expansions, where every `@json` literal is in canonical form.
+    #[test]
+    fn output_oracle_sees_coerced_and_aliased_json_payloads() {
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let loader = sparq_jsonld::NoopLoader;
+        let coerced = |payload: Value| {
+            json!({"@context": {"payload": {"@id": "https://example.org/p", "@type": "@json"}},
+                   "payload": payload})
+        };
+        // Document-level equality alone is blind to the reordering…
+        assert!(json_ld_equal(
+            &coerced(json!([1, 2])),
+            &coerced(json!([2, 1]))
+        ));
+        // …the output oracle is not.
+        assert!(json_ld_output_equal(
+            &coerced(json!([1, 2])),
+            &coerced(json!([2, 1])),
+            &opts,
+            &loader
+        )
+        .is_err());
+        assert!(json_ld_output_equal(
+            &coerced(json!({"k": [1, 2]})),
+            &coerced(json!({"k": [2, 1]})),
+            &opts,
+            &loader
+        )
+        .is_err());
+
+        let aliased = |payload: Value| {
+            json!({"@context": {"v": "@value", "t": "@type"},
+                   "@id": "https://example.org/a",
+                   "https://example.org/p": {"v": payload, "t": "@json"}})
+        };
+        assert!(json_ld_equal(
+            &aliased(json!([1, 2])),
+            &aliased(json!([2, 1]))
+        ));
+        assert!(json_ld_output_equal(
+            &aliased(json!([1, 2])),
+            &aliased(json!([2, 1])),
+            &opts,
+            &loader
+        )
+        .is_err());
+
+        // Equal documents still pass, and ordinary (set-valued) arrays stay unordered.
+        assert!(json_ld_output_equal(
+            &coerced(json!([1, 2])),
+            &coerced(json!([1, 2])),
+            &opts,
+            &loader
+        )
+        .is_ok());
+        let plain = |a: &str, b: &str| {
+            json!({"@context": {"p": "https://example.org/p"},
+                   "@id": "https://example.org/a", "p": [a, b]})
+        };
+        assert!(json_ld_output_equal(&plain("x", "y"), &plain("y", "x"), &opts, &loader).is_ok());
     }
 
     /// Arrays outside @list are unordered (set semantics).
