@@ -7,14 +7,18 @@
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use sparq_lws_core::lws::resources::{
-    reads_as_json_patch, LINKSET_COST_BUDGET, LINKSET_PARSE_AMPLIFICATION, LINKSET_PATCH_BODY,
+    reads_as_json_patch, reads_as_linkset, LINKSET_COST_BUDGET, LINKSET_PARSE_AMPLIFICATION,
+    LINKSET_PATCH_BODY, LINKSET_PUT_BODY, LINKSET_PUT_PARSE_AMPLIFICATION,
 };
 
 struct Counting;
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
+/// Held by each test: the counters are process-wide, so no other test may allocate meanwhile.
+static MEASURING: Mutex<()> = Mutex::new(());
 
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
@@ -55,6 +59,7 @@ fn repeated(unit: &str, len: usize) -> String {
 
 #[test]
 fn parsing_allocates_within_the_measured_bound() {
+    let _alone = MEASURING.lock().unwrap_or_else(|e| e.into_inner());
     const { assert!(LINKSET_PATCH_BODY * LINKSET_PARSE_AMPLIFICATION <= LINKSET_COST_BUDGET) };
     let long_key = format!(r#"{{"{}":""}}"#, "k".repeat(1000));
     let nested = format!("{}{}", "[".repeat(120), "]".repeat(120));
@@ -103,6 +108,77 @@ fn parsing_allocates_within_the_measured_bound() {
                 "{unit} to {len}: {peak} bytes for {} bytes of text",
                 text.len()
             );
+        }
+    }
+}
+
+/// The peak live bytes reading `text` as a linkset PUT reads it, and what its scan charged.
+fn put_peak_of(text: &str) -> (usize, Option<usize>) {
+    let base = LIVE.load(Ordering::SeqCst);
+    PEAK.store(base, Ordering::SeqCst);
+    let cost = std::hint::black_box(reads_as_linkset(text.as_bytes()));
+    (PEAK.load(Ordering::SeqCst) - base, cost)
+}
+
+/// A linkset PUT reads a body only once a scan that keeps nothing has charged it, and parsing
+/// it then allocates within [`LINKSET_PUT_PARSE_AMPLIFICATION`] times that charge (with half of
+/// it as margin), whatever the body's size or shape. A body charged past the scan's budget
+/// allocates no more than the scan's scratch (an escaped string's text, at most the body's size).
+#[test]
+fn a_linkset_put_reads_within_what_its_scan_charged() {
+    let _alone = MEASURING.lock().unwrap_or_else(|e| e.into_inner());
+    let long_key = format!(r#"{{"{}":""}}"#, "k".repeat(1000));
+    let nested = format!("{}{}", "[".repeat(120), "]".repeat(120));
+    let nested_objects = format!("{}\"\"{}", r#"{"":"#.repeat(60), "}".repeat(60));
+    let target = r#"{"href":"https://e.example/a","title*":[{"value":"v","language":"en"}]}"#;
+    let mut units: Vec<&str> = vec![
+        r#""""#,
+        "[]",
+        "{}",
+        r#"[""]"#,
+        "[[]]",
+        "[{}]",
+        r#"{"":""}"#,
+        r#"{"":[]}"#,
+        r#"{"":{}}"#,
+        r#"[[""]]"#,
+        r#"{"a":"","b":""}"#,
+        r#"{"a":"","a":""}"#,
+        r#"["",""]"#,
+        "true",
+        "null",
+        r#""\u0000""#,
+        r#""\n""#,
+        "\"\u{e000}\"",
+        r#"{"\u0000":""}"#,
+        &long_key,
+        &nested,
+        &nested_objects,
+        target,
+    ];
+    let mixed = units.join(",");
+    units.push(&mixed);
+    for unit in units {
+        for len in [
+            LINKSET_PUT_BODY / 64,
+            LINKSET_PUT_BODY / 4,
+            LINKSET_PUT_BODY,
+        ] {
+            let text = repeated(unit, len);
+            let (peak, cost) = put_peak_of(&text);
+            match cost {
+                Some(cost) => assert!(
+                    2 * peak <= LINKSET_PUT_PARSE_AMPLIFICATION * cost + 2 * text.len(),
+                    "{unit} to {len}: {peak} bytes, charged {cost}, for {} bytes of text",
+                    text.len()
+                ),
+                None => assert!(
+                    peak <= text.len() + 4096,
+                    "{unit} to {len}: {peak} bytes refused, for {} bytes of text",
+                    text.len()
+                ),
+            }
+            assert!(peak <= LINKSET_COST_BUDGET + text.len());
         }
     }
 }

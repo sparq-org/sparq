@@ -274,8 +274,14 @@ What the server exposes, all discoverable from the storage description
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
   data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
   `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`,
-  which take `PATCH` with JSON Patch (advertised in `Allow` and `Accept-Patch`; a failed
-  precondition gets `412`). A linkset `PATCH` changes only user-managed links: the
+  which take `PATCH` with JSON Patch and `PUT` of a whole `application/linkset+json` document
+  (both advertised in `Allow`, the patch format in `Accept-Patch`; a failed precondition gets
+  `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link
+  in one write and is checked as a `PATCH` result is; its body is at most what the metadata may
+  hold, 256 KiB (`413` past it, unread), and before it is parsed a scan that keeps nothing
+  charges it as the patch is charged and refuses it (`413`) past 512 KiB, so parsing it, which
+  holds at most a measured, doubled four times that charge, stays within 2 MiB; a number in it
+  gets `422`, text that is not JSON `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
   server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
   values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
@@ -292,7 +298,7 @@ What the server exposes, all discoverable from the storage description
   relative reference grown by the base) to 2 MiB; past any of these, `413`. A document with
   members besides `linkset` gets `422`. A `Link` header on a create or replace is held to the
   same target and length caps (`431` past them). Every write that stores a linkset (a create, a
-  replace, a linkset `PATCH`) checks the document it would serve, with the server-managed links
+  replace, a linkset `PATCH` or `PUT`) checks the document it would serve, with the server-managed links
   put back and the representation's size at its longest, against exactly what a linkset `PATCH`
   checks its target with (those caps, that cost, and the metadata's size limit), and gets `413`
   past it, so whatever is stored can be patched. A linkset stored before these checks that
@@ -414,7 +420,7 @@ What the server exposes, all discoverable from the storage description
   Each topic of a new subscription is checked under its lock, waited for at most two seconds
   (then `503`). The bound on deliveries prepared for one change counts only authorized ones: a
   subscriber that may not read the resource takes no place from one that may.
-- Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH and a `DELETE`
+- Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
