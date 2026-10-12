@@ -7,17 +7,17 @@
   "measured_source": {
     "source_commit": "0b570a5c46e7dee04981d26f33c3e74b5160fa5c",
     "source_tree": "8e16b9ccd821a4b3b46e3063257589840ba32514",
-    "observed_at_utc": "2026-10-12T21:27:10+00:00",
+    "observed_at_utc": "2026-10-12T21:46:14+00:00",
     "platform": "Linux x86_64 shared cloud work box",
     "canonical": false,
     "tool_executable_sha256": {
       "nargo": "0852cd5631ac5ca25f744f25c931e3cff16351d9bcdbfb03cebb48a4494a0fe3",
       "bb": "d7621dfb151f55c23fb04bf274f366a6a1e0516b85a3cf0ae9165a9952509793"
     },
-    "job_sha256": "1e35a17cdcd57b32b7566ab7451e615a2acc19032185893e1a8a7a6ad04bf04d",
-    "independent_handoff_sha256": "be6f5fccca5bcd3179fcfdbdcfa6c2439d4b50b9b88ce24beb86230a51b4f56c"
+    "job_sha256": "f3f43b02dea5c8f0ae68cdf41cfd6e2811b9e4d5078711f6a86e3d2464c2ab1e",
+    "independent_handoff_sha256": "66ff73e60b956ba259aa8bcec72f4d4ec4d811e035be6becd03933025c2e22ef"
   },
-  "measurement_method": "At measured_source, two independent runs from clean git archives of source_commit compiled every listed member with the pinned nargo, hashed the ACIR bytecode, ABI and artifact, measured `bb gates -s ultra_honk` and, for the v1 members, regenerated the noir-recursive verification key. The two runs agreed on every circuit size, ACIR, ABI, key and gate log hash. The twelve full-width i64 and s64 members changed because their integer literal opening changed; every other member and every v1 ACIR, ABI and key equalled the values recorded before. The compiled artifact embeds its checkout path, so artifact_sha256 is kept as recorded for the unchanged version-4 members.",
+  "measurement_method": "At measured_source, two independent runs from clean git archives of source_commit compiled every listed member with the pinned nargo, hashed the ACIR bytecode, ABI and artifact, measured `bb gates -s ultra_honk` and, for the v1 members, regenerated the noir-recursive verification key (bench/zk-compose/scripts/remeasure_result_evidence.py). The two runs agreed on every circuit size, ACIR, ABI, key and gate log hash; every v1 ACIR, ABI and key equalled its baseline record. The compiled artifact embeds its checkout path, so artifact_sha256 is kept as recorded.",
   "limitations": "Non-canonical: measured on a shared work box, not a dedicated machine; future CI replays are still required. Static compile, circuit size and key identity only; no timing, soundness or external-audit claim. source_files, not source_commit, binds the Noir bytes.",
   "tool_versions": {
     "nargo": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)",
