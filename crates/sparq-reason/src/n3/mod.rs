@@ -207,7 +207,7 @@ pub(crate) use run_shared::RuntimeDocs;
 /// one for its whole life). Private fields and one constructor each: a run cannot hold a
 /// table that was not made fresh against its sources.
 mod run_shared {
-    use super::{document_blank_labels, fresh_blank_prefix, parser, VisitedDocs};
+    use super::{document_blank_labels, fresh_blank_prefix, parser, Term, VisitedDocs};
     use rustc_hash::{FxHashMap, FxHashSet};
 
     pub(super) struct RunShared {
@@ -234,7 +234,12 @@ mod run_shared {
 
     struct DocTable {
         prefix: String,
+        /// Each key's document, for the collision refusal.
         docs: FxHashMap<String, (String, String)>,
+        /// The standardized statements already made from a `(text, base)`, keyed by text,
+        /// then by base (looked up without allocating): a run re-evaluates a parse builtin
+        /// on every round, and neither the parse nor the SHA-256 key needs redoing.
+        given: FxHashMap<String, Vec<(String, Vec<[Term; 3]>)>>,
     }
 
     impl RuntimeDocs {
@@ -247,15 +252,50 @@ mod run_shared {
                 labels.extend(document_blank_labels(p));
             }
             let prefix = fresh_blank_prefix(&labels, "__rp");
-            let table = DocTable { prefix, docs: FxHashMap::default() };
+            let (docs, given) = (FxHashMap::default(), FxHashMap::default());
+            let table = DocTable { prefix, docs, given };
             RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
+        }
+
+        /// The statements of the document parsed from `text` under `base` (by `parse`,
+        /// run only the first time), with its blanks standardized apart; `Ok(None)` when
+        /// `parse` fails, `Err` when another document has its key.
+        fn formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+        ) -> Result<Option<Vec<[Term; 3]>>, String> {
+            {
+                let t = self.0.borrow();
+                let known = t.given.get(text).and_then(|bs| bs.iter().find(|(b, _)| b == base));
+                if let Some((_, f)) = known {
+                    return Ok(Some(f.clone()));
+                }
+            }
+            let Some(mut ts) = parse() else { return Ok(None) };
+            let prefix = self.prefix_for(text, base)?;
+            // In place: only the blank labels are rewritten, nothing else is copied.
+            fn go(t: &mut Term, p: &str) {
+                match t {
+                    Term::Blank(l) => l.insert_str(0, p),
+                    Term::List(ms) => ms.iter_mut().for_each(|m| go(m, p)),
+                    Term::Formula(rs) => rs.iter_mut().flatten().for_each(|m| go(m, p)),
+                    Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, p)),
+                    _ => {}
+                }
+            }
+            ts.iter_mut().flatten().for_each(|t| go(t, &prefix));
+            let entry = (base.to_string(), ts.clone());
+            self.0.borrow_mut().given.entry(text.to_string()).or_default().push(entry);
+            Ok(Some(ts))
         }
 
         /// The label prefix for the blanks of the document parsed from `text` under
         /// `base`; `Err` when another document has its key.
         fn prefix_for(&self, text: &str, base: &str) -> Result<String, String> {
-            let key = runtime_doc_key(text, base);
             let mut t = self.0.borrow_mut();
+            let key = runtime_doc_key(text, base);
             let prefix = format!("{}{key}_", t.prefix);
             let owner = t.docs.entry(key).or_insert_with(|| (text.to_string(), base.to_string()));
             if owner.0 != text || owner.1 != base {
@@ -282,7 +322,13 @@ mod run_shared {
             h.update((part.len() as u64).to_be_bytes());
             h.update(part.as_bytes());
         }
-        h.finalize()[..8].iter().map(|b| format!("{b:02x}")).collect()
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut key = String::with_capacity(16);
+        for b in &h.finalize()[..8] {
+            key.push(char::from(HEX[usize::from(b >> 4)]));
+            key.push(char::from(HEX[usize::from(b & 0xf)]));
+        }
+        key
     }
 
     impl RunShared {
@@ -297,9 +343,14 @@ mod run_shared {
             RunShared::new(RuntimeDocs::for_sources(sources))
         }
 
-        /// [`RuntimeDocs::prefix_for`] on the run's table.
-        pub(super) fn parsed_prefix(&self, text: &str, base: &str) -> Result<String, String> {
-            self.runtime.prefix_for(text, base)
+        /// [`RuntimeDocs::formula`] on the run's table.
+        pub(super) fn parsed_formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+        ) -> Result<Option<Vec<[Term; 3]>>, String> {
+            self.runtime.formula(text, base, parse)
         }
     }
 }
@@ -335,18 +386,25 @@ struct BwCtx<'a> {
 
 impl BwCtx<'_> {
     /// The statements of a document parsed at run time from `text` (under `base`), with
-    /// its blanks standardized apart through the run's allocator
-    /// ([`run_shared::RunShared::parsed_prefix`]). `None` when the allocator refuses the
-    /// document; the refusal fails the run.
-    fn standardize_parsed(
+    /// its blanks standardized apart through the run's table
+    /// ([`run_shared::RunShared::parsed_formula`]), which parses each document once.
+    /// `None` when the text does not parse, or when the table refuses the document (the
+    /// refusal fails the run).
+    fn runtime_formula(
         &self,
         text: &str,
         base: &str,
-        ts: Vec<[Term; 3]>,
+        pending: &bounded::Pending,
     ) -> Option<Vec<[Term; 3]>> {
-        let prefix = self.visited.borrow().parsed_prefix(text, base);
-        match prefix {
-            Ok(prefix) => Some(ts.iter().map(|t| stratum_blanks(t, &prefix)).collect()),
+        let parse = || {
+            // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
+            let parsed = bounded::parse_n3(text, base, pending).ok()?;
+            Some(reencode_statements(parsed))
+        };
+        let visited = self.visited.clone();
+        let made = visited.borrow().parsed_formula(text, base, parse);
+        match made {
+            Ok(ts) => ts,
             Err(e) => {
                 self.nested_error.borrow_mut().get_or_insert(e);
                 None
@@ -4150,18 +4208,14 @@ fn eval_functional_inner(
                     // taken later by `log:supports` / `log:conclusion`, which is where the
                     // import-cycle guard ([`VisitedDocs`]) applies. Resolution itself does no
                     // recursion, so no marking is needed here.
-                    // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-                    let parsed = bounded::parse_n3(&text, doc, pending).ok()?;
-                    Term::Formula(bw.standardize_parsed(&text, doc, reencode_statements(parsed))?)
+                    Term::Formula(bw.runtime_formula(&text, doc, pending)?)
                 }
             }
             _ => return None,
         },
         Func::ParsedAsN3 => match &args[..] {
             [Term::Lit(src, _, _)] => {
-                // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-                let parsed = bounded::parse_n3(src, &bw.base, pending).ok()?;
-                Term::Formula(bw.standardize_parsed(src, &bw.base, reencode_statements(parsed))?)
+                Term::Formula(bw.runtime_formula(src, &bw.base, pending)?)
             }
             _ => return None,
         },
