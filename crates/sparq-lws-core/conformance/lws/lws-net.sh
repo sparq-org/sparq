@@ -6,6 +6,11 @@
 #   LWS_NET=../LWS.net LWS_TESTS=../lws-test-suite/lws10/tests.yaml \
 #     crates/sparq-lws-core/conformance/lws/lws-net.sh
 #
+# LWS_TESTS=builtin runs the definitions LWS.net itself carries (Suite/Model/Resources/new.ttl)
+# instead. LWS_NET_MIN_PASSED makes the run a ratchet: it fails only when fewer tests pass
+# (that suite holds a test that fails on purpose). Each failed test is printed by name, as a CI
+# annotation in GitHub Actions.
+#
 # Needs the .NET 10 SDK and Node.js (to convert the YAML-LD definition to N-Triples).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -32,7 +37,9 @@ const [, , src, dst] = process.argv;
 const doc = parse(await readFile(src, "utf8"));
 await writeFile(dst, await jsonld.toRDF(doc, { format: "application/n-quads" }));
 JS
-(cd "$conv" && node convert.mjs "$LWS_TESTS" "$LWS_NET/Suite/Model/Resources/new.ttl")
+if [ "$LWS_TESTS" != builtin ]; then
+  (cd "$conv" && node convert.mjs "$LWS_TESTS" "$LWS_NET/Suite/Model/Resources/new.ttl")
+fi
 
 SOLID_SERVER_PROTOCOL=lws \
 SOLID_SERVER_LWS_OPEN=1 \
@@ -54,4 +61,18 @@ Suite__BaseUri="http://localhost:$PORT/" dotnet test Suite/Test \
 # One line with the counts, as a CI annotation when running in GitHub Actions.
 counts=$(grep -o '<Counters [^>]*>' "$OUT/lws-net.trx" 2>/dev/null | head -1 || true)
 echo "${GITHUB_ACTIONS:+::notice title=lws-net::}lws-net ${counts:-no results}"
+python3 - "$OUT/lws-net.trx" "${GITHUB_ACTIONS:+gha}" <<'PY' || true
+import sys, xml.etree.ElementTree as ET
+ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+for r in ET.parse(sys.argv[1]).iter(ns + "UnitTestResult"):
+    if r.get("outcome") != "Passed":
+        msg = r.findtext(f"{ns}Output/{ns}ErrorInfo/{ns}Message") or ""
+        line = f"{r.get('testName')} ({r.get('outcome')}): {' '.join(msg.split())[:300]}"
+        print(f"::error title=lws-net failed::{line}" if sys.argv[2:] == ["gha"] else line)
+PY
+if [ -n "${LWS_NET_MIN_PASSED:-}" ]; then
+  passed=$(echo "$counts" | grep -o 'passed="[0-9]*"' | grep -o '[0-9]*' || echo 0)
+  echo "lws-net: ${passed:-0} passed (floor $LWS_NET_MIN_PASSED)"
+  [ "${passed:-0}" -ge "$LWS_NET_MIN_PASSED" ] && exit 0 || exit 1
+fi
 exit $status

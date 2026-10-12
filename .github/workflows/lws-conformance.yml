@@ -33,7 +33,7 @@ permissions:
 
 env:
   TOUCHSTONE_REF: 6a3206eb97d173a89b3ffeb790f2d1a3337cf535
-  LWS_NET_REF: eca99a4a5beb949561a9989a183dd3216712bb79
+  LWS_NET_REF: e0cdc973ee2a63d810764aa025f80b6fa2bb0fff
   LWS_TESTS_REF: 72cfc0a80c718dddbcf43ea6bea98a13a3c14e99
 
 jobs:
@@ -106,6 +106,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: build sparq-lws-core
         run: cargo build -p sparq-lws-core
+      # LWS.net's own definitions first: the run below overwrites them with the YAML-LD suite.
+      - name: run lws-net (LWS.net's own definitions)
+        env:
+          LWS_NET: ${{ github.workspace }}/LWS.net
+          LWS_TESTS: builtin
+          LWS_NET_MIN_PASSED: "0"
+          OUT: ${{ github.workspace }}/target/lws-net-builtin
+        run: crates/sparq-lws-core/conformance/lws/lws-net.sh
       - name: run lws-net
         env:
           LWS_NET: ${{ github.workspace }}/LWS.net
