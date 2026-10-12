@@ -330,14 +330,22 @@ impl MetaClosure {
             }
             // rdfs2: (r domain o), some fact (s r y).
             for &r in self.dom_inv.get(&o).into_iter().flatten() {
-                let y = self.po.get(&r).and_then(|m| m.get(&s)).and_then(|ys| ys.first());
+                let y = self
+                    .po
+                    .get(&r)
+                    .and_then(|m| m.get(&s))
+                    .and_then(|ys| ys.first());
                 if let Some(&y) = y {
                     return Some(("rdfs2", [[r, v.domain, o], [s, r, y]]));
                 }
             }
             // rdfs3: (r range o), some fact (x r s).
             for &r in self.rng_inv.get(&o).into_iter().flatten() {
-                let x = self.op.get(&r).and_then(|m| m.get(&s)).and_then(|xs| xs.first());
+                let x = self
+                    .op
+                    .get(&r)
+                    .and_then(|m| m.get(&s))
+                    .and_then(|xs| xs.first());
                 if let Some(&x) = x {
                     return Some(("rdfs3", [[r, v.range, o], [x, r, s]]));
                 }
@@ -452,7 +460,11 @@ fn remove_pairs(index: &mut Index, pairs: &mut [(Id, Id)]) {
 }
 
 /// [`remove_pairs`] for a two-level index: each `(outer, key, value)` of `triples`.
-fn remove_nested(nested: &mut FxHashMap<Id, Index>, mut triples: Vec<(Id, Id, Id)>, drop_empty: bool) {
+fn remove_nested(
+    nested: &mut FxHashMap<Id, Index>,
+    mut triples: Vec<(Id, Id, Id)>,
+    drop_empty: bool,
+) {
     triples.sort_unstable();
     for group in triples.chunk_by(|a, b| a.0 == b.0) {
         let outer = group[0].0;

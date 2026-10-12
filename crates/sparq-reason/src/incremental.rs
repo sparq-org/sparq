@@ -360,12 +360,12 @@ impl MaterializedGraph {
             }
             mc.delete(&removed, &self.base, &self.v);
             self.meta = Some(mc);
-            match raw {
-                Some((sc, sp, dom, rng)) => self.meta_tbox(sc, sp, dom, rng),
-                None => {
-                    #[cfg(feature = "explain")]
-                    self.explain.remove_triples(&removed);
-                }
+            #[cfg(feature = "explain")]
+            if raw.is_none() {
+                self.explain.remove_triples(&removed);
+            }
+            if let Some((sc, sp, dom, rng)) = raw {
+                self.meta_tbox(sc, sp, dom, rng);
             }
             return removed.len();
         }
@@ -424,7 +424,12 @@ impl MaterializedGraph {
             self.base
                 .iter()
                 .copied()
-                .chain(self.counts.keys().copied().filter(|t| !self.base.contains(t)))
+                .chain(
+                    self.counts
+                        .keys()
+                        .copied()
+                        .filter(|t| !self.base.contains(t)),
+                )
                 .chain(
                     self.schema_facts
                         .iter()
@@ -432,7 +437,9 @@ impl MaterializedGraph {
                         .filter(|t| !self.base.contains(t) && !self.counts.contains_key(t)),
                 )
         });
-        meta.into_iter().flatten().chain(counted.into_iter().flatten())
+        meta.into_iter()
+            .flatten()
+            .chain(counted.into_iter().flatten())
     }
 
     /// Number of triples in the closure.
@@ -3713,7 +3720,11 @@ mod tests {
             set.remove(t);
         }
         check_step(&g, &mut dict, &set);
-        assert_eq!(g.full_rebuilds(), 0, "a meta-schema delete must not rebuild the closure");
+        assert_eq!(
+            g.full_rebuilds(),
+            0,
+            "a meta-schema delete must not rebuild the closure"
+        );
     }
 
     #[test]
