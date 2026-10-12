@@ -12,10 +12,10 @@ import sys
 import xml.etree.ElementTree as ET
 
 NS = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
-# dotnet test exits 0 when every test passed, 1 (VSTest) or 2 (Microsoft.Testing.Platform) when
-# some failed. Anything else (3 aborted, 5 invalid arguments, 7 session failure, 8 no tests, ...)
-# means the run itself went wrong.
-TEST_OUTCOME_STATUSES = {0, 1, 2}
+# LWS.net runs on Microsoft.Testing.Platform, which exits 0 when every test passed and 2 when some
+# failed. Anything else (1 a generic failure, 3 aborted, 5 invalid arguments, 7 session failure,
+# 8 no tests, ...) means the run itself went wrong.
+TEST_OUTCOME_STATUSES = {0, 2}
 
 
 def read(path):
@@ -93,7 +93,7 @@ def self_test():
     assert run(trx(["Passed", "Passed", "Failed"]), 2, **floor) == 0, (
         "a failing test above the floor"
     )
-    assert run(trx(["Passed", "Passed", "Failed"]), 1, **floor) == 0, "VSTest's failure status"
+    assert run(trx(["Passed", "Passed", "Failed"]), 1, **floor) == 1, "a generic failure"
     assert run(trx(["Passed", "Passed"]), 3, **floor) == 1, "an aborted run"
     assert run(trx(["Passed", "Passed"]), 2, **floor) == 1, "a run missing a test"
     assert run(trx(["Passed", "Passed", "Passed"]), 7, **floor) == 1, "an infrastructure status"
@@ -101,6 +101,7 @@ def self_test():
     malformed = trx(["Passed"] * 3)[: -len("</TestRun>")]
     assert run(malformed, 0, **floor) == 1, "a report that does not parse"
     assert run("", 0, **floor) == 1, "an empty report"
+    assert check("/nonexistent/lws-net.trx", 0, **floor) == 1, "no report"
     no_counters = f'<TestRun xmlns="{NS[1:-1]}"><Results/></TestRun>'
     assert run(no_counters, 0, **floor) == 1, "a report without counters"
     assert run(trx(["Passed", "Failed"]), 2) == 2, "no floor: the harness's own status"
