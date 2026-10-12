@@ -1053,21 +1053,21 @@ pub async fn handle<S: Store + 'static>(
         if state.needs_auth(agent) {
             return state.challenge(None);
         }
-        if let Some(refused) = unavailable() {
-            return refused;
+        // A new subscription is authorized by its topics: whether the container is set aside
+        // is said once they are checked (see [`subscribe`]).
+        if req.method != Method::POST || linkset {
+            if let Some(refused) = unavailable() {
+                return refused;
+            }
         }
         if linkset {
             return service_linkset(&state.cfg, req, &state.cfg.absolute(SUBSCRIPTIONS_PATH));
         }
         return match req.method {
             Method::GET | Method::HEAD => listing(state, req, agent, owner),
-            Method::POST => {
-                // Expired subscriptions still hold their place in the store until they are
-                // removed: a few go now, before the listing a conditional create is evaluated
-                // against is held, and before this one is counted.
-                purge_expired(state, req.admission.clone()).await;
-                subscribe(state, req, agent, owner).await
-            }
+            // Expired subscriptions still hold their place in the store until they are removed:
+            // a few go once the request is authorized (see [`subscribe`]).
+            Method::POST => subscribe(state, req, agent, owner).await,
             _ => method_not_allowed("GET, HEAD, POST"),
         };
     }
@@ -1364,9 +1364,8 @@ async fn subscribe<S: Store + 'static>(
     // The subscriber is checked once before the lock is taken, and only a topic it may read is
     // waited on, or said to be set aside: one it may not read is refused the same whatever its
     // state, so neither a stuck change to it nor a write holding its lock shows through. A
-    // set-aside topic is decided as a request to it is (see
-    // [`access::allowed_set_aside`](super::access::allowed_set_aside)): against its metadata
-    // from before the stuck change, failing closed when that cannot be read. The check that
+    // set-aside topic is decided as a request to it is (see [`access::aside`]): on what it was
+    // before the stuck change began, failing closed when that cannot be read. The check that
     // counts is made again under the lock.
     let storage = state.cfg.storage();
     let cannot_read = || {
@@ -1383,18 +1382,17 @@ async fn subscribe<S: Store + 'static>(
     let readable = |resource: &str, aside: bool| {
         let resource = resource.to_string();
         async move {
-            if !resource.starts_with(storage)
-                || !state.store.exists(&resource).await.unwrap_or(false)
-            {
+            if !resource.starts_with(storage) {
                 return false;
             }
             if aside {
-                access::allowed_set_aside(state, Action::Read, &resource, agent)
-                    .await
-                    .unwrap_or(false)
-            } else {
-                state.allowed(Action::Read, &resource, agent).await
+                return matches!(
+                    access::aside(state, Action::Read, &resource, agent).await,
+                    Ok(access::Aside::Allowed)
+                );
             }
+            state.store.exists(&resource).await.unwrap_or(false)
+                && state.allowed(Action::Read, &resource, agent).await
         }
     };
     for topic in &topics {
@@ -1415,6 +1413,15 @@ async fn subscribe<S: Store + 'static>(
             return cannot_read();
         }
     }
+    // Only now, with every topic authorized, does the subscriber learn whether the
+    // subscriptions container is set aside (or new changes wait on set-aside ones), and do
+    // expired subscriptions, which may be anyone's, have a few removed (waiting on their
+    // locks): before the listing a conditional create is evaluated against is held, and before
+    // this one is counted.
+    if let Some(refused) = super::resources::unavailable(state, req) {
+        return refused;
+    }
+    purge_expired(state, req.admission.clone()).await;
     // A conditional create is evaluated against the listing, held exclusively from here until
     // the subscription is registered. Taken only once every topic has been checked (and its
     // lock released): a topic naming the subscriptions container itself, or its linkset, would
@@ -3001,7 +3008,7 @@ mod tests {
         );
         drop(held);
         // a is set aside: the stranger is refused as for b; the reader is told to retry.
-        stick(&state, &store, &a);
+        stick(&state, &store, &a).await;
         assert_eq!(subscribe(&a, &stranger).await.as_ref(), Some(&refused));
         let got = subscribe(&a, &reader).await.expect("answered at once");
         assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE);
@@ -3057,7 +3064,7 @@ mod tests {
             let req = test_store::request(m, path, &[], "");
             async move { test_store::route_as(&state, req, &who).await.status() }
         };
-        stick(&state, &store, &iri);
+        stick(&state, &store, &iri).await;
         let unknown = format!("{SUBSCRIPTIONS_PATH}unknown");
         for m in [Method::GET, Method::DELETE] {
             for who in [&reader, &stranger] {
@@ -3089,7 +3096,7 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         // A grant record, likewise: only its author and the owner hear it is set aside.
-        *store.fail_delete_of.lock().unwrap() = None;
+        test_store::unstick(&store);
         test_store::put_back(&state, &iri).await;
         let grant = test_store::grant_read(
             &state,
@@ -3101,7 +3108,7 @@ mod tests {
             .strip_prefix(state.cfg.storage().trim_end_matches('/'))
             .unwrap()
             .to_string();
-        stick(&state, &store, &grant);
+        stick(&state, &store, &grant).await;
         let ask_grant = |who: &Agent| {
             let (state, who) = (state.clone(), who.clone());
             let req = test_store::request(Method::GET, &grant_path, &[], "");
@@ -3110,5 +3117,95 @@ mod tests {
         assert_eq!(ask_grant(&reader).await, StatusCode::FORBIDDEN);
         assert_eq!(ask_grant(&stranger).await, StatusCode::FORBIDDEN);
         assert_eq!(ask_grant(&owner).await, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Issue #6814 (review): a subscription POST said the subscriptions container was set
+    /// aside, or that new changes waited on set-aside ones, and removed expired subscriptions
+    /// (waiting on their locks), before it checked the subscriber may read its topics. A topic
+    /// it may not read is refused first, at once, whatever the container's state.
+    #[tokio::test]
+    async fn a_subscription_is_authorized_by_its_topics_before_anything_else() {
+        use test_store::{agent, closed_state, data, grant_read, route_as, stick, OWNER};
+        let (state, store) = closed_state(100).await;
+        let (a, b) = (data(&state, "a").await, data(&state, "b").await);
+        let reader = agent("https://reader.example/#me");
+        grant_read(&state, "https://reader.example/#me", &[&a]).await;
+        let post = |topic: &str, who: &Agent| {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [topic],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let (state, who) = (state.clone(), who.clone());
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                let r =
+                    tokio::time::timeout(Duration::from_millis(500), route_as(&state, req, &who))
+                        .await
+                        .expect("answered at once");
+                let retry = r.headers().contains_key(header::RETRY_AFTER);
+                (r.status(), retry)
+            }
+        };
+        let refused = (StatusCode::FORBIDDEN, false);
+        assert_eq!(post(&b, &reader).await, refused);
+        // An expired subscription, its record held by a removal in progress: a request that
+        // removed it first would wait on it.
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let old = format!("{container}old");
+        let sub = Subscription {
+            id: "old".into(),
+            subscriber: Some(OWNER.into()),
+            client: None,
+            topics: vec![state.cfg.storage()],
+            inbox: "https://inbox.example/".into(),
+            expires: None,
+            expires_at: Some(1),
+            failures: 0,
+        };
+        state
+            .store
+            .create_in_container(
+                &container,
+                &old,
+                Bytes::from(serde_json::to_vec(&sub).unwrap()),
+                LWS_JSON,
+            )
+            .await
+            .unwrap();
+        state.notify.subs.write().unwrap().insert("old".into(), sub);
+        let held = state.locks.lock(&old).await.unwrap();
+        assert_eq!(post(&b, &reader).await, refused);
+        drop(held);
+        // The container is set aside (a stuck change to a subscription in it).
+        stick(&state, &store, &format!("{container}stuck")).await;
+        assert!(!state.visible(&container));
+        assert_eq!(post(&b, &reader).await, refused);
+        assert_eq!(
+            post(&a, &reader).await,
+            (StatusCode::SERVICE_UNAVAILABLE, true)
+        );
+        test_store::unstick(&store);
+        test_store::put_back(&state, &container).await;
+        // New changes wait while set-aside ones hold as much as they may.
+        state.set_aside_bytes.store(
+            super::super::MAX_SET_ASIDE_BYTES,
+            std::sync::atomic::Ordering::Release,
+        );
+        assert_eq!(post(&b, &reader).await, refused);
+        assert_eq!(
+            post(&a, &reader).await,
+            (StatusCode::SERVICE_UNAVAILABLE, true)
+        );
+        state
+            .set_aside_bytes
+            .store(0, std::sync::atomic::Ordering::Release);
+        assert_eq!(post(&a, &reader).await.0, StatusCode::CREATED);
     }
 }

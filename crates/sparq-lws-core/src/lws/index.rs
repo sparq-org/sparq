@@ -226,19 +226,12 @@ enum Failed {
     Store,
     /// What it would keep is past [`MAX_INDEX_WORKING_SET`].
     TooLarge,
-    /// A resource the agent may read is set aside (a stuck change to it, or to a member it
-    /// lists, is being put back): the walk cannot say what is there until it is back, so there
-    /// is no index to give rather than one that leaves out what is under it. One the agent may
-    /// not read never fails the walk ([`readable`]).
+    /// A resource the walk reached is set aside (a stuck change to it, or to a member it lists,
+    /// is being put back), or something was set aside while it walked: the walk cannot say what
+    /// is there until it is back, so there is no index to give rather than one that leaves out
+    /// what is under it.
     SetAside,
-    /// What the walk passed over while it was set aside was put back before the walk ended, so
-    /// what it read of it (a listing, under no lock) may be out of date: the walk is made again.
-    Changed,
 }
-
-/// How many times the storage is walked for one request when what a walk passed over set aside
-/// is put back meanwhile ([`Failed::Changed`]), before the request is answered `503`.
-const WALK_TRIES: usize = 3;
 
 /// What a walk of the storage keeps, against one budget: the URIs it has yet to visit, the
 /// listing it is reading, and whatever its visitor keeps. Past the budget, [`Failed::TooLarge`].
@@ -279,15 +272,6 @@ impl Kept {
 /// the check allowed (a delete and a re-create by someone else cannot slip in between); the lock
 /// is released, and the metadata dropped, before the next resource.
 ///
-/// A resource that is set aside (a stuck change to it, or to a member it lists, is being put
-/// back) is neither waited on nor visited, and does not by itself fail the walk: whether it
-/// does is decided by whether the agent may read it, so that one it may not read says nothing
-/// of its state ([`Failed::SetAside`]). A set-aside container is still followed, its listing read
-/// without its lock (which the change holds): what is in flux under it is set aside too, and is
-/// decided the same way. Once the walk is over, every resource set aside then is checked
-/// ([`aside_readable`]), those set aside while it walked included; and what it passed over set
-/// aside, if put back meanwhile, makes the walk be made again ([`Failed::Changed`]).
-///
 /// The walk keeps no record of where it has been: the storage is a tree, and a container's
 /// members are only followed when they lie strictly below it, so nothing is visited twice. What
 /// it does keep, the URIs still to visit and the listing in hand, is charged to `kept` with what
@@ -298,10 +282,9 @@ async fn readable<S: Store + 'static>(
     kept: &Kept,
     mut visit: impl FnMut(&str, Vec<String>, &ResourceMeta) -> Result<(), Failed>,
 ) -> Result<(), Failed> {
-    // Whatever is set aside while the walk runs moves this count: then (or when the walk passed
-    // over something set aside) what is set aside is checked once it is over.
+    // Whatever is set aside while the walk runs moves this count, the resources it already
+    // visited included, so a walk that ends with it moved fails (below), whatever it reached.
     let set_asides = state.locks.set_asides();
-    let mut passed_over: Vec<String> = Vec::new();
     let root = state.cfg.storage();
     kept.charge(root.len())?;
     let mut stack = vec![root];
@@ -309,18 +292,18 @@ async fn readable<S: Store + 'static>(
         kept.refund(uri.len());
         // Each resource is read under its shared lock, its listing included: a change to it in
         // flight (a recursive delete part way, say) is waited for, never read half done. What a
-        // stuck change holds is never waited on until it is put back: the lock is given only
-        // while the resource is visible (see [`IriLocks::read`](super::resources::IriLocks::read)),
-        // and a stuck recursive delete sets aside everything it holds.
-        let guard = state.locks.read(&uri).await;
-        let aside = guard.is_none();
-        if aside {
-            kept.charge(uri.len())?;
-            passed_over.push(uri.clone());
+        // stuck change holds fails the walk at once rather than being waited on until it is put
+        // back, or left out with what is under it: the lock is given only while the resource is
+        // visible (see [`IriLocks::read`](super::resources::IriLocks::read)), and a stuck
+        // recursive delete sets aside everything it holds.
+        let Some(_guard) = state.locks.read(&uri).await else {
+            return Err(Failed::SetAside);
+        };
+        if state.locks.set_asides() != set_asides {
+            return Err(Failed::SetAside);
         }
         // A resource removed since it was listed is not in the index: its existence is checked
-        // under its lock (its metadata alone does not say, being read as a default when absent),
-        // or, set aside, as it stands.
+        // under its lock (its metadata alone does not say, being read as a default when absent).
         match state.store.exists(&uri).await {
             Ok(true) => {}
             Ok(false) => continue,
@@ -357,11 +340,6 @@ async fn readable<S: Store + 'static>(
             drop(children);
             kept.refund(listed);
         }
-        // Not visited while set aside: whether the agent may read it is decided once the walk
-        // is over.
-        if aside {
-            continue;
-        }
         match state.check(Action::Read, &uri, agent).await {
             Ok(true) => {}
             Ok(false) | Err(crate::error::ServerError::NotFound) => continue,
@@ -392,38 +370,8 @@ async fn readable<S: Store + 'static>(
         types.extend(more);
         visit(&uri, types, &meta)?;
     }
-    if passed_over.is_empty() && state.locks.set_asides() == set_asides {
-        return Ok(());
-    }
-    aside_readable(state, agent).await?;
-    // What was passed over and is visible again was put back while the walk ran: what the walk
-    // read of it, or under it, may be from before.
-    if passed_over.iter().any(|uri| state.visible(uri)) {
-        return Err(Failed::Changed);
-    }
-    Ok(())
-}
-
-/// [`Failed::SetAside`] when the agent may read something set aside in the storage now (as a
-/// request to it decides, see
-/// [`access::allowed_set_aside`](super::access::allowed_set_aside)): the walk cannot say what
-/// is there. What it may not read is left out, as when it is not set aside.
-async fn aside_readable<S: Store + 'static>(
-    state: &LwsState<S>,
-    agent: &Agent,
-) -> Result<(), Failed> {
-    let root = state.cfg.storage();
-    let services = state.cfg.absolute("/.lws/");
-    for uri in state.locks.hidden() {
-        // The service records (subscriptions, grants, requests) are not in the storage walked.
-        if !uri.starts_with(&root) || uri.starts_with(&services) {
-            continue;
-        }
-        match super::access::allowed_set_aside(state, Action::Read, &uri, agent).await {
-            Ok(true) => return Err(Failed::SetAside),
-            Ok(false) | Err(crate::error::ServerError::NotFound) => {}
-            Err(_) => return Err(Failed::Store),
-        }
+    if state.locks.set_asides() != set_asides {
+        return Err(Failed::SetAside);
     }
     Ok(())
 }
@@ -563,56 +511,45 @@ async fn handle_within<S: Store + 'static>(
     let media_type = media_type.as_str();
     // A failure says nothing of the resource it met: its URI, and so its existence, may be
     // something the agent may not read. Every failure gets the same response.
+    // What is kept while the storage is walked is charged against one budget.
+    let kept = Kept {
+        bytes: std::sync::atomic::AtomicUsize::new(0),
+        budget,
+    };
+    let charge = |bytes: usize| kept.charge(bytes);
     let mut items: Vec<(String, Vec<String>)> = Vec::new();
     let mut all_types: BTreeSet<String> = BTreeSet::new();
-    let mut tries = 0;
-    let walked = loop {
-        tries += 1;
-        items.clear();
-        all_types.clear();
-        // What is kept while the storage is walked is charged against one budget.
-        let kept = Kept {
-            bytes: std::sync::atomic::AtomicUsize::new(0),
-            budget,
-        };
-        let charge = |bytes: usize| kept.charge(bytes);
-        let walked = if search {
-            // A search keeps only what it matched, with its types.
-            readable(state, agent, &kept, |uri, types, meta| {
-                let have: std::collections::HashSet<&str> =
-                    types.iter().map(String::as_str).collect();
-                let mut matched = all_groups(&filter.types, |v| have.contains(v));
-                if matched && !filter.relations.is_empty() {
-                    matched = filter.relations.iter().all(|(rel, groups)| {
-                        let targets = relation_targets(uri, meta, rel);
-                        all_groups(groups, |v| targets.contains(v))
-                    });
+    let walked = if search {
+        // A search keeps only what it matched, with its types.
+        readable(state, agent, &kept, |uri, types, meta| {
+            let have: std::collections::HashSet<&str> = types.iter().map(String::as_str).collect();
+            let mut matched = all_groups(&filter.types, |v| have.contains(v));
+            if matched && !filter.relations.is_empty() {
+                matched = filter.relations.iter().all(|(rel, groups)| {
+                    let targets = relation_targets(uri, meta, rel);
+                    all_groups(groups, |v| targets.contains(v))
+                });
+            }
+            drop(have);
+            if matched {
+                charge(uri.len() + types.iter().map(String::len).sum::<usize>())?;
+                items.push((uri.to_string(), types));
+            }
+            Ok(())
+        })
+        .await
+    } else {
+        // The index keeps only the distinct types.
+        readable(state, agent, &kept, |_, types, _| {
+            for t in types {
+                if !all_types.contains(&t) {
+                    charge(t.len())?;
+                    all_types.insert(t);
                 }
-                drop(have);
-                if matched {
-                    charge(uri.len() + types.iter().map(String::len).sum::<usize>())?;
-                    items.push((uri.to_string(), types));
-                }
-                Ok(())
-            })
-            .await
-        } else {
-            // The index keeps only the distinct types.
-            readable(state, agent, &kept, |_, types, _| {
-                for t in types {
-                    if !all_types.contains(&t) {
-                        charge(t.len())?;
-                        all_types.insert(t);
-                    }
-                }
-                Ok(())
-            })
-            .await
-        };
-        match walked {
-            Err(Failed::Changed) if tries < WALK_TRIES => continue,
-            walked => break walked,
-        }
+            }
+            Ok(())
+        })
+        .await
     };
     // A failure says nothing of the resource it met: its URI, and so its existence, may be
     // something the agent may not read. Every failure of the store gets the same response.
@@ -631,9 +568,6 @@ async fn handle_within<S: Store + 'static>(
             );
         }
         Err(Failed::SetAside) => return super::resources::set_aside_meanwhile(),
-        Err(Failed::Changed) => {
-            return super::resources::retry_later("the storage kept changing while it was walked")
-        }
     }
     let mut links = Vec::new();
     let mut content_location = None;
@@ -1515,141 +1449,5 @@ mod tests {
         assert_eq!(served(Some("text/turtle")).await, None);
         assert_eq!(served(Some("application/lws+json;q=0")).await, None);
         assert_eq!(served(Some("*/*;q=0")).await, None);
-    }
-
-    /// The type search of everything, as `state` answers it to `agent`: its status, and the
-    /// URIs it lists.
-    async fn search_as<S: Store + 'static>(
-        state: &LwsState<S>,
-        agent: &Agent,
-    ) -> (StatusCode, Vec<String>) {
-        let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
-        let get = super::super::test_store::request(Method::GET, &path, &[], "");
-        let r = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            handle(state, &get, agent),
-        )
-        .await
-        .expect("answered");
-        let status = r.status();
-        let doc = super::super::test_store::body_json(r).await;
-        let items = doc["items"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|i| i["id"].as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default();
-        (status, items)
-    }
-
-    /// Issue #6814: the walks took each resource's lock, and failed with `503` on a set-aside
-    /// one, before they checked the agent may read it, so a stuck change to a resource the
-    /// agent may not read failed its index. A set-aside resource fails the walk only for an
-    /// agent that may read it (or what is set aside with it); for anyone else it is left out,
-    /// as any resource it may not read is.
-    #[tokio::test]
-    async fn a_set_aside_resource_fails_the_walk_only_for_who_may_read_it() {
-        use super::super::test_store::{agent, closed_state, data, grant_read, stick, OWNER};
-        let (state, store) = closed_state(100).await;
-        let (a, secret) = (data(&state, "a").await, data(&state, "secret").await);
-        let reader = agent("https://reader.example/#me");
-        grant_read(&state, "https://reader.example/#me", &[&a]).await;
-        let (status, items) = search_as(&state, &reader).await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(items, vec![a.clone()]);
-        // A stuck change to the secret sets it aside, and the root listing it: the reader may
-        // read neither, so its walk is as before.
-        stick(&state, &store, &secret);
-        assert!(!state.visible(&state.cfg.storage()));
-        assert_eq!(
-            search_as(&state, &reader).await,
-            (StatusCode::OK, vec![a.clone()])
-        );
-        let index = super::super::test_store::request(Method::GET, TYPE_INDEX_PATH, &[], "");
-        assert_eq!(
-            handle(&state, &index, &reader).await.status(),
-            StatusCode::OK
-        );
-        // The owner may read them: its walk cannot say what is there.
-        let owner = agent(OWNER);
-        assert_eq!(
-            search_as(&state, &owner).await.0,
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-        assert_eq!(
-            handle(&state, &index, &owner).await.status(),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-        // Nor can the reader's, once what is set aside is something it may read.
-        let reader_too = agent("https://reader-too.example/#me");
-        grant_read(&state, "https://reader-too.example/#me", &[&secret]).await;
-        assert_eq!(
-            search_as(&state, &reader_too).await.0,
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-        assert_eq!(
-            handle(&state, &index, &reader_too).await.status(),
-            StatusCode::SERVICE_UNAVAILABLE
-        );
-    }
-
-    /// Issue #6814: a walk passes over what is set aside, deciding whether the agent may read it
-    /// on what it is while its change is stuck, and reading a set-aside container's listing
-    /// without its lock. When it is put back while the walk runs, that may be out of date (here
-    /// the reader's own resource, its metadata part way through a stuck change, is not yet its
-    /// own), so the walk is made again.
-    #[tokio::test]
-    async fn a_walk_over_what_was_put_back_meanwhile_is_made_again() {
-        use super::super::test_store::{agent, closed_state, data, grant_read, put_back};
-        use super::super::{meta_key, Undo, Unsettled};
-        let (state, store) = closed_state(100).await;
-        let (a, b, mine) = (
-            data(&state, "a").await,
-            data(&state, "b").await,
-            data(&state, "mine").await,
-        );
-        let reader = agent("https://reader.example/#me");
-        grant_read(&state, "https://reader.example/#me", &[&a, &b]).await;
-        // mine is the reader's; a stuck change to its metadata left it no creator meanwhile.
-        let meta = ResourceMeta {
-            creator: reader.subject.clone(),
-            ..ResourceMeta::default()
-        };
-        state.put_resource_meta(&mine, &meta).await.unwrap();
-        let key = meta_key(&mine);
-        let body = state.store.read(&key).await.unwrap().body;
-        let stored = state.store.meta(&key).await.unwrap().unwrap();
-        state
-            .put_resource_meta(&mine, &ResourceMeta::default())
-            .await
-            .unwrap();
-        *store.fail_restore_of.lock().unwrap() = Some(key.clone());
-        let left = Unsettled(vec![Undo::Restore {
-            key,
-            prior: Some((body, stored)),
-        }]);
-        state.set_aside(left, ());
-        assert!(!state.visible(&mine) && !state.visible(&state.cfg.storage()));
-        // The walk passes over the root and mine, then waits on b.
-        let held = state.locks.lock(&b).await.unwrap();
-        let task = {
-            let (state, reader) = (state.clone(), reader.clone());
-            tokio::spawn(async move { search_as(&state, &reader).await })
-        };
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(
-            !task.is_finished(),
-            "the walk waits for a write in progress"
-        );
-        // Meanwhile the change is put back: mine is the reader's again.
-        *store.fail_restore_of.lock().unwrap() = None;
-        put_back(&state, &mine).await;
-        drop(held);
-        let (status, mut items) = task.await.unwrap();
-        items.sort();
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(items, vec![a, b, mine]);
     }
 }

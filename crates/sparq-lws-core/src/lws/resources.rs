@@ -217,37 +217,26 @@ async fn authorize_unlocked<S: Store + 'static>(
 /// caller that may act on it, and to anyone else what it would get were the resource not set
 /// aside (a challenge, a `403`, or the `404` of a missing resource).
 ///
-/// What the decision rests on is the resource's own metadata (its creator and types), which the
-/// stuck change may itself be part way through: a change to the metadata first marks the old
-/// metadata `pending` ([`write_with_meta`]), and that mark denies every grant. Here, where all
-/// a caller can learn is that the resource is set aside (nothing is served or changed), the
-/// decision is made against the metadata as it stands with the mark set aside
-/// ([`access::allowed_set_aside`](super::access::allowed_set_aside)): the metadata from before
-/// the change, while it is part way. A grantee that could read the resource before the change
-/// is told to retry, as before, and a caller that could not is refused. What cannot be decided
-/// (the store fails while the change is stuck) refuses: it fails closed, revealing nothing.
+/// What the decision rests on is the resource's own metadata (its creator and types) and its
+/// format, which the stuck change may itself be part way through: a new format or new types
+/// may have landed before putting them back stalled. So it is made on what the resource was
+/// before the change began, as the change's journal staged it before its first step
+/// ([`access::aside`](super::access::aside)): a caller whose access the change would newly
+/// grant is refused, and a grantee whose access it would remove is told to retry. What cannot
+/// be read for it (the store fails while the change is stuck) refuses: it fails closed,
+/// revealing nothing.
 async fn authorized_aside<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
     uri: &str,
     agent: &Agent,
 ) -> Response {
-    // The owner may act on anything there is or may be: nothing is read to decide.
-    if !(state.cfg.open || super::access::is_owner(state, agent)) {
-        match state.store.exists(uri).await {
-            Ok(true) => {}
-            Ok(false) if state.needs_auth(agent) => return state.challenge(None),
-            Ok(false) => return problem(StatusCode::NOT_FOUND, None),
-            Err(_) => return state.deny(agent),
-        }
-        if !super::access::allowed_set_aside(state, action, uri, agent)
-            .await
-            .unwrap_or(false)
-        {
-            return state.deny(agent);
-        }
+    match super::access::aside(state, action, uri, agent).await {
+        Ok(super::access::Aside::Allowed) => set_aside_meanwhile(),
+        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => state.challenge(None),
+        Ok(super::access::Aside::Missing) => problem(StatusCode::NOT_FOUND, None),
+        Ok(super::access::Aside::Denied) | Err(_) => state.deny(agent),
     }
-    set_aside_meanwhile()
 }
 
 fn allow_for(uri: &str, is_root: bool) -> String {
@@ -1893,10 +1882,13 @@ pub struct IriLocks {
     /// The IRIs set aside ([`LwsState::set_aside`](super::LwsState::set_aside)), each with how
     /// many set-aside changes are to it.
     hidden: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// What each IRI set aside was before the stuck change to it began (see
+    /// [`Prior`](super::Prior)), kept while it is set aside.
+    priors: std::sync::Mutex<std::collections::HashMap<String, super::Prior>>,
     /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
     hid: tokio::sync::Notify,
     /// How many times anything was set aside: a walk over many resources reads it before and
-    /// after, and checks what is set aside if it moved ([`IriLocks::set_asides`]).
+    /// after, and fails if it moved ([`IriLocks::set_asides`]).
     set_asides: std::sync::atomic::AtomicU64,
 }
 
@@ -1955,31 +1947,43 @@ impl IriLocks {
             .contains_key(iri)
     }
 
-    /// Every IRI set aside now.
-    pub fn hidden(&self) -> Vec<String> {
-        self.hidden
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .keys()
-            .cloned()
-            .collect()
-    }
-
     /// How many times anything was set aside so far. A walk that reads it before it starts and
-    /// again when it ends, and finds it the same (and passed over nothing set aside), met no
-    /// resource set aside during it: one set aside before was not visible when the walk reached
-    /// it, and one set aside after its visit moved the count. Otherwise the walk checks what is
-    /// set aside once it is over.
+    /// again when it ends, and finds it the same, met no resource set aside during it: one set
+    /// aside before was not visible when the walk reached it, and one set aside after its visit
+    /// moved the count.
     pub fn set_asides(&self) -> u64 {
         self.set_asides.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Set `iris` aside (once more each), and wake every wait for a lock so it checks again.
-    pub(crate) fn hide(&self, iris: &[String]) {
+    /// What `iri`, set aside, was before the stuck change to it began, as far as the change
+    /// says (see [`Prior`](super::Prior)); the default (what is stored now) when it says
+    /// nothing, or when `iri` is not set aside.
+    pub(crate) fn prior(&self, iri: &str) -> super::Prior {
+        self.priors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(iri)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Set `iris` aside (once more each), with what they were before the change (`priors`; for
+    /// one already set aside, what an earlier stuck change says comes first), and wake every
+    /// wait for a lock so it checks again.
+    pub(crate) fn hide(
+        &self,
+        iris: &[String],
+        mut priors: std::collections::HashMap<String, super::Prior>,
+    ) {
         {
             let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
+            let mut kept = self.priors.lock().unwrap_or_else(|e| e.into_inner());
             for iri in iris {
                 *hidden.entry(iri.clone()).or_default() += 1;
+                // What an earlier change left untouched, a later one found as it was.
+                if let Some(prior) = priors.remove(iri) {
+                    kept.entry(iri.clone()).or_default().or(prior);
+                }
             }
             self.set_asides
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1996,6 +2000,10 @@ impl IriLocks {
                 *e.get_mut() -= 1;
                 if *e.get() == 0 {
                     e.remove();
+                    self.priors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(iri);
                 }
             }
         }
@@ -9652,81 +9660,110 @@ mod tests {
         );
     }
 
+    /// A response as a caller sees it: its status, its headers (but the date) and its body.
+    async fn seen(r: Response) -> (StatusCode, Vec<(String, String)>, Bytes) {
+        let mut headers: Vec<(String, String)> = r
+            .headers()
+            .iter()
+            .filter(|(k, _)| *k != header::DATE)
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
+            .collect();
+        headers.sort();
+        let status = r.status();
+        (status, headers, body_of(r).await)
+    }
+
     /// Issue #6814: a request to a set-aside resource was answered `503` before it was
     /// authorized, so a caller that may not act on the resource could tell a stuck change to it
-    /// from a resource it simply may not read. It is authorized first: whoever may not act on the
-    /// resource is refused the same whatever its state, and only whoever may is told to retry.
+    /// from a resource it simply may not read. It is authorized first: for every method, on a
+    /// data resource, a container and their linksets, whoever may not act on the resource gets
+    /// exactly what it gets for one in no such state (status, headers and body), and only
+    /// whoever may is told to retry.
     #[tokio::test]
     async fn only_a_caller_that_may_act_learns_a_resource_is_set_aside() {
-        use super::super::test_store::{agent, closed_state, data, grant_read, stick, OWNER};
+        use super::super::test_store::{
+            agent, closed_state, data, grant_read, request as req, route_as, stick, OWNER,
+        };
         let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
         let (a, b) = (data(&st, "a").await, data(&st, "b").await);
+        for c in ["c/", "d/"] {
+            st.store
+                .create_in_container(&root, &format!("{root}{c}"), Bytes::new(), LWS_JSON)
+                .await
+                .unwrap();
+            st.store
+                .create_in_container(
+                    &format!("{root}{c}"),
+                    &format!("{root}{c}x"),
+                    "x".into(),
+                    "text/plain",
+                )
+                .await
+                .unwrap();
+        }
+        let (c, d) = (format!("{root}c/"), format!("{root}d/"));
         let reader = agent("https://reader.example/#me");
         let stranger = agent("https://stranger.example/#me");
         let owner = agent(OWNER);
         let anonymous = Agent::anonymous();
-        grant_read(&st, "https://reader.example/#me", &[&a, &b]).await;
+        grant_read(&st, "https://reader.example/#me", &[&a, &b, &c, &d]).await;
         let ask = |m: Method, p: &str, who: &Agent| {
-            let (st, r, who) = (
-                st.clone(),
-                super::super::test_store::request(m, p, &[("content-type", "text/plain")], "z"),
-                who.clone(),
-            );
+            let (st, who) = (st.clone(), who.clone());
+            let r = req(m, p, &[("content-type", "text/plain"), ("slug", "n")], "z");
             async move {
-                let r = tokio::time::timeout(
-                    std::time::Duration::from_secs(1),
-                    super::super::test_store::route_as(&st, r, &who),
+                seen(
+                    tokio::time::timeout(std::time::Duration::from_secs(1), route_as(&st, r, &who))
+                        .await
+                        .expect("answered at once"),
                 )
                 .await
-                .expect("answered at once");
-                let retry = r.headers().contains_key(header::RETRY_AFTER);
-                (r.status(), retry, body_of(r).await)
             }
         };
-        // a is set aside (and the root listing it); b is not.
-        stick(&st, &store, &a);
-        let reads = [Method::GET, Method::HEAD, Method::OPTIONS];
-        let writes = [Method::PUT, Method::PATCH, Method::DELETE];
-        for m in reads.iter().chain(&writes) {
-            for (path, same) in [("/a", "/b"), ("/a.meta", "/b.meta")] {
-                // Whoever may not act on it gets what it gets for a resource that is not set
-                // aside: the same status and body, and no Retry-After.
+        // a is set aside (a stuck write to it), and with it the root listing it; c is set
+        // aside, as a stuck create of a member of it is. b and d are not.
+        stick(&st, &store, &a).await;
+        stick(&st, &store, &format!("{c}new")).await;
+        assert!(!st.visible(&c) && !st.visible(&root) && st.visible(&d));
+        let methods = [
+            Method::GET,
+            Method::HEAD,
+            Method::OPTIONS,
+            Method::PUT,
+            Method::PATCH,
+            Method::POST,
+            Method::DELETE,
+        ];
+        let pairs = [
+            ("/a", "/b"),
+            ("/a.meta", "/b.meta"),
+            ("/c/", "/d/"),
+            ("/c/.meta", "/d/.meta"),
+        ];
+        for m in &methods {
+            for (aside, other) in pairs {
                 for who in [&stranger, &anonymous] {
-                    let (got, want) = (
-                        ask(m.clone(), path, who).await,
-                        ask(m.clone(), same, who).await,
-                    );
-                    assert!(got.0.is_client_error(), "{m} {path}: {:?}", got.0);
-                    assert!(!got.1, "{m} {path}");
-                    assert_eq!(got, want, "{m} {path}");
+                    let got = ask(m.clone(), aside, who).await;
+                    assert!(got.0.is_client_error(), "{m} {aside}: {}", got.0);
+                    assert_eq!(got, ask(m.clone(), other, who).await, "{m} {aside}");
+                    assert!(got.1.iter().all(|(k, _)| k != "retry-after"), "{m} {aside}");
                 }
-                // The owner may: it is told to retry.
-                let got = ask(m.clone(), path, &owner).await;
-                assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m} {path}");
-                assert!(got.1);
+                // The owner may act on it: it is told to retry.
+                let got = ask(m.clone(), aside, &owner).await;
+                assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m} {aside}");
+                assert!(got.1.iter().any(|(k, _)| k == "retry-after"));
+                // The reader may read it, not change it.
+                let got = ask(m.clone(), aside, &reader).await;
+                if matches!(*m, Method::GET | Method::HEAD | Method::OPTIONS) {
+                    assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m} {aside}");
+                } else {
+                    assert!(got.0.is_client_error(), "{m} {aside}: {}", got.0);
+                    assert_eq!(got, ask(m.clone(), other, &reader).await, "{m} {aside}");
+                }
             }
         }
-        // The reader may read a, so it learns a is set aside; it may not change it.
-        for m in &reads {
-            let got = ask(m.clone(), "/a", &reader).await;
-            assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m}");
-        }
-        for m in &writes {
-            let got = ask(m.clone(), "/a", &reader).await;
-            assert_eq!(got, ask(m.clone(), "/b", &reader).await, "{m}");
-            assert_eq!(got.0, StatusCode::FORBIDDEN, "{m}");
-        }
-        // The root lists a, so it is set aside too: only who may create in it hears so.
-        let post = ask(Method::POST, "/", &reader).await;
-        assert_eq!(post.0, StatusCode::FORBIDDEN);
-        assert!(!post.1);
-        assert_eq!(
-            ask(Method::POST, "/", &owner).await.0,
-            StatusCode::SERVICE_UNAVAILABLE
-        );
         // The storage description is public: anyone may learn its root is set aside.
-        let description =
-            super::super::test_store::request(Method::GET, "/", &[("accept", LWS_CID)], "");
+        let description = req(Method::GET, "/", &[("accept", LWS_CID)], "");
         assert_eq!(
             handle(&st, &description, &anonymous).await.status(),
             StatusCode::SERVICE_UNAVAILABLE
@@ -9737,14 +9774,10 @@ mod tests {
             super::super::MAX_SET_ASIDE_BYTES,
             std::sync::atomic::Ordering::Release,
         );
-        assert_eq!(
-            ask(Method::PUT, "/b", &stranger).await.0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            ask(Method::PUT, "/b", &reader).await.0,
-            StatusCode::FORBIDDEN
-        );
+        for who in [&stranger, &reader] {
+            assert_eq!(ask(Method::PUT, "/b", who).await.0, StatusCode::FORBIDDEN);
+            assert_eq!(ask(Method::POST, "/d/", who).await.0, StatusCode::FORBIDDEN);
+        }
         assert_eq!(
             ask(Method::PUT, "/b", &owner).await.0,
             StatusCode::SERVICE_UNAVAILABLE
@@ -9754,54 +9787,157 @@ mod tests {
             .store(0, std::sync::atomic::Ordering::Release);
     }
 
-    /// Issue #6814: what decides whether a caller may act on a set-aside resource is the
-    /// resource's own metadata, which the stuck change may be part way through. A change to
-    /// the metadata marks the old metadata `pending` first, and the mark fails every grant
-    /// closed; for a set-aside resource the decision is made against the marked metadata (the
-    /// resource's from before the change), so a grantee is still told to retry and a stranger
-    /// is still refused. When it cannot be read at all, everyone but the owner is refused.
+    /// Issue #6814: whether a caller may act on a set-aside resource rests on its metadata and
+    /// format, which the stuck change may have rewritten before putting them back stalled. It
+    /// is decided on what the resource was before the change began: a type or format the change
+    /// wrote never newly satisfies a grant, and one it took away still does. When that cannot
+    /// be read, everyone but the owner is refused.
     #[tokio::test]
-    async fn a_set_aside_resource_is_decided_by_its_metadata_from_before_the_change() {
-        use super::super::test_store::{agent, closed_state, data, grant_read, stick, OWNER};
+    async fn a_set_aside_resource_is_decided_by_what_it_was_before_the_change() {
+        use super::super::test_store::{agent, closed_state, data, request as req, OWNER};
+        use super::super::{meta_key, Undo, Unsettled};
         let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
         let a = data(&st, "a").await;
-        let reader = agent("https://reader.example/#me");
-        let stranger = agent("https://stranger.example/#me");
-        grant_read(&st, "https://reader.example/#me", &[&a]).await;
-        let get = |who: &Agent| {
-            let (st, who) = (st.clone(), who.clone());
+        let (public, private) = ("https://e.example/Public", "https://e.example/Private");
+        let mut meta = st.resource_meta(&a).await.unwrap();
+        meta.types = vec![public.to_string()];
+        st.put_resource_meta(&a, &meta).await.unwrap();
+        let grant = |who: &str, constraint: Value| {
+            let body = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": ["AccessGrant"],
+                "storage": st.cfg.storage(),
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": who,
+                    "constraint": [constraint]}],
+            });
+            let (st, owner) = (st.clone(), owner.clone());
             async move {
-                let r = super::super::test_store::request(Method::GET, "/a", &[], "");
-                handle(&st, &r, &who).await.status()
+                let r = super::super::access::handle(
+                    &st,
+                    &req(
+                        Method::POST,
+                        GRANTS_PATH,
+                        &[("content-type", LWS_JSON)],
+                        &body.to_string(),
+                    ),
+                    &owner,
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::CREATED);
             }
         };
-        // A change to the metadata part way: the old metadata, marked.
-        let mut meta = st.resource_meta(&a).await.unwrap();
-        meta.pending = true;
-        st.put_resource_meta(&a, &meta).await.unwrap();
-        // Not set aside (a process that stopped mid-way), the mark fails closed, as before.
-        assert_eq!(get(&reader).await, StatusCode::FORBIDDEN);
-        stick(&st, &store, &a);
-        assert_eq!(get(&reader).await, StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(get(&stranger).await, StatusCode::FORBIDDEN);
-        assert_eq!(get(&agent(OWNER)).await, StatusCode::SERVICE_UNAVAILABLE);
-        // Whether it is there cannot be read: nobody but the owner is told anything of it.
-        *store.fail_exists_of.lock().unwrap() = Some(a.clone());
-        assert_eq!(get(&reader).await, StatusCode::FORBIDDEN);
-        assert_eq!(get(&stranger).await, StatusCode::FORBIDDEN);
-        assert_eq!(get(&Agent::anonymous()).await, StatusCode::UNAUTHORIZED);
-        assert_eq!(get(&agent(OWNER)).await, StatusCode::SERVICE_UNAVAILABLE);
+        let type_is = |t: &str| json!({"leftOperand": "type", "operator": "eq", "rightOperand": t});
+        grant("https://old.example/#me", type_is(public)).await;
+        grant("https://new.example/#me", type_is(private)).await;
+        grant(
+            "https://turtle.example/#me",
+            json!({"leftOperand": "format", "operator": "eq", "rightOperand": "text/turtle"}),
+        )
+        .await;
+        let get = |path: &str, who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            let r = req(Method::GET, path, &[], "");
+            async move { handle(&st, &r, &who).await.status() }
+        };
+        assert_eq!(get("/a", "https://old.example/#me").await, StatusCode::OK);
+        assert_eq!(
+            get("/a", "https://new.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/a", "https://turtle.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        // A change to Turtle content of the private type landed whole (its content, then its
+        // metadata), then failed, and putting it back keeps failing: what is stored is the new
+        // state, and the journal holds the old.
+        let key = meta_key(&a);
+        let old_content = st.store.read(&a).await.unwrap();
+        let old_meta = st.store.read(&key).await.unwrap();
+        st.store
+            .write(&a, Bytes::from("<> a <x:y> ."), "text/turtle")
+            .await
+            .unwrap();
+        let mut new = meta.clone();
+        new.types = vec![private.to_string()];
+        st.put_resource_meta(&a, &new).await.unwrap();
+        *store.fail_restore_of.lock().unwrap() = Some(a.clone());
+        st.set_aside(
+            Unsettled(vec![
+                Undo::Restore {
+                    key: a.clone(),
+                    prior: Some((old_content.body, old_content.meta)),
+                },
+                Undo::Restore {
+                    key,
+                    prior: Some((old_meta.body, old_meta.meta)),
+                },
+            ]),
+            (),
+        );
+        assert!(!st.visible(&a));
+        // Whoever could read it before is told to retry; whoever the change would newly let read
+        // it is refused, as is a stranger.
+        let unavailable = StatusCode::SERVICE_UNAVAILABLE;
+        assert_eq!(get("/a", "https://old.example/#me").await, unavailable);
+        assert_eq!(
+            get("/a", "https://new.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/a", "https://turtle.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/a", "https://stranger.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(get("/a", OWNER).await, unavailable);
+        // A stuck change that left the metadata untouched is decided on the metadata as stored;
+        // when that cannot be read, everyone but the owner is refused.
+        let b = data(&st, "b").await;
+        st.put_resource_meta(&b, &meta).await.unwrap();
+        let old_b = st.store.read(&b).await.unwrap();
+        // (Its existence cannot be read either: putting it back keeps failing, and what the
+        // change says of it is all the decision reads.)
+        *store.fail_exists_of.lock().unwrap() = Some(b.clone());
+        st.set_aside(
+            Unsettled(vec![Undo::Recreate {
+                iri: b.clone(),
+                parent: Some(st.cfg.storage()),
+                body: old_b.body,
+                meta: old_b.meta,
+            }]),
+            (),
+        );
+        assert!(!st.visible(&b));
+        assert_eq!(get("/b", "https://old.example/#me").await, unavailable);
+        *store.fail_read_of.lock().unwrap() = Some(meta_key(&b));
+        assert_eq!(
+            get("/b", "https://old.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/b", "https://stranger.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        let r = handle(&st, &req(Method::GET, "/b", &[], ""), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(get("/b", OWNER).await, unavailable);
+        *store.fail_read_of.lock().unwrap() = None;
         *store.fail_exists_of.lock().unwrap() = None;
     }
 
-    /// Issue #6814: a set-aside resource that is not there (a stuck delete took it away) is,
-    /// to whoever may not act on it, the `404` (or challenge) of any missing resource.
+    /// Issue #6814: a set-aside resource that was not there before the stuck change (a create
+    /// part way) is, to whoever may not act on it, the `404` (or challenge) of any missing
+    /// resource.
     #[tokio::test]
     async fn a_missing_set_aside_resource_is_missing_to_a_stranger() {
         use super::super::test_store::{agent, closed_state, stick, OWNER};
         let (st, store) = closed_state(100).await;
         let gone = st.cfg.absolute("/gone");
-        stick(&st, &store, &gone);
+        stick(&st, &store, &gone).await;
         let get = |path: &str, who: &Agent| {
             let (st, who) = (st.clone(), who.clone());
             let r = super::super::test_store::request(Method::GET, path, &[], "");

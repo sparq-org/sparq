@@ -426,12 +426,15 @@ What the server exposes, all discoverable from the storage description
   reached too. A request already waiting on a lock when its resource is set aside is answered
   `503` then, not left waiting. A resource stays set aside until every stuck change to it is
   put back. While set-aside changes hold 256 MiB or more to put back, new writes are answered
-  `503` too (reads go on). Every route authorizes a request before it says anything of this:
+  `503` too (reads go on). Every route but the type index and search authorizes a request
+  before it says anything of this:
   a caller that may not act on the resource (or record) gets the same `401`/`403`/`404` it gets
-  when nothing is set aside. Whether it may is decided on the resource's metadata as it stands;
-  a change part way through it leaves the old metadata marked `pending` (which otherwise refuses
-  every grant), and for a set-aside resource that old metadata decides, so a grantee is told to
-  retry as before. When it cannot be read, only the owner hears of the state. A write's container is touched by the task that runs its store
+  when nothing is set aside. Whether it may is decided on what the resource was before the stuck
+  change began (whether it was there, its metadata and its format, as the change's journal
+  staged them before its first step), never on what the change wrote meanwhile: access the
+  change would newly grant is not met, and access it would remove still is. When that cannot
+  be read, only the owner hears of the state. A new subscription is told its container is set
+  aside only once every topic is authorized. A write's container is touched by the task that runs its store
   calls, so a client that goes away mid-write cannot leave the container's date behind. A
   create whose store reply was lost is removed whole the same way. A write that changes
   metadata and a recursive delete first store a durable intent: what each resource it will
@@ -488,12 +491,10 @@ What the server exposes, all discoverable from the storage description
   its distinct types) and the walk's own state (the listing in hand and the members still to
   visit), at most 16 MiB in all; past that the request gets `507`. Each resource, and each
   container's listing, is read under that resource's lock, so a change in flight (a recursive
-  delete part way) is waited out, never read half done. A resource a stuck change is to (set
-  aside) is never waited on: the walk passes over it, following a set-aside container's listing
-  as it stands. When the caller may read anything set aside once the walk is over (set aside
-  before it or while it ran), the request gets `503` (`Retry-After`) rather than an index that
-  leaves out what is under it; what the caller may not read never fails its walk. When what the
-  walk passed over is put back before it ends, the walk is made again (`503` after three).
+  delete part way) is waited out, never read half done. When the walk reaches a resource a
+  stuck change is to (set aside), or anything is set aside while it walks (what it already
+  visited included), the request gets `503` (`Retry-After`) at once, rather than waiting on
+  it or answering an index that leaves out what is under it.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,

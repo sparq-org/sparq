@@ -757,10 +757,10 @@ impl<S: Store + 'static> LwsState<S> {
 
     /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
     /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). Every
-    /// route checks it once it has authorized the request (so only a caller that may act on the
-    /// resource learns it is set aside), and every lock is taken only while it holds
-    /// ([`resources::IriLocks::lock`]), so one that is not visible is answered `503` at once, or
-    /// passed over by a walk over many, and never waited on.
+    /// route to a resource or record checks it once it has authorized the request (so only a
+    /// caller that may act on it learns it is set aside; see [`access::aside`]), and every lock
+    /// is taken only while it holds ([`resources::IriLocks::lock`]), so one that is not visible
+    /// is answered `503` at once, or fails a walk over many, and is never waited on.
     pub(crate) fn visible(&self, uri: &str) -> bool {
         self.locks.visible(uri)
     }
@@ -826,7 +826,7 @@ impl<S: Store + 'static> LwsState<S> {
         let bytes = left.bytes();
         self.set_aside_bytes
             .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
-        self.locks.hide(&iris);
+        self.locks.hide(&iris, left.priors());
         (iris, bytes)
     }
 
@@ -1198,6 +1198,13 @@ impl Unsettled {
     fn iris(&self) -> Vec<String> {
         iris_of(&self.0)
     }
+
+    /// What each resource it is to was before the change (see [`Prior`]).
+    fn priors(&self) -> std::collections::HashMap<String, Prior> {
+        let mut out = std::collections::HashMap::new();
+        priors_of(&self.0, &mut out);
+        out
+    }
 }
 
 /// About how many bytes `undo` holds to put back: each body, and each record at its limit.
@@ -1214,6 +1221,100 @@ fn bytes_of(undo: &[Undo]) -> usize {
             _ => MAX_META_BYTES,
         })
         .fold(0, usize::saturating_add)
+}
+
+/// What a resource that a stuck change is to was before the change began, as far as deciding
+/// who may act on it goes: taken from what the change's journal staged before its first step
+/// (and so before any of its writes landed), never from what is stored while it is part way.
+/// A field the change left nothing to put back of (it did not touch it, or it is put back
+/// already) is `None`: what is stored for it now is what it was.
+///
+/// It decides only who may learn the resource is set aside ([`access::aside`]); nothing is
+/// served or changed on it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Prior {
+    /// Whether the resource was there.
+    pub existed: Option<bool>,
+    /// Its metadata: the default when it had none, and, when what it had does not parse, one
+    /// marked `pending` (which refuses every grant).
+    pub meta: Option<ResourceMeta>,
+    /// Its format (a container's is its listing's).
+    pub format: Option<Option<String>>,
+}
+
+impl Prior {
+    /// Fill what this does not say yet from `other`.
+    pub(crate) fn or(&mut self, other: Prior) {
+        self.existed = self.existed.or(other.existed);
+        if self.meta.is_none() {
+            self.meta = other.meta;
+        }
+        if self.format.is_none() {
+            self.format = other.format;
+        }
+    }
+}
+
+/// What each resource `undo` puts back was before its change (see [`Prior`]).
+fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) {
+    let format = |iri: &str, meta: &StoredMeta| {
+        Some(if iri.ends_with('/') {
+            LWS_JSON.to_string()
+        } else {
+            meta.content_type.clone()
+        })
+    };
+    for step in undo {
+        let (iri, prior) = match step {
+            Undo::Restore { key, prior } => match key.strip_suffix(META_SUFFIX) {
+                Some(iri) => {
+                    let meta = match prior {
+                        Some((body, _)) => parse_meta(iri, body).unwrap_or(ResourceMeta {
+                            pending: true,
+                            ..ResourceMeta::default()
+                        }),
+                        None => ResourceMeta::default(),
+                    };
+                    (
+                        iri.to_string(),
+                        Prior {
+                            meta: Some(meta),
+                            ..Prior::default()
+                        },
+                    )
+                }
+                None => (
+                    key.clone(),
+                    Prior {
+                        existed: Some(prior.is_some()),
+                        format: Some(prior.as_ref().and_then(|(_, m)| format(key, m))),
+                        ..Prior::default()
+                    },
+                ),
+            },
+            Undo::Recreate { iri, meta, .. } => (
+                iri.clone(),
+                Prior {
+                    existed: Some(true),
+                    format: Some(format(iri, meta)),
+                    ..Prior::default()
+                },
+            ),
+            Undo::Remove { iri, .. } => (
+                iri.clone(),
+                Prior {
+                    existed: Some(false),
+                    ..Prior::default()
+                },
+            ),
+            Undo::Resolve { undo, .. } => {
+                priors_of(undo, out);
+                continue;
+            }
+            Undo::Locked { .. } | Undo::Forget { .. } => continue,
+        };
+        out.entry(iri).or_default().or(prior);
+    }
 }
 
 /// The resources `undo` is to, each once.
@@ -2818,16 +2919,27 @@ pub(crate) mod test_store {
         super::route(state, req).await
     }
 
-    /// Set `iri` aside, as a stuck change to it is: putting it back (removing it) keeps failing
-    /// until `store.fail_delete_of` is cleared.
-    pub fn stick(state: &super::LwsState<FlakyStore>, store: &FlakyStore, iri: &str) {
-        *store.fail_delete_of.lock().unwrap() = Some(iri.to_string());
+    /// Set `iri` aside, as a stuck write of its content is: putting back what it holds now
+    /// (removing it, when it holds nothing: a stuck create) keeps failing until [`unstick`].
+    pub async fn stick(state: &super::LwsState<FlakyStore>, store: &FlakyStore, iri: &str) {
+        let prior = state.store.read(iri).await.ok().map(|r| (r.body, r.meta));
+        if prior.is_some() {
+            *store.fail_restore_of.lock().unwrap() = Some(iri.to_string());
+        } else {
+            *store.fail_delete_of.lock().unwrap() = Some(iri.to_string());
+        }
         let left = super::Unsettled(vec![super::Undo::Restore {
             key: iri.to_string(),
-            prior: None,
+            prior,
         }]);
         state.set_aside(left, ());
         assert!(!state.visible(iri));
+    }
+
+    /// Let what [`stick`] set aside be put back.
+    pub fn unstick(store: &FlakyStore) {
+        *store.fail_restore_of.lock().unwrap() = None;
+        *store.fail_delete_of.lock().unwrap() = None;
     }
 
     /// Wait (a few seconds at most) until `iri` is no longer set aside.

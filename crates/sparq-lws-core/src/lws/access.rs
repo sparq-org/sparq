@@ -628,24 +628,53 @@ pub async fn allowed<S: Store + 'static>(
     decide(state, action, uri, agent, &meta, None).await
 }
 
-/// As [`allowed`], for a resource that is set aside (a stuck change to it is being put back), to
-/// decide only whether the caller may learn so: never to serve or change it. The `pending` mark
-/// a change part way leaves on the metadata ([`ResourceMeta::pending`]) is taken off first: the
-/// marked metadata is the resource's from before the change, which is what the caller's access
-/// rested on until the change began. A resource that is not set aside is decided by
-/// [`allowed`], the mark failing closed.
-pub async fn allowed_set_aside<S: Store + 'static>(
+/// Whether `agent` may learn that the set-aside resource at `uri` is set aside: never whether it
+/// may be served or changed, which waits until it is put back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Aside {
+    /// It may act on it.
+    Allowed,
+    /// It may not.
+    Denied,
+    /// The resource was not there before the stuck change (to anyone but the owner).
+    Missing,
+}
+
+/// [`Aside`] for `agent` and `action` on the set-aside resource at `uri`, decided as
+/// [`allowed`] decided before the stuck change to it began: on what it was then (whether it was
+/// there, its metadata and its format, see [`Prior`](super::Prior)), with the grants in force
+/// now. What the change may have written meanwhile (new content, new types, a `pending` mark)
+/// is never read for it: a grant the change would newly satisfy is not met, and one it would
+/// stop meeting still is. What the change left untouched is read as stored. An error when that
+/// cannot be read.
+pub async fn aside<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
     uri: &str,
     agent: &Agent,
-) -> Result<bool, ServerError> {
+) -> Result<Aside, ServerError> {
     if state.cfg.open || is_owner(state, agent) {
-        return Ok(true);
+        return Ok(Aside::Allowed);
     }
-    let mut meta = state.resource_meta(uri).await?;
-    meta.pending = false;
-    decide(state, action, uri, agent, &meta, None).await
+    let prior = state.locks.prior(uri);
+    let existed = match prior.existed {
+        Some(existed) => existed,
+        None => state.store.exists(uri).await?,
+    };
+    if !existed {
+        return Ok(Aside::Missing);
+    }
+    let meta = match prior.meta {
+        Some(meta) => meta,
+        None => state.resource_meta(uri).await?,
+    };
+    Ok(
+        if decide(state, action, uri, agent, &meta, prior.format).await? {
+            Aside::Allowed
+        } else {
+            Aside::Denied
+        },
+    )
 }
 
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
