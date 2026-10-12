@@ -56,32 +56,14 @@
   }
 }
 
-// [OPUS-5.5] The double-blind build (`--input anon=true`) shows a placeholder for every value that
-// identifies our repository: proof-method identifiers, commits, and the digests and image IDs of
-// guest binaries, which its public records list. The normal build shows the value unchanged.
-#let withheld = "[withheld for review]"
-#let repo-id(body) = if anon { withheld } else { body }
-
-// Short commit / digest rendering for bound identity records (first twelve hex characters). The
-// record is looked up in both builds, so the anonymous build still checks it.
-#let short-id(key) = repo-id(raw(headline(key).slice(0, 12)))
-
-// Fixed three-decimal rendering for the preliminary pilot values (a display helper; the value
-// itself always comes from the evidence file).
-#let fmt3(x) = {
-  let s = str(calc.round(x, digits: 3))
-  let parts = s.split(".")
-  if parts.len() == 1 { s + ".000" } else { s + "0" * calc.max(0, 3 - parts.at(1).len()) }
-}
-#let pilot(key) = fmt3(ev(key))
-
-// [OPUS-5.5] Executor cycle counts in millions, rounded to two decimals for display only (the
-// value itself always comes from the evidence file through headline, so it must be canonical).
-#let mcycles(key) = {
-  let s = str(calc.round(headline(key) / 1000000, digits: 2))
-  let parts = s.split(".")
-  if parts.len() == 1 { s + ".00" } else { s + "0" * calc.max(0, 2 - parts.at(1).len()) }
-}
+// [OPUS-5.5] Display helpers shared with the ESWC variant and its supplementary material
+// (_lib/zksparql.typ). The double-blind build (`--input anon=true`) shows a placeholder for every
+// value that identifies our repository (repo-id, short-id); pilot renders the preliminary pilot
+// values with three decimals, and mcycles executor cycle counts in millions.
+#import "_lib/zksparql.typ": pilot, mcycles
+#import "_lib/zksparql.typ" as zks
+#let repo-id(body) = zks.repo-id(anon, body)
+#let short-id(key) = zks.short-id(anon, key)
 
 // A visible placeholder for a planned measurement that is not yet an evidence record.
 #let todo-results(body) = block(inset: 6pt, stroke: 0.8pt + red, width: 100%, breakable: false)[#text(fill: red)[*Results pending.* #body]]
