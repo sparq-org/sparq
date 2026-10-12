@@ -13,31 +13,11 @@ SPEC.loader.exec_module(selector)
 BASE, HEAD = "a" * 40, "b" * 40
 
 
-def pull_request_paths(workflow: str) -> list[str]:
-    """The `paths:` list under the workflow's `pull_request:` trigger."""
-    block = workflow.split("\n  pull_request:\n", 1)[1].split("\n  merge_group:", 1)[0]
-    lines = block.split("    paths:\n", 1)[1].splitlines()
-    return [line.strip()[3:-1] for line in lines if line.startswith("      - '")]
-
-
-def expected_paths(prefixes, files) -> list[str]:
-    return sorted(p + "**" if p.endswith("/") else p + "*" for p in prefixes) + sorted(files)
-
-
 class NativeSelectionTests(unittest.TestCase):
-    def test_pull_request_path_filter_is_exactly_the_selector(self):
-        # Not a required check, so PRs that touch no input skip the workflow; the
-        # filter must not drop any input the selector counts. push and merge_group
-        # stay unfiltered and keep the step-level selector.
-        workflow = (ROOT / ".github/workflows/zk-native-composition.yml").read_text()
-        self.assertEqual(pull_request_paths(workflow),
-                         expected_paths(selector.NATIVE_PREFIXES, selector.NATIVE_FILES))
-        trigger = workflow.split("\njobs:", 1)[0]
-        self.assertEqual(trigger.count("    paths:"), 1)
-
     def test_workflow_always_creates_job_but_scopes_every_heavy_step(self):
         workflow = (ROOT / ".github/workflows/zk-native-composition.yml").read_text()
         self.assertIn("  merge_group:\n    types: [checks_requested]", workflow)
+        self.assertNotIn("    paths:", workflow)
         self.assertIn("name: native credential and circuit composition", workflow)
         self.assertIn("python3 scripts/ci_native_composition_paths.py", workflow)
         self.assertIn("Require explicit classification output", workflow)
@@ -63,7 +43,8 @@ class NativeSelectionTests(unittest.TestCase):
                  "scripts/tests/test_ci_native_composition_paths.py", "scripts/tests/test_ci_summary_gate.py",
                  "bench/zk-bindings/corpus.py", "bench/zk-bindings/run.py", "bench/zk-bindings/protocol.json",
                  "bench/zk-bindings/native_ci.py", "bench/zk-bindings/test_native_ci.py",
-                 "bench/zk-bindings/inventory.json", "bench/zk-bindings/test_harness.py"]
+                 "bench/zk-bindings/inventory.json", "bench/zk-bindings/test_harness.py",
+                 "supply-chain/config.toml"]
         for path in paths:
             with self.subTest(path=path):
                 self.assertTrue(selector.relevant_path(path))

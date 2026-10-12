@@ -6,29 +6,6 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    # Only PRs that touch an input start this workflow (it is not a required
-    # check). Exactly the selector's path set; the selector test checks it.
-    paths:
-      - '.cargo/**'
-      - 'crates/sparq-canon/**'
-      - 'crates/sparq-core/**'
-      - 'rust-toolchain*'
-      - 'vendor/spargebra/**'
-      - 'zk/native-composition/**'
-      - '.github/workflows/ci-summary.yml'
-      - '.github/workflows/zk-native-composition.yml'
-      - 'Cargo.toml'
-      - 'bench/zk-bindings/corpus.py'
-      - 'bench/zk-bindings/inventory.json'
-      - 'bench/zk-bindings/native_ci.py'
-      - 'bench/zk-bindings/protocol.json'
-      - 'bench/zk-bindings/run.py'
-      - 'bench/zk-bindings/test_harness.py'
-      - 'bench/zk-bindings/test_native_ci.py'
-      - 'scripts/ci_native_composition_paths.py'
-      - 'scripts/ci_summary_gate.py'
-      - 'scripts/tests/test_ci_native_composition_paths.py'
-      - 'scripts/tests/test_ci_summary_gate.py'
   merge_group:
     types: [checks_requested]
   push:
