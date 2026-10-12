@@ -5,6 +5,36 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    # Only PRs that touch an input start this workflow (it is not a required
+    # check). Exactly the selector's path set; the selector test checks it.
+    paths:
+      - '.cargo/**'
+      - 'bench/zk-bindings/**'
+      - 'crates/sparq-canon/**'
+      - 'crates/sparq-core/**'
+      - 'crates/sparq-engine-serialize/**'
+      - 'crates/sparq-engine-service/**'
+      - 'crates/sparq-engine/**'
+      - 'crates/sparq-introspect/**'
+      - 'crates/sparq-jsonld/**'
+      - 'crates/sparq-query-protocol/**'
+      - 'crates/sparq-substrate/**'
+      - 'rust-toolchain*'
+      - 'vendor/spargebra-shim/**'
+      - 'vendor/spargebra/**'
+      - 'vendor/zk-sdk/**'
+      - 'zk/sparql-evaluator/**'
+      - '.github/workflows/zk-exact-evaluator.yml'
+      - '.github/workflows/zk-toolchain.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'bench/differential-divergences.json'
+      - 'crates/sparq-bench/src/fuzz.rs'
+      - 'crates/sparq-conformance/examples/proof_corpus.rs'
+      - 'scripts/ci_exact_evaluator_evidence.py'
+      - 'scripts/ci_exact_evaluator_paths.py'
+      - 'scripts/tests/test_ci_exact_evaluator_evidence.py'
+      - 'scripts/tests/test_ci_exact_evaluator_paths.py'
   merge_group:
     types: [checks_requested]
   push:

@@ -6,6 +6,8 @@ import os
 import re
 import subprocess
 
+# The pull_request `paths:` filter in .github/workflows/zk-exact-evaluator.yml must list
+# exactly EXACT_PREFIXES and EXACT_FILES; the test below checks it.
 # Local crates must cover evaluator_path_closure() in
 # scripts/tests/test_ci_exact_evaluator_paths.py, which derives them from the manifests.
 EXACT_PREFIXES = (

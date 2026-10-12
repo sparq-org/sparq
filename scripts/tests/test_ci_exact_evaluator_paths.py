@@ -108,15 +108,35 @@ def completed(stdout=b""):
     return subprocess.CompletedProcess([], 0, stdout)
 
 
+def pull_request_paths(workflow: str) -> list[str]:
+    """The `paths:` list under the workflow's `pull_request:` trigger."""
+    block = workflow.split("\n  pull_request:\n", 1)[1].split("\n  merge_group:", 1)[0]
+    lines = block.split("    paths:\n", 1)[1].splitlines()
+    return [line.strip()[3:-1] for line in lines if line.startswith("      - '")]
+
+
+def expected_paths(prefixes, files) -> list[str]:
+    return sorted(p + "**" if p.endswith("/") else p + "*" for p in prefixes) + sorted(files)
+
+
 class ExactEvaluatorSelection(unittest.TestCase):
     def test_workflow_always_creates_the_gate_and_checks_classification(self):
         workflow = (Path(__file__).parents[2] / ".github/workflows/zk-exact-evaluator.yml").read_text()
         self.assertIn("  merge_group:\n    types: [checks_requested]", workflow)
         self.assertIn("name: real exact-dataset guest and proof", workflow)
-        self.assertNotIn("    paths:", workflow)
         self.assertIn("Require explicit classification output", workflow)
         self.assertIn("python3 scripts/ci_exact_evaluator_paths.py", workflow)
         self.assertIn("python3 scripts/ci_exact_evaluator_evidence.py", workflow)
+
+    def test_pull_request_path_filter_is_exactly_the_selector(self):
+        # Not a required check, so PRs that touch no input skip the workflow; the
+        # filter must not drop any input the selector counts. push and merge_group
+        # stay unfiltered and keep the step-level selector.
+        workflow = (ROOT / ".github/workflows/zk-exact-evaluator.yml").read_text()
+        self.assertEqual(pull_request_paths(workflow),
+                         expected_paths(selector.EXACT_PREFIXES, selector.EXACT_FILES))
+        trigger = workflow.split("\njobs:", 1)[0]
+        self.assertEqual(trigger.count("    paths:"), 1)
 
     def test_every_execution_input_is_relevant(self):
         for path in EXACT_INPUTS:
