@@ -416,7 +416,9 @@ fn forbidden_ip_table() -> Vec<(&'static str, bool)> {
         ("fe80::1", true),
         ("febf::1", true),
         ("fe7f::1", false),
-        ("fec0::1", false),
+        // v6 site-local fec0::/10 (deprecated, still internal)
+        ("fec0::1", true),
+        ("feff::1", true),
         // v6 unique-local fc00::/7 boundaries
         ("fc00::1", true),
         ("fdff::1", true),
@@ -425,8 +427,10 @@ fn forbidden_ip_table() -> Vec<(&'static str, bool)> {
         // v4-mapped v6 unwraps to the embedded v4
         ("::ffff:10.0.0.1", true),
         ("::ffff:8.8.8.8", false),
+        // v6 documentation is not global
+        ("2001:db8::1", true),
         // global v6
-        ("2001:db8::1", false),
+        ("2001:4860:4860::8888", false),
     ]
 }
 

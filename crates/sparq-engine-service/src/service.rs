@@ -1428,30 +1428,42 @@ pub const SERVICE_EGRESS_REFUSED_MARKER: &str = "SERVICE egress refused";
 
 /// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden (private /
 /// internal / non-global) destination for SERVICE federation. Returns `true`
-/// when the address is in a range the default-deny policy refuses.
+/// when the address is in a range the default-deny policy refuses: anything that is
+/// not global unicast.
 ///
 /// Forbidden ranges:
 /// * loopback — `127.0.0.0/8`, `::1`
 /// * RFC1918 private — `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
 /// * link-local — `169.254.0.0/16` (incl. the `169.254.169.254` cloud-metadata
 ///   IP) and IPv6 `fe80::/10`
-/// * unique-local IPv6 — `fc00::/7`
-/// * unspecified — `0.0.0.0`, `::`
-/// * IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped and re-classified as the
-///   embedded IPv4 address, so a private v4 cannot be smuggled through a v6 host.
+/// * unique-local IPv6 — `fc00::/7`; deprecated site-local IPv6 — `fec0::/10`
+/// * "this network" — `0.0.0.0/8` (incl. unspecified `0.0.0.0`) and `::`
+/// * shared CGNAT `100.64.0.0/10`, IETF protocol assignments `192.0.0.0/24`,
+///   benchmarking `198.18.0.0/15`, reserved `240.0.0.0/4` (incl. broadcast)
+/// * documentation — `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `2001:db8::/32`
+/// * multicast — `224.0.0.0/4`, `ff00::/8`
+/// * NAT64 — `64:ff9b::/96` and local-use `64:ff9b:1::/48`, which translate to an
+///   arbitrary (possibly private) IPv4
+/// * IPv4-compatible IPv6 (`::a.b.c.d`)
+/// * IPv4-mapped IPv6 (`::ffff:a.b.c.d`) and 6to4 (`2002:aabb:ccdd::/48`) are
+///   unwrapped and re-classified as the embedded IPv4 address, so a private v4
+///   cannot be smuggled through a v6 host.
 #[cfg(feature = "service")]
 pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
+    use std::net::{IpAddr, Ipv4Addr};
     match ip {
         IpAddr::V4(v4) => {
+            let o = v4.octets();
             v4.is_loopback()            // 127.0.0.0/8
                 || v4.is_private()      // 10/8, 172.16/12, 192.168/16
                 || v4.is_link_local()   // 169.254.0.0/16 (incl. 169.254.169.254)
-                || v4.is_unspecified()  // 0.0.0.0
-                // Defence-in-depth on ranges that are also internal but not
-                // covered above: broadcast, shared CGNAT (100.64/10), benchmarking.
-                || v4.is_broadcast()    // 255.255.255.255
-                || matches!(v4.octets(), [100, b, ..] if (64..=127).contains(&b)) // 100.64/10 CGNAT
+                || v4.is_documentation() // 192.0.2/24, 198.51.100/24, 203.0.113/24
+                || v4.is_multicast()    // 224.0.0.0/4
+                || o[0] == 0            // 0.0.0.0/8
+                || o[0] >= 240          // 240.0.0.0/4 reserved, incl. 255.255.255.255
+                || (o[0] == 100 && (o[1] & 0xc0) == 64) // 100.64.0.0/10 CGNAT
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0) // 192.0.0.0/24
+                || (o[0] == 198 && (o[1] & 0xfe) == 18) // 198.18.0.0/15 benchmarking
         }
         IpAddr::V6(v6) => {
             // Unwrap IPv4-mapped (::ffff:a.b.c.d) and re-check as IPv4 so a
@@ -1459,10 +1471,20 @@ pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return is_forbidden_ip(IpAddr::V4(v4));
             }
-            v6.is_loopback()            // ::1
-                || v6.is_unspecified()  // ::
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
+            let s = v6.segments();
+            if s[0] == 0x2002 {
+                // 6to4: the next 32 bits are the relay's IPv4 address.
+                let [a, b] = s[1].to_be_bytes();
+                let [c, d] = s[2].to_be_bytes();
+                return is_forbidden_ip(IpAddr::V4(Ipv4Addr::new(a, b, c, d)));
+            }
+            s[..6] == [0; 6]            // ::, ::1 and IPv4-compatible ::a.b.c.d
+                || v6.is_multicast()    // ff00::/8
+                || (s[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+                || (s[0] & 0xffc0) == 0xfec0 // fec0::/10 site-local
+                || (s[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
+                || (s[0] == 0x2001 && s[1] == 0x0db8) // 2001:db8::/32 documentation
+                || (s[0] == 0x0064 && s[1] == 0xff9b) // 64:ff9b::/32 NAT64
         }
     }
 }
