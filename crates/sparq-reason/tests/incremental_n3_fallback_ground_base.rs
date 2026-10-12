@@ -314,10 +314,17 @@ fn reserved_label_naming_no_node_is_refused() {
 
 /// A document parsed at run time (`log:parsedAsN3`) never aliases the caller's node: a
 /// text that spells the caller's label names a node of the graph's own, and a text that
-/// spells the graph's internal namespace for caller blanks (`__bs…`) is refused.
+/// spells a label in the graph's internal namespace for caller blanks (its exact
+/// `__bs{k}_` prefix) is refused. A label merely starting with `__bs` is not.
 #[test]
 fn runtime_parsed_blanks_do_not_alias_caller_blanks() {
-    for (text, parsed) in [("_:x", 1), ("_:__bs0_x", 0), ("_:__bs1_x", 0)] {
+    // The graph's caller namespace here is `__bs0_`: only a label in it is refused.
+    for (text, parsed) in [
+        ("_:x", 1),
+        ("_:__bs0_x", 0),
+        ("_:__bs1_x", 1),
+        ("_:__bsmith", 1),
+    ] {
         let rules = format!(
             "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
              {{ \"{text} <http://ex/r> <http://ex/o9> .\" log:parsedAsN3 ?f . \
@@ -381,4 +388,28 @@ fn why_shows_the_callers_blank_labels() {
         assert_ne!(mine.nodes()[0].key[0], theirs.nodes()[0].key[0]);
         assert_eq!(theirs.nodes()[0].rule, "asserted");
     }
+}
+
+/// Review round 4: the caller-namespace refusal applies only to a run that serves a
+/// `MaterializedN3Graph`. A batch run parses a text spelling `_:__bs0_x` as on main.
+#[test]
+fn batch_runtime_parse_of_a_bs_label_is_not_refused() {
+    let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+               { \"_:__bs0_x <urn:p> <urn:o> .\" log:parsedAsN3 ?f } \
+               => { <urn:s> <urn:parsed> true } .";
+    let closure = sparq_reason::reason_n3_terms(src, None).expect("reason");
+    let marker = [
+        Term::Iri("urn:s".into()),
+        Term::Iri("urn:parsed".into()),
+        Term::Lit(
+            "true".into(),
+            "http://www.w3.org/2001/XMLSchema#boolean".into(),
+            None,
+        ),
+    ];
+    assert!(
+        closure.facts.contains(&marker),
+        "the parse was refused: {:?}",
+        closure.facts
+    );
 }

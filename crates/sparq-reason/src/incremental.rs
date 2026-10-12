@@ -2645,6 +2645,7 @@ impl MaterializedN3Graph {
             self.base.iter().cloned(),
             crate::NegationCycles::Reject,
             &self.cuts,
+            &self.base_ns,
         ) {
             Ok(closure) => self.fallback_closure = closure.facts.into_iter().collect(),
             // The rules cannot be stratified (a negation cycle, possibly inside a nested
