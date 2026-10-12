@@ -215,9 +215,10 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 //   (e.g. () and an rdf:nil IRI); explain::n3_proof_tree_for_key(dict, &run.steps, &key, opts) roots by key.
 // statement_keys is injective w.r.t. Term's own Eq: formula rows keep their order and duplicates (as the
 // engine compares them); blank labels and __bw copies are not normalized. So a key is only as
-// reproducible as the engine's terms: skolem labels (__sk<n>_e) are allocated in hash-set traversal
-// order, so a fact carrying one (or a log:conclusion formula built from such rules) can key
-// differently across runs/platforms, exactly like its why() strings (pre-existing; GH #6749).
+// reproducible as the engine's terms. Skolem labels (__sk<n>_e) are numbered in the canonical
+// (sorted-binding) order of each round's firings, not hash-set order, so they, their keys and
+// why() strings are reproducible across runs/platforms (GH #6749); a log:conclusion formula's
+// row order still follows the nested closure's set order.
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 

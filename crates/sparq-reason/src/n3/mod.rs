@@ -579,34 +579,39 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
         let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
-        let mut fired: FxHashSet<String> = FxHashSet::default();
-        for b in match_premise(&premise, &facts, &bw) {
-            let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
-                None
-            } else {
-                let key: String = concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect();
-                if !fired.insert(key) {
-                    continue; // this firing already instantiated its existentials
-                }
-                sk_counter += 1;
-                Some(
-                    concl_blanks
-                        .iter()
-                        .map(|l| (l.clone(), format!("{}{}_{}_{}", sk_prefix, ri, sk_counter, l)))
-                        .collect(),
-                )
-            };
+        let bindings = match_premise(&premise, &facts, &bw);
+        let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
             for c in &rule.conclusion {
-                let c = match &sk {
+                let c = match sk {
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if let Some(g) = ground_triple(&c, &b) {
+                if let Some(g) = ground_triple(&c, b) {
                     if emitted.insert(g.clone()) {
                         out.push(g);
                     }
                 }
             }
+        };
+        if concl_blanks.is_empty() {
+            for b in &bindings {
+                emit(b, None);
+            }
+            continue;
+        }
+        // One instantiation per distinct conclusion-relevant binding, numbered in the
+        // canonical order of the firings (GH #6749).
+        let none_fired = FxHashSet::default();
+        let firings = canonical_new_firings(bindings, &concl_vars, &none_fired, false);
+        let base = sk_counter;
+        sk_counter += firings.len();
+        for (rank, _, b) in firings {
+            let n = base + rank + 1;
+            let sk: FxHashMap<String, String> = concl_blanks
+                .iter()
+                .map(|l| (l.clone(), format!("{}{}_{}_{}", sk_prefix, ri, n, l)))
+                .collect();
+            emit(&b, Some(&sk));
         }
     }
     if let Some(e) = bw.nested_error.take() {
@@ -670,6 +675,69 @@ fn conclusion_existentials(conclusion: &[[Term; 3]]) -> (Vec<String>, Vec<String
         }
     }
     (blanks.into_iter().collect(), vars.into_iter().collect())
+}
+
+/// The firing key of binding `b` for a rule whose conclusion variables are `concl_vars`
+/// ([`conclusion_existentials`]): one existential instantiation per distinct key.
+fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
+    concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect()
+}
+
+/// The firings among `bindings` that mint existentials for the first time — one per firing
+/// key not yet in `fired` — each with its RANK in the canonical order of those keys
+/// (sorted; GH #6749), returned in arrival order.
+///
+/// Skolem labels are numbered by rank. The bindings arrive in the order the fact and delta
+/// hash sets yield them, which depends on insertion history and on the hasher's word size
+/// (native vs `wasm32`); ranking the round's new firings by key makes the label a function
+/// of the firing and the round's contents, which are sets, not of that order. Distinct keys
+/// get distinct ranks, so labels stay injective. Only the numbering is canonical: the
+/// firings keep their arrival order, so the facts they derive are inserted as before.
+///
+/// Of several bindings with one key, the first to arrive is kept; with `tie_break`, the
+/// least by its full canonical encoding is kept instead, so the premises a proof step
+/// records are reproducible too. The conclusion they instantiate is the same either way.
+fn canonical_new_firings(
+    bindings: Vec<Binding>,
+    concl_vars: &[String],
+    fired: &FxHashSet<String>,
+    tie_break: bool,
+) -> Vec<(usize, String, Binding)> {
+    let fresh: Vec<(String, Binding)> = bindings
+        .into_iter()
+        .filter_map(|b| {
+            let key = firing_key(&b, concl_vars);
+            (!fired.contains(&key)).then_some((key, b))
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..fresh.len()).collect();
+    if tie_break {
+        let full: Vec<Vec<String>> = fresh
+            .iter()
+            .map(|(_, b)| {
+                let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+                f.sort_unstable();
+                f
+            })
+            .collect();
+        order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0).then_with(|| full[x].cmp(&full[y])));
+    } else {
+        order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0).then(x.cmp(&y)));
+    }
+    let mut rank: Vec<Option<usize>> = vec![None; fresh.len()];
+    let mut next = 0;
+    for (j, &i) in order.iter().enumerate() {
+        if j > 0 && fresh[order[j - 1]].0 == fresh[i].0 {
+            continue; // a later binding of a key already ranked
+        }
+        rank[i] = Some(next);
+        next += 1;
+    }
+    fresh
+        .into_iter()
+        .zip(rank)
+        .filter_map(|((key, b), r)| Some((r?, key, b)))
+        .collect()
 }
 
 /// A stratified run's result ([`reason_n3_stratified`]).
@@ -1197,7 +1265,7 @@ fn run_closure(
     // of non-monotonic rules do not mint endless new blanks).
     let concl_meta: Vec<(Vec<String>, Vec<String>)> =
         rules.iter().map(|r| conclusion_existentials(&r.conclusion)).collect();
-    let mut fired: FxHashSet<(usize, String)> = FxHashSet::default();
+    let mut fired: Vec<FxHashSet<String>> = vec![FxHashSet::default(); rules.len()];
     let mut sk_counter = 0usize;
 
     // TRANSITIVITY fast path: rules of the exact shape `{?x P ?y. ?y P ?z} => {?x P ?z}`
@@ -1405,40 +1473,20 @@ fn run_closure(
                     bs
                 };
                 let (concl_blanks, concl_vars) = &concl_meta[ri];
-                for b in bindings {
-                    // Fresh conclusion existentials: rename the conclusion's blanks
-                    // once per distinct (rule, conclusion-binding) firing.
-                    let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
-                        None
-                    } else {
-                        let key: String = concl_vars
-                            .iter()
-                            .map(|v| format!("{:?};", b.get(v)))
-                            .collect();
-                        if !fired.insert((ri, key)) {
-                            continue; // this firing already instantiated its existentials
-                        }
-                        sk_counter += 1;
-                        Some(
-                            concl_blanks
-                                .iter()
-                                .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, sk_counter, l)))
-                                .collect(),
-                        )
-                    };
+                let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
                     for c in &rule.conclusion {
-                        let c = match &sk {
+                        let c = match sk {
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple(&c, &b) {
+                        if let Some(g) = ground_triple(&c, b) {
                             if !facts.contains(&g) {
                                 // The supporting facts: premise patterns instantiated under b that
                                 // are actual facts (excludes builtins / list structure).
                                 let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
                                     rule.premise
                                         .iter()
-                                        .filter_map(|p| ground_triple(p, &b))
+                                        .filter_map(|p| ground_triple(p, b))
                                         .filter(|t| facts.contains(t))
                                         .collect()
                                 } else {
@@ -1448,6 +1496,29 @@ fn run_closure(
                             }
                         }
                     }
+                };
+                if concl_blanks.is_empty() {
+                    for b in &bindings {
+                        emit(b, None);
+                    }
+                    continue;
+                }
+                // Fresh conclusion existentials: rename the conclusion's blanks once per
+                // distinct (rule, conclusion-binding) firing, numbered in the canonical order
+                // of this round's new firings so a label never depends on hash-set traversal
+                // order (GH #6749).
+                let tie_break = mode == StepMode::Full;
+                let firings = canonical_new_firings(bindings, concl_vars, &fired[ri], tie_break);
+                let base = sk_counter;
+                sk_counter += firings.len();
+                for (rank, key, b) in firings {
+                    let n = base + rank + 1;
+                    let sk: FxHashMap<String, String> = concl_blanks
+                        .iter()
+                        .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, n, l)))
+                        .collect();
+                    emit(&b, Some(&sk));
+                    fired[ri].insert(key);
                 }
             }
             let mut new_delta: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -6140,6 +6211,124 @@ mod tests {
             parent_node, parent_object,
             "the existential must co-refer across its :hasParent and rdf:type triples"
         );
+    }
+
+    /// GH #6749: the documents below hold the same facts; only their order and an unrelated
+    /// padding set (which changes the fact sets' capacity, so their traversal order) differ.
+    fn skolem_order_variants(n: usize) -> Vec<String> {
+        let rules = "{ ?x :p :v } => { ?x :q _:e } .\n{ ?x :q ?e } => { ?e :r _:f } .\n";
+        let subj: Vec<String> = (0..n).map(|i| format!(":s{i:02} :p :v .\n")).collect();
+        let pad: String = (0..300).map(|i| format!(":pad{i} :unrelated {i} .\n")).collect();
+        let head = "@prefix : <http://ex/> .\n";
+        let fwd: String = subj.concat();
+        let rev: String = subj.iter().rev().cloned().collect();
+        let mut mixed = subj.clone();
+        mixed.rotate_left(n / 3);
+        vec![
+            format!("{head}{fwd}{rules}"),
+            format!("{head}{rules}{rev}"),
+            format!("{head}{pad}{}{rules}", mixed.concat()),
+            format!("{head}{rules}{}{pad}", rev),
+        ]
+    }
+
+    /// subject IRI -> (its `:q` existential's label, that existential's `:r` label).
+    fn skolem_labels(src: &str) -> std::collections::BTreeMap<String, (String, String)> {
+        let c = reason_n3_terms(src, None).unwrap();
+        let find = |s: &Term, p: &str| -> Option<String> {
+            c.facts.iter().find_map(|[fs, fp, fo]| match (fp, fo) {
+                (Term::Iri(i), Term::Blank(l)) if i == p && fs == s => Some(l.clone()),
+                _ => None,
+            })
+        };
+        c.facts
+            .iter()
+            .filter_map(|[s, p, _]| match (s, p) {
+                (Term::Iri(si), Term::Iri(pi)) if pi == "http://ex/p" => {
+                    let e = find(s, "http://ex/q")?;
+                    let f = find(&Term::Blank(e.clone()), "http://ex/r")?;
+                    Some((si.clone(), (e, f)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn skolem_labels_do_not_depend_on_traversal_order() {
+        // GH #6749: a rule existential's label was taken from a counter bumped in the order
+        // the delta hash set yields bindings, so it depended on insertion history and the
+        // hasher's word size. The label must be a function of the firing alone.
+        let n = 24;
+        let runs: Vec<_> = skolem_order_variants(n).iter().map(|d| skolem_labels(d)).collect();
+        assert_eq!(runs[0].len(), n, "every subject fires both existential rules");
+        for r in &runs[1..] {
+            assert_eq!(r, &runs[0], "same facts, different order: same skolem labels");
+        }
+        // Minted in the canonical order of the firings' bindings: rule order within a
+        // round, then the bound terms, so `:s00` takes the first label of its round.
+        let first = &runs[0]["http://ex/s00"];
+        assert_eq!(first.0, "__sk0_1_e");
+        assert_eq!(runs[0]["http://ex/s23"].0, format!("__sk0_{n}_e"));
+        // The second round's firings follow, keyed by the first round's labels.
+        let mut f: Vec<String> = runs[0].values().map(|(_, f)| f.clone()).collect();
+        f.sort();
+        let mut want: Vec<String> = (n + 1..=2 * n).map(|k| format!("__sk0_{k}_f")).collect();
+        want.sort();
+        assert_eq!(f, want);
+    }
+
+    #[test]
+    fn skolem_statement_keys_and_proofs_are_reproducible() {
+        // GH #6749: the identity keys (and so sparq-prov entity IRIs) and the proof steps
+        // carry the skolem labels, so they inherit the labels' order (in)dependence.
+        let render = |src: &str| {
+            let mut dict = Dict::new();
+            let run = reason_n3_proof_run(&mut dict, src).unwrap();
+            let mut keys: Vec<String> = run
+                .closure_keys
+                .iter()
+                .map(|k| k.join(" "))
+                .filter(|k| !k.contains("/unrelated"))
+                .collect();
+            keys.sort();
+            let mut steps: Vec<String> = run
+                .steps
+                .iter()
+                .map(|st| format!("{} {:?} <= {:?}", st.rule, st.conclusion_key, st.premise_keys))
+                .collect();
+            steps.sort();
+            (keys, steps)
+        };
+        let docs = skolem_order_variants(12);
+        let base = render(&docs[0]);
+        for d in &docs[1..] {
+            let r = render(d);
+            assert_eq!(r.0, base.0, "statement keys are order-independent");
+            assert_eq!(r.1, base.1, "proof steps are order-independent");
+        }
+    }
+
+    #[test]
+    fn query_existential_labels_do_not_depend_on_traversal_order() {
+        // GH #6749, the `--query` projection's own existentials (`__qsk…`).
+        let q = "@prefix : <http://ex/> .\n{ ?x :p :v } => { ?x :ans _:a } .\n";
+        let label_of = |data: &str| -> std::collections::BTreeMap<String, String> {
+            reason_n3_query_terms(data, q)
+                .unwrap()
+                .into_iter()
+                .filter_map(|[s, _, o]| match (s, o) {
+                    (Term::Iri(s), Term::Blank(l)) => Some((s, l)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let docs = skolem_order_variants(16);
+        let base = label_of(&docs[0]);
+        assert_eq!(base.len(), 16);
+        for d in &docs[1..] {
+            assert_eq!(label_of(d), base, "same data, different order: same query labels");
+        }
     }
 
     // ---- [OPUS-4.8] sq-qcnn.16: coverage gap tests for uncovered builtin paths ----
