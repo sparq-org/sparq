@@ -369,10 +369,9 @@ const PARSE_DEPTH: usize = 64;
 /// cut ([`generated`]); everything evaluation keeps is at most this deep, and what it
 /// builds before the check is at most this plus the nesting of the rule text. A run
 /// handed deeper terms directly (as terms, not text: [`given_terms`]) keeps terms as
-/// deep as those, and no deeper. Twice
-/// [`PARSE_DEPTH`], so a parsed document (`log:semantics`, `log:parsedAsN3`) quoted as a
-/// formula value, and rules over it, stay inside. Pinned on a 2 MiB thread by the
-/// `n3::tests` small-stack tests (#6732).
+/// deep as those, and no deeper. Twice [`PARSE_DEPTH`], so a parsed document
+/// (`log:semantics`, `log:parsedAsN3`) quoted as a formula value, and rules over it,
+/// stay inside. Pinned on a 2 MiB thread by the `n3::tests` small-stack tests (#6732).
 const TERM_DEPTH: usize = 2 * PARSE_DEPTH;
 
 /// Why a generated term was dropped.
@@ -456,9 +455,9 @@ pub(crate) fn generated<'a>(
 /// (`<=`) proof step (the heaviest recursion per level). A backward proof step and a
 /// scoped operator's inner clause matched against the store ([`nested_step`]) each hold
 /// one unit while they run, and a nested forward closure ([`CLOSURE_FRAMES`]) holds its
-/// units while it runs; every nested closure of the run draws on the same allowance, so a chain
-/// of distinct documents (`log:semantics` then `log:conclusion`, each closing the next)
-/// cannot reset it, and neither can a fresh backward search inside a nested closure. It
+/// units while it runs. Every nested closure of the run draws on the same allowance, so
+/// a chain of distinct documents (`log:semantics` then `log:conclusion`, each closing the
+/// next) cannot reset it, and neither can a fresh backward search inside one. It
 /// is sized for the smallest stack the engine supports (a 2 MiB thread in a debug build),
 /// leaving room for a parse up to [`PARSE_DEPTH`] deep and the term walkers at the
 /// innermost level. It admits a top-level backward search of [`BW_DEPTH`] steps with room
