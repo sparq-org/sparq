@@ -370,9 +370,10 @@ const C_VERSION_VAL: u64 = 0;
 
 /// Canonicalize a parent frontier: it is a *set*, so it encodes sorted
 /// ascending (byte order of the 32-byte ids, which is also the order of their
-/// fixed-length CBOR byte strings) with duplicates removed, so one logical
-/// commit has exactly one plaintext encoding. (`CommitId` hashes the randomized
-/// encrypted envelope, so it is not unique per logical commit.)
+/// fixed-length CBOR byte strings) with duplicates removed, so permuting or
+/// duplicating parents does not change `encode`/`signing_bytes` output. (This
+/// is not a unique encoding of a commit, and `CommitId` hashes the randomized
+/// encrypted envelope, so it is not unique per logical commit either.)
 fn canon_parents(parents: &[CommitId]) -> Vec<CommitId> {
     let mut v = parents.to_vec();
     v.sort();
