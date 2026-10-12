@@ -217,8 +217,13 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // engine compares them); blank labels and __bw copies are not normalized. So a key is only as
 // reproducible as the engine's terms. Skolem labels (__sk<n>_e) are numbered in the sorted order
 // of each round's firing keys (every variable the conclusion substitutes), so for the SAME parsed
-// input they, their keys and why() strings do not depend on hash-set traversal or hasher width
-// (native vs wasm32; GH #6749). Only that: they are NOT canonical across reordered isomorphic
+// input the labels and the structural keys of facts carrying them do not depend on hash-set
+// traversal or hasher width (native vs wasm32; GH #6749). why() proof trees are NOT covered: a
+// non-existential fact keeps whichever supporting binding arrives first, and an existential's
+// proof includes its premises' proofs. E.g. with :a :p :v. :b :p :v. and rules ?x :p :v => ?x :q :v,
+// ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key are stable, but its
+// why() tree may cite :a or :b as the :q witness depending on traversal order (GH #6844).
+// Labels are also NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
 // and a label depends on the other firings in its round), and they hold only while the binding
 // values and firing sets are themselves stable. Values that still carry traversal order -

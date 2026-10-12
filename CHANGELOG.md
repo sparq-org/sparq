@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
+  the same parsed input their labels (`__sk<n>_<label>`), and the statement keys and
+  `sparq-prov` entity IRIs of facts carrying them, no longer depend on hash-set traversal order
+  or hasher width (native vs `wasm32`). Existing labels are renumbered, so these keys and IRIs
+  differ from those minted by earlier versions; regenerate stored ones. `why()` proof trees
+  can still vary with traversal order. (#6749)
+
+### Fixed
+
+- **sparq-reason (N3):** a rule whose existential conclusion contains a quoted formula with
+  variables (e.g. `{ ?x :p :v } => { _:e :q { ?x :r :v } }`) now fires once per distinct
+  binding of those variables. Before, it could fire only once and drop the other bindings'
+  conclusions, so such closures can now be larger and may reach closure limits sooner. (#6749)
+
 ## [0.1.5] - 2026-10-10
 
 Fix-forward release after the v0.1.4 release workflow failed before creating a GitHub
