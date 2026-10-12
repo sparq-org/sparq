@@ -7,9 +7,10 @@
 #     crates/sparq-lws-core/conformance/lws/lws-net.sh
 #
 # LWS_TESTS=builtin runs the definitions LWS.net itself carries (Suite/Model/Resources/new.ttl)
-# instead. LWS_NET_MIN_PASSED makes the run a ratchet: it fails only when fewer tests pass
-# (that suite holds a test that fails on purpose). Each failed test is printed by name, as a CI
-# annotation in GitHub Actions.
+# instead. LWS_NET_MIN_PASSED makes the run a ratchet: it fails when fewer tests pass (that suite
+# holds a test that fails on purpose), when fewer than LWS_NET_EXPECTED_TOTAL ran, when the report
+# does not parse, or when the harness aborted. Each failed test is printed by name, as a CI
+# annotation in GitHub Actions (lws-net-report.py; `--self-test` checks it).
 #
 # Needs the .NET 10 SDK and Node.js (to convert the YAML-LD definition to N-Triples).
 set -euo pipefail
@@ -27,7 +28,7 @@ mkdir -p "$OUT"
 conv="$OUT/convert"
 mkdir -p "$conv"
 if [ ! -d "$conv/node_modules/jsonld" ]; then
-  (cd "$conv" && npm init -y >/dev/null && npm install --silent jsonld@8 yaml@2 >/dev/null)
+  (cd "$conv" && npm init -y >/dev/null && npm install --silent jsonld@8.3.3 yaml@2.9.1 >/dev/null)
 fi
 cat > "$conv/convert.mjs" <<'JS'
 import { readFile, writeFile } from "node:fs/promises";
@@ -53,26 +54,17 @@ for _ in $(seq 1 100); do
   sleep 0.2
 done
 cd "$LWS_NET"
+# A report left by an earlier run must not stand in for this one.
+rm -f "$OUT/lws-net.trx"
 status=0
 # LWS.net's global.json selects Microsoft.Testing.Platform, which takes --report-trx rather than
 # VSTest's --logger (it exits 5, invalid arguments, on --logger).
 Suite__BaseUri="http://localhost:$PORT/" dotnet test Suite/Test \
   --report-trx --report-trx-filename lws-net.trx --results-directory "$OUT" || status=$?
-# One line with the counts, as a CI annotation when running in GitHub Actions.
-counts=$(grep -o '<Counters [^>]*>' "$OUT/lws-net.trx" 2>/dev/null | head -1 || true)
-echo "${GITHUB_ACTIONS:+::notice title=lws-net::}lws-net ${counts:-no results}"
-python3 - "$OUT/lws-net.trx" "${GITHUB_ACTIONS:+gha}" <<'PY' || true
-import sys, xml.etree.ElementTree as ET
-ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
-for r in ET.parse(sys.argv[1]).iter(ns + "UnitTestResult"):
-    if r.get("outcome") != "Passed":
-        msg = r.findtext(f"{ns}Output/{ns}ErrorInfo/{ns}Message") or ""
-        line = f"{r.get('testName')} ({r.get('outcome')}): {' '.join(msg.split())[:300]}"
-        print(f"::error title=lws-net failed::{line}" if sys.argv[2:] == ["gha"] else line)
-PY
-if [ -n "${LWS_NET_MIN_PASSED:-}" ]; then
-  passed=$(echo "$counts" | grep -o 'passed="[0-9]*"' | grep -o '[0-9]*' || echo 0)
-  echo "lws-net: ${passed:-0} passed (floor $LWS_NET_MIN_PASSED)"
-  [ "${passed:-0}" -ge "$LWS_NET_MIN_PASSED" ] && exit 0 || exit 1
-fi
-exit $status
+# The counts and each failed test, as CI annotations in GitHub Actions; with a floor, the run
+# counts only when the report parses, LWS_NET_EXPECTED_TOTAL tests ran and the harness ended with
+# a test outcome.
+python3 -B "$here/lws-net-report.py" "$OUT/lws-net.trx" --status "$status" \
+  ${GITHUB_ACTIONS:+--gha} \
+  ${LWS_NET_MIN_PASSED:+--min-passed "$LWS_NET_MIN_PASSED"} \
+  ${LWS_NET_EXPECTED_TOTAL:+--expected-total "$LWS_NET_EXPECTED_TOTAL"} || exit $?
