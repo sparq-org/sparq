@@ -5,10 +5,18 @@
 //! (the same calendar [`crate::temporal::parse_civil_date`] uses), so a formatted lexical
 //! parses back to the same instant.
 
-/// Days since 1970-01-01 of a proleptic-Gregorian civil date (`month` 1–12, `day` 1–31).
-/// The inverse of [`civil_from_days`]. Returned as `i128`, so every `i64` year is exact
-/// (the day count of a year near `i64::MAX` does not fit an `i64`).
+/// Days since 1970-01-01 of a proleptic-Gregorian civil date. The inverse of
+/// [`civil_from_days`]. Returned as `i128`, so every `i64` year is exact (the day count of a
+/// year near `i64::MAX` does not fit an `i64`).
+///
+/// Precondition: the date is valid (`month` 1–12, `day` 1 to that month's length). This is
+/// not checked in release builds, and an invalid date rolls over (2024-04-31 gives the day
+/// number of 2024-05-01), so validate parsed input first. Debug builds assert it.
 pub fn days_from_civil(year: i64, month: u32, day: u32) -> i128 {
+    debug_assert!(
+        (1..=12).contains(&month) && day >= 1 && day <= days_in_month(year, month),
+        "invalid civil date {year}-{month}-{day}"
+    );
     let y = i128::from(year) - i128::from(month <= 2);
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = y - era * 400; // [0, 399]
@@ -18,13 +26,26 @@ pub fn days_from_civil(year: i64, month: u32, day: u32) -> i128 {
     era * 146_097 + doe - 719_468
 }
 
-/// Epoch seconds (UTC) → an `xsd:dateTime` lexical `YYYY-MM-DDTHH:MM:SSZ`.
+/// The number of days in `month` (1–12) of proleptic-Gregorian `year`.
+fn days_in_month(year: i64, month: u32) -> u32 {
+    match month {
+        2 if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+/// Epoch seconds (UTC) → an `xsd:dateTime` lexical `YYYY-MM-DDTHH:MM:SSZ`. A year before
+/// 0000 is written `-YYYY` with at least four digits after the sign, as XSD requires.
 pub fn format_utc(epoch_secs: i64) -> String {
     let days = epoch_secs.div_euclid(86_400);
     let tod = epoch_secs.rem_euclid(86_400); // 0..86400, always non-negative
     let (h, mi, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
     let (y, m, d) = civil_from_days(days);
-    format!("{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
+    let sign = if y < 0 { "-" } else { "" };
+    let y = y.unsigned_abs();
+    format!("{sign}{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
 /// Days-from-epoch (1970-01-01 = 0) → `(year, month, day)`. The inverse of
@@ -145,5 +166,31 @@ mod tests {
             let days = days_from_civil(year, 6, 15);
             assert_eq!(days.signum(), year.signum() as i128);
         }
+    }
+
+    /// Years before 0000 keep four digits after the sign (`-0001`, not `-001`) and
+    /// parse back to the same instant.
+    #[test]
+    fn negative_years_are_xsd_padded_and_round_trip() {
+        let cases = [
+            (days_from_civil(-1, 1, 1), "-0001-01-01T00:00:00Z"),
+            (days_from_civil(-999, 12, 31), "-0999-12-31T00:00:00Z"),
+            (days_from_civil(-12_345, 6, 7), "-12345-06-07T00:00:00Z"),
+            (days_from_civil(0, 1, 1), "0000-01-01T00:00:00Z"),
+        ];
+        for (days, want) in cases {
+            let secs = i64::try_from(days * 86_400).unwrap();
+            let lex = format_utc(secs);
+            assert_eq!(lex, want);
+            let tl = Timeline::parse_datetime(&lex).expect("formatted lexical must parse");
+            assert_eq!(tl.instant() as i64, secs, "round-trip mismatch for {lex}");
+        }
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "invalid civil date")]
+    fn invalid_date_is_rejected_in_debug() {
+        let _ = days_from_civil(2024, 4, 31);
     }
 }
