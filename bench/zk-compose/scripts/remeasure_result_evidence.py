@@ -18,10 +18,11 @@ embeds the checkout path and is not compared), every v1 ACIR, ABI and key equals
 713025dc baseline record, every size equals gate_counts_latest.json, and exactly the expected
 members and sources change. It validates all four files before replacing any of them and
 restores any it replaced if a later replacement fails; an interruption of the process itself
-(a kill or power loss between renames) can still leave a mixed set, which `git checkout` of
-the four files undoes. The result is always labelled non-canonical; the job manifest and
-run outputs are not part of the repository, so the two-run agreement it records is checked
-when `apply` runs, not later.
+(a kill or power loss between renames) can still leave a mixed set, which
+`git checkout -- <the four files>` undoes. It refuses to run while the four files have
+unstaged edits, so that recovery never discards anything else. The result is always
+labelled non-canonical; the job manifest and run outputs are not part of the repository,
+so the two-run agreement it records is checked when `apply` runs, not later.
 """
 
 from __future__ import annotations
@@ -164,6 +165,9 @@ def apply(args: argparse.Namespace) -> None:
         recorded = data.get("tool_versions") or {"nargo": data["nargo_version"], "bb": data["bb_version"]}
         if recorded["nargo"] != tools["nargo"] or recorded["bb"] != tools["bb"]:
             raise SystemExit(f"{name}: toolchain differs from the recorded one")
+    paths = [f"bench/zk-compose/{name}.json" for name in evidence]
+    if subprocess.run(["git", "diff", "--quiet", "--", *paths], cwd=ROOT).returncode:
+        raise SystemExit("the evidence files have unstaged edits; check them out or stage them first")
     # Every check has passed. Stage all four files, then replace them one by one. Separate
     # renames are not one atomic update, so if a replacement fails the files already replaced
     # are restored from their original bytes, and staged temporaries are always removed.
