@@ -42,30 +42,41 @@ def read(path):
     return executed, passed, failures
 
 
-def check(path, status, min_passed=None, expected_total=None, gha=False):
-    """The process exit code for this run, printing what it found."""
+def exit_code(status):
+    """`status` as a process exit code: an out-of-range one is a failure, not its low byte."""
+    return status if 0 <= status <= 255 else 1
+
+
+def problems(path, status, min_passed=None, expected_total=None):
+    """(summary, failed tests, why the run does not count): the last is empty when it does."""
     try:
         executed, passed, failures = read(path)
     except ValueError as e:
-        print(f"{'::error title=lws-net::' if gha else ''}lws-net: {e} (exit {status})")
-        return status or 1
-    print(
-        f"{'::notice title=lws-net::' if gha else ''}lws-net {passed} of {executed} passed (exit {status})"
-    )
+        return f"{e} (exit {status})", [], ["unreadable report"]
+    summary = f"{passed} of {executed} passed (exit {status})"
+    why = []
+    if min_passed is not None:
+        if status not in TEST_OUTCOME_STATUSES:
+            why.append(f"the harness exited {status}, not with a test outcome")
+        if expected_total is not None and executed != expected_total:
+            why.append(f"{executed} tests ran, {expected_total} expected")
+        if passed < min_passed:
+            why.append(f"{passed} passed, below the floor of {min_passed}")
+    return summary, failures, why
+
+
+def check(path, status, min_passed=None, expected_total=None, gha=False):
+    """The process exit code for this run, printing what it found."""
+    summary, failures, why = problems(path, status, min_passed, expected_total)
+    print(f"{'::notice title=lws-net::' if gha else ''}lws-net {summary}")
     for line in failures:
         print(f"::error title=lws-net failed::{line}" if gha else line)
-    if min_passed is None:
-        return status
-    problems = []
-    if status not in TEST_OUTCOME_STATUSES:
-        problems.append(f"the harness exited {status}, not with a test outcome")
-    if expected_total is not None and executed != expected_total:
-        problems.append(f"{executed} tests ran, {expected_total} expected")
-    if passed < min_passed:
-        problems.append(f"{passed} passed, below the floor of {min_passed}")
-    for p in problems:
-        print(f"{'::error title=lws-net::' if gha else ''}lws-net: {p}")
-    return 1 if problems else 0
+    for w in why:
+        print(f"{'::error title=lws-net::' if gha else ''}lws-net: {w}")
+    if why:
+        return 1
+    # Without a floor the harness's own status stands, unless the report is unreadable.
+    return 0 if min_passed is not None else exit_code(status)
 
 
 def trx(outcomes):
@@ -90,21 +101,55 @@ def self_test():
             os.unlink(f.name)
 
     floor = dict(min_passed=2, expected_total=3)
-    assert run(trx(["Passed", "Passed", "Failed"]), 2, **floor) == 0, (
-        "a failing test above the floor"
+
+    def why(text, status, **kw):
+        with tempfile.NamedTemporaryFile("w", suffix=".trx", delete=False) as f:
+            f.write(text)
+        try:
+            return problems(f.name, status, **kw)[2]
+        finally:
+            os.unlink(f.name)
+
+    complete = trx(["Passed", "Passed", "Failed"])
+    assert why(complete, 2, **floor) == [], "a failing test above the floor"
+    assert why(complete, 0, **floor) == [], "status 0"
+    assert why(complete, 1, **floor) == ["the harness exited 1, not with a test outcome"], (
+        "a generic failure"
     )
-    assert run(trx(["Passed", "Passed", "Failed"]), 1, **floor) == 1, "a generic failure"
-    assert run(trx(["Passed", "Passed"]), 3, **floor) == 1, "an aborted run"
-    assert run(trx(["Passed", "Passed"]), 2, **floor) == 1, "a run missing a test"
-    assert run(trx(["Passed", "Passed", "Passed"]), 7, **floor) == 1, "an infrastructure status"
-    assert run(trx(["Passed", "Failed", "Failed"]), 2, **floor) == 1, "below the floor"
+    assert why(trx(["Passed", "Passed"]), 3, **floor) == [
+        "the harness exited 3, not with a test outcome",
+        "2 tests ran, 3 expected",
+    ], "an aborted run"
+    assert why(trx(["Passed", "Passed"]), 2, **floor) == ["2 tests ran, 3 expected"], "a short run"
+    assert why(trx(["Passed"] * 3), 7, **floor) == [
+        "the harness exited 7, not with a test outcome"
+    ], "an infrastructure status"
+    assert why(trx(["Passed", "Failed", "Failed"]), 2, **floor) == [
+        "1 passed, below the floor of 2"
+    ], "below the floor"
     malformed = trx(["Passed"] * 3)[: -len("</TestRun>")]
-    assert run(malformed, 0, **floor) == 1, "a report that does not parse"
-    assert run("", 0, **floor) == 1, "an empty report"
-    assert check("/nonexistent/lws-net.trx", 0, **floor) == 1, "no report"
     no_counters = f'<TestRun xmlns="{NS[1:-1]}"><Results/></TestRun>'
-    assert run(no_counters, 0, **floor) == 1, "a report without counters"
+    for text, case in [(malformed, "malformed"), ("", "empty"), (no_counters, "no counters")]:
+        assert why(text, 0, **floor) == ["unreadable report"], case
+        assert run(text, 0, **floor) == 1, case
+    assert problems("/nonexistent/lws-net.trx", 0, **floor)[2] == ["unreadable report"], "missing"
+    assert run(complete, 2, **floor) == 0 and run(complete, 1, **floor) == 1, "exit codes"
     assert run(trx(["Passed", "Failed"]), 2) == 2, "no floor: the harness's own status"
+    # An unreadable report fails whatever the status, even one whose low byte is 0.
+    for status in (0, 2, 256, 512, -256):
+        assert run("", status) == 1 and run("", status, **floor) == 1, status
+    assert run(complete, 256) == 1 and run(complete, -256) == 1, "out-of-range status"
+    # The command line, as lws-net.sh runs it.
+    import subprocess
+
+    for args in (["--status", "256"], ["--status", "512", "--min-passed", "1"]):
+        r = subprocess.run(
+            [sys.executable, "-B", __file__, "/nonexistent/lws-net.trx", *args],
+            capture_output=True,
+            text=True,
+        )
+        assert r.returncode == 1, (args, r.returncode, r.stdout)
+        assert "no readable report" in r.stdout, r.stdout
     print("lws-net-report self-test passed")
 
 
