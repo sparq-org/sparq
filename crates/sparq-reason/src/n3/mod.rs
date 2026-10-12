@@ -3695,7 +3695,7 @@ fn output_bytes_bound(f: Func, args: &[Term]) -> usize {
         Func::Format => bounded::string_term_bytes(sum(
             &mut args.iter().map(|a| text(a).saturating_add(NUMERAL_TEXT_BYTES)),
         )),
-        Func::Replace => match &args[..] {
+        Func::Replace => match args {
             // Every match (at most one per position, plus one) is replaced by the
             // replacement's text, and every `$` reference in it expands to text inside a
             // match; matches do not overlap, so each reference adds at most the input.
