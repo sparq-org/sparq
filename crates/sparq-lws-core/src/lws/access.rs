@@ -563,7 +563,21 @@ impl AccessStore {
                 me.map(grants).write().expect("lock").insert(id, record);
             }
         }
+        // Grants have no quota on their number: only the owner makes them.
+        if let Some(past) = me.requests_past_quota() {
+            super::report_past_quota("access requests", &cfg.absolute(REQUESTS_PATH), &past);
+        }
         Ok(me)
+    }
+
+    /// What of the access requests in force is past their quota, counted as a new request is
+    /// admitted; `None` when nothing is.
+    pub(crate) fn requests_past_quota(&self) -> Option<String> {
+        let requests = self.requests.read().expect("lock");
+        self.request_quota.past(
+            requests.len(),
+            requests.values().map(|r| r.author.as_deref()),
+        )
     }
 
     /// Take what `loaded` holds in place of what this holds.
@@ -2385,6 +2399,79 @@ mod tests {
             .filter(|r| r.status() == StatusCode::CREATED)
             .count();
         assert_eq!(created, MAX_REQUESTS_PER_AUTHOR);
+    }
+
+    /// Review finding (#6810): stored access requests can exceed their quota (stored before it
+    /// was lowered, or written to the store directly). The start loads them all, removes none,
+    /// reports what is past the quota, and admits no new request from an author past its share.
+    #[tokio::test]
+    async fn requests_stored_past_their_quota_are_kept_reported_and_admit_no_more() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let container = state.cfg.absolute(REQUESTS_PATH);
+        let asker = "https://asker.example/#me";
+        let document = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessRequest"],
+            "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        });
+        for i in 0..=MAX_REQUESTS_PER_AUTHOR {
+            let stored = json!({"document": document, "author": asker});
+            store
+                .create_in_container(
+                    &container,
+                    &format!("{container}r{i:04}"),
+                    Bytes::from(stored.to_string()),
+                    LWS_JSON,
+                )
+                .await
+                .unwrap();
+        }
+        let state = LwsState::new(store.clone(), state.cfg.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            state.access.requests.read().unwrap().len(),
+            MAX_REQUESTS_PER_AUTHOR + 1,
+            "all loaded"
+        );
+        let past = state.access.requests_past_quota().unwrap();
+        assert!(
+            past.contains(&format!(
+                "1 author(s) holding more than {MAX_REQUESTS_PER_AUTHOR} each (at most {})",
+                MAX_REQUESTS_PER_AUTHOR + 1
+            )),
+            "{past}"
+        );
+        let post = super::super::test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &document.to_string(),
+        );
+        let agent = |who: &str| Agent {
+            subject: Some(who.into()),
+            ..Agent::anonymous()
+        };
+        let r = handle(&state, &post, &agent(asker)).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        let r = handle(&state, &post, &agent("https://other.example/#me")).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // Withdrawing two brings the asker under its share.
+        for i in 0..2 {
+            let delete = super::super::test_store::request(
+                Method::DELETE,
+                &format!("{REQUESTS_PATH}r{i:04}"),
+                &[],
+                "",
+            );
+            let r = handle(&state, &delete, &agent(asker)).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        }
+        assert!(state.access.requests_past_quota().is_none());
+        let r = handle(&state, &post, &agent(asker)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert!(store.exists(&format!("{container}r0002")).await.unwrap());
     }
 
     #[test]

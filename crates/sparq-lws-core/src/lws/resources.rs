@@ -8332,7 +8332,8 @@ mod tests {
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
-        // No room in the delivery queue: every notification made is counted as dropped.
+        // No room in the delivery queue: every subscription that hears of a change is counted as
+        // not prepared.
         cfg.delivery = super::super::notify::DeliveryLimits {
             queue: 0,
             workers: 1,
@@ -8357,13 +8358,13 @@ mod tests {
         assert!(cancelled.is_err());
         gate.add_permits(1);
         for _ in 0..200 {
-            if st.notify.dropped() > 0 {
+            if st.notify.unprepared() > 0 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(st.store.exists(&format!("{root}x")).await.unwrap());
-        assert_eq!(st.notify.dropped(), 1, "the Create was never announced");
+        assert_eq!(st.notify.unprepared(), 1, "the Create was never announced");
         assert_ne!(st.resource_meta(&root).await.unwrap().version, version);
     }
 

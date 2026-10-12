@@ -258,8 +258,12 @@ pub struct Notifier {
     limits: DeliveryLimits,
     /// Deliveries admitted and not yet finished.
     admitted: Arc<AtomicUsize>,
-    /// Deliveries dropped because the queue was full.
+    /// Notifications dropped for want of queue room, each one known to be owed: authorized for
+    /// its subscriber, or belonging to no subscription.
     dropped: AtomicU64,
+    /// Subscriptions that heard of a change once its deliveries were already at their bound:
+    /// neither authorized nor notified, so whether each was owed a notification is not known.
+    unprepared: AtomicU64,
     /// The worker pool: one permit per delivery in flight.
     workers: Arc<tokio::sync::Semaphore>,
     /// Per inbox origin, its own limit (dropped once no delivery holds it).
@@ -332,6 +336,7 @@ impl Notifier {
             limits: cfg.delivery,
             admitted: Arc::new(AtomicUsize::new(0)),
             dropped: AtomicU64::new(0),
+            unprepared: AtomicU64::new(0),
             workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
             inboxes: Mutex::new(HashMap::new()),
             quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER),
@@ -421,7 +426,40 @@ impl Notifier {
         self.held_back.store(held_back, Ordering::SeqCst);
         *self.quarantined.write().expect("lock") = quarantined;
         *self.etag.write().expect("lock") = new_etag();
+        if let Some(past) = self.past_quota(cfg.owner.as_deref()) {
+            super::report_past_quota("subscriptions", &container, &past);
+        }
         Ok(())
+    }
+
+    /// What of the subscriptions in force is past their quotas, counted as a new subscription
+    /// is admitted: each share holds its own subscriptions and those held back or quarantined at
+    /// the start (which may be anyone's), and a subscriber's share its unexpired ones. `None`
+    /// when nothing is.
+    pub(crate) fn past_quota(&self, owner: Option<&str>) -> Option<String> {
+        let now = jose::now_secs();
+        let subs = self.subs.read().expect("lock");
+        let unloaded =
+            self.held_back.load(Ordering::SeqCst) + self.quarantined.read().expect("lock").len();
+        let is_owner = |s: &&Subscription| owner.is_some() && s.subscriber.as_deref() == owner;
+        let share = |owners: bool| {
+            let mine = || subs.values().filter(move |s| is_owner(s) == owners);
+            let held = mine().count() + unloaded;
+            let authors = mine()
+                .filter(|s| !s.expired(now))
+                .map(|s| s.subscriber.as_deref());
+            let quota = if owners {
+                &self.owner_quota
+            } else {
+                &self.quota
+            };
+            quota.past(held, authors)
+        };
+        let past: Vec<String> = [(false, "others'"), (true, "the owner's")]
+            .into_iter()
+            .filter_map(|(owners, whose)| share(owners).map(|p| format!("{whose} share: {p}")))
+            .collect();
+        (!past.is_empty()).then(|| past.join("; "))
     }
 
     fn get(&self, id: &str) -> Option<Subscription> {
@@ -583,8 +621,14 @@ impl Notifier {
         };
         // Every matching subscription is a candidate: the bound is on the deliveries prepared,
         // which only an authorized one makes, so one that may not read the resource never takes
-        // the place of one that may. What is copied out is bounded by the subscriptions in force,
-        // which the quotas bound.
+        // the place of one that may. For the same reason the authorization done here has no
+        // budget of its own: a budget spent on the candidates in turn could be used up by one
+        // party's subscriptions that may not read the resource before an authorized one is
+        // reached. The work is bounded instead by the subscriptions in force, which the quotas
+        // bound: at most MAX_SUBSCRIPTIONS held by subscribers other than the owner and as many
+        // by the owner, so one authorization each for at most 2 * MAX_SUBSCRIPTIONS candidates,
+        // and none past the `limit`-th delivery prepared. Stored subscriptions loaded past a quota
+        // are reported at the start, and admit no new one to that share until it is under it.
         let candidates: Vec<Subscription> = {
             let subs = self.subs.read().expect("lock");
             subs.values()
@@ -605,10 +649,11 @@ impl Notifier {
         };
         let total = candidates.len();
         for (i, sub) in candidates.into_iter().enumerate() {
-            // Once the bound is reached the rest are dropped as a full queue drops them, and
-            // counted so, without being authorized.
+            // Once the bound is reached the rest are not authorized (that work is what the bound
+            // saves), so whether each was owed a notification is not known: they are counted
+            // apart from the dropped ones, each of which was.
             if out.len() == limit {
-                self.note_dropped(total - i, &event.uri);
+                self.note_unprepared(total - i, limit, &event.uri);
                 break;
             }
             // Delivery-time authorization (section 10.3.3): a subscriber that may not read the
@@ -734,6 +779,20 @@ impl Notifier {
         }
     }
 
+    /// Count `n` subscriptions that heard of a change to `uri` past the bound of `limit`
+    /// deliveries, and so were neither authorized nor notified. Logged as drops are.
+    fn note_unprepared(&self, n: usize, limit: usize, uri: &str) {
+        let before = self.unprepared.fetch_add(n as u64, Ordering::SeqCst);
+        let after = before + n as u64;
+        if before == 0 || before.ilog2() != after.ilog2() {
+            eprintln!(
+                "lws: {limit} webhook notification(s) prepared for {uri}, the most one change \
+                 may have; {n} more subscription(s) to it were neither checked nor notified \
+                 ({after} so far)"
+            );
+        }
+    }
+
     /// Run one admitted delivery in the background.
     fn run<S: Store + 'static>(
         &self,
@@ -826,9 +885,17 @@ impl Notifier {
         s
     }
 
-    /// Deliveries dropped because the queue was full.
+    /// Notifications dropped because the queue was full (or a change's deliveries were at their
+    /// bound), each one known to be owed: authorized for its subscriber when it was prepared, or
+    /// belonging to no subscription.
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::SeqCst)
+    }
+
+    /// Subscriptions that heard of a change once its deliveries were at their bound: neither
+    /// authorized nor notified, so some may not have been owed a notification at all.
+    pub fn unprepared(&self) -> u64 {
+        self.unprepared.load(Ordering::SeqCst)
     }
 }
 
@@ -2744,6 +2811,170 @@ mod tests {
         let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
         assert_eq!(prepared.len(), 1);
         assert_eq!(prepared[0].watch.subscription, "b");
+    }
+
+    /// Review finding (#6810): once a change's deliveries reached their bound, the subscriptions
+    /// left were counted as dropped deliveries without being authorized, so the count took in
+    /// ones that were owed nothing. Only deliveries known to be owed are counted dropped; the
+    /// subscriptions past the bound are counted apart, as neither checked nor notified.
+    #[tokio::test]
+    async fn only_owed_deliveries_are_counted_dropped() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let root = state.cfg.storage();
+        let linkset = format!("{root}{META_SUFFIX}");
+        for (id, who, topics) in [
+            ("a", "https://bob.example/#me", vec![root.clone()]),
+            ("b", "https://owner.example/#me", vec![root.clone()]),
+            ("c", "https://bob.example/#me", vec![root.clone()]),
+            ("d", "https://owner.example/#me", vec![root.clone()]),
+            (
+                "e",
+                "https://owner.example/#me",
+                vec![root.clone(), linkset],
+            ),
+        ] {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: Some(who.into()),
+                client: None,
+                topics,
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        let event = Event {
+            kind: "Update",
+            is_container: true,
+            uri: root.clone(),
+            relation: None,
+        };
+        // Bob may not read the root, the owner may: `a` is passed over, `b` fills the bound, and
+        // `c`, `d` and `e` are neither checked nor notified, whoever they belong to.
+        let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
+        assert_eq!(prepared.len(), 1);
+        assert_eq!(prepared[0].watch.subscription, "b");
+        assert_eq!(state.notify.dropped(), 0);
+        assert_eq!(state.notify.unprepared(), 3);
+        // With room for all three of the owner's, `e` brings two (the root and its linkset),
+        // the second past the bound: authorized, so owed, and counted dropped.
+        let prepared = state.notify.prepare_at_most(&state, &event, 3).await;
+        assert_eq!(prepared.len(), 3);
+        assert_eq!(state.notify.dropped(), 1);
+        assert_eq!(state.notify.unprepared(), 3);
+        // A shared bound already spent (a recursive delete's) checks nothing at all.
+        assert!(state
+            .notify
+            .prepare_at_most(&state, &event, 0)
+            .await
+            .is_empty());
+        assert_eq!(state.notify.unprepared(), 8);
+        assert_eq!(state.notify.dropped(), 1);
+    }
+
+    /// Review finding (#6810): stored subscriptions can exceed their quotas (stored before a
+    /// quota was lowered, or written to the store directly). The start loads them all, removes
+    /// none, reports what is past which quota, and admits no new subscription to a share until
+    /// it is under its quota again.
+    #[tokio::test]
+    async fn subscriptions_stored_past_their_quota_are_kept_reported_and_admit_no_more() {
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let reader = "https://reader.example/#me";
+        // The reader holds one more than its share, and with one subscription each of others,
+        // the share of everyone but the owner holds one more than its quota.
+        let others = MAX_SUBSCRIPTIONS + 1 - (MAX_SUBSCRIPTIONS_PER_SUBSCRIBER + 1);
+        let subscribers = (0..=MAX_SUBSCRIPTIONS_PER_SUBSCRIBER)
+            .map(|_| reader.to_string())
+            .chain((0..others).map(|i| format!("https://p{i}.example/#me")));
+        for (i, who) in subscribers.enumerate() {
+            let sub = Subscription {
+                id: String::new(),
+                subscriber: Some(who),
+                client: None,
+                topics: vec![state.cfg.storage()],
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
+            store
+                .create_in_container(&container, &format!("{container}s{i:04}"), body, LWS_JSON)
+                .await
+                .unwrap();
+        }
+        let state = LwsState::new(store.clone(), state.cfg.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            state.notify.subs.read().unwrap().len(),
+            MAX_SUBSCRIPTIONS + 1,
+            "all loaded"
+        );
+        let past = state.notify.past_quota(state.cfg.owner.as_deref()).unwrap();
+        assert!(
+            past.contains(&format!("{} held", MAX_SUBSCRIPTIONS + 1)),
+            "{past}"
+        );
+        assert!(past.contains("1 author(s)"), "{past}");
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let agent = |who: &str| Agent {
+            subject: Some(who.into()),
+            ..Agent::anonymous()
+        };
+        let newcomer = agent("https://new.example/#me");
+        let r = handle(&state, &post, &agent(reader)).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        let r = handle(&state, &post, &newcomer).await;
+        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        // The reader cancels two of its own: its share is under its quota, and so is everyone's.
+        for i in 0..2 {
+            let delete = test_store::request(
+                Method::DELETE,
+                &format!("{SUBSCRIPTIONS_PATH}s{i:04}"),
+                &[],
+                "",
+            );
+            let r = handle(&state, &delete, &agent(reader)).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            if i == 0 {
+                // At its quota, not under it: still refused.
+                let r = handle(&state, &post, &agent(reader)).await;
+                assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+                let r = handle(&state, &post, &newcomer).await;
+                assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+            }
+        }
+        assert!(state
+            .notify
+            .past_quota(state.cfg.owner.as_deref())
+            .is_none());
+        let r = handle(&state, &post, &newcomer).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = handle(&state, &post, &agent(reader)).await;
+        assert_eq!(
+            r.status(),
+            StatusCode::INSUFFICIENT_STORAGE,
+            "the share is full again"
+        );
     }
 
     /// Review findings: a topic's lock was waited for without bound, so a write stalled on a
