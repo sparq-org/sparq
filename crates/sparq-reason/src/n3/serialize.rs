@@ -31,7 +31,7 @@
 //!   first unit that uses it, which re-parses to the same variable (GH #5391, GH #6701
 //!   review). A FORMULA-level declaration binds only in its formula (GH #6754,
 //!   `FORMULA_UNIVERSAL`; a rule side's own are `PREMISE_UNIVERSAL` /
-//!   `CONCLUSION_UNIVERSAL`), and is written back at the top of that formula. See `Unit`
+//!   `CONCLUSION_UNIVERSAL`), and is written back in that formula, before its first use. See `Unit`
 //!   for the shapes the exact writers refuse. Only
 //!   [`RuleVars::VarIris`], which grounds variables into `var:` IRIs and is not meant to be
 //!   re-reasoned, names a universal by its local name.
@@ -290,9 +290,11 @@ enum Unplaced {
 ///
 /// # Scoping universals: where each is declared
 ///
-/// A FORMULA-level universal (`__uf.<n>.<iri>`, GH #6754) is declared at the top of the
-/// formula that binds it — the one `n` formula boundaries out from the mention — with
-/// `@forAll <iri> .`, which re-parses to the same names. Refused
+/// A FORMULA-level universal (`__uf.<n>.<iri>`, GH #6754) is declared in the formula that
+/// binds it — the one `n` formula boundaries out from the mention — with `@forAll <iri> .`
+/// right before the first statement that mentions it ([`formula_declarations`]), which
+/// re-parses to the same names when anything does. Refused, replaying the parser's scoping
+/// over that plan
 /// ([`NotRepresentable::UnrepresentableScope`]): a plain mention of that IRI the declaration
 /// would capture, a mention the declaration of an inner formula would shadow, and a mention
 /// whose declaring formula is not in the output.
@@ -476,12 +478,11 @@ impl Unit {
             }
             Term::Formula(ts) => {
                 out.push('{');
-                let own = own_formula_universals(ts);
-                if !own.is_empty() {
-                    out.push(' ');
-                    write_declarations(own.into_iter(), out);
-                }
-                for row in ts {
+                for (row, decls) in ts.iter().zip(formula_declarations(ts)) {
+                    if !decls.is_empty() {
+                        out.push(' ');
+                        write_declarations(decls.into_iter(), out);
+                    }
                     for t in row {
                         out.push(' ');
                         self.scoped(t, active, out);
@@ -543,18 +544,35 @@ fn own_formula_universals(ts: &[[Term; 3]]) -> BTreeSet<&str> {
     out
 }
 
-/// Why `t` cannot be written with each formula-level universal declared `@forAll` at the
-/// top of its own formula (GH #6754), or `None`. `stack` holds the IRIs each enclosing
-/// formula of the unit declares, outermost first. Refused: a plain mention of an IRI an
-/// enclosing formula declares (the declaration would capture it), a mention of an outer
-/// formula's universal inside a formula that declares the same IRI (shadowed), a
-/// document-level universal under such a formula (likewise), and a formula-level universal
-/// whose declaring formula is not part of the output.
+/// Where the formula with content `ts` declares its own universals: per statement, the
+/// IRIs whose `@forAll` goes right before it — the first statement that mentions each. As
+/// late as possible, so the declaration captures as few earlier plain mentions as it can.
+fn formula_declarations(ts: &[[Term; 3]]) -> Vec<BTreeSet<&str>> {
+    let mut seen = BTreeSet::new();
+    (0..ts.len()).map(|i| own_formula_universals(&ts[i..=i]).into_iter().filter(|iri| seen.insert(*iri)).collect()).collect()
+}
+
+/// Why `t` cannot be written with each formula-level universal declared `@forAll` where
+/// [`formula_declarations`] puts it (GH #6754), or `None` — the parser's own scoping,
+/// replayed over the planned text. `stack` holds the IRIs each enclosing formula of the
+/// unit has declared so far, outermost first. Refused: a plain mention of an IRI a
+/// declaration in effect would capture, a mention of an outer formula's universal after an
+/// inner formula declared the same IRI (shadowed), a document-level universal there
+/// (likewise), and a formula-level universal whose declaring formula is not in the output.
 fn formula_scope_problem<'a>(t: &'a Term, stack: &mut Vec<BTreeSet<&'a str>>) -> Option<String> {
     match t {
         Term::Formula(ts) => {
-            stack.push(own_formula_universals(ts));
-            let why = ts.iter().flatten().find_map(|m| formula_scope_problem(m, stack));
+            stack.push(BTreeSet::new());
+            let mut why = None;
+            for (row, decls) in ts.iter().zip(formula_declarations(ts)) {
+                if let Some(top) = stack.last_mut() {
+                    top.extend(decls);
+                }
+                why = row.iter().find_map(|m| formula_scope_problem(m, stack));
+                if why.is_some() {
+                    break;
+                }
+            }
             stack.pop();
             why
         }
@@ -571,9 +589,13 @@ fn formula_scope_problem<'a>(t: &'a Term, stack: &mut Vec<BTreeSet<&'a str>>) ->
                         "the formula-level @forAll universal <{iri}> belongs to a formula that is not part of this output"
                     ));
                 };
-                stack[target + 1..].iter().any(|d| d.contains(iri)).then(|| {
-                    format!("the formula-level @forAll universal <{iri}> would be shadowed by an inner formula's own @forAll <{iri}>")
-                })
+                match stack.iter().rposition(|d| d.contains(iri)) {
+                    Some(k) if k == target => None,
+                    Some(k) if k > target => Some(format!(
+                        "the formula-level @forAll universal <{iri}> would be shadowed by an inner formula's own @forAll <{iri}>"
+                    )),
+                    _ => Some(format!("the formula-level @forAll universal <{iri}> would be read before its declaration")),
+                }
             } else {
                 let iri = universal_iri(v)?;
                 stack.iter().any(|d| d.contains(iri)).then(|| {

@@ -693,6 +693,9 @@ impl Compiler {
 
     #[allow(clippy::too_many_lines)]
     fn lower_rule(&mut self, rule: &super::model::Rule) -> Result<(), String> {
+        if super::has_premise_universal(rule) {
+            return Err("compiled-rules: a premise declares its own @forAll universal, which only a stored universal can match; the text engine handles it".into());
+        }
         // The engine's OWN premise ordering (builtins after their producers), so the
         // compiled evaluation order matches the text engine's exactly.
         let premise = super::order_premise(&rule.premise);

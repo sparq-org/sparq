@@ -2076,6 +2076,9 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
     let not_includes = n3_iri(N3_LOG, "notIncludes");
     let mut raws: Vec<RawRule> = Vec::new();
     for (rix, rule) in parsed.rules.iter().enumerate() {
+        if crate::n3::has_premise_universal(rule) {
+            return Err(format!("rule {rix}: premise declares its own @forAll universal"));
+        }
         let ordered = n3_order_premise(&rule.premise);
         let mut atoms = Vec::new();
         let mut n_plain = 0usize;

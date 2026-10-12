@@ -2157,6 +2157,16 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
         return true;
     }
     match (&aw, &cw) {
+        // A premise universal meets only a variable: that variable then stands for it.
+        (Term::Var(v), Term::Var(w)) if premise_universal(v) && !quoted_universal(w) && !premise_universal(w) => {
+            s.insert(w.clone(), aw.clone());
+            true
+        }
+        (Term::Var(w), Term::Var(v)) if premise_universal(v) && !quoted_universal(w) && !premise_universal(w) => {
+            s.insert(w.clone(), cw.clone());
+            true
+        }
+        (Term::Var(v), _) | (_, Term::Var(v)) if premise_universal(v) => false,
         (Term::Var(v), _) if !quoted_universal(v) => {
             if frees_quoted_universal(&cw) {
                 return false;
@@ -2261,9 +2271,61 @@ fn frees_quoted_universal(t: &Term) -> bool {
     go(t, 0)
 }
 
+/// Is `v` a rule premise's own `@forAll` universal (`__up.<iri>`, [`parser::scope_rule`]),
+/// possibly as a backward-chaining copy (`__bw<n>_` prefixes)? The premise says its
+/// statements hold for EVERY value of it, so one ground instance proves nothing: it may
+/// match only a universal the store itself holds (GH #6754, as EYE does).
+fn premise_universal(v: &str) -> bool {
+    let mut rest = v;
+    loop {
+        if rest.starts_with(serialize::PREMISE_UNIVERSAL) {
+            return true;
+        }
+        let Some(r) = rest.strip_prefix("__bw") else { return false };
+        let digits = r.bytes().take_while(u8::is_ascii_digit).count();
+        match r[digits..].strip_prefix('_') {
+            Some(next) if digits > 0 => rest = next,
+            _ => return false,
+        }
+    }
+}
+
+/// Can a premise universal stand for `t`: a universal variable of the store (not a quoted
+/// formula's own, not another premise universal)?
+fn premise_universal_value(t: &Term) -> bool {
+    matches!(t, Term::Var(w) if !quoted_universal(w) && !premise_universal(w))
+}
+
+/// Does `rule`'s premise declare its own `@forAll` universal? The compiled and counting
+/// engines bind every premise variable to ground terms, so they refuse such a rule.
+pub(crate) fn has_premise_universal(rule: &Rule) -> bool {
+    fn go(t: &Term) -> bool {
+        match t {
+            Term::Var(v) => premise_universal(v),
+            Term::Formula(ts) => ts.iter().flatten().any(go),
+            Term::List(ms) => ms.iter().any(go),
+            Term::Triple(tr) => tr.iter().any(go),
+            _ => false,
+        }
+    }
+    rule.premise.iter().flatten().any(go)
+}
+
 fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
     match (pat, val) {
         (Term::Var(v), _) if quoted_universal(v) => pat == val,
+        // A premise's own universal: only a store universal, and two of them never the same
+        // one (`∀x∀y. x p y` is not proved by `∀z. z p z`).
+        (Term::Var(v), _) if premise_universal(v) => match b.get(v) {
+            Some(existing) => existing == val,
+            None => {
+                if !premise_universal_value(val) || b.iter().any(|(k, w)| w == val && premise_universal(k)) {
+                    return false;
+                }
+                b.insert(v.clone(), val.clone());
+                true
+            }
+        },
         (Term::Var(v), _) => match b.get(v) {
             Some(existing) => existing == val,
             None => {
@@ -2380,14 +2442,36 @@ fn ground_triple(t: &[Term; 3], b: &Binding) -> Option<[Term; 3]> {
     }
 }
 
+/// Every variable of `stmts` named `from + rest` renamed to `to + rest`, at any depth.
+fn rename_var_prefix(stmts: &mut [[Term; 3]], from: &str, to: &str) {
+    fn go(t: &mut Term, from: &str, to: &str) {
+        match t {
+            Term::Var(v) => {
+                if let Some(rest) = v.strip_prefix(from) {
+                    *t = Term::Var(format!("{to}{rest}"));
+                }
+            }
+            Term::Formula(ts) => ts.iter_mut().flatten().for_each(|m| go(m, from, to)),
+            Term::List(ms) => ms.iter_mut().for_each(|m| go(m, from, to)),
+            Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, from, to)),
+            _ => {}
+        }
+    }
+    stmts.iter_mut().flatten().for_each(|t| go(t, from, to));
+}
+
 /// Rename a conclusion's own universals (`__uc.<iri>`, [`parser::scope_rule`]) to the
-/// document-level `__ua.<iri>`: asserting `∀x. S(x)` beside a document under `∀x` is the
+/// document-level `__ua.<iri>` — inside a [`formula_closure`] run (`__uk.<k>.<iri>`), to
+/// that run's document level, `__ul.<k>.<iri>`, so the result formula gets them back as its
+/// own: asserting `∀x. S(x)` beside a document under `∀x` is the
 /// same as conjoining `S(x)` under it, since `x` does not occur in what is already there.
 fn assert_conclusion_universals(t: &mut Term) {
     match t {
         Term::Var(v) => {
             if let Some(iri) = v.strip_prefix(serialize::CONCLUSION_UNIVERSAL) {
                 *t = Term::Var(format!("{}{iri}", serialize::UNIVERSAL_VAR));
+            } else if let Some(rest) = v.strip_prefix(CLOSURE_CONCLUSION_UNIVERSAL) {
+                *t = Term::Var(format!("{LIFTED_UNIVERSAL}{rest}"));
             }
         }
         Term::Formula(ts) => ts.iter_mut().flatten().for_each(assert_conclusion_universals),
@@ -3068,6 +3152,10 @@ fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
 /// never takes an enclosing closure's universals for its own.
 const LIFTED_UNIVERSAL: &str = "__ul.";
 
+/// A forward rule's own conclusion universal inside the [`formula_closure`] run `k`:
+/// `__uk.<k>.<iri>`, asserted as that run's `__ul.<k>.<iri>`.
+const CLOSURE_CONCLUSION_UNIVERSAL: &str = "__uk.";
+
 /// The forward closure of a quoted formula under its own `=>` rules
 /// (log:supports / log:conclusion): the original triples plus everything a
 /// fixpoint run over them derives.
@@ -3092,7 +3180,9 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // The formula's own `@forAll` universals quantify its statements, rules included, so
     // the run reads them as that document's universals (GH #6754); the derivations get
     // them back named for their place in the result formula.
-    let lift = format!("{LIFTED_UNIVERSAL}{}.", bw.visited.borrow().len());
+    let depth = bw.visited.borrow().len();
+    let lift = format!("{LIFTED_UNIVERSAL}{depth}.");
+    let asserted = format!("{CLOSURE_CONCLUSION_UNIVERSAL}{depth}.");
     let mut lifted = ts.to_vec();
     parser::own_universals_to(&mut lifted, &lift);
     for row in lifted {
@@ -3100,6 +3190,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
             (Term::Formula(p), Term::Iri(i), Term::Formula(c)) if i == parser::LOG_IMPLIES => {
                 let mut r = Rule { premise: p.clone(), conclusion: c.clone() };
                 parser::scope_rule(&mut r);
+                rename_var_prefix(&mut r.conclusion, serialize::CONCLUSION_UNIVERSAL, &asserted);
                 rules.push(r);
             }
             (Term::Formula(c), Term::Iri(i), Term::Formula(p)) if i == parser::LOG_IMPLIED_BY => {

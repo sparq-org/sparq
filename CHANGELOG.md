@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **sparq-reason (N3):** a `@forAll` declared inside a formula now binds only in that formula,
+  as the N3 Team Submission's quantification rules say. A rule's premise and conclusion,
+  sibling formulae and a nested re-declaration no longer share one variable. Copies of one
+  closed formula still compare equal (`log:equalTo`). This changes results:
+  `{ @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }` no longer derives `:c :q :b` from
+  `:c :p :b`. A premise's own universal is now proved only by a universal the store holds,
+  not by one ground fact (EYE behaves the same). A quoted formula's own universal matches only
+  that formula and is never substituted, so `{ @forAll :x. :x :q :z }` in a premise no longer
+  matches `{ :k :q :z }`, and `{ ?s :q :z }` no longer matches it. The compiled and counting
+  engines refuse a rule whose premise declares its own universal. Document-level `@forAll` is
+  unchanged. `reason_n3_pass_all` and the exact writers write each declaration back inside its
+  formula, where the source had it. (#6754)
+
 ## [0.1.5] - 2026-10-10
 
 Fix-forward release after the v0.1.4 release workflow failed before creating a GitHub

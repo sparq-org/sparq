@@ -8,8 +8,8 @@
 //! or the write returns `NotRepresentable`, which it does exactly for the shapes with no
 //! lossless N3 form (checked against an independent oracle). A document-level `@forAll`
 //! is ONE variable, `__ua.<iri>`, so the writer declares it once, at document level; a
-//! formula-level one binds only in its formula (GH #6754) and is declared at the top of
-//! that formula. The writer refuses a plain mention of an IRI that a declaration would
+//! formula-level one binds only in its formula (GH #6754) and is declared in that formula
+//! before its first use. The writer refuses a plain mention of an IRI that a declaration would
 //! capture, a shadowed mention, or two distinct variables (a universal and its copy)
 //! anywhere in the output.
 //! There is no fallback spelling.
@@ -348,6 +348,14 @@ fn check_document_with(body: &str, want_refusal: bool, consumed_refusal: bool) {
 #[test]
 fn every_re_reasonable_write_preserves_semantics_or_refuses() {
     let representable = [
+        // Codex round 5 (1): the premise and the conclusion each declare `:x`, and the
+        // premise mentions `:x` plainly before its declaration (GH #6754: the premise's
+        // `@forAll` is written back between the two, where the source had it).
+        "{ :marker :ref :x. @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
+        // A mid-formula declaration after a plain mention in the same formula: likewise.
+        ":a :p { :m :r :x. @forAll :x. :x :p :b }.\n",
+        // An outer universal mentioned in an inner formula before its own redeclaration.
+        ":a :p { @forAll :x. :s :q { :x :r :o. @forAll :x. :x :q :o } }.\n",
         // Body and head share a universal (W3C N3 tests: 23 rules in 12 files): one
         // document-level declaration, before the rule, scopes both sides.
         "@forAll :x.\n{ :x :p :b } => { :x :q :b }.\n:c :p :b.\n",
@@ -378,17 +386,11 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
         check_document(body, false);
     }
     // `log:conclusion` really ran the quoted rule, binding its universal on both sides.
-    let c = closure(&format!("{PRE}{}", representable[6]));
-    let shared = reason_n3_pass_all(&format!("{PRE}{}", representable[0]), RuleVars::N3).expect("pass-all");
+    let c = closure(&format!("{PRE}{}", representable[9]));
+    let shared = reason_n3_pass_all(&format!("{PRE}{}", representable[3]), RuleVars::N3).expect("pass-all");
     assert_eq!(shared.matches("@forAll").count(), 1, "{shared}");
     assert!(c.iter().any(|f| f.starts_with("[Iri(\"http://ex/a\"), Iri(\"http://ex/concl\")") && f.contains("Iri(\"http://ex/m\"), Iri(\"http://ex/r\"), Iri(\"http://ex/o\")")), "{c:#?}");
     let lossy = [
-        // Codex round 5 (1): the premise and the conclusion each declare `:x`, and the
-        // premise mentions `:x` plainly before its declaration: the premise's `@forAll`,
-        // written at its top, would capture that mention.
-        "{ :marker :ref :x. @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
-        // A mid-formula declaration after a plain mention in the same formula: likewise.
-        ":a :p { :m :r :x. @forAll :x. :x :p :b }.\n",
         // A derived formula holding the universal and, after it, the plain IRI: the
         // document's declaration would capture the plain mention.
         ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { { :x :link :k } :k ?s } }.\n",
@@ -419,9 +421,9 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
         check_document(body, true);
     }
     // The normalized terms really are in the source closure (else the refusals prove nothing).
-    let c = closure(&format!("{PRE}{}", lossy[6]));
+    let c = closure(&format!("{PRE}{}", lossy[4]));
     assert!(c.iter().any(|f| f.contains("Some(\"EN\")")), "{c:#?}");
-    let c = closure(&format!("{PRE}{}", lossy[7]));
+    let c = closure(&format!("{PRE}{}", lossy[5]));
     assert!(c.iter().any(|f| f.contains("Iri(\"http://www.w3.org/1999/02/22-rdf-syntax-ns#nil\")")), "{c:#?}");
 }
 
@@ -459,8 +461,10 @@ fn a_source_variable_spelled_like_the_display_name_stays_distinct() {
     let back = |doc: &str| parser::parse(doc).expect("re-parses").facts;
     let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
     assert_eq!(back(&doc), back(src), "{doc}");
-    // A plain mention before the declaration: the document line would capture it.
-    assert!(reason_n3_pass_all("@prefix : <http://ex/>.\n:a :p { :x :q :z. @forAll :x. :x :r ?x }.\n", RuleVars::N3).is_err());
+    // A plain mention before a mid-formula declaration: written before it (GH #6754).
+    let mid = "@prefix : <http://ex/>.\n:a :p { :x :q :z. @forAll :x. :x :r ?x }.\n";
+    let doc = reason_n3_pass_all(mid, RuleVars::N3).expect("declared where the source had it");
+    assert_eq!(back(&doc), back(mid), "{doc}");
     let x = var("__ua.http://ex/x");
     let f = [iri("http://ex/a"), iri("http://ex/p"), formula(vec![
         [x.clone(), iri("http://ex/x"), var("x")],
@@ -655,8 +659,8 @@ fn decls(text: &str) -> usize {
 }
 
 /// GH #6701 review rounds 10–12, GH #6754: a document-level universal is declared ONCE, on
-/// a document line before its first use; a formula-level one is declared at the top of the
-/// formula that binds it, as the source did. Anything else is refused with the dedicated
+/// a document line before its first use; a formula-level one is declared in the formula that
+/// binds it, before its first use, as the source did. Anything else is refused with the dedicated
 /// error.
 #[test]
 fn every_universal_is_declared_in_its_own_scope_or_refused() {
@@ -700,8 +704,16 @@ fn every_universal_is_declared_in_its_own_scope_or_refused() {
         sparq_reason::n3::serialize::write_term(&var("__ua.http://ex/x"), &mut out),
         Err(NotRepresentable::UnrepresentableScope(_))
     ));
-    // A plain mention before the declaration in the declaring formula would be captured.
-    scope_error(serialize_facts(facts(":a :p { :m :r :x. @forAll :x. :x :p :b }.").iter()));
+    // A plain mention before a mid-formula declaration is written before it (Codex #6851
+    // round 1), and an outer universal mentioned before an inner redeclaration likewise.
+    for src in [":a :p { :m :r :x. @forAll :x. :x :p :b }.", ":a :p { @forAll :x. :s :q { :x :r :o. @forAll :x. :x :q :o } }."] {
+        let f = facts(src);
+        let text = serialize_facts(f.iter()).unwrap_or_else(|e| panic!("{e}\n{src}"));
+        assert_eq!(parser::parse(&text).expect("re-parses").facts, f, "{text}");
+    }
+    // A plain mention AFTER the universal in one formula: no placement works.
+    let after = [k.clone(), k.clone(), formula(vec![[var("__uf.0.http://ex/x"), k.clone(), k.clone()], [k.clone(), k.clone(), iri("http://ex/x")]])];
+    scope_error(serialize_facts([&after].into_iter()));
     let captured = [k.clone(), k.clone(), formula(vec![[var("__ua.http://ex/x"), k.clone(), formula(vec![[k.clone(), k.clone(), iri("http://ex/x")]])]])];
     scope_error(serialize_facts([&captured].into_iter()));
     // A plain mention in an EARLIER fact is not captured: the line comes after it.
@@ -1111,6 +1123,7 @@ fn random_scopes_round_trip_or_are_refused() {
         }
     }
     eprintln!("{wrote} written, {refused} refused ({caught} by the re-parse gate)");
-    // Over-refusal is the safe failure mode: plain mentions are frequent in the generator.
-    assert!(wrote > 800 && refused > 10 && caught == 0, "{wrote} written, {refused} refused, {caught} by the gate");
+    // Every generated document comes from source text, so it has an exact form: with each
+    // declaration placed where its scope needs it (GH #6754), nothing is refused.
+    assert!(wrote == 3000 && refused == 0 && caught == 0, "{wrote} written, {refused} refused, {caught} by the gate");
 }

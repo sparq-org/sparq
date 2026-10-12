@@ -41,9 +41,24 @@ fn rule_premise_and_conclusion_declarations_are_different_variables() {
     // ground fact follows (main derived `:c :q :b` through one shared variable).
     let facts = closure("{ @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b.\n");
     assert!(!has(&facts, "c", "q", "b"), "{facts:?}");
-    // The premise's own universal still matches like a rule variable.
+}
+
+#[test]
+fn a_premise_universal_is_proved_only_by_a_stored_universal() {
+    // `{ @forAll :x. :x :p :b }` says EVERY x has `:p :b`: one ground instance does not prove
+    // it (Codex #6851 round 1; EYE derives nothing here either) …
     let facts = closure("{ @forAll :x. :x :p :b } => { :hit :by :rule }.\n:c :p :b.\n");
+    assert!(!has(&facts, "hit", "by", "rule"), "{facts:?}");
+    // … a stored universal does (EYE derives `:hit :by :rule`; the W3C N3 suite's
+    // quantification/simple_forAll_premise.n3 is this shape).
+    let facts = closure("@forAll :y. :y :p :b.\n{ @forAll :x. :x :p :b } => { :hit :by :rule }.\n");
     assert!(has(&facts, "hit", "by", "rule"), "{facts:?}");
+    // Two premise universals are two: `∀z. z :p z` does not prove `∀x∀y. x :p y`.
+    let facts = closure("@forAll :z. :z :p :z.\n{ @forAll :x, :y. :x :p :y } => { :hit :by :rule }.\n");
+    assert!(!has(&facts, "hit", "by", "rule"), "{facts:?}");
+    // A builtin cannot ground it either.
+    let facts = closure("{ @forAll :x. ( 1 2 ) math:sum :x } => { :hit :by :rule }.\n");
+    assert!(!has(&facts, "hit", "by", "rule"), "{facts:?}");
 }
 
 #[test]
@@ -58,8 +73,9 @@ fn a_premise_universal_does_not_capture_a_quickvar_spelled_like_a_generated_name
 #[test]
 fn a_quoted_sibling_copy_of_the_premise_keeps_its_own_binder() {
     // The conclusion quotes a formula identical to the premise. Its `:x` is bound in that
-    // quoted formula, not by the premise, so the firing must not substitute into it.
-    let src = "{ @forAll :x. :x :p :b } => { :log :says { @forAll :x. :x :p :b } }.\n:c :p :b.\n\
+    // quoted formula, not by the premise, so the firing (on the stored universal `:y`)
+    // must not substitute into it.
+    let src = "{ @forAll :x. :x :p :b } => { :log :says { @forAll :x. :x :p :b } }.\n@forAll :y. :y :p :b.\n\
                :want :is { @forAll :x. :x :p :b }.\n";
     let facts = closure(src);
     let want = facts.iter().find(|f| f[0] == iri("want")).expect("source fact")[2].clone();
@@ -126,6 +142,18 @@ fn a_nested_closure_keeps_the_enclosing_formula_s_universals() {
     let src = ":k :is { @forAll :x. :a :says { :x :q :z }. { :a :says ?g. ?g log:conclusion ?h } => { :a :closed ?h } }.\n\
                { :k :is ?f. ?f log:conclusion ?c. ?c log:includes { @forAll :x. :a :closed { :x :q :z } } } => { :nested :lift :ok }.\n";
     assert!(has(&closure(src), "nested", "lift", "ok"));
+}
+
+#[test]
+fn a_closure_keeps_universals_its_rules_assert_in_the_result_formula() {
+    // Codex #6851 round 1: a rule inside the closed formula concludes a universal; the
+    // result formula must hold it as ITS OWN universal, not a document-level one.
+    let src = ":k :is { :c :p :b. { :c :p :b } => { @forAll :x. :a :says { :x :q :z } } }.\n\
+               { :k :is ?f. ?f log:conclusion ?c. ?c log:includes { @forAll :x. :a :says { :x :q :z } } } => { :concl :scoped :ok }.\n\
+               { :k :is ?f. ?f log:supports { @forAll :x. :a :says { :x :q :z } } } => { :supports :scoped :ok }.\n";
+    let facts = closure(src);
+    assert!(has(&facts, "concl", "scoped", "ok"), "{facts:?}");
+    assert!(has(&facts, "supports", "scoped", "ok"), "{facts:?}");
 }
 
 #[test]
