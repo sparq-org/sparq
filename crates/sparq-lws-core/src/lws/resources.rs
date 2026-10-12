@@ -1369,11 +1369,13 @@ fn sanitize_slug(slug: Option<&str>) -> Option<String> {
 /// User-managed links by relation.
 type Links = std::collections::BTreeMap<String, Vec<String>>;
 
-/// A relation's key, lower-cased: registered relation types and extension ones (URIs) alike
-/// are compared case-insensitively (RFC 8288 section 2.1.1 and 2.1.2), so two spellings of
-/// one relation are one key.
+/// A relation's key: an extension relation (a URI) as it is, a registered one lower-cased.
 fn rel_key(r: &str) -> String {
-    r.to_ascii_lowercase()
+    if r.contains(':') {
+        r.to_string()
+    } else {
+        r.to_ascii_lowercase()
+    }
 }
 
 /// The types and user-managed links a request declared in its Link headers. What they hold once
@@ -4576,30 +4578,35 @@ mod tests {
         assert_eq!(&body_of(r).await[..], b"kept");
     }
 
-    /// RFC 8288 section 2.1.2: extension relation types are compared case-insensitively, so two
-    /// spellings of one are one relation, holding the target once.
+    /// Review finding (#6839): an extension relation is kept as it was spelled, as the type
+    /// index's search keys it (`index::relation_key`), so a search by that spelling finds it.
     #[tokio::test]
-    async fn extension_relations_are_case_insensitive() {
+    async fn an_extension_relation_is_kept_as_spelled() {
         let st = state().await;
-        let link = r#"<https://t.example/x>; rel="https://E.example/Rel", <https://t.example/x>; rel="https://e.example/rel""#;
+        let link = r#"<https://t.example/x>; rel="https://E.example/Rel""#;
         let uri = post(&st, "e.txt", "text/plain", "x", &[("link", link)]).await;
-        let r = call(&st, "GET", &format!("{}.meta", path_of(&uri)), &[], "").await;
+        let r = call(
+            &st,
+            "GET",
+            &format!("{}{META_SUFFIX}", path_of(&uri)),
+            &[],
+            "",
+        )
+        .await;
         assert_eq!(r.status(), StatusCode::OK);
-        let doc: Value = serde_json::from_slice(&body_of(r).await).unwrap();
+        let doc = json_of(r).await;
         let entry = doc["linkset"]
             .as_array()
             .unwrap()
             .iter()
             .find(|e| e["anchor"] == uri.as_str())
-            .unwrap();
-        let rels: Vec<_> = entry
-            .as_object()
             .unwrap()
-            .keys()
-            .filter(|k| k.contains("e.example"))
-            .collect();
-        assert_eq!(rels, ["https://e.example/rel"]);
-        assert_eq!(entry["https://e.example/rel"].as_array().unwrap().len(), 1);
+            .clone();
+        assert_eq!(
+            entry["https://E.example/Rel"][0]["href"],
+            "https://t.example/x"
+        );
+        assert!(entry.get("https://e.example/rel").is_none());
     }
 
     #[tokio::test]
