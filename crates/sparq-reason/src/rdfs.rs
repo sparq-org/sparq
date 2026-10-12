@@ -686,21 +686,17 @@ pub(crate) fn closure_derived(
     d
 }
 
-/// [`schema_is_meta`] of `original`'s own schema, with no monotone-OWL axioms.
+/// [`schema_is_meta`] of `original`'s own schema, with no monotone-OWL axioms, read from the
+/// raw triples: a property is in the subPropertyOf closure exactly when it is an endpoint of a
+/// raw subPropertyOf triple, so no closure is built (the ordinary path builds it once, in
+/// [`closure_round`]).
 fn plain_schema_is_meta(original: &FxHashSet<[Id; 3]>, v: &Vocab) -> bool {
-    let mut sp: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
-    let mut dom: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
-    let mut rng: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
-    for &[s, p, o] in original {
-        if p == v.sub_prop {
-            sp.entry(s).or_default().push(o);
-        } else if p == v.domain {
-            dom.entry(s).or_default().push(o);
-        } else if p == v.range {
-            rng.entry(s).or_default().push(o);
-        }
-    }
-    schema_is_meta(v, &transitive_closure(&sp), &dom, &rng, &MonoOwl::default())
+    let schema_props = [v.ty, v.sub_class, v.sub_prop, v.domain, v.range];
+    let is_schema = |x: Id| schema_props.contains(&x);
+    original.iter().any(|&[s, p, o]| {
+        (p == v.sub_prop && (is_schema(s) || is_schema(o)))
+            || ((p == v.domain || p == v.range) && is_schema(s))
+    })
 }
 
 /// Whether the schema is "meta" (see [`ClosureRound::meta`]): some RDFS schema property is in

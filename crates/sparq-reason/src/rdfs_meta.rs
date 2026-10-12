@@ -15,17 +15,24 @@
 //! of the `O(n^3)` a closure-by-closure join (or re-saturating a dense closure) costs; typing
 //! an instance likewise walks its class's edges, not every superclass of every class.
 //!
-//! The evaluation is a datalog program over two relations, facts and edges (an edge is also
-//! a fact). Edges are tracked exactly: a fact first derived by transitivity and later
-//! asserted or derived by rdfs7 becomes an edge then. So the state is a function of the
-//! asserted triples alone, which [`MetaClosure::delete`] relies on.
+//! A fact is an edge when its FIRST derivation is an assertion or rdfs7. A fact that is
+//! already in the closure is never promoted later: it already has an edge path, and promoting
+//! would let an identity or cyclic property rewrite (`rdfs:subClassOf rdfs:subPropertyOf
+//! rdfs:subClassOf`, which rewrites every transitive conclusion to itself) turn the `Θ(n²)`
+//! conclusions of a chain into edges and make transitivity cubic. The invariant is that every
+//! subClassOf / subPropertyOf fact has an edge path, and every edge is asserted or
+//! rdfs7-derived from current facts. [`MetaClosure::delete`] keeps both: a surviving fact
+//! keeps its whole edge path, because overdeletion removes every transitive conclusion along
+//! a path that lost an edge.
 //!
 //! **Deletes** (#6784) use DRed (delete and rederive), so their cost follows the affected
 //! consequences, not the closure size:
 //! 1. *Overdelete*: every fact that some rule instance derives from a deleted fact, followed
 //!    transitively, using the same joins as an insert (against the old indexes).
 //! 2. *Rederive*: an overdeleted fact comes back if it is still asserted, or if a rule
-//!    instance derives it from the remaining facts (one backward check per fact).
+//!    instance derives it from the remaining facts (one backward check per fact). A
+//!    hierarchy fact tries transitivity first, so it becomes an edge only when no edge path
+//!    is left; a fact that only an rdfs7 rewrite supports comes back as an edge.
 //! 3. *Propagate*: the facts that came back are processed like an insert.
 //!
 //! With the `explain` feature each derived fact keeps its FIRST derivation (rule + the two
@@ -40,18 +47,75 @@ use sparq_core::dict::Id;
 
 type T = [Id; 3];
 type Derivation = (&'static str, [T; 2]);
-type Index = FxHashMap<Id, Vec<Id>>;
+type Index = FxHashMap<Id, Bucket>;
 
-/// One unit of semi-naive work: process `t` as a fact (index it, join it in the fact role)
-/// and/or as an edge (index it, join it in the edge role).
-type Work = (T, bool, bool);
+/// One unit of semi-naive work: a new fact, and whether it is an edge.
+type Work = (T, bool);
+
+/// Buckets at most this long are searched linearly on removal.
+const SMALL_BUCKET: usize = 32;
+
+/// The members of one index key. A removal from a bucket longer than [`SMALL_BUCKET`] first
+/// builds a member-to-position map, and the bucket keeps it from then on, so later removals
+/// are `O(1)` swap-removes. A closure that is only built (the batch case) never pays for it.
+#[derive(Default)]
+struct Bucket {
+    items: Vec<Id>,
+    pos: Option<Box<FxHashMap<Id, u32>>>,
+}
+
+impl Bucket {
+    fn push(&mut self, x: Id) {
+        if let Some(pos) = self.pos.as_deref_mut() {
+            pos.insert(x, self.items.len() as u32);
+        }
+        self.items.push(x);
+    }
+
+    /// Remove `x` (each member occurs once in its bucket).
+    fn remove(&mut self, x: Id) {
+        if self.pos.is_none() && self.items.len() > SMALL_BUCKET {
+            let pos = self.items.iter().enumerate().map(|(i, &y)| (y, i as u32));
+            self.pos = Some(Box::new(pos.collect()));
+        }
+        let i = match self.pos.as_deref_mut() {
+            Some(pos) => match pos.remove(&x) {
+                Some(i) => i as usize,
+                None => return,
+            },
+            None => match self.items.iter().position(|&y| y == x) {
+                Some(i) => i,
+                None => return,
+            },
+        };
+        self.items.swap_remove(i);
+        if let (Some(pos), Some(&moved)) = (self.pos.as_deref_mut(), self.items.get(i)) {
+            pos.insert(moved, i as u32);
+        }
+    }
+}
+
+impl std::ops::Deref for Bucket {
+    type Target = [Id];
+    fn deref(&self) -> &[Id] {
+        &self.items
+    }
+}
+
+impl<'a> IntoIterator for &'a Bucket {
+    type Item = &'a Id;
+    type IntoIter = std::slice::Iter<'a, Id>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter()
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct MetaClosure {
     /// Every fact in the closure (asserted and derived).
     pub(crate) facts: FxHashSet<T>,
-    /// The `subClassOf` / `subPropertyOf` facts that are edges (asserted, or derived by
-    /// rdfs7), including ones queued but not processed yet.
+    /// The `subClassOf` / `subPropertyOf` facts that are edges (first derived by an
+    /// assertion or rdfs7), including ones queued but not processed yet.
     edges: FxHashSet<T>,
     /// `x -> [a]` for every subClassOf / subPropertyOf fact `(a R x)` (closure or edge).
     sc_in: Index,
@@ -86,6 +150,12 @@ impl MetaClosure {
         m
     }
 
+    /// How many hierarchy facts are traversal edges.
+    #[cfg(test)]
+    pub(crate) fn edge_count(&self) -> usize {
+        self.edges.len()
+    }
+
     /// Add asserted triples and their consequences.
     pub(crate) fn insert(&mut self, triples: &[T], v: &Vocab) {
         let mut work: Vec<Work> = Vec::new();
@@ -113,7 +183,7 @@ impl MetaClosure {
             let t = gone[i];
             i += 1;
             let edge = self.edges.contains(&t);
-            self.join(t, true, edge, &mut out, v);
+            self.join(t, edge, &mut out, v);
             for (c, _, _) in out.drain(..) {
                 if self.facts.contains(&c) && seen.insert(c) {
                     gone.push(c);
@@ -138,9 +208,9 @@ impl MetaClosure {
 
     fn propagate(&mut self, mut work: Vec<Work>, v: &Vocab) {
         let mut out = Vec::new();
-        while let Some((t, fact, edge)) = work.pop() {
-            self.index(t, fact, edge, v);
-            self.join(t, fact, edge, &mut out, v);
+        while let Some((t, edge)) = work.pop() {
+            self.index(t, edge, v);
+            self.join(t, edge, &mut out, v);
             for (c, e, why) in out.drain(..) {
                 self.offer(c, e, Some(why), &mut work, v);
             }
@@ -148,8 +218,7 @@ impl MetaClosure {
     }
 
     /// A derivation of `t` enters the closure; `edge` (only meaningful for subClassOf /
-    /// subPropertyOf) marks an edge. A known fact that only now becomes an edge is queued
-    /// for its edge role alone.
+    /// subPropertyOf) marks an edge. Only a first derivation counts (see the module docs).
     #[inline]
     fn offer(
         &mut self,
@@ -168,42 +237,38 @@ impl MetaClosure {
             if edge {
                 self.edges.insert(t);
             }
-            work.push((t, true, edge));
-        } else if edge && self.edges.insert(t) {
-            work.push((t, false, true));
+            work.push((t, edge));
         }
     }
 
-    /// Index `t` in its fact role and/or its edge role.
-    fn index(&mut self, t: T, fact: bool, edge: bool, v: &Vocab) {
+    /// Index `t` as a fact and, if `edge`, as an edge.
+    fn index(&mut self, t: T, edge: bool, v: &Vocab) {
         let [s, p, o] = t;
-        if fact {
-            self.po.entry(p).or_default().entry(s).or_default().push(o);
-            if let Some(m) = self.op.get_mut(&p) {
-                m.entry(o).or_default().push(s);
-            }
-            if p == v.sub_prop {
-                self.sp_in.entry(o).or_default().push(s);
-            } else if p == v.sub_class {
-                self.sc_in.entry(o).or_default().push(s);
-            } else if p == v.domain {
-                self.dom.entry(s).or_default().push(o);
-                self.dom_inv.entry(o).or_default().push(s);
-            } else if p == v.range {
-                self.rng.entry(s).or_default().push(o);
-                self.rng_inv.entry(o).or_default().push(s);
-                if !self.op.contains_key(&s) {
-                    let mut m = Index::default();
-                    for (&x, ys) in self.po.get(&s).into_iter().flatten() {
-                        for &y in ys {
-                            m.entry(y).or_default().push(x);
-                        }
+        self.po.entry(p).or_default().entry(s).or_default().push(o);
+        if let Some(m) = self.op.get_mut(&p) {
+            m.entry(o).or_default().push(s);
+        }
+        if p == v.sub_prop {
+            self.sp_in.entry(o).or_default().push(s);
+        } else if p == v.sub_class {
+            self.sc_in.entry(o).or_default().push(s);
+        } else if p == v.domain {
+            self.dom.entry(s).or_default().push(o);
+            self.dom_inv.entry(o).or_default().push(s);
+        } else if p == v.range {
+            self.rng.entry(s).or_default().push(o);
+            self.rng_inv.entry(o).or_default().push(s);
+            if !self.op.contains_key(&s) {
+                let mut m = Index::default();
+                for (&x, ys) in self.po.get(&s).into_iter().flatten() {
+                    for &y in ys {
+                        m.entry(y).or_default().push(x);
                     }
-                    self.op.insert(s, m);
                 }
-            } else if p == v.ty {
-                self.type_sub.entry(o).or_default().push(s);
+                self.op.insert(s, m);
             }
+        } else if p == v.ty {
+            self.type_sub.entry(o).or_default().push(s);
         }
         if edge {
             if p == v.sub_prop {
@@ -216,67 +281,65 @@ impl MetaClosure {
         }
     }
 
-    /// Every rule instance with `t` as a premise (in its fact role and/or its edge role)
-    /// whose other premise is indexed: `(conclusion, conclusion is an edge, derivation)`.
-    fn join(&self, t: T, fact: bool, edge: bool, out: &mut Vec<(T, bool, Derivation)>, v: &Vocab) {
+    /// Every rule instance with `t` as a premise (as a fact and, if `edge`, as an edge) whose
+    /// other premise is indexed: `(conclusion, conclusion is an edge, derivation)`.
+    fn join(&self, t: T, edge: bool, out: &mut Vec<(T, bool, Derivation)>, v: &Vocab) {
         let [s, p, o] = t;
-        if fact {
-            // `t` as the data premise (any predicate, the schema ones included).
-            if let Some(qs) = self.sp_edges_out.get(&p) {
+        // `t` as the data premise (any predicate, the schema ones included).
+        if let Some(qs) = self.sp_edges_out.get(&p) {
+            out.extend(
+                qs.iter()
+                    .map(|&q| ([s, q, o], true, ("rdfs7", [[p, v.sub_prop, q], t]))),
+            );
+        }
+        if let Some(cs) = self.dom.get(&p) {
+            out.extend(
+                cs.iter()
+                    .map(|&c| ([s, v.ty, c], true, ("rdfs2", [[p, v.domain, c], t]))),
+            );
+        }
+        if let Some(cs) = self.rng.get(&p) {
+            out.extend(
+                cs.iter()
+                    .map(|&c| ([o, v.ty, c], true, ("rdfs3", [[p, v.range, c], t]))),
+            );
+        }
+        if p == v.ty {
+            if let Some(ds) = self.sc_edges_out.get(&o) {
                 out.extend(
-                    qs.iter()
-                        .map(|&q| ([s, q, o], true, ("rdfs7", [[p, v.sub_prop, q], t]))),
+                    ds.iter()
+                        .map(|&d| ([s, v.ty, d], true, ("rdfs9", [[o, v.sub_class, d], t]))),
                 );
             }
-            if let Some(cs) = self.dom.get(&p) {
+        }
+        // `t` as a schema premise.
+        if p == v.sub_prop || p == v.sub_class {
+            let (edges_out, rule) = if p == v.sub_class {
+                (&self.sc_edges_out, "rdfs11")
+            } else {
+                (&self.sp_edges_out, "rdfs5")
+            };
+            // Closure side: (s R o), edge (o R x) ⊢ (s R x).
+            if let Some(xs) = edges_out.get(&o) {
                 out.extend(
-                    cs.iter()
-                        .map(|&c| ([s, v.ty, c], true, ("rdfs2", [[p, v.domain, c], t]))),
+                    xs.iter()
+                        .map(|&x| ([s, p, x], false, (rule, [t, [o, p, x]]))),
                 );
             }
-            if let Some(cs) = self.rng.get(&p) {
-                out.extend(
-                    cs.iter()
-                        .map(|&c| ([o, v.ty, c], true, ("rdfs3", [[p, v.range, c], t]))),
-                );
-            }
-            if p == v.ty {
-                if let Some(ds) = self.sc_edges_out.get(&o) {
-                    out.extend(
-                        ds.iter()
-                            .map(|&d| ([s, v.ty, d], true, ("rdfs9", [[o, v.sub_class, d], t]))),
-                    );
-                }
-            }
-            // `t` as a schema premise.
-            if p == v.sub_prop || p == v.sub_class {
-                let (edges_out, rule) = if p == v.sub_class {
-                    (&self.sc_edges_out, "rdfs11")
-                } else {
-                    (&self.sp_edges_out, "rdfs5")
-                };
-                // Closure side: (s R o), edge (o R x) ⊢ (s R x).
-                if let Some(xs) = edges_out.get(&o) {
-                    out.extend(
-                        xs.iter()
-                            .map(|&x| ([s, p, x], false, (rule, [t, [o, p, x]]))),
-                    );
-                }
-            } else if p == v.domain || p == v.range {
-                let (rule, range) = if p == v.domain {
-                    ("rdfs2", false)
-                } else {
-                    ("rdfs3", true)
-                };
-                for (&x, ys) in self.po.get(&s).into_iter().flatten() {
-                    out.extend(ys.iter().map(|&y| {
-                        (
-                            [if range { y } else { x }, v.ty, o],
-                            true,
-                            (rule, [t, [x, s, y]]),
-                        )
-                    }));
-                }
+        } else if p == v.domain || p == v.range {
+            let (rule, range) = if p == v.domain {
+                ("rdfs2", false)
+            } else {
+                ("rdfs3", true)
+            };
+            for (&x, ys) in self.po.get(&s).into_iter().flatten() {
+                out.extend(ys.iter().map(|&y| {
+                    (
+                        [if range { y } else { x }, v.ty, o],
+                        true,
+                        (rule, [t, [x, s, y]]),
+                    )
+                }));
             }
         }
         if edge {
@@ -310,11 +373,25 @@ impl MetaClosure {
         }
     }
 
-    /// One rule instance that derives `t` from the indexed facts, or `None`. rdfs7 is tried
-    /// first, because it makes `t` an edge.
+    /// One rule instance that derives `t` from the indexed facts, or `None`. A hierarchy fact
+    /// tries transitivity first, so it becomes an edge (through rdfs7) only when no edge path
+    /// is left.
     fn derivation(&self, t: T, v: &Vocab) -> Option<Derivation> {
         let [s, p, o] = t;
         let has = |x: T| self.facts.contains(&x);
+        if p == v.sub_class || p == v.sub_prop {
+            // Transitivity: fact (s R m), edge (m R o).
+            let (edges_in, rule) = if p == v.sub_class {
+                (&self.sc_edges_in, "rdfs11")
+            } else {
+                (&self.sp_edges_in, "rdfs5")
+            };
+            for &m in edges_in.get(&o).into_iter().flatten() {
+                if has([s, p, m]) {
+                    return Some((rule, [[s, p, m], [m, p, o]]));
+                }
+            }
+        }
         // rdfs7: edge (q sp p), fact (s q o).
         for &q in self.sp_edges_in.get(&p).into_iter().flatten() {
             if has([s, q, o]) {
@@ -350,131 +427,93 @@ impl MetaClosure {
                     return Some(("rdfs3", [[r, v.range, o], [x, r, s]]));
                 }
             }
-        } else if p == v.sub_class || p == v.sub_prop {
-            // Transitivity: fact (s R m), edge (m R o).
-            let (edges_in, rule) = if p == v.sub_class {
-                (&self.sc_edges_in, "rdfs11")
-            } else {
-                (&self.sp_edges_in, "rdfs5")
-            };
-            for &m in edges_in.get(&o).into_iter().flatten() {
-                if has([s, p, m]) {
-                    return Some((rule, [[s, p, m], [m, p, o]]));
-                }
-            }
         }
         None
     }
 
-    /// Drop `gone` from the closure and from every index. Removals are grouped by index key,
-    /// so each touched bucket is filtered once.
+    /// Drop `gone` from the closure and from every index. Each removal touches one bucket
+    /// entry per index (see [`Bucket`]), not a whole bucket.
     fn unindex(&mut self, gone: &[T], v: &Vocab) {
-        const SC_IN: usize = 0;
-        const SP_IN: usize = 1;
-        const SC_OUT: usize = 2;
-        const SP_OUT: usize = 3;
-        const SC_EIN: usize = 4;
-        const SP_EIN: usize = 5;
-        const DOM: usize = 6;
-        const RNG: usize = 7;
-        const DOM_INV: usize = 8;
-        const RNG_INV: usize = 9;
-        const TYPE_SUB: usize = 10;
-        let mut buckets: [Vec<(Id, Id)>; 11] = Default::default();
-        let mut po: Vec<(Id, Id, Id)> = Vec::with_capacity(gone.len());
-        let mut op: Vec<(Id, Id, Id)> = Vec::new();
         for &t in gone {
             let [s, p, o] = t;
             self.facts.remove(&t);
             #[cfg(feature = "explain")]
             self.prov.remove(&t);
-            po.push((p, s, o));
-            if self.op.contains_key(&p) {
-                op.push((p, o, s));
+            if let Some(m) = self.po.get_mut(&p) {
+                drop_member(m, s, o);
+                if m.is_empty() {
+                    self.po.remove(&p);
+                }
+            }
+            // An `op` entry stays even when emptied: its predicate keeps an object index.
+            if let Some(m) = self.op.get_mut(&p) {
+                drop_member(m, o, s);
             }
             if p == v.sub_prop {
-                buckets[SP_IN].push((o, s));
+                drop_member(&mut self.sp_in, o, s);
             } else if p == v.sub_class {
-                buckets[SC_IN].push((o, s));
+                drop_member(&mut self.sc_in, o, s);
             } else if p == v.domain {
-                buckets[DOM].push((s, o));
-                buckets[DOM_INV].push((o, s));
+                drop_member(&mut self.dom, s, o);
+                drop_member(&mut self.dom_inv, o, s);
             } else if p == v.range {
-                buckets[RNG].push((s, o));
-                buckets[RNG_INV].push((o, s));
+                drop_member(&mut self.rng, s, o);
+                drop_member(&mut self.rng_inv, o, s);
             } else if p == v.ty {
-                buckets[TYPE_SUB].push((o, s));
+                drop_member(&mut self.type_sub, o, s);
             }
             if self.edges.remove(&t) {
                 if p == v.sub_prop {
-                    buckets[SP_OUT].push((s, o));
-                    buckets[SP_EIN].push((o, s));
+                    drop_member(&mut self.sp_edges_out, s, o);
+                    drop_member(&mut self.sp_edges_in, o, s);
                 } else {
-                    buckets[SC_OUT].push((s, o));
-                    buckets[SC_EIN].push((o, s));
+                    drop_member(&mut self.sc_edges_out, s, o);
+                    drop_member(&mut self.sc_edges_in, o, s);
                 }
             }
         }
-        let indexes: [&mut Index; 11] = [
-            &mut self.sc_in,
-            &mut self.sp_in,
-            &mut self.sc_edges_out,
-            &mut self.sp_edges_out,
-            &mut self.sc_edges_in,
-            &mut self.sp_edges_in,
-            &mut self.dom,
-            &mut self.rng,
-            &mut self.dom_inv,
-            &mut self.rng_inv,
-            &mut self.type_sub,
-        ];
-        for (index, mut pairs) in indexes.into_iter().zip(buckets) {
-            remove_pairs(index, &mut pairs);
-        }
-        remove_nested(&mut self.po, po, true);
-        // An `op` entry stays even when emptied: its predicate keeps an object index.
-        remove_nested(&mut self.op, op, false);
     }
 }
 
-/// Remove each `(key, value)` of `pairs` from `index`. Each touched bucket is filtered once,
-/// and an emptied bucket is dropped.
-fn remove_pairs(index: &mut Index, pairs: &mut [(Id, Id)]) {
-    pairs.sort_unstable();
-    for group in pairs.chunk_by(|a, b| a.0 == b.0) {
-        let key = group[0].0;
-        let Some(bucket) = index.get_mut(&key) else {
-            continue;
-        };
-        if let [(_, x)] = group {
-            if let Some(i) = bucket.iter().position(|y| y == x) {
-                bucket.swap_remove(i);
-            }
-        } else {
-            bucket.retain(|y| group.binary_search(&(key, *y)).is_err());
-        }
+/// Remove `x` from `index[key]`, dropping the bucket once it is empty.
+fn drop_member(index: &mut Index, key: Id, x: Id) {
+    if let Some(bucket) = index.get_mut(&key) {
+        bucket.remove(x);
         if bucket.is_empty() {
             index.remove(&key);
         }
     }
 }
 
-/// [`remove_pairs`] for a two-level index: each `(outer, key, value)` of `triples`.
-fn remove_nested(
-    nested: &mut FxHashMap<Id, Index>,
-    mut triples: Vec<(Id, Id, Id)>,
-    drop_empty: bool,
-) {
-    triples.sort_unstable();
-    for group in triples.chunk_by(|a, b| a.0 == b.0) {
-        let outer = group[0].0;
-        let Some(index) = nested.get_mut(&outer) else {
-            continue;
-        };
-        let mut pairs: Vec<(Id, Id)> = group.iter().map(|&(_, k, x)| (k, x)).collect();
-        remove_pairs(index, &mut pairs);
-        if drop_empty && index.is_empty() {
-            nested.remove(&outer);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A bucket keeps the right members through removals on both sides of [`SMALL_BUCKET`],
+    /// including after its position map exists.
+    #[test]
+    fn bucket_removal_keeps_members() {
+        let mut b = Bucket::default();
+        let mut want: FxHashSet<Id> = FxHashSet::default();
+        for x in 0..100 {
+            b.push(x);
+            want.insert(x);
+        }
+        let mut seed: u32 = 7;
+        for round in 0..300 {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let x = (seed >> 16) % 120;
+            if round % 3 == 0 {
+                if want.insert(x) {
+                    b.push(x);
+                }
+            } else {
+                b.remove(x);
+                want.remove(&x);
+            }
+            let got: FxHashSet<Id> = b.iter().copied().collect();
+            assert_eq!(got, want);
+            assert_eq!(b.len(), want.len());
         }
     }
 }

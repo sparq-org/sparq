@@ -3727,6 +3727,89 @@ mod tests {
         );
     }
 
+    /// #6842 review: an identity (`subClassOf subPropertyOf subClassOf`) or cyclic property
+    /// rewrite re-derives every transitive conclusion of a chain through rdfs7. Those
+    /// conclusions must not become traversal edges (that makes transitivity cubic), across
+    /// inserts and deletes alike, and the closure must still equal batch.
+    #[test]
+    fn meta_schema_rewrites_keep_edges_sparse() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let (thing, x, p) = (
+            ex(&mut dict, "Thing"),
+            ex(&mut dict, "x"),
+            ex(&mut dict, "p"),
+        );
+        let k: Vec<Id> = (0..40).map(|i| ex(&mut dict, &format!("K{i}"))).collect();
+        let identity = vec![[v.sc, v.sp, v.sc]];
+        let cycle = vec![[v.sc, v.sp, p], [p, v.sp, v.sc]];
+        for rewrite in [identity, cycle] {
+            let mut base = rewrite.clone();
+            base.push([v.ty, v.dom, thing]);
+            base.push([x, v.ty, k[0]]);
+            for w in k.windows(2) {
+                base.push([w[0], v.sc, w[1]]);
+            }
+            let sparse = |g: &MaterializedGraph| {
+                let edges = g.meta.as_deref().expect("meta schema").edge_count();
+                assert!(
+                    edges <= 2 * k.len(),
+                    "{edges} edges for a {}-class chain",
+                    k.len()
+                );
+            };
+            let mut g = MaterializedGraph::new(&mut dict, &[]);
+            g.insert(&base);
+            sparse(&g);
+            let mut set: FxHashSet<[Id; 3]> = base.iter().copied().collect();
+            check_step(&g, &mut dict, &set);
+            let cut = [k[20], v.sc, k[21]];
+            g.delete(&[cut]);
+            set.remove(&cut);
+            sparse(&g);
+            check_step(&g, &mut dict, &set);
+            g.insert(&[cut]);
+            set.insert(cut);
+            sparse(&g);
+            check_step(&g, &mut dict, &set);
+            let g = MaterializedGraph::new(&mut dict, &base);
+            sparse(&g);
+        }
+    }
+
+    /// #6842 review: many individuals share one class, so their typings sit in large index
+    /// buckets. Single deletes (and re-inserts) go through the positional bucket removal and
+    /// must keep the closure equal to batch.
+    #[test]
+    fn meta_schema_large_bucket_deletes() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let (thing, c, d) = (
+            ex(&mut dict, "Thing"),
+            ex(&mut dict, "C"),
+            ex(&mut dict, "D"),
+        );
+        let xs: Vec<Id> = (0..120).map(|i| ex(&mut dict, &format!("x{i}"))).collect();
+        let mut base = vec![[v.ty, v.dom, thing], [c, v.sc, d]];
+        base.extend(xs.iter().map(|&x| [x, v.ty, c]));
+        let mut g = MaterializedGraph::new(&mut dict, &base);
+        let mut set: FxHashSet<[Id; 3]> = base.iter().copied().collect();
+        for (i, &x) in xs.iter().enumerate().rev().step_by(3) {
+            let t = [x, v.ty, c];
+            assert_eq!(g.delete(&[t]), 1);
+            set.remove(&t);
+            if i % 2 == 0 {
+                assert_eq!(g.insert(&[[x, v.ty, d]]), 1);
+                set.insert([x, v.ty, d]);
+            }
+            if i % 10 == 0 {
+                check_step(&g, &mut dict, &set);
+            }
+        }
+        check_step(&g, &mut dict, &set);
+        assert_eq!(g.full_rebuilds(), 0);
+    }
+
     #[test]
     fn initial_materialization_matches_batch() {
         let mut dict = Dict::new();
