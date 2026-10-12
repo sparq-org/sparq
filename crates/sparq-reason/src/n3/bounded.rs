@@ -48,6 +48,14 @@ impl<T> Bounded<T> {
             cut: Some(why),
         }
     }
+
+    /// The same step, its value mapped by `f` (the cut, if any, kept).
+    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Bounded<U> {
+        Bounded {
+            value: f(self.value),
+            cut: self.cut,
+        }
+    }
 }
 
 /// Where [`settle`] records a cut.
@@ -265,24 +273,31 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// nested `log:conclusion` closure of a run gets the same limits as the run, not a share
 /// of them.
 ///
-/// `max_term_bytes` bounds each term a builtin derives, not the closure's total memory:
-/// many distinct terms just under it are bounded only by `max_facts`.
+/// `max_term_bytes` bounds each term the text engine derives (a builtin's argument list
+/// and result, a formula `log:parsedAsN3` / `log:semantics` parses or `log:conclusion`
+/// returns, and a rule conclusion's list, quoted triple or formula), each sized before it
+/// is built. It is not a bound on the closure's total memory: many distinct terms just
+/// under it are bounded only by `max_facts`.
+///
+/// The struct is `#[non_exhaustive]`: outside this crate, start from
+/// [`ClosureLimits::default`] and set the fields to change
+/// (`let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`).
 ///
 /// Pass one to [`reason_n3_with_limits`](crate::n3::reason_n3_with_limits) or
 /// [`reason_n3_terms_with_limits`](crate::n3::reason_n3_terms_with_limits); every other
 /// N3 entry point uses [`ClosureLimits::default`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ClosureLimits {
     /// Rounds one forward closure may run (summed over its strata). Default 1,000,000.
     pub max_rounds: usize,
     /// Facts one forward closure may hold, asserted and derived together. Default
     /// 50,000,000.
     pub max_facts: usize,
-    /// Approximate bytes of one term a functional builtin (`string:concatenation`,
-    /// `string:format`, `string:replace`, `list:append`, `log:conjunction`, …) may derive:
-    /// its strings plus a fixed cost per node, counted through nested lists, formulas and
-    /// quoted triples. The builtin is checked before it builds the result, from the sizes
-    /// of its inputs. Default 16 MiB.
+    /// Approximate bytes of one term the closure may derive (a builtin's argument list or
+    /// result, a parsed or concluded formula, a conclusion's compound term): its strings
+    /// plus a fixed cost per node, counted through nested lists, formulas and quoted
+    /// triples, and checked before the term is built. Default 16 MiB.
     pub max_term_bytes: usize,
 }
 
@@ -298,7 +313,7 @@ impl Default for ClosureLimits {
 }
 
 /// The fixed cost [`term_bytes`] charges each node of a term.
-const TERM_NODE_BYTES: usize = std::mem::size_of::<Term>();
+pub(crate) const TERM_NODE_BYTES: usize = std::mem::size_of::<Term>();
 
 /// The approximate size of `t` that [`ClosureLimits::max_term_bytes`] bounds: the bytes
 /// of its strings plus [`TERM_NODE_BYTES`] per node, through nested lists, formulas and
@@ -332,18 +347,18 @@ pub(crate) fn string_term_bytes(lex: usize) -> usize {
     lex.saturating_add(XSD_STRING_LEN + TERM_NODE_BYTES)
 }
 
-/// The ONE checkpoint a functional builtin passes before it builds its result (GH #6771).
-/// `bound` is an upper bound on the result's [`term_bytes`], computed from the sizes of
-/// its inputs without allocating the result; `exact` is the result's exact size, computed
-/// (again without building it) only when `bound` is over the limit, for a builtin whose
-/// bound is loose (`string:replace`).
+/// The ONE checkpoint every term the text engine derives passes before it is built
+/// (GH #6771): a builtin's argument list and result, and a rule conclusion's terms.
+/// `bound` is an upper bound on the term's [`term_bytes`], computed from borrowed inputs
+/// without building anything; `exact` is its exact size, computed (again without building
+/// it) only when `bound` is over the limit, so a loose bound never refuses a term that fits.
 ///
-/// Past the run's [`ClosureLimits::max_term_bytes`] the result is refused: a cut, and
+/// Past the run's [`ClosureLimits::max_term_bytes`] the term is refused: a cut, and
 /// `Some(error)` the caller must fail the closure with, so no entry point returns the
 /// closure without the term as a result.
 pub(crate) fn derived_term(
     run: &Truncation,
-    builtin: &dyn std::fmt::Debug,
+    what: &dyn std::fmt::Display,
     bound: usize,
     exact: impl FnOnce() -> usize,
 ) -> Bounded<Option<String>> {
@@ -357,8 +372,8 @@ pub(crate) fn derived_term(
     }
     Bounded::cut(
         Some(format!(
-            "n3: {CLOSURE_CUT}: the builtin {builtin:?} would derive a term of about {size} \
-             bytes, over max_term_bytes ({limit}): the rules build ever larger terms (raise \
+            "n3: {CLOSURE_CUT}: {what} would be a term of about {size} bytes, over \
+             max_term_bytes ({limit}): the rules build ever larger terms (raise \
              ClosureLimits::max_term_bytes to allow more)"
         )),
         CLOSURE_CUT,
@@ -473,6 +488,46 @@ pub(crate) fn parse_n3_with_extra(
         Err(ParseFailure::Resource(e)) => Bounded::cut(Err(e.message), e.why),
     };
     settle(cuts, parsed)
+}
+
+/// Why a builtin's parse was stopped by [`ClosureLimits::max_term_bytes`].
+const PARSE_TERM_CUT: &str = "forward closure limit exceeded (a parsed formula)";
+
+/// Charge `bytes` of built terms to a charged parse with `left` bytes left: what is left
+/// after it, or the limit error once the parse would pass it.
+pub(crate) fn charge_parse(left: usize, bytes: usize) -> Result<usize, LimitError> {
+    left.checked_sub(bytes).ok_or_else(|| LimitError {
+        why: PARSE_TERM_CUT,
+        message: format!(
+            "n3: {CLOSURE_CUT}: a parsed formula would build more than max_term_bytes of \
+             terms (raise ClosureLimits::max_term_bytes to allow more)"
+        ),
+    })
+}
+
+/// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`): the
+/// terms the parse builds are charged against the run's
+/// [`ClosureLimits::max_term_bytes`] as it builds them, so a small source whose prefixes
+/// expand into a huge formula is refused while it is parsed. `Err(Some(error))` is that
+/// refusal (a cut on `cuts`, and an error the caller must fail the closure with);
+/// `Err(None)` is any other failure, a syntax error or the nesting limit (which is itself
+/// recorded as a cut).
+pub(crate) fn parse_n3_term(
+    src: &str,
+    base: &str,
+    run: &Truncation,
+    cuts: &impl Sink,
+) -> Result<super::parser::Parsed, Option<String>> {
+    use super::parser::{parse_charged_checked, ParseFailure};
+    let left = Some(run.limits.max_term_bytes);
+    match parse_charged_checked(src, base, std::iter::empty(), left) {
+        Ok(p) => Ok(p),
+        Err(ParseFailure::Syntax(_)) => Err(None),
+        Err(ParseFailure::Resource(e)) => {
+            cuts.record(e.why);
+            Err((e.why == PARSE_TERM_CUT).then_some(e.message))
+        }
+    }
 }
 
 /// A document a builtin asked the resolver for (`log:semantics`, `log:content`). No

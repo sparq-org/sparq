@@ -601,6 +601,9 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
+                if conclusion_refused(&bw, &c, &b) {
+                    continue;
+                }
                 if let Some(g) = ground_triple(&c, &b) {
                     if emitted.insert(g.clone()) {
                         out.push(g);
@@ -1431,6 +1434,9 @@ fn run_closure(
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
+                        if conclusion_refused(&bw, &c, &b) {
+                            continue;
+                        }
                         if let Some(g) = ground_triple(&c, &b) {
                             if !facts.contains(&g) {
                                 // The supporting facts: premise patterns instantiated under b that
@@ -1830,6 +1836,14 @@ fn match_premise_seeded(
                         if !negation_gate(bw) {
                             continue;
                         }
+                        // One copy of the template per solution, sized before it is built.
+                        let bytes = sols
+                            .iter()
+                            .map(|s| resolved_bytes(template, s, true))
+                            .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
+                        if refused_term(bw, &bw.truncated, Derived::Collected, bytes, || bytes) {
+                            continue;
+                        }
                         let collected =
                             Term::List(sols.iter().map(|s| apply_deep(template, s)).collect());
                         let mut nb = b.clone();
@@ -2182,6 +2196,12 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
 /// [`extract_lists`], which resolves rule-local structure. `rdf:nil` is the
 /// empty list.
 fn fact_list(head: &Term, facts: &FactIndex) -> Bounded<Option<Vec<Term>>> {
+    fact_list_refs(head, facts).map(|ms| ms.map(|ms| ms.into_iter().cloned().collect()))
+}
+
+/// [`fact_list`], borrowing the members from the store (so they can be sized before
+/// they are copied).
+fn fact_list_refs<'f>(head: &Term, facts: &'f FactIndex) -> Bounded<Option<Vec<&'f Term>>> {
     let first = Term::Iri(parser::RDF_FIRST.into());
     let rest = Term::Iri(parser::RDF_REST.into());
     let nil = Term::Iri(parser::RDF_NIL.into());
@@ -2190,11 +2210,7 @@ fn fact_list(head: &Term, facts: &FactIndex) -> Bounded<Option<Vec<Term>>> {
         head.clone(),
         |cur| *cur == nil || *cur == empty,
         |cur| {
-            let f = facts
-                .ps
-                .get(&(first.clone(), cur.clone()))?
-                .first()?
-                .clone();
+            let f = facts.ps.get(&(first.clone(), cur.clone()))?.first()?;
             let r = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
             Some((f, r))
         },
@@ -3669,40 +3685,190 @@ fn functional_builtin(p: &Term) -> Option<Func> {
 /// bytes (`1e308`, or the smallest subnormal), an `i128` 40.
 const NUMERAL_TEXT_BYTES: usize = 400;
 
-/// An upper bound on the [`bounded::term_bytes`] of the term builtin `f` derives from
-/// `args`, from the input sizes alone. 0 for a builtin whose result is never larger than
-/// one of its inputs (a part of one, a number, a fixed-size value) or whose size is
-/// bounded elsewhere (`log:conclusion` runs its own closure under the same limits;
-/// `log:content` / `log:semantics` read a document the caller's resolver supplies).
-fn output_bytes_bound(f: Func, args: &[Term]) -> usize {
-    // The text a string builtin copies from a member: a literal's lexical form (and, if
-    // it may be printed as a number, room for that), or an IRI's text.
-    let text = |t: &Term| match t {
-        Term::Lit(v, dt, _)
-            if dt
-                .strip_prefix("http://www.w3.org/2001/XMLSchema#")
-                .is_some_and(|local| local != "string") =>
-        {
-            v.len().saturating_add(NUMERAL_TEXT_BYTES)
+/// The datatype of a language-tagged literal.
+const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+/// N3 text a builtin parses into a formula (`log:parsedAsN3`, `log:semantics`), its terms
+/// charged against the run's term-size limit as the parser builds them
+/// ([`bounded::parse_n3_term`]). `None` when it is not N3 (a no-match; a parser limit is
+/// a cut) or when the limit refused it (a cut, and an error that fails the closure).
+fn parsed_term(
+    src: &str,
+    base: &str,
+    bw: &BwCtx,
+    pending: &bounded::Pending,
+) -> Option<parser::Parsed> {
+    match bounded::parse_n3_term(src, base, &bw.truncated, pending) {
+        Ok(parsed) => Some(parsed),
+        Err(refused) => {
+            if let Some(e) = refused {
+                bw.nested_error.borrow_mut().get_or_insert(e);
+            }
+            None
         }
-        Term::Lit(v, _, _) | Term::Iri(v) => v.len(),
-        _ => 0,
+    }
+}
+
+/// Whether instantiating conclusion triple `c` under `b` would build a term past the
+/// run's term-size limit: a conclusion that nests a bound term in a list, quoted triple
+/// or formula (`{ :a :p ?s } => { :a :p (?s ?s) }`) copies it, so it can grow every round
+/// without any builtin. Sized from the borrowed terms; a refusal is a cut and an error
+/// that fails the closure.
+fn conclusion_refused(bw: &BwCtx, c: &[Term; 3], b: &Binding) -> bool {
+    c.iter()
+        .filter(|t| matches!(t, Term::List(_) | Term::Triple(_) | Term::Formula(_)))
+        .any(|t| {
+            let bytes = resolved_bytes(t, b, true);
+            refused_term(bw, &bw.truncated, Derived::Conclusion, bytes, || bytes)
+        })
+}
+
+/// What a term-size refusal names ([`bounded::derived_term`]).
+enum Derived {
+    /// The result of a functional builtin.
+    Result(Func),
+    /// The argument list a functional builtin is evaluated over.
+    Arguments(Func),
+    /// A term of a rule conclusion, instantiated under a binding.
+    Conclusion,
+    /// The list `log:collectAllIn` collects.
+    Collected,
+}
+
+impl std::fmt::Display for Derived {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Derived::Result(b) => write!(f, "the result of the builtin {b:?}"),
+            Derived::Arguments(b) => write!(f, "the argument list of the builtin {b:?}"),
+            Derived::Conclusion => write!(f, "a rule conclusion's term"),
+            Derived::Collected => write!(f, "the list log:collectAllIn collects"),
+        }
+    }
+}
+
+/// The ONE term-size checkpoint of the text engine (GH #6771), over
+/// [`bounded::derived_term`]: `true` when the term is refused, its cut recorded on `cuts`
+/// and its error set to fail the closure (`bw.nested_error`).
+fn refused_term(
+    bw: &BwCtx,
+    cuts: &impl bounded::Sink,
+    what: Derived,
+    bound: usize,
+    exact: impl FnOnce() -> usize,
+) -> bool {
+    match settle(cuts, bounded::derived_term(&bw.truncated, &what, bound, exact)) {
+        Some(e) => {
+            bw.nested_error.borrow_mut().get_or_insert(e);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The [`bounded::term_bytes`] of `t` with `b`'s bindings substituted, as [`apply`] (or,
+/// with `deep`, [`apply_deep`], through quoted formulae) would build it, read from the
+/// borrowed terms without building it.
+fn resolved_bytes(t: &Term, b: &Binding, deep: bool) -> usize {
+    let node = bounded::TERM_NODE_BYTES;
+    let all = |ts: &mut dyn Iterator<Item = &Term>| {
+        ts.fold(node, |n, m| n.saturating_add(resolved_bytes(m, b, deep)))
     };
+    match t {
+        Term::Var(v) => bounded::term_bytes(b.get(v).unwrap_or(t)),
+        Term::List(ms) => all(&mut ms.iter()),
+        Term::Triple(tr) => all(&mut tr.iter()),
+        Term::Formula(ts) if deep => all(&mut ts.iter().flatten()),
+        _ => bounded::term_bytes(t),
+    }
+}
+
+/// The [`bounded::term_bytes`] of the list builtin `args` member `a` stands for: a
+/// first-class list, or the members of an rdf:first/rest data list walked from the store.
+fn list_member_bytes(a: &Term, facts: &FactIndex, pending: &bounded::Pending) -> usize {
+    let sum = |it: &mut dyn Iterator<Item = &Term>| {
+        it.map(bounded::term_bytes).fold(0usize, usize::saturating_add)
+    };
+    match a {
+        Term::List(ms) => sum(&mut ms.iter()),
+        other => settle(pending, fact_list_refs(other, facts)).map_or(0, |ms| sum(&mut ms.into_iter())),
+    }
+}
+
+/// A sink for the text a string builtin writes: the string itself, or (to size the
+/// result without building it) a byte count.
+trait TextOut {
+    fn put(&mut self, s: &str);
+}
+
+impl TextOut for String {
+    fn put(&mut self, s: &str) {
+        self.push_str(s);
+    }
+}
+
+/// Counts the bytes a string builtin would write.
+#[derive(Default)]
+struct TextBytes(usize);
+
+impl TextOut for TextBytes {
+    fn put(&mut self, s: &str) {
+        self.0 = self.0.saturating_add(s.len());
+    }
+}
+
+/// The size of the term builtin `f` derives from `args`: with `exact`, its
+/// [`bounded::term_bytes`], computed without building it; without, a cheap upper bound on
+/// it from the input sizes. Every builtin has an entry (the match is exhaustive). 0 for a
+/// builtin whose result is never larger than one of its inputs (a part of one, a number,
+/// a fixed-size value), or is sized where it is built (`log:conclusion` after its closure,
+/// `log:parsedAsN3` / `log:semantics` while parsing); `log:content` is the text the
+/// caller's resolver supplies.
+fn output_bytes(
+    f: Func,
+    args: &[Term],
+    facts: &FactIndex,
+    pending: &bounded::Pending,
+    exact: bool,
+) -> usize {
+    use bounded::{string_term_bytes, term_bytes, TERM_NODE_BYTES};
     let sum = |it: &mut dyn Iterator<Item = usize>| it.fold(0usize, usize::saturating_add);
+    let lex0 = || args.first().and_then(lex).unwrap_or("");
     match f {
-        Func::Concat => bounded::string_term_bytes(sum(&mut args.iter().map(text))),
+        Func::Concat if exact => {
+            string_term_bytes(sum(&mut args.iter().map(|a| concat_piece(a).map_or(0, |p| p.len()))))
+        }
+        Func::Concat => string_term_bytes(sum(&mut args.iter().map(|a| match a {
+            Term::Lit(v, dt, _)
+                if dt
+                    .strip_prefix("http://www.w3.org/2001/XMLSchema#")
+                    .is_some_and(|local| local != "string") =>
+            {
+                v.len().saturating_add(NUMERAL_TEXT_BYTES)
+            }
+            Term::Lit(v, _, _) | Term::Iri(v) => v.len(),
+            _ => 0,
+        }))),
+        Func::Format if exact => {
+            let mut out = TextBytes::default();
+            format_text(args, pending, &mut out).map_or(0, |()| string_term_bytes(out.0))
+        }
         // `%d` / `%f` print any member read as a number, whatever its datatype.
-        Func::Format => bounded::string_term_bytes(sum(
-            &mut args.iter().map(|a| text(a).saturating_add(NUMERAL_TEXT_BYTES)),
-        )),
+        Func::Format => string_term_bytes(sum(&mut args.iter().map(|a| {
+            lex(a).map_or(0, str::len).saturating_add(NUMERAL_TEXT_BYTES)
+        }))),
         Func::Replace => match args {
+            [Term::Lit(s, _, _), Term::Lit(pattern, _, _), Term::Lit(r, _, _)] if exact => {
+                // A pattern that does not compile is the builtin's own cut.
+                settle(pending, bounded::regex(pattern))
+                    .map_or(0, |re| string_term_bytes(replace_bytes(&re, s, r)))
+            }
             // Every match (at most one per position, plus one) is replaced by the
             // replacement's text, and every `$` reference in it expands to text inside a
             // match; matches do not overlap, so each reference adds at most the input.
             [Term::Lit(s, _, _), _, Term::Lit(r, _, _)] => {
                 let refs = r.bytes().filter(|&c| c == b'$').count();
                 let per_match = s.len().saturating_add(1).saturating_mul(r.len());
-                bounded::string_term_bytes(
+                string_term_bytes(
                     s.len()
                         .saturating_add(per_match)
                         .saturating_add(refs.saturating_mul(s.len())),
@@ -3711,46 +3877,255 @@ fn output_bytes_bound(f: Func, args: &[Term]) -> usize {
             _ => 0,
         },
         // Unicode case mapping and %XX-encoding at most triple the bytes.
-        Func::LowerCase
-        | Func::UpperCase
-        | Func::EncodeForUri
-        | Func::EncodeForUriCwm
-        | Func::EncodeForFragId => match args.first() {
-            Some(Term::Lit(v, _, _)) => bounded::string_term_bytes(v.len().saturating_mul(3)),
+        Func::LowerCase | Func::UpperCase | Func::EncodeForUri | Func::EncodeForUriCwm
+        | Func::EncodeForFragId
+            if !exact =>
+        {
+            string_term_bytes(lex0().len().saturating_mul(3))
+        }
+        Func::LowerCase => {
+            string_term_bytes(sum(&mut lex0().chars().flat_map(char::to_lowercase).map(char::len_utf8)))
+        }
+        Func::UpperCase => {
+            string_term_bytes(sum(&mut lex0().chars().flat_map(char::to_uppercase).map(char::len_utf8)))
+        }
+        Func::EncodeForUri => string_term_bytes(sum(&mut lex0().bytes().map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_' | b'~') { 1 } else { 3 }
+        }))),
+        Func::EncodeForUriCwm | Func::EncodeForFragId => {
+            let keep_extra = cwm_uri_keeps(f);
+            string_term_bytes(sum(&mut lex0().bytes().map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'-') || keep_extra.contains(&c) {
+                    1
+                } else {
+                    3
+                }
+            })))
+        }
+        // A merge of its members' lists (first-class, or data lists walked from the store).
+        Func::Append => sum(&mut args.iter().map(|a| list_member_bytes(a, facts, pending)))
+            .saturating_add(TERM_NODE_BYTES),
+        // The distinct triples of its member formulae.
+        Func::Conjunction if exact => {
+            let mut seen: FxHashSet<&[Term; 3]> = FxHashSet::default();
+            let distinct = args
+                .iter()
+                .filter_map(|a| match a {
+                    Term::Formula(ts) => Some(ts),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|t| seen.insert(t));
+            sum(&mut distinct.flat_map(|t| t.iter()).map(term_bytes)).saturating_add(TERM_NODE_BYTES)
+        }
+        Func::Conjunction => sum(&mut args.iter().map(term_bytes)),
+        Func::Langlit => match args {
+            [Term::Lit(lex, _, _), Term::Lit(lang, _, _)] => TERM_NODE_BYTES
+                .saturating_add(lex.len())
+                .saturating_add(RDF_LANG_STRING.len())
+                .saturating_add(lang.len()),
             _ => 0,
         },
-        // A merge of its members (`list:append` over data lists walks the store, whose
-        // members each passed this checkpoint or were asserted).
-        Func::Append | Func::Conjunction | Func::Langlit => {
-            sum(&mut args.iter().map(bounded::term_bytes))
-        }
-        _ => 0,
+        // Sized where they are built, or supplied by the caller.
+        Func::LogConclusion | Func::ParsedAsN3 | Func::Semantics | Func::Content => 0,
+        // A part of an input, a number, or a fixed-size value.
+        Func::Scrape
+        | Func::First
+        | Func::Last
+        | Func::Dtlit
+        | Func::TimeZone
+        | Func::Length
+        | Func::StrLength
+        | Func::MemberCount
+        | Func::Sum
+        | Func::Difference
+        | Func::Product
+        | Func::Quotient
+        | Func::Remainder
+        | Func::IntegerQuotient
+        | Func::Max
+        | Func::Min
+        | Func::Exponentiation
+        | Func::Logarithm
+        | Func::Atan2
+        | Func::Negation
+        | Func::AbsoluteValue
+        | Func::Rounded
+        | Func::Floor
+        | Func::Ceiling
+        | Func::Sin
+        | Func::Cos
+        | Func::Tan
+        | Func::Asin
+        | Func::Acos
+        | Func::Atan
+        | Func::Sinh
+        | Func::Cosh
+        | Func::Tanh
+        | Func::Asinh
+        | Func::Acosh
+        | Func::Atanh
+        | Func::Degrees
+        | Func::Radians
+        | Func::Year
+        | Func::Month
+        | Func::Day
+        | Func::Hours
+        | Func::Minutes
+        | Func::Seconds
+        | Func::DayOfWeek
+        | Func::InSeconds => 0,
     }
 }
 
-/// The exact [`bounded::term_bytes`] of what builtin `f` derives from `args`, computed
-/// without building it, for a builtin whose [`output_bytes_bound`] is loose; otherwise
-/// the bound itself.
-fn output_bytes_exact(f: Func, args: &[Term], pending: &bounded::Pending) -> usize {
-    let Func::Replace = f else {
-        return output_bytes_bound(f, args);
-    };
-    let [Term::Lit(s, _, _), Term::Lit(pattern, _, _), Term::Lit(r, _, _)] = args else {
-        return 0;
-    };
-    // A pattern that does not compile is the builtin's own cut, below.
-    let Some(re) = settle(pending, bounded::regex(pattern)) else {
-        return 0;
-    };
+/// The bytes `regex`'s `replace_all(s, r)` writes, counted without building the output
+/// or any expansion: each match is replaced by `r`'s literal text plus the captures it
+/// names, under the regex crate's replacement syntax (`$$` is `$`; `$name` / `${name}` a
+/// group by index or name, empty if it did not participate; a `$` that starts no
+/// reference is literal).
+fn replace_bytes<'r>(re: &regex::Regex, s: &str, r: &'r str) -> usize {
+    enum Piece<'r> {
+        Text(usize),
+        Index(usize),
+        Name(&'r str),
+    }
+    let valid = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    // A reference by number, else by name.
+    let reference = |name: &'r str| name.parse::<usize>().map_or(Piece::Name(name), Piece::Index);
+    let mut pieces = Vec::new();
+    let mut rest = r;
+    while let Some(i) = rest.find('$') {
+        pieces.push(Piece::Text(i));
+        let after = &rest[i + 1..];
+        if let Some(tail) = after.strip_prefix('$') {
+            pieces.push(Piece::Text(1));
+            rest = tail;
+        } else if let Some(braced) = after.strip_prefix('{') {
+            match braced.find('}') {
+                Some(end) => {
+                    pieces.push(reference(&braced[..end]));
+                    rest = &braced[end + 1..];
+                }
+                None => {
+                    pieces.push(Piece::Text(1));
+                    rest = after;
+                }
+            }
+        } else {
+            let end = after.bytes().position(|c| !valid(c)).unwrap_or(after.len());
+            if end == 0 {
+                pieces.push(Piece::Text(1));
+            } else {
+                pieces.push(reference(&after[..end]));
+            }
+            rest = &after[end..];
+        }
+    }
+    pieces.push(Piece::Text(rest.len()));
     let mut out = s.len();
-    let mut expanded = String::new();
     for caps in re.captures_iter(s) {
         let matched = caps.get(0).map_or(0, |m| m.len());
-        expanded.clear();
-        caps.expand(r, &mut expanded);
-        out = out.saturating_sub(matched).saturating_add(expanded.len());
+        let replaced = pieces
+            .iter()
+            .map(|p| match p {
+                Piece::Text(n) => *n,
+                Piece::Index(i) => caps.get(*i).map_or(0, |m| m.len()),
+                Piece::Name(n) => caps.name(n).map_or(0, |m| m.len()),
+            })
+            .fold(0usize, usize::saturating_add);
+        out = out.saturating_sub(matched).saturating_add(replaced);
     }
-    bounded::string_term_bytes(out)
+    out
+}
+
+/// ( fmt args… ) string:format: the honest %s/%d/%f/%% subset, written to `out`; `None`
+/// for any other directive or an argument-count mismatch (which EYE throws on).
+fn format_text(args: &[Term], pending: &bounded::Pending, out: &mut impl TextOut) -> Option<()> {
+    let fmt = lex(args.first()?)?;
+    let mut argi = 1;
+    let mut chars = fmt.chars();
+    let mut buf = [0u8; 4];
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.put(c.encode_utf8(&mut buf));
+            continue;
+        }
+        match chars.next()? {
+            '%' => out.put("%"),
+            's' => {
+                out.put(lex(args.get(argi)?)?);
+                argi += 1;
+            }
+            'd' => {
+                // The integer part: exact in the exact tower, else from the f64.
+                let n = match numval_in(args.get(argi)?, pending)? {
+                    NumVal::Int(i) => i,
+                    NumVal::Dec(m, sc) => m / rep(pending, 10i128.checked_pow(sc))?,
+                    NumVal::F64(f) => i128::from(settle(pending, bounded::int_of_f64(f))?),
+                };
+                out.put(&n.to_string());
+                argi += 1;
+            }
+            'f' => {
+                // C printf's default precision, 6 digits: exact from the exact
+                // tower, else from the f64 (a numeral past i128 is a cut).
+                out.put(&fixed6(numval_in(args.get(argi)?, pending)?, pending)?);
+                argi += 1;
+            }
+            _ => return None, // unsupported directive: fail, don't mangle
+        }
+    }
+    (argi == args.len()).then_some(())
+}
+
+/// The text `string:concatenation` takes from member `a`: cwm coerces typed literals to
+/// their canonical VALUE string ("0"^^xsd:boolean → "false", 0E1 → "0") and IRIs to their
+/// text (concatenation.n3 s01); `None` for any other member.
+fn concat_piece(a: &Term) -> Option<std::borrow::Cow<'_, str>> {
+    use std::borrow::Cow;
+    Some(match a {
+        Term::Lit(v, dt, _) => match dt.strip_prefix("http://www.w3.org/2001/XMLSchema#") {
+            Some("boolean") => Cow::Borrowed(if v == "0" || v == "false" { "false" } else { "true" }),
+            Some("integer" | "decimal" | "float" | "double") => match numval(a) {
+                // A numeral past i128: its canonical value string, exactly.
+                Some(NumVal::F64(_)) if big_numeral_canonical(v).is_some() => {
+                    Cow::Owned(big_numeral_canonical(v)?)
+                }
+                Some(NumVal::Int(i)) => Cow::Owned(i.to_string()),
+                Some(NumVal::Dec(m, sc)) => {
+                    let (m, sc) = dec_norm(m, sc);
+                    if sc == 0 {
+                        Cow::Owned(m.to_string())
+                    } else {
+                        let Term::Lit(lex, _, _) = numval_term(NumVal::Dec(m, sc)) else { return None };
+                        Cow::Owned(lex)
+                    }
+                }
+                Some(NumVal::F64(f)) => {
+                    if f.fract() == 0.0 && f.abs() < 9.007e15 {
+                        // not-a-cut: exact-cast (whole, below 2^53)
+                        Cow::Owned((f as i64).to_string())
+                    } else {
+                        Cow::Owned(format!("{f}"))
+                    }
+                }
+                None => Cow::Borrowed(v),
+            },
+            _ => Cow::Borrowed(v),
+        },
+        Term::Iri(i) => Cow::Borrowed(i),
+        _ => return None,
+    })
+}
+
+/// The extra bytes cwm's `string:encodeForURI` / `string:encodeForFragID` keep unencoded
+/// (uriEncode-out.n3): URI keeps #'()~ but encodes '/'; FragID keeps '/' but encodes #'()~.
+fn cwm_uri_keeps(f: Func) -> &'static [u8] {
+    if matches!(f, Func::EncodeForUriCwm) {
+        b"#'()~"
+    } else {
+        b"/"
+    }
 }
 
 /// Evaluate a functional builtin `(members) op object`: resolve the list members under `b`,
@@ -3866,23 +4241,42 @@ fn eval_functional_inner(
     // Arguments: the list members (rule-local structure, a data list walked
     // from the fact store, or `rdf:nil` = the empty list), else a singleton
     // for the unary (math:/string:/time:) ops.
-    let subj_applied = apply(subj, &b);
-    let resolved_list: Option<Vec<Term>> = match &subj_applied {
-        // First-class list value (already substituted by `apply`).
-        Term::List(ms) => Some(ms.clone()),
-        // A data list written as rdf:first/rest triples, via a bound variable.
-        _ => settle(pending, fact_list(&subj_applied, facts))
-            .map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
+    // A list is sized from the borrowed terms (its members with the binding substituted,
+    // or the data list's members in the store) BEFORE it is built: a rule-local list can
+    // name a bound term many times, and a data list copies its members (GH #6771).
+    let subj_bound = match subj {
+        Term::Var(v) => b.get(v).unwrap_or(subj),
+        _ => subj,
     };
-    let was_list = resolved_list.is_some();
+    let (args, was_list): (Vec<Term>, bool) = if let Term::List(_) = subj_bound {
+        let bytes = resolved_bytes(subj, &b, false);
+        if refused_term(bw, pending, Derived::Arguments(f), bytes, || bytes) {
+            return None;
+        }
+        // First-class list value (substituted by `apply`).
+        let Term::List(members) = apply(subj, &b) else { return None };
+        (members, true)
+    } else {
+        let subj_applied = apply(subj, &b);
+        // A data list written as rdf:first/rest triples, via a bound variable.
+        match settle(pending, fact_list_refs(&subj_applied, facts)) {
+            Some(members) => {
+                let bytes = members
+                    .iter()
+                    .map(|m| resolved_bytes(m, &b, false))
+                    .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
+                if refused_term(bw, pending, Derived::Arguments(f), bytes, || bytes) {
+                    return None;
+                }
+                (members.iter().map(|m| apply(m, &b)).collect(), true)
+            }
+            None => (vec![subj_applied], false),
+        }
+    };
     // The list:-namespace ops are only defined ON lists.
     if matches!(f, Func::Length | Func::First | Func::Last | Func::Append) && !was_list {
         return None;
     }
-    let args: Vec<Term> = match resolved_list {
-        Some(members) => members,
-        None => vec![subj_applied.clone()],
-    };
     if args.is_empty()
         && !matches!(
             f,
@@ -3897,18 +4291,16 @@ fn eval_functional_inner(
     {
         return None;
     }
-    // The ONE term-size checkpoint (GH #6771): a builtin whose result can be larger than
-    // its inputs is sized from them BEFORE it builds the result, so a term that grows
+    // The result is sized from the arguments BEFORE it is built, so a term that grows
     // every round is refused (a cut, and an error that fails the closure) instead of
-    // exhausting memory.
-    let refused = settle(
+    // exhausting memory (GH #6771).
+    if refused_term(
+        bw,
         pending,
-        bounded::derived_term(&bw.truncated, &f, output_bytes_bound(f, &args), || {
-            output_bytes_exact(f, &args, pending)
-        }),
-    );
-    if let Some(e) = refused {
-        bw.nested_error.borrow_mut().get_or_insert(e);
+        Derived::Result(f),
+        output_bytes(f, &args, facts, pending, false),
+        || output_bytes(f, &args, facts, pending, true),
+    ) {
         return None;
     }
     let result: Term = match f {
@@ -3946,45 +4338,8 @@ fn eval_functional_inner(
             _ => return None,
         },
         Func::Format => {
-            // ( fmt args… ) string:format ?out — honest %s/%d/%f/%% subset; any other
-            // directive (or an argument-count mismatch, which EYE throws on) fails.
-            let fmt = lex(&args[0])?.to_string();
             let mut out = String::new();
-            let mut argi = 1;
-            let mut chars = fmt.chars();
-            while let Some(c) = chars.next() {
-                if c != '%' {
-                    out.push(c);
-                    continue;
-                }
-                match chars.next()? {
-                    '%' => out.push('%'),
-                    's' => {
-                        out.push_str(lex(args.get(argi)?)?);
-                        argi += 1;
-                    }
-                    'd' => {
-                        // The integer part: exact in the exact tower, else from the f64.
-                        let n = match numval_in(args.get(argi)?, pending)? {
-                            NumVal::Int(i) => i,
-                            NumVal::Dec(m, sc) => m / rep(pending, 10i128.checked_pow(sc))?,
-                            NumVal::F64(f) => i128::from(settle(pending, bounded::int_of_f64(f))?),
-                        };
-                        out.push_str(&n.to_string());
-                        argi += 1;
-                    }
-                    'f' => {
-                        // C printf's default precision, 6 digits: exact from the exact
-                        // tower, else from the f64 (a numeral past i128 is a cut).
-                        out.push_str(&fixed6(numval_in(args.get(argi)?, pending)?, pending)?);
-                        argi += 1;
-                    }
-                    _ => return None, // unsupported directive: fail, don't mangle
-                }
-            }
-            if argi != args.len() {
-                return None;
-            }
+            format_text(&args, pending, &mut out)?;
             Term::Lit(out, XSD_STRING.into(), None)
         }
         Func::Scrape => {
@@ -3999,44 +4354,7 @@ fn eval_functional_inner(
         Func::Concat => {
             let mut s = String::new();
             for a in &args {
-                match a {
-                    // cwm coerces typed literals to their canonical VALUE
-                    // string ("0"^^xsd:boolean → "false", 0E1 → "0").
-                    Term::Lit(v, dt, _) => match dt.strip_prefix("http://www.w3.org/2001/XMLSchema#") {
-                        Some("boolean") => s.push_str(if v == "0" || v == "false" { "false" } else { "true" }),
-                        Some("integer" | "decimal" | "float" | "double") => {
-                            match numval(a) {
-                                // A numeral past i128: its canonical value string, exactly.
-                                Some(NumVal::F64(_)) if big_numeral_canonical(v).is_some() => {
-                                    s.push_str(&big_numeral_canonical(v)?)
-                                }
-                                Some(NumVal::Int(i)) => s.push_str(&i.to_string()),
-                                Some(NumVal::Dec(m, sc)) => {
-                                    let (m, sc) = dec_norm(m, sc);
-                                    if sc == 0 {
-                                        s.push_str(&m.to_string());
-                                    } else {
-                                        let Term::Lit(lex, _, _) = numval_term(NumVal::Dec(m, sc)) else { return None };
-                                        s.push_str(&lex);
-                                    }
-                                }
-                                Some(NumVal::F64(f)) => {
-                                    if f.fract() == 0.0 && f.abs() < 9.007e15 {
-                                        // not-a-cut: exact-cast (whole, below 2^53)
-                                        s.push_str(&(f as i64).to_string());
-                                    } else {
-                                        s.push_str(&format!("{f}"));
-                                    }
-                                }
-                                None => s.push_str(v),
-                            }
-                        }
-                        _ => s.push_str(v),
-                    },
-                    // cwm coerces IRI arguments to their text (concatenation.n3 s01).
-                    Term::Iri(i) => s.push_str(i),
-                    _ => return None,
-                }
+                s.push_str(&concat_piece(a)?);
             }
             Term::Lit(s, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
@@ -4055,11 +4373,7 @@ fn eval_functional_inner(
             // cwm's quoting pairs (uriEncode-out.n3): URI keeps #'()~ but
             // encodes '/'; FragID keeps '/' but encodes #'()~. Both keep
             // alphanumerics and _.- and use uppercase hex.
-            let keep_extra: &[u8] = if matches!(f, Func::EncodeForUriCwm) {
-                b"#'()~"
-            } else {
-                b"/"
-            };
+            let keep_extra = cwm_uri_keeps(f);
             let mut out = String::new();
             for byte in lex(&args[0])?.bytes() {
                 match byte {
@@ -4073,7 +4387,20 @@ fn eval_functional_inner(
             Term::Lit(out, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
         Func::LogConclusion => match &args[..] {
-            [Term::Formula(ts)] => Term::Formula(formula_closure(ts, bw)),
+            [Term::Formula(ts)] => {
+                // The closure ran under the run's limits; the formula holding all of it is
+                // one more term, sized before it is kept.
+                let closed = formula_closure(ts, bw);
+                let bytes = closed
+                    .iter()
+                    .flatten()
+                    .map(bounded::term_bytes)
+                    .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
+                if refused_term(bw, pending, Derived::Result(f), bytes, || bytes) {
+                    return None;
+                }
+                Term::Formula(closed)
+            }
             _ => return None,
         },
         Func::Semantics | Func::Content => match &args[..] {
@@ -4089,8 +4416,7 @@ fn eval_functional_inner(
                     // taken later by `log:supports` / `log:conclusion`, which is where the
                     // import-cycle guard ([`VisitedDocs`]) applies. Resolution itself does no
                     // recursion, so no marking is needed here.
-                    // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-                    let parsed = bounded::parse_n3(&text, doc, pending).ok()?;
+                    let parsed = parsed_term(&text, doc, bw, pending)?;
                     Term::Formula(reencode_statements(parsed))
                 }
             }
@@ -4098,8 +4424,7 @@ fn eval_functional_inner(
         },
         Func::ParsedAsN3 => match &args[..] {
             [Term::Lit(src, _, _)] => {
-                // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-                let parsed = bounded::parse_n3(src, &bw.base, pending).ok()?;
+                let parsed = parsed_term(src, &bw.base, bw, pending)?;
                 Term::Formula(reencode_statements(parsed))
             }
             _ => return None,
@@ -4801,6 +5126,59 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 
 #[cfg(test)]
 mod tests {
+    /// GH #6771 review: the replacement size is counted, not built, and the count is what
+    /// `replace_all` writes, under every corner of the replacement syntax.
+    #[test]
+    fn replace_bytes_counts_what_replace_all_writes() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("banana", "a", "[$0]"),
+            ("banana", "(a)(n)?", "$2$1$$"),
+            ("banana", "(?P<v>a)", "${v}-$v-${nope}-$nope"),
+            ("banana", "a", "$1a${1}b"),
+            ("banana", "a", "$"),
+            ("banana", "a", "x$"),
+            ("banana", "a", "${unclosed"),
+            ("banana", "a", "$-$ $."),
+            ("banana", "", "<>"),
+            ("ünïcödé", "[öé]", "$0$0"),
+            ("", "x*", "y"),
+        ];
+        for &(s, pattern, r) in cases {
+            let re = regex::Regex::new(pattern).expect("pattern");
+            let want = re.replace_all(s, r).len();
+            assert_eq!(super::replace_bytes(&re, s, r), want, "{s:?} {pattern:?} {r:?}");
+        }
+    }
+
+    /// GH #6771 review: every functional builtin has a size entry (`output_bytes` matches
+    /// exhaustively), and for each one the cheap bound is at least the exact size, on
+    /// arguments that exercise the string, list and formula builtins.
+    #[test]
+    fn every_builtin_has_a_size_whose_bound_covers_it() {
+        use super::{bounded, output_bytes, FactIndex, Func, Term};
+        let s = |v: &str| Term::Lit(v.into(), "http://www.w3.org/2001/XMLSchema#string".into(), None);
+        let d = Term::Lit("1E300".into(), "http://www.w3.org/2001/XMLSchema#double".into(), None);
+        let f = Term::Formula(vec![[s("a"), s("b"), s("c")]]);
+        let samples: Vec<Vec<Term>> = vec![
+            vec![s("aÉ /#ß%x"), s("(É)"), s("$1$1${1}$$")],
+            vec![s("%s and %d and %f %%"), s("x"), d.clone(), d.clone()],
+            vec![d.clone(), s("y"), Term::Iri("http://ex/i".into())],
+            vec![Term::List(vec![s("a"), d.clone()]), Term::List(vec![s("b")])],
+            vec![f.clone(), f.clone(), Term::Formula(vec![[s("x"), s("y"), s("z")]])],
+            vec![s("lex"), s("en")],
+        ];
+        let facts = FactIndex::default();
+        for &func in Func::ALL {
+            for args in &samples {
+                let pending = bounded::Pending::default();
+                let bound = output_bytes(func, args, &facts, &pending, false);
+                let exact = output_bytes(func, args, &facts, &pending, true);
+                assert!(exact <= bound, "{func:?} {args:?}: exact {exact} > bound {bound}");
+                let _ = pending.finish(());
+            }
+        }
+    }
+
     /// Every registry entry's declared store read, walked over the whole registry
     /// (`ALL` is generated with each enum, so a new variant joins this walk) and checked
     /// against the expected table below. A new builtin fails here until the table says

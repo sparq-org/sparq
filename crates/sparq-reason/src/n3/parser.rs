@@ -111,8 +111,23 @@ pub(crate) fn parse_with_extra_checked(
     base: &str,
     extra: impl IntoIterator<Item = [Term; 3]>,
 ) -> Result<Parsed, ParseFailure> {
+    parse_charged_checked(src, base, extra, None)
+}
+
+/// As [`parse_with_extra_checked`]; with `term_bytes_left`, every term the parse builds
+/// that can be larger than the source text it was read from (an expanded prefixed name, an
+/// IRI resolved against the base, and the subject and predicate copied into each statement
+/// of a `;` / `,` list) is charged against it before it is kept, and the parse stops
+/// ([`ParseFailure::Resource`]) once it is spent ([`super::bounded::charge_parse`]).
+pub(crate) fn parse_charged_checked(
+    src: &str,
+    base: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
+    term_bytes_left: Option<usize>,
+) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
     p.base = base.to_string();
+    p.term_bytes_left = term_bytes_left;
     let r = parse_document(&mut p, base, extra);
     r.map_err(|m| match p.stopped.take() {
         Some(e) => ParseFailure::Resource(e),
@@ -307,6 +322,9 @@ struct Parser<'a> {
     depth: usize,
     /// The limit the parse stopped on, if it did ([`ParseFailure::Resource`]).
     stopped: Option<super::bounded::LimitError>,
+    /// The bytes of expanded terms the parse may still build, when it is charged
+    /// ([`parse_charged_checked`]).
+    term_bytes_left: Option<usize>,
 }
 
 
@@ -324,7 +342,34 @@ impl<'a> Parser<'a> {
             pathvar: 0,
             depth: 0,
             stopped: None,
+            term_bytes_left: None,
         }
+    }
+
+    /// Charge `bytes` of built terms to a charged parse ([`parse_charged_checked`]).
+    fn charge(&mut self, bytes: usize) -> Result<(), String> {
+        let Some(left) = self.term_bytes_left else {
+            return Ok(());
+        };
+        match super::bounded::charge_parse(left, bytes) {
+            Ok(left) => {
+                self.term_bytes_left = Some(left);
+                Ok(())
+            }
+            Err(e) => {
+                let message = e.message().to_string();
+                self.stopped = Some(e);
+                Err(message)
+            }
+        }
+    }
+
+    /// `t`, charged to a charged parse.
+    fn charged(&mut self, t: Term) -> Result<Term, String> {
+        if self.term_bytes_left.is_some() {
+            self.charge(super::bounded::term_bytes(&t))?;
+        }
+        Ok(t)
     }
 
     // ---- lexing helpers ------------------------------------------------------
@@ -541,6 +586,12 @@ impl<'a> Parser<'a> {
             let (pred, swapped) = self.verb(out)?;
             loop {
                 let obj = self.term(out)?;
+                if self.term_bytes_left.is_some() {
+                    // The subject and predicate are copied into every statement.
+                    let copies = super::bounded::term_bytes(subj)
+                        .saturating_add(super::bounded::term_bytes(&pred));
+                    self.charge(copies)?;
+                }
                 if swapped {
                     out.push([obj, pred.clone(), subj.clone()]);
                 } else {
@@ -836,7 +887,9 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(resolve_iri(&self.base, &iri))
+        let iri = resolve_iri(&self.base, &iri);
+        self.charge(iri.len())?;
+        Ok(iri)
     }
 
     /// `\uXXXX` or `\UXXXXXXXX` with the backslash already consumed.
@@ -947,7 +1000,7 @@ impl<'a> Parser<'a> {
                         Some(ns) => ns.clone(),
                         None => resolve_iri(&self.base, "#"),
                     };
-                    return Ok(Term::Iri(format!("{ns}{tok}")));
+                    return self.charged(Term::Iri(format!("{ns}{tok}")));
                 }
             }
             return Err(format!("bad token '{tok}' at {start}"));
@@ -965,7 +1018,7 @@ impl<'a> Parser<'a> {
                 None => return Err(format!("unknown prefix '{pfx}:'")),
             },
         };
-        Ok(Term::Iri(format!("{ns}{local}")))
+        self.charged(Term::Iri(format!("{ns}{local}")))
     }
 
     fn read_name(&mut self) -> String {
