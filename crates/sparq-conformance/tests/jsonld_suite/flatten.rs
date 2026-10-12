@@ -29,7 +29,7 @@ use std::path::Path;
 ///    writing and re-parsing (no structural loss — both ASTs are JSON).
 /// 5. Parse the suite's expected document as a `serde_json::Value`.
 /// 6. Compare with `json_ld_equal` (object key order insignificant; array order
-///    significant only inside `@list`; integers compared exactly, non-integral
+///    significant only inside `@list` and a `@json` payload; integers compared exactly, non-integral
 ///    numbers compared as f64 so `1` ≡ `1.0`).
 ///
 /// ## Honest SKIP buckets (recorded, not passed, not failed) — see the `flatten` floor

@@ -38,7 +38,8 @@ pub struct CompactScores {
 ///    Algorithm. The `FsLoader` maps the suite URL prefix to the local fixture tree so
 ///    remote `@context`/`@import` references resolve offline (deny-by-default otherwise).
 /// 5. Deep-compare against the suite's EXPECTED document via `json_ld_equal` (object key
-///    order insignificant; array order significant only inside explicit `@list` values;
+///    order insignificant; array order significant only inside explicit `@list` values
+///    and a `@json` payload;
 ///    numbers compared as in the expand lane).
 ///
 /// ## Honest oracle caveat
