@@ -584,6 +584,10 @@ fn formula_key(ts: &[[Term; 3]]) -> u64 {
 struct BwCtx<'a> {
     rules: &'a [Rule],
     rename: std::cell::Cell<usize>,
+    /// The backward-rule application ([`rename_vars`] space) whose renamed premise is being
+    /// evaluated, if any: a containment pattern bound through a variable there is renamed
+    /// into it, as the premise's own formulas are.
+    application: std::cell::Cell<Option<usize>>,
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
@@ -664,6 +668,7 @@ impl<'a> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
+            application: std::cell::Cell::new(None),
             base: String::new(),
             resolver: None,
             visited,
@@ -2232,22 +2237,35 @@ fn match_premise_admitted(
                 // The pattern: a formula written in place, or the formula a variable is
                 // bound to, matched exactly as if it were written in place (GH #6936). Any
                 // other object is no pattern, and fails the premise for this binding.
+                // Inside a backward rule's premise the bound formula takes that rule
+                // application's renaming, as a formula written there does, so its variables
+                // share the application's bindings ([`BwCtx::application`]).
+                let renamed: Term;
                 let inner: &[[Term; 3]] = match &pat[2] {
                     Term::Formula(t) => t,
-                    Term::Var(v) => match b.get(v) {
+                    Term::Var(_) => match resolved(&pat[2], &b) {
                         // A pattern reached through a variable was not visible to
                         // [`validate_rule_quantifiers`]: a quantified formula bound to it is
                         // refused the same way, failing the run.
-                        Some(val @ Term::Formula(_)) if quantified_clause(val) => {
+                        val @ Term::Formula(_) if quantified_clause(val) => {
                             bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                             continue;
                         }
-                        Some(Term::Formula(t)) => t,
-                        // `{}` parses as the literal true: the empty pattern.
-                        Some(Term::Lit(v, _, _)) if v == "true" => NO_STATEMENTS,
+                        val @ Term::Formula(t) => match bw.application.get() {
+                            Some(n) => {
+                                renamed = rename_vars(val, n);
+                                match &renamed {
+                                    Term::Formula(t) => t,
+                                    _ => continue,
+                                }
+                            }
+                            None => t,
+                        },
+                        val if empty_formula(val) => NO_STATEMENTS,
+                        // Unbound, or no formula: no pattern.
                         _ => continue,
                     },
-                    Term::Lit(v, _, _) if v == "true" => NO_STATEMENTS,
+                    val if empty_formula(val) => NO_STATEMENTS,
                     _ => continue,
                 };
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
@@ -2617,8 +2635,17 @@ fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
                     ListGen::In => obj_ready,
                 };
             }
-            // functional / binder / scope op: bidirectional ops accept either
-            // side; the rest need the subject.
+            // A scope op also needs a pattern given through a variable (GH #6936); the
+            // variables of a pattern written in place are its outputs.
+            if scope_op(&pat[1]).is_some() {
+                let pattern_ready = match &pat[2] {
+                    Term::Var(v) => produced.contains(v),
+                    _ => true,
+                };
+                return subj_ready && pattern_ready;
+            }
+            // functional / binder op: bidirectional ops accept either side; the rest need
+            // the subject.
             let bidi = matches!(
                 functional_builtin(&pat[1]),
                 Some(Func::Dtlit | Func::Negation | Func::InSeconds)
@@ -2700,7 +2727,10 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            for sol in match_premise_seeded(&prem, facts, &subst, None, bw, depth) {
+            let outer = bw.application.replace(Some(n));
+            let sols = match_premise_seeded(&prem, facts, &subst, None, bw, depth);
+            bw.application.set(outer);
+            for sol in sols {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -2749,6 +2779,28 @@ fn rename_vars(t: &Term, n: usize) -> Term {
         ])),
         _ => t.clone(),
     }
+}
+
+/// `t` resolved through any chain of variable bindings in `b`, borrowed (bounded against
+/// cycles); an unbound variable resolves to itself.
+fn resolved<'t>(t: &'t Term, b: &'t Binding) -> &'t Term {
+    let mut cur = t;
+    for _ in 0..b.len() + 1 {
+        match cur {
+            Term::Var(v) => match b.get(v) {
+                Some(next) => cur = next,
+                None => break,
+            },
+            _ => break,
+        }
+    }
+    cur
+}
+
+/// Whether `t` is the empty formula `{}`, which the parser reads as the boolean `true`
+/// (no other literal spelled "true" is).
+fn empty_formula(t: &Term) -> bool {
+    matches!(t, Term::Lit(v, dt, None) if v == "true" && dt == parser::XSD_BOOLEAN)
 }
 
 /// Resolve `t` through any chain of variable bindings in `s` (bounded against cycles).

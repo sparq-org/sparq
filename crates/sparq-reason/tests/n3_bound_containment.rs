@@ -163,6 +163,90 @@ fn a_non_formula_pattern_fails_the_premise() {
     }
 }
 
+/// The pattern variable is an input of the operator: a rule may bind it after the
+/// containment atom, for every operator and scope (the subject `:s` is the store).
+#[test]
+fn a_pattern_bound_by_a_later_premise_is_matched() {
+    for op in ["includes", "notIncludes", "supports"] {
+        for scope in ["{ :a :p :b }", ":s"] {
+            for key in ["hit", "miss"] {
+                let src = doc(&format!("{{ {scope} log:{op} ?f. :cfg :{key} ?f }} => {{ :r :{op} :{key} }}."));
+                let truth = if op == "notIncludes" { "notIncludes" } else { "includes" };
+                let want: Vec<_> = expected(truth, key).then(|| fired(op, key)).into_iter().collect();
+                // The store-scoped notIncludes is a negation cycle (see above): opt in.
+                assert_eq!(text(&src, NegationCycles::SinglePass).expect("text"), want, "{src}");
+                if !(op == "notIncludes" && scope == ":s") {
+                    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+                    assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+                }
+            }
+        }
+    }
+}
+
+/// A pattern variable nothing binds is no pattern: the premise fails (it is not matched as
+/// the empty pattern).
+#[test]
+fn an_unbound_pattern_fails_the_premise() {
+    for op in ["includes", "notIncludes", "supports"] {
+        let src = doc(&format!("{{ {{ :a :p :b }} log:{op} ?f }} => {{ :r :{op} :unbound }}."));
+        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), none(), "{src}");
+    }
+}
+
+/// Only the parser's empty formula (`{}`, the boolean `true`) is the empty pattern; a
+/// string spelled "true" is no formula.
+#[test]
+fn only_the_empty_formula_is_the_empty_pattern() {
+    for (key, value, holds) in [("empty", "{}", true), ("plain", "\"true\"", false), ("lang", "\"true\"@en", false)] {
+        for bound in [true, false] {
+            let pat = if bound { "?f" } else { value };
+            let src = format!(
+                "{} :cfg :{key} {value}.",
+                doc(&format!(
+                    "{{ :cfg :{key} ?f. {{ :a :p :b }} log:includes {pat} }} => {{ :r :includes :{key} }}.
+                     {{ :cfg :{key} ?f. {{ :a :p :b }} log:notIncludes {pat} }} => {{ :r :notIncludes :{key} }}."
+                ))
+            );
+            // The empty pattern is included everywhere; a non-formula fails both premises.
+            let want: Vec<_> = holds.then(|| fired("includes", key)).into_iter().collect();
+            assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+        }
+    }
+}
+
+/// A bound pattern shares the variables of the rule it is matched in, as the same formula
+/// written there does: a backward rule's renamed document-level universal (and a forward
+/// rule's) constrains the stored formula's mention of it.
+#[test]
+fn a_bound_pattern_shares_the_rules_variables() {
+    let backward = |pat: &str| {
+        format!(
+            "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
+             @forAll :x.
+             :cfg :pat {{ :x :p :b }}.
+             {{ :x :hit :yes }} <= {{ :cfg :pat ?f. {{ :a :p :b }} log:includes {pat} }}.
+             {{ :c :hit :yes }} => {{ :r :fired :c }}.
+             {{ :a :hit :yes }} => {{ :r :fired :a }}."
+        )
+    };
+    let forward = |pat: &str| {
+        format!(
+            "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
+             @forAll :x.
+             :cfg :pat {{ :x :p :b }}. :a :q :yes. :c :q :yes.
+             {{ :x :q :yes. :cfg :pat ?f. {{ :a :p :b }} log:includes {pat} }} => {{ :r :fired :x }}."
+        )
+    };
+    let want = vec![[iri("r"), iri("fired"), iri("a")]];
+    for make in [&backward as &dyn Fn(&str) -> String, &forward] {
+        for pat in ["?f", "{ :x :p :b }"] {
+            let src = make(pat);
+            assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+        }
+    }
+}
+
 /// The compiled evaluator has no variable pattern: it refuses the rule, so its callers
 /// route the document to the batch engine instead of diverging from it.
 #[cfg(feature = "compiled-rules")]
