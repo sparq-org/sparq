@@ -22,7 +22,7 @@ use bytes::Bytes;
 use super::{resources, META_SUFFIX};
 use crate::error::ServerResult;
 use crate::store::sparq::{DeleteOutcome, ResourceMeta};
-use crate::store::{ReadPlan, Resource, Store, ValidatedChildIri};
+use crate::store::{Fence, ReadPlan, Resource, Store, ValidatedChildIri};
 
 /// How many counters the resources are spread over.
 const SLOTS: usize = 256;
@@ -116,17 +116,29 @@ impl Drop for Mutating<'_> {
 
 /// A [`Store`] whose every change moves the snapshot counters of what it changes (see the
 /// module docs).
+///
+/// Cloning it gives another handle to the same store and counters: what a task that must not keep
+/// the server's state alive holds (see `records::Settlements`).
 pub struct Tracked<S> {
-    inner: S,
-    gens: Generations,
+    inner: std::sync::Arc<S>,
+    gens: std::sync::Arc<Generations>,
+}
+
+impl<S> Clone for Tracked<S> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            gens: self.gens.clone(),
+        }
+    }
 }
 
 impl<S: Store> Tracked<S> {
     /// Track `inner`, whose storage root is `root`.
     pub fn new(inner: S, root: String) -> Self {
         Self {
-            inner,
-            gens: Generations::new(root),
+            inner: std::sync::Arc::new(inner),
+            gens: std::sync::Arc::new(Generations::new(root)),
         }
     }
 
@@ -210,6 +222,15 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.delete_container_if_empty(iri, parent).await
     }
 
+    /// A write not settled ([`crate::error::ServerError::Unsettled`]) may still land after its
+    /// call returned, until its fence has succeeded: the fence is marked as a change to what that
+    /// write changes (the fence carries it, so nothing is kept per unsettled write).
+    async fn fence(&self, fence: &Fence) -> ServerResult<()> {
+        let keys: Vec<&str> = fence.touches().iter().map(String::as_str).collect();
+        let _m = self.gens.mutating(&keys);
+        self.inner.fence(fence).await
+    }
+
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
         self.inner.list_children(container).await
     }
@@ -235,6 +256,41 @@ impl<S: Store> Store for Tracked<S> {
 mod tests {
     use super::super::test_store::state;
     use super::*;
+
+    /// Codex review of #6836: an unsettled write was remembered until its fence, so one settled
+    /// by a read instead leaked its entry. Nothing is kept per write now: the fence carries what
+    /// the write changes, and fencing it moves those snapshots and leaves nothing in flight.
+    #[tokio::test]
+    async fn a_fence_moves_the_snapshot_of_what_its_write_changes() {
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        let c = st.cfg.absolute("/c/");
+        st.store
+            .create_in_container(&root, &c, Bytes::new(), "application/lws+json")
+            .await
+            .unwrap();
+        let d = format!("{c}d");
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        let fence = match st
+            .store
+            .create_in_container(&c, &d, Bytes::from_static(b"d"), "text/plain")
+            .await
+        {
+            Err(crate::error::ServerError::Unsettled { fence, .. }) => fence,
+            other => panic!("expected an unsettled write, got {other:?}"),
+        };
+        assert_eq!(fence.touches(), [c.clone(), d.clone()]);
+        let before = [st.generation(&c), st.generation(&d)];
+        st.store.fence(&fence).await.unwrap();
+        assert!(st.generation(&c) >= before[0] + 2);
+        assert!(st.generation(&d) >= before[1] + 2);
+        assert!(!st.in_flight(&c) && !st.in_flight(&d));
+        // Fenced first: the write, when it arrives, changes nothing.
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!st.store.exists(&d).await.unwrap());
+    }
 
     /// Every mutating [`Store`] method, and a journal's rollback, moves the snapshot of the
     /// container listing what it changes, and of what it changes, and leaves nothing in flight.

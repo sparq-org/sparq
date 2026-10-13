@@ -187,39 +187,7 @@ pub(crate) fn term_to_json(s: &mut String, t: &Term) {
     }
 }
 
-/// Appends `s` to `out` with JSON string escaping. Bulk-copies maximal runs of
-/// already-safe text and only handles the rare escape byte individually — the common
-/// (no-escape) value is a single `push_str`, which matters when serialising millions of
-/// result cells. Byte-level is safe: every escaped byte is ASCII (< 0x80), so UTF-8
-/// multi-byte sequences (all bytes ≥ 0x80) are never split and pass through in a run.
-pub(crate) fn escape_into(out: &mut String, s: &str) {
-    let bytes = s.as_bytes();
-    let mut start = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        let esc: &str = match b {
-            b'"' => "\\\"",
-            b'\\' => "\\\\",
-            b'\n' => "\\n",
-            b'\r' => "\\r",
-            b'\t' => "\\t",
-            0x00..=0x1f => {
-                // Other control character → \u00XX.
-                out.push_str(&s[start..i]);
-                out.push_str("\\u00");
-                const HEX: &[u8; 16] = b"0123456789abcdef";
-                out.push(HEX[(b >> 4) as usize] as char);
-                out.push(HEX[(b & 0xf) as usize] as char);
-                start = i + 1;
-                continue;
-            }
-            _ => continue,
-        };
-        out.push_str(&s[start..i]);
-        out.push_str(esc);
-        start = i + 1;
-    }
-    out.push_str(&s[start..]);
-}
+pub(crate) use sparq_core::json::escape_into;
 
 #[cfg(test)]
 mod rows_tests {

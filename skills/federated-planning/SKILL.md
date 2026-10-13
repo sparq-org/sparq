@@ -352,8 +352,10 @@ since:
     — one source of truth, no divergent copy of the parsing (port-0/overflow/IPv6-bracket/
     trailing-colon all fail-CLOSED). The address classifier is shared the same way:
     `sparq_fedclient::is_forbidden_ip` and `discovery::is_forbidden_ip` re-export
-    `sparq_engine::is_forbidden_ip`, and remote SPARQL-Results-JSON terms decode through
-    `sparq_engine::srj_term`. The same port-scoping flows through `EgressGuard::check_addr`
+    `sparq_engine::is_forbidden_ip`, and remote SPARQL-Results-JSON bodies parse through
+    the engine's streaming SERVICE reader `sparq_engine::parse_srj_into` (rows handed to a
+    `sparq_engine::RowSink` closure; `sparq_fedclient::parse_srj` collects them into a
+    `Relation`), so terms decode through the same `sparq_engine::srj_term`. The same port-scoping flows through `EgressGuard::check_addr`
     / `check_endpoint` and all three native ureq SSRF resolvers (`HttpTransport` /
     `HttpFragmentTransport` / discovery `HttpFetcher`). There is no wildcard port and no global
     bypass; default-deny stays default-deny. Use `EgressGuard::is_allowed_port(host, port)` for the
@@ -364,7 +366,12 @@ since:
   resolution layer** that maps a plan `pattern: usize` → `TriplePattern` and a `source: usize`
   → a source adapter (the resolver requires the `descriptors`/`adapters` slices to be in the
   same order, and range-checks every lookup). `lower_leaf` lowers one BGP pattern to a
-  single-pattern `SELECT`; `materialize_single_source` walks the `JoinTree`, fetches each
+  single-pattern `SELECT` and returns `Result<SubQuery, RenderError>`: each position is
+  rendered strictly as one SPARQL term (a `VARNAME` variable, an IRI with no character
+  `IRIREF` forbids, a pre-rendered `"…"` literal that parses as exactly one SPARQL literal and is
+  re-serialised, or a bare value as an escaped string), and anything else is a
+  `RenderError` (`InterpError::Render` in the interpreters, `None` from `push_group`) so
+  nothing is sent; `materialize_single_source` walks the `JoinTree`, fetches each
   leaf's SRJ through the Phase-2 adapter, parses it, and natural-joins in the plan's join
   order. The load-bearing property — the materialised federated result **equals** local
   `sparq-engine` evaluation of the same query (`solutions_equal` bag comparison) — is driven

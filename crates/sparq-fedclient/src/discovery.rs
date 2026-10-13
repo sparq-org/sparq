@@ -633,7 +633,10 @@ impl<'a> PatternProbeSession<'a> {
         endpoint: &str,
         pattern: &sparq_fedplan::TriplePattern,
     ) -> PatternProbeOutcome {
-        let clause = crate::planner::render_pattern_clause(pattern);
+        // A pattern that cannot be written as SPARQL is never probed; the source is kept.
+        let Ok(clause) = crate::planner::render_pattern_clause(pattern) else {
+            return PatternProbeOutcome::Unknown;
+        };
         let key = format!("{}\0{}", endpoint, clause);
         if let Some(outcome) = self.cache.get(&key).copied() {
             self.stats.cache_hits += 1;
@@ -693,10 +696,24 @@ impl<'a> PatternProbeSession<'a> {
     }
 }
 
-#[cfg(feature = "pattern_probe")]
+/// The GET form of `query` against `endpoint`. The endpoint's own query parameters are kept,
+/// except any existing `query` (the SPARQL Protocol takes exactly one); empty parameters are
+/// dropped, and a fragment is removed because it is never sent to the server.
 fn probe_url(endpoint: &str, query: &str) -> String {
-    let separator = if endpoint.contains('?') { '&' } else { '?' };
-    format!("{endpoint}{separator}query={}", pct_encode(query))
+    let base = endpoint.split_once('#').map_or(endpoint, |(base, _)| base);
+    let (path, params) = base.split_once('?').unwrap_or((base, ""));
+    let mut url = format!("{path}?");
+    for param in params.split('&') {
+        // Match the name as a server decodes it (`%71uery` is `query`); keep the text verbatim.
+        let name = param.split_once('=').map_or(param, |(name, _)| name);
+        if !param.is_empty() && percent_encoding::percent_decode_str(name).ne("query".bytes()) {
+            url.push_str(param);
+            url.push('&');
+        }
+    }
+    url.push_str("query=");
+    url.push_str(&pct_encode(query));
+    url
 }
 
 /// An in-memory fetcher mapping exact URLs → response bodies. Any URL not in the map yields a
@@ -927,7 +944,7 @@ pub fn discover(endpoint: &str, fetcher: &dyn Fetcher) -> Result<Discovery, Stri
 /// [`Fetcher`] can express. Returns the boolean answer, or an error if the endpoint is
 /// unreachable or returns a non-ASK body.
 fn ask_probe(endpoint: &str, fetcher: &dyn Fetcher) -> Result<bool, String> {
-    let url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
+    let url = probe_url(endpoint, ASK_PROBE);
     let body = fetcher
         .get(&url, "application/sparql-results+json")
         .map_err(|e| format!("discovery: ASK probe to {endpoint} failed: {e}"))?;
@@ -1327,6 +1344,42 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         let ask_url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
         let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": false }"#);
         let d = discover(endpoint, &fetcher).expect("a false ASK still proves reachability");
+        assert_eq!(d.provenance, Provenance::AskProbe);
+    }
+
+    #[test]
+    fn probe_url_keeps_one_query_parameter_in_the_query_string() {
+        // (endpoint suffix after `http://e/s`, the probe URL before its `query=` parameter)
+        for (suffix, kept) in [
+            ("", "?"),
+            ("?g=x", "?g=x&"),
+            ("?g=x#top", "?g=x&"),
+            ("#top", "?"),
+            ("?query=old&g=x", "?g=x&"),
+            ("?query&g=x", "?g=x&"),
+            ("?queryx=1", "?queryx=1&"),
+            ("?", "?"),
+            ("?g=x&", "?g=x&"),
+            ("?%71uery=ASK%7B%7D&g=x", "?g=x&"),
+            ("?%71uery", "?"),
+            ("?Query=1&qu+ery=2", "?Query=1&qu+ery=2&"),
+        ] {
+            let expected = format!("http://e/s{kept}query={}", pct_encode(ASK_PROBE));
+            assert_eq!(
+                probe_url(&format!("http://e/s{suffix}"), ASK_PROBE),
+                expected,
+                "{suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn ask_probe_appends_to_an_existing_query_string() {
+        // An endpoint URL that already carries a query string gets `&query=`, not a second `?`.
+        let endpoint = "http://keyed/sparql?default-graph-uri=urn%3Ag";
+        let ask_url = format!("{endpoint}&query={}", pct_encode(ASK_PROBE));
+        let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": true }"#);
+        let d = discover(endpoint, &fetcher).expect("the probe reaches the keyed endpoint");
         assert_eq!(d.provenance, Provenance::AskProbe);
     }
 

@@ -177,7 +177,7 @@ fn lower_leaf_escapes_every_bare_literal_control_char_exactly() {
         predicate: iri("http://ex/p"),
         object: Term::Literal("a\\b\"c\nd\re\tf".to_string()),
     };
-    let sub = lower_leaf(&tp);
+    let sub = lower_leaf(&tp).unwrap();
     assert_eq!(
         sub.sparql,
         r#"SELECT ?s WHERE { ?s <http://ex/p> "a\\b\"c\nd\re\tf" }"#
@@ -195,7 +195,7 @@ fn lower_leaf_emits_prerendered_literal_verbatim() {
         object: Term::Literal(r#""30"^^<http://www.w3.org/2001/XMLSchema#integer>"#.to_string()),
     };
     assert_eq!(
-        lower_leaf(&tp).sparql,
+        lower_leaf(&tp).unwrap().sparql,
         r#"SELECT ?s WHERE { ?s <http://ex/p> "30"^^<http://www.w3.org/2001/XMLSchema#integer> }"#
     );
 }
