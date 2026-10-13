@@ -251,7 +251,13 @@ mod run_shared {
             for p in sources {
                 labels.extend(document_blank_labels(p));
             }
-            let prefix = fresh_blank_prefix(&labels, "__rp");
+            RuntimeDocs::for_labels(&labels)
+        }
+
+        /// [`for_sources`](Self::for_sources) given the sources' blank labels
+        /// ([`document_blank_labels`]), for a run that has already collected them.
+        pub(super) fn for_labels(labels: &FxHashSet<&str>) -> RuntimeDocs {
+            let prefix = fresh_blank_prefix(labels, "__rp");
             let (docs, given) = (FxHashMap::default(), FxHashMap::default());
             let table = DocTable { prefix, docs, given };
             RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
@@ -1339,16 +1345,18 @@ fn run_closure(
     // from being captured by a minted conclusion blank. Labels ingested later
     // through document builtins or nested closure evaluation are outside this
     // initial-source guarantee.
-    let sk_prefix = fresh_blank_prefix(&document_blank_labels(&parsed), "__sk");
+    let labels = document_blank_labels(&parsed);
+    let sk_prefix = fresh_blank_prefix(&labels, "__sk");
     // A caller reads this closure further (a query, the next document of an explicit
     // pipeline, a nested closure's consumer).
     let read_further = inherit.is_some();
     let visited = match inherit {
         Some(v) => v,
-        None => match runtime {
-            Some(r) => run_shared::RunShared::new(r.clone()),
-            None => run_shared::RunShared::for_sources(&[&parsed]),
-        },
+        None => run_shared::RunShared::new(match runtime {
+            Some(r) => r.clone(),
+            // One scan of the document's labels serves both namespaces.
+            None => RuntimeDocs::for_labels(&labels),
+        }),
     };
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
     // Premises evaluate left-to-right with no coroutining — reorder each
