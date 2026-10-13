@@ -461,7 +461,9 @@ pub(crate) fn check(
     // A `GRAPH ?var` target is authorized while its operation runs on the fork, so a denial
     // in any operation discards the whole request. On a directory-backed store the commit of a
     // multi-operation request is not yet one durable unit when it creates or removes graphs, so
-    // there such an operation must still be the whole request.
+    // there such an operation must still be the whole request. The check covers every named
+    // graph (a dataset with any durable one counts), and a graph the request creates is durable
+    // only under a directory-backed root (`Graph::ensure_named`), which this already refuses.
     if reqs.var_graphs && upd.operations.len() > 1 && graph.is_directory_backed() {
         return Err(
             "update denied: on a directory-backed store, a DELETE/INSERT … WHERE with a \

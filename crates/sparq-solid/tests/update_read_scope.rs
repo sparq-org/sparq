@@ -432,3 +432,39 @@ fn in_memory_multi_operation_requests_are_all_or_nothing() {
     let text = out(&s);
     assert!(text.contains("multi") && text.contains("var"), "{text}");
 }
+
+/// An in-memory dataset holding one durable named graph counts as directory-backed: a
+/// multi-operation request with a variable target is refused there with the same error, and
+/// nothing is applied in memory or on disk.
+#[test]
+fn a_durable_named_graph_keeps_the_single_operation_rule() {
+    let dir = std::env::temp_dir().join(format!("sparq_update_scope_mixed_{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    Graph::load_str("<urn:o> <urn:p> \"out\" .", "ntriples")
+        .expect("loads")
+        .save(&dir)
+        .expect("saves");
+    let mut g = Graph::load_dataset(&small_dataset(), "nquads").expect("loads");
+    let out_graph = g
+        .named
+        .iter()
+        .position(|(n, _)| n.to_string() == "<https://pod.ex/out>")
+        .expect("out exists");
+    g.named[out_graph].1 = Graph::open(&dir).expect("opens");
+    let mut s = PodStore::new(g);
+    s.materialize_wac().expect("wac");
+    let before = snapshot(&s);
+    let e = s
+        .update_as(
+            &bob(),
+            "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
+             INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
+        )
+        .expect_err("a durable named graph makes the store directory-backed");
+    assert!(e.contains("directory-backed store"), "{e}");
+    assert_eq!(snapshot(&s), before, "memory changed");
+    drop(s);
+    let back = Graph::open(&dir).expect("reopens");
+    assert_eq!(back.len(), 1, "disk changed");
+    std::fs::remove_dir_all(&dir).ok();
+}
