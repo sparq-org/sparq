@@ -1901,7 +1901,7 @@ fn body_limit(path: &str, max_body: usize) -> usize {
     } else if path.starts_with(SUBSCRIPTIONS_PATH) {
         notify::MAX_SUBSCRIPTION_BYTES
     } else if path == TYPE_SEARCH_PATH {
-        index::MAX_FILTER_BYTES
+        index::MAX_FILTER_READ
     } else if path.starts_with(GRANTS_PATH) {
         access::MAX_GRANT_BYTES
     } else {
@@ -3538,7 +3538,7 @@ mod tests {
         let routes = [
             ("POST", REQUESTS_PATH, access::MAX_REQUEST_BYTES),
             ("POST", SUBSCRIPTIONS_PATH, notify::MAX_SUBSCRIPTION_BYTES),
-            ("QUERY", TYPE_SEARCH_PATH, index::MAX_FILTER_BYTES),
+            ("QUERY", TYPE_SEARCH_PATH, index::MAX_FILTER_READ),
             ("POST", GRANTS_PATH, access::MAX_GRANT_BYTES),
             ("POST", "/", max),
             ("PUT", "/x", max),
@@ -3557,6 +3557,31 @@ mod tests {
                 "{method} {path}"
             );
         }
+        // A type search read to its limit is answered as a search: a well-formed filter that
+        // long is too complex to page.
+        let search = |len: usize| {
+            let app = app.clone();
+            async move {
+                let head = "{\"type\": [\"https://e.example/T\"], \"@padding\": \"";
+                let filter = format!("{head}{}\"}}", "x".repeat(len - head.len() - 2));
+                assert_eq!(filter.len(), len);
+                let req = Request::builder()
+                    .method("QUERY")
+                    .uri(TYPE_SEARCH_PATH)
+                    .header("content-type", index::LWS_QUERY)
+                    .body(Body::from(filter))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            }
+        };
+        assert_eq!(
+            search(index::MAX_FILTER_READ).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            search(index::MAX_FILTER_READ + 1).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
         assert_eq!(body_limit("/", 10), 10);
         assert_eq!(body_limit(REQUESTS_PATH, 10), 10);
     }

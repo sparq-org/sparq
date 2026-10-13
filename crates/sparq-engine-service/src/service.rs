@@ -97,19 +97,6 @@
 
 use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple, Variable};
 
-/// A fully-collected remote SELECT result: the projected variables and one row per
-/// solution (`None` = the variable is unbound in that solution).
-///
-/// PRODUCTION consumption is streaming ([`eval_remote_into`] hands rows to a sink as
-/// they are parsed, bead sq-my8wd.4); this collected form backs the convenience
-/// wrappers ([`eval_remote`], [`parse_results`], [`parse_srj`], [`parse_srx`]) and the
-/// tests. `PartialEq` supports the streaming-vs-reference equivalence tests. [FABLE-5]
-#[derive(Debug, PartialEq)]
-pub(crate) struct ServiceRelation {
-    pub vars: Vec<Variable>,
-    pub rows: Vec<Vec<Option<Term>>>,
-}
-
 /// Shorthand for the streaming row-sink contract (bead sq-my8wd.4): called once per
 /// parsed solution row, positionally projected over the result's variables (`None` =
 /// unbound). Returning `Err` ABORTS the parse and the error string is propagated to
@@ -207,22 +194,11 @@ pub fn eval_remote_into_read<F: RowSink>(
     parse_results_into_read(std::io::BufReader::new(reader), on_row)
 }
 
-/// Collecting wrapper over [`eval_remote_into`]: evaluate one SERVICE call end-to-end
-/// into a fully-collected [`ServiceRelation`]. Kept for tests and small-result
-/// callers; production SERVICE evaluation streams via [`eval_remote_into`].
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn eval_remote(
-    transport: &dyn Transport,
-    endpoint: &str,
-    query: &str,
-) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = eval_remote_into(transport, endpoint, query, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
-}
+/// The error for a response body that starts with neither `{` nor `<`.
+#[cfg(feature = "service")]
+const NOT_A_RESULTS_DOCUMENT: &str =
+    "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
+     (expected a leading '{' or '<')";
 
 /// Parse a remote SELECT results document incrementally, content-sniffing JSON vs
 /// XML, delivering each row to `on_row` and returning the projected variables.
@@ -244,24 +220,8 @@ pub(crate) fn parse_results_into<F: RowSink>(
         Some(b'{') => parse_srj_into(text, on_row),
         // An empty body or a leading byte that is neither `{` nor `<` is not a results
         // document we can parse; report it (SILENT turns this into an empty result).
-        _ => Err(
-            "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
-             (expected a leading '{' or '<')"
-                .into(),
-        ),
+        _ => Err(NOT_A_RESULTS_DOCUMENT.into()),
     }
-}
-
-/// Collecting wrapper over `parse_results_into` (tests / small-result callers).
-#[cfg(feature = "service")]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn parse_results(text: &str) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = parse_results_into(text, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
 }
 
 /// Parse a remote SELECT results document from a `BufRead` stream WITHOUT buffering
@@ -284,11 +244,7 @@ pub(crate) fn parse_results_into_read<R: std::io::BufRead, F: RowSink>(
             .fill_buf()
             .map_err(|e| format!("SERVICE: reading response: {}", e))?;
         if buf.is_empty() {
-            return Err(
-                "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
-                 (expected a leading '{' or '<')"
-                    .into(),
-            );
+            return Err(NOT_A_RESULTS_DOCUMENT.into());
         }
         // Find first non-whitespace byte in this buffer chunk.
         let pos = buf.iter().position(|b| !b.is_ascii_whitespace());
@@ -304,11 +260,7 @@ pub(crate) fn parse_results_into_read<R: std::io::BufRead, F: RowSink>(
                 return match sniff {
                     b'<' => parse_srx_into_read(reader, on_row),
                     b'{' => parse_srj_into_read(reader, on_row),
-                    _ => Err(
-                        "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
-                         (expected a leading '{' or '<')"
-                            .into(),
-                    ),
+                    _ => Err(NOT_A_RESULTS_DOCUMENT.into()),
                 };
             }
             None => {
@@ -618,39 +570,11 @@ pub fn pushable_term(t: &Term) -> bool {
 /// document buffers raw binding objects until `head` arrives, and duplicate top-level
 /// keys (malformed JSON) resolve in document order rather than DOM check order.
 #[cfg(feature = "service")]
-pub(crate) fn parse_srj_into<F: RowSink>(
+pub fn parse_srj_into<F: RowSink>(
     text: &str,
     on_row: &mut F,
 ) -> Result<Vec<Variable>, String> {
-    use serde::de::DeserializeSeed;
-
-    let mut st = srj_stream::State::new(on_row);
-    let mut de = serde_json::Deserializer::from_str(text);
-    if let Err(e) = srj_stream::TopSeed(&mut st).deserialize(&mut de) {
-        // A semantic error (bad term / bad variable / sink refusal) was smuggled out
-        // through the side channel VERBATIM; anything else is a JSON syntax error and
-        // gets the same wrapping the DOM path used.
-        return Err(st
-            .take_fail()
-            .unwrap_or_else(|| format!("SERVICE: invalid results JSON: {}", e)));
-    }
-    de.end()
-        .map_err(|e| format!("SERVICE: invalid results JSON: {}", e))?;
-    // Post-parse checks in the SAME precedence order as the old DOM path: ASK boolean
-    // first, then a missing/invalid `head.vars`, then a missing `results.bindings`.
-    st.finish()
-}
-
-/// Collecting wrapper over `parse_srj_into` (tests / small-result callers).
-#[cfg(feature = "service")]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn parse_srj(text: &str) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = parse_srj_into(text, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
+    parse_srj_with(serde_json::Deserializer::from_str(text), on_row)
 }
 
 /// Reader-seam variant of [`parse_srj_into`]: parse a SPARQL-Results-JSON document
@@ -666,17 +590,30 @@ pub(crate) fn parse_srj_into_read<R: std::io::Read, F: RowSink>(
     reader: R,
     on_row: &mut F,
 ) -> Result<Vec<Variable>, String> {
+    parse_srj_with(serde_json::Deserializer::from_reader(reader), on_row)
+}
+
+/// The SPARQL-Results-JSON driver behind [`parse_srj_into`] and [`parse_srj_into_read`].
+#[cfg(feature = "service")]
+fn parse_srj_with<'de, R: serde_json::de::Read<'de>, F: RowSink>(
+    mut de: serde_json::Deserializer<R>,
+    on_row: &mut F,
+) -> Result<Vec<Variable>, String> {
     use serde::de::DeserializeSeed;
 
     let mut st = srj_stream::State::new(on_row);
-    let mut de = serde_json::Deserializer::from_reader(reader);
     if let Err(e) = srj_stream::TopSeed(&mut st).deserialize(&mut de) {
+        // A semantic error (bad term / bad variable / sink refusal) was smuggled out
+        // through the side channel VERBATIM; anything else is a JSON syntax error and
+        // gets the same wrapping the DOM path used.
         return Err(st
             .take_fail()
             .unwrap_or_else(|| format!("SERVICE: invalid results JSON: {}", e)));
     }
     de.end()
         .map_err(|e| format!("SERVICE: invalid results JSON: {}", e))?;
+    // Post-parse checks in the SAME precedence order as the old DOM path: ASK boolean
+    // first, then a missing/invalid `head.vars`, then a missing `results.bindings`.
     st.finish()
 }
 
@@ -1379,18 +1316,6 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
         );
     }
     Ok(vars)
-}
-
-/// Collecting wrapper over `parse_srx_into` (tests / small-result callers).
-#[cfg(feature = "service")]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn parse_srx(text: &str) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = parse_srx_into(text, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
 }
 
 // ---------------------------------------------------------------------------
@@ -2132,6 +2057,47 @@ const SERVICE_MAX_BODY_BYTES: u64 = 1024 * 1024 * 1024;
 #[cfg(all(test, feature = "service"))]
 mod tests {
     use super::*;
+
+    /// A fully-collected remote SELECT result (`None` = unbound), for comparing parses.
+    #[derive(Debug, PartialEq)]
+    struct ServiceRelation {
+        vars: Vec<Variable>,
+        rows: Vec<Vec<Option<Term>>>,
+    }
+
+    type Sink<'a> = &'a mut dyn FnMut(Vec<Option<Term>>) -> Result<(), String>;
+
+    /// Run a streaming parse to completion, collecting its rows.
+    fn collect(
+        parse: impl FnOnce(Sink<'_>) -> Result<Vec<Variable>, String>,
+    ) -> Result<ServiceRelation, String> {
+        let mut rows = Vec::new();
+        let vars = parse(&mut |row| {
+            rows.push(row);
+            Ok(())
+        })?;
+        Ok(ServiceRelation { vars, rows })
+    }
+
+    fn eval_remote(
+        t: &dyn Transport,
+        endpoint: &str,
+        query: &str,
+    ) -> Result<ServiceRelation, String> {
+        collect(|mut sink| eval_remote_into(t, endpoint, query, &mut sink))
+    }
+
+    fn parse_results(text: &str) -> Result<ServiceRelation, String> {
+        collect(|mut sink| parse_results_into(text, &mut sink))
+    }
+
+    fn parse_srj(text: &str) -> Result<ServiceRelation, String> {
+        collect(|mut sink| parse_srj_into(text, &mut sink))
+    }
+
+    fn parse_srx(text: &str) -> Result<ServiceRelation, String> {
+        collect(|mut sink| parse_srx_into(text, &mut sink))
+    }
 
     // ---------------------------------------------------------------------
     // [OPUS-4.8] (sq-6vshe.4 / sq-d4p) Per-request timeout wired to the QueryBudget

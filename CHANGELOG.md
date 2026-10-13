@@ -41,6 +41,10 @@ and every registry and release artifact.
   `NameID` is an http(s) URL. Every subject token's expiry is checked again just before an
   access token is issued, still with the clock-skew allowance, so a token that expires while
   its documents are fetched is refused. (#6819, #6821)
+- **sparq-trust (status lists):** `decode_encoded_list` now rejects a `u` (base64url) body
+  whose length is ≡ 1 mod 4 even when the leftover bits are zero (for example `ugAAAA`);
+  such a body has no byte-string meaning, and every other non-canonical form was already
+  refused. A list published by a conforming encoder is unaffected. (#6873)
 - **Breaking (sparq-fedclient):** pushed-down SPARQL renders every pattern position strictly as
   one SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
   report `InterpError::Render`, and `push_group` returns `None` for a pattern holding a
@@ -58,10 +62,14 @@ and every registry and release artifact.
   incremental DRed delete instead of rebuilding the closure. (#6842)
 - **sparq-solid:** a rules-free `DELETE`/`INSERT … WHERE` update commits without forking the
   store. (#6830)
-- **SERVICE and sparq-fedclient** share one SPARQL results decoder, one SSRF resolver and one
-  pattern renderer. (#6840, #6872, #6879, #6884)
-- **sparq-core:** shared hex, percent, JSON-string and civil-date codecs replace per-crate
-  copies. (#6850, #6864, #6866, #6868)
+- **SERVICE and sparq-fedclient** share one SPARQL results decoder and SRJ driver, one SSRF
+  resolver, and one pattern and N-Triples term renderer; sparq-fedclient parses federation
+  results with the engine's streaming SRJ reader. (#6840, #6872, #6879, #6884, #6895, #6896,
+  #6898)
+- **sparq-core:** shared hex, percent, JSON-string, civil-date, base58btc and base64url codecs
+  replace per-crate copies. (#6850, #6864, #6866, #6868, #6873)
+- **sparq-shacl:** one JS report renderer replaces the two wasm copies, with public
+  `to_js_json` and `message_text` helpers on the report. (#6856)
 - **CI:** zk-native-composition also runs when `supply-chain/config.toml` changes (#6861); the
   LWS.NET suite's own 57 test definitions run as a ratchet (#6831).
 
@@ -92,12 +100,15 @@ and every registry and release artifact.
   against the grammar. (#6826)
 - **sparq-reason:** the N3 nesting limit fits a 2 MiB thread stack, so deeply nested input is
   refused instead of overflowing the stack. (#6835)
+- **sparq-reason:** base-graph blank nodes stay distinct from blank labels the N3 parser
+  allocates. (#6779)
+- **LWS:** a type-search filter too long to page is refused as too complex (422). (#6889)
 - **sparq-shacl:** `LATERAL` blocks are covered by the SHACL-SPARQL pre-binding checks and the
   `VALUES` push-down. (#6846)
 - **JSON-LD conformance:** the oracles compare arrays inside `@json` literals in order. (#6857)
 - **CI:** the scheduled and full-sweep runs are green again (#6824, #6837), and the nightly
   visual sweep builds its inputs first and pushes re-minted baselines to a review branch
-  (#6858, #6887, #6890, #6893).
+  (#6858, #6887, #6890, #6892, #6893).
 
 ## [0.1.5] - 2026-10-10
 

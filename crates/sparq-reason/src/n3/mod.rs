@@ -224,6 +224,9 @@ struct BwCtx<'a> {
     /// Why a search of this run (or of a nested closure it reached) was cut short, if one
     /// was ([`Truncation`]).
     truncated: Truncation,
+    /// The caller blank namespace of the `MaterializedN3Graph` the run serves, if any
+    /// ([`run_closure`]'s `caller_ns`).
+    caller_ns: Option<String>,
 }
 
 impl BwCtx<'_> {
@@ -271,6 +274,7 @@ impl<'a> BwCtx<'a> {
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
             truncated,
+            caller_ns: None,
         }
     }
 }
@@ -359,7 +363,7 @@ fn reason_n3_in(
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = bounded::parse_n3(src, "", truncated)?;
     let (facts, steps, _) =
-        run_closure(parsed, None, None, truncated, StepMode::None, cycles)?.top_level();
+        run_closure(parsed, None, None, truncated, StepMode::None, cycles, None)?.top_level();
     Ok(intern_closure::<NoKeys>(dict, &facts, &steps)?.closure)
 }
 
@@ -375,6 +379,7 @@ pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<
         &cuts,
         StepMode::Full,
         NegationCycles::Reject,
+        None,
     )?
     .top_level();
     // The steps carry their facts' keys; the closure's own keys are not returned, so not built.
@@ -408,6 +413,7 @@ pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, Str
         &cuts,
         StepMode::Full,
         NegationCycles::Reject,
+        None,
     )?
     .top_level();
     intern_closure::<CollectKeys>(dict, &facts, &steps)
@@ -465,6 +471,7 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
         &cuts,
         StepMode::None,
         NegationCycles::Reject,
+        None,
     )?
     .top_level();
     // Universals are written as their own IRIs under `@forAll` declarations, so the output
@@ -568,6 +575,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
         &truncated,
         StepMode::None,
         NegationCycles::Reject,
+        None,
     )?
     .read_further(&truncated);
     let mut bw = BwCtx::new(&backward, truncated);
@@ -778,6 +786,7 @@ fn stratified_in(
             &truncated,
             StepMode::None,
             cycles,
+            None,
         )?;
         warnings.extend(closure.warning.iter().map(|w| format!("stratum {i}: {w}")));
         let f = closure.read_further(&truncated);
@@ -803,6 +812,44 @@ fn stratified_in(
 fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
     let seen = document_blank_labels(parsed);
     fresh_blank_prefix(&seen, "__st")
+}
+
+/// The namespace [`MaterializedN3Graph`](crate::MaterializedN3Graph) gives its caller's
+/// blank labels (GH #6775): the smallest `__bs{k}_` prefix no blank label of the rules
+/// document starts with. The parser's own labels (`_b<n>` for `[]`, `_:x` as written,
+/// `__path<n>`, `__ex_<local>`) are all in `parsed`, so none starts with it, and the
+/// `__sk…`/`__st…` labels the engine mints are other families. A document parsed at run
+/// time cannot spell it either ([`runtime_document`]).
+pub(crate) fn fresh_base_blank_prefix(parsed: &parser::Parsed) -> String {
+    fresh_blank_prefix(&document_blank_labels(parsed), "__bs")
+}
+
+/// The statements of a document parsed at run time (`log:parsedAsN3`, `log:semantics`),
+/// or `None`, recording a cut on the run, when the run serves a `MaterializedN3Graph`
+/// and one of the document's blank labels starts with that graph's caller namespace
+/// `caller_ns` (its exact `__bs{k}_` prefix): such a text could otherwise name a caller's
+/// blank node, which only the caller introduces. Without a caller namespace (every batch
+/// and query run) nothing is refused. The document's other blanks keep their labels as
+/// written; standardizing runtime documents apart is a separate change.
+fn runtime_document(
+    parsed: parser::Parsed,
+    pending: &bounded::Pending,
+    caller_ns: Option<&str>,
+) -> Option<Vec<[Term; 3]>> {
+    let spells_caller = caller_ns.is_some_and(|ns| {
+        document_blank_labels(&parsed).iter().any(|l| l.starts_with(ns))
+    });
+    if spells_caller {
+        return settle(
+            pending,
+            Bounded::cut(
+                None,
+                "a document parsed at run time spells a blank label in the caller namespace \
+                 of the MaterializedN3Graph it serves; it was refused",
+            ),
+        );
+    }
+    Some(reencode_statements(parsed))
 }
 
 /// Every blank label reachable in `t`, including nested list members, formula
@@ -891,6 +938,7 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
     extra: impl IntoIterator<Item = [Term; 3]>,
     cuts: &Truncation,
+    caller_ns: Option<&str>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
     let (facts, steps, _) = run_closure(
@@ -900,6 +948,7 @@ pub(crate) fn reason_n3_terms_proof(
         cuts,
         StepMode::Full,
         NegationCycles::Reject,
+        caller_ns,
     )?
     .top_level();
     Ok((facts.all, steps))
@@ -1008,6 +1057,7 @@ pub(crate) fn reason_n3_terms_in(
         truncated,
         StepMode::Conclusions,
         cycles,
+        None,
     )?
     .top_level();
     Ok(N3Closure {
@@ -1029,6 +1079,7 @@ pub(crate) fn reason_n3_terms_with_facts(
     extra: impl IntoIterator<Item = [Term; 3]>,
     cycles: NegationCycles,
     truncated: &Truncation,
+    caller_ns: &str,
 ) -> Result<N3Closure, String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, truncated)?;
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
@@ -1039,6 +1090,7 @@ pub(crate) fn reason_n3_terms_with_facts(
         truncated,
         StepMode::Conclusions,
         cycles,
+        Some(caller_ns),
     )?
     .top_level();
     Ok(N3Closure {
@@ -1116,6 +1168,10 @@ fn run_closure(
     mode: StepMode,
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
+    // The caller blank namespace of the `MaterializedN3Graph` this run serves (its exact
+    // `__bs{k}_` prefix), if any: a document parsed at run time may not spell a label in
+    // it ([`runtime_document`]). A nested run passes its parent's.
+    caller_ns: Option<&str>,
 ) -> Result<Closure, String> {
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
@@ -1141,6 +1197,7 @@ fn run_closure(
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
+    bw.caller_ns = caller_ns.map(str::to_string);
     // A caller reads this closure further (a query, the next document of an explicit
     // pipeline, a nested closure's consumer).
     let read_further = inherit.is_some();
@@ -3055,6 +3112,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
         &bw.truncated,
         StepMode::None,
         cycles,
+        bw.caller_ns.as_deref(),
     ) {
         Ok(closed) => closed.read_further(&bw.truncated),
         Err(e) => {
@@ -3988,7 +4046,8 @@ fn eval_functional_inner(
                     // recursion, so no marking is needed here.
                     // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                     let parsed = bounded::parse_n3(&text, doc, pending).ok()?;
-                    Term::Formula(reencode_statements(parsed))
+                    let ns = bw.caller_ns.as_deref();
+                    Term::Formula(runtime_document(parsed, pending, ns)?)
                 }
             }
             _ => return None,
@@ -3997,7 +4056,8 @@ fn eval_functional_inner(
             [Term::Lit(src, _, _)] => {
                 // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                 let parsed = bounded::parse_n3(src, &bw.base, pending).ok()?;
-                Term::Formula(reencode_statements(parsed))
+                let ns = bw.caller_ns.as_deref();
+                Term::Formula(runtime_document(parsed, pending, ns)?)
             }
             _ => return None,
         },
@@ -4868,6 +4928,7 @@ mod tests {
             &truncated,
             StepMode::None,
             NegationCycles::Reject,
+            None,
         );
         truncated.get()
     }

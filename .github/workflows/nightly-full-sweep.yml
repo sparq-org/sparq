@@ -315,6 +315,12 @@ jobs:
       - name: Build lean wasm bundle
         if: needs.config.outputs.mode == 'full'
         run: cd ../js && npm run build:wasm:lean
+      # /surface/inference loads the tier-b reasoner bundle (crates/sparq-reason-wasm) on its own;
+      # sync-wasm treats it as optional, so without this step the page captures "Reasoner failed
+      # to load". pages.yml builds it the same way (#6891).
+      - name: Build W-reason wasm bundle
+        if: needs.config.outputs.mode == 'full'
+        run: cd ../js && npm run build:reason-wasm
       - name: Sync wasm bundle into site/public/wasm/
         if: needs.config.outputs.mode == 'full'
         run: npm run sync-wasm

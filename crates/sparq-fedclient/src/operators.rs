@@ -46,7 +46,7 @@
 
 use crate::planner::{lower_leaf, lower_leaf_fragment, pattern_vars, SourceResolver};
 use crate::source::{FedError, FederatedSource, FragBinding, FragPattern, FragTerm, SourceType};
-use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple};
+use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple, Variable};
 use sparq_fedplan::{JoinNode, JoinTree, PatternSources, TriplePattern};
 use std::collections::HashMap;
 // [OPUS-4.8] sq-vtba (Phase 5): the streaming-operator surface reuses the planner's proven
@@ -505,88 +505,22 @@ fn join_key(row: &[Option<Term>], shared: &[(usize, usize)], from_left: bool) ->
 
 /// Parse a SPARQL-Results-JSON SELECT body into a [`Relation`].
 ///
-/// This mirrors `sparq-engine`'s `service::parse_srj` (which is `pub(crate)` there, so it
-/// cannot be imported) over the SAME `oxrdf::Term` model: `uri`/`bnode`/`literal`
-/// (+`xml:lang`/`its:dir`/`datatype`) and the SPARQL-1.2 `triple` term. A variable absent
-/// from a solution object is UNBOUND (`None`). An ASK `boolean` body is rejected (this
-/// interpreter only joins SELECT relations). [OPUS-4.8] sq-j27p.
+/// This is the engine's streaming SERVICE reader (`sparq_engine::parse_srj_into`), so a
+/// relation parsed here is row-for-row what the engine's SERVICE would read: `uri`/`bnode`/
+/// `literal` (+`xml:lang`/`its:dir`/`datatype`) and the SPARQL-1.2 `triple` term, a variable
+/// absent from a solution object is UNBOUND (`None`), and an ASK `boolean` body is rejected
+/// (this interpreter only joins SELECT relations). Errors carry the engine's text without its
+/// `SERVICE: ` prefix.
 pub fn parse_srj(text: &str) -> Result<Relation, String> {
-    // [GPT-5.6] sq-1rtc2: borrow the document envelope and each binding cell from the input.
-    // Cells outside `head.vars` remain undecoded, matching the previous parser's semantics.
-    let document: SrjDocument<'_> =
-        serde_json::from_str(text).map_err(|e| format!("invalid results JSON: {}", e))?;
-    if document.boolean.is_some() {
-        return Err("endpoint returned an ASK boolean, expected SELECT bindings".to_string());
-    }
-    let vars = document
-        .head
-        .and_then(|head| head.vars)
-        .map(|vars| {
-            serde_json::from_str::<Vec<&serde_json::value::RawValue>>(vars.get())
-                .map_err(|_| "results JSON missing head.vars".to_string())
-        })
-        .transpose()?
-        .map(|vars| {
-            vars.into_iter()
-                .filter_map(|var| serde_json::from_str::<String>(var.get()).ok())
-                .collect::<Vec<_>>()
-        })
-        .ok_or_else(|| "results JSON missing head.vars".to_string())?;
-
     let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    for solution in document
-        .results
-        .and_then(|results| results.bindings)
-        .map(|bindings| {
-            serde_json::from_str::<Vec<&serde_json::value::RawValue>>(bindings.get())
-                .map_err(|_| "results JSON missing results.bindings".to_string())
-        })
-        .transpose()?
-        .ok_or_else(|| "results JSON missing results.bindings".to_string())?
-    {
-        let object: std::collections::HashMap<String, &serde_json::value::RawValue> =
-            serde_json::from_str(solution.get())
-                .map_err(|_| "a solution binding is not a JSON object".to_string())?;
-        let mut row: Vec<Option<Term>> = Vec::with_capacity(vars.len());
-        for var in &vars {
-            match object.get(var) {
-                Some(cell) => {
-                    let value: serde_json::Value = serde_json::from_str(cell.get())
-                        .map_err(|e| format!("invalid results JSON: {}", e))?;
-                    row.push(Some(srj_term(&value)?));
-                }
-                None => row.push(None),
-            }
-        }
+    let vars = sparq_engine::parse_srj_into(text, &mut |row| {
         rows.push(row);
-    }
+        Ok(())
+    })
+    .map_err(|e| e.strip_prefix("SERVICE: ").map(str::to_string).unwrap_or(e))?;
+    let vars = vars.into_iter().map(Variable::into_string).collect();
     Ok(Relation { vars, rows })
 }
-
-#[derive(serde::Deserialize)]
-struct SrjDocument<'a> {
-    #[serde(borrow)]
-    head: Option<SrjHead<'a>>,
-    #[serde(borrow)]
-    results: Option<SrjResults<'a>>,
-    boolean: Option<serde_json::Value>,
-}
-
-#[derive(serde::Deserialize)]
-struct SrjHead<'a> {
-    #[serde(borrow)]
-    vars: Option<&'a serde_json::value::RawValue>,
-}
-
-#[derive(serde::Deserialize)]
-struct SrjResults<'a> {
-    #[serde(borrow)]
-    bindings: Option<&'a serde_json::value::RawValue>,
-}
-
-/// Reconstruct one `oxrdf::Term` from an SRJ binding value object: the engine's SERVICE
-/// decoder, so a relation parsed here is term-for-term what the engine would read.
-use sparq_engine::srj_term;
 
 // ─── Result-equivalence (the load-bearing invariant) ─────────────────────────────────
 
