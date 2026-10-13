@@ -1169,6 +1169,9 @@ mod tests {
         let one = |cells: Vec<Term>| render_values_block(&["a".to_string()], &[cells]);
         assert!(matches!(one(vec![iri("http://ex/a> } ; <x")]), Err(RenderError::Iri(_))));
         assert!(matches!(one(vec![lit("\"a\" } ; \"b\"")]), Err(RenderError::Literal(_))));
+        // A value whose rendering an endpoint's code-point preprocessing would change.
+        assert!(matches!(one(vec![lit("a\\u0022b")]), Err(RenderError::Literal(_))));
+        assert!(matches!(one(vec![lit("\"a\\\\U00000022b\"")]), Err(RenderError::Literal(_))));
         assert!(matches!(one(vec![var("x")]), Err(RenderError::Values(_))));
         assert!(matches!(one(vec![]), Err(RenderError::Values(_))));
         assert!(matches!(one(vec![iri("http://ex/a"), iri("http://ex/b")]), Err(RenderError::Values(_))));

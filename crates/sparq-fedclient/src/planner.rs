@@ -381,11 +381,54 @@ pub(crate) fn render_term(t: &Term) -> Result<String, RenderError> {
         Term::Var(v) => Err(RenderError::Var(v.0.clone())),
         Term::Iri(iri) if is_iriref_body(iri) => Ok(format!("<{iri}>")),
         Term::Iri(iri) => Err(RenderError::Iri(iri.clone())),
-        Term::Literal(lit) if lit.starts_with('"') => parse_sparql_literal(lit)
-            .map(|l| l.to_string())
-            .ok_or_else(|| RenderError::Literal(lit.clone())),
-        Term::Literal(lit) => Ok(oxrdf::Literal::new_simple_literal(lit.as_str()).to_string()),
+        Term::Literal(lit) => {
+            let parsed = if lit.starts_with('"') {
+                parse_sparql_literal(lit)
+            } else {
+                Some(oxrdf::Literal::new_simple_literal(lit.as_str()))
+            };
+            parsed.as_ref().and_then(render_literal).ok_or_else(|| RenderError::Literal(lit.clone()))
+        }
     }
+}
+
+/// Serialise `l` with escapes that SPARQL's code-point preprocessing leaves alone: the lexical
+/// form uses only `ECHAR` escapes (other characters are written as they are), and a value an
+/// endpoint would read as holding a `\u`/`\U` escape before parsing (a `\` followed by `u` or
+/// `U`) is `None`, as is a datatype IRI that is not an `IRIREF`.
+fn render_literal(l: &oxrdf::Literal) -> Option<String> {
+    let mut out = String::with_capacity(l.value().len() + 2);
+    out.push('"');
+    for c in l.value().chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    if out.contains("\\u") || out.contains("\\U") {
+        return None;
+    }
+    if let Some(lang) = l.language() {
+        out.push('@');
+        out.push_str(lang);
+        if let Some(direction) = l.direction() {
+            out.push_str(&format!("--{direction}"));
+        }
+    } else if l.datatype() != oxrdf::vocab::xsd::STRING {
+        let dt = l.datatype().as_str();
+        if !is_iriref_body(dt) {
+            return None;
+        }
+        out.push_str(&format!("^^<{dt}>"));
+    }
+    Some(out)
 }
 
 /// Parse `lit` as exactly one SPARQL literal, in any of SPARQL's literal forms (short or long
@@ -779,6 +822,13 @@ mod tests {
                 Literal::new_typed_literal("q\"} \\", NamedNode::new("http://ex/d").unwrap()).into(),
             ),
             (Term::Literal("\"x\"".into()), Literal::new_simple_literal("x").into()),
+            (
+                Term::Literal("\"hi\"@ar--rtl".into()),
+                Literal::new_directional_language_tagged_literal("hi", "ar", oxrdf::BaseDirection::Rtl)
+                    .unwrap()
+                    .into(),
+            ),
+            (Term::Literal("\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>".into()), Literal::from(1).into()),
             // Long-string forms, which the SPARQL grammar accepts in every literal position.
             (
                 Term::Literal("\"\"\"line 1\nline \"2\" }\"\"\"".into()),

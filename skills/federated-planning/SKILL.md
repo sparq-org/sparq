@@ -369,7 +369,8 @@ since:
   single-pattern `SELECT` and returns `Result<SubQuery, RenderError>`: each position is
   rendered strictly as one SPARQL term (a `VARNAME` variable, an IRI with no character
   `IRIREF` forbids, a pre-rendered `"…"` literal that parses as exactly one SPARQL literal and is
-  re-serialised, or a bare value as an escaped string), and anything else is a
+  re-serialised, or a bare value as an escaped string; literals are written with `ECHAR` escapes
+  only, and one whose value an endpoint's `\u`/`\U` preprocessing would change is refused), and anything else is a
   `RenderError` (`InterpError::Render` in the interpreters, `None` from `push_group`) so
   nothing is sent; `materialize_single_source` walks the `JoinTree`, fetches each
   leaf's SRJ through the Phase-2 adapter, parses it, and natural-joins in the plan's join
