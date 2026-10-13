@@ -372,6 +372,13 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.remove_child(container, child).await
     }
 
+    async fn fence(&self, fence: &super::sparq::Fence) -> Result<(), SparqError> {
+        // The live client: one update (the fence).
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.inner.fence(fence).await
+    }
+
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);

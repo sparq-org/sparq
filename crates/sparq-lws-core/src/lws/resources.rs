@@ -1736,7 +1736,7 @@ async fn create<S: Store + 'static>(
                     // member or its metadata in between; what is left then is set aside with
                     // the locks (see [`LwsState::set_aside`](super::LwsState::set_aside)).
                     let mut undo = Vec::new();
-                    if matches!(e, ServerError::Storage(_)) {
+                    if matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. }) {
                         undo.push(super::Undo::Remove {
                             iri: child.clone(),
                             parent: parent.clone(),
@@ -2171,7 +2171,11 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
     let parent = parent_of(uri, &state.cfg.storage());
     let landed = |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>,
                   undone: bool| {
-        !undone && matches!(outcome, Ok(_) | Err(ServerError::Storage(_)))
+        !undone
+            && matches!(
+                outcome,
+                Ok(_) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+            )
     };
     // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
     // metadata was modified"); none of one that may not have happened.
@@ -4411,7 +4415,10 @@ async fn linkset<S: Store + 'static>(
             let parent = parent_of(uri, &state.cfg.storage());
             let event = updated(uri);
             let after = move |w: &Result<(), ServerError>| {
-                let landed = matches!(w, Ok(()) | Err(ServerError::Storage(_)));
+                let landed = matches!(
+                    w,
+                    Ok(()) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+                );
                 (parent.filter(|_| landed), w.is_ok().then_some(event))
             };
             let locks = (guard, listing.take());

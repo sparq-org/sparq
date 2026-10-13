@@ -77,6 +77,8 @@ The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_
   (everything outside the RFC 3986 unreserved set becomes uppercase `%XX`).
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
+- `sparq_core::hex::{encode, encode_into, decode}` are the shared base16 helpers (lowercase
+  `encode`, either case via `encode_into`, case-insensitive `decode` returning `None` on bad input).
 - `sparq_core::json::escape_into(&mut String, &str)` appends JSON string escaping (no quotes) and
   `sparq_core::json::push_string(&mut String, &str)` appends a quoted JSON string literal; every
   hand-written JSON serialiser in the workspace (results, reports, explain, change streams) uses them.
