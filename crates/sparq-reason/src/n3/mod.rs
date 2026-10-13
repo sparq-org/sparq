@@ -5322,6 +5322,7 @@ mod tests {
                 [[iri("s"), iri("p"), deep.clone()]],
                 NegationCycles::Reject,
                 &run,
+                "__bs0_",
             )
             .expect("closes");
             (
