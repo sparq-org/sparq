@@ -67,7 +67,7 @@
 
 use crate::source::pct_encode;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::ureq_egress::{Client, EgressFilterResolver};
+use crate::ureq_egress::{Client, GuardedHttp};
 use sparq_fedplan::{SourceDescriptor, SourceId};
 
 // ─── Vocabulary IRIs (must match sparq-server/src/descriptors.rs exactly) ────────────
@@ -755,10 +755,9 @@ pub use sparq_engine::is_forbidden_ip;
 /// TLS stack ever enters the wasm bundle.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct HttpFetcher {
-    timeout: std::time::Duration,
-    /// Hosts (bare authority, lower-cased) exempt from the SSRF filter — for a trusted
-    /// internal federation endpoint that resolves privately.
-    allow_private: std::sync::Arc<std::collections::HashSet<String>>,
+    /// The timeout and the hosts (bare authority, lower-cased) exempt from the SSRF filter —
+    /// for a trusted internal federation endpoint that resolves privately.
+    http: GuardedHttp,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -774,14 +773,13 @@ impl HttpFetcher {
     /// discovery) and the strict default-deny SSRF policy (no private host allowed).
     pub fn new() -> HttpFetcher {
         HttpFetcher {
-            timeout: std::time::Duration::from_secs(15),
-            allow_private: std::sync::Arc::new(std::collections::HashSet::new()),
+            http: GuardedHttp::new(Client::Discovery, std::collections::HashSet::new()),
         }
     }
 
     /// Sets the per-request timeout.
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> HttpFetcher {
-        self.timeout = timeout;
+        self.http.timeout = timeout;
         self
     }
 
@@ -789,7 +787,8 @@ impl HttpFetcher {
     /// filter — its resolved addresses are dialled even when private. Use ONLY for a
     /// deliberately-trusted internal endpoint.
     pub fn allow_private_host(mut self, host: impl Into<String>) -> HttpFetcher {
-        std::sync::Arc::make_mut(&mut self.allow_private).insert(host.into().to_ascii_lowercase());
+        std::sync::Arc::make_mut(&mut self.http.allow_private)
+            .insert(host.into().to_ascii_lowercase());
         self
     }
 }
@@ -797,36 +796,10 @@ impl HttpFetcher {
 #[cfg(not(target_arch = "wasm32"))]
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str, accept: &str) -> Result<String, String> {
-        // [OPUS-4.8] sq-g2xs: ureq-3 `Agent::with_parts` + the default-deny SSRF resolver — ureq
-        // dials only the addresses the resolver returns (the vetted IP is the dialled IP).
-        let agent = crate::ureq_egress::agent(
-            self.timeout,
-            EgressFilterResolver {
-                allow_private: std::sync::Arc::clone(&self.allow_private),
-                client: Client::Discovery,
-            },
-        );
-        match agent.get(url).header("Accept", accept).call() {
-            // ureq-3 caps `read_to_string` at 10 MiB by default; raise it to match the other
-            // transports (a finite cap still bounds memory).
-            Ok(mut r) => r
-                .body_mut()
-                .with_config()
-                .limit(DISCOVERY_MAX_BODY_BYTES)
-                .read_to_string()
-                .map_err(|e| format!("discovery: reading response from {url}: {e}")),
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("discovery: {url} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("discovery: request to {url} failed: {e}")),
-        }
+        let response = self.http.agent().get(url).header("Accept", accept).call();
+        self.http.read_body(response, url, false)
     }
 }
-
-/// Max bytes read from a discovery (VoID/SD) response body. ureq-3's default `read_to_string`
-/// cap is 10 MiB; raised to a generous-but-finite bound (memory stays bounded). [OPUS-4.8] sq-g2xs.
-#[cfg(not(target_arch = "wasm32"))]
-const DISCOVERY_MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
 // ─── Orchestration: discover() ────────────────────────────────────────────────────────
 
@@ -992,6 +965,8 @@ fn parse_ask_boolean(body: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::ureq_egress::EgressFilterResolver;
 
     /// A served-shape Service Description (the exact N-Triples
     /// `sparq-server/src/descriptors.rs::sd_ntriples` writes for a read-only, federation-
