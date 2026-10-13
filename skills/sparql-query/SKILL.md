@@ -747,8 +747,9 @@ SPARQL Update `USING` identity behavior.
   When enabled, outbound `SERVICE` fetches go through a **default-deny SSRF egress filter**:
   an endpoint that resolves to a loopback / RFC1918 / link-local (incl. the `169.254.169.254`
   cloud-metadata IP) / unique-local / unspecified address is refused (checked on the *resolved* IP,
-  so DNS rebinding can't bypass it; `sparq_engine::is_forbidden_ip(ip)` is that classifier,
-  also covering broadcast, CGNAT `100.64/10` and IPv4-mapped IPv6). To federate to a trusted internal endpoint, allowlist its host
+  so DNS rebinding can't bypass it; `sparq_engine::is_forbidden_ip(ip)` is that classifier;
+  it refuses every non-global range, incl. multicast, documentation, CGNAT and NAT64, and judges
+  IPv4-mapped and 6to4 addresses by their embedded IPv4). To federate to a trusted internal endpoint, allowlist its host
   for the scope: `with_service_egress_allow([host.to_string()], || query(&g, q))`. Public endpoints
   need no opt-in. An allowlist entry may be **host-level** (`127.0.0.1` — every port) or
   **port-scoped** (`127.0.0.1:8053`, `[::1]:8053`, `.example.org:443` — that host on THAT port ONLY,

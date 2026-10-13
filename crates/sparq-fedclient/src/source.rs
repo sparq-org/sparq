@@ -1705,7 +1705,7 @@ mod tests {
                 "{ip} should be allowed"
             );
         }
-        assert!(!is_forbidden_ip(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 5))));
+        assert!(!is_forbidden_ip(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9))));
         assert!(!is_forbidden_ip("2606:4700:4700::1111".parse().unwrap())); // public v6
     }
 
