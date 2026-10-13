@@ -3291,23 +3291,24 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
 /// A parsed document's statements with rules re-encoded into their surface
 /// triple form (log:semantics / log:parsedAsN3 result formulae).
 fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
-    let quote = |ts: &[[Term; 3]]| -> Term {
+    // the rules' formulas MOVE back into statements: no copy of a parsed formula
+    let quote = |ts: Vec<[Term; 3]>| -> Term {
         if ts.is_empty() {
             // the empty formula IS the literal true
             Term::Lit("true".into(), parser::XSD_BOOLEAN.into(), None)
         } else {
-            Term::Formula(ts.to_vec())
+            Term::Formula(ts)
         }
     };
     let mut ts = parsed.facts;
-    for r in &parsed.rules {
-        ts.push([quote(&r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(&r.conclusion)]);
+    for r in parsed.rules {
+        ts.push([quote(r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(r.conclusion)]);
     }
-    for r in &parsed.backward_rules {
+    for r in parsed.backward_rules {
         ts.push([
-            quote(&r.conclusion),
+            quote(r.conclusion),
             Term::Iri(parser::LOG_IMPLIED_BY.into()),
-            quote(&r.premise),
+            quote(r.premise),
         ]);
     }
     ts
@@ -4015,10 +4016,9 @@ const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langSt
 /// The formula a builtin parses N3 text into (`log:parsedAsN3`, `log:semantics`), sized
 /// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
 /// cut) or when the formula is past the run's term-size limit (a cut, and the run
-/// refused). The parser also charges the terms it builds against the limit as it runs
-/// ([`bounded::parse_n3_term`]), so an expanding parse stops early; that charge is not
-/// yet complete (leaf literals and IRIs are allocated before they are charged), so the
-/// returned formula is sized again here.
+/// refused). The parser charges what it keeps against the limit before allocating it
+/// ([`bounded::parse_n3_term`]), so an expanding parse stops early; the formula is sized
+/// again here once [`runtime_document`] has re-encoded it.
 fn parsed_formula(
     f: Func,
     src: &str,

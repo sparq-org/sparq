@@ -114,14 +114,25 @@ pub(crate) fn parse_with_extra_checked(
     parse_charged_checked(src, base, extra, None)
 }
 
-/// As [`parse_with_extra_checked`]; with `allowance`, the parse is charged two ways, each
-/// against `allowance`, and stops ([`ParseFailure::Resource`]) once either is spent
-/// ([`super::bounded::charge_parse`]):
-/// * every term it builds, as it builds it (an expanded IRI, a literal, a list or formula
-///   node; [`super::bounded::node_bytes`]), so no list or formula grows past it;
-/// * every statement it keeps, each kept term once ([`super::bounded::kept_bytes`]), so the
-///   formula it returns fits, the subject and predicate copied into each statement of a
-///   `;` / `,` list included.
+/// As [`parse_with_extra_checked`]; with `allowance`, every byte the parse keeps is charged
+/// against `allowance` BEFORE it is allocated, and the parse stops
+/// ([`ParseFailure::Resource`]) once the next allocation would pass it
+/// ([`super::bounded::charge_parse`]). All of it goes through one choke point,
+/// [`Parser::charge`]:
+/// * every string a term or a directive keeps: a decoded literal (charged as it grows), an
+///   expanded prefixed name, a resolved IRI (its bound, settled once resolved), a name, a
+///   number, a fresh blank, a fixed IRI (`a`, `=>`, a datatype), a prefix, a base and a
+///   quantified name;
+/// * a fixed [`super::bounded::TERM_NODE_BYTES`] for each term node, once, where it is built;
+/// * a copy of a term ([`super::bounded::term_bytes`], a formula's full contents included)
+///   before it is made: the subject or predicate shared by a `;` / `,` list (the first
+///   statement takes the term itself), the node a property list names, a path step's
+///   variable, a quantified term, and a rule's renamed premise blanks.
+///
+/// A parse whose result is its only use of a term is charged exactly the result's
+/// [`super::bounded::term_bytes`] (plus its directives). Not charged: the scratch buffer
+/// one token is read into before it is resolved or expanded (no larger than that token
+/// of `src`, and dropped before the next), a vector's spare capacity, and `extra`.
 pub(crate) fn parse_charged_checked(
     src: &str,
     base: &str,
@@ -130,8 +141,8 @@ pub(crate) fn parse_charged_checked(
 ) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
     p.base = base.to_string();
-    p.built_left = allowance;
-    p.kept_left = allowance;
+    p.left = allowance;
+    p.allowance = allowance.unwrap_or(0);
     let r = parse_document(&mut p, base, extra);
     r.map_err(|m| match p.stopped.take() {
         Some(e) => ParseFailure::Resource(e),
@@ -140,16 +151,27 @@ pub(crate) fn parse_charged_checked(
 }
 
 fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item = [Term; 3]>) -> Result<Parsed, String> {
-    let mut stmts = p.document()?;
-    stmts.extend(extra);
-    let mut facts = Vec::new();
+    let mut facts = p.document()?;
+    facts.extend(extra);
     let mut rules = Vec::new();
     let mut backward_rules = Vec::new();
-    for [s, pred, o] in stmts {
-        match (&pred, &s, &o) {
+    // A rule statement leaves the facts; its formulas MOVE into the rule (a charged parse
+    // charged them once, as they were built).
+    let take = |t: &mut Term| match t {
+        Term::Formula(ts) => std::mem::take(ts),
+        _ => Vec::new(),
+    };
+    let is_true = |t: &Term| matches!(t, Term::Lit(v, _, _) if v == "true");
+    facts.retain_mut(|[s, pred, o]| {
+        let Term::Iri(i) = &*pred else {
+            return true;
+        };
+        let implies = i == LOG_IMPLIES;
+        let implied_by = i == LOG_IMPLIED_BY || i == LOG_IMPLIED_BY_LEGACY;
+        match (&*s, &*o) {
             // { premise } => { conclusion }
-            (Term::Iri(i), Term::Formula(prem), Term::Formula(concl)) if i == LOG_IMPLIES => {
-                rules.push(Rule { premise: prem.clone(), conclusion: concl.clone() });
+            (Term::Formula(_), Term::Formula(_)) if implies => {
+                rules.push(Rule { premise: take(s), conclusion: take(o) });
             }
             // { conclusion } <= { premise } — a backward rule. EYE never fires these
             // forward: they are tried goal-directed when a forward-rule premise (or an
@@ -157,28 +179,23 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
             // Verified against eyereasoner/eye reasoning/backward: the premise is often a
             // pure builtin over the goal's bindings, which can ONLY be evaluated once the
             // goal instantiates the variables — a forward reversal would derive nothing.
-            (Term::Iri(i), Term::Formula(concl), Term::Formula(prem))
-                if i == LOG_IMPLIED_BY || i == LOG_IMPLIED_BY_LEGACY =>
-            {
-                backward_rules.push(Rule { premise: prem.clone(), conclusion: concl.clone() });
+            (Term::Formula(_), Term::Formula(_)) if implied_by => {
+                backward_rules.push(Rule { premise: take(o), conclusion: take(s) });
             }
             // `{} => { conclusion }` — `{}` IS the literal true (N3 CG), an
             // always-true premise: fires unconditionally.
-            (Term::Iri(i), Term::Lit(v, _, _), Term::Formula(concl))
-                if i == LOG_IMPLIES && v == "true" =>
-            {
-                rules.push(Rule { premise: Vec::new(), conclusion: concl.clone() });
+            (l, Term::Formula(_)) if implies && is_true(l) => {
+                rules.push(Rule { premise: Vec::new(), conclusion: take(o) });
             }
             // { conclusion } <= true. — an always-provable backward fact schema (EYE's
             // idiom for backward base cases).
-            (Term::Iri(i), Term::Formula(concl), Term::Lit(v, _, _))
-                if (i == LOG_IMPLIED_BY || i == LOG_IMPLIED_BY_LEGACY) && v == "true" =>
-            {
-                backward_rules.push(Rule { premise: Vec::new(), conclusion: concl.clone() });
+            (Term::Formula(_), l) if implied_by && is_true(l) => {
+                backward_rules.push(Rule { premise: Vec::new(), conclusion: take(s) });
             }
-            _ => facts.push([s, pred, o]),
+            _ => return true,
         }
-    }
+        false
+    });
     // N3 semantics: a blank node inside a rule is an EXISTENTIAL — in the
     // premise it matches anything (like a variable), and a premise-bound
     // label shared with the conclusion carries its binding (the cwm/EYE
@@ -202,6 +219,21 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
         if premise_blanks.is_empty() {
             continue;
         }
+        // The new names, charged before they are allocated (the old ones are dropped).
+        if p.left.is_some() {
+            let digits = decimal_digits(ri);
+            let grown = std::cell::Cell::new(0usize);
+            let measure = |t: &mut Term| {
+                if let Term::Blank(l) = t {
+                    if premise_blanks.contains(l.as_str()) {
+                        grown.set(grown.get().saturating_add(PREMISE_BLANK_VAR.len() + digits + 1 + l.len()));
+                    }
+                }
+            };
+            rewrite_terms(&mut r.premise, false, &measure);
+            rewrite_terms(&mut r.conclusion, false, &measure);
+            p.charge(grown.get())?;
+        }
         let rename = |t: &mut Term| {
             if let Term::Blank(l) = t {
                 if premise_blanks.contains(l.as_str()) {
@@ -212,6 +244,7 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
         rewrite_terms(&mut r.premise, false, &rename);
         rewrite_terms(&mut r.conclusion, false, &rename);
     }
+    p.charge(base.len())?;
     Ok(Parsed { facts, rules, backward_rules, base: base.to_string() })
 }
 
@@ -230,15 +263,6 @@ fn well_known_prefix(pfx: &str) -> Option<&'static str> {
         "time" => "http://www.w3.org/2000/10/swap/time#",
         _ => return None,
     })
-}
-
-/// `rdf:nil` IS the empty list — normalize the IRI spelling to `Term::List([])`
-/// so `()` and `rdf:nil` are one value (cwm/EYE agree).
-fn nil_to_list(t: Term) -> Term {
-    match t {
-        Term::Iri(i) if i == RDF_NIL => Term::List(Vec::new()),
-        other => other,
-    }
 }
 
 /// Collect blank labels; `into_formulae` controls whether quoted `{ … }`
@@ -326,12 +350,20 @@ struct Parser<'a> {
     depth: usize,
     /// The limit the parse stopped on, if it did ([`ParseFailure::Resource`]).
     stopped: Option<super::bounded::LimitError>,
-    /// The bytes of terms a charged parse may still build ([`parse_charged_checked`]).
-    built_left: Option<usize>,
-    /// The bytes of statements a charged parse may still keep.
-    kept_left: Option<usize>,
+    /// The bytes a charged parse may still allocate ([`parse_charged_checked`]); `None`
+    /// for an uncharged parse.
+    left: Option<usize>,
+    /// A charged parse's whole allowance, which a release never raises `left` past.
+    allowance: usize,
 }
 
+/// A term every statement of a `;` / `,` list shares ([`Parser::share`]).
+enum Shared {
+    /// Not yet in a statement.
+    Owned(Term),
+    /// In statement `.0` of the list's output, at position `.1`.
+    At((usize, usize)),
+}
 
 impl<'a> Parser<'a> {
     fn new(src: &'a str) -> Parser<'a> {
@@ -347,53 +379,132 @@ impl<'a> Parser<'a> {
             pathvar: 0,
             depth: 0,
             stopped: None,
-            built_left: None,
-            kept_left: None,
+            left: None,
+            allowance: 0,
         }
     }
 
-    /// Charge `bytes` to `left`, one of a charged parse's allowances
-    /// ([`parse_charged_checked`]); an uncharged parse (`None`) is not charged.
-    fn charge(
-        left: &mut Option<usize>,
-        stopped: &mut Option<super::bounded::LimitError>,
-        bytes: usize,
-    ) -> Result<(), String> {
-        let Some(l) = *left else {
+    // ---- the charge (parse_charged_checked) -----------------------------------
+    // Every allocation a charged parse keeps goes through `charge`, before it is made.
+
+    /// Charge `bytes` that are about to be allocated to a charged parse's allowance; an
+    /// uncharged parse is not charged. Past the allowance the parse stops: the limit is
+    /// recorded ([`ParseFailure::Resource`]) and the error unwinds it.
+    fn charge(&mut self, bytes: usize) -> Result<(), String> {
+        let Some(left) = self.left else {
             return Ok(());
         };
-        match super::bounded::charge_parse(l, bytes) {
-            Ok(l) => {
-                *left = Some(l);
+        match super::bounded::charge_parse(left, bytes) {
+            Ok(left) => {
+                self.left = Some(left);
                 Ok(())
             }
             Err(e) => {
                 let message = e.message().to_string();
-                *stopped = Some(e);
+                self.stopped = Some(e);
                 Err(message)
             }
         }
     }
 
-    /// `t`, just built, charged to a charged parse's built allowance.
-    fn built(&mut self, t: Term) -> Result<Term, String> {
-        if self.built_left.is_some() {
-            Parser::charge(&mut self.built_left, &mut self.stopped, super::bounded::node_bytes(&t))?;
+    /// Give back `bytes` charged for an allocation that has been dropped (or that came out
+    /// smaller than charged).
+    fn release(&mut self, bytes: usize) {
+        if let Some(left) = &mut self.left {
+            *left = left.saturating_add(bytes).min(self.allowance);
         }
+    }
+
+    /// Give back a dropped term's [`super::bounded::term_bytes`].
+    fn release_term(&mut self, t: &Term) {
+        if self.left.is_some() {
+            self.release(super::bounded::term_bytes(t));
+        }
+    }
+
+    /// `parts` joined into a new string, charged before it is allocated.
+    fn new_string(&mut self, parts: &[&str]) -> Result<String, String> {
+        let n = parts.iter().map(|p| p.len()).fold(0usize, usize::saturating_add);
+        self.charge(n)?;
+        let mut out = String::with_capacity(n);
+        for p in parts {
+            out.push_str(p);
+        }
+        Ok(out)
+    }
+
+    /// Append `piece` to `buf`, a string a term keeps, charged before it grows.
+    fn append(&mut self, buf: &mut String, piece: &str) -> Result<(), String> {
+        self.charge(piece.len())?;
+        buf.push_str(piece);
+        Ok(())
+    }
+
+    /// Append `c` to `buf` (as [`Parser::append`]).
+    fn append_char(&mut self, buf: &mut String, c: char) -> Result<(), String> {
+        self.charge(c.len_utf8())?;
+        buf.push(c);
+        Ok(())
+    }
+
+    /// `t`, a term node whose strings are already charged, with its node charged.
+    fn node(&mut self, t: Term) -> Result<Term, String> {
+        self.charge(super::bounded::TERM_NODE_BYTES)?;
         Ok(t)
     }
 
-    /// Charge a statement of `parts` to a charged parse's kept allowance, BEFORE its
-    /// terms are copied into it.
-    fn keep(&mut self, parts: [&Term; 3]) -> Result<(), String> {
-        if self.kept_left.is_some() {
-            let bytes = parts
-                .iter()
-                .map(|t| super::bounded::kept_bytes(t))
-                .fold(0usize, usize::saturating_add);
-            Parser::charge(&mut self.kept_left, &mut self.stopped, bytes)?;
+    /// An IRI term for the fixed `iri`.
+    fn fixed_iri(&mut self, iri: &str) -> Result<Term, String> {
+        let iri = self.new_string(&[iri])?;
+        self.node(Term::Iri(iri))
+    }
+
+    /// A literal of the fixed lexical form `lex` and datatype `dt`.
+    fn fixed_lit(&mut self, lex: &str, dt: &str) -> Result<Term, String> {
+        let lex = self.new_string(&[lex])?;
+        let dt = self.new_string(&[dt])?;
+        self.node(Term::Lit(lex, dt, None))
+    }
+
+    /// A copy of `t`, its full [`super::bounded::term_bytes`] (a formula's contents
+    /// included) charged before it is made.
+    fn copy(&mut self, t: &Term) -> Result<Term, String> {
+        if self.left.is_some() {
+            self.charge(super::bounded::term_bytes(t))?;
         }
-        Ok(())
+        Ok(t.clone())
+    }
+
+    /// `iri` resolved against the base, charged: its bound before it is resolved, settled
+    /// to its length after.
+    fn resolved(&mut self, iri: &str) -> Result<String, String> {
+        let bound = if self.base.is_empty() || has_scheme(iri) {
+            iri.len()
+        } else {
+            // RFC 3986 §5.2: the base's scheme, authority and path up to its last `/`, a
+            // `/` for an empty path, then the reference; removing dot segments only shortens.
+            self.base.len().saturating_add(iri.len()).saturating_add(1)
+        };
+        self.charge(bound)?;
+        let out = resolve_iri(&self.base, iri);
+        if out.len() > bound {
+            self.charge(out.len() - bound)?;
+        } else {
+            self.release(bound - out.len());
+        }
+        Ok(out)
+    }
+
+    /// A shared term (a list's subject or predicate) for its next statement, at `at`: the
+    /// term itself the first time, then a charged copy of the first statement's.
+    fn share(&mut self, held: &mut Shared, out: &[[Term; 3]], at: (usize, usize)) -> Result<Term, String> {
+        match std::mem::replace(held, Shared::At(at)) {
+            Shared::Owned(t) => Ok(t),
+            Shared::At(first) => {
+                *held = Shared::At(first);
+                self.copy(&out[first.0][first.1])
+            }
+        }
     }
 
     // ---- lexing helpers ------------------------------------------------------
@@ -485,20 +596,19 @@ impl<'a> Parser<'a> {
             self.ws();
             let iri = match self.peek() {
                 Some(b'<') => self.read_iriref()?,
-                _ => match self.read_prefixed_name()? {
-                    Term::Iri(i) => i,
-                    other => return Err(format!("expected IRI in quantifier, got {}", super::serialize::display_lossy(&other))),
-                },
+                _ => self.read_prefixed_name()?,
             };
             // A universal is keyed by its FULL IRI under an unforgeable prefix (GH #5391):
             // two `@forAll` IRIs sharing a local name stay two variables, and no source
             // quickvar can spell it (a `.` cannot occur in a VARNAME), so none can collide
             // with or capture it. One IRI is one variable in every scope (GH #6754).
             let term = if universal {
-                Term::Var(format!("{UNIVERSAL_VAR}{iri}"))
+                let name = self.new_string(&[UNIVERSAL_VAR, &iri])?;
+                self.node(Term::Var(name))?
             } else {
                 let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri);
-                Term::Blank(format!("__ex_{local}"))
+                let name = self.new_string(&["__ex_", local])?;
+                self.node(Term::Blank(name))?
             };
             self.quants.last_mut().expect("scope stack").insert(iri, term);
             if !self.eat(b',') {
@@ -509,9 +619,34 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    /// The quantified stand-in for `iri`, innermost scope first.
-    fn quantified(&self, iri: &str) -> Option<Term> {
-        self.quants.iter().rev().find_map(|frame| frame.get(iri).cloned())
+    /// A charged copy of the quantified stand-in for `iri`, innermost scope first.
+    fn quantified(&mut self, iri: &str) -> Result<Option<Term>, String> {
+        let Some(bytes) = self
+            .quants
+            .iter()
+            .rev()
+            .find_map(|frame| frame.get(iri))
+            .map(super::bounded::term_bytes)
+        else {
+            return Ok(None);
+        };
+        self.charge(bytes)?;
+        Ok(self.quants.iter().rev().find_map(|frame| frame.get(iri).cloned()))
+    }
+
+    /// The term the IRI `iri` (charged) reads as: its quantified stand-in, the empty list
+    /// for `rdf:nil`, or the IRI.
+    fn iri_term(&mut self, iri: String) -> Result<Term, String> {
+        if let Some(q) = self.quantified(&iri)? {
+            self.release(iri.len());
+            return Ok(q);
+        }
+        if iri == RDF_NIL {
+            // `rdf:nil` IS the empty list (N3 semantics).
+            self.release(iri.len());
+            return self.node(Term::List(Vec::new()));
+        }
+        self.node(Term::Iri(iri))
     }
 
     fn directive_prefix(&mut self) -> Result<(), String> {
@@ -551,7 +686,7 @@ impl<'a> Parser<'a> {
             if self.peek() == Some(b'.') {
                 break;
             }
-            let name = self.read_name();
+            let name = self.read_name()?;
             if name.is_empty() {
                 break;
             }
@@ -595,27 +730,35 @@ impl<'a> Parser<'a> {
             if !self.eat(b'.') && self.strict {
                 return Err("statement must end with '.'".into());
             }
+            // a bare subject is kept by no statement
+            self.release_term(&subj);
             return Ok(());
         }
-        self.predicate_object_list(&subj, out)?;
+        self.predicate_object_list(subj, out)?;
         if !self.eat(b'.') && self.strict {
             return Err("statement must end with '.'".into());
         }
         Ok(())
     }
 
-    fn predicate_object_list(&mut self, subj: &Term, out: &mut Vec<[Term; 3]>) -> Result<(), String> {
+    /// The statements of `subj`'s predicate-object list, into `out`; where the first of
+    /// them keeps `subj`. The first statement takes `subj` and each predicate itself; each
+    /// later one keeps a charged copy ([`Parser::share`]).
+    fn predicate_object_list(&mut self, subj: Term, out: &mut Vec<[Term; 3]>) -> Result<(usize, usize), String> {
+        let mut subj = Shared::Owned(subj);
+        let mut first = None;
         loop {
             self.ws();
             let (pred, swapped) = self.verb(out)?;
+            let mut pred = Shared::Owned(pred);
             loop {
                 let obj = self.term(out)?;
-                self.keep([subj, &pred, &obj])?;
-                if swapped {
-                    out.push([obj, pred.clone(), subj.clone()]);
-                } else {
-                    out.push([subj.clone(), pred.clone(), obj]);
-                }
+                let i = out.len();
+                let at = (i, if swapped { 2 } else { 0 });
+                let s = self.share(&mut subj, out, at)?;
+                let p = self.share(&mut pred, out, (i, 1))?;
+                first.get_or_insert(at);
+                out.push(if swapped { [obj, p, s] } else { [s, p, obj] });
                 if !self.eat(b',') {
                     break;
                 }
@@ -629,7 +772,8 @@ impl<'a> Parser<'a> {
                 break; // trailing `;`
             }
         }
-        Ok(())
+        // the verb and object above are mandatory: a list keeps at least one statement
+        first.ok_or_else(|| "empty predicate-object list".to_string())
     }
 
     /// A predicate position: returns `(predicate, swapped)` — `swapped` is the
@@ -640,13 +784,13 @@ impl<'a> Parser<'a> {
         if !self.strict {
             if self.starts_with("=>") {
                 self.i += 2;
-                return Ok((Term::Iri(LOG_IMPLIES.into()), false));
+                return Ok((self.fixed_iri(LOG_IMPLIES)?, false));
             }
             if self.starts_with("<=") {
                 self.i += 2;
                 // `conclusion <= premise` — log:isImpliedBy; `parse` routes it into
                 // the backward-rule set (goal-directed resolution, see module doc).
-                return Ok((Term::Iri(LOG_IMPLIED_BY.into()), false));
+                return Ok((self.fixed_iri(LOG_IMPLIED_BY)?, false));
             }
             // `<- expr` — inverted predicate (N3 2023): `:s <- :p :o` ≡ `:o :p :s`.
             // Disambiguate from an IRIREF `<-s>`: an IRI closes with '>' before
@@ -658,7 +802,7 @@ impl<'a> Parser<'a> {
             }
             if self.peek() == Some(b'=') {
                 self.i += 1;
-                return Ok((Term::Iri(OWL_SAME_AS.into()), false));
+                return Ok((self.fixed_iri(OWL_SAME_AS)?, false));
             }
         }
         // `a` keyword (rdf:type) — only when a standalone token. Under
@@ -671,14 +815,14 @@ impl<'a> Parser<'a> {
             let j = self.i + 1;
             if j >= self.s.len() || is_ws_byte(self.s[j]) || self.s[j] == b'<' {
                 self.i += 1;
-                return Ok((Term::Iri(RDF_TYPE.into()), false));
+                return Ok((self.fixed_iri(RDF_TYPE)?, false));
             }
         }
         if !self.strict && self.starts_with("@a") {
             let j = self.i + 2;
             if j >= self.s.len() || is_ws_byte(self.s[j]) {
                 self.i += 2;
-                return Ok((Term::Iri(RDF_TYPE.into()), false));
+                return Ok((self.fixed_iri(RDF_TYPE)?, false));
             }
         }
         // `is EXPR of` — inverse predicate; `has EXPR` — explicit forward.
@@ -751,23 +895,24 @@ impl<'a> Parser<'a> {
                 Some(b'!') => {
                     self.i += 1;
                     let pred = self.atom(out)?;
-                    let next = self.fresh_pathvar();
-                    self.keep([&base, &pred, &next])?;
-                    out.push([base, pred, next.clone()]);
+                    let next = self.fresh_pathvar()?;
+                    let kept = self.copy(&next)?;
+                    out.push([base, pred, kept]);
                     base = next;
                 }
                 Some(b'^') if self.s.get(self.i + 1) == Some(&b'^') => {
                     // a `^^dt` cast on a non-literal term (old euler/N3QL
                     // surface): consume and ignore the datatype.
                     self.i += 2;
-                    let _ = self.read_iri_or_prefixed()?;
+                    let dt = self.read_iri_or_prefixed()?;
+                    self.release(dt.len());
                 }
                 Some(b'^') => {
                     self.i += 1;
                     let pred = self.atom(out)?;
-                    let next = self.fresh_pathvar();
-                    self.keep([&next, &pred, &base])?;
-                    out.push([next.clone(), pred, base]);
+                    let next = self.fresh_pathvar()?;
+                    let kept = self.copy(&next)?;
+                    out.push([kept, pred, base]);
                     base = next;
                 }
                 _ => break,
@@ -776,20 +921,26 @@ impl<'a> Parser<'a> {
         Ok(base)
     }
 
-    fn fresh_pathvar(&mut self) -> Term {
+    fn fresh_pathvar(&mut self) -> Result<Term, String> {
         // Path steps mint EXISTENTIALS (cwm prints them as bnodes); inside a
         // rule premise the blank→variable rewrite turns them into join vars.
         self.pathvar += 1;
-        Term::Blank(format!("__path{}", self.pathvar))
+        self.numbered_blank("__path", self.pathvar)
     }
 
-    /// A single atomic term (no path operators), charged to a charged parse as it is built.
+    /// The blank `{prefix}{n}`, charged before its name is allocated.
+    fn numbered_blank(&mut self, prefix: &str, n: usize) -> Result<Term, String> {
+        let digits = decimal_digits(n);
+        self.charge(prefix.len() + digits)?;
+        let mut name = String::with_capacity(prefix.len() + digits);
+        name.push_str(prefix);
+        // writing to a String cannot fail
+        let _ = std::fmt::Write::write_fmt(&mut name, format_args!("{n}"));
+        self.node(Term::Blank(name))
+    }
+
+    /// A single atomic term (no path operators). Each reader charges the term it builds.
     fn atom(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
-        let t = self.atom_uncharged(out)?;
-        self.built(t)
-    }
-
-    fn atom_uncharged(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
         self.ws();
         match self.peek() {
             // `<<` opens an RDF-star / RDF 1.2 quoted-triple term — never a valid
@@ -803,10 +954,7 @@ impl<'a> Parser<'a> {
             }
             Some(b'<') => {
                 let iri = self.read_iriref()?;
-                if let Some(q) = self.quantified(&iri) {
-                    return Ok(q);
-                }
-                Ok(nil_to_list(Term::Iri(iri)))
+                self.iri_term(iri)
             }
             Some(b'"') | Some(b'\'') => self.read_literal(),
             Some(b'?') => {
@@ -814,19 +962,20 @@ impl<'a> Parser<'a> {
                     return Err("variables are not Turtle".into());
                 }
                 self.i += 1;
-                let v = self.read_name();
+                let v = self.read_name()?;
                 if self.peek() == Some(b'@') {
                     // `?D@de` (euler-era language cast on a variable): ignore.
                     self.i += 1;
-                    let _ = self.read_name();
+                    self.scan_name();
                 }
-                Ok(Term::Var(v))
+                self.node(Term::Var(v))
             }
             Some(b'_') => {
                 // _:label
                 self.i += 1;
                 self.eat(b':');
-                Ok(Term::Blank(self.read_blank_label()))
+                let label = self.read_blank_label()?;
+                self.node(Term::Blank(label))
             }
             Some(b'{') => {
                 if self.strict {
@@ -841,11 +990,11 @@ impl<'a> Parser<'a> {
                 // `@true` / `@false` (the explicit keyword forms under @keywords)
                 if self.starts_with("@true") {
                     self.i += 5;
-                    return Ok(Term::Lit("true".into(), XSD_BOOLEAN.into(), None));
+                    return self.fixed_lit("true", XSD_BOOLEAN);
                 }
                 if self.starts_with("@false") {
                     self.i += 6;
-                    return Ok(Term::Lit("false".into(), XSD_BOOLEAN.into(), None));
+                    return self.fixed_lit("false", XSD_BOOLEAN);
                 }
                 Err(format!("unexpected '@' token at byte {}", self.i))
             }
@@ -858,20 +1007,13 @@ impl<'a> Parser<'a> {
                     }
                 };
                 if bool_allowed(&self.keywords, "true") && self.keyword("true") {
-                    return Ok(Term::Lit("true".into(), XSD_BOOLEAN.into(), None));
+                    return self.fixed_lit("true", XSD_BOOLEAN);
                 }
                 if bool_allowed(&self.keywords, "false") && self.keyword("false") {
-                    return Ok(Term::Lit("false".into(), XSD_BOOLEAN.into(), None));
+                    return self.fixed_lit("false", XSD_BOOLEAN);
                 }
-                match self.read_prefixed_name()? {
-                    Term::Iri(i) => {
-                        if let Some(q) = self.quantified(&i) {
-                            return Ok(q);
-                        }
-                        Ok(nil_to_list(Term::Iri(i)))
-                    }
-                    other => Ok(other),
-                }
+                let iri = self.read_prefixed_name()?;
+                self.iri_term(iri)
             }
             None => Err("unexpected end of input".into()),
         }
@@ -913,7 +1055,8 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(resolve_iri(&self.base, &iri))
+        // `iri` is a scratch copy of the token; what is kept is its resolved form
+        self.resolved(&iri)
     }
 
     /// `\uXXXX` or `\UXXXXXXXX` with the backslash already consumed.
@@ -942,17 +1085,19 @@ impl<'a> Parser<'a> {
         }
         // Unreachable on valid UTF-8 now that the scan only stops on ASCII bytes
         // (always char boundaries), but the parser must REPORT, never panic.
-        let pfx = std::str::from_utf8(&self.s[start..self.i])
-            .map_err(|e| e.to_string())?
-            .to_string();
+        let end = self.i;
         if self.peek() != Some(b':') {
             return Err(format!("expected ':' after prefix name at byte {}", self.i));
         }
         self.i += 1;
-        Ok(pfx)
+        let pfx = std::str::from_utf8(&self.s[start..end]).map_err(|e| e.to_string())?;
+        self.new_string(&[pfx])
     }
 
-    fn read_prefixed_name(&mut self) -> Result<Term, String> {
+    /// A prefixed name (or, under `@keywords`, a bare word), expanded: the IRI it names,
+    /// charged before the expansion is allocated. The token itself is read into a scratch
+    /// buffer no larger than it.
+    fn read_prefixed_name(&mut self) -> Result<String, String> {
         let start = self.i;
         let mut tok = String::new();
         while self.i < self.s.len() {
@@ -1018,35 +1163,46 @@ impl<'a> Parser<'a> {
         let Some((pfx, local)) = tok.split_once(':') else {
             // a BARE word: legal only under `@keywords` (cwm) — it reads as
             // `:word` in the default prefix unless declared a keyword.
-            if let Some(kws) = &self.keywords {
-                if !tok.is_empty() && !kws.contains(tok) {
-                    let ns = match self.prefixes.get("") {
-                        Some(ns) => ns.clone(),
-                        None => resolve_iri(&self.base, "#"),
-                    };
-                    return Ok(Term::Iri(format!("{ns}{tok}")));
-                }
+            if self.keywords.as_ref().is_some_and(|kws| !tok.is_empty() && !kws.contains(tok)) {
+                return self.expand("", tok);
             }
             return Err(format!("bad token '{tok}' at {start}"));
         };
-        let ns = match self.prefixes.get(pfx) {
-            Some(ns) => ns.clone(),
-            None if self.strict => return Err(format!("unknown prefix '{pfx}:'")),
-            // cwm/EYE treat an undeclared default prefix as `@prefix : <#>.`
-            // (document-local names); honor that for ':' only.
-            None if pfx.is_empty() => resolve_iri(&self.base, "#"),
+        if !self.prefixes.contains_key(pfx) {
+            if self.strict {
+                return Err(format!("unknown prefix '{pfx}:'"));
+            }
             // cwm's reference outputs use the well-known SWAP/RDF prefixes
             // without declaring them — resolve those like cwm does.
-            None => match well_known_prefix(pfx) {
-                Some(ns) => ns.to_string(),
-                None => return Err(format!("unknown prefix '{pfx}:'")),
-            },
-        };
-        Ok(Term::Iri(format!("{ns}{local}")))
+            if let Some(ns) = well_known_prefix(pfx) {
+                return self.new_string(&[ns, local]);
+            }
+            if !pfx.is_empty() {
+                return Err(format!("unknown prefix '{pfx}:'"));
+            }
+        }
+        self.expand(pfx, local)
     }
 
-    fn read_name(&mut self) -> String {
-        let start = self.i;
+    /// `local` in the namespace of the prefix `pfx`, charged before it is allocated. An
+    /// undeclared default prefix reads as `@prefix : <#>.` (cwm/EYE: document-local names).
+    fn expand(&mut self, pfx: &str, local: &str) -> Result<String, String> {
+        let Some(n) = self.prefixes.get(pfx).map(String::len) else {
+            let ns = self.resolved("#")?;
+            let out = self.new_string(&[&ns, local]);
+            self.release(ns.len());
+            return out;
+        };
+        self.charge(n.saturating_add(local.len()))?;
+        let ns = &self.prefixes[pfx];
+        let mut out = String::with_capacity(n + local.len());
+        out.push_str(ns);
+        out.push_str(local);
+        Ok(out)
+    }
+
+    /// Skip a name.
+    fn scan_name(&mut self) {
         while self.i < self.s.len() {
             let c = self.s[self.i];
             if c.is_ascii_alphanumeric() || c == b'_' || c == b'-' {
@@ -1057,13 +1213,26 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        String::from_utf8_lossy(&self.s[start..self.i]).into_owned()
+    }
+
+    /// The text from `start` to the cursor, charged before it is copied.
+    fn read_span(&mut self, start: usize) -> Result<String, String> {
+        let end = self.i.min(self.s.len());
+        self.charge(end - start)?;
+        Ok(String::from_utf8_lossy(&self.s[start..end]).into_owned())
+    }
+
+    fn read_name(&mut self) -> Result<String, String> {
+        let start = self.i;
+        self.scan_name();
+        self.read_span(start)
     }
 
     /// A blank-node label: like a name, but dots are allowed INSIDE
     /// (`_:b.0` — Turtle BLANK_NODE_LABEL).
-    fn read_blank_label(&mut self) -> String {
-        let mut label = self.read_name();
+    fn read_blank_label(&mut self) -> Result<String, String> {
+        let start = self.i;
+        self.scan_name();
         while self.peek() == Some(b'.') {
             let cont = self.s.get(self.i + 1).is_some_and(|&n| {
                 n.is_ascii_alphanumeric() || matches!(n, b'_' | b'-') || n >= 0x80
@@ -1072,10 +1241,9 @@ impl<'a> Parser<'a> {
                 break;
             }
             self.i += 1;
-            label.push('.');
-            label.push_str(&self.read_name());
+            self.scan_name();
         }
-        label
+        self.read_span(start)
     }
 
     fn read_literal(&mut self) -> Result<Term, String> {
@@ -1097,16 +1265,17 @@ impl<'a> Parser<'a> {
                 self.i += 1;
                 let Some(e) = self.peek() else { return Err("truncated escape".into()) };
                 match e {
-                    b'n' => val.push('\n'),
-                    b't' => val.push('\t'),
-                    b'r' => val.push('\r'),
-                    b'b' => val.push('\u{8}'),
-                    b'f' => val.push('\u{c}'),
-                    b'"' => val.push('"'),
-                    b'\'' => val.push('\''),
-                    b'\\' => val.push('\\'),
+                    b'n' => self.append_char(&mut val, '\n')?,
+                    b't' => self.append_char(&mut val, '\t')?,
+                    b'r' => self.append_char(&mut val, '\r')?,
+                    b'b' => self.append_char(&mut val, '\u{8}')?,
+                    b'f' => self.append_char(&mut val, '\u{c}')?,
+                    b'"' => self.append_char(&mut val, '"')?,
+                    b'\'' => self.append_char(&mut val, '\'')?,
+                    b'\\' => self.append_char(&mut val, '\\')?,
                     b'u' | b'U' => {
-                        val.push(self.read_unicode_escape()?);
+                        let c = self.read_unicode_escape()?;
+                        self.append_char(&mut val, c)?;
                         continue;
                     }
                     other => return Err(format!("illegal string escape '\\{}'", other as char)),
@@ -1127,17 +1296,19 @@ impl<'a> Parser<'a> {
             }
             // utf-8 safe push
             let ch_len = utf8_len(c);
-            val.push_str(std::str::from_utf8(&self.s[self.i..self.i + ch_len]).map_err(|e| e.to_string())?);
+            let s = self.s;
+            let ch = std::str::from_utf8(&s[self.i..self.i + ch_len]).map_err(|e| e.to_string())?;
+            self.append(&mut val, ch)?;
             self.i += ch_len;
         }
         // datatype / lang
         if self.s[self.i..].starts_with(b"^^") {
             self.i += 2;
             let dt = self.read_iri_or_prefixed()?;
-            Ok(Term::Lit(val, dt, None))
+            self.node(Term::Lit(val, dt, None))
         } else if self.peek() == Some(b'@') {
             self.i += 1;
-            let lang = self.read_name();
+            let mut lang = self.read_name()?;
             // LANGTAG: [a-zA-Z]+('-'[a-zA-Z0-9]+)*; canonical form is lowercase.
             let valid = !lang.is_empty()
                 && lang.split('-').enumerate().all(|(k, part)| {
@@ -1149,13 +1320,12 @@ impl<'a> Parser<'a> {
             if !valid {
                 return Err(format!("invalid language tag '@{lang}'"));
             }
-            Ok(Term::Lit(
-                val,
-                "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString".into(),
-                Some(lang.to_ascii_lowercase()),
-            ))
+            lang.make_ascii_lowercase();
+            let dt = self.new_string(&["http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"])?;
+            self.node(Term::Lit(val, dt, Some(lang)))
         } else {
-            Ok(Term::Lit(val, "http://www.w3.org/2001/XMLSchema#string".into(), None))
+            let dt = self.new_string(&["http://www.w3.org/2001/XMLSchema#string"])?;
+            self.node(Term::Lit(val, dt, None))
         }
     }
 
@@ -1164,10 +1334,7 @@ impl<'a> Parser<'a> {
         if self.peek() == Some(b'<') {
             self.read_iriref()
         } else {
-            match self.read_prefixed_name()? {
-                Term::Iri(i) => Ok(i),
-                _ => Err("expected datatype IRI".into()),
-            }
+            self.read_prefixed_name()
         }
     }
 
@@ -1215,11 +1382,10 @@ impl<'a> Parser<'a> {
         if digits == 0 {
             return Err(format!("expected a number at byte {start}"));
         }
-        let txt = std::str::from_utf8(&self.s[start..self.i])
-            .map_err(|e| e.to_string())?
-            .to_string();
+        let txt = self.read_span(start)?;
         let dt = if is_double { XSD_DOUBLE } else if is_decimal { XSD_DECIMAL } else { XSD_INTEGER };
-        Ok(Term::Lit(txt, dt.into(), None))
+        let dt = self.new_string(&[dt])?;
+        self.node(Term::Lit(txt, dt, None))
     }
 
     fn enter(&mut self) -> Result<(), String> {
@@ -1259,9 +1425,9 @@ impl<'a> Parser<'a> {
         self.depth -= 1;
         if triples.is_empty() {
             // `{}` IS the literal true (N3 CG: the empty graph holds vacuously).
-            return Ok(Term::Lit("true".into(), XSD_BOOLEAN.into(), None));
+            return self.fixed_lit("true", XSD_BOOLEAN);
         }
-        Ok(Term::Formula(triples))
+        self.node(Term::Formula(triples))
     }
 
     /// An RDF-star / RDF 1.2 quoted-triple term: `<< s p o >>` or the RDF 1.2
@@ -1292,7 +1458,7 @@ impl<'a> Parser<'a> {
         }
         self.i += 2;
         self.depth -= 1;
-        Ok(Term::Triple(Box::new([s, p, o])))
+        self.node(Term::Triple(Box::new([s, p, o])))
     }
 
     fn read_collection(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
@@ -1312,7 +1478,7 @@ impl<'a> Parser<'a> {
         self.depth -= 1;
         // A collection is a FIRST-CLASS list term (N3 semantics); `()` = rdf:nil
         // = the empty list.
-        Ok(Term::List(items))
+        self.node(Term::List(items))
     }
 
     fn read_bnode_propertylist(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
@@ -1327,21 +1493,26 @@ impl<'a> Parser<'a> {
             }
             named
         } else {
-            self.fresh_bnode()
+            self.fresh_bnode()?
         };
         self.ws();
-        if !self.eat(b']') {
-            self.predicate_object_list(&node, out)?;
+        let node = if self.eat(b']') {
+            node
+        } else {
+            // the list's first statement keeps the node; the term returned is a copy
+            let (i, j) = self.predicate_object_list(node, out)?;
             self.ws();
             self.eat(b']');
-        }
+            let named = &out[i][j];
+            self.copy(named)?
+        };
         self.depth -= 1;
         Ok(node)
     }
 
-    fn fresh_bnode(&mut self) -> Term {
+    fn fresh_bnode(&mut self) -> Result<Term, String> {
         self.bnode += 1;
-        Term::Blank(format!("_b{}", self.bnode))
+        self.numbered_blank("_b", self.bnode)
     }
 }
 
@@ -1356,18 +1527,32 @@ impl<'a> Parser<'a> {
 ///
 /// `resolve_iri(base, "#")` is the cwm empty-prefix convention (`<base>#`).
 pub(super) fn resolve_iri(base: &str, iri: &str) -> String {
-    let has_scheme = iri.split_once(':').is_some_and(|(scheme, _)| {
-        scheme.starts_with(|c: char| c.is_ascii_alphabetic())
-            && scheme
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-    });
-    if base.is_empty() || has_scheme {
+    if base.is_empty() || has_scheme(iri) {
         return iri.to_string();
     }
     oxiri::IriRef::parse(base)
         .and_then(|base| base.resolve(iri))
         .map_or_else(|_| iri.to_string(), oxiri::IriRef::into_inner)
+}
+
+/// The number of decimal digits `n` prints with.
+fn decimal_digits(mut n: usize) -> usize {
+    let mut digits = 1;
+    while n >= 10 {
+        n /= 10;
+        digits += 1;
+    }
+    digits
+}
+
+/// Does `iri` carry a scheme (RFC 3986 §4.3)? Such a reference resolves to itself.
+fn has_scheme(iri: &str) -> bool {
+    iri.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    })
 }
 
 /// Byte-level whitespace test for the byte-wise lexer — ONLY ASCII bytes count.
@@ -1536,6 +1721,35 @@ mod resolve_iri_tests {
 #[cfg(test)]
 pub(super) mod parse_surface_tests {
     use super::*;
+
+    /// A named property list (`[ id <s> … ]`) is built once: the node it names is
+    /// charged once, and each statement that keeps it once more.
+    #[test]
+    fn a_named_property_list_that_fits_the_allowance_exactly_is_accepted() {
+        for src in [
+            "<http://ex/a> <http://ex/b> [ id <http://ex/s> ] .",
+            "<http://ex/a> <http://ex/b> [ id <http://ex/s> <http://ex/p> <http://ex/o> ] .",
+            "[ id <http://ex/s> <http://ex/p> <http://ex/o> ] <http://ex/q> <http://ex/r> .",
+        ] {
+            let Ok(parsed) = parse_charged_checked(src, "", std::iter::empty(), None) else {
+                panic!("{src} is N3")
+            };
+            let fits: usize =
+                parsed.facts.iter().flatten().map(super::super::bounded::term_bytes).sum();
+            assert!(
+                parse_charged_checked(src, "", std::iter::empty(), Some(fits)).is_ok(),
+                "{src} fits {fits} bytes"
+            );
+            assert!(
+                matches!(
+                    parse_charged_checked(src, "", std::iter::empty(), Some(fits - 1)),
+                    Err(ParseFailure::Resource(_))
+                ),
+                "{src} does not fit {} bytes",
+                fits - 1
+            );
+        }
+    }
 
     fn iri(s: &str) -> Term {
         Term::Iri(s.into())

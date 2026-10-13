@@ -101,6 +101,19 @@ const BIG_DOC: &str = "http://ex/big";
 const LATE_DOC: &str = "http://ex/late";
 /// The size of [`BIG_DOC`]'s text, over [`LIMIT`].
 const BIG: usize = 70 << 10;
+/// A document the resolver supplies as [`formula_copies`].
+const SEM_DOC: &str = "http://ex/sem";
+
+/// N3 text whose quoted formula, about [`SMALL`] bytes, is the subject of [`K`]
+/// statements.
+fn formula_copies() -> String {
+    let objects: Vec<String> = (0..K).map(|i| format!("<http://ex/o{i}>")).collect();
+    format!(
+        "{{ <http://ex/s> <http://ex/p> '{}' }} <http://ex/q> {} .",
+        "x".repeat(SMALL),
+        objects.join(", ")
+    )
+}
 
 /// What one run allocated during rule evaluation (from the first resolver read).
 struct Measured {
@@ -128,6 +141,8 @@ fn measured(doc: &str) -> (Result<usize, String>, Measured) {
         }
         Some(if iri == BIG_DOC {
             "z".repeat(BIG)
+        } else if iri == SEM_DOC {
+            formula_copies()
         } else {
             String::new()
         })
@@ -433,6 +448,42 @@ fn cases() -> Vec<Case> {
             "{ :a :src ?s. ?s log:parsedAsN3 ?f } => { :a :out ?f }.",
             "{ :a :src ?s. ?s string:length ?n } => { :a :ok true }.",
             64 * 3 * SMALL,
+            "a parsed formula",
+        ),
+        // A quoted formula is the subject of K statements: each statement keeps its own
+        // copy, so K copies of an 8 KiB formula are charged as they are made, not as one
+        // node each.
+        case(
+            "log:parsedAsN3 formula copies",
+            format!(":a :src \"\"\"{}\"\"\".\n", formula_copies()),
+            "{ :a :src ?s. ?s log:parsedAsN3 ?f } => { :a :out ?f }.",
+            "{ :a :src ?s. ?s string:length ?n } => { :a :ok true }.",
+            K * SMALL,
+            "a parsed formula",
+        ),
+        // Directives build terms too: 64 prefixes each naming an 8 KiB base keep 512 KiB
+        // of namespaces for an empty formula.
+        case(
+            "log:parsedAsN3 directives",
+            {
+                let mut src = format!("@base <http://ex/{}/>. ", "a".repeat(SMALL));
+                for i in 0..64 {
+                    src.push_str(&format!("@prefix p{i}: <>. "));
+                }
+                format!(":a :src \"\"\"{src}\"\"\".\n")
+            },
+            "{ :a :src ?s. ?s log:parsedAsN3 ?f } => { :a :out ?f }.",
+            "{ :a :src ?s. ?s string:length ?n } => { :a :ok true }.",
+            64 * SMALL,
+            "a parsed formula",
+        ),
+        // `log:semantics` parses the resolver's text with the same charged parser.
+        case(
+            "log:semantics formula copies",
+            String::new(),
+            &format!("{{ <{SEM_DOC}> log:semantics ?f }} => {{ :a :out ?f }}."),
+            &format!("{{ <{SEM_DOC}> log:content ?c. ?c string:length ?n }} => {{ :a :ok true }}."),
+            K * SMALL,
             "a parsed formula",
         ),
         // Results that copy, or are a part of, an input over the limit. The input is

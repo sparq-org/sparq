@@ -315,8 +315,8 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// bindings (a conclusion, a premise pattern, a scope or collection template, a
 /// backward-rule projection), the list `log:collectAllIn` collects, and the formula
 /// `log:conclusion` returns. The formula `log:parsedAsN3` / `log:semantics` parses is
-/// charged by its parser for each term it builds and each statement it keeps as it goes,
-/// and sized again once the parse returns it. Numeric results are not covered (below). The
+/// charged by its parser before each allocation it keeps (every string, term node and
+/// copy, directives included), and sized again once the parse returns it. Numeric results are not covered (below). The
 /// size is approximate: string bytes plus a fixed cost per node. Binding a variable to a
 /// term that already exists (premise matching, `log:includes`) copies that term; it builds
 /// nothing new and is not sized again.
@@ -328,10 +328,10 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// What it does not bound:
 /// * the closure's total memory: many distinct terms just under the limit are bounded
 ///   only by `max_facts`;
-/// * the parser input size: the document's own parse is not charged. A `log:parsedAsN3` /
-///   `log:semantics` parse is, but it allocates a literal or IRI before charging it, and
-///   charges a quoted formula copied into each statement of a `;` / `,` list as one node,
-///   so it can allocate past the limit before it is refused;
+/// * the document's own parse, which is not charged: its memory is bounded by its input
+///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
+///   holds only scratch copies of one token at a time, the vectors' spare capacity, and
+///   the text it parses;
 /// * numeric results, as on main (GH #6901): the forward and reverse results of the
 ///   arithmetic and other numeric builtins, and the canonical numeric pieces
 ///   `string:concatenation` renders. Their size entries are fixed estimates that do not
@@ -876,9 +876,10 @@ pub(crate) fn charge_parse(left: usize, bytes: usize) -> Result<usize, LimitErro
 }
 
 /// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`) under
-/// the run's [`ClosureLimits::max_term_bytes`]: the parser charges every term it builds
-/// as it builds it, and every statement it keeps, so a small source whose prefixes expand
-/// into a huge formula is refused while it is parsed. On that refusal the run is refused
+/// the run's [`ClosureLimits::max_term_bytes`]: the parser charges every byte it keeps
+/// before allocating it (each string, term node and copy; `parse_charged_checked`), so a
+/// small source whose prefixes, base or shared formulas expand into a huge formula is
+/// refused while it is parsed. On that refusal the run is refused
 /// (a cut, and an error every closure of the run fails with). `None` for that and for any
 /// other failure: a syntax error, or the nesting limit (itself recorded as a cut).
 pub(crate) fn parse_n3_term(
@@ -899,26 +900,6 @@ pub(crate) fn parse_n3_term(
             }
             None
         }
-    }
-}
-
-/// The bytes a parsed statement keeps for term `t`: its [`term_bytes`], except that a
-/// quoted formula counts one node (its statements were kept, and charged, one by one).
-pub(crate) fn kept_bytes(t: &Term) -> usize {
-    match t {
-        Term::Formula(_) => TERM_NODE_BYTES,
-        Term::List(ms) => ms.iter().map(kept_bytes).fold(TERM_NODE_BYTES, usize::saturating_add),
-        Term::Triple(tr) => tr.iter().map(kept_bytes).fold(TERM_NODE_BYTES, usize::saturating_add),
-        _ => term_bytes(t),
-    }
-}
-
-/// The bytes the parser allocates for `t` itself, not counting the terms inside it (each
-/// built, and charged, on its own).
-pub(crate) fn node_bytes(t: &Term) -> usize {
-    match t {
-        Term::Formula(_) | Term::List(_) | Term::Triple(_) => TERM_NODE_BYTES,
-        _ => term_bytes(t),
     }
 }
 
