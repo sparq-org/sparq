@@ -221,8 +221,8 @@ async fn authorize_unlocked<S: Store + 'static>(
     .unwrap_or_else(|| Some(state.deny(agent)))
 }
 
-/// How many times a check without the lock is made again while changes to its resource keep
-/// beginning or ending during it, before it refuses.
+/// How many times a check without the lock is made again while changes to its resource itself
+/// keep beginning or ending during it, before it refuses.
 const STABLE_ATTEMPTS: usize = 8;
 
 /// Run `check`, a decision about `uri` made without its lock, until no change to `uri` began or
@@ -236,10 +236,11 @@ where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = T>,
 {
+    let watch = state.locks.watch(uri);
     for _ in 0..STABLE_ATTEMPTS {
-        let before = state.locks.generation(uri);
+        let before = state.locks.generation(&watch);
         let decided = check().await;
-        if state.locks.generation(uri) == before {
+        if state.locks.generation(&watch) == before {
             return Some(decided);
         }
     }
@@ -1965,10 +1966,11 @@ pub struct IriLocks {
     /// The IRIs a journaled change is to while it is in flight ([`InFlight`](super::InFlight)),
     /// each with how many such changes are to it and what it was before the first began.
     in_flight: std::sync::Mutex<std::collections::HashMap<String, (usize, super::Prior)>>,
-    /// Moved on for an IRI whenever a change to it is published or lands, or it is set aside or
-    /// shown again ([`IriLocks::generation`]), in a fixed number of stripes (an IRI shares its
-    /// stripe with others, which only costs a check made again).
-    generations: [std::sync::atomic::AtomicU64; GENERATION_STRIPES],
+    /// The IRIs a check without the lock is being made about ([`IriLocks::watch`]), each with
+    /// how many such checks there are and a count moved on whenever a change to it is published
+    /// or lands, or it is set aside or shown again ([`IriLocks::generation`]). Only watched IRIs
+    /// are counted, so the map is as large as the checks in flight.
+    watched: std::sync::Mutex<std::collections::HashMap<String, (usize, u64)>>,
     /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
     hid: tokio::sync::Notify,
     /// How many times anything was set aside: a walk over many resources reads it before and
@@ -1984,18 +1986,27 @@ struct LockMap {
     sweep_at: usize,
 }
 
-/// How many stripes [`IriLocks::generation`] keeps.
-const GENERATION_STRIPES: usize = 32;
-
 /// The size of [`LockMap`] below which it is never swept.
 const LOCK_SWEEP_FLOOR: usize = 1024;
 
-/// The stripe of [`IriLocks::generation`] `iri` is counted in.
-fn stripe(iri: &str) -> usize {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    iri.hash(&mut h);
-    (h.finish() as usize) % GENERATION_STRIPES
+/// A watch of one IRI ([`IriLocks::watch`]), ended when dropped.
+pub(crate) struct Watch<'a> {
+    locks: &'a IriLocks,
+    iri: &'a str,
+}
+
+impl Drop for Watch<'_> {
+    fn drop(&mut self) {
+        let mut watched = self.locks.watched.lock().unwrap_or_else(|e| e.into_inner());
+        if let std::collections::hash_map::Entry::Occupied(mut e) =
+            watched.entry(self.iri.to_string())
+        {
+            e.get_mut().0 -= 1;
+            if e.get().0 == 0 {
+                e.remove();
+            }
+        }
+    }
 }
 
 impl IriLocks {
@@ -2072,16 +2083,38 @@ impl IriLocks {
         prior
     }
 
-    /// A count that has moved on since an earlier reading for `iri` if, in between, a change to
-    /// it was published or landed, or it was set aside or shown again: a check made without the
-    /// lock reads it before and after what it reads, and the same count both times means that
-    /// what it read was neither a change part way nor one being put back.
-    pub(crate) fn generation(&self, iri: &str) -> u64 {
-        self.generations[stripe(iri)].load(std::sync::atomic::Ordering::SeqCst)
+    /// Count the changes to `iri` until the watch is dropped ([`IriLocks::generation`]).
+    pub(crate) fn watch<'a>(&'a self, iri: &'a str) -> Watch<'a> {
+        self.watched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(iri.to_string())
+            .or_default()
+            .0 += 1;
+        Watch { locks: self, iri }
+    }
+
+    /// A count, for an IRI being watched, that has moved on since an earlier reading if, in
+    /// between, a change to it was published or landed, or it was set aside or shown again: a
+    /// check made without the lock reads it before and after what it reads, and the same count
+    /// both times means that what it read was neither a change part way nor one being put back.
+    pub(crate) fn generation(&self, watch: &Watch<'_>) -> u64 {
+        self.watched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(watch.iri)
+            .map_or(0, |(_, generation)| *generation)
     }
 
     fn moved(&self, iri: &str) {
-        self.generations[stripe(iri)].fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some((_, generation)) = self
+            .watched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(iri)
+        {
+            *generation += 1;
+        }
     }
 
     /// Whether a journaled change to `iri` is in flight (see [`InFlight`](super::InFlight)):
@@ -10658,6 +10691,36 @@ mod tests {
         st.locks.landed(std::slice::from_ref(&a));
         gate.add_permits(1);
         assert_eq!(get.await.unwrap(), Some(StatusCode::OK));
+    }
+
+    /// Review of #6925: a lock-free check is made again only when its own resource changed while
+    /// it ran, never for a change to any other, so no amount of unrelated writing makes it
+    /// refuse.
+    #[test]
+    fn only_a_change_to_the_resource_checked_moves_its_generation() {
+        let locks = IriLocks::default();
+        let (a, others) = (
+            "https://h.example/a",
+            ["https://h.example/b", "https://h.example/c/"],
+        );
+        let watch = locks.watch(a);
+        let before = locks.generation(&watch);
+        for i in 0..1000 {
+            let other = format!("{}{i}", others[i % 2]);
+            locks.changing_from([(other.clone(), Default::default())].into_iter().collect());
+            locks.landed(std::slice::from_ref(&other));
+            locks.hide(std::slice::from_ref(&other), Default::default());
+            locks.show(std::slice::from_ref(&other));
+        }
+        assert_eq!(locks.generation(&watch), before);
+        locks.changing_from([(a.to_string(), Default::default())].into_iter().collect());
+        let published = locks.generation(&watch);
+        assert_ne!(published, before);
+        locks.landed(&[a.to_string()]);
+        assert_ne!(locks.generation(&watch), published);
+        drop(watch);
+        // Nothing is kept for a resource once no check watches it.
+        assert!(locks.watched.lock().unwrap().is_empty());
     }
 
     /// Issue #6814: a set-aside resource that was not there before the stuck change (a create
