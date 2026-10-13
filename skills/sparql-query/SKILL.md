@@ -72,6 +72,10 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
+- `sparq_core::baseenc::{base58btc_encode, base58btc_encode_into, base58btc_decode, base64url_encode,
+  base64url_encode_into, base64url_decode}` are the shared multibase `z` / `u` body codecs; both
+  decoders return `Result<Vec<u8>, DecodeError>` and base64url accepts only the one canonical
+  unpadded text per byte string.
 - `sparq_core::percent::{decode, encode}` are the shared percent-encoding helpers: lenient
   `decode(s, plus_as_space)` (malformed escapes kept verbatim, UTF-8 read lossily) and `encode`
   (everything outside the RFC 3986 unreserved set becomes uppercase `%XX`).

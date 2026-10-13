@@ -60,6 +60,7 @@
 //! [OPUS-4.8] sq-pfae.3 (issue #940 / gh-940). Written while Fable unavailable — flag for
 //! re-review when Fable returns. 🤖 SPARQ agent — trust-graph authorisation PoC.
 
+use sparq_core::baseenc::{base58btc_decode, base58btc_encode};
 use sparq_zk::sig::{public_key_from_hex, public_key_to_hex, PublicKey};
 
 /// The multibase prefix for **base58btc** (`z`), the encoding `did:key` mandates for
@@ -214,7 +215,7 @@ fn decode_did_key_id(id: &str) -> Result<PublicKey, DidError> {
     }
     let b58 = &id[prefix.len_utf8()..];
     let payload = base58btc_decode(b58)
-        .ok_or_else(|| DidError::BadKeyMaterial(format!("bad base58: {}", id)))?;
+        .map_err(|_| DidError::BadKeyMaterial(format!("bad base58: {}", id)))?;
     let (codec, rest) = decode_varint(&payload)
         .ok_or_else(|| DidError::BadKeyMaterial("truncated multicodec varint".to_string()))?;
     if codec != MULTICODEC_BABYJUBJUB_PUB {
@@ -351,65 +352,6 @@ fn collect_verification_methods(doc: &serde_json::Value) -> Vec<&serde_json::Val
 
 // --- minimal multibase / multicodec / hex (no extra deps — lean-core rule) -----
 
-/// The base58btc alphabet (Bitcoin/IPFS ordering), as used by multibase `z`.
-const B58_ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
-/// Encode bytes as base58btc (no multibase prefix). Big-endian, leading-zero preserving.
-fn base58btc_encode(input: &[u8]) -> String {
-    // Count leading zero bytes (each → a leading '1').
-    let zeros = input.iter().take_while(|&&b| b == 0).count();
-    let mut digits: Vec<u8> = Vec::new();
-    for &byte in input {
-        let mut carry = byte as u32;
-        for d in digits.iter_mut() {
-            carry += (*d as u32) << 8;
-            *d = (carry % 58) as u8;
-            carry /= 58;
-        }
-        while carry > 0 {
-            digits.push((carry % 58) as u8);
-            carry /= 58;
-        }
-    }
-    let mut out = String::with_capacity(zeros + digits.len());
-    for _ in 0..zeros {
-        out.push('1');
-    }
-    for &d in digits.iter().rev() {
-        out.push(B58_ALPHABET[d as usize] as char);
-    }
-    if out.is_empty() {
-        out.push('1');
-    }
-    out
-}
-
-/// Decode a base58btc string (no multibase prefix). `None` on any non-alphabet char.
-fn base58btc_decode(input: &str) -> Option<Vec<u8>> {
-    if input.is_empty() {
-        return None;
-    }
-    let mut bytes: Vec<u8> = Vec::new();
-    for ch in input.chars() {
-        let val = B58_ALPHABET.iter().position(|&c| c as char == ch)? as u32;
-        let mut carry = val;
-        for b in bytes.iter_mut() {
-            carry += (*b as u32) * 58;
-            *b = (carry & 0xff) as u8;
-            carry >>= 8;
-        }
-        while carry > 0 {
-            bytes.push((carry & 0xff) as u8);
-            carry >>= 8;
-        }
-    }
-    // Restore leading zero bytes (each leading '1' → a 0x00).
-    let zeros = input.chars().take_while(|&c| c == '1').count();
-    bytes.extend(std::iter::repeat_n(0u8, zeros));
-    bytes.reverse();
-    Some(bytes)
-}
-
 /// Encode an unsigned-LEB128 varint (the multicodec encoding).
 fn encode_varint(mut v: u64) -> Vec<u8> {
     let mut out = Vec::new();
@@ -489,7 +431,7 @@ mod tests {
             let dec = base58btc_decode(&enc).unwrap();
             assert_eq!(dec, v, "base58 round-trip for {:?}", v);
         }
-        assert!(base58btc_decode("0OIl").is_none()); // chars not in the alphabet
+        assert!(base58btc_decode("0OIl").is_err()); // chars not in the alphabet
     }
 
     #[test]

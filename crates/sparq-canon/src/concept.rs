@@ -96,6 +96,9 @@
 use oxrdf::Quad;
 
 use crate::{digest_quads_with, CanonError};
+use sparq_core::baseenc::{
+    base58btc_decode, base58btc_encode_into, base64url_decode, base64url_encode_into, DecodeError,
+};
 
 /// The URN prefix a concept record is named by. Compared case-insensitively:
 /// RFC 8141 makes the scheme and the namespace identifier case-insensitive,
@@ -201,8 +204,10 @@ impl Multibase {
             Multibase::Base16Upper => base16_decode(body, true),
             Multibase::Base32Lower => base32_decode(body, false),
             Multibase::Base32Upper => base32_decode(body, true),
-            Multibase::Base58Btc => base58btc_decode(body),
-            Multibase::Base64Url => base64url_decode(body),
+            Multibase::Base58Btc => base58btc_decode(body).map_err(|e| core_err(e, "base58btc")),
+            Multibase::Base64Url => {
+                base64url_decode(body).map_err(|e| core_err(e, "base64url (unpadded)"))
+            }
         }
     }
 
@@ -215,8 +220,8 @@ impl Multibase {
             Multibase::Base16Upper => sparq_core::hex::encode_into(bytes, true, &mut s),
             Multibase::Base32Lower => base32_encode(bytes, false, &mut s),
             Multibase::Base32Upper => base32_encode(bytes, true, &mut s),
-            Multibase::Base58Btc => base58btc_encode(bytes, &mut s),
-            Multibase::Base64Url => base64url_encode(bytes, &mut s),
+            Multibase::Base58Btc => base58btc_encode_into(bytes, &mut s),
+            Multibase::Base64Url => base64url_encode_into(bytes, &mut s),
         }
         s
     }
@@ -630,18 +635,25 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Multibase alphabets. Hand-rolled (as `sparq-trust` does for status lists)
-// rather than pulled in as a dependency: this crate's leanness is deliberate,
-// and the four alphabets below are a few dozen lines each.
+// Multibase alphabets. Hand-rolled rather than pulled in as a dependency: this
+// crate's leanness is deliberate. Base58btc and base64url are the shared
+// `sparq_core::baseenc` codecs; base16 and base32 stay here.
 // ---------------------------------------------------------------------------
 
-const BASE58BTC: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE32_LOWER: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
 const BASE32_UPPER: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 fn bad_char(c: char, alphabet: &str) -> ConceptError {
     ConceptError::Multibase(format!("character {:?} is not valid {}", c, alphabet))
+}
+
+fn core_err(e: DecodeError, alphabet: &str) -> ConceptError {
+    match e {
+        DecodeError::InvalidChar(c) => bad_char(c, alphabet),
+        DecodeError::NonCanonical => {
+            ConceptError::Multibase(format!("non-canonical {alphabet} padding bits"))
+        }
+    }
 }
 
 fn base16_decode(s: &str, upper: bool) -> Result<Vec<u8>, ConceptError> {
@@ -710,94 +722,6 @@ fn base32_encode(bytes: &[u8], upper: bool, out: &mut String) {
     }
     if bits > 0 {
         out.push(table[((acc << (5 - bits)) & 0x1f) as usize] as char);
-    }
-}
-
-fn base64url_decode(s: &str) -> Result<Vec<u8>, ConceptError> {
-    let mut acc: u32 = 0;
-    let mut bits: u32 = 0;
-    let mut out = Vec::with_capacity(s.len() * 3 / 4);
-    for c in s.chars() {
-        let v = BASE64URL
-            .iter()
-            .position(|&t| t as char == c)
-            .ok_or_else(|| bad_char(c, "base64url (unpadded)"))?;
-        acc = (acc << 6) | v as u32;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(((acc >> bits) & 0xff) as u8);
-        }
-    }
-    if bits >= 6 || acc & ((1u32 << bits) - 1) != 0 {
-        return Err(ConceptError::Multibase(
-            "non-canonical base64url padding bits".to_string(),
-        ));
-    }
-    Ok(out)
-}
-
-fn base64url_encode(bytes: &[u8], out: &mut String) {
-    let mut acc: u32 = 0;
-    let mut bits: u32 = 0;
-    for &b in bytes {
-        acc = (acc << 8) | u32::from(b);
-        bits += 8;
-        while bits >= 6 {
-            bits -= 6;
-            out.push(BASE64URL[((acc >> bits) & 0x3f) as usize] as char);
-        }
-    }
-    if bits > 0 {
-        out.push(BASE64URL[((acc << (6 - bits)) & 0x3f) as usize] as char);
-    }
-}
-
-fn base58btc_decode(s: &str) -> Result<Vec<u8>, ConceptError> {
-    let mut out: Vec<u8> = Vec::new();
-    for c in s.chars() {
-        let v = BASE58BTC
-            .iter()
-            .position(|&t| t as char == c)
-            .ok_or_else(|| bad_char(c, "base58btc"))?;
-        let mut carry = v as u32;
-        for b in out.iter_mut().rev() {
-            carry += 58 * u32::from(*b);
-            *b = (carry & 0xff) as u8;
-            carry >>= 8;
-        }
-        while carry > 0 {
-            out.insert(0, (carry & 0xff) as u8);
-            carry >>= 8;
-        }
-    }
-    // Every leading '1' is one leading zero byte.
-    let leading = s.chars().take_while(|&c| c == '1').count();
-    let mut result = vec![0u8; leading];
-    result.extend_from_slice(&out);
-    Ok(result)
-}
-
-fn base58btc_encode(bytes: &[u8], out: &mut String) {
-    let leading = bytes.iter().take_while(|&&b| b == 0).count();
-    let mut digits: Vec<u8> = Vec::new();
-    for &b in &bytes[leading..] {
-        let mut carry = u32::from(b);
-        for d in &mut digits {
-            carry += u32::from(*d) << 8;
-            *d = (carry % 58) as u8;
-            carry /= 58;
-        }
-        while carry > 0 {
-            digits.push((carry % 58) as u8);
-            carry /= 58;
-        }
-    }
-    for _ in 0..leading {
-        out.push('1');
-    }
-    for &d in digits.iter().rev() {
-        out.push(BASE58BTC[usize::from(d)] as char);
     }
 }
 

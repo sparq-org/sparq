@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-trust (status lists):** `decode_encoded_list` now rejects a `u` (base64url) body
+  whose length is ≡ 1 mod 4 even when the leftover bits are zero (for example `ugAAAA`);
+  such a body has no byte-string meaning, and every other non-canonical form was already
+  refused. A list published by a conforming encoder is unaffected. (#6873)
 - **sparq-fedclient:** pushed-down SPARQL renders every pattern position strictly as one
   SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
   report `InterpError::Render`, and `push_group` returns `None` for a pattern holding a
   variable name that is not a SPARQL `VARNAME`, an IRI with a character `IRIREF` forbids, or a
   `"`-prefixed literal that is not exactly one SPARQL literal. Pre-rendered literals are
   re-serialised with canonical escaping. (#6877)
+
 ### Fixed
 
 - **sparq-solid / sparq-prov (date stamps):** epoch seconds before 0000-03-01 now format to the
