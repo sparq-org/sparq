@@ -752,7 +752,9 @@ SPARQL Update `USING` identity behavior.
   crates.io dependency closure; not a supported front door; sq-6vshe.4, seam A2 of the facade split) and re-exported through the facade — the
   `service` feature name and the `sparq_engine::with_service_egress_allow` / `…egress_policy` /
   `…SERVICE_EGRESS_REFUSED_MARKER` / `…allowlist_entry_permits` paths below are unchanged and remain
-  the supported surface.
+  the supported surface. The XML results reader matches elements by namespace as well as name: an
+  element in another namespace (or with an undeclared prefix) is ignored, and a response with no
+  `xmlns` at all is still read as results XML.
   When enabled, outbound `SERVICE` fetches go through a **default-deny SSRF egress filter**:
   an endpoint that resolves to a loopback / RFC1918 / link-local (incl. the `169.254.169.254`
   cloud-metadata IP) / unique-local / unspecified address is refused (checked on the *resolved* IP,
