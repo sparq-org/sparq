@@ -609,7 +609,9 @@ pub struct Inner<S: Store> {
     /// Fetches identity documents, OpenID provider metadata and JWKS.
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
-    pub locks: resources::IriLocks,
+    /// Shared, so a task that must not keep the state alive can hold them (see
+    /// `records::Settlements`).
+    pub locks: Arc<resources::IriLocks>,
     /// The bytes set-aside changes hold to put back (see [`LwsState::may_write`]).
     set_aside_bytes: std::sync::atomic::AtomicUsize,
     /// The containers whose own modification time may be behind a change to them: each with
@@ -618,6 +620,30 @@ pub struct Inner<S: Store> {
     /// The intents of kept changes that wait on a touch of each container (see
     /// [`LwsState::owe_touch`]).
     owed_touches: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
+    /// The record changes being made or settled (see [`records::Settlements`]).
+    pub(crate) settlements: records::Settlements,
+}
+
+/// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
+/// [`records::Settlements`]), so dropping every other handle drops the state and ends its tasks.
+pub(crate) struct WeakState<S: Store> {
+    inner: std::sync::Weak<Inner<S>>,
+}
+
+impl<S: Store> WeakState<S> {
+    /// The state, while anything else still holds it.
+    pub(crate) fn upgrade(&self) -> Option<LwsState<S>> {
+        self.inner.upgrade().map(|inner| LwsState { inner })
+    }
+}
+
+impl<S: Store> LwsState<S> {
+    /// A handle to the state that does not keep it alive.
+    pub(crate) fn downgrade(&self) -> WeakState<S> {
+        WeakState {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -671,6 +697,7 @@ impl<S: Store + 'static> LwsState<S> {
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
                 owed_touches: Default::default(),
+                settlements: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
@@ -1078,7 +1105,12 @@ type StoredMeta = crate::store::ResourceMeta;
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
 /// the backend, where the change may have landed before the failure was reported.
 pub(crate) fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
-    matches!(outcome, Ok(_) | Err(crate::error::ServerError::Storage(_)))
+    matches!(
+        outcome,
+        Ok(_)
+            | Err(crate::error::ServerError::Storage(_))
+            | Err(crate::error::ServerError::Unsettled { .. })
+    )
 }
 
 /// How to put back one change a [`Journal`] made.
@@ -1552,7 +1584,9 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         // Only a member that went, or may have, is recreated.
         if matches!(
             outcome,
-            Ok(crate::store::DeleteOutcome::Deleted) | Err(crate::error::ServerError::Storage(_))
+            Ok(crate::store::DeleteOutcome::Deleted)
+                | Err(crate::error::ServerError::Storage(_))
+                | Err(crate::error::ServerError::Unsettled { .. })
         ) {
             self.undo.push(Undo::Recreate {
                 iri: iri.to_string(),
@@ -2364,7 +2398,7 @@ fn link_param(s: &str) -> Option<(&str, &str, &str)> {
 }
 
 /// The links of a Link header value (RFC 8288 section 3), read as they are needed: a caller that
-/// stops at a bound (see [`check_headers`]) has spent nothing on what lies past it, and nothing
+/// stops at a bound (see `check_headers`) has spent nothing on what lies past it, and nothing
 /// is allocated. Reading stops at the first part that is not a `link-value`: a target without its
 /// `>` or with a `<` in it, or parameters that are not `link-param`s (a quoted string never
 /// closed among them); nothing after it is read as a link.
@@ -2485,6 +2519,27 @@ pub(crate) mod test_store {
         pub fail_restore_of: Arc<std::sync::Mutex<Option<String>>>,
         /// How many times `restore` was called.
         pub restores: Arc<std::sync::atomic::AtomicUsize>,
+        /// The next `create_in_container` of a resource (not of an intent) answers at once that
+        /// it failed unsettled ([`ServerError::Unsettled`]), as an HTTP update that timed out:
+        /// the write is still sent, and commits once the gate opens, unless it has been fenced
+        /// ([`Store::fence`]) by then.
+        pub unsettle_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// As `unsettle_next_create`, for the next `delete_container_if_empty` of the IRI named.
+        pub unsettle_next_delete_of: GateOf,
+        /// As `unsettle_next_create`, for every create of a resource while set (one gate).
+        pub unsettle_creates: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// `fence` fails, as while the remote store cannot be reached.
+        pub fail_fence: Arc<AtomicBool>,
+        /// How many times `fence` was called.
+        pub fences_tried: Arc<std::sync::atomic::AtomicUsize>,
+        /// `fence` never answers, as a call to a store that stalls.
+        pub hang_fence: Arc<AtomicBool>,
+        /// What the last write reported unsettled changes (its fence's `touches`).
+        pub last_unsettled: Arc<std::sync::Mutex<Vec<String>>>,
+        /// Each unsettled write by its fence's nonce: whether it is fenced, locked while it
+        /// commits (a fence and the write it fences are each atomic).
+        unsettled:
+            Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<bool>>>>>,
         /// When set to `n`, the store step (write, create, delete) after the next `n` fails, once,
         /// before it changes anything; then it is cleared. See [`each_failure_changes_nothing`].
         pub fail_step: Arc<std::sync::Mutex<Option<usize>>>,
@@ -2537,6 +2592,14 @@ pub(crate) mod test_store {
                 two_step_deletes: Default::default(),
                 fail_restore_of: Default::default(),
                 restores: Default::default(),
+                unsettle_next_create: Default::default(),
+                unsettle_next_delete_of: Default::default(),
+                unsettle_creates: Default::default(),
+                fail_fence: Default::default(),
+                fences_tried: Default::default(),
+                hang_fence: Default::default(),
+                last_unsettled: Default::default(),
+                unsettled: Default::default(),
                 fail_step: Default::default(),
                 fail_then: Default::default(),
                 dead_after: Default::default(),
@@ -2573,6 +2636,40 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("the injected failure".into()));
             }
             Ok(())
+        }
+    }
+
+    impl FlakyStore {
+        /// Answer that a write failed unsettled, and send `write` once `gate` opens, unless it
+        /// was fenced by then.
+        fn unsettle<F>(
+            &self,
+            gate: Arc<tokio::sync::Semaphore>,
+            touches: Vec<String>,
+            write: F,
+        ) -> ServerError
+        where
+            F: std::future::Future + Send + 'static,
+        {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let nonce = format!("flaky-{}", NEXT.fetch_add(1, Ordering::SeqCst));
+            *self.last_unsettled.lock().unwrap() = touches.clone();
+            let fenced = Arc::new(tokio::sync::Mutex::new(false));
+            self.unsettled
+                .lock()
+                .unwrap()
+                .insert(nonce.clone(), fenced.clone());
+            tokio::spawn(async move {
+                gate.acquire().await.expect("gate").forget();
+                let fenced = fenced.lock().await;
+                if !*fenced {
+                    write.await;
+                }
+            });
+            ServerError::Unsettled {
+                detail: "the update timed out".into(),
+                fence: crate::store::Fence::new(nonce, touches),
+            }
         }
     }
 
@@ -2704,6 +2801,28 @@ pub(crate) mod test_store {
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
             self.step()?;
+            if !container.starts_with(super::intents::PREFIX) {
+                let gate = self
+                    .unsettle_next_create
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .or_else(|| self.unsettle_creates.lock().unwrap().clone());
+                if let Some(gate) = gate {
+                    let (inner, container, child, ct) = (
+                        self.inner.clone(),
+                        container.to_string(),
+                        child.to_string(),
+                        ct.to_string(),
+                    );
+                    let touches = vec![container.clone(), child.clone()];
+                    return Err(self.unsettle(gate, touches, async move {
+                        let _ = inner
+                            .create_in_container(&container, &child, body, &ct)
+                            .await;
+                    }));
+                }
+            }
             let gate = self.hold_next_create.lock().unwrap().take();
             if let Some(gate) = gate {
                 let (inner, container, child, ct) = (
@@ -2790,6 +2909,19 @@ pub(crate) mod test_store {
         ) -> ServerResult<DeleteOutcome> {
             // The same failures as `delete`: a resource is removed by either.
             self.step()?;
+            if let Some(gate) = held(&self.unsettle_next_delete_of, iri) {
+                let (inner, iri, parent) = (
+                    self.inner.clone(),
+                    iri.to_string(),
+                    parent.map(str::to_string),
+                );
+                let touches = std::iter::once(iri.clone()).chain(parent.clone()).collect();
+                return Err(self.unsettle(gate, touches, async move {
+                    let _ = inner
+                        .delete_container_if_empty(&iri, parent.as_deref())
+                        .await;
+                }));
+            }
             if self.fail_delete.load(Ordering::SeqCst)
                 || self.fail_delete_of.lock().unwrap().as_deref() == Some(iri)
             {
@@ -2814,6 +2946,21 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("blob cleanup failed".into()));
             }
             Ok(outcome)
+        }
+        async fn fence(&self, fence: &crate::store::Fence) -> ServerResult<()> {
+            self.fences_tried.fetch_add(1, Ordering::SeqCst);
+            if self.hang_fence.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            if self.fail_fence.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("the store cannot be reached".into()));
+            }
+            let write = self.unsettled.lock().unwrap().get(fence.nonce()).cloned();
+            let Some(write) = write else {
+                return Err(ServerError::Storage("no such write".into()));
+            };
+            *write.lock().await = true;
+            Ok(())
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             if self.fail_list.load(Ordering::SeqCst)

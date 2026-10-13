@@ -559,8 +559,8 @@ impl Notifier {
             }
         };
         let settle = {
-            let (state, id) = (state.clone(), id.to_string());
-            move |gone: bool, ()| {
+            let id = id.to_string();
+            move |state: &LwsState<S>, gone: bool, ()| {
                 if !gone {
                     return None;
                 }
@@ -1295,8 +1295,8 @@ async fn quarantined<S: Store + 'static>(
                 }
             };
             let settle = {
-                let (state, id) = (state.clone(), id.to_string());
-                move |gone: bool, ()| {
+                let id = id.to_string();
+                move |state: &LwsState<S>, gone: bool, ()| {
                     if gone {
                         state.notify.quarantined.write().expect("lock").remove(&id);
                         *state.notify.etag.write().expect("lock") = new_etag();
@@ -1636,8 +1636,7 @@ async fn subscribe<S: Store + 'static>(
     let doc = document(state, &sub);
     let author = sub.subscriber.clone();
     let register = {
-        let state = state.clone();
-        move || {
+        move |state: &LwsState<S>| {
             state.notify.subs.write().expect("lock").insert(id, sub);
             *state.notify.etag.write().expect("lock") = new_etag();
             // Counted as registered from here on.

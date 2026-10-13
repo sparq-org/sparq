@@ -668,7 +668,7 @@ pub enum Aside {
 
 /// [`Aside`] for `agent` and `action` on the set-aside resource at `uri`, decided as
 /// [`allowed`] decided before the stuck change to it began: on what it was then (whether it was
-/// there, its metadata and its format, see [`Prior`](super::Prior)), with the grants in force
+/// there, its metadata and its format, see `Prior`), with the grants in force
 /// now. What the change may have written meanwhile (new content, new types, a `pending` mark)
 /// is never read for it: a grant the change would newly satisfy is not met, and one it would
 /// stop meeting still is. What the change left untouched is read as stored. An error when that
@@ -1172,9 +1172,9 @@ pub async fn handle<S: Store + 'static>(
                 }
             };
             let settle = {
-                let (state, id) = (state.clone(), id.to_string());
+                let id = id.to_string();
                 let author = record.author.clone();
-                move |gone: bool, held| {
+                move |state: &LwsState<S>, gone: bool, held| {
                     {
                         let mut map = state.access.map(grants).write().expect("lock");
                         if gone {
@@ -1343,8 +1343,7 @@ async fn create<S: Store + 'static>(
     // The record is put in force, counted and announced in one step, once it is stored: a client
     // that goes away after the store committed cannot keep it from being announced.
     let register = {
-        let state = state.clone();
-        move || {
+        move |state: &LwsState<S>| {
             state
                 .access
                 .map(grants)
@@ -1354,7 +1353,7 @@ async fn create<S: Store + 'static>(
             state.access.bump(grants);
             // Counted as registered from here on.
             drop(slot);
-            announce(&state, grants, &document, own_inbox, activity);
+            announce(state, grants, &document, own_inbox, activity);
         }
     };
     let created = super::records::create_record(
@@ -3072,6 +3071,344 @@ mod tests {
         assert_eq!(withdrawal.await.unwrap(), StatusCode::NO_CONTENT);
         let r = handle(&state, &post(), &asker).await;
         assert_eq!(r.status(), StatusCode::CREATED);
+    }
+
+    /// Issue #6836: a create whose write failed unsettled (an HTTP update that timed out, still
+    /// running on the store) was answered `500` with its place freed when the listing did not
+    /// show it yet; the write then committed, leaving a record stored, not in force, and outside
+    /// its author's share until the next start. It keeps its place, unregistered, until its fence
+    /// lands; then it is put in force, as the write landed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_create_that_may_still_commit_keeps_its_place_until_it_is_settled() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(REQUESTS_PATH);
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = || {
+            test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[],
+                &access_doc("AccessRequest", "https://a/", None),
+            )
+        };
+        let stored = || async { state.store.list_children(&container).await.unwrap().len() };
+        let registered = || state.access.requests.read().unwrap().len();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("not known"), "{body}");
+        // Not listed, and not in force, but not taken as absent: its place is held.
+        assert_eq!(stored().await, 0);
+        assert_eq!(registered(), 0);
+        for _ in 1..MAX_REQUESTS_PER_AUTHOR {
+            let r = handle(&state, &post(), &asker).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        // The write lands while the store cannot be reached to fence it: still not in force,
+        // and still holding its place.
+        gate.add_permits(1);
+        for _ in 0..250 {
+            if stored().await == MAX_REQUESTS_PER_AUTHOR {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(stored().await, MAX_REQUESTS_PER_AUTHOR);
+        assert_eq!(registered(), MAX_REQUESTS_PER_AUTHOR - 1);
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        // Once the store answers, the fence settles it: stored, so in force.
+        store.fail_fence.store(false, Ordering::SeqCst);
+        eventually("the stored request is put in force", || {
+            registered() == MAX_REQUESTS_PER_AUTHOR
+        })
+        .await;
+        assert_eq!(
+            state.access.request_quota.in_flight.lock().unwrap().total,
+            0
+        );
+        let r = handle(&state, &post(), &asker).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        // A start loads the same.
+        let state = restart(&store).await;
+        assert_eq!(
+            state.access.requests.read().unwrap().len(),
+            MAX_REQUESTS_PER_AUTHOR
+        );
+    }
+
+    /// Issue #6836: a create whose fence lands before its write does can no longer commit: it is
+    /// settled as not stored, its place is freed, and the write, when it arrives, changes nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_create_fenced_before_it_commits_is_settled_as_not_stored() {
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(REQUESTS_PATH);
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        let r = handle(&state, &post, &asker).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        eventually("the place is freed", || {
+            state.access.request_quota.in_flight.lock().unwrap().total == 0
+        })
+        .await;
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert!(state
+            .store
+            .list_children(&container)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(state.access.requests.read().unwrap().is_empty());
+        let state = restart(&store).await;
+        assert!(state.access.requests.read().unwrap().is_empty());
+    }
+
+    /// Issue #6836, the mirror: a revocation whose delete failed unsettled could be answered
+    /// "still stored", the grant put back in force, and the delete then commit, leaving a grant
+    /// in force that is not stored. It stays out of force until the delete is fenced, and is then
+    /// removed as the delete landed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_revocation_that_may_still_commit_is_settled_once_fenced() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let iri = granted(&state).await;
+        assert_eq!(state.access.grant_policies().len(), 1);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let delete = test_store::request(
+            Method::DELETE,
+            iri.strip_prefix(&state.cfg.base_url).unwrap(),
+            &[],
+            "",
+        );
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("not known"), "{body}");
+        // Still listed, but not taken as kept: out of force until settled.
+        assert_eq!(
+            state.store.list_children(&container).await.unwrap().len(),
+            1
+        );
+        assert!(state.access.grant_policies().is_empty());
+        gate.add_permits(1);
+        for _ in 0..250 {
+            if state
+                .store
+                .list_children(&container)
+                .await
+                .unwrap()
+                .is_empty()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(state
+            .store
+            .list_children(&container)
+            .await
+            .unwrap()
+            .is_empty());
+        store.fail_fence.store(false, Ordering::SeqCst);
+        eventually("the revoked grant is removed", || {
+            state.access.grants.read().unwrap().is_empty()
+        })
+        .await;
+        let state = restart(&store).await;
+        assert!(state.access.grants.read().unwrap().is_empty());
+    }
+
+    /// Issue #6836, the mirror: a revocation fenced before its delete lands is settled as not
+    /// removed: the grant is put back in force, and the delete, when it arrives, changes nothing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_revocation_fenced_before_it_commits_puts_the_grant_back() {
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let iri = granted(&state).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        let delete = test_store::request(
+            Method::DELETE,
+            iri.strip_prefix(&state.cfg.base_url).unwrap(),
+            &[],
+            "",
+        );
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        eventually("the grant is put back in force", || {
+            state.access.grant_policies().len() == 1
+        })
+        .await;
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        assert_eq!(
+            state.store.list_children(&container).await.unwrap().len(),
+            1
+        );
+        assert_eq!(state.access.grant_policies().len(), 1);
+        // And it can be revoked.
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// Codex review of #6836: settlement tasks had no bound, so creates (grants have no quota)
+    /// against a store that keeps failing piled up tasks, records and locks. A change holds a
+    /// place among those being settled from its request until it is settled; past the bound, a
+    /// new one is refused with `503`, and once the store answers again, the places come back.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn record_changes_being_settled_are_bounded() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let post = || {
+            test_store::request(
+                Method::POST,
+                GRANTS_PATH,
+                &[],
+                &access_doc("AccessGrant", "https://a/", None),
+            )
+        };
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_creates.lock().unwrap() = Some(gate.clone());
+        store.fail_fence.store(true, Ordering::SeqCst);
+        for _ in 0..super::super::records::MAX_SETTLING {
+            let r = handle(&state, &post(), &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        assert_eq!(
+            state.settlements.pending(),
+            super::super::records::MAX_SETTLING
+        );
+        let r = handle(&state, &post(), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // The store answers again: every one is fenced (before its write, still held), so none
+        // is stored, and the places come back.
+        *store.unsettle_creates.lock().unwrap() = None;
+        store.fail_fence.store(false, Ordering::SeqCst);
+        eventually("every change is settled", || {
+            state.settlements.pending() == 0
+        })
+        .await;
+        gate.add_permits(super::super::records::MAX_SETTLING);
+        let r = handle(&state, &post(), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert_eq!(state.access.grant_policies().len(), 1);
+    }
+
+    /// Codex review of #6836: a settlement task held the state, so a server dropped on a
+    /// runtime that goes on kept it, and the task, running. The tasks hold the state only
+    /// weakly: dropping it ends them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dropping_the_state_ends_its_settlements() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let post = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        *store.unsettle_next_create.lock().unwrap() =
+            Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let r = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        eventually("the settlement is retrying", || {
+            store.fences_tried.load(Ordering::SeqCst) >= 2
+        })
+        .await;
+        let weak = state.downgrade();
+        drop(state);
+        eventually("the state is dropped", || weak.upgrade().is_none()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        let tried = store.fences_tried.load(Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), tried);
+    }
+
+    /// Codex review of #6836: a settlement step held the state across a store call, so one that
+    /// stalled kept the state, its tasks, the record's lock and its quota place alive after every
+    /// other handle was dropped. A settlement waits on the store and locks through their own
+    /// handles: dropping the state ends it even while its fence never answers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dropping_the_state_ends_a_settlement_whose_store_call_stalls() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        *store.unsettle_next_create.lock().unwrap() =
+            Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let r = handle(&state, &post, &asker).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let child = store.last_unsettled.lock().unwrap()[1].clone();
+        // The settlement's next fence stalls for good.
+        store.hang_fence.store(true, Ordering::SeqCst);
+        let tried = store.fences_tried.load(Ordering::SeqCst);
+        eventually("the settlement's fence is stalled", || {
+            store.fences_tried.load(Ordering::SeqCst) > tried
+        })
+        .await;
+        let (locks, quota) = (
+            state.locks.clone(),
+            state.access.request_quota.in_flight.clone(),
+        );
+        assert_eq!(quota.lock().unwrap().total, 1);
+        assert!(locks.try_lock(&child).is_none(), "the settlement holds it");
+        let weak = state.downgrade();
+        drop(state);
+        eventually("the state is dropped", || weak.upgrade().is_none()).await;
+        eventually("the record's lock is released", || {
+            locks.try_lock(&child).is_some()
+        })
+        .await;
+        eventually("the quota place is released", || {
+            quota.lock().unwrap().total == 0
+        })
+        .await;
     }
 
     /// Review finding: a create waited for its container inside a task of its own, so requests
