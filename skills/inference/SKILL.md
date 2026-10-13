@@ -107,13 +107,18 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
 // A log:includes / log:notIncludes / log:supports PATTERN bound through a variable
-// (`:cfg :pat ?f. ?s log:includes ?f`) is the formula it is bound to, matched exactly as if
-// written in place: the operator waits for the premise that binds it (an unbound SCOPE
-// variable means the store and is not waited for; when no premise can bind a pattern /
-// clause / aggregation subject given through a variable, the rule is refused: "N3: no
-// evaluation order binds every required input …"; a positive containment / collectAllIn
-// given its formula through a variable may bind ANY variable, so whatever needs one waits
-// for it). UNSUPPORTED inside a backward (`<=`)
+// (`:cfg :pat ?f. ?s log:includes ?f`) is the formula it is bound to, matched against the
+// bindings in place: it CANNOT introduce new bindings. Such an operator (and a collectAllIn
+// / forAllIn given a clause or subject through a variable) runs after every other premise
+// atom, in written order; an includes / supports pattern, or a collectAllIn subject's
+// result list, that still holds a free variable then fails the run ("N3: a formula bound
+// through a variable may not bind new variables …"; binding through bound formulas is
+// tracked in https://github.com/sparq-org/sparq/issues/6943). notIncludes patterns and
+// forAllIn clauses keep their internal variables (they bind nothing outward); a forAllIn
+// clause that is not a formula when it runs fails the premise. An unbound SCOPE variable
+// means the store and is not waited for; when no order binds a variable-given pattern /
+// clause / subject the rule is refused ("N3: no evaluation order binds every required
+// input …"). UNSUPPORTED inside a backward (`<=`)
 // rule: a pattern, or a collectAllIn / forAllIn clause or subject, reached through a
 // variable there fails the run ("N3: a formula bound through a variable is unsupported
 // inside a backward rule …"; write it in the rule; full support:

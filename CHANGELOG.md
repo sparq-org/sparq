@@ -118,11 +118,17 @@ Both changes are in that commit, but its copy of this file does not list them.
 ### Fixed
 
 - **sparq-reason (N3):** a `log:includes` / `log:notIncludes` / `log:supports` pattern
-  bound through a variable is matched as the bound formula, as when written inline; it was
-  matched as the empty pattern, so `log:includes` held vacuously and `log:notIncludes`
-  never fired. The operator waits for the premise that binds the pattern (an unbound
-  scope variable means the store and is not waited for; a rule in which no premise can
-  bind the pattern is refused with `N3: no evaluation order binds every required input …`).
+  bound through a variable is matched as the bound formula, against the bindings in place;
+  it was matched as the empty pattern, so `log:includes` held vacuously and
+  `log:notIncludes` never fired. A bound formula cannot introduce new bindings: such an
+  operator runs after the rest of the premise, and a bound `log:includes` /
+  `log:supports` pattern, or a variable-given `log:collectAllIn` subject's result list,
+  that still holds a free variable fails the run with
+  `N3: a formula bound through a variable may not bind new variables …` (#6943). A rule in
+  which no premise can bind the pattern is refused with
+  `N3: no evaluation order binds every required input …`; an unbound scope variable means
+  the store. A `log:forAllIn` clause that is not a formula fails the premise instead of
+  holding vacuously.
   Inside a backward (`<=`) rule a
   pattern, or a `log:collectAllIn` / `log:forAllIn` clause or subject, reached through a
   variable is unsupported and fails the run with
