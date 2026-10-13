@@ -242,7 +242,7 @@ pub(super) fn own_universals_from(stmts: &mut [[Term; 3]], prefix: &str) {
 }
 
 /// Give a rule's two sides their own universals (GH #6754): the premise's become the rule's
-/// matching variables ([`PREMISE_UNIVERSAL`]) and the conclusion's become
+/// rejection markers ([`PREMISE_UNIVERSAL`]) and the conclusion's become
 /// [`CONCLUSION_UNIVERSAL`]. Every other formula-level universal stays a quoted formula's
 /// own, which the engine matches only by identity and never substitutes.
 pub(super) fn scope_rule(r: &mut Rule) {

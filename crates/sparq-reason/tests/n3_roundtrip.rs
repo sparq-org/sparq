@@ -348,10 +348,9 @@ fn check_document_with(body: &str, want_refusal: bool, consumed_refusal: bool) {
 #[test]
 fn every_re_reasonable_write_preserves_semantics_or_refuses() {
     let representable = [
-        // Codex round 5 (1): the premise and the conclusion each declare `:x`, and the
-        // premise mentions `:x` plainly before its declaration (GH #6754: the premise's
-        // `@forAll` is written back between the two, where the source had it).
-        "{ :marker :ref :x. @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
+        // The conclusion mentions :x plainly before its own declaration (GH #6754:
+        // @forAll is written back between the two, where the source had it).
+        "{ :marker :ref :x. ?x :p :b } => { :marker :ref :x. @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
         // A mid-formula declaration after a plain mention in the same formula: likewise.
         ":a :p { :m :r :x. @forAll :x. :x :p :b }.\n",
         // An outer universal mentioned in an inner formula before its own redeclaration.
@@ -788,7 +787,7 @@ fn units_are_ordered_so_no_declaration_captures_a_plain_mention() {
     assert_eq!(got, want, "{doc}");
 }
 
-/// GH #6701 review round 11 (HIGH), Codex's counterexample: a document-level universal
+/// GH #6701: a document-level universal
 /// used only in a rule's premise is written with a DOCUMENT-level line, never moved into
 /// the premise. GH #6754: a premise-level declaration is the premise's own variable, and is
 /// written back in the premise — never hoisted to the document either.
@@ -805,7 +804,17 @@ fn a_document_level_binder_is_never_moved_into_a_formula() {
         (&doc_level, format!("@forAll <http://ex/x> .\n{{ <http://ex/x> <http://ex/p> <http://ex/o> . }} => {concl}")),
         (&in_premise, format!("{{ @forAll <http://ex/x> . <http://ex/x> <http://ex/p> <http://ex/o> . }} => {concl}")),
     ] {
-        let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+        let doc = if src == &in_premise {
+            assert_eq!(
+                reason_n3_pass_all(src, RuleVars::N3).unwrap_err(),
+                "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)"
+            );
+            let mut out = String::new();
+            write_rule(&one_rule(src), RuleKind::Forward, RuleVars::N3, &mut out).expect("exact rule writer");
+            out
+        } else {
+            reason_n3_pass_all(src, RuleVars::N3).expect("pass-all")
+        };
         assert_eq!(doc, want);
         assert_eq!(premise(&doc), premise(src));
     }
@@ -1103,8 +1112,10 @@ fn random_scopes_round_trip_or_are_refused() {
         let g = generate(&mut r);
         let src = parser::parse(&g.text).unwrap_or_else(|e| panic!("{e}\n{}", g.text));
         same_binding(&g, &src).unwrap_or_else(|e| panic!("the PARSER disagrees with the oracle: {e}\n{}", g.text));
+        let quantified_premise = g.statements.iter().flat_map(|(_, mentions)| mentions).flatten().any(|v| v.starts_with("__up."));
         match reason_n3_pass_all(&g.text, RuleVars::N3) {
             Ok(doc) => {
+                assert!(!quantified_premise, "a quantified antecedent was accepted: {}", g.text);
                 let back = parser::parse(&doc).unwrap_or_else(|e| panic!("{e}\n{doc}"));
                 same_binding(&g, &back).unwrap_or_else(|e| panic!("re-bound silently: {e}\n{}\n---\n{doc}", g.text));
                 wrote += 1;
@@ -1112,18 +1123,16 @@ fn random_scopes_round_trip_or_are_refused() {
             Err(e) => {
                 refused += 1;
                 caught += usize::from(e.contains("re-parses as") || e.contains("does not re-parse"));
-                // The only refusals: a unit mixing a plain mention and the universal (the one
-                // document line would capture it), or units that need each other first.
-                assert!(
-                    e.contains("capture a plain mention") || e.contains("form a cycle") || e.contains("shadowed"),
-                    "{e}\n{}",
-                    g.text
+                assert!(quantified_premise, "a supported generated document was refused: {e}\n{}", g.text);
+                assert_eq!(
+                    e,
+                    "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)",
+                    "{}", g.text
                 );
             }
         }
     }
     eprintln!("{wrote} written, {refused} refused ({caught} by the re-parse gate)");
-    // Every generated document comes from source text, so it has an exact form: with each
-    // declaration placed where its scope needs it (GH #6754), nothing is refused.
-    assert!(wrote == 3000 && refused == 0 && caught == 0, "{wrote} written, {refused} refused, {caught} by the gate");
+    // Supported generated documents keep exact scopes; quantified antecedents are refused.
+    assert!(wrote > 0 && refused > 0 && wrote + refused == 3000 && caught == 0, "{wrote} written, {refused} refused, {caught} by the gate");
 }

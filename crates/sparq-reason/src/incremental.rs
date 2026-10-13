@@ -2076,9 +2076,6 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
     let not_includes = n3_iri(N3_LOG, "notIncludes");
     let mut raws: Vec<RawRule> = Vec::new();
     for (rix, rule) in parsed.rules.iter().enumerate() {
-        if crate::n3::has_premise_universal(rule) {
-            return Err(format!("rule {rix}: premise declares its own @forAll universal"));
-        }
         let ordered = n3_order_premise(&rule.premise);
         let mut atoms = Vec::new();
         let mut n_plain = 0usize;
@@ -2398,10 +2395,12 @@ impl MaterializedN3Graph {
     /// [`N3Mode::Counting`] and ABox mutations are incremental; otherwise it runs in
     /// [`N3Mode::Fallback`] (every mutation re-runs the batch engine — always correct).
     ///
-    /// Errors only on rules-document parse failure.
+    /// Errors on rules-document parse failure or unsupported `@forAll` quantifiers in
+    /// a rule premise or scoped body pattern.
     pub fn new(rules_src: &str, base_facts: &[[N3Term; 3]]) -> Result<Self, String> {
         let cuts = crate::n3::bounded::Truncation::top_level();
         let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
+        crate::n3::validate_rule_quantifiers(&parsed)?;
         let (compiled, disqualified) = match n3_compile(&parsed) {
             Ok(c) => (Some(Rc::new(c)), None),
             Err(reason) => (None, Some(reason)),

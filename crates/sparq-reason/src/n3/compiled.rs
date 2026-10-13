@@ -274,7 +274,8 @@ pub struct BoundRuleSet<'a> {
 ///
 /// Returns `Err` on a parse failure or on any unsupported construct (backward rules,
 /// unsupported builtins, conclusion existentials, unresolvable builtin inputs,
-/// formula-/list-valued facts, unbound conclusion variables).
+/// formula-/list-valued facts, unbound conclusion variables, or `@forAll` in a rule
+/// premise or scoped body pattern).
 ///
 /// # Examples
 ///
@@ -301,6 +302,7 @@ pub fn compile_with_cycles(
     cycles: super::NegationCycles,
 ) -> Result<CompiledRuleSet, String> {
     let parsed = super::bounded::parse_n3(src, "", &super::bounded::Truncation::top_level())?;
+    super::validate_rule_quantifiers(&parsed)?;
     if !parsed.backward_rules.is_empty() {
         return Err("compiled-rules: backward (`<=`) rules are not in the compiled subset (goal-directed resolution stays with the text engine)".into());
     }
@@ -693,9 +695,6 @@ impl Compiler {
 
     #[allow(clippy::too_many_lines)]
     fn lower_rule(&mut self, rule: &super::model::Rule) -> Result<(), String> {
-        if super::has_premise_universal(rule) {
-            return Err("compiled-rules: a premise declares its own @forAll universal, which only a stored universal can match; the text engine handles it".into());
-        }
         // The engine's OWN premise ordering (builtins after their producers), so the
         // compiled evaluation order matches the text engine's exactly.
         let premise = super::order_premise(&rule.premise);

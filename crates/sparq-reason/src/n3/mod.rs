@@ -318,6 +318,11 @@ pub struct ProofStep {
 /// list walk cap, a nested closure left unclosed by the import-cycle guard): the run
 /// fails rather than read missing facts as absent. Only
 /// [`NegationCycles::SinglePass`] accepts that incomplete result.
+///
+/// # Errors
+///
+/// Returns an error for `@forAll` in a rule's own premise or a scoped body pattern,
+/// as well as parse failures, negation cycles and incomplete negation reads.
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     reason_n3_in(dict, src, NegationCycles::Reject, &Truncation::top_level())
 }
@@ -511,7 +516,8 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
 /// forward premises. A negation cycle in it, including one a query-supplied backward rule
 /// closes, is an error.
 ///
-/// Errors when either document fails to parse, or when the query document has no forward rule
+/// Errors for unsupported antecedent quantifiers, when either document fails to parse,
+/// or when the query document has no forward rule
 /// (a fact-only or backward-only query document has nothing to project — fail loudly rather
 /// than return an empty answer that reads like "the query matched nothing").
 pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, String> {
@@ -522,6 +528,7 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
 fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term; 3]>, String> {
     let data_parsed = bounded::parse_n3(data, "", &cuts)?;
     let query_parsed = bounded::parse_n3(query, "", &cuts)?;
+    validate_rule_quantifiers(&query_parsed)?;
     if query_parsed.rules.is_empty() {
         return Err("n3 query filter: the query document contains no `{ … } => { … }` forward \
                     rule; only forward-rule (SELECT/CONSTRUCT-style) query documents project an \
@@ -1117,6 +1124,7 @@ fn run_closure(
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
 ) -> Result<Closure, String> {
+    validate_rule_quantifiers(&parsed)?;
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
     // from being captured by a minted conclusion blank. Labels ingested later
@@ -2157,16 +2165,6 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
         return true;
     }
     match (&aw, &cw) {
-        // A premise universal meets only a variable: that variable then stands for it.
-        (Term::Var(v), Term::Var(w)) if premise_universal(v) && !quoted_universal(w) && !premise_universal(w) => {
-            s.insert(w.clone(), aw.clone());
-            true
-        }
-        (Term::Var(w), Term::Var(v)) if premise_universal(v) && !quoted_universal(w) && !premise_universal(w) => {
-            s.insert(w.clone(), cw.clone());
-            true
-        }
-        (Term::Var(v), _) | (_, Term::Var(v)) if premise_universal(v) => false,
         (Term::Var(v), _) if !quoted_universal(v) => {
             if frees_quoted_universal(&cw) {
                 return false;
@@ -2271,61 +2269,41 @@ fn frees_quoted_universal(t: &Term) -> bool {
     go(t, 0)
 }
 
-/// Is `v` a rule premise's own `@forAll` universal (`__up.<iri>`, [`parser::scope_rule`]),
-/// possibly as a backward-chaining copy (`__bw<n>_` prefixes)? The premise says its
-/// statements hold for EVERY value of it, so one ground instance proves nothing: it may
-/// match only a universal the store itself holds (GH #6754, as EYE does).
-fn premise_universal(v: &str) -> bool {
-    let mut rest = v;
-    loop {
-        if rest.starts_with(serialize::PREMISE_UNIVERSAL) {
-            return true;
-        }
-        let Some(r) = rest.strip_prefix("__bw") else { return false };
-        let digits = r.bytes().take_while(u8::is_ascii_digit).count();
-        match r[digits..].strip_prefix('_') {
-            Some(next) if digits > 0 => rest = next,
-            _ => return false,
-        }
-    }
-}
-
-/// Can a premise universal stand for `t`: a universal variable of the store (not a quoted
-/// formula's own, not another premise universal)?
-fn premise_universal_value(t: &Term) -> bool {
-    matches!(t, Term::Var(w) if !quoted_universal(w) && !premise_universal(w))
-}
-
-/// Does `rule`'s premise declare its own `@forAll` universal? The compiled and counting
-/// engines bind every premise variable to ground terms, so they refuse such a rule.
-pub(crate) fn has_premise_universal(rule: &Rule) -> bool {
-    fn go(t: &Term) -> bool {
+/// Reject antecedent quantifiers that the rule matchers cannot soundly evaluate.
+pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), String> {
+    fn has(t: &Term, prefix: &str) -> bool {
         match t {
-            Term::Var(v) => premise_universal(v),
-            Term::Formula(ts) => ts.iter().flatten().any(go),
-            Term::List(ms) => ms.iter().any(go),
-            Term::Triple(tr) => tr.iter().any(go),
+            Term::Var(v) => v.starts_with(prefix),
+            Term::Formula(ts) => ts.iter().flatten().any(|t| has(t, prefix)),
+            Term::List(ms) => ms.iter().any(|t| has(t, prefix)),
+            Term::Triple(tr) => tr.iter().any(|t| has(t, prefix)),
             _ => false,
         }
     }
-    rule.premise.iter().flatten().any(go)
+    for rule in parsed.rules.iter().chain(&parsed.backward_rules) {
+        for atom in &rule.premise {
+            // Ordinary quoted formula terms retain identity matching. Containment and
+            // aggregation patterns would instead need quantified wildcard matching.
+            let scoped_pattern = if scope_op(&atom[1]).is_some() {
+                Some(&atom[2])
+            } else if collect_op(&atom[1]).is_some() {
+                Some(&atom[0])
+            } else {
+                None
+            };
+            if atom.iter().any(|t| has(t, serialize::PREMISE_UNIVERSAL))
+                || scoped_pattern.is_some_and(|t| has(t, serialize::FORMULA_UNIVERSAL))
+            {
+                return Err("N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
     match (pat, val) {
         (Term::Var(v), _) if quoted_universal(v) => pat == val,
-        // A premise's own universal: only a store universal, and two of them never the same
-        // one (`∀x∀y. x p y` is not proved by `∀z. z p z`).
-        (Term::Var(v), _) if premise_universal(v) => match b.get(v) {
-            Some(existing) => existing == val,
-            None => {
-                if !premise_universal_value(val) || b.iter().any(|(k, w)| w == val && premise_universal(k)) {
-                    return false;
-                }
-                b.insert(v.clone(), val.clone());
-                true
-            }
-        },
         (Term::Var(v), _) => match b.get(v) {
             Some(existing) => existing == val,
             None => {

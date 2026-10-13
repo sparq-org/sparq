@@ -3,9 +3,8 @@
 //! The parser names such a universal by its declared IRI plus its de Bruijn distance to
 //! the declaring formula (`?__uf.<n>.<iri>`), so the name is unforgeable (a `.` cannot
 //! occur in a source quickvar) and canonical (alpha-equivalent copies of a formula are the
-//! same term). In a rule, the premise's own universals are the rule's matching variables;
-//! every other formula-level universal belongs to its quoted formula, matches only itself
-//! and is never substituted. Document-level `@forAll` is unchanged.
+//! same term). Rules with premise-local universals are rejected; every other formula-level
+//! universal belongs to its quoted formula, matches only itself and is never substituted. Document-level `@forAll` is unchanged.
 
 use sparq_reason::n3::{parser, Term};
 use sparq_reason::{reason_n3_pass_all, reason_n3_terms, RuleVars};
@@ -35,47 +34,102 @@ fn vars(t: &Term, out: &mut Vec<String>) {
     }
 }
 
-#[test]
-fn rule_premise_and_conclusion_declarations_are_different_variables() {
-    // The conclusion's `:x` is its own universal: the premise binds nothing in it, so no
-    // ground fact follows (main derived `:c :q :b` through one shared variable).
-    let facts = closure("{ @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b.\n");
-    assert!(!has(&facts, "c", "q", "b"), "{facts:?}");
+// These entry-point tests exercise validate_rule_quantifiers in every engine.
+const QUANTIFIER_ERROR: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
+
+fn premise_cases() -> Vec<String> {
+    [
+        "{ @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }. :c :p :b.",
+        "@forAll :y. :y :p :b. { @forAll :x. :x :p :b } => { :hit :by :rule }.",
+        "@forAll :z. :z :p :z. { @forAll :x, :y. :x :p :y } => { :hit :by :rule }.",
+        // An ordinary variable must not alias a premise-local universal.
+        "@forAll :z. :z :p :z. { @forAll :x. :x :p ?y } => { :hit :by :rule }.",
+        "{ @forAll :x. ( 1 2 ) math:sum :x } => { :hit :by :rule }.",
+        "{ @forAll :x. :x :p :b } => { ?__uf0_x :q :b }.",
+        "{ @forAll :x. :x :p :b } => { ?__up_x :q :b }.",
+        // Backward rules have the same unsupported antecedent.
+        "{ :hit :by :rule } <= { @forAll :x. :x :p :b }.",
+    ].iter().map(|src| format!("@prefix : <{EX}>. {src}")).collect()
+}
+
+fn scope_cases() -> Vec<String> {
+    ["notIncludes", "includes", "supports"].iter().flat_map(|op| {
+        [
+            format!("{{ ?scope log:{op} {{ @forAll :x. :x :p :b }} }} => {{ :hit :by :rule }}."),
+            // The quantifier may be nested inside the pattern.
+            format!("{{ ?scope log:{op} {{ :a :says {{ @forAll :x. :x :p :b }} }} }} => {{ :hit :by :rule }}."),
+        ]
+    }).chain([
+        "{ ( ?x { @forAll :x. :x :p :b } ?list ) log:collectAllIn ?scope } => { :hit :by :rule }.".into(),
+        "{ ( { @forAll :x. :x :p :b } { :a :p :b } ) log:forAllIn ?scope } => { :hit :by :rule }.".into(),
+    ]).map(|src| format!("@prefix : <{EX}>. {src}")).collect()
 }
 
 #[test]
-fn a_premise_universal_is_proved_only_by_a_stored_universal() {
-    // `{ @forAll :x. :x :p :b }` says EVERY x has `:p :b`: one ground instance does not prove
-    // it (Codex #6851 round 1; EYE derives nothing here either) …
-    let facts = closure("{ @forAll :x. :x :p :b } => { :hit :by :rule }.\n:c :p :b.\n");
-    assert!(!has(&facts, "hit", "by", "rule"), "{facts:?}");
-    // … a stored universal does (EYE derives `:hit :by :rule`; the W3C N3 suite's
-    // quantification/simple_forAll_premise.n3 is this shape).
-    let facts = closure("@forAll :y. :y :p :b.\n{ @forAll :x. :x :p :b } => { :hit :by :rule }.\n");
-    assert!(has(&facts, "hit", "by", "rule"), "{facts:?}");
-    // Two premise universals are two: `∀z. z :p z` does not prove `∀x∀y. x :p y`.
-    let facts = closure("@forAll :z. :z :p :z.\n{ @forAll :x, :y. :x :p :y } => { :hit :by :rule }.\n");
-    assert!(!has(&facts, "hit", "by", "rule"), "{facts:?}");
-    // A builtin cannot ground it either.
-    let facts = closure("{ @forAll :x. ( 1 2 ) math:sum :x } => { :hit :by :rule }.\n");
-    assert!(!has(&facts, "hit", "by", "rule"), "{facts:?}");
+fn naive_rejects_premise_own_forall() {
+    for src in premise_cases() {
+        assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), QUANTIFIER_ERROR, "{src}");
+    }
 }
 
 #[test]
-fn a_premise_universal_does_not_capture_a_quickvar_spelled_like_a_generated_name() {
-    // The #6746 counterexample: no source quickvar can spell a generated binder name.
-    let facts = closure("{ @forAll :x. :x :p :b } => { ?__uf0_x :q :b }.\n:c :p :b.\n");
-    assert!(!has(&facts, "c", "q", "b"), "{facts:?}");
-    let facts = closure("{ @forAll :x. :x :p :b } => { ?__up_x :q :b }.\n:c :p :b.\n");
-    assert!(!has(&facts, "c", "q", "b"), "{facts:?}");
+fn naive_rejects_forall_in_scope_patterns() {
+    for src in scope_cases() {
+        assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), QUANTIFIER_ERROR, "{src}");
+    }
+}
+
+#[cfg(feature = "compiled-rules")]
+#[test]
+fn compiled_rejects_premise_own_forall() {
+    for src in premise_cases() {
+        assert_eq!(sparq_reason::n3::compiled::compile(&src).unwrap_err(), QUANTIFIER_ERROR, "{src}");
+    }
+}
+
+#[cfg(feature = "compiled-rules")]
+#[test]
+fn compiled_rejects_forall_in_scope_patterns() {
+    for src in scope_cases() {
+        assert_eq!(sparq_reason::n3::compiled::compile(&src).unwrap_err(), QUANTIFIER_ERROR, "{src}");
+    }
 }
 
 #[test]
-fn a_quoted_sibling_copy_of_the_premise_keeps_its_own_binder() {
-    // The conclusion quotes a formula identical to the premise. Its `:x` is bound in that
-    // quoted formula, not by the premise, so the firing (on the stored universal `:y`)
-    // must not substitute into it.
-    let src = "{ @forAll :x. :x :p :b } => { :log :says { @forAll :x. :x :p :b } }.\n@forAll :y. :y :p :b.\n\
+fn incremental_rejects_premise_own_forall() {
+    for src in premise_cases() {
+        let err = sparq_reason::MaterializedN3Graph::new(&src, &[]).err().expect("rejected");
+        assert_eq!(err, QUANTIFIER_ERROR, "{src}");
+    }
+}
+
+#[test]
+fn incremental_rejects_forall_in_scope_patterns() {
+    for src in scope_cases() {
+        let err = sparq_reason::MaterializedN3Graph::new(&src, &[]).err().expect("rejected");
+        assert_eq!(err, QUANTIFIER_ERROR, "{src}");
+    }
+}
+
+#[test]
+fn a_query_rejects_premise_own_forall() {
+    let src = format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
+    assert_eq!(sparq_reason::reason_n3_query_terms("", &src).unwrap_err(), QUANTIFIER_ERROR);
+}
+
+#[test]
+fn a_nested_closure_rejects_premise_own_forall() {
+    // An inner premise cannot use the enclosing formula's lifted universal as its own.
+    let src = format!("@prefix : <{EX}>.
+        :k :is {{ @forAll :x. :x :p :b. {{ @forAll :y. :y :p :b }} => {{ :hit :by :rule }} }}.
+        {{ :k :is ?f. ?f log:conclusion ?g }} => {{ :result :is ?g }}.");
+    assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), format!("in a nested closure: {QUANTIFIER_ERROR}"));
+}
+
+#[test]
+fn a_quoted_conclusion_keeps_its_own_binder() {
+    // The quoted conclusion's binder is independent of the ordinary premise variable.
+    let src = "{ ?x :p :b } => { :log :says { @forAll :x. :x :p :b } }.\n:c :p :b.\n\
                :want :is { @forAll :x. :x :p :b }.\n";
     let facts = closure(src);
     let want = facts.iter().find(|f| f[0] == iri("want")).expect("source fact")[2].clone();
@@ -137,22 +191,28 @@ fn a_formula_s_own_universals_quantify_its_rules_under_log_conclusion() {
 
 #[test]
 fn a_nested_closure_keeps_the_enclosing_formula_s_universals() {
-    // The inner `log:conclusion` runs inside the outer one, over a formula that mentions the
-    // OUTER formula's `:x`; its result must still mention that `:x`, not claim it.
+    // The inner closure mentions the OUTER formula's :x; it must not claim that binder.
     let src = ":k :is { @forAll :x. :a :says { :x :q :z }. { :a :says ?g. ?g log:conclusion ?h } => { :a :closed ?h } }.\n\
-               { :k :is ?f. ?f log:conclusion ?c. ?c log:includes { @forAll :x. :a :closed { :x :q :z } } } => { :nested :lift :ok }.\n";
-    assert!(has(&closure(src), "nested", "lift", "ok"));
+               { :k :is ?f. ?f log:conclusion ?c } => { :result :is ?c }.\n";
+    let facts = closure(src);
+    let result = facts.iter().find(|f| f[0] == iri("result")).expect("closed result");
+    let Term::Formula(rows) = &result[2] else { panic!("formula result: {result:?}") };
+    assert!(rows.contains(&[iri("a"), iri("closed"), Term::Formula(vec![
+        [Term::Var(format!("__uf.1.{EX}x")), iri("q"), iri("z")]
+    ])]), "{rows:?}");
 }
 
 #[test]
 fn a_closure_keeps_universals_its_rules_assert_in_the_result_formula() {
-    // Codex #6851 round 1: a rule inside the closed formula concludes a universal; the
-    // result formula must hold it as ITS OWN universal, not a document-level one.
     let src = ":k :is { :c :p :b. { :c :p :b } => { @forAll :x. :a :says { :x :q :z } } }.\n\
-               { :k :is ?f. ?f log:conclusion ?c. ?c log:includes { @forAll :x. :a :says { :x :q :z } } } => { :concl :scoped :ok }.\n\
-               { :k :is ?f. ?f log:supports { @forAll :x. :a :says { :x :q :z } } } => { :supports :scoped :ok }.\n";
+               { :k :is ?f. ?f log:conclusion ?c } => { :result :is ?c }.\n\
+               { :k :is ?f. ?f log:supports { :a :says _:formula } } => { :supports :scoped :ok }.\n";
     let facts = closure(src);
-    assert!(has(&facts, "concl", "scoped", "ok"), "{facts:?}");
+    let result = facts.iter().find(|f| f[0] == iri("result")).expect("closed result");
+    let Term::Formula(rows) = &result[2] else { panic!("formula result: {result:?}") };
+    assert!(rows.contains(&[iri("a"), iri("says"), Term::Formula(vec![
+        [Term::Var(format!("__uf.1.{EX}x")), iri("q"), iri("z")]
+    ])]), "{rows:?}");
     assert!(has(&facts, "supports", "scoped", "ok"), "{facts:?}");
 }
 
@@ -171,8 +231,9 @@ fn document_level_for_all_is_unchanged() {
 
 #[test]
 fn no_generated_binder_reaches_a_derived_fact() {
-    let src = "{ @forAll :x. :x :p :b } => { :r :s { @forAll :y. :y :t :x } }.\n:c :p :b.\n";
+    let src = "{ ?x :p :b } => { @forAll :z. :z :q :b. :r :s { @forAll :y. :y :t ?x } }.\n:c :p :b.\n";
     let facts = closure(src);
+    assert!(facts.iter().any(|f| f[0] == iri("r")), "the rule fired: {facts:?}");
     for f in &facts {
         let mut v = Vec::new();
         f.iter().for_each(|t| vars(t, &mut v));
@@ -184,7 +245,7 @@ fn no_generated_binder_reaches_a_derived_fact() {
 fn formula_level_universals_round_trip_through_pass_all() {
     let src = format!(
         "@prefix : <{EX}>.\n:a :p {{ @forAll :x. :x :q {{ @forAll :x. :x :r :z }} }}.\n\
-         {{ @forAll :x. :x :p :b }} => {{ @forAll :x. :x :q :b. :log :says {{ @forAll :x. :x :p :b }} }}.\n:c :p :b.\n"
+         {{ ?x :p :b }} => {{ @forAll :x. :x :q :b. :log :says {{ @forAll :x. :x :p :b }} }}.\n:c :p :b.\n"
     );
     let doc = reason_n3_pass_all(&src, RuleVars::N3).expect("pass-all writes formula-level universals");
     assert!(!doc.contains("__u"), "no engine-internal name: {doc}");

@@ -78,7 +78,7 @@ pub(super) const UNIVERSAL_VAR: &str = "__ua.";
 pub(super) const FORMULA_UNIVERSAL: &str = "__uf.";
 
 /// A rule PREMISE's own formula-level universal (`__up.<iri>`), renamed from
-/// [`FORMULA_UNIVERSAL`] when the rule is built: the rule's matching variable. Only that
+/// [`FORMULA_UNIVERSAL`] when the rule is built: a marker for rejecting the rule. Only that
 /// premise can mention it, so no other formula's binder can capture or be captured by it.
 pub(super) const PREMISE_UNIVERSAL: &str = "__up.";
 
