@@ -359,6 +359,29 @@ impl PublicGrant {
         admin_pub.verify(&self.signing_bytes(), &sig)
     }
 
+    /// Exercise-time epoch check: is this grant usable in epoch `current`?
+    ///
+    /// The grant authorizes the inclusive range `epoch ..= max_epoch` (with no
+    /// upper bound when [`Self::max_epoch`] is `None`). Returns
+    /// [`Error::EpochOutOfRange`] when `current` precedes the epoch the grant
+    /// is scoped to or exceeds its ceiling.
+    ///
+    /// This is the single canonical enforcement point for the ceiling: the
+    /// capability/envelope layer never learns a "current epoch" on its own, so
+    /// nothing else in this crate rejects an over-ceiling grant. The caller that
+    /// admits the grant (a broker/sync tier) must call this alongside
+    /// [`Self::verify`]; a verified signature does **not** imply an in-range
+    /// epoch.
+    pub fn check_epoch(&self, current: Epoch) -> Result<()> {
+        if current.0 < self.epoch.0 {
+            return Err(Error::EpochOutOfRange("current epoch precedes the grant epoch"));
+        }
+        if self.max_epoch.is_some_and(|m| current.0 > m.0) {
+            return Err(Error::EpochOutOfRange("current epoch exceeds max_epoch"));
+        }
+        Ok(())
+    }
+
     /// Decode + validate a public grant (fail-closed). Rejects an unknown suite,
     /// any secret field (10/11/12 are not permitted in a public grant), unknown
     /// mandatory fields, non-canonical CBOR, and an inconsistent authority set.
