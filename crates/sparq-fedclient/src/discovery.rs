@@ -704,7 +704,9 @@ fn probe_url(endpoint: &str, query: &str) -> String {
     let (path, params) = base.split_once('?').unwrap_or((base, ""));
     let mut url = format!("{path}?");
     for param in params.split('&') {
-        if !param.is_empty() && param != "query" && !param.starts_with("query=") {
+        // Match the name as a server decodes it (`%71uery` is `query`); keep the text verbatim.
+        let name = param.split_once('=').map_or(param, |(name, _)| name);
+        if !param.is_empty() && percent_encoding::percent_decode_str(name).ne("query".bytes()) {
             url.push_str(param);
             url.push('&');
         }
@@ -1358,6 +1360,9 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
             ("?queryx=1", "?queryx=1&"),
             ("?", "?"),
             ("?g=x&", "?g=x&"),
+            ("?%71uery=ASK%7B%7D&g=x", "?g=x&"),
+            ("?%71uery", "?"),
+            ("?Query=1&qu+ery=2", "?Query=1&qu+ery=2&"),
         ] {
             let expected = format!("http://e/s{kept}query={}", pct_encode(ASK_PROBE));
             assert_eq!(
