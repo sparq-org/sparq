@@ -3165,10 +3165,14 @@ impl Graph {
             // A frame still pending here was never cleared, so its body was not fully
             // materialised: treat it as abandoned.
             if j.pending {
-                j.abandoned = true;
+                self.mark_abandoned();
                 return Err(NEEDS_RECOVERY.to_owned());
             }
-            return j.append(records).map_err(|e| format!("txn journal commit failed: {e}"));
+            let appended = j.append(records);
+            if j.abandoned {
+                self.mark_abandoned();
+            }
+            return appended.map_err(|e| format!("txn journal commit failed: {e}"));
         }
         #[cfg(not(feature = "mmap"))]
         let _ = records;
@@ -3184,7 +3188,12 @@ impl Graph {
         self.refuse_if_abandoned()?;
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
-            return j.truncate().map_err(|e| format!("txn journal clear failed: {e}"));
+            if let Err(e) = j.truncate() {
+                // The frame may still be on disk, and a reopen would redo it over anything
+                // written after it: nothing more may be written until then.
+                self.mark_abandoned();
+                return Err(format!("txn journal clear failed: {e}"));
+            }
         }
         Ok(())
     }
@@ -3197,8 +3206,22 @@ impl Graph {
     /// when no frame is pending.
     pub fn abandon_txn(&mut self) {
         #[cfg(feature = "mmap")]
+        if self.txn.as_ref().is_some_and(|j| j.pending) {
+            self.mark_abandoned();
+        }
+    }
+
+    /// Refuse durable writes to this graph and every named graph under it until a reopen: a
+    /// write to a named graph would otherwise land in its own log ahead of the parent's frame,
+    /// and the redo would then put older records over it.
+    #[cfg(feature = "mmap")]
+    fn mark_abandoned(&mut self) {
         if let Some(j) = &mut self.txn {
-            j.abandoned = j.pending;
+            j.pending = true;
+            j.abandoned = true;
+        }
+        for (_, sub) in &mut self.named {
+            sub.mark_abandoned();
         }
     }
 
@@ -4439,6 +4462,10 @@ impl TxnJournal {
 
     /// Empties the journal (after its frame has been materialised into the per-graph state).
     fn truncate(&mut self) -> std::io::Result<()> {
+        #[cfg(test)]
+        if tests::FAIL_JOURNAL_CLEAR.with(std::cell::Cell::get) {
+            return Err(std::io::Error::other("injected journal clear failure"));
+        }
         self.file.set_len(0)?;
         self.file.sync_data()?;
         self.pending = false;
@@ -6437,6 +6464,8 @@ mod tests {
     thread_local! {
         /// Makes the journal's frame sync fail after the frame is written.
         pub(super) static FAIL_JOURNAL_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// Makes clearing the journal fail.
+        pub(super) static FAIL_JOURNAL_CLEAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
     use super::*;
 
@@ -10910,6 +10939,37 @@ mod tests {
         assert_eq!(x.map(|v| v.len()), Some(1), "the committed record was redone");
         assert!(dump_terms(&g).is_empty(), "the refused write left no trace");
         g.apply_delta(std::slice::from_ref(&b), &[]).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A journal that cannot be cleared after its frame was applied refuses every later write,
+    /// to the graph and its named graphs, until a reopen redoes the frame.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn failed_journal_clear_refuses_writes_until_reopen() {
+        let dir = txn_tmp_dir("clearfail");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let a = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn(&[TxnRecord::Insert(None, a.clone())]).unwrap();
+            g.apply_delta(std::slice::from_ref(&a), &[]).unwrap();
+            FAIL_JOURNAL_CLEAR.with(|f| f.set(true));
+            let res = g.clear_txn();
+            FAIL_JOURNAL_CLEAR.with(|f| f.set(false));
+            assert!(res.is_err());
+            assert!(g.needs_recovery());
+            assert!(g.apply_delta(&[], std::slice::from_ref(&a)).is_err());
+            let sub = &mut g.named[0].1;
+            assert!(sub.apply_delta(&[], &[[named("n0"), term_iri(0, "p"), named("o0")]]).is_err());
+        }
+        let g = Graph::open(&dir).unwrap();
+        assert!(!g.needs_recovery());
+        assert_eq!(dump_terms(&g).len(), 1, "the frame was redone");
         std::fs::remove_dir_all(&dir).ok();
     }
 

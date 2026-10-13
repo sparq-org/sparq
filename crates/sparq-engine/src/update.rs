@@ -879,6 +879,8 @@ pub fn update_in_place_atomic_with_budget(
     sparql: &str,
     budget: &crate::QueryBudget,
 ) -> Result<(), String> {
+    // The fork carries no journal, so check the graph itself before working on it.
+    refuse_if_recovering(graph)?;
     let mut working = graph.fork();
     update_in_place_with_budget(&mut working, sparql, budget)?;
     *graph = working;
@@ -911,6 +913,7 @@ fn apply_update_in_place(
     mut sink: EffectSink,
     mut authorize: Option<&mut WriteAuthorizer<'_>>,
 ) -> Result<(), String> {
+    refuse_if_recovering(graph)?;
     for op in &upd.operations {
         match op {
             GraphUpdateOperation::InsertData { data } => {
@@ -1086,6 +1089,17 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
     // [OPUS-4.8] (sq-ycle) (4) The body is fully materialised into the per-graph state — clear the
     // redo journal so the next body starts fresh and a clean reopen is a no-op (no-op in-memory).
     graph.clear_txn()
+}
+
+/// Refuse to change a graph that holds a committed update it could not finish applying
+/// ([`Graph::needs_recovery`]): only a reopen may change it, by completing that update.
+fn refuse_if_recovering(graph: &Graph) -> Result<(), String> {
+    if graph.needs_recovery() {
+        return Err("the graph holds a committed update that was not fully applied; reopen it to \
+                    complete the update"
+            .to_owned());
+    }
+    Ok(())
 }
 
 /// Step (3) of [`apply_effects`]: apply each effect to the per-graph state, in capture order.
@@ -1537,6 +1551,9 @@ mod tests {
             assert!(durable.needs_recovery());
             let later = captured("", "INSERT DATA { GRAPH <http://ex/q> { <http://ex/s> <http://ex/p> 1 } }");
             assert!(apply_effects(&mut durable, &later).is_err(), "no later body commits over the gap");
+            assert!(update_in_place(&mut durable, "INSERT DATA { GRAPH <http://ex/x> { <http://ex/s> <http://ex/p> 2 } }").is_err());
+            assert!(update_in_place_atomic(&mut durable, "INSERT DATA { <http://ex/s> <http://ex/p> 3 }").is_err());
+            assert!(durable.needs_recovery(), "nothing replaced the graph");
         }
         let g = Graph::open(&dir).unwrap();
         assert!(!g.needs_recovery());
