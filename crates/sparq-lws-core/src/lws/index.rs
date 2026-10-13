@@ -469,6 +469,14 @@ async fn handle_within<S: Store + 'static>(
                 Some(b) => filter_bytes = Bytes::from(b),
                 None => return problem(StatusCode::NOT_FOUND, None),
             }
+            // The rounding above lets a byte or two more through: a page link carrying a filter
+            // past its size is longer than any this server makes, whatever the filter holds.
+            if filter_bytes.len() > MAX_FILTER_BYTES {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+                );
+            }
         } else {
             match req.content_type() {
                 None => {
@@ -502,19 +510,12 @@ async fn handle_within<S: Store + 'static>(
         };
         if filter_bytes.len() > MAX_FILTER_BYTES {
             // A well-formed filter too long to carry on its page links is a search too complex
-            // to answer (section 7.2), as one with too many groups is. A page link carrying one
-            // is longer than any this server makes: too large, as one refused above before decoding is.
-            return if page_link {
-                problem(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
-                )
-            } else {
-                problem(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
-                )
-            };
+            // to answer (section 7.2), as one with too many groups is. (A page link carrying one
+            // was refused above.)
+            return problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+            );
         }
     }
     // lws+json or ld+json, negotiated by quality and specificity (lws+json on a tie, or without
@@ -772,10 +773,10 @@ mod tests {
         let filter = types(99, &long);
         assert!(filter.len() > MAX_FILTER_BYTES && filter.len() <= MAX_FILTER_READ);
         assert_eq!(search(filter).await, StatusCode::UNPROCESSABLE_ENTITY);
-        assert_ne!(
-            search(types(99, "https://e.example")).await,
-            StatusCode::PAYLOAD_TOO_LARGE
-        );
+        let short = types(99, "https://e.example");
+        assert!(short.len() <= MAX_FILTER_BYTES);
+        // The same search gets the same answer on either origin.
+        assert_eq!(search(short).await, StatusCode::UNPROCESSABLE_ENTITY);
         // At the limit, and one byte past it.
         let padded = |len: usize| {
             let head = "{\"type\": [\"https://e.example/T\"], \"@padding\": \"";
@@ -788,9 +789,34 @@ mod tests {
             StatusCode::UNPROCESSABLE_ENTITY
         );
         // A long filter that is not one is malformed, whatever its length.
-        let mut broken = padded(MAX_FILTER_BYTES + 1);
+        let mut broken = padded(MAX_FILTER_BYTES + 2);
         broken.pop();
+        assert_eq!(broken.len(), MAX_FILTER_BYTES + 1);
         assert_eq!(search(broken).await, StatusCode::BAD_REQUEST);
+        // A page link carrying a filter one byte past its size is refused as too large, whatever
+        // the filter holds: its encoding is within the rounded bound checked before decoding.
+        let link = |filter: String| {
+            let state = state.clone();
+            async move {
+                let q = jose::b64url(filter.as_bytes());
+                assert!(q.len() <= MAX_FILTER_BYTES.div_ceil(3) * 4);
+                let path = format!("{TYPE_SEARCH_PATH}?q={q}&page=1");
+                handle(
+                    &state,
+                    &test_store::request(Method::GET, &path, &[], ""),
+                    &Agent::anonymous(),
+                )
+                .await
+                .status()
+            }
+        };
+        assert_eq!(
+            link(padded(MAX_FILTER_BYTES + 1)).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        let mut broken = padded(MAX_FILTER_BYTES + 2);
+        broken.pop();
+        assert_eq!(link(broken).await, StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[tokio::test]
