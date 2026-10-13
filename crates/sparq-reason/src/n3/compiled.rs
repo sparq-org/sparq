@@ -1320,8 +1320,7 @@ impl BoundRuleSet<'_> {
                         let oxrdf::Term::NamedNode(n) = dict.term(id) else {
                             continue;
                         };
-                        let bytes = bounded::string_term_bytes(n.as_str().len());
-                        if refused_term(run, run, Derived::Uri, bytes, || bytes) {
+                        if super::uri_refused(run, run, n.as_str(), true) {
                             continue;
                         }
                         let lit = dict.intern_lit(n.as_str(), XSD_STRING, None);
@@ -1342,8 +1341,7 @@ impl BoundRuleSet<'_> {
                         let oxrdf::Term::Literal(l) = dict.term(id) else {
                             continue;
                         };
-                        let bytes = bounded::TERM_NODE_BYTES.saturating_add(l.value().len());
-                        if refused_term(run, run, Derived::Uri, bytes, || bytes) {
+                        if super::uri_refused(run, run, l.value(), false) {
                             continue;
                         }
                         let iri = dict.intern_iri(l.value());

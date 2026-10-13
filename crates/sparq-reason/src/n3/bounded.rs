@@ -15,6 +15,8 @@
 //! fails if a limit or a raw `Regex::new` appears in another N3 evaluator source.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::rc::Rc;
 
 use super::model::Term;
@@ -331,15 +333,29 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// What it does not bound:
 /// * the closure's total memory: many distinct terms just under the limit are bounded
 ///   only by `max_facts`;
+/// * the intermediate join work within a round (the binding rows of a premise join, or
+///   how many times rules fire), on any engine: the text engine, the compiled evaluator
+///   and the incremental counting engine alike (GH #6938);
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time
 ///   (each bounded by the length of the source token), the spare capacity of its strings,
 ///   vectors and maps, its fixed-size state, and the text it parses;
 /// * the text a resolver supplies (`log:content`, `log:semantics`), which the caller
-///   allocates before it is sized (the literal or formula built from it is refused);
-/// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
-///   fallback is bounded), which has no round and fact allowance either.
+///   allocates before it is sized (the literal or formula built from it is refused).
+///
+/// The incremental counting engine behind `MaterializedN3Graph` (GH #6854) takes the
+/// same allowance (`MaterializedN3Graph::with_limits`; `new` uses the default). Its
+/// builtins substitute their subject and object through `bounded::substitute` and size each
+/// result with the text engine's own checkpoint before building it; its conclusions are
+/// variables, IRIs and literals, so they build no new term. Each propagation is charged
+/// one round per wave (and per round of a recursive layer's local fixpoint) against the
+/// round allowance; each new distinct fact is checked against the fact allowance as it is
+/// collected, and the closure after each wave, so no published closure holds more than
+/// `max_facts` facts. Past any limit the graph rebuilds through the batch engine
+/// under the same limits, so it holds the batch engine's closure or fails closed with its
+/// error. Its rounds are not the batch engine's schedule, so under equal round or fact
+/// limits it can hold a closure a from-scratch batch run near the boundary refuses.
 ///
 /// The opt-in `compiled-rules` evaluator (`n3::compiled`, GH #6855) takes the same
 /// allowance (`eval_with_limits`; `eval` uses the default) and refuses with the same
@@ -358,9 +374,10 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// [`ClosureLimits::default`] and set the fields to change
 /// (`let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`).
 ///
-/// Pass one to [`reason_n3_with_limits`](crate::n3::reason_n3_with_limits) or
-/// [`reason_n3_terms_with_limits`](crate::n3::reason_n3_terms_with_limits); every other
-/// N3 entry point uses [`ClosureLimits::default`].
+/// Pass one to [`reason_n3_with_limits`](crate::n3::reason_n3_with_limits),
+/// [`reason_n3_terms_with_limits`](crate::n3::reason_n3_terms_with_limits) or
+/// [`MaterializedN3Graph::with_limits`](crate::MaterializedN3Graph::with_limits); every
+/// other N3 entry point uses [`ClosureLimits::default`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ClosureLimits {
@@ -459,7 +476,7 @@ pub(crate) fn derived_term(
 /// The [`term_bytes`] of `t` with `b`'s bindings substituted, as [`substitute`] (or, with
 /// `deep`, [`substitute_deep`], through quoted formulae) would build it, read from the
 /// borrowed terms without building anything.
-pub(crate) fn resolved_bytes(t: &Term, b: &super::Binding, deep: bool) -> usize {
+pub(crate) fn resolved_bytes<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>, deep: bool) -> usize {
     let all = |ts: &mut dyn Iterator<Item = &Term>| {
         ts.fold(TERM_NODE_BYTES, |n, m| n.saturating_add(resolved_bytes(m, b, deep)))
     };
@@ -504,13 +521,19 @@ impl std::fmt::Display for Substituted {
 
 /// THE substitution of the text engine: `t` with `b`'s bound variables substituted
 /// (recursing into lists and quoted triples; a quoted formula is a value, kept as is).
+/// The incremental counting engine substitutes a builtin's subject and object through it
+/// too (GH #6854), so both engines size the same terms.
 /// A compound `t` can name a bound term many times, so it is sized from the borrowed
 /// terms first ([`resolved_bytes`]) and refused past the run's term-size limit
 /// ([`derived_term`]): `None`, with the cut and the run's refusal recorded. A variable or
 /// atom is one copy of an existing term and is not sized. `tests/n3_bounded_discipline.rs`
 /// fails if an N3 evaluator substitutes any other way.
 #[inline]
-pub(crate) fn substitute(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
+pub(crate) fn substitute<S: BuildHasher>(
+    t: &Term,
+    b: &HashMap<String, Term, S>,
+    run: &Truncation,
+) -> Option<Term> {
     match t {
         Term::List(_) | Term::Triple(_) if compound_refused(t, b, run, false) => None,
         _ => Some(apply(t, b)),
@@ -534,7 +557,12 @@ pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) ->
 /// (sized from the borrowed terms; the cut and the run's refusal are recorded). Kept out
 /// of line: a variable or atom, the common case, never reaches it.
 #[inline(never)]
-fn compound_refused(t: &Term, b: &super::Binding, run: &Truncation, deep: bool) -> bool {
+fn compound_refused<S: BuildHasher>(
+    t: &Term,
+    b: &HashMap<String, Term, S>,
+    run: &Truncation,
+    deep: bool,
+) -> bool {
     substituted_refused(run, resolved_bytes(t, b, deep))
 }
 
@@ -588,7 +616,7 @@ pub(crate) fn dict_term_bytes(dict: &sparq_core::dict::Dict, id: sparq_core::dic
 /// Substitute bound variables in `t` (recursing into list members and quoted triples);
 /// returns the term (possibly still containing free vars). Private: callers go through
 /// [`substitute`].
-fn apply(t: &Term, b: &super::Binding) -> Term {
+fn apply<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>) -> Term {
     match t {
         Term::Var(v) => b.get(v).cloned().unwrap_or_else(|| t.clone()),
         Term::List(ms) => Term::List(ms.iter().map(|m| apply(m, b)).collect()),
@@ -660,15 +688,29 @@ impl ClosureRounds {
                 self.left = left;
                 Ok(())
             }
-            _ => {
-                cuts.record(CLOSURE_CUT);
-                Err(format!(
-                    "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
-                     the rules keep deriving new facts (raise ClosureLimits to allow more)",
-                    self.limits.max_rounds, self.limits.max_facts
-                ))
-            }
+            _ => Err(self.exceeded(cuts)),
         }
+    }
+
+    /// The fact allowance alone, without spending a round: `Err` (the cut recorded on
+    /// `cuts`) when a closure holding `facts` facts is past it. The incremental counting
+    /// engine checks each new fact against it as it is collected, so no wave holds more
+    /// distinct facts than the allowance before it is refused.
+    pub(crate) fn hold(&self, facts: usize, cuts: &impl Sink) -> Result<(), String> {
+        if facts <= self.limits.max_facts {
+            return Ok(());
+        }
+        Err(self.exceeded(cuts))
+    }
+
+    /// The error of a closure past its allowance, the cut recorded on `cuts`.
+    fn exceeded(&self, cuts: &impl Sink) -> String {
+        cuts.record(CLOSURE_CUT);
+        format!(
+            "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
+             the rules keep deriving new facts (raise ClosureLimits to allow more)",
+            self.limits.max_rounds, self.limits.max_facts
+        )
     }
 }
 

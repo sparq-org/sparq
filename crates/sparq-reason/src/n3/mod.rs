@@ -3612,16 +3612,14 @@ fn eval_binder_inner(
         Bidi::LogUri => match (sv, ov) {
             // forward: IRI subject → its text as a string literal
             (Term::Iri(i), _) => {
-                let bytes = bounded::string_term_bytes(i.len());
-                if refused_term(run, pending, Derived::Uri, bytes, || bytes) {
+                if uri_refused(run, pending, i, true) {
                     return None;
                 }
                 (o, Term::Lit(i.clone(), "http://www.w3.org/2001/XMLSchema#string".into(), None))
             }
             // reverse: string object → the IRI it names
             (Term::Var(_), Term::Lit(v, _, _)) => {
-                let bytes = bounded::TERM_NODE_BYTES.saturating_add(v.len());
-                if refused_term(run, pending, Derived::Uri, bytes, || bytes) {
+                if uri_refused(run, pending, v, false) {
                     return None;
                 }
                 (s, Term::Iri(v.clone()))
@@ -4939,6 +4937,56 @@ fn refused_term(
     exact: impl FnOnce() -> usize,
 ) -> bool {
     settle(cuts, bounded::derived_term(run, &what, bound, exact))
+}
+
+/// Whether the term `log:uri` binds, built from the borrowed `text`, is refused for its
+/// size: with `to_literal`, an IRI's text as an `xsd:string` literal (forward); without,
+/// the IRI a string names (reverse). Shared by the text engine, the compiled evaluator
+/// and the incremental counting engine.
+pub(crate) fn uri_refused(
+    run: &Truncation,
+    cuts: &impl bounded::Sink,
+    text: &str,
+    to_literal: bool,
+) -> bool {
+    let bytes = if to_literal {
+        bounded::string_term_bytes(text.len())
+    } else {
+        bounded::TERM_NODE_BYTES.saturating_add(text.len())
+    };
+    refused_term(run, cuts, Derived::Uri, bytes, || bytes)
+}
+
+/// The string builtins the incremental counting engine behind
+/// [`MaterializedN3Graph`](crate::MaterializedN3Graph) evaluates itself (GH #6854).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CountedFunc {
+    Concat,
+    Scrape,
+    EncodeForUri,
+}
+
+/// Whether the result of `f` over `args` (its argument list as substituted, or the one
+/// subject of a unary builtin) is refused for its size: the text engine's own result
+/// checkpoint ([`output_bytes`], a cheap bound and only past the limit the exact size),
+/// run before the result is built. The cut and the run's refusal are recorded on `run`.
+pub(crate) fn counted_result_refused(run: &Truncation, f: CountedFunc, args: &[Term]) -> bool {
+    let f = match f {
+        CountedFunc::Concat => Func::Concat,
+        CountedFunc::Scrape => Func::Scrape,
+        CountedFunc::EncodeForUri => Func::EncodeForUri,
+    };
+    // These builtins never read the store (only the list builtins walk a data list).
+    let facts = FactIndex::default();
+    let pending = bounded::Pending::default();
+    let refused = refused_term(
+        run,
+        &pending,
+        Derived::Result(f),
+        output_bytes(f, args, &facts, &pending, false),
+        || output_bytes(f, args, &facts, &pending, true),
+    );
+    settle(run, pending.finish(refused))
 }
 
 /// The [`bounded::term_bytes`] of the literal `true` that `log:conjunction` returns for the
