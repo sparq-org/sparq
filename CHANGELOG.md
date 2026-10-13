@@ -11,11 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **sparq-reason (N3):** formula-level `@forAll` declarations keep their own scope,
   including nested and sibling quoted formulas. Naive, compiled and incremental engines
-  reject `@forAll` in a rule's own premise or a scoped body pattern with a specific error.
+  reject `@forAll` in a rule's own premise or a scoped body pattern with a specific error;
+  a `log:forAllIn` / `log:collectAllIn` clause bound through a variable is checked when it
+  is evaluated and fails the run the same way.
   Quoted formula terms retain identity matching, conclusion universals keep their own
   scope, and closure-introduced universals are restored in the result formula.
   Document-level `@forAll` is unchanged. Exact writers place each formula-level
   declaration inside its formula. (#6754)
+- **Breaking (sparq-reason, `compiled-rules` feature):** `n3::compiled::eval` and
+  `BoundRuleSet::eval` now return `Result<Vec<[Id; 3]>, String>` and run under the default
+  `ClosureLimits`; new `n3::compiled::eval_with_limits` and `BoundRuleSet::eval_with_limits`
+  take a `ClosureLimits`. A compiled closure past its round, fact or term-size allowance
+  returns `Err("n3: forward closure limit exceeded …")` instead of running until memory
+  runs out. (#6855)
 - **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
   16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
   outside the crate. Start from the default and set fields:

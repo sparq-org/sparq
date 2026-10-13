@@ -850,7 +850,7 @@ fn derivable_prohibitions_are_seen_at_every_entry_point() {
         if let Ok(rs) = sparq_reason::n3::compiled::compile(&src) {
             let mut d = Dict::new();
             let facts = sparq_reason::n3::compiled::intern_facts(&mut d, &src).expect(name);
-            let out = sparq_reason::n3::compiled::eval(&mut d, &facts, &rs);
+            let out = sparq_reason::n3::compiled::eval(&mut d, &facts, &rs).expect(name);
             assert!(
                 !out.iter().any(|t| permit_iri(&d, t[1])),
                 "{name}: compiled"

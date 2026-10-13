@@ -339,8 +339,16 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// * the text a resolver supplies (`log:content`, `log:semantics`), which the caller
 ///   allocates before it is sized (the literal or formula built from it is refused);
 /// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
-///   fallback is bounded) and the opt-in `compiled-rules` evaluator (GH #6855), neither
-///   of which has the round and fact allowance either.
+///   fallback is bounded), which has no round and fact allowance either.
+///
+/// The opt-in `compiled-rules` evaluator (`n3::compiled`, GH #6855) takes the same
+/// allowance (`eval_with_limits`; `eval` uses the default) and refuses with the same
+/// error: each builtin result, and each argument list a builtin is evaluated over, is
+/// sized the way the text engine sizes it before it is built, and its conclusions build
+/// no new term (they copy ids the premise bound). Its fixpoint schedule differs (no
+/// closing naive check round, no transitivity fast path, no quoted-triple substitution
+/// checkpoints), so under equal limits the two engines can accept or refuse differently
+/// near a boundary.
 ///
 /// One over-refusal is deliberate: a builtin's argument list is a term it builds, so
 /// `log:conjunction` over many copies of one large formula is refused when the copies
@@ -527,8 +535,54 @@ pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) ->
 /// of line: a variable or atom, the common case, never reaches it.
 #[inline(never)]
 fn compound_refused(t: &Term, b: &super::Binding, run: &Truncation, deep: bool) -> bool {
-    let bytes = resolved_bytes(t, b, deep);
+    substituted_refused(run, resolved_bytes(t, b, deep))
+}
+
+/// Whether a term built under a rule's bindings, of `bytes` ([`term_bytes`], computed
+/// without building it), is past the run's term-size limit: the cut and the run's refusal
+/// are recorded. The compiled evaluator sizes a builtin's argument list through it, as
+/// [`substitute`] sizes the list the text engine builds.
+pub(crate) fn substituted_refused(run: &Truncation, bytes: usize) -> bool {
     settle(run, derived_term(run, &Substituted, bytes, || bytes))
+}
+
+/// The [`term_bytes`] of dictionary term `id`, as the text engine's term for it would
+/// count, read from the dictionary's borrowed records without building the term (an
+/// inline integer is counted from its digits; a triple term walks its components with an
+/// explicit stack).
+#[cfg(feature = "compiled-rules")]
+pub(crate) fn dict_term_bytes(dict: &sparq_core::dict::Dict, id: sparq_core::dict::Id) -> usize {
+    use sparq_core::dict::{is_inline, TermParts, INLINE_BASE};
+    const XSD_INTEGER_LEN: usize = "http://www.w3.org/2001/XMLSchema#integer".len();
+    // One node's own bytes, or its components when it is a triple term.
+    let node = |id| {
+        if is_inline(id) {
+            return Ok(super::digit_count(u128::from(id - INLINE_BASE)) + XSD_INTEGER_LEN);
+        }
+        Ok(match dict.term_parts(id) {
+            TermParts::Iri { prefix, suffix } => prefix.len().saturating_add(suffix.len()),
+            TermParts::Lit { value, datatype, lang } => value
+                .len()
+                .saturating_add(datatype.len())
+                .saturating_add(lang.map_or(0, str::len)),
+            TermParts::Blank(b) => b.len(),
+            TermParts::Triple(ids) => return Err(ids),
+        })
+    };
+    let ids = match node(id) {
+        Ok(n) => return n.saturating_add(TERM_NODE_BYTES),
+        Err(ids) => ids,
+    };
+    let mut total = TERM_NODE_BYTES;
+    let mut stack = ids.to_vec();
+    while let Some(id) = stack.pop() {
+        total = total.saturating_add(TERM_NODE_BYTES);
+        match node(id) {
+            Ok(n) => total = total.saturating_add(n),
+            Err(ids) => stack.extend(ids),
+        }
+    }
+    total
 }
 
 /// Substitute bound variables in `t` (recursing into list members and quoted triples);
