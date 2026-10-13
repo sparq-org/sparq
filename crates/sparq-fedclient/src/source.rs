@@ -460,14 +460,6 @@ impl EgressGuard {
     }
 }
 
-/// Extract the bare host authority (no scheme, no userinfo, no port, IPv6 brackets
-/// stripped, lowercased) from an endpoint IRI. Returns `None` when there is no authority.
-/// A tiny tolerant parser so the egress gate has no URL-crate dependency of its own (the
-/// crate already pulls `oxrdf`/`spargebra`, not `url`, under `fedclient`). [OPUS-4.8].
-fn endpoint_host(endpoint: &str) -> Option<String> {
-    endpoint_host_port(endpoint).map(|(host, _port)| host)
-}
-
 /// Extract the bare host authority (lowercased, IPv6 brackets stripped) **and** the authority
 /// port from an endpoint IRI: the explicit `:port`, or the scheme default (443 for `https`,
 /// 80 otherwise — the SAME port that is actually dialled). Returns `None` when there is no host
@@ -1660,6 +1652,7 @@ mod tests {
 
     #[test]
     fn host_parsing() {
+        let endpoint_host = |e| endpoint_host_port(e).map(|(host, _port)| host);
         assert_eq!(
             endpoint_host("http://dbpedia.org/sparql").as_deref(),
             Some("dbpedia.org")
