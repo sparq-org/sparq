@@ -501,7 +501,10 @@ What the server exposes, all discoverable from the storage description
   change is over (`503` if its members keep changing); removing a member holds its container
   exclusively. A container whose modification time has not yet been, or could not be, moved on
   after a change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
-  on a stale date. Every change to the store (a request's own steps, a touch, a rollback or a
+  on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
+  every member's, so a change whose touch a stop lost still moves it on; a member whose time the
+  backend does not record is listed without `modified`, and the listing then has no
+  `Last-Modified`. Every change to the store (a request's own steps, a touch, a rollback or a
   retried undo) goes through one tracked path, and a listing made while a change to the
   container or a member is in flight has no `Last-Modified`; one that overlapped a change is
   made again. A PUT with `Content-Range`
