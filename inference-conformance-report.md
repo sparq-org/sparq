@@ -80,12 +80,12 @@ Source: w3c/N3 `tests/` (pinned clone). The reasoner manifest measures EYE/cwm p
 | suite | pass | fail | divergence | out-of-scope | pass-rate (of run) |
 |---|---:|---:|---:|---:|---:|
 | n3/extended | 871 | 0 | 0 | 107 | 100.0% |
-| n3/parser | 213 | 0 | 1 | 16 | 100.0% |
+| n3/parser | 212 | 0 | 2 | 16 | 100.0% |
 | n3/reasoner | 83 | 0 | 3 | 3 | 100.0% |
 | n3/turtle | 297 | 0 | 0 | 0 | 100.0% |
-| **total** | **1464** | **0** | **4** | **126** | **100.0%** |
+| **total** | **1463** | **0** | **5** | **126** | **100.0%** |
 
-**Overall (N3 (w3c/N3 community-group suite)): 1464 pass / 0 fail / 4 documented divergence / 126 out-of-scope — pass+divergence 100.0% of run, 92.1% of all in-scope tests.**
+**Overall (N3 (w3c/N3 community-group suite)): 1463 pass / 0 fail / 5 documented divergence / 126 out-of-scope — pass+divergence 100.0% of run, 92.1% of all in-scope tests.**
 
 ### Documented divergences
 
@@ -97,6 +97,8 @@ Source: w3c/N3 `tests/` (pinned clone). The reasoner manifest measures EYE/cwm p
   *observed*: output not isomorphic to the reference (1 vs 1 statements; expected-only e.g. [Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#test"), Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"), Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#Successful")]; actual-only e.g. [Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#test"), Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#a"), Iri("https:/)
 - `n3/parser` — **numbers.n3**: the expected output cwm_n3/n3parser.tests_n3_10013.n3 keeps ONE statement under the generating author's local base (file:/home/syosi/...#is) while the rest were rebased — that statement can never match any correct parse.
   *observed*: parsed statements not isomorphic to the reference
+- `n3/parser` — **too-nested.n3**: cwm_syntax/too-nested.n3 nests 1080 formulae; the N3 parser rejects bracket nesting past bounded::PARSE_DEPTH (64) so untrusted input cannot overflow a 2 MiB stack. The entry is rdft:Proposed and upstream notes 'succeeding or failing doesn't prove much'.
+  *observed*: parse error: nesting deeper than 64
 
 ### Out-of-scope reasons
 
@@ -137,6 +139,6 @@ Source: w3c/rdf-tests `rdf/rdf11/rdf-turtle/manifest.ttl` (pinned clone). Runs T
 
 ## Overall (all inference suites)
 
-**1950 pass / 0 fail / 17 documented divergence / 185 out-of-scope — pass+divergence 100.0% of run, 91.4% of all in-scope tests.**
+**1949 pass / 0 fail / 18 documented divergence / 185 out-of-scope — pass+divergence 100.0% of run, 91.4% of all in-scope tests.**
 
 Covers the four inference regime suites (rdf-mt, OWL 2 RL, N3, SPARQL 1.1 entailment) plus the W3C rdf-turtle Turtle parser suite (not an inference suite; shares the same `inference-conformance` CI ratchet job per the central scoreboard).

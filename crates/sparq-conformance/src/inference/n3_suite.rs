@@ -488,9 +488,18 @@ fn options(g: &MiniGraph, node: &oxrdf::NamedOrBlankNode) -> Options {
     o
 }
 
-/// Suite entries whose REFERENCE disagrees with their action document —
-/// failing them is not an engine gap. Kept as documented divergences.
+/// Suite entries whose REFERENCE disagrees with their action document, or that
+/// exceed a deliberate engine resource limit — failing them is not an engine
+/// gap. Kept as documented divergences.
 const DOCUMENTED_DIVERGENCES: &[(&str, &str, &str)] = &[
+    (
+        "too-nested.n3",
+        "deliberate parser nesting limit (#6732 / #6835)",
+        "cwm_syntax/too-nested.n3 nests 1080 formulae; the N3 parser rejects bracket \
+         nesting past bounded::PARSE_DEPTH (64) so untrusted input cannot overflow a \
+         2 MiB stack. The entry is rdft:Proposed and upstream notes 'succeeding or \
+         failing doesn't prove much'",
+    ),
     (
         "bad_prefix2",
         "suite-internal conflict",
