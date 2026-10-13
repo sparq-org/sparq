@@ -289,14 +289,17 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// nested `log:conclusion` closure of a run gets the same limits as the run, not a share
 /// of them.
 ///
-/// `max_term_bytes` (GH #6771) bounds each term the text engine would build: a functional
-/// builtin's argument list and result, any term substituted under a rule's bindings (a
-/// conclusion, a premise pattern, a scope or collection template, a list generator's
-/// member, a backward-rule projection), the list `log:collectAllIn` collects, the formula
-/// `log:conclusion` returns, and the formula `log:parsedAsN3` / `log:semantics` parses.
-/// Each is sized from borrowed inputs before it is built, except the parsed formula, which
-/// is sized once the parse returns it. The size is approximate: string bytes plus a fixed
-/// cost per node.
+/// `max_term_bytes` (GH #6771) bounds each term the text engine would build: every
+/// builtin's result (a functional builtin's, `log:uri` either way, `log:dtlit` reversed,
+/// the member or pair a list generator binds, the literal `log:content` returns), a
+/// functional builtin's argument list, any term substituted under a rule's bindings (a
+/// conclusion, a premise pattern, a scope or collection template, a backward-rule
+/// projection), the list `log:collectAllIn` collects, the formula `log:conclusion`
+/// returns, and the formula `log:parsedAsN3` / `log:semantics` parses. Each is sized from
+/// borrowed inputs before it is built, except the parsed formula, which is sized once the
+/// parse returns it. The size is approximate: string bytes plus a fixed cost per node.
+/// Binding a variable to a term that already exists (premise matching, `log:includes`)
+/// copies that term; it builds nothing new and is not sized again.
 ///
 /// Substitution is sized because the raw substitution functions are private to this
 /// module; the guard test `substitution_goes_through_the_bounded_module` is a lexical
@@ -309,7 +312,8 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///   `log:semantics` one) allocates the terms it builds before its result is sized, so
 ///   its memory is bounded by its input text, and a short prefix used many times
 ///   expands before the formula is refused;
-/// * the text `log:content` returns, which the caller's resolver supplies;
+/// * the text a resolver supplies (`log:content`, `log:semantics`), which the caller
+///   allocates before it is sized (the literal or formula built from it is refused);
 /// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
 ///   fallback is bounded) and the opt-in `compiled-rules` evaluator (GH #6855), neither
 ///   of which has the round and fact allowance either.
@@ -451,30 +455,34 @@ impl std::fmt::Display for Substituted {
 /// ([`derived_term`]): `None`, with the cut and the run's refusal recorded. A variable or
 /// atom is one copy of an existing term and is not sized. `tests/n3_bounded_discipline.rs`
 /// fails if an N3 evaluator substitutes any other way.
+#[inline]
 pub(crate) fn substitute(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
-    substitute_checked(t, b, run, false)
+    match t {
+        Term::List(_) | Term::Triple(_) if compound_refused(t, b, run, false) => None,
+        _ => Some(apply(t, b)),
+    }
 }
 
 /// [`substitute`], also substituting inside quoted formulae (a conclusion's
 /// instantiation): a variable left inside a formula after substitution is the formula's
 /// own.
+#[inline]
 pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
-    substitute_checked(t, b, run, true)
+    match t {
+        Term::List(_) | Term::Triple(_) | Term::Formula(_) if compound_refused(t, b, run, true) => {
+            None
+        }
+        _ => Some(apply_deep(t, b)),
+    }
 }
 
-fn substitute_checked(t: &Term, b: &super::Binding, run: &Truncation, deep: bool) -> Option<Term> {
-    let compound = match t {
-        Term::List(_) | Term::Triple(_) => true,
-        Term::Formula(_) => deep,
-        _ => false,
-    };
-    if compound {
-        let bytes = resolved_bytes(t, b, deep);
-        if settle(run, derived_term(run, &Substituted, bytes, || bytes)) {
-            return None;
-        }
-    }
-    Some(if deep { apply_deep(t, b) } else { apply(t, b) })
+/// Whether compound `t`, substituted under `b`, is past the run's term-size limit
+/// (sized from the borrowed terms; the cut and the run's refusal are recorded). Kept out
+/// of line: a variable or atom, the common case, never reaches it.
+#[inline(never)]
+fn compound_refused(t: &Term, b: &super::Binding, run: &Truncation, deep: bool) -> bool {
+    let bytes = resolved_bytes(t, b, deep);
+    settle(run, derived_term(run, &Substituted, bytes, || bytes))
 }
 
 /// Substitute bound variables in `t` (recursing into list members and quoted triples);

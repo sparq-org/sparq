@@ -1753,17 +1753,14 @@ fn match_premise_seeded(
                     continue;
                 };
                 let matches: Vec<Binding> = match scope_term {
-                    Term::Formula(ts) => {
-                        let scope: Vec<[Term; 3]> = if matches!(op, ScopeOp::Supports) {
-                            formula_closure(&ts, bw)
-                        } else {
-                            ts
-                        };
-                        formula_containment(&scope, inner, &b, bw)
+                    // log:supports searches the closure in place: no term is built.
+                    Term::Formula(ts) if matches!(op, ScopeOp::Supports) => {
+                        with_formula_closure(&ts, bw, |scope| formula_containment(scope, inner, &b, bw))
                     }
+                    Term::Formula(ts) => formula_containment(&ts, inner, &b, bw),
                     // `{}` parses as the literal true — the EMPTY formula:
                     // it includes nothing (and notIncludes everything).
-                    Term::Lit(v, _, _) if v == "true" => formula_containment(&[], inner, &b, bw),
+                    Term::Lit(v, _, _) if v == "true" => formula_containment(NO_STATEMENTS, inner, &b, bw),
                     _ => match_premise_seeded(inner, facts, &b, None, bw, depth),
                 };
                 // Every negation passes the gate, whatever it found.
@@ -1819,7 +1816,7 @@ fn match_premise_seeded(
                     Some(match bounded::substitute_deep(&pat[2], seed, &bw.truncated)? {
                         Term::Formula(scope) => formula_containment(&scope, atoms, seed, bw),
                         Term::Lit(v, _, _) if v == "true" => {
-                            formula_containment(&[], atoms, seed, bw)
+                            formula_containment(NO_STATEMENTS, atoms, seed, bw)
                         }
                         _ => match_premise_seeded(atoms, facts, seed, None, bw, depth),
                     })
@@ -1838,7 +1835,7 @@ fn match_premise_seeded(
                             .iter()
                             .map(|s| bounded::resolved_bytes(template, s, true))
                             .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
-                        if refused_term(bw, &bw.truncated, Derived::Collected, bytes, || bytes) {
+                        if refused_term(&bw.truncated, &bw.truncated, Derived::Collected, bytes, || bytes) {
                             continue;
                         }
                         let Some(items) = sols
@@ -1884,12 +1881,21 @@ fn match_premise_seeded(
                 // A first-class `( … )` list value, hand-written rdf:first/rest
                 // rule structure, or a data list reached through a bound
                 // variable (walked from the fact store).
-                let members: Option<Vec<Term>> = match &head {
-                    Term::List(ms) => Some(ms.clone()),
-                    _ => bw.settle(fact_list(&head, facts)),
+                let members: Option<std::borrow::Cow<'_, [Term]>> = match &head {
+                    Term::List(ms) => Some(std::borrow::Cow::Borrowed(&ms[..])),
+                    _ => bw.settle(fact_list(&head, facts)).map(std::borrow::Cow::Owned),
                 };
                 if let Some(members) = members {
                     for (ix, m) in members.iter().enumerate() {
+                        // The term this binds, sized from the borrowed member first: the
+                        // member, or for list:iterate an (index member) pair.
+                        let mut bytes = bounded::resolved_bytes(m, b, false);
+                        if let ListGen::Iterate = gen {
+                            bytes = bytes.saturating_add(2 * bounded::TERM_NODE_BYTES + NUMBER_TERM_BYTES);
+                        }
+                        if refused_term(&bw.truncated, &bw.truncated, Derived::Generated(gen), bytes, || bytes) {
+                            continue;
+                        }
                         let Some(mv) = bounded::substitute(m, b, &bw.truncated) else { continue };
                         let target = match gen {
                             ListGen::Member | ListGen::In => mv,
@@ -2818,32 +2824,39 @@ fn eval_binder_inner(
     o: &Term,
     b: Binding,
     run: &Truncation,
-    _pending: &bounded::Pending,
+    pending: &bounded::Pending,
 ) -> Option<Binding> {
-    let (sv, ov) = (bounded::substitute(s, &b, run)?, bounded::substitute(o, &b, run)?);
-    let mut nb = b;
-    match op {
-        Bidi::LogUri => match (&sv, &ov) {
+    // Both sides as bound, borrowed: the result is sized from them before it is built.
+    fn side<'t>(t: &'t Term, b: &'t Binding) -> &'t Term {
+        match t {
+            Term::Var(v) => b.get(v).unwrap_or(t),
+            other => other,
+        }
+    }
+    let (sv, ov) = (side(s, &b), side(o, &b));
+    let result = match op {
+        Bidi::LogUri => match (sv, ov) {
             // forward: IRI subject → its text as a string literal
             (Term::Iri(i), _) => {
-                let lit = Term::Lit(i.clone(), "http://www.w3.org/2001/XMLSchema#string".into(), None);
-                if unify_term(o, &lit, &mut nb) {
-                    Some(nb)
-                } else {
-                    None
+                let bytes = bounded::string_term_bytes(i.len());
+                if refused_term(run, pending, Derived::Uri, bytes, || bytes) {
+                    return None;
                 }
+                (o, Term::Lit(i.clone(), "http://www.w3.org/2001/XMLSchema#string".into(), None))
             }
             // reverse: string object → the IRI it names
             (Term::Var(_), Term::Lit(v, _, _)) => {
-                if unify_term(s, &Term::Iri(v.clone()), &mut nb) {
-                    Some(nb)
-                } else {
-                    None
+                let bytes = bounded::TERM_NODE_BYTES.saturating_add(v.len());
+                if refused_term(run, pending, Derived::Uri, bytes, || bytes) {
+                    return None;
                 }
+                (s, Term::Iri(v.clone()))
             }
-            _ => None,
+            _ => return None,
         },
-    }
+    };
+    let mut nb = b;
+    unify_term(result.0, &result.1, &mut nb).then_some(nb)
 }
 
 registry_enum! {
@@ -2913,8 +2926,11 @@ fn collect_op(p: &Term) -> Option<CollectOp> {
 /// with pattern blanks as wildcards, pattern variables binding, and scope
 /// terms — including its quantified variables — as opaque constants. Returns
 /// one binding per complete match.
-fn formula_containment(
-    scope: &[[Term; 3]],
+/// The empty scope.
+const NO_STATEMENTS: &[[Term; 3]] = &[];
+
+fn formula_containment<S: std::borrow::Borrow<[Term; 3]>>(
+    scope: &[S],
     pattern: &[[Term; 3]],
     seed: &Binding,
     bw: &BwCtx,
@@ -2936,9 +2952,9 @@ fn formula_containment(
     bw.settle(steps.finish(out))
 }
 
-fn containment_search(
+fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
     remaining: &[[Term; 3]],
-    scope: &[[Term; 3]],
+    scope: &[S],
     b: Binding,
     defers_left: usize,
     out: &mut Vec<Binding>,
@@ -2984,6 +3000,7 @@ fn containment_search(
         }
     }
     for st in scope {
+        let st: &[Term; 3] = st.borrow();
         let mut nb = b.clone();
         if (0..3).all(|k| unify_term(&pat[k], &st[k], &mut nb)) {
             containment_search(rest, scope, nb, rest.len(), out, steps, run);
@@ -3019,7 +3036,22 @@ fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
 /// The forward closure of a quoted formula under its own `=>` rules
 /// (log:supports / log:conclusion): the original triples plus everything a
 /// fixpoint run over them derives.
-fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
+/// The bytes of a formula holding `statements` ([`bounded::term_bytes`] of each term,
+/// plus one node), read from the borrowed statements.
+fn formula_bytes<'a>(statements: impl Iterator<Item = &'a [Term; 3]>) -> usize {
+    statements
+        .flatten()
+        .map(bounded::term_bytes)
+        .fold(bounded::TERM_NODE_BYTES, usize::saturating_add)
+}
+
+/// `f` over the closure of formula `ts` under its own rules: its statements plus their
+/// derivations, each once, borrowed (nothing is copied to make the closure's formula).
+fn with_formula_closure<R>(
+    ts: &[[Term; 3]],
+    bw: &BwCtx,
+    f: impl FnOnce(&[&[Term; 3]]) -> R,
+) -> R {
     // Import-cycle guard ([`VisitedDocs`]). If this exact formula's closure is already in
     // progress up the stack, re-closing it would recurse forever (the A→A / A→B→A / diamond
     // re-import non-termination path through a LIVE `log:semantics` resolver). Break the cycle
@@ -3028,10 +3060,11 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // cycle: with `bw.resolver` `None` the set stays empty and this is a no-op.)
     let key = formula_key(ts);
     if !bw.visited.borrow_mut().insert(key) {
-        return bw.settle(Bounded::cut(
-            ts.to_vec(),
+        bw.settle(Bounded::cut(
+            (),
             "a nested closure re-entered a document already being closed and was left unclosed",
         ));
+        return f(&ts.iter().collect::<Vec<_>>());
     }
 
     let mut facts: Vec<[Term; 3]> = Vec::new();
@@ -3075,20 +3108,16 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
                 .borrow_mut()
                 .get_or_insert(format!("in a nested closure: {e}"));
             bw.visited.borrow_mut().remove(&key);
-            return ts.to_vec();
+            return f(&ts.iter().collect::<Vec<_>>());
         }
     };
     // Original statements (including the rule statements, which cwm keeps in
-    // log:conclusion output) plus the derivations.
-    let mut seen: FxHashSet<[Term; 3]> = ts.iter().cloned().collect();
-    let mut result: Vec<[Term; 3]> = ts.to_vec();
-    for f in closed.all {
-        if seen.insert(f.clone()) {
-            result.push(f);
-        }
-    }
+    // log:conclusion output) plus the derivations, each once.
     bw.visited.borrow_mut().remove(&key);
-    result
+    let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
+    let mut all: Vec<&[Term; 3]> = ts.iter().collect();
+    all.extend(closed.all.iter().filter(|f| seen.insert(f)));
+    f(&all)
 }
 
 /// The lexical string of a literal term (for `string:` builtins).
@@ -3705,7 +3734,7 @@ fn parsed_formula(
         .flatten()
         .map(bounded::term_bytes)
         .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
-    if refused_term(bw, pending, Derived::Result(f), bytes, || bytes) {
+    if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
         return None;
     }
     Some(Term::Formula(statements))
@@ -3719,6 +3748,10 @@ enum Derived {
     Arguments(Func),
     /// The list `log:collectAllIn` collects.
     Collected,
+    /// The term a list generator binds (`list:member`, `list:in`, `list:iterate`).
+    Generated(ListGen),
+    /// The term `log:uri` binds.
+    Uri,
 }
 
 impl std::fmt::Display for Derived {
@@ -3727,6 +3760,8 @@ impl std::fmt::Display for Derived {
             Derived::Result(b) => write!(f, "the result of the builtin {b:?}"),
             Derived::Arguments(b) => write!(f, "the argument list of the builtin {b:?}"),
             Derived::Collected => write!(f, "the list log:collectAllIn collects"),
+            Derived::Generated(g) => write!(f, "the result of the builtin {g:?}"),
+            Derived::Uri => write!(f, "the result of the builtin LogUri"),
         }
     }
 }
@@ -3735,14 +3770,18 @@ impl std::fmt::Display for Derived {
 /// [`bounded::derived_term`]: `true` when the term is refused, its cut recorded on `cuts`
 /// and the run refused, which fails every closure of the run ([`Truncation::refusal`]).
 fn refused_term(
-    bw: &BwCtx,
+    run: &Truncation,
     cuts: &impl bounded::Sink,
     what: Derived,
     bound: usize,
     exact: impl FnOnce() -> usize,
 ) -> bool {
-    settle(cuts, bounded::derived_term(&bw.truncated, &what, bound, exact))
+    settle(cuts, bounded::derived_term(run, &what, bound, exact))
 }
+
+/// The size [`output_bytes`] gives a number, a count or a date part: its lexical form
+/// (at most [`NUMERAL_TEXT_BYTES`]), a datatype IRI and one node.
+const NUMBER_TERM_BYTES: usize = bounded::TERM_NODE_BYTES + NUMERAL_TEXT_BYTES + 64;
 
 /// The [`bounded::term_bytes`] of the list builtin `args` member `a` stands for: a
 /// first-class list, or the members of an rdf:first/rest data list walked from the store.
@@ -3888,15 +3927,25 @@ fn output_bytes(
                 .saturating_add(lang.len()),
             _ => 0,
         },
-        // Sized where they are built (`log:dtlit` before its own early return), or
-        // supplied by the caller.
+        // Sized where they are built: `log:dtlit` before its own early return,
+        // `log:conclusion` from the borrowed closure, the parsed formula once parsed, and
+        // `log:content`'s literal once the resolver has supplied its text.
         Func::Dtlit | Func::LogConclusion | Func::ParsedAsN3 | Func::Semantics | Func::Content => 0,
-        // A part of an input, a number, or a fixed-size value.
-        Func::Scrape
-        | Func::First
-        | Func::Last
-        | Func::TimeZone
-        | Func::Length
+        // A member of the argument list, copied.
+        Func::First => args.first().map_or(0, term_bytes),
+        Func::Last => args.last().map_or(0, term_bytes),
+        // The first capture group of the first match: at most the input; exactly, the
+        // capture (the regex is compiled, and run, without building the result).
+        Func::Scrape => match args {
+            [Term::Lit(s, _, _), Term::Lit(pattern, _, _)] if exact => settle(pending, bounded::regex(pattern))
+                .and_then(|re| re.captures(s).and_then(|c| c.get(1)).map(|m| m.len()))
+                .map_or(0, string_term_bytes),
+            _ => string_term_bytes(lex0().len()),
+        },
+        // The time zone offset: a part of the input.
+        Func::TimeZone => string_term_bytes(lex0().len()),
+        // A number, a count or a date part.
+        Func::Length
         | Func::StrLength
         | Func::MemberCount
         | Func::Sum
@@ -3936,7 +3985,7 @@ fn output_bytes(
         | Func::Minutes
         | Func::Seconds
         | Func::DayOfWeek
-        | Func::InSeconds => 0,
+        | Func::InSeconds => NUMBER_TERM_BYTES,
     }
 }
 
@@ -4139,7 +4188,7 @@ fn eval_functional_inner(
         };
         if let (Some((lex, true)), Some((dt, false))) = (resolve(&members[0]), resolve(&members[1])) {
             let bytes = bounded::TERM_NODE_BYTES.saturating_add(lex).saturating_add(dt);
-            if refused_term(bw, pending, Derived::Result(f), bytes, || bytes) {
+            if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
                 return None;
             }
         }
@@ -4152,13 +4201,41 @@ fn eval_functional_inner(
                 unify_term(obj, &lit, &mut nb).then_some(nb)
             }
             // reverse: decompose a ground object literal into its parts
+            // (each part sized from the borrowed literal before it is copied)
             _ => {
-                let Some(Term::Lit(v, dt, _)) = bounded::substitute(obj, &nb, run) else { return None };
-                (unify_term(&members[0], &Term::Lit(v.clone(), XSD_STRING.into(), None), &mut nb)
-                    && unify_term(&members[1], &Term::Iri(dt.clone()), &mut nb))
-                .then_some(nb)
+                let bound = match obj {
+                    Term::Var(v) => nb.get(v)?,
+                    other => other,
+                };
+                let Term::Lit(v, dt, _) = bound else { return None };
+                let bytes = bounded::string_term_bytes(v.len())
+                    .max(bounded::TERM_NODE_BYTES.saturating_add(dt.len()));
+                if refused_term(run, pending, Derived::Result(f), bytes, || bytes) {
+                    return None;
+                }
+                let (lex, dt) = (Term::Lit(v.clone(), XSD_STRING.into(), None), Term::Iri(dt.clone()));
+                (unify_term(&members[0], &lex, &mut nb) && unify_term(&members[1], &dt, &mut nb))
+                    .then_some(nb)
             }
         };
+    }
+    // log:conclusion closes the subject formula as bound, borrowed (not copied into an
+    // argument list). The closure ran under the run's limits; the formula holding all of
+    // it is one more term, sized from the borrowed closure before its statements are
+    // copied.
+    if let Func::LogConclusion = f {
+        let bound = match subj {
+            Term::Var(v) => b.get(v)?,
+            other => other,
+        };
+        let Term::Formula(ts) = bound else { return None };
+        let result = with_formula_closure(ts, bw, |all| {
+            let bytes = formula_bytes(all.iter().copied());
+            (!refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes))
+                .then(|| Term::Formula(all.iter().map(|t| (*t).clone()).collect()))
+        })?;
+        let mut nb = b;
+        return unify_term(obj, &result, &mut nb).then_some(nb);
     }
     // math:negation is bidirectional in EYE: `?x math:negation 3` solves
     // ?x = -3 (the one reverse mode the suites rely on).
@@ -4166,6 +4243,10 @@ fn eval_functional_inner(
         let s_applied = bounded::substitute(subj, &b, &bw.truncated)?;
         if !s_applied.is_ground() {
             let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
+            // A number: sized as one ([`NUMBER_TERM_BYTES`]) before it is built.
+            if refused_term(&bw.truncated, pending, Derived::Result(f), NUMBER_TERM_BYTES, || NUMBER_TERM_BYTES) {
+                return None;
+            }
             if let Some(v) = numval_in(&o_applied, pending) {
                 let negated = rep(pending, numval_negate(v))?;
                 let mut nb = b;
@@ -4186,6 +4267,10 @@ fn eval_functional_inner(
     if !subj.is_ground() && subj_applied.as_ref().is_some_and(|s| !s.is_ground()) {
         let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
         if o_applied.is_ground() {
+            // A number or a dateTime: sized as a number before it is built.
+            if refused_term(&bw.truncated, pending, Derived::Result(f), NUMBER_TERM_BYTES, || NUMBER_TERM_BYTES) {
+                return None;
+            }
             let inverse = |v: f64| -> Option<f64> {
                 Some(match f {
                     Func::Sin => v.asin(),
@@ -4253,7 +4338,7 @@ fn eval_functional_inner(
                     .iter()
                     .map(|m| bounded::resolved_bytes(m, &b, false))
                     .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
-                if refused_term(bw, pending, Derived::Arguments(f), bytes, || bytes) {
+                if refused_term(&bw.truncated, pending, Derived::Arguments(f), bytes, || bytes) {
                     return None;
                 }
                 let members = members
@@ -4287,7 +4372,7 @@ fn eval_functional_inner(
     // every round is refused (a cut, and an error that fails the closure) instead of
     // exhausting memory (GH #6771).
     if refused_term(
-        bw,
+        &bw.truncated,
         pending,
         Derived::Result(f),
         output_bytes(f, &args, facts, pending, false),
@@ -4378,29 +4463,19 @@ fn eval_functional_inner(
             }
             Term::Lit(out, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
-        Func::LogConclusion => match &args[..] {
-            [Term::Formula(ts)] => {
-                // The closure ran under the run's limits; the formula holding all of it is
-                // one more term, sized before it is kept.
-                let closed = formula_closure(ts, bw);
-                let bytes = closed
-                    .iter()
-                    .flatten()
-                    .map(bounded::term_bytes)
-                    .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
-                if refused_term(bw, pending, Derived::Result(f), bytes, || bytes) {
-                    return None;
-                }
-                Term::Formula(closed)
-            }
-            _ => return None,
-        },
+        // Evaluated above, from the borrowed subject.
+        Func::LogConclusion => return None,
         Func::Semantics | Func::Content => match &args[..] {
             [Term::Iri(doc)] => {
                 // No resolver (document access is off for this run) leaves the document's
                 // content as unknown as a resolver that cannot supply it: both are cuts.
                 let text = settle(pending, bounded::resolved(bw.resolver.and_then(|r| r(doc))))?;
                 if matches!(f, Func::Content) {
+                    // The text is the resolver's; the literal holding it is sized first.
+                    let bytes = bounded::string_term_bytes(text.len());
+                    if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
+                        return None;
+                    }
                     Term::Lit(text, XSD_STRING.into(), None)
                 } else {
                     // cwm-faithful: `log:semantics` returns the document's PARSED statements
