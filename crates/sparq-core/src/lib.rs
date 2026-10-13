@@ -1826,6 +1826,7 @@ impl Graph {
     /// and NO `named.bin`, so its on-disk layout is byte-identical to before this change.
     #[cfg(feature = "mmap")]
     pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        self.refuse_if_abandoned().map_err(std::io::Error::other)?;
         std::fs::create_dir_all(dir)?;
         self.store.save(dir)?; // folds any delta-overlay into the persisted permutations
         self.dict.save_mmap(dir)?; // includes appended (delta-overlay) terms
@@ -1846,6 +1847,7 @@ impl Graph {
     /// after open to trade RAM for exactly-raw query speed instead.
     #[cfg(feature = "mmap")]
     pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        self.refuse_if_abandoned().map_err(std::io::Error::other)?;
         std::fs::create_dir_all(dir)?;
         self.store.save_compressed(dir)?; // folds any delta-overlay, like `save`
         self.dict.save_mmap(dir)?;
@@ -2074,6 +2076,7 @@ impl Graph {
         let mut journal = TxnJournal::open(dir)?;
         journal.truncate()?;
         g.txn = Some(journal);
+        g.share_recovery_state();
         Ok(g)
     }
 
@@ -3164,15 +3167,11 @@ impl Graph {
         if let Some(j) = &mut self.txn {
             // A frame still pending here was never cleared, so its body was not fully
             // materialised: treat it as abandoned.
-            if j.pending {
-                self.mark_abandoned();
+            if j.pending || j.is_abandoned() {
+                j.abandon();
                 return Err(NEEDS_RECOVERY.to_owned());
             }
-            let appended = j.append(records);
-            if j.abandoned {
-                self.mark_abandoned();
-            }
-            return appended.map_err(|e| format!("txn journal commit failed: {e}"));
+            return j.append(records).map_err(|e| format!("txn journal commit failed: {e}"));
         }
         #[cfg(not(feature = "mmap"))]
         let _ = records;
@@ -3191,7 +3190,7 @@ impl Graph {
             if let Err(e) = j.truncate() {
                 // The frame may still be on disk, and a reopen would redo it over anything
                 // written after it: nothing more may be written until then.
-                self.mark_abandoned();
+                j.abandon();
                 return Err(format!("txn journal clear failed: {e}"));
             }
         }
@@ -3206,22 +3205,32 @@ impl Graph {
     /// when no frame is pending.
     pub fn abandon_txn(&mut self) {
         #[cfg(feature = "mmap")]
-        if self.txn.as_ref().is_some_and(|j| j.pending) {
-            self.mark_abandoned();
+        if let Some(j) = &mut self.txn {
+            if j.pending {
+                j.abandon();
+            }
         }
     }
 
-    /// Refuse durable writes to this graph and every named graph under it until a reopen: a
-    /// write to a named graph would otherwise land in its own log ahead of the parent's frame,
-    /// and the redo would then put older records over it.
+    /// Give every durable named graph under this graph the same recovery state as this one, so
+    /// abandoning a frame here refuses their durable writes too: a write to a named graph lands
+    /// in its own log, and a reopen would redo this graph's older frame over it. Called
+    /// wherever a named graph is opened or created under a directory-backed graph.
     #[cfg(feature = "mmap")]
-    fn mark_abandoned(&mut self) {
-        if let Some(j) = &mut self.txn {
-            j.pending = true;
-            j.abandoned = true;
+    fn share_recovery_state(&mut self) {
+        let Some(state) = self.txn.as_ref().map(|j| std::sync::Arc::clone(&j.abandoned)) else {
+            return;
+        };
+        fn adopt(g: &mut Graph, state: &std::sync::Arc<std::sync::atomic::AtomicBool>) {
+            if let Some(j) = &mut g.txn {
+                j.abandoned = std::sync::Arc::clone(state);
+            }
+            for (_, sub) in &mut g.named {
+                adopt(sub, state);
+            }
         }
         for (_, sub) in &mut self.named {
-            sub.mark_abandoned();
+            adopt(sub, &state);
         }
     }
 
@@ -3231,7 +3240,7 @@ impl Graph {
     pub fn needs_recovery(&self) -> bool {
         #[cfg(feature = "mmap")]
         if let Some(j) = &self.txn {
-            return j.abandoned;
+            return j.is_abandoned();
         }
         false
     }
@@ -3247,6 +3256,7 @@ impl Graph {
     /// (compaction, vacuum) would persist a state that may lack part of the frame and drop
     /// the journal that holds it.
     fn refuse_if_txn_open(&self) -> Result<(), String> {
+        self.refuse_if_abandoned()?;
         #[cfg(feature = "mmap")]
         if self.txn.as_ref().is_some_and(|j| j.pending) {
             return Err(NEEDS_RECOVERY.to_owned());
@@ -3457,6 +3467,7 @@ impl Graph {
             let sub = Graph::open(&named_dir.join(i.to_string())).map_err(|e| e.to_string())?;
             self.named.push((name, sub));
         }
+        self.share_recovery_state();
         Ok(())
     }
 
@@ -3592,6 +3603,7 @@ impl Graph {
         if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
             let g = self.create_durable_named(&dir, name)?;
             self.named.push((name.clone(), g));
+            self.share_recovery_state();
             return Ok(self.named.len() - 1);
         }
         self.named.push((name.clone(), Graph::from_parts(Dict::new(), Vec::new())));
@@ -4378,8 +4390,10 @@ struct TxnJournal {
     /// A committed frame is on disk and not yet cleared: set by a non-empty `append`, reset by
     /// `truncate`.
     pending: bool,
-    /// Materialising the pending frame failed part-way (see [`Graph::abandon_txn`]).
-    abandoned: bool,
+    /// A frame could not be fully materialised or the journal could not be written or
+    /// cleared (see [`Graph::abandon_txn`]). Shared by a directory-backed graph and every
+    /// durable named graph under it, and cleared only by reopening.
+    abandoned: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[cfg(feature = "mmap")]
@@ -4398,7 +4412,7 @@ impl TxnJournal {
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
         let file = std::fs::OpenOptions::new().create(true).append(true).open(Self::path(dir))?;
-        Ok(TxnJournal { file, pending: false, abandoned: false })
+        Ok(TxnJournal { file, pending: false, abandoned: std::sync::Arc::default() })
     }
 
     /// Frames `records` (each `(is_insert, slot, triple)`) into ONE checksummed frame and fsyncs —
@@ -4450,9 +4464,14 @@ impl TxnJournal {
             // The frame may be on disk in whole or in part. Put the journal back to where it
             // was, durably; failing that, nothing more may be written until a reopen decides
             // what the journal holds.
-            if self.file.set_len(start).and_then(|()| self.file.sync_data()).is_err() {
-                self.pending = true;
-                self.abandoned = true;
+            let rolled_back = self.file.set_len(start).and_then(|()| self.file.sync_data());
+            #[cfg(test)]
+            let rolled_back = rolled_back.and_then(|()| match tests::FAIL_JOURNAL_ROLLBACK.with(std::cell::Cell::get) {
+                true => Err(std::io::Error::other("injected journal rollback failure")),
+                false => Ok(()),
+            });
+            if rolled_back.is_err() {
+                self.abandon();
             }
             return Err(e);
         }
@@ -4469,8 +4488,17 @@ impl TxnJournal {
         self.file.set_len(0)?;
         self.file.sync_data()?;
         self.pending = false;
-        self.abandoned = false;
         Ok(())
+    }
+
+    /// Refuse every durable write from here until a reopen (see [`Graph::abandon_txn`]).
+    fn abandon(&mut self) {
+        self.pending = true;
+        self.abandoned.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn is_abandoned(&self) -> bool {
+        self.abandoned.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Reads `dir`'s journal into `(is_insert, slot, triple)` records in append order, frame by
@@ -6464,6 +6492,8 @@ mod tests {
     thread_local! {
         /// Makes the journal's frame sync fail after the frame is written.
         pub(super) static FAIL_JOURNAL_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// Makes rolling a failed journal write back fail too.
+        pub(super) static FAIL_JOURNAL_ROLLBACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// Makes clearing the journal fail.
         pub(super) static FAIL_JOURNAL_CLEAR: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
@@ -10970,6 +11000,44 @@ mod tests {
         let g = Graph::open(&dir).unwrap();
         assert!(!g.needs_recovery());
         assert_eq!(dump_terms(&g).len(), 1, "the frame was redone");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A journal write that fails and cannot be rolled back leaves the graph and its named
+    /// graphs refusing writes; a reopen keeps only what the journal committed in full.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn failed_journal_rollback_refuses_writes_until_reopen() {
+        let dir = txn_tmp_dir("rollbackfail");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let a = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            FAIL_JOURNAL_SYNC.with(|f| f.set(true));
+            FAIL_JOURNAL_ROLLBACK.with(|f| f.set(true));
+            let res = g.commit_txn(&[TxnRecord::Insert(None, a.clone())]);
+            FAIL_JOURNAL_SYNC.with(|f| f.set(false));
+            FAIL_JOURNAL_ROLLBACK.with(|f| f.set(false));
+            assert!(res.is_err());
+            assert!(g.needs_recovery());
+            assert!(g.apply_delta(std::slice::from_ref(&a), &[]).is_err());
+            assert!(g.commit_txn(&[TxnRecord::Insert(None, a.clone())]).is_err());
+            assert!(g.clear_txn().is_err());
+            assert!(g.save(&dir.join("copy")).is_err());
+            let sub = &mut g.named[0].1;
+            assert!(sub.needs_recovery(), "named graphs share the state");
+            assert!(sub.apply_delta(&[], &[[named("n0"), term_iri(0, "p"), named("o0")]]).is_err());
+            assert!(sub.compact().is_err());
+        }
+        // The outcome of a commit whose journal write failed is uncertain, never partial: here
+        // the truncation went through before the injected failure, so nothing is redone.
+        let g = Graph::open(&dir).unwrap();
+        assert!(!g.needs_recovery() && !g.named[0].1.needs_recovery());
+        assert!(dump_terms(&g).is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }
 
