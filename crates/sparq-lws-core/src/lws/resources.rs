@@ -7799,6 +7799,68 @@ mod tests {
         }
     }
 
+    /// Issue #6768: a plain write or a create commits before its container is touched, and the
+    /// marker that suppresses the container's date until then is in memory only. A stop between
+    /// the two leaves the stored date from before the change; the listing's Last-Modified is the
+    /// latest of the container's and every listed member's own, so an If-Modified-Since from
+    /// before the change still never meets a 304. The store changes are made here directly, as
+    /// a process that stopped before its touch left them, on a server that never saw them.
+    #[tokio::test]
+    async fn a_change_whose_touch_was_lost_still_moves_the_listing_date() {
+        use super::super::test_store::{request as req, state};
+        let (st, _store) = state(100).await;
+        let anyone = Agent::anonymous();
+        let root = st.cfg.storage();
+        let listing = [("accept", "application/lws+json")];
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            ),
+            &anyone,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let since = |r: &Response| {
+            r.headers()[header::LAST_MODIFIED]
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+        let was = since(&handle(&st, &req(Method::GET, "/", &listing, ""), &anyone).await);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // A create committed, its touch lost.
+        st.store
+            .create_in_container(&root, &format!("{root}b"), "y".into(), "text/plain")
+            .await
+            .unwrap();
+        assert!(!st.is_untouched(&root) && !st.in_flight(&root));
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", was.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let now = since(&r);
+        assert_ne!(now, was);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // A plain write committed, its touch lost.
+        st.store
+            .write(&format!("{root}a"), "longer".into(), "text/plain")
+            .await
+            .unwrap();
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", now.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_ne!(since(&r), now);
+    }
+
     /// Review finding: a container whose own time could not be moved on after a member was
     /// deleted kept its old Last-Modified, and every time in its listing could be older still,
     /// so an If-Modified-Since from before the delete met a 304. Until a touch lands the
