@@ -313,6 +313,28 @@ jobs:
       - name: Sync wasm bundle into site/public/wasm/
         if: needs.config.outputs.mode == 'full'
         run: npm run sync-wasm
+      # The Playwright web server runs `next dev` without the prebuild, so the paper and spec
+      # pages render their "not built yet" placeholder unless the Typst fragments exist on disk.
+      # Build them on the host before the container run, as the a11y sweep does above.
+      - name: Install Typst CLI (pinned, SHA-256 verified)
+        if: needs.config.outputs.mode == 'full'
+        run: |
+          set -euo pipefail
+          TYPST_VERSION=v0.15.0
+          TYPST_SHA256=59b207df01be2dab9f13e80f73d04d7ff8273ffd46b3dd1b9eef5c60f3eeabea
+          url="https://github.com/typst/typst/releases/download/${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz"
+          curl -sSfL -o /tmp/typst.tar.xz "$url"
+          echo "${TYPST_SHA256}  /tmp/typst.tar.xz" | sha256sum -c -
+          tar -xf /tmp/typst.tar.xz -C /tmp
+          mkdir -p "$HOME/.local/bin"
+          cp /tmp/typst-x86_64-unknown-linux-musl/typst "$HOME/.local/bin/typst"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/typst" --version
+      - name: Build spec + paper fragments (Typst)
+        if: needs.config.outputs.mode == 'full'
+        run: |
+          npm run build-specs
+          npm run build-papers
       - name: Determinism grep gate (no waitForTimeout calls)
         if: needs.config.outputs.mode == 'full'
         run: npm run test:e2e:grep-gate
