@@ -24,6 +24,7 @@ pub mod extsort;
 #[cfg(feature = "iri-fast")]
 pub mod iri;
 mod nt;
+pub mod percent;
 // [OPUS-4.8] sq-jocpn: the opt-in native byte-level Turtle parser. OFF by default (it names
 // `oxiri` as a dep for byte-identical base resolution) so the lean default / wasm build never
 // links it and the incumbent oxttl Turtle path stays shipped until this drop-in is A/B-validated.
