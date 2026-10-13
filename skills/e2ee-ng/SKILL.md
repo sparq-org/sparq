@@ -102,7 +102,8 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   admin `sign`/`verify`, and a **branch set**: `ScopedBranch` +
   `branch_scope`/`set_branch_scope`/`covers_branch`), `Capability`
   (`new_read`/`new_write`/`new_admin`, `validate`,
-  `encode_secret`/`decode_secret`), `wrap_capability`/`unwrap_capability` (the
+  `encode_secret` → `Zeroizing<Vec<u8>>`/`decode_secret`),
+  `wrap_capability`/`unwrap_capability` (the
   typed §4.2 secret-transfer path: encode-secret + recipient-wrap under the fixed
   `CAPABILITY_WRAP_AAD`, plaintext never handed to the caller), and `delegate`
   (narrow-only).
@@ -124,7 +125,11 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
 
 - **Secrets never go on the wire in the clear.** `K_read` and private keys live in
   the secret-bearing `Capability::encode_secret` output (a bearer secret) — wrap it
-  with `wrap` before it leaves protected local storage. Prefer
+  with `wrap` before it leaves protected local storage. That output is a
+  `zeroize::Zeroizing<Vec<u8>>` written into one pre-reserved buffer (no secret
+  CBOR fragments, no reallocation), so it erases itself on drop — keep it in that
+  wrapper; copying it into a plain `Vec` (`.to_vec()`, `(*buf).clone()`) leaves an
+  un-erased copy. Prefer
   `wrap_capability`/`unwrap_capability`: same two steps, but the AAD is the fixed
   `CAPABILITY_WRAP_AAD` (so a capability wrapping cannot be confused with a DEK or
   bare-`K_read` wrapping made under a caller-chosen label), the capability is

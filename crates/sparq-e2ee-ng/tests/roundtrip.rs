@@ -439,7 +439,7 @@ fn wrap_capability_aad_is_domain_separated() {
     ));
     assert_eq!(
         unwrap(&recipient, &wrapped, CAPABILITY_WRAP_AAD).unwrap(),
-        cap.encode_secret()
+        *cap.encode_secret()
     );
 }
 
