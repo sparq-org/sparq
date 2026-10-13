@@ -792,7 +792,7 @@ the profile.
   - **The list `log:collectAllIn` collects** and **the formula `log:conclusion` returns.**
   - **The formula `log:parsedAsN3` / `log:semantics` returns**, sized once the parse returns it (not while it parses: see below).
 
-  `tests/n3_builtin_alloc.rs` counts heap bytes with a counting global allocator and checks each builtin's result path refuses an oversized term without building it.
+  `tests/n3_builtin_alloc.rs` counts heap bytes with a counting global allocator. For each builtin result, substitution and `log:collectAllIn` list it checks that an oversized term is refused, and that the heap peak during evaluation stays within half the term's size of a control run that derives nothing large, so the term was not built first. Results at most three times an input the evaluation already holds (URI encoding, `string:lowerCase`) are checked for the refusal only.
 
   Past the limit, the call returns `Err("n3: forward closure limit exceeded: … max_term_bytes …")` and the cut is recorded. Every closure of the run fails, rather than aborting on a failed allocation. The size is approximate: string bytes plus a fixed cost per node. It bounds each derived term, not total memory: many distinct terms just under the limit are bounded only by `max_facts`.
 
