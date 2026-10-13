@@ -11,7 +11,7 @@
 //! enforces the **same** default-deny SSRF policy: resolve the host, drop every private/internal
 //! address (unless the bare host is explicitly allowlisted), and return only the survivors — so
 //! ureq dials only vetted IPs and there is no DNS-rebinding re-resolve window. This module holds
-//! that resolver ([`EgressFilterResolver`]) and the agent built around it ([`agent`]), plus the
+//! that resolver ([`EgressFilterResolver`]) and the client built around it ([`GuardedHttp`]), plus the
 //! ureq-3 helpers behind them (URI→host:port parse, the capacity-bounded filtered resolve, the
 //! refusal error), so those three transports share one implementation. Native-only; only
 //! built when the `fedclient` feature pulls ureq in.
@@ -156,18 +156,80 @@ impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
     }
 }
 
-/// A ureq agent with the global `timeout`, the sparq-fedclient user agent and `resolver`. ureq
-/// connects only to the addresses the resolver returns, so the vetted IP is the dialled IP.
-pub(crate) fn agent(timeout: std::time::Duration, resolver: EgressFilterResolver) -> ureq::Agent {
-    let config = ureq::Agent::config_builder()
-        .timeout_global(Some(timeout))
-        .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
-        .build();
-    ureq::Agent::with_parts(
-        config,
-        ureq::unversioned::transport::DefaultConnector::new(),
-        resolver,
-    )
+/// The settings of one SSRF-guarded HTTP client (the federation transports or the discovery
+/// fetcher): its global timeout, the hosts its [`EgressFilterResolver`] lets resolve privately,
+/// and which client it is, which sets the default timeout, the body cap and the error texts.
+#[derive(Debug, Clone)]
+pub(crate) struct GuardedHttp {
+    pub(crate) timeout: std::time::Duration,
+    pub(crate) allow_private: std::sync::Arc<std::collections::HashSet<String>>,
+    client: Client,
+}
+
+impl GuardedHttp {
+    /// A client with `client`'s default timeout, finite so a black-holed host fails rather than
+    /// hangs: 30s for federation (the engine's SERVICE default) and 15s for discovery.
+    pub(crate) fn new(client: Client, allow_private: std::collections::HashSet<String>) -> Self {
+        let timeout = std::time::Duration::from_secs(match client {
+            Client::Federation => 30,
+            Client::Discovery => 15,
+        });
+        GuardedHttp {
+            timeout,
+            allow_private: std::sync::Arc::new(allow_private),
+            client,
+        }
+    }
+
+    /// A ureq agent with the global timeout, the sparq-fedclient user agent and the SSRF
+    /// resolver. ureq connects only to the addresses the resolver returns, so the vetted IP is
+    /// the dialled IP and there is no DNS-rebinding re-resolve window (sq-25xk, sq-g2xs).
+    pub(crate) fn agent(&self) -> ureq::Agent {
+        let config = ureq::Agent::config_builder()
+            .timeout_global(Some(self.timeout))
+            .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
+            .build();
+        let resolver = EgressFilterResolver {
+            allow_private: std::sync::Arc::clone(&self.allow_private),
+            client: self.client,
+        };
+        ureq::Agent::with_parts(
+            config,
+            ureq::unversioned::transport::DefaultConnector::new(),
+            resolver,
+        )
+    }
+
+    /// The body of the response to a request for `url`, or the error text for a transport
+    /// failure or a non-2xx status (ureq 3 reports both as errors). ureq's default
+    /// `read_to_string` cap of 10 MiB is raised because a federated SELECT or TPF page can
+    /// exceed it; the cap stays finite so memory stays bounded: 1 GiB for federation, 256 MiB
+    /// for a discovery document. `fragment` names a TPF fragment request in the error text.
+    pub(crate) fn read_body(
+        &self,
+        response: Result<ureq::http::Response<ureq::Body>, ureq::Error>,
+        url: &str,
+        fragment: bool,
+    ) -> Result<String, String> {
+        let (who, limit, server) = match (self.client, fragment) {
+            (Client::Federation, false) => ("fedclient", 1 << 30, "endpoint "),
+            (Client::Federation, true) => ("fedclient", 1 << 30, "fragment server "),
+            (Client::Discovery, _) => ("discovery", 256 << 20, ""),
+        };
+        let body = if fragment { "fragment" } else { "response" };
+        match response {
+            Ok(mut r) => r
+                .body_mut()
+                .with_config()
+                .limit(limit)
+                .read_to_string()
+                .map_err(|e| format!("{who}: reading {body} from {url}: {e}")),
+            Err(ureq::Error::StatusCode(code)) => {
+                Err(format!("{who}: {server}{url} returned HTTP {code}"))
+            }
+            Err(e) => Err(format!("{who}: request to {url} failed: {e}")),
+        }
+    }
 }
 
 // [FABLE-5] sq-3dyje.6 (mutation-kill): DIRECT unit tests for this `pub(crate)` module.
