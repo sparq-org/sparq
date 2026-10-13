@@ -399,7 +399,7 @@ since:
   `FilterClass` covers AND that pass the common-variable check AND whose `Filter::expr` text
   parses as exactly one SPARQL expression over only the conjunct's declared `vars` with no
   `EXISTS` or `\u`/`\U` code-point escape (anything else stays a local filter, whose
-  variables the group then keeps projected), `ORDER`/`LIMIT` when the capability allows (`LIMIT`
+  variables the group then all stay projected), `ORDER`/`LIMIT` when the capability allows (`LIMIT`
   only when no conjunct stays local)
   (`ORDER BY` keys are typed `OrderKey { var, descending }` — `OrderKey::asc`/`desc` — and a key
   whose name is not a `VARNAME` makes `push_group` return `None`) — a full endpoint gets the whole group as one multi-pattern `SELECT`, a

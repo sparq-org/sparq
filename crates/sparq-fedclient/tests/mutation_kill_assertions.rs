@@ -279,7 +279,7 @@ fn push_group_keeps_uncovered_filter_local_with_exact_indices() {
         .expect("a well-formed group pushes");
     assert_eq!(pushed.pushed_filters, vec![1]);
     assert_eq!(pushed.local_filters, vec![0, 2]);
-    // The local REGEX needs `?o`, so the group keeps it projected.
+    // A conjunct stays local, so the group projects all of its variables.
     assert_eq!(
         pushed.sub.sparql,
         "SELECT ?s ?o WHERE { ?s <http://ex/p> ?o FILTER(?o = <http://ex/a>) }"

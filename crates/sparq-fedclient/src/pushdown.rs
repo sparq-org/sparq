@@ -536,11 +536,11 @@ pub fn push_group(
     } else {
         gvars.clone()
     };
-    // A conjunct evaluated locally needs the group's bindings of its variables too.
-    let local_needs = |v: &String| local_filters.iter().any(|&i| filters[i].vars.contains(v));
+    // A conjunct evaluated locally may need any of the group's bindings (an `EXISTS` can
+    // correlate on variables it does not declare), so the group then projects all of them.
     let project: Vec<String> = projectable
         .iter()
-        .filter(|v| output_vars.iter().any(|o| o == *v) || local_needs(v))
+        .filter(|v| !local_filters.is_empty() || output_vars.iter().any(|o| o == *v))
         .cloned()
         .collect();
 
@@ -792,12 +792,13 @@ mod tests {
             Filter::new(vec!["city".to_string()], "?city = \"NYC\"", FilterClass::Full),
         ];
         let pushed = push_group(&group, &bgp, &cap, &output, &filters, &[], None).unwrap();
-        // The whole group is one sub-query, projecting exactly ?s ?name, pushing FILTER(?age>18).
+        // The whole group is one sub-query pushing FILTER(?age>18); the ?city conjunct stays
+        // local, so every group variable stays projected.
         assert_eq!(
             pushed.sub.sparql,
-            "SELECT ?s ?name WHERE { ?s <http://ex/age> ?age . ?s <http://ex/name> ?name FILTER(?age > 18) }"
+            "SELECT ?s ?age ?name WHERE { ?s <http://ex/age> ?age . ?s <http://ex/name> ?name FILTER(?age > 18) }"
         );
-        assert_eq!(pushed.sub.project, vec!["s".to_string(), "name".to_string()]);
+        assert_eq!(pushed.sub.project, vec!["s".to_string(), "age".to_string(), "name".to_string()]);
         assert_eq!(pushed.pushed_filters, vec![0]); // first filter pushed
         assert_eq!(pushed.local_filters, vec![1]); // second kept local
     }
@@ -1226,14 +1227,16 @@ mod tests {
     fn a_local_filter_keeps_its_variables_and_the_limit_local() {
         let bgp = Bgp::new(vec![tp(var("s"), iri("http://ex/p"), var("o"))]);
         let group = ExclusiveGroup { source: 0, patterns: vec![0] };
-        let out = ["s".to_string()];
         let keys = [OrderKey::asc("o")];
-        let local = [Filter::new(vec!["o".to_string()], "?o > 1 && EXISTS { ?o ?p ?q }", FilterClass::Full)];
+        // The EXISTS also correlates on `?s`, which the conjunct does not declare.
+        let local = [Filter::new(vec!["o".to_string()], "?o > 1 && EXISTS { ?s ?p ?o }", FilterClass::Full)];
+        let out = ["x".to_string()];
         let pushed = push_group(&group, &bgp, &Capability::endpoint(), &out, &local, &keys, Some(1)).unwrap();
         assert_eq!(pushed.local_filters, vec![0]);
         assert_eq!(pushed.sub.sparql, "SELECT ?s ?o WHERE { ?s <http://ex/p> ?o } ORDER BY ?o");
         assert_eq!(pushed.sub.project, vec!["s".to_string(), "o".to_string()]);
         // With every conjunct pushed, the projection stays narrow and the limit is pushed.
+        let out = ["s".to_string()];
         let remote = [Filter::new(vec!["o".to_string()], "?o > 1", FilterClass::Full)];
         let pushed = push_group(&group, &bgp, &Capability::endpoint(), &out, &remote, &keys, Some(1)).unwrap();
         assert_eq!(pushed.sub.sparql, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o > 1) } ORDER BY ?o LIMIT 1");
