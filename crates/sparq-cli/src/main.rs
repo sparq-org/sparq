@@ -1877,17 +1877,7 @@ fn terse_expansion_to_json(expansion: &sparq_terse::Expansion) -> String {
     // false positive on inline-captured identifiers.
     fn esc(out: &mut String, s: &str) {
         out.push('"');
-        for c in s.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-                c => out.push(c),
-            }
-        }
+        sparq_core::json::escape_into(out, s);
         out.push('"');
     }
 
@@ -2376,17 +2366,7 @@ fn suite_results_json(mode: &str, iters: usize, rows: &[SuiteRow]) -> String {
 fn json_str(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() + 2);
     out.push('"');
-    for c in raw.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
+    sparq_core::json::escape_into(&mut out, raw);
     out.push('"');
     out
 }

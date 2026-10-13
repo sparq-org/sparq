@@ -45,8 +45,9 @@
 //! carries a domain/range, detected by the same `crate::rdfs::schema_is_meta` predicate the batch
 //! closure uses — break the one-step argument: derived facts feed back into the schema. Then the
 //! closure is kept by the semi-naive `crate::rdfs::meta::MetaClosure` (the same engine the batch
-//! closure uses for meta schemas): an insert adds only its consequences; a delete rebuilds it
-//! (linear in the fixpoint's joins). Ordinary schemas keep exact counting.
+//! closure uses for meta schemas): an insert adds only its consequences, and a delete runs DRed
+//! (overdelete, rederive, propagate) over the fixpoint, so both cost what they change (#6784).
+//! Ordinary schemas keep exact counting.
 //!
 //! # Semantics
 //!
@@ -75,6 +76,8 @@ use sparq_core::dict::{Dict, Id};
 mod incremental_explain;
 #[cfg(feature = "explain")]
 use incremental_explain::{OwlExplain, RdfsExplain};
+#[cfg(feature = "explain")]
+pub use incremental_explain::why_n3_document;
 
 use crate::rdfs::meta::MetaClosure;
 
@@ -109,8 +112,9 @@ pub struct MaterializedGraph {
     rng_full: FxHashMap<Id, Vec<Id>>,
     /// `Some` when the base's schema is meta (`crate::rdfs::schema_is_meta`): derived facts
     /// feed back into the schema, so the one-step counting argument fails. The closure is then
-    /// maintained by a semi-naive fixpoint (`counts` mirrors its derived facts, each at 1):
-    /// inserts extend it by their consequences only; deletes rebuild it.
+    /// maintained by a semi-naive fixpoint, whose fact set IS the closure (`counts` and
+    /// `schema_facts` are not used for it): inserts extend it by their consequences only;
+    /// deletes run DRed over it.
     meta: Option<Box<MetaClosure>>,
     /// How many times the v1 full-rematerialization fallback ran (TBox mutations). The initial
     /// materialization in [`new`](Self::new) is not counted. Exposed for tests/telemetry.
@@ -161,8 +165,47 @@ impl MaterializedGraph {
     /// [`MetaClosure`] instead.
     fn rematerialize(&mut self) {
         self.rebuilds += 1;
+        let (sc, sp, dom, rng) = self.raw_tbox();
+        self.sp_closure = transitive_closure(&sp);
+        if schema_is_meta(&self.v, &self.sp_closure, &dom, &rng, &MonoOwl::default()) {
+            self.counts.clear();
+            self.meta = Some(Box::new(MetaClosure::build(&self.base, &self.v)));
+            self.meta_tbox(sc, sp, dom, rng);
+            return;
+        }
+        self.meta = None;
+        self.close_tbox(&sc, &dom, &rng);
+        // 3. Sweep every base triple against the closed TBox, counting emissions.
+        let asserted: Vec<[Id; 3]> = self.base.iter().copied().collect();
+        let emitted = sweep(
+            &asserted,
+            &self.v,
+            &self.sc_closure,
+            &self.sp_closure,
+            &self.dom_full,
+            &self.rng_full,
+            None,
+        );
+        self.counts.clear();
+        for t in emitted {
+            *self.counts.entry(t).or_insert(0) += 1;
+        }
+        #[cfg(feature = "explain")]
+        self.explain.rebuild(&self.base, sc, sp, dom, rng);
+    }
+
+    /// Step 1 of [`rematerialize`](Self::rematerialize): the raw `(subClassOf,
+    /// subPropertyOf, domain, range)` maps of the base.
+    #[allow(clippy::type_complexity)]
+    fn raw_tbox(
+        &self,
+    ) -> (
+        FxHashMap<Id, Vec<Id>>,
+        FxHashMap<Id, Vec<Id>>,
+        FxHashMap<Id, Vec<Id>>,
+        FxHashMap<Id, Vec<Id>>,
+    ) {
         let v = &self.v;
-        // 1. Raw TBox maps from the base.
         let mut sc: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
         let mut sp: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
         let mut dom: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
@@ -178,47 +221,47 @@ impl MaterializedGraph {
                 rng.entry(s).or_default().push(o);
             }
         }
-        // 2. Saturate the TBox.
-        self.sc_closure = transitive_closure(&sc);
-        self.sp_closure = transitive_closure(&sp);
-        self.dom_full = close_dr(&dom, &self.sp_closure, &self.sc_closure);
-        self.rng_full = close_dr(&rng, &self.sp_closure, &self.sc_closure);
-        if schema_is_meta(v, &self.sp_closure, &dom, &rng, &MonoOwl::default()) {
-            let mc = MetaClosure::build(&self.base, v);
-            self.counts = mc
-                .facts
-                .iter()
-                .filter(|t| !self.base.contains(*t))
-                .map(|&t| (t, 1))
-                .collect();
-            self.meta = Some(Box::new(mc));
-            // TBox-closure facts of the ASSERTED edges: `why()` keeps proving these as rdfs11 /
-            // rdfs5 chains over asserted edges; everything else uses the fixpoint provenance.
-            self.fill_schema_facts();
-            #[cfg(feature = "explain")]
-            self.explain.rebuild(&self.base, sc, sp, dom, rng);
-            return;
-        }
-        self.meta = None;
-        // 3. Sweep every base triple against the closed TBox, counting emissions.
-        let asserted: Vec<[Id; 3]> = self.base.iter().copied().collect();
-        let emitted = sweep(
-            &asserted,
-            v,
-            &self.sc_closure,
-            &self.sp_closure,
-            &self.dom_full,
-            &self.rng_full,
-            None,
-        );
-        self.counts.clear();
-        for t in emitted {
-            *self.counts.entry(t).or_insert(0) += 1;
-        }
-        // 4. TBox-closure facts (rdfs11 / rdfs5), maintained as a set of their own.
+        (sc, sp, dom, rng)
+    }
+
+    /// Step 2 (`sp_closure` is already set): saturate the rest of the TBox, and collect its
+    /// closure facts (rdfs11 / rdfs5) as a set of their own.
+    fn close_tbox(
+        &mut self,
+        sc: &FxHashMap<Id, Vec<Id>>,
+        dom: &FxHashMap<Id, Vec<Id>>,
+        rng: &FxHashMap<Id, Vec<Id>>,
+    ) {
+        self.sc_closure = transitive_closure(sc);
+        self.dom_full = close_dr(dom, &self.sp_closure, &self.sc_closure);
+        self.rng_full = close_dr(rng, &self.sp_closure, &self.sc_closure);
         self.fill_schema_facts();
+    }
+
+    /// The TBox state of meta mode. The fixpoint holds every TBox-closure fact, so only
+    /// `why()` reads a closed TBox here: with `explain` the TBox-closure facts of the ASSERTED
+    /// edges keep being proved as rdfs11 / rdfs5 chains over asserted edges (everything else
+    /// uses the fixpoint provenance). Without it, nothing is closed.
+    fn meta_tbox(
+        &mut self,
+        sc: FxHashMap<Id, Vec<Id>>,
+        sp: FxHashMap<Id, Vec<Id>>,
+        dom: FxHashMap<Id, Vec<Id>>,
+        rng: FxHashMap<Id, Vec<Id>>,
+    ) {
         #[cfg(feature = "explain")]
-        self.explain.rebuild(&self.base, sc, sp, dom, rng);
+        {
+            self.close_tbox(&sc, &dom, &rng);
+            self.explain.rebuild(&self.base, sc, sp, dom, rng);
+        }
+        #[cfg(not(feature = "explain"))]
+        {
+            let _ = (sc, sp, dom, rng);
+            self.sc_closure.clear();
+            self.dom_full.clear();
+            self.rng_full.clear();
+            self.schema_facts.clear();
+        }
     }
 
     fn fill_schema_facts(&mut self) {
@@ -267,14 +310,7 @@ impl MaterializedGraph {
         // Meta mode: inserts are monotone, so the semi-naive fixpoint just absorbs them (a meta
         // schema stays meta under inserts).
         if let Some(mc) = self.meta.as_mut() {
-            for t in mc.insert(&added, &self.v) {
-                if !self.base.contains(&t) {
-                    self.counts.insert(t, 1);
-                }
-            }
-            for t in &added {
-                self.counts.remove(t);
-            }
+            mc.insert(&added, &self.v);
             #[cfg(feature = "explain")]
             self.explain.add_triples(&added);
             return added.len();
@@ -310,9 +346,32 @@ impl MaterializedGraph {
         if removed.is_empty() {
             return 0;
         }
-        // Meta mode: a delete can retract fixpoint facts, so the closure is rebuilt (linear
-        // transitivity keeps that proportional to the closure's joins, not cubic).
-        if tbox || self.meta.is_some() {
+        // Meta mode: delete and rederive over the fixpoint (#6784), so the cost follows the
+        // affected consequences. A TBox delete also refreshes the TBox state, and falls back to
+        // a full rebuild only when the schema stops being meta.
+        if let Some(mut mc) = self.meta.take() {
+            let mut raw = None;
+            if tbox {
+                let (sc, sp, dom, rng) = self.raw_tbox();
+                self.sp_closure = transitive_closure(&sp);
+                if !schema_is_meta(&self.v, &self.sp_closure, &dom, &rng, &MonoOwl::default()) {
+                    self.rematerialize();
+                    return removed.len();
+                }
+                raw = Some((sc, sp, dom, rng));
+            }
+            mc.delete(&removed, &self.base, &self.v);
+            self.meta = Some(mc);
+            #[cfg(feature = "explain")]
+            if raw.is_none() {
+                self.explain.remove_triples(&removed);
+            }
+            if let Some((sc, sp, dom, rng)) = raw {
+                self.meta_tbox(sc, sp, dom, rng);
+            }
+            return removed.len();
+        }
+        if tbox {
             self.rematerialize();
             return removed.len();
         }
@@ -336,6 +395,9 @@ impl MaterializedGraph {
 
     /// Is `t` in the materialized closure (asserted or derived)?
     pub fn contains(&self, t: &[Id; 3]) -> bool {
+        if let Some(mc) = self.meta.as_deref() {
+            return mc.facts.contains(t);
+        }
         self.base.contains(t) || self.counts.contains_key(t) || self.schema_facts.contains(t)
     }
 
@@ -344,6 +406,11 @@ impl MaterializedGraph {
     /// caller can rebuild a `Graph`/index from this; live integration with the T17 store
     /// overlay is a documented follow-up.
     pub fn closure(&self) -> Vec<[Id; 3]> {
+        if let Some(mc) = self.meta.as_deref() {
+            let mut out: Vec<[Id; 3]> = mc.facts.iter().copied().collect();
+            out.sort_unstable();
+            return out;
+        }
         let mut set: FxHashSet<[Id; 3]> = self.base.clone();
         set.extend(self.counts.keys().copied());
         set.extend(self.schema_facts.iter().copied());
@@ -354,25 +421,42 @@ impl MaterializedGraph {
 
     /// Iterate the closure without materializing a `Vec` (unsorted, deduplicated).
     pub fn iter(&self) -> impl Iterator<Item = [Id; 3]> + '_ {
-        self.base
-            .iter()
-            .copied()
-            .chain(self.counts.keys().copied().filter(|t| !self.base.contains(t)))
-            .chain(
-                self.schema_facts
-                    .iter()
-                    .copied()
-                    .filter(|t| !self.base.contains(t) && !self.counts.contains_key(t)),
-            )
+        let meta = self.meta.as_deref().map(|mc| mc.facts.iter().copied());
+        let counted = self.meta.is_none().then(|| {
+            self.base
+                .iter()
+                .copied()
+                .chain(
+                    self.counts
+                        .keys()
+                        .copied()
+                        .filter(|t| !self.base.contains(t)),
+                )
+                .chain(
+                    self.schema_facts
+                        .iter()
+                        .copied()
+                        .filter(|t| !self.base.contains(t) && !self.counts.contains_key(t)),
+                )
+        });
+        meta.into_iter()
+            .flatten()
+            .chain(counted.into_iter().flatten())
     }
 
     /// Number of triples in the closure.
     pub fn len(&self) -> usize {
-        self.iter().count()
+        match self.meta.as_deref() {
+            Some(mc) => mc.facts.len(),
+            None => self.iter().count(),
+        }
     }
 
     /// Is the closure empty?
     pub fn is_empty(&self) -> bool {
+        if let Some(mc) = self.meta.as_deref() {
+            return mc.facts.is_empty();
+        }
         self.base.is_empty() && self.counts.is_empty() && self.schema_facts.is_empty()
     }
 
@@ -1612,6 +1696,64 @@ pub struct MaterializedN3Graph {
     /// leaves it here; incremental inserts record into it. So a cut lasts only while the
     /// facts that caused it are present.
     cuts: crate::n3::bounded::Truncation,
+    /// The namespace of the caller's blank labels inside the graph (GH #6775): a caller
+    /// label `l` is held as `{base_ns}{l}`, fresh against every blank label of the rules
+    /// document and never minted by the engine, so a caller's `_b1` never aliases the
+    /// parser's `_b1` for a `[]`. Every other blank (the document's, the engine's) is shown
+    /// to the caller as `{N3_GRAPH_BLANK}{label}`. Facts cross the API boundary through
+    /// [`Self::inward`] and [`Self::outward`] only.
+    base_ns: String,
+    /// The table of documents the rules parse at run time (`log:parsedAsN3`), kept for the
+    /// graph's whole life and shared by every rebuild and proof re-derivation, so a
+    /// runtime-parsed blank keeps its label (and the caller its handle on it) across
+    /// mutations: an inserted fact naming that blank never moves the table's prefix.
+    runtime_docs: crate::n3::RuntimeDocs,
+}
+
+/// The reserved label space in which [`MaterializedN3Graph`] shows the blank nodes that
+/// are not the caller's (the rules document's, the engine's): `_:x` in the rules is
+/// `__d.x` to the caller, so it never reads as the caller's own `x`.
+pub const N3_GRAPH_BLANK: &str = "__d.";
+
+/// `t` with `f` applied to every blank label (recursing into lists, formulae and quoted
+/// triples), or `None` when `f` changes none: a term without blank nodes costs no
+/// allocation.
+fn map_blank_labels(t: &N3Term, f: &impl Fn(&str) -> Option<String>) -> Option<N3Term> {
+    fn row(r: &[N3Term; 3], f: &impl Fn(&str) -> Option<String>) -> Option<[N3Term; 3]> {
+        let m: [Option<N3Term>; 3] = [0, 1, 2].map(|i| map_blank_labels(&r[i], f));
+        if m.iter().all(Option::is_none) {
+            return None;
+        }
+        let [a, b, c] = m;
+        Some([
+            a.unwrap_or_else(|| r[0].clone()),
+            b.unwrap_or_else(|| r[1].clone()),
+            c.unwrap_or_else(|| r[2].clone()),
+        ])
+    }
+    match t {
+        N3Term::Blank(l) => f(l).map(N3Term::Blank),
+        N3Term::List(ms) => {
+            let m: Vec<Option<N3Term>> = ms.iter().map(|x| map_blank_labels(x, f)).collect();
+            if m.iter().all(Option::is_none) {
+                return None;
+            }
+            Some(N3Term::List(
+                m.into_iter().zip(ms).map(|(n, o)| n.unwrap_or_else(|| o.clone())).collect(),
+            ))
+        }
+        N3Term::Formula(ts) => {
+            let m: Vec<Option<[N3Term; 3]>> = ts.iter().map(|r| row(r, f)).collect();
+            if m.iter().all(Option::is_none) {
+                return None;
+            }
+            Some(N3Term::Formula(
+                m.into_iter().zip(ts).map(|(n, o)| n.unwrap_or_else(|| o.clone())).collect(),
+            ))
+        }
+        N3Term::Triple(tr) => row(tr, f).map(|r| N3Term::Triple(Box::new(r))),
+        _ => None,
+    }
 }
 
 /// Evaluation phase of a non-seed plain atom relative to the delta seed (the counting
@@ -2401,12 +2543,13 @@ impl MaterializedN3Graph {
         let cuts = crate::n3::bounded::Truncation::top_level();
         let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
         crate::n3::validate_rule_quantifiers(&parsed)?;
+        let base_ns = crate::n3::fresh_base_blank_prefix(&parsed);
+        let runtime_docs = crate::n3::RuntimeDocs::for_sources(&[&parsed]);
         let (compiled, disqualified) = match n3_compile(&parsed) {
             Ok(c) => (Some(Rc::new(c)), None),
             Err(reason) => (None, Some(reason)),
         };
-        let mut base: FxHashSet<[N3Term; 3]> = parsed.facts.iter().cloned().collect();
-        base.extend(base_facts.iter().cloned());
+        let base: FxHashSet<[N3Term; 3]> = parsed.facts.iter().cloned().collect();
         let n_layers = compiled.as_ref().map_or(0, |c| c.layers.len());
         let mut g = MaterializedN3Graph {
             rules_src: rules_src.to_string(),
@@ -2424,7 +2567,20 @@ impl MaterializedN3Graph {
             rebuilds: 0,
             strat_warning: None,
             cuts: cuts.clone(),
+            base_ns,
+            runtime_docs,
         };
+        let mut caller = Vec::with_capacity(base_facts.len());
+        for f in base_facts {
+            let Some(f) = g.inward(f) else {
+                return Err(format!(
+                    "base blank label in {N3_GRAPH_BLANK}{}… names no node of the graph",
+                    g.base_ns
+                ));
+            };
+            caller.push(f.into_owned());
+        }
+        g.base.extend(caller);
         // The rules parse's record is the counting run's; the checked run re-parses.
         g.rematerialize(cuts, crate::n3::bounded::Truncation::top_level());
         g.rebuilds = 0;
@@ -2432,6 +2588,54 @@ impl MaterializedN3Graph {
             return Err(format!("{w} The rules document is rejected."));
         }
         Ok(g)
+    }
+
+    /// A caller's fact as the graph holds it, the inverse of [`Self::outward`]: a label
+    /// `l` is the caller's node `{base_ns}{l}`, and `{N3_GRAPH_BLANK}{label}` names the
+    /// graph's own node `label`. `None` for `{N3_GRAPH_BLANK}{base_ns}…`, which
+    /// [`Self::outward`] never produces. Borrowed (no allocation) when the fact has no
+    /// blank node.
+    pub(crate) fn inward<'a>(
+        &self,
+        t: &'a [N3Term; 3],
+    ) -> Option<std::borrow::Cow<'a, [N3Term; 3]>> {
+        let ns = self.base_ns.as_str();
+        let invalid = Cell::new(false);
+        let to_ns = |l: &str| match l.strip_prefix(N3_GRAPH_BLANK) {
+            Some(own) => {
+                invalid.set(invalid.get() || own.starts_with(ns));
+                Some(own.to_string())
+            }
+            None => Some(format!("{ns}{l}")),
+        };
+        let m: [Option<N3Term>; 3] = [0, 1, 2].map(|i| map_blank_labels(&t[i], &to_ns));
+        if invalid.get() {
+            return None;
+        }
+        if m.iter().all(Option::is_none) {
+            return Some(std::borrow::Cow::Borrowed(t));
+        }
+        let [a, b, c] = m;
+        Some(std::borrow::Cow::Owned([
+            a.unwrap_or_else(|| t[0].clone()),
+            b.unwrap_or_else(|| t[1].clone()),
+            c.unwrap_or_else(|| t[2].clone()),
+        ]))
+    }
+
+    /// A closure fact as the caller sees it: labels in [`Self::base_ns`] get the caller's
+    /// own label back, every other blank (the rules document's, the engine's: none starts
+    /// with `base_ns`) is shown as `{N3_GRAPH_BLANK}{label}`. Injective: a caller label is
+    /// never in the reserved space, since [`Self::inward`] reads that space as the graph's.
+    pub(crate) fn outward(&self, t: &[N3Term; 3]) -> [N3Term; 3] {
+        let ns = self.base_ns.as_str();
+        let from_ns = |l: &str| {
+            Some(match l.strip_prefix(ns) {
+                Some(caller) => caller.to_string(),
+                None => format!("{N3_GRAPH_BLANK}{l}"),
+            })
+        };
+        [0, 1, 2].map(|i| map_blank_labels(&t[i], &from_ns).unwrap_or_else(|| t[i].clone()))
     }
 
     /// Does mutating `t` require a full rebuild? (Guard predicates — their truth is baked
@@ -2534,6 +2738,7 @@ impl MaterializedN3Graph {
             self.base.iter().cloned(),
             crate::NegationCycles::Reject,
             &self.cuts,
+            &self.runtime_docs,
         ) {
             Ok(closure) => self.fallback_closure = closure.facts.into_iter().collect(),
             // The rules cannot be stratified (a negation cycle, possibly inside a nested
@@ -2814,9 +3019,12 @@ impl MaterializedN3Graph {
             if !f.iter().all(N3Term::is_ground) {
                 continue;
             }
+            // A label `outward` never produces names no node: ignored like a non-ground fact.
+            let Some(f) = self.inward(f) else { continue };
+            let f = f.into_owned();
             if self.base.insert(f.clone()) {
-                rebuild |= self.triggers_rebuild(f);
-                added.push(f.clone());
+                rebuild |= self.triggers_rebuild(&f);
+                added.push(f);
             }
         }
         if added.is_empty() {
@@ -2852,9 +3060,10 @@ impl MaterializedN3Graph {
         let mut removed = Vec::new();
         let mut rebuild = false;
         for f in facts {
-            if self.base.remove(f) {
-                rebuild |= self.triggers_rebuild(f);
-                removed.push(f.clone());
+            let Some(f) = self.inward(f) else { continue };
+            if self.base.remove(f.as_ref()) {
+                rebuild |= self.triggers_rebuild(&f);
+                removed.push(f.into_owned());
             }
         }
         if removed.is_empty() {
@@ -2886,6 +3095,11 @@ impl MaterializedN3Graph {
 
     /// Is `t` in the materialized closure (asserted or derived)?
     pub fn contains(&self, t: &[N3Term; 3]) -> bool {
+        self.inward(t).is_some_and(|t| self.holds(&t))
+    }
+
+    /// Is `t`, in the graph's own labels, in the materialized closure?
+    pub(crate) fn holds(&self, t: &[N3Term; 3]) -> bool {
         match self.mode {
             N3Mode::Counting => self.index.contains(t),
             N3Mode::Fallback => self.fallback_closure.contains(t),
@@ -2895,8 +3109,8 @@ impl MaterializedN3Graph {
     /// The full materialized closure (unordered; [`Term`](crate::n3::Term) has no ordering).
     pub fn closure(&self) -> Vec<[N3Term; 3]> {
         match self.mode {
-            N3Mode::Counting => self.index.all.iter().cloned().collect(),
-            N3Mode::Fallback => self.fallback_closure.iter().cloned().collect(),
+            N3Mode::Counting => self.index.all.iter().map(|t| self.outward(t)).collect(),
+            N3Mode::Fallback => self.fallback_closure.iter().map(|t| self.outward(t)).collect(),
         }
     }
 
@@ -3483,6 +3697,16 @@ mod tests {
             vec![[spo, v.sp, v.sp], [p, spo, q], [s_, p, o_]],
             // Review example: an ordinary two-edge rdfs11 proof must survive meta mode.
             vec![[a, v.sc, b], [b, v.sc, cc], [v.ty, v.dom, thing]],
+            // #6784: `a sc cc` is both a transitivity conclusion and an rdfs7 edge, plus a
+            // cycle, so a delete must rederive edges as well as facts.
+            vec![
+                [sub, v.sp, v.sc],
+                [a, v.sc, b],
+                [b, v.sc, cc],
+                [a, sub, cc],
+                [cc, v.sc, a],
+                [x, v.ty, a],
+            ],
         ];
         for base in cases {
             let full: FxHashSet<[Id; 3]> = base.iter().copied().collect();
@@ -3567,7 +3791,157 @@ mod tests {
                 sofar.remove(&t);
                 check_step(&g, &mut dict, &sofar);
             }
+            // #6784: a random stream of inserts and (multi-triple) deletes.
+            for _ in 0..8 {
+                if next(2) == 0 || sofar.is_empty() {
+                    let t = [
+                        terms[next(terms.len())],
+                        terms[next(terms.len())],
+                        terms[next(terms.len())],
+                    ];
+                    g.insert(&[t]);
+                    sofar.insert(t);
+                } else {
+                    let mut present: Vec<[Id; 3]> = sofar.iter().copied().collect();
+                    present.sort_unstable();
+                    let gone: Vec<[Id; 3]> = (0..1 + next(3))
+                        .map(|_| present[next(present.len())])
+                        .collect();
+                    g.delete(&gone);
+                    for t in &gone {
+                        sofar.remove(t);
+                    }
+                }
+                check_step(&g, &mut dict, &sofar);
+            }
         }
+    }
+
+    /// #6784: on a meta schema a delete is maintained by delete-and-rederive over the
+    /// fixpoint, not by rebuilding it. ABox deletes and TBox deletes that keep the schema meta
+    /// never fall back, and the closure stays equal to batch through cycles and alternative
+    /// derivations.
+    #[test]
+    fn meta_schema_delete_is_incremental() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let thing = ex(&mut dict, "Thing");
+        let k: Vec<Id> = (0..6).map(|i| ex(&mut dict, &format!("K{i}"))).collect();
+        let (x, y) = (ex(&mut dict, "x"), ex(&mut dict, "y"));
+        let mut base = vec![[v.ty, v.dom, thing]];
+        for w in k.windows(2) {
+            base.push([w[0], v.sc, w[1]]);
+        }
+        base.push([k[3], v.sc, k[1]]); // a cycle K1 -> K2 -> K3 -> K1
+        base.push([k[0], v.sc, k[2]]); // a shortcut: alternative derivations
+        base.extend([[x, v.ty, k[0]], [x, v.ty, k[2]], [y, v.ty, k[4]]]);
+        let mut g = MaterializedGraph::new(&mut dict, &base);
+        let mut set: FxHashSet<[Id; 3]> = base.iter().copied().collect();
+        check_step(&g, &mut dict, &set);
+        for t in [
+            [x, v.ty, k[0]],
+            [k[1], v.sc, k[2]],
+            [y, v.ty, k[4]],
+            [k[3], v.sc, k[1]],
+        ] {
+            assert_eq!(g.delete(&[t]), 1);
+            set.remove(&t);
+            check_step(&g, &mut dict, &set);
+        }
+        let two = [[x, v.ty, k[2]], [k[0], v.sc, k[2]]];
+        assert_eq!(g.delete(&two), 2);
+        for t in &two {
+            set.remove(t);
+        }
+        check_step(&g, &mut dict, &set);
+        assert_eq!(
+            g.full_rebuilds(),
+            0,
+            "a meta-schema delete must not rebuild the closure"
+        );
+    }
+
+    /// #6842 review: an identity (`subClassOf subPropertyOf subClassOf`) or cyclic property
+    /// rewrite re-derives every transitive conclusion of a chain through rdfs7. Those
+    /// conclusions must not become traversal edges (that makes transitivity cubic), across
+    /// inserts and deletes alike, and the closure must still equal batch.
+    #[test]
+    fn meta_schema_rewrites_keep_edges_sparse() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let (thing, x, p) = (
+            ex(&mut dict, "Thing"),
+            ex(&mut dict, "x"),
+            ex(&mut dict, "p"),
+        );
+        let k: Vec<Id> = (0..40).map(|i| ex(&mut dict, &format!("K{i}"))).collect();
+        let identity = vec![[v.sc, v.sp, v.sc]];
+        let cycle = vec![[v.sc, v.sp, p], [p, v.sp, v.sc]];
+        for rewrite in [identity, cycle] {
+            let mut base = rewrite.clone();
+            base.push([v.ty, v.dom, thing]);
+            base.push([x, v.ty, k[0]]);
+            for w in k.windows(2) {
+                base.push([w[0], v.sc, w[1]]);
+            }
+            let sparse = |g: &MaterializedGraph| {
+                let edges = g.meta.as_deref().expect("meta schema").edge_count();
+                assert!(
+                    edges <= 2 * k.len(),
+                    "{edges} edges for a {}-class chain",
+                    k.len()
+                );
+            };
+            let mut g = MaterializedGraph::new(&mut dict, &[]);
+            g.insert(&base);
+            sparse(&g);
+            let mut set: FxHashSet<[Id; 3]> = base.iter().copied().collect();
+            check_step(&g, &mut dict, &set);
+            let cut = [k[20], v.sc, k[21]];
+            g.delete(&[cut]);
+            set.remove(&cut);
+            sparse(&g);
+            check_step(&g, &mut dict, &set);
+            g.insert(&[cut]);
+            set.insert(cut);
+            sparse(&g);
+            check_step(&g, &mut dict, &set);
+            let g = MaterializedGraph::new(&mut dict, &base);
+            sparse(&g);
+        }
+    }
+
+    /// #6842 review: many individuals share one class, so their typings sit in large index
+    /// buckets. Single deletes (and re-inserts) go through the positional bucket removal and
+    /// must keep the closure equal to batch.
+    #[test]
+    fn meta_schema_large_bucket_deletes() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let (thing, c, d) = (
+            ex(&mut dict, "Thing"),
+            ex(&mut dict, "C"),
+            ex(&mut dict, "D"),
+        );
+        let xs: Vec<Id> = (0..120).map(|i| ex(&mut dict, &format!("x{i}"))).collect();
+        let mut base = vec![[v.ty, v.dom, thing], [c, v.sc, d]];
+        base.extend(xs.iter().map(|&x| [x, v.ty, c]));
+        let mut g = MaterializedGraph::new(&mut dict, &base);
+        let mut set: FxHashSet<[Id; 3]> = base.iter().copied().collect();
+        for (i, &x) in xs.iter().enumerate().rev().step_by(3) {
+            let t = [x, v.ty, c];
+            assert_eq!(g.delete(&[t]), 1);
+            set.remove(&t);
+            if i % 2 == 0 {
+                assert_eq!(g.insert(&[[x, v.ty, d]]), 1);
+                set.insert([x, v.ty, d]);
+            }
+            if i % 10 == 0 {
+                check_step(&g, &mut dict, &set);
+            }
+        }
+        check_step(&g, &mut dict, &set);
+        assert_eq!(g.full_rebuilds(), 0);
     }
 
     #[test]

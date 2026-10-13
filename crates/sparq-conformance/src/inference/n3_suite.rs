@@ -128,15 +128,7 @@ fn run_manifest(
             .unwrap_or_default();
         let name = if name.is_empty() || suite == "n3/reasoner" {
             // Reasoner mf:names repeat upstream; the entry id is the useful key.
-            match &node {
-                oxrdf::NamedOrBlankNode::NamedNode(n) => n
-                    .as_str()
-                    .rsplit(['#', '/'])
-                    .next()
-                    .unwrap_or(n.as_str())
-                    .to_string(),
-                oxrdf::NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
-            }
+            entry_id(&node)
         } else {
             name
         };
@@ -177,9 +169,7 @@ fn run_manifest(
             }
         };
         if let Outcome::Fail(e) = &outcome {
-            if let Some((_, _why, detail)) =
-                DOCUMENTED_DIVERGENCES.iter().find(|(n, _, _)| *n == name)
-            {
+            if let Some(detail) = documented_divergence(suite, &entry_id(&node), &name, e) {
                 outcome = Outcome::Divergence(detail, e.clone());
             }
         }
@@ -487,6 +477,70 @@ fn options(g: &MiniGraph, node: &oxrdf::NamedOrBlankNode) -> Options {
     }
     o
 }
+
+/// The manifest entry's own id: the local name of its IRI (`…#cwm_syntax_too-nested.n3`),
+/// which, unlike `mf:name`, is unique within a manifest.
+fn entry_id(node: &oxrdf::NamedOrBlankNode) -> String {
+    match node {
+        oxrdf::NamedOrBlankNode::NamedNode(n) => n
+            .as_str()
+            .rsplit(['#', '/'])
+            .next()
+            .unwrap_or(n.as_str())
+            .to_string(),
+        oxrdf::NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
+    }
+}
+
+/// The documented rationale for a FAIL, if the failure is a known, accepted
+/// divergence. A [`SCOPED_DIVERGENCES`] entry matches only its own manifest
+/// (suite label) and entry id, and only when the failure is the documented one;
+/// a [`DOCUMENTED_DIVERGENCES`] entry matches by name.
+fn documented_divergence(
+    suite: &str,
+    entry_id: &str,
+    name: &str,
+    failure: &str,
+) -> Option<&'static str> {
+    SCOPED_DIVERGENCES
+        .iter()
+        .find(|d| {
+            d.suite == suite && d.entry_id == entry_id && failure.starts_with(d.failure_prefix)
+        })
+        .map(|d| d.rationale)
+        .or_else(|| {
+            DOCUMENTED_DIVERGENCES
+                .iter()
+                .find(|(n, _, _)| *n == name)
+                .map(|(_, _, detail)| *detail)
+        })
+}
+
+/// A divergence accepted for ONE manifest entry and ONE failure: any other
+/// failure of that entry (an unreadable fixture, a panic, a different parse
+/// error) stays a FAIL.
+struct ScopedDivergence {
+    /// The suite label of the entry's manifest (`n3/parser` = `manifest-parser.ttl`).
+    suite: &'static str,
+    /// The entry's IRI local name ([`entry_id`]).
+    entry_id: &'static str,
+    /// The failure message must start with this.
+    failure_prefix: &'static str,
+    rationale: &'static str,
+}
+
+/// Entries that exceed a deliberate engine resource limit.
+const SCOPED_DIVERGENCES: &[ScopedDivergence] = &[ScopedDivergence {
+    suite: "n3/parser",
+    entry_id: "cwm_syntax_too-nested.n3",
+    // The parser's nesting-limit refusal (`bounded::enter_nesting`), as `syntax_test`
+    // reports it. The parser's error is a plain string, so the text is the match.
+    failure_prefix: "parse error: nesting deeper than ",
+    rationale: "cwm_syntax/too-nested.n3 nests 1080 formulae; the N3 parser rejects bracket \
+                nesting past bounded::PARSE_DEPTH (64) so untrusted input cannot overflow \
+                a 2 MiB stack (#6732 / #6835). The entry is rdft:Proposed and upstream \
+                notes 'succeeding or failing doesn't prove much'",
+}];
 
 /// Suite entries whose REFERENCE disagrees with their action document —
 /// failing them is not an engine gap. Kept as documented divergences.
@@ -804,5 +858,57 @@ fn num_lex(s: &str) -> Option<f64> {
         "INF" | "+INF" => Some(f64::INFINITY),
         "-INF" => Some(f64::NEG_INFINITY),
         _ => s.parse::<f64>().ok().filter(|v| !v.is_nan()),
+    }
+}
+
+#[cfg(test)]
+mod divergence_tests {
+    use super::documented_divergence;
+
+    const ID: &str = "cwm_syntax_too-nested.n3";
+    const NAME: &str = "too-nested.n3";
+
+    #[test]
+    fn too_nested_depth_refusal_is_the_documented_divergence() {
+        let d = documented_divergence("n3/parser", ID, NAME, "parse error: nesting deeper than 64");
+        assert!(d.is_some_and(|r| r.contains("PARSE_DEPTH")));
+    }
+
+    #[test]
+    fn too_nested_with_any_other_failure_stays_a_fail() {
+        for failure in [
+            "parse error: expected '}' at line 3",
+            "parser panicked",
+            "timeout (10s) in parser",
+            "read cwm_syntax/too-nested.n3: No such file or directory (os error 2)",
+            "negative syntax: parser accepted an invalid document",
+        ] {
+            assert_eq!(
+                documented_divergence("n3/parser", ID, NAME, failure),
+                None,
+                "{failure}"
+            );
+        }
+    }
+
+    #[test]
+    fn too_nested_in_another_manifest_stays_a_fail() {
+        for suite in ["n3/extended", "n3/turtle", "n3/reasoner"] {
+            assert_eq!(
+                documented_divergence(suite, ID, NAME, "parse error: nesting deeper than 64"),
+                None,
+                "{suite}"
+            );
+        }
+        // Same manifest, same mf:name, a different entry.
+        assert_eq!(
+            documented_divergence(
+                "n3/parser",
+                "other_too-nested.n3",
+                NAME,
+                "parse error: nesting deeper than 64"
+            ),
+            None
+        );
     }
 }

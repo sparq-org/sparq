@@ -29,7 +29,6 @@
 use sparq_core::Graph;
 use wasm_bindgen::prelude::*;
 
-use crate::report_to_json;
 
 /// A pre-parsed RDF graph handle for **repeat validation without re-parse**
 /// (opt-in `stateful` feature; the stateless `Validator` is the default surface).
@@ -59,7 +58,7 @@ impl ParsedGraph {
     /// Infallible once both sides are parsed — malformed shapes are skipped by the
     /// engine, never surfaced as an error.
     pub fn validate(&self, shapes: &ParsedGraph) -> String {
-        report_to_json(&sparq_shacl::validate(&self.graph, &shapes.graph))
+        sparq_shacl::validate(&self.graph, &shapes.graph).to_js_json()
     }
 
     /// Like [`validate`](Self::validate) but returns the report as report-RDF
@@ -130,10 +129,11 @@ mod tests {
     #[test]
     fn parsed_validate_matches_one_shot_json() {
         let json = handle(DATA).validate(&handle(SHAPES));
-        let one_shot = report_to_json(&sparq_shacl::validate(
+        let one_shot = sparq_shacl::validate(
             &Graph::load_str(DATA, "turtle").unwrap(),
             &Graph::load_str(SHAPES, "turtle").unwrap(),
-        ));
+        )
+        .to_js_json();
         assert_eq!(json, one_shot, "{json}");
         assert!(json.contains("\"message\":\"age must be an integer\""), "{json}");
     }

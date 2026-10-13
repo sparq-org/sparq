@@ -195,7 +195,376 @@ pub type Resolver = dyn Fn(&str) -> Option<String>;
 /// Keying on formula CONTENT (not the document IRI) means the guard needs no extra plumbing
 /// through the lazy `log:semantics` → `log:supports` evaluation hand-off, and is exact for
 /// the recursion that actually loops (a formula closing itself, transitively).
-type VisitedDocs = std::rc::Rc<std::cell::RefCell<FxHashSet<u64>>>;
+///
+/// The same shared state carries the runtime-document table, so every nested closure
+/// draws runtime-parse blank labels from ONE table ([`run_shared::RuntimeDocs`]).
+type VisitedDocs = std::rc::Rc<std::cell::RefCell<run_shared::RunShared>>;
+
+pub(crate) use run_shared::RuntimeDocs;
+
+
+/// The state one top-level run shares with all of its nested closures, and the table of
+/// documents parsed at run time, which can outlive a run (a `MaterializedN3Graph` keeps
+/// one for its whole life). Private fields and one constructor each: a run cannot hold a
+/// table that was not made fresh against its sources.
+mod run_shared {
+    use super::{
+        bounded, document_blank_labels, formula_bytes, fresh_blank_prefix, parser, Term,
+        VisitedDocs,
+    };
+    use rustc_hash::{FxHashMap, FxHashSet};
+
+    pub(super) struct RunShared {
+        /// Content keys of the formulas whose closure is in progress (the import-cycle
+        /// guard, [`VisitedDocs`]).
+        pub(super) docs: FxHashSet<u64>,
+        /// Blank labels for documents parsed at run time.
+        runtime: RuntimeDocs,
+    }
+
+    /// The table of documents parsed at run time (`log:parsedAsN3`, `log:semantics`) and
+    /// the ONE allocator of their blank labels. Such a document's blanks are its own: they
+    /// are standardized apart into `{prefix}{key}_{label}`, `key` the document's
+    /// scope key ([`runtime_doc_digest`], a specified hash of its text and base). So a label
+    /// depends on the document alone, never on the order a run meets documents in, nor
+    /// on the build: the same text under the same base always parses to the same formula
+    /// (a materialization and a proof re-derivation agree, and exported proof keys are
+    /// stable). Two documents never share a blank: a second document whose key is
+    /// already taken is refused, failing the run. No runtime text can spell a label of
+    /// the sources the table was made for: `prefix` is the smallest `__rp{k}_` no blank of
+    /// any of them starts with, except a source blank spelled exactly as a runtime blank
+    /// (`__rp{k}_{key}_<label>`), which names that runtime document's blank whether an
+    /// exported closure or a person wrote it; so re-reasoning exported output keeps `k`.
+    /// Per document the table keeps a constant-size entry (the full SHA-256 digest, for
+    /// the collision refusal, and the label prefix), never the text or base, and it takes
+    /// at most [`bounded::runtime_docs`] documents: one more fails the run with a cut. It
+    /// finds a known document again by that digest (one SHA-256 per runtime parse).
+    /// Cloning shares the table.
+    #[derive(Clone)]
+    pub(crate) struct RuntimeDocs(std::rc::Rc<std::cell::RefCell<DocTable>>);
+
+    struct DocTable {
+        prefix: String,
+        /// Each known document's entry, by its full SHA-256 digest.
+        by_doc: FxHashMap<[u8; 32], u32>,
+        /// Each entry by its 8-byte scope key, for the collision refusal.
+        by_key: FxHashMap<u64, u32>,
+        /// One constant-size entry per document: its SHA-256 digest and label prefix.
+        entries: Vec<DocEntry>,
+        /// Documents this table may hold ([`bounded::runtime_docs`]).
+        room: usize,
+    }
+
+    /// What the table keeps of one document: its full SHA-256 digest (to tell two
+    /// documents sharing an 8-byte scope key apart) and its label prefix
+    /// `{prefix}{key}_`, whose length is the same for every entry of a table.
+    struct DocEntry {
+        digest: [u8; 32],
+        prefix: String,
+    }
+
+    /// Why the table refused a document.
+    pub(super) enum Refusal {
+        /// Another document has its scope key.
+        Collision,
+        /// The table is full ([`bounded::runtime_docs`]).
+        Full,
+    }
+
+    impl RuntimeDocs {
+        /// A table for runs over `sources` (every document whose blanks the runs hold: a
+        /// query passes its data and its query document, a `MaterializedN3Graph` its
+        /// rules document).
+        pub(crate) fn for_sources(sources: &[&parser::Parsed]) -> RuntimeDocs {
+            let mut labels = FxHashSet::default();
+            for p in sources {
+                labels.extend(document_blank_labels(p));
+            }
+            RuntimeDocs::for_labels(&labels)
+        }
+
+        /// [`for_sources`](Self::for_sources) given the sources' blank labels
+        /// ([`document_blank_labels`]), for a run that has already collected them.
+        pub(super) fn for_labels(labels: &FxHashSet<&str>) -> RuntimeDocs {
+            // A source label spelled exactly as a runtime blank (`__rp{k}_{key}_<label>`)
+            // is one: it was exported from an earlier run (`reason_n3_pass_all` output,
+            // a serialized closure) and names that runtime document's blank. It does not
+            // push `k` up, so re-reasoning an exported closure keeps the same `k` and the
+            // reparsed document's blanks are the exported nodes (a fixed point).
+            let other: FxHashSet<&str> =
+                labels.iter().copied().filter(|l| !is_runtime_label(l)).collect();
+            let prefix = fresh_blank_prefix(&other, "__rp");
+            RuntimeDocs::with_room(prefix, bounded::runtime_docs())
+        }
+
+        fn with_room(prefix: String, room: usize) -> RuntimeDocs {
+            let table = DocTable {
+                prefix,
+                by_doc: FxHashMap::default(),
+                by_key: FxHashMap::default(),
+                entries: Vec::new(),
+                room,
+            };
+            RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
+        }
+
+        /// The statements of the document parsed from `text` under `base` (by `parse`),
+        /// with its blanks standardized apart; `Ok(None)` when `parse` fails or `admit`
+        /// refuses the standardized formula's size, `Err` when the table refuses the
+        /// document. `admit` gets that size ([`formula_bytes`] of the statements once
+        /// every blank label carries its prefix) computed from the parsed statements,
+        /// before any label is rewritten and before the table takes the document.
+        fn formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
+            let Some(mut ts) = parse() else { return Ok(None) };
+            // Each blank label grows by the label prefix, the same length for every
+            // document of the table.
+            let blanks = ts.iter().map(blank_occurrences).fold(0, usize::saturating_add);
+            let grown = blanks.saturating_mul(self.0.borrow().label_prefix_len());
+            let bytes = formula_bytes(ts.iter()).saturating_add(grown);
+            if !admit(bytes) {
+                return Ok(None);
+            }
+            // A document with no blank has nothing to standardize apart (and needs no key).
+            if blanks == 0 {
+                return Ok(Some(ts));
+            }
+            let mut t = self.0.borrow_mut();
+            let prefix = t.prefix_for(text, base)?;
+            // In place: only the blank labels are rewritten, nothing else is copied.
+            fn go(t: &mut Term, p: &str) {
+                match t {
+                    Term::Blank(l) => l.insert_str(0, p),
+                    Term::List(ms) => ms.iter_mut().for_each(|m| go(m, p)),
+                    Term::Formula(rs) => rs.iter_mut().flatten().for_each(|m| go(m, p)),
+                    Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, p)),
+                    _ => {}
+                }
+            }
+            ts.iter_mut().flatten().for_each(|t| go(t, prefix));
+            debug_assert_eq!(formula_bytes(ts.iter()), bytes, "the admitted size is the size");
+            Ok(Some(ts))
+        }
+    }
+
+    /// The blank-label occurrences in `t`, through nested lists, formulas and quoted
+    /// triples (walked with an explicit stack, as [`bounded::term_bytes`] walks).
+    fn blank_occurrences(t: &[Term; 3]) -> usize {
+        let mut n = 0usize;
+        let mut stack: Vec<&Term> = t.iter().collect();
+        while let Some(t) = stack.pop() {
+            match t {
+                Term::Blank(_) => n += 1,
+                Term::List(ms) => stack.extend(ms),
+                Term::Formula(rs) => stack.extend(rs.iter().flatten()),
+                Term::Triple(tr) => stack.extend(tr.iter()),
+                _ => {}
+            }
+        }
+        n
+    }
+
+    /// The hex digits of a scope key in a label prefix.
+    const KEY_HEX: usize = 16;
+
+    impl DocTable {
+        /// The length of every label prefix `{prefix}{key}_` of this table.
+        fn label_prefix_len(&self) -> usize {
+            self.prefix.len() + KEY_HEX + 1
+        }
+
+        /// The label prefix for the blanks of the document parsed from `text` under
+        /// `base`; `Err` when another document has its key or the table is full (the
+        /// table is then unchanged).
+        fn prefix_for(&mut self, text: &str, base: &str) -> Result<&str, Refusal> {
+            let digest = runtime_doc_digest(text, base);
+            if let Some(&at) = self.by_doc.get(&digest) {
+                return Ok(&self.entries[at as usize].prefix);
+            }
+            let key = scope_key(&digest);
+            let at = match self.by_key.get(&key) {
+                Some(&at) if self.entries[at as usize].digest == digest => at,
+                Some(_) => return Err(Refusal::Collision),
+                None => {
+                    if self.entries.len() >= self.room {
+                        return Err(Refusal::Full);
+                    }
+                    let mut prefix = String::with_capacity(self.label_prefix_len());
+                    prefix.push_str(&self.prefix);
+                    sparq_core::hex::encode_into(&digest[..8], false, &mut prefix);
+                    prefix.push('_');
+                    debug_assert_eq!(prefix.len(), self.label_prefix_len());
+                    // An index; `room` keeps the table far below u32::MAX entries.
+                    let at = u32::try_from(self.entries.len()).map_err(|_| Refusal::Full)?;
+                    self.entries.push(DocEntry { digest, prefix });
+                    self.by_key.insert(key, at);
+                    at
+                }
+            };
+            self.by_doc.insert(digest, at);
+            Ok(&self.entries[at as usize].prefix)
+        }
+
+        /// The bytes the table keeps per document: the same for every document,
+        /// whatever its text and base.
+        #[cfg(test)]
+        fn bytes_per_entry(&self) -> Vec<usize> {
+            let slot = std::mem::size_of::<([u8; 32], u32)>() + std::mem::size_of::<(u64, u32)>();
+            let entry = std::mem::size_of::<DocEntry>() + slot;
+            self.entries.iter().map(|e| entry + e.prefix.capacity()).collect()
+        }
+    }
+
+    /// Whether `label` has the exact shape of a standardized runtime blank:
+    /// `__rp{k}_{key}_<label>` with `k` decimal digits and `key` 16 lowercase hex digits
+    /// ([`runtime_doc_digest`]).
+    pub(super) fn is_runtime_label(label: &str) -> bool {
+        let Some(rest) = label.strip_prefix("__rp") else { return false };
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let Some(rest) = rest[digits..].strip_prefix('_') else { return false };
+        let key = rest.as_bytes().get(..16);
+        digits > 0
+            && key.is_some_and(|k| k.iter().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+            && rest.as_bytes().get(16) == Some(&b'_')
+    }
+
+    /// The 8-byte scope key of a document: the first 8 bytes of its digest.
+    fn scope_key(digest: &[u8; 32]) -> u64 {
+        #[cfg(test)]
+        if table_tests::SAME_KEY.with(std::cell::Cell::get) {
+            return 0;
+        }
+        u64::from_be_bytes(digest[..8].try_into().expect("8 bytes"))
+    }
+
+    /// The SHA-256 digest of a document parsed at run time: SHA-256 over
+    /// `"sparq-n3-runtime-doc\0"`, then the UTF-8 `text` and the UTF-8 `base`, each
+    /// preceded by its byte length as a big-endian `u64`. Its first 8 bytes, as 16
+    /// lowercase hex digits, are the document's scope key in its blank labels. Specified
+    /// (not a std hasher), so the key is the same on every build: it reaches exported
+    /// labels, proof keys and provenance IRIs.
+    fn runtime_doc_digest(text: &str, base: &str) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"sparq-n3-runtime-doc\0");
+        for part in [text, base] {
+            h.update((part.len() as u64).to_be_bytes());
+            h.update(part.as_bytes());
+        }
+        h.finalize().into()
+    }
+
+    /// The scope key of a document parsed at run time ([`runtime_doc_digest`]).
+    #[cfg(test)]
+    pub(crate) fn runtime_doc_key(text: &str, base: &str) -> String {
+        sparq_core::hex::encode(&runtime_doc_digest(text, base)[..8])
+    }
+
+    impl RunShared {
+        /// The shared state of one top-level run drawing on `runtime`.
+        pub(super) fn new(runtime: RuntimeDocs) -> VisitedDocs {
+            let shared = RunShared { docs: FxHashSet::default(), runtime };
+            std::rc::Rc::new(std::cell::RefCell::new(shared))
+        }
+
+        /// The shared state of a top-level run over `sources`, with a table of its own.
+        pub(super) fn for_sources(sources: &[&parser::Parsed]) -> VisitedDocs {
+            RunShared::new(RuntimeDocs::for_sources(sources))
+        }
+
+        /// [`RuntimeDocs::formula`] on the run's table.
+        pub(super) fn parsed_formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
+            self.runtime.formula(text, base, parse, admit)
+        }
+    }
+
+    #[cfg(test)]
+    mod table_tests {
+        use super::{Refusal, RuntimeDocs, Term};
+
+        std::thread_local! {
+            /// Gives every document the same scope key, forcing a key collision.
+            pub(super) static SAME_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        /// Two different documents sharing a scope key are told apart by their full
+        /// digest: the second is refused, while the first, met again, keeps its prefix.
+        #[test]
+        fn a_scope_key_collision_is_refused_and_a_known_document_is_kept() {
+            SAME_KEY.with(|c| c.set(true));
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let a = t.formula("a", "", doc, |_| true);
+            let b = t.formula("b", "", doc, |_| true);
+            let again = t.formula("a", "", doc, |_| true);
+            SAME_KEY.with(|c| c.set(false));
+            assert!(matches!(b, Err(Refusal::Collision)));
+            assert_eq!(a.ok().flatten(), again.ok().flatten());
+            assert_eq!(t.0.borrow().entries.len(), 1);
+        }
+
+
+        /// A document of `text` whose one blank is `_:x`.
+        fn doc() -> Option<Vec<[Term; 3]>> {
+            let iri = |s: &str| Term::Iri(s.to_string());
+            Some(vec![[Term::Blank("x".into()), iri("http://ex/p"), iri("http://ex/o")]])
+        }
+
+        /// When full the table refuses a new document without taking it, and still
+        /// serves the documents it holds.
+        #[test]
+        fn a_full_table_refuses_without_inserting() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 2);
+            let a = t.formula("a", "", doc, |_| true).ok().flatten().expect("a");
+            assert!(t.formula("b", "", doc, |_| true).is_ok());
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
+            assert_eq!(t.0.borrow().entries.len(), 2);
+            assert_eq!(t.formula("a", "", doc, |_| true).ok().flatten(), Some(a));
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
+        }
+
+        /// `admit` gets the size the formula has once standardized apart, and a refusal
+        /// leaves the table without the document (nothing was prefixed).
+        #[test]
+        fn admit_sees_the_standardized_size_before_the_table_takes_the_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let mut seen = 0;
+            let refused = t.formula("a", "", doc, |n| {
+                seen = n;
+                false
+            });
+            assert!(matches!(refused, Ok(None)));
+            assert!(t.0.borrow().entries.is_empty());
+            let kept = t.formula("a", "", doc, |_| true).ok().flatten().expect("kept");
+            assert_eq!(super::formula_bytes(kept.iter()), seen);
+            assert_eq!(t.0.borrow().entries.len(), 1);
+        }
+
+        /// The table keeps the same number of bytes for a one-byte text as for a
+        /// megabyte one (and for a long base).
+        #[test]
+        fn an_entry_does_not_grow_with_its_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let big = "y".repeat(1 << 20);
+            for (text, base) in [("a", ""), (big.as_str(), ""), ("a", big.as_str())] {
+                assert!(t.formula(text, base, doc, |_| true).is_ok());
+            }
+            let sizes = t.0.borrow().bytes_per_entry();
+            assert_eq!(sizes.len(), 3);
+            assert!(sizes.iter().all(|&n| n == sizes[0]), "{sizes:?}");
+        }
+    }
+}
 
 /// A stable structural key for a quoted formula, used by the import-cycle guard
 /// ([`VisitedDocs`]) to recognise a closure that is already in progress up the stack.
@@ -227,6 +596,33 @@ struct BwCtx<'a> {
 }
 
 impl BwCtx<'_> {
+    /// The statements `parse` makes of the document parsed at run time from `text` (under
+    /// `base`), with its blanks standardized apart through the run's table
+    /// ([`run_shared::RunShared::parsed_formula`]). `None` when the text does not parse,
+    /// when `admit` refuses the size the standardized formula will have (checked before
+    /// any label is rewritten), or when the table refuses the document (the refusal
+    /// fails the run).
+    fn runtime_formula(
+        &self,
+        text: &str,
+        base: &str,
+        parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+        admit: impl FnOnce(usize) -> bool,
+        pending: &bounded::Pending,
+    ) -> Option<Vec<[Term; 3]>> {
+        let visited = self.visited.clone();
+        let made = visited.borrow().parsed_formula(text, base, parse, admit);
+        let e = match made {
+            Ok(ts) => return ts,
+            Err(run_shared::Refusal::Collision) => "n3: two documents parsed at run time share a \
+                 blank-node scope key; refused rather than let their blank nodes alias"
+                .to_string(),
+            Err(run_shared::Refusal::Full) => bounded::runtime_docs_exceeded(pending),
+        };
+        self.nested_error.borrow_mut().get_or_insert(e);
+        None
+    }
+
     /// Use a budgeted or fallible step's result, recording a cut on the run
     /// ([`bounded::settle`]).
     fn settle<T>(&self, b: Bounded<T>) -> T {
@@ -261,13 +657,14 @@ fn negation_gate(bw: &BwCtx) -> bool {
 }
 
 impl<'a> BwCtx<'a> {
-    fn new(rules: &'a [Rule], truncated: Truncation) -> BwCtx<'a> {
+    /// A context sharing `visited` with the run it belongs to.
+    fn new(rules: &'a [Rule], truncated: Truncation, visited: VisitedDocs) -> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
             base: String::new(),
             resolver: None,
-            visited: VisitedDocs::default(),
+            visited,
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
             truncated,
@@ -364,7 +761,7 @@ fn reason_n3_in(
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = bounded::parse_n3(src, "", truncated)?;
     let (facts, steps, _) =
-        run_closure(parsed, None, None, truncated, StepMode::None, cycles)?.top_level();
+        run_closure(parsed, None, None, truncated, StepMode::None, cycles, None)?.top_level();
     Ok(intern_closure::<NoKeys>(dict, &facts, &steps)?.closure)
 }
 
@@ -380,6 +777,7 @@ pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<
         &cuts,
         StepMode::Full,
         NegationCycles::Reject,
+        None,
     )?
     .top_level();
     // The steps carry their facts' keys; the closure's own keys are not returned, so not built.
@@ -413,6 +811,7 @@ pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, Str
         &cuts,
         StepMode::Full,
         NegationCycles::Reject,
+        None,
     )?
     .top_level();
     intern_closure::<CollectKeys>(dict, &facts, &steps)
@@ -470,6 +869,7 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
         &cuts,
         StepMode::None,
         NegationCycles::Reject,
+        None,
     )?
     .top_level();
     // Universals are written as their own IRIs under `@forAll` declarations, so the output
@@ -568,16 +968,20 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
     // One run: the data closure and the query premises share one cut record.
     let truncated = cuts;
+    // ... and one runtime-parse allocator, fresh against both documents: a text the query
+    // parses never spells a blank of the data closure.
+    let shared = run_shared::RunShared::for_sources(&[&data_parsed, &query_parsed]);
     let facts = run_closure(
         data_parsed,
         None,
-        Some(VisitedDocs::default()),
+        Some(shared.clone()),
         &truncated,
         StepMode::None,
         NegationCycles::Reject,
+        None,
     )?
     .read_further(&truncated);
-    let mut bw = BwCtx::new(&backward, truncated);
+    let mut bw = BwCtx::new(&backward, truncated, shared);
     bw.base = base;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
@@ -608,15 +1012,17 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if let Some(g) = ground_triple(&c, &b) {
-                    if emitted.insert(g.clone()) {
+                if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
+                    // A conclusion past the term-depth limit is dropped, as a cut.
+                    if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
+                    {
                         out.push(g);
                     }
                 }
             }
         }
     }
-    if let Some(e) = bw.nested_error.take() {
+    if let Some(e) = bw.nested_error.take().or_else(|| bw.truncated.refusal()) {
         return Err(e);
     }
     Ok(out)
@@ -778,13 +1184,17 @@ fn stratified_in(
         parsed.facts.append(&mut carried);
         // An incomplete closure (rules FailClosed skipped) taints the whole rest of the
         // pipeline: every later document's negation gate reads `truncated`.
+        // Each stratum's runtime parses are standardized apart against its own source,
+        // which holds the earlier strata's carried (renamed) closure.
+        let shared = run_shared::RunShared::for_sources(&[&parsed]);
         let closure = run_closure(
             parsed,
             None,
-            Some(VisitedDocs::default()),
+            Some(shared),
             &truncated,
             StepMode::None,
             cycles,
+            None,
         )?;
         warnings.extend(closure.warning.iter().map(|w| format!("stratum {i}: {w}")));
         let f = closure.read_further(&truncated);
@@ -810,6 +1220,15 @@ fn stratified_in(
 fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
     let seen = document_blank_labels(parsed);
     fresh_blank_prefix(&seen, "__st")
+}
+
+/// The namespace [`MaterializedN3Graph`](crate::MaterializedN3Graph) gives its caller's
+/// blank labels (GH #6775): the smallest `__bs{k}_` prefix no blank label of the rules
+/// document starts with. The parser's own labels (`_b<n>` for `[]`, `_:x` as written,
+/// `__path<n>`, `__ex_<local>`) are all in `parsed`, so none starts with it, and the
+/// `__sk…`/`__st…`/`__rp…` labels the engine mints are other families.
+pub(crate) fn fresh_base_blank_prefix(parsed: &parser::Parsed) -> String {
+    fresh_blank_prefix(&document_blank_labels(parsed), "__bs")
 }
 
 /// Every blank label reachable in `t`, including nested list members, formula
@@ -898,6 +1317,7 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
     extra: impl IntoIterator<Item = [Term; 3]>,
     cuts: &Truncation,
+    runtime: Option<&RuntimeDocs>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
     let (facts, steps, _) = run_closure(
@@ -907,6 +1327,7 @@ pub(crate) fn reason_n3_terms_proof(
         cuts,
         StepMode::Full,
         NegationCycles::Reject,
+        runtime,
     )?
     .top_level();
     Ok((facts.all, steps))
@@ -1015,6 +1436,7 @@ pub(crate) fn reason_n3_terms_in(
         truncated,
         StepMode::Conclusions,
         cycles,
+        None,
     )?
     .top_level();
     Ok(N3Closure {
@@ -1036,6 +1458,7 @@ pub(crate) fn reason_n3_terms_with_facts(
     extra: impl IntoIterator<Item = [Term; 3]>,
     cycles: NegationCycles,
     truncated: &Truncation,
+    runtime: &RuntimeDocs,
 ) -> Result<N3Closure, String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, truncated)?;
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
@@ -1046,6 +1469,7 @@ pub(crate) fn reason_n3_terms_with_facts(
         truncated,
         StepMode::Conclusions,
         cycles,
+        Some(runtime),
     )?
     .top_level();
     Ok(N3Closure {
@@ -1111,9 +1535,11 @@ impl Closure {
 fn run_closure(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
-    // The import-cycle guard ([`VisitedDocs`]). `None` for a TOP-LEVEL run (a fresh,
-    // empty set); a nested run reached through `formula_closure` passes the PARENT's set so
-    // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
+    // The import-cycle guard and runtime-parse allocator ([`VisitedDocs`]). `None` for a
+    // TOP-LEVEL run (made fresh against `parsed`); a nested run reached through
+    // `formula_closure` passes the PARENT's, so a `log:semantics` / `log:content` document
+    // IRI active up the stack is still recognised, and a query or a pipeline stratum passes
+    // the one its entry point made.
     // `Some` also means a caller reads this closure further (a query, the next document
     // of an explicit pipeline, a nested closure's consumer).
     inherit: Option<VisitedDocs>,
@@ -1123,6 +1549,10 @@ fn run_closure(
     mode: StepMode,
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
+    // The runtime-document table a TOP-LEVEL run draws on when its caller keeps one across
+    // runs (a `MaterializedN3Graph`); `None` makes one fresh against `parsed`. Ignored
+    // with `inherit`, whose run state already carries its table.
+    runtime: Option<&RuntimeDocs>,
 ) -> Result<Closure, String> {
     validate_rule_quantifiers(&parsed)?;
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
@@ -1130,8 +1560,29 @@ fn run_closure(
     // from being captured by a minted conclusion blank. Labels ingested later
     // through document builtins or nested closure evaluation are outside this
     // initial-source guarantee.
-    let sk_prefix = fresh_blank_prefix(&document_blank_labels(&parsed), "__sk");
+    let labels = document_blank_labels(&parsed);
+    let sk_prefix = fresh_blank_prefix(&labels, "__sk");
+    // A caller reads this closure further (a query, the next document of an explicit
+    // pipeline, a nested closure's consumer).
+    let read_further = inherit.is_some();
+    let visited = match inherit {
+        Some(v) => v,
+        None => run_shared::RunShared::new(match runtime {
+            Some(r) => r.clone(),
+            // One scan of the document's labels serves both namespaces.
+            None => RuntimeDocs::for_labels(&labels),
+        }),
+    };
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
+    // A top-level run keeps terms as deep as those it was handed (terms built in code can
+    // nest past the parser's limit); rules cannot build deeper ([`bounded::given_terms`]).
+    if !read_further {
+        let rule_terms = rules
+            .iter()
+            .chain(&backward_rules)
+            .flat_map(|r| r.premise.iter().chain(&r.conclusion).flatten());
+        bounded::given_terms(truncated, facts0.iter().flatten().chain(rule_terms));
+    }
     // Premises evaluate left-to-right with no coroutining — reorder each
     // premise so a builtin runs only after the atoms that produce its inputs
     // (cwm evaluates builtins "when ready"; concat.n3 test13f writes the
@@ -1145,16 +1596,10 @@ fn run_closure(
     // loop below. Rules on a cycle through negation follow `cycles`.
     let strata = strata::stratify(&rules, &backward_rules, cycles)?;
     let mut facts = FactIndex::from_iter(facts0);
-    let mut bw = BwCtx::new(&backward_rules, truncated.clone());
+    let mut bw = BwCtx::new(&backward_rules, truncated.clone(), visited);
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
-    // A caller reads this closure further (a query, the next document of an explicit
-    // pipeline, a nested closure's consumer).
-    let read_further = inherit.is_some();
-    if let Some(v) = inherit {
-        bw.visited = v;
-    }
     // Derivation steps at the term level (interned to ids once at the end).
     let mut steps: Vec<DerivationStep> = Vec::new();
 
@@ -1319,7 +1764,7 @@ fn run_closure(
     let mut delta: FxHashSet<[Term; 3]> = facts.all.clone(); // round 0: every fact is "new"
     // The closure's round and fact allowance (the run's `ClosureLimits`): a rule set that
     // never saturates (GH #6757) stops with a cut and an error instead of running forever.
-    // An iteration bound, not a memory bound (GH #6771).
+    // Its term-size allowance is checked where builtins derive terms (GH #6771).
     let mut allowance = bounded::ClosureRounds::forward(truncated);
     for (stratum, &close_naively) in close_naively.iter().enumerate() {
         if stratum > 0 {
@@ -1331,6 +1776,13 @@ fn run_closure(
         let mut closing_check = false;
         loop {
             bounded::ClosureRounds::round(&mut allowance, facts.all.len(), truncated)?;
+            // A nested closure failed, or the negation gate refused, in an earlier round:
+            // the run fails with that error at the end anyway, so stop here instead of
+            // re-evaluating (a failed nested closure is retried every round, and each
+            // retry re-runs every level under it).
+            if let Some(e) = bw.nested_error.take() {
+                return Err(e);
+            }
             // A round with `first_round` set is NAIVE: every rule over the whole fact set.
             let naive_round = first_round;
             let mut produced: Vec<DerivationStep> = Vec::new();
@@ -1439,14 +1891,17 @@ fn run_closure(
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple(&c, &b) {
-                            if !facts.contains(&g) {
+                        if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
+                            // A conclusion past the term-depth limit is dropped, as a cut.
+                            if !facts.contains(&g)
+                                && bw.settle(bounded::generated(&bw.truncated, &g))
+                            {
                                 // The supporting facts: premise patterns instantiated under b that
                                 // are actual facts (excludes builtins / list structure).
                                 let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
                                     rule.premise
                                         .iter()
-                                        .filter_map(|p| ground_triple(p, &b))
+                                        .filter_map(|p| ground_triple(p, &b, &bw.truncated))
                                         .filter(|t| facts.contains(t))
                                         .collect()
                                 } else {
@@ -1517,7 +1972,7 @@ fn run_closure(
             delta = new_delta;
         }
     }
-    if let Some(e) = bw.nested_error.take() {
+    if let Some(e) = bw.nested_error.take().or_else(|| truncated.refusal()) {
         return Err(e);
     }
     let skipped = strata
@@ -1704,7 +2159,25 @@ fn match_premise(premise: &[[Term; 3]], facts: &FactIndex, bw: &BwCtx) -> Vec<Bi
 /// driver, by running once per join-atom index, considers only bindings that involve ≥1 new
 /// fact. `None` = naive (every join atom matches all facts); also used for the negation
 /// sub-formula recursion.
+///
+/// An evaluation boundary ([`within_depth`]): a `seed` past the term-depth limit is
+/// refused, as a cut, before any atom is evaluated under it.
 fn match_premise_seeded(
+    premise: &[[Term; 3]],
+    facts: &FactIndex,
+    seed: &Binding,
+    delta_at: Option<(&FxHashSet<[Term; 3]>, usize)>,
+    bw: &BwCtx,
+    depth: usize,
+) -> Vec<Binding> {
+    if !seed.is_empty() && !within_depth(seed, bw) {
+        return Vec::new();
+    }
+    match_premise_admitted(premise, facts, seed, delta_at, bw, depth)
+}
+
+/// [`match_premise_seeded`] for a `seed` already within the term-depth limit.
+fn match_premise_admitted(
     premise: &[[Term; 3]],
     facts: &FactIndex,
     seed: &Binding,
@@ -1728,8 +2201,9 @@ fn match_premise_seeded(
         let rest: Vec<[Term; 3]> =
             premise.iter().enumerate().filter(|&(i, _)| i != k).map(|(_, p)| p.clone()).collect();
         let mut out = Vec::new();
+        // Each seed extends the admitted `seed` with parts of stored facts only.
         for s in &seeds {
-            out.extend(match_premise_seeded(&rest, facts, s, None, bw, depth));
+            out.extend(match_premise_admitted(&rest, facts, s, None, bw, depth));
         }
         return out;
     }
@@ -1757,19 +2231,24 @@ fn match_premise_seeded(
             let is_not = matches!(op, ScopeOp::NotIncludes);
             let mut next = Vec::new();
             for b in bindings {
-                let matches: Vec<Binding> = match apply_deep(&pat[0], &b) {
-                    Term::Formula(ts) => {
-                        let scope: Vec<[Term; 3]> = if matches!(op, ScopeOp::Supports) {
-                            formula_closure(&ts, bw)
-                        } else {
-                            ts
-                        };
-                        formula_containment(&scope, inner, &b, bw)
+                let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
+                    continue;
+                };
+                let matches: Vec<Binding> = match scope_term {
+                    // log:supports searches the closure in place: no term is built.
+                    Term::Formula(ts) if matches!(op, ScopeOp::Supports) => {
+                        with_formula_closure(&ts, bw, |scope| formula_containment(scope, inner, &b, bw))
                     }
+                    Term::Formula(ts) => formula_containment(&ts, inner, &b, bw),
                     // `{}` parses as the literal true — the EMPTY formula:
                     // it includes nothing (and notIncludes everything).
-                    Term::Lit(v, _, _) if v == "true" => formula_containment(&[], inner, &b, bw),
-                    _ => match_premise_seeded(inner, facts, &b, None, bw, depth),
+                    Term::Lit(v, _, _) if v == "true" => formula_containment(NO_STATEMENTS, inner, &b, bw),
+                    // The store as the scope: the clause recurses into premise matching,
+                    // holding a unit of the run's stack allowance (`_frames`).
+                    _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
+                        Some(_frames) => match_premise_seeded(inner, facts, &b, None, bw, depth),
+                        None => Vec::new(),
+                    },
                 };
                 // Every negation passes the gate, whatever it found.
                 if is_not {
@@ -1777,7 +2256,7 @@ fn match_premise_seeded(
                         next.push(b);
                     }
                 } else {
-                    next.extend(matches);
+                    next.extend(matches.into_iter().filter(|nb| within_depth(nb, bw)));
                 }
             }
             bindings = next;
@@ -1821,15 +2300,21 @@ fn match_premise_seeded(
                         Term::Lit(v, _, _) if v == "true" => &[],
                         _ => return None,
                     };
-                    Some(match apply_deep(&pat[2], seed) {
+                    Some(match bounded::substitute_deep(&pat[2], seed, &bw.truncated)? {
                         Term::Formula(scope) => formula_containment(&scope, atoms, seed, bw),
                         Term::Lit(v, _, _) if v == "true" => {
-                            formula_containment(&[], atoms, seed, bw)
+                            formula_containment(NO_STATEMENTS, atoms, seed, bw)
                         }
-                        _ => match_premise_seeded(atoms, facts, seed, None, bw, depth),
+                        // The store as the scope: as for the scoped operators above.
+                        _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
+                            Some(_frames) => {
+                                match_premise_seeded(atoms, facts, seed, None, bw, depth)
+                            }
+                            None => Vec::new(),
+                        },
                     })
                 };
-                let subj = apply(&pat[0], &b);
+                let Some(subj) = bounded::substitute(&pat[0], &b, &bw.truncated) else { continue };
                 let Term::List(members) = &subj else { continue };
                 match op {
                     CollectOp::CollectAll => {
@@ -1838,10 +2323,24 @@ fn match_premise_seeded(
                         if !negation_gate(bw) {
                             continue;
                         }
-                        let collected =
-                            Term::List(sols.iter().map(|s| apply_deep(template, s)).collect());
+                        // One copy of the template per solution, sized before it is built.
+                        let bytes = sols
+                            .iter()
+                            .map(|s| bounded::resolved_bytes(template, s, true))
+                            .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
+                        if refused_term(&bw.truncated, &bw.truncated, Derived::Collected, bytes, || bytes) {
+                            continue;
+                        }
+                        let Some(items) = sols
+                            .iter()
+                            .map(|s| bounded::substitute_deep(template, s, &bw.truncated))
+                            .collect::<Option<Vec<Term>>>()
+                        else {
+                            continue;
+                        };
+                        let collected = Term::List(items);
                         let mut nb = b.clone();
-                        if unify_term(list_pat, &collected, &mut nb) {
+                        if unify_term(list_pat, &collected, &mut nb) && within_depth(&nb, bw) {
                             next.push(nb);
                         }
                     }
@@ -1871,17 +2370,27 @@ fn match_premise_seeded(
             };
             let mut next = Vec::new();
             for b in &bindings {
-                let head = apply(list_pos, b);
+                let Some(head) = bounded::substitute(list_pos, b, &bw.truncated) else { continue };
                 // A first-class `( … )` list value, hand-written rdf:first/rest
                 // rule structure, or a data list reached through a bound
                 // variable (walked from the fact store).
-                let members: Option<Vec<Term>> = match &head {
-                    Term::List(ms) => Some(ms.clone()),
-                    _ => bw.settle(fact_list(&head, facts)),
+                let members: Option<std::borrow::Cow<'_, [Term]>> = match &head {
+                    Term::List(ms) => Some(std::borrow::Cow::Borrowed(&ms[..])),
+                    _ => bw.settle(fact_list(&head, facts)).map(std::borrow::Cow::Owned),
                 };
                 if let Some(members) = members {
                     for (ix, m) in members.iter().enumerate() {
-                        let mv = apply(m, b);
+                        // The term this binds, sized from the borrowed member first: the
+                        // member, or for list:iterate an (index member) pair.
+                        let mut bytes = bounded::resolved_bytes(m, b, false);
+                        if let ListGen::Iterate = gen {
+                            let index = Numeral::count(ix).term_bytes();
+                            bytes = bytes.saturating_add(bounded::TERM_NODE_BYTES).saturating_add(index);
+                        }
+                        if refused_term(&bw.truncated, &bw.truncated, Derived::Generated(gen), bytes, || bytes) {
+                            continue;
+                        }
+                        let Some(mv) = bounded::substitute(m, b, &bw.truncated) else { continue };
                         let target = match gen {
                             ListGen::Member | ListGen::In => mv,
                             // (?index ?value) pairs, 0-based (EYE list:iterate).
@@ -1891,7 +2400,7 @@ fn match_premise_seeded(
                             ]),
                         };
                         let mut nb = b.clone();
-                        if unify_term(var_pos, &target, &mut nb) {
+                        if unify_term(var_pos, &target, &mut nb) && within_depth(&nb, bw) {
                             next.push(nb);
                         }
                     }
@@ -1902,33 +2411,43 @@ fn match_premise_seeded(
             bindings = bindings
                 .into_iter()
                 .filter_map(|b| bw.settle(eval_functional(f, &pat[0], &pat[2], facts, bw, b)))
+                .filter(|nb| within_depth(nb, bw))
                 .collect();
         } else if let Some(op) = binder_builtin(&pat[1]) {
             bindings = bindings
                 .into_iter()
-                .filter_map(|b| bw.settle(eval_binder(op, &pat[0], &pat[2], b)))
+                .filter_map(|b| bw.settle(eval_binder(op, &pat[0], &pat[2], b, &bw.truncated)))
+                .filter(|nb| within_depth(nb, bw))
                 .collect();
         } else if let Some(op) = builtin(&pat[1]) {
-            bindings.retain(|b| bw.settle(eval_builtin(op, &pat[0], &pat[2], b)));
+            bindings.retain(|b| bw.settle(eval_builtin(op, &pat[0], &pat[2], b, &bw.truncated)));
         } else {
             // Join atom: selective FactIndex lookup (no full scan) for each current binding,
             // PLUS goal-directed resolution against the backward (`<=`) rules.
             let mut next = Vec::new();
             for b in &bindings {
-                let (s_a, p_a, o_a) = (apply(&pat[0], b), apply(&pat[1], b), apply(&pat[2], b));
+                let run = &bw.truncated;
+                let (Some(s_a), Some(p_a), Some(o_a)) = (
+                    bounded::substitute(&pat[0], b, run),
+                    bounded::substitute(&pat[1], b, run),
+                    bounded::substitute(&pat[2], b, run),
+                ) else {
+                    continue;
+                };
                 // Virtual rdf:first / rdf:rest over a first-class list value —
                 // cwm/EYE expose list structure to matching even though the
                 // list is a term, not triples (`?L rdf:first ?X` computes).
                 if let (Term::List(ms), Term::Iri(pi)) = (&s_a, &p_a) {
                     if pi == parser::RDF_FIRST || pi == parser::RDF_REST {
                         if !ms.is_empty() {
+                            // The tail is sized before it is built.
                             let val = if pi == parser::RDF_FIRST {
-                                ms[0].clone()
+                                Some(ms[0].clone())
                             } else {
-                                Term::List(ms[1..].to_vec())
+                                bounded::list_tail(ms, run)
                             };
                             let mut nb = b.clone();
-                            if unify_term(&pat[2], &val, &mut nb) {
+                            if val.is_some_and(|val| unify_term(&pat[2], &val, &mut nb)) && within_depth(&nb, bw) {
                                 next.push(nb);
                             }
                         }
@@ -1946,8 +2465,14 @@ fn match_premise_seeded(
                         bw.rules.iter().flat_map(|r| &r.conclusion).any(
                             |c| !matches!((&p_a, &c[1]), (Term::Iri(a), Term::Iri(b)) if a != b),
                         );
-                    if let Some(d) = bw.settle(bounded::backward_step(depth, could_match)) {
-                        next.extend(backward_prove(pat, b, facts, bw, d));
+                    let step = bounded::backward_step(&bw.truncated, depth, could_match);
+                    // `_frames` holds the step's unit of the run's stack allowance.
+                    if let Some((d, _frames)) = bw.settle(step) {
+                        next.extend(
+                            backward_prove(pat, b, facts, bw, d)
+                                .into_iter()
+                                .filter(|nb| within_depth(nb, bw)),
+                        );
                     }
                 }
             }
@@ -1958,6 +2483,31 @@ fn match_premise_seeded(
         }
     }
     bindings
+}
+
+/// Whether every value `b` binds is within the term-depth limit
+/// ([`bounded::generated`]). A binding an atom built past it is dropped, as a cut: the
+/// premise atoms that can build a deeper value than they read (builtins, list
+/// generators, virtual list access, scoped operators, backward proofs) filter their
+/// bindings through here, so every binding a premise carries forward is within it. The
+/// containment search of a formula scope ([`containment_search`]) checks each binding it
+/// extends here too, before carrying it to its next statement.
+///
+/// The invariant: nothing past the limit enters an evaluation. Each recursive evaluation
+/// boundary checks what it is handed before it evaluates anything, and refuses it as a
+/// cut:
+/// - premise evaluation from a seed ([`match_premise_seeded`]): the seed, which covers a
+///   backward proof step's substitution, a store-scoped clause's binding and a
+///   `log:collectAllIn` / `log:forAllIn` clause's binding;
+/// - a backward proof step ([`backward_prove`]): its instantiated goal;
+/// - a formula-scope search ([`formula_containment`]): its seed and the scope;
+/// - a nested closure ([`formula_closure`], `log:supports` / `log:conclusion`): the
+///   statements it would admit as facts and rules.
+///
+/// A top-level run's own input is admitted by raising the limit to it
+/// ([`bounded::given_terms`]); parsed text is within the parser's nesting limit.
+fn within_depth(b: &Binding, bw: &BwCtx) -> bool {
+    bw.settle(bounded::generated(&bw.truncated, b.values()))
 }
 
 /// Whether a premise reads the fact store outside its join atoms, from each relation's
@@ -2067,7 +2617,21 @@ fn is_join_atom(pat: &[Term; 3]) -> bool {
 /// each proof back onto the goal's variables. SLD resolution with standardized-apart rule
 /// variables and a depth bound (`depth` counts REMAINING backward applications).
 fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, depth: usize) -> Vec<Binding> {
-    let goal = [apply(&pat[0], b), apply(&pat[1], b), apply(&pat[2], b)];
+    let run = &bw.truncated;
+    let (Some(g0), Some(g1), Some(g2)) = (
+        bounded::substitute(&pat[0], b, run),
+        bounded::substitute(&pat[1], b, run),
+        bounded::substitute(&pat[2], b, run),
+    ) else {
+        return Vec::new();
+    };
+    let goal = [g0, g1, g2];
+    // An evaluation boundary ([`within_depth`]): a goal past the term-depth limit is not
+    // resolved. Each rule's substitution is checked where its premise is evaluated
+    // ([`match_premise_seeded`]).
+    if !bw.settle(bounded::generated(&bw.truncated, &goal)) {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for rule in bw.rules {
         for concl in &rule.conclusion {
@@ -2102,7 +2666,11 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                     if let Term::Var(_) = g {
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
-                        let val = apply(&walk(g, &sol), &sol);
+                        let Some(val) = bounded::substitute(&walk(g, &sol), &sol, &bw.truncated)
+                        else {
+                            ok = false;
+                            break;
+                        };
                         if (val.is_ground() || matches!(val, Term::Formula(_)))
                             && !unify_term(g, &val, &mut nb)
                         {
@@ -2198,6 +2766,12 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
 /// [`extract_lists`], which resolves rule-local structure. `rdf:nil` is the
 /// empty list.
 fn fact_list(head: &Term, facts: &FactIndex) -> Bounded<Option<Vec<Term>>> {
+    fact_list_refs(head, facts).map(|ms| ms.map(|ms| ms.into_iter().cloned().collect()))
+}
+
+/// [`fact_list`], borrowing the members from the store (so they can be sized before
+/// they are copied).
+fn fact_list_refs<'f>(head: &Term, facts: &'f FactIndex) -> Bounded<Option<Vec<&'f Term>>> {
     let first = Term::Iri(parser::RDF_FIRST.into());
     let rest = Term::Iri(parser::RDF_REST.into());
     let nil = Term::Iri(parser::RDF_NIL.into());
@@ -2206,11 +2780,7 @@ fn fact_list(head: &Term, facts: &FactIndex) -> Bounded<Option<Vec<Term>>> {
         head.clone(),
         |cur| *cur == nil || *cur == empty,
         |cur| {
-            let f = facts
-                .ps
-                .get(&(first.clone(), cur.clone()))?
-                .first()?
-                .clone();
+            let f = facts.ps.get(&(first.clone(), cur.clone()))?.first()?;
             let r = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
             Some((f, r))
         },
@@ -2333,60 +2903,57 @@ fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
     }
 }
 
-/// Multiset unification of two formula bodies under `b` (small formulae;
-/// backtracking with a binding clone per branch).
+/// Multiset unification of two formula bodies under `b`: a backtracking search that
+/// matches pattern statement `i` to an unused value statement, with a binding clone per
+/// branch. The search state is an explicit stack (one entry per matched statement), so
+/// formulae of any width take no stack per statement.
 fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
     if ps.len() != vs.len() {
         return false;
     }
-    fn go(
-        i: usize,
-        ps: &[[Term; 3]],
-        vs: &[[Term; 3]],
-        used: &mut [bool],
-        b: &Binding,
-    ) -> Option<Binding> {
+    let mut used = vec![false; vs.len()];
+    // `stack[i]`: the binding after matching `ps[..i]`, and the next value statement to
+    // try for `ps[i]`.
+    let mut stack: Vec<(Binding, usize)> = Vec::with_capacity(ps.len() + 1);
+    stack.push((b.clone(), 0));
+    while !stack.is_empty() {
+        let i = stack.len() - 1;
+        let (cur, next) = &mut stack[i];
         if i == ps.len() {
-            return Some(b.clone());
+            *b = std::mem::take(cur);
+            return true;
         }
-        for j in 0..vs.len() {
+        let mut found = None;
+        while *next < vs.len() {
+            let j = *next;
+            *next += 1;
             if used[j] {
                 continue;
             }
-            let mut nb = b.clone();
+            let mut nb = cur.clone();
             if (0..3).all(|k| unify_term(&ps[i][k], &vs[j][k], &mut nb)) {
+                found = Some((j, nb));
+                break;
+            }
+        }
+        match found {
+            Some((j, nb)) => {
                 used[j] = true;
-                let done = go(i + 1, ps, vs, used, &nb);
-                used[j] = false;
-                if done.is_some() {
-                    return done;
+                stack.push((nb, 0));
+            }
+            None => {
+                // `ps[i]` has no match left: undo the match of `ps[i - 1]` and try its
+                // next value statement.
+                stack.pop();
+                if let Some((_, next)) = stack.last() {
+                    used[next - 1] = false;
                 }
             }
         }
-        None
     }
-    let mut used = vec![false; vs.len()];
-    match go(0, ps, vs, &mut used, b) {
-        Some(nb) => {
-            *b = nb;
-            true
-        }
-        None => false,
-    }
+    false
 }
 
-/// Substitute bound variables in `t` (recursing into list members); returns the
-/// term (possibly still containing free vars).
-fn apply(t: &Term, b: &Binding) -> Term {
-    match t {
-        Term::Var(v) => b.get(v).cloned().unwrap_or_else(|| t.clone()),
-        Term::List(ms) => Term::List(ms.iter().map(|m| apply(m, b)).collect()),
-        Term::Triple(tr) => {
-            Term::Triple(Box::new([apply(&tr[0], b), apply(&tr[1], b), apply(&tr[2], b)]))
-        }
-        _ => t.clone(),
-    }
-}
 
 /// Instantiate a conclusion triple under binding `b` (deeply — variables
 /// inside quoted formulae substitute too); `None` if any term stays non-ground.
@@ -2397,7 +2964,7 @@ fn apply(t: &Term, b: &Binding) -> Term {
 /// statements include rules — cwm keeps those rule variables quoted in the
 /// emitted formula). Only a variable at the triple level (or inside a list)
 /// leaves the conclusion genuinely uninstantiated.
-fn ground_triple(t: &[Term; 3], b: &Binding) -> Option<[Term; 3]> {
+fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 3]> {
     fn instantiated(t: &Term) -> bool {
         match t {
             Term::Var(_) => false,
@@ -2409,7 +2976,11 @@ fn ground_triple(t: &[Term; 3], b: &Binding) -> Option<[Term; 3]> {
             _ => true,
         }
     }
-    let mut g = [apply_deep(&t[0], b), apply_deep(&t[1], b), apply_deep(&t[2], b)];
+    let mut g = [
+        bounded::substitute_deep(&t[0], b, run)?,
+        bounded::substitute_deep(&t[1], b, run)?,
+        bounded::substitute_deep(&t[2], b, run)?,
+    ];
     // The conclusion's own `@forAll` universals, now asserted, are document-level ones
     // (GH #6754). After substitution, so no binding can reach them.
     g.iter_mut().for_each(assert_conclusion_universals);
@@ -2789,9 +3360,9 @@ fn builtin(p: &Term) -> Option<Builtin> {
 
 /// Evaluate a filter builtin. Every fallible step inside settles into a local
 /// [`bounded::Pending`], so the caller gets a [`Bounded`] it must settle on the run.
-fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> Bounded<bool> {
+fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding, run: &Truncation) -> Bounded<bool> {
     let pending = bounded::Pending::default();
-    let v = eval_builtin_inner(op, s, o, b, &pending);
+    let v = eval_builtin_inner(op, s, o, b, run, &pending);
     pending.finish(v)
 }
 
@@ -2800,9 +3371,12 @@ fn eval_builtin_inner(
     s: &Term,
     o: &Term,
     b: &Binding,
+    run: &Truncation,
     pending: &bounded::Pending,
 ) -> bool {
-    let (s, o) = (apply(s, b), apply(o, b));
+    let (Some(s), Some(o)) = (bounded::substitute(s, b, run), bounded::substitute(o, b, run)) else {
+        return false;
+    };
     match op {
         Builtin::LogEq => s == o,
         Builtin::LogNe => s != o,
@@ -2889,9 +3463,9 @@ fn binder_builtin(p: &Term) -> Option<Bidi> {
 /// a variable or filtering on equality). `None` ⇒ the premise fails for this binding.
 /// Evaluate a bidirectional builtin. It has no fallible step today; it returns a
 /// [`Bounded`] like every builtin so that any future one must be settled.
-fn eval_binder(op: Bidi, s: &Term, o: &Term, b: Binding) -> Bounded<Option<Binding>> {
+fn eval_binder(op: Bidi, s: &Term, o: &Term, b: Binding, run: &Truncation) -> Bounded<Option<Binding>> {
     let pending = bounded::Pending::default();
-    let v = eval_binder_inner(op, s, o, b, &pending);
+    let v = eval_binder_inner(op, s, o, b, run, &pending);
     pending.finish(v)
 }
 
@@ -2900,32 +3474,40 @@ fn eval_binder_inner(
     s: &Term,
     o: &Term,
     b: Binding,
-    _pending: &bounded::Pending,
+    run: &Truncation,
+    pending: &bounded::Pending,
 ) -> Option<Binding> {
-    let (sv, ov) = (apply(s, &b), apply(o, &b));
-    let mut nb = b;
-    match op {
-        Bidi::LogUri => match (&sv, &ov) {
+    // Both sides as bound, borrowed: the result is sized from them before it is built.
+    fn side<'t>(t: &'t Term, b: &'t Binding) -> &'t Term {
+        match t {
+            Term::Var(v) => b.get(v).unwrap_or(t),
+            other => other,
+        }
+    }
+    let (sv, ov) = (side(s, &b), side(o, &b));
+    let result = match op {
+        Bidi::LogUri => match (sv, ov) {
             // forward: IRI subject → its text as a string literal
             (Term::Iri(i), _) => {
-                let lit = Term::Lit(i.clone(), "http://www.w3.org/2001/XMLSchema#string".into(), None);
-                if unify_term(o, &lit, &mut nb) {
-                    Some(nb)
-                } else {
-                    None
+                let bytes = bounded::string_term_bytes(i.len());
+                if refused_term(run, pending, Derived::Uri, bytes, || bytes) {
+                    return None;
                 }
+                (o, Term::Lit(i.clone(), "http://www.w3.org/2001/XMLSchema#string".into(), None))
             }
             // reverse: string object → the IRI it names
             (Term::Var(_), Term::Lit(v, _, _)) => {
-                if unify_term(s, &Term::Iri(v.clone()), &mut nb) {
-                    Some(nb)
-                } else {
-                    None
+                let bytes = bounded::TERM_NODE_BYTES.saturating_add(v.len());
+                if refused_term(run, pending, Derived::Uri, bytes, || bytes) {
+                    return None;
                 }
+                (s, Term::Iri(v.clone()))
             }
-            _ => None,
+            _ => return None,
         },
-    }
+    };
+    let mut nb = b;
+    unify_term(result.0, &result.1, &mut nb).then_some(nb)
 }
 
 registry_enum! {
@@ -2989,29 +3571,6 @@ fn collect_op(p: &Term) -> Option<CollectOp> {
     }
 }
 
-/// Substitute bound variables in `t`, recursing into lists AND quoted
-/// formulae (used where a formula value must be fully instantiated:
-/// includes scopes, conclusion emission).
-fn apply_deep(t: &Term, b: &Binding) -> Term {
-    match t {
-        Term::Var(v) => match b.get(v) {
-            Some(val) => val.clone(),
-            None => t.clone(),
-        },
-        Term::List(ms) => Term::List(ms.iter().map(|m| apply_deep(m, b)).collect()),
-        Term::Formula(ts) => Term::Formula(
-            ts.iter()
-                .map(|r| [apply_deep(&r[0], b), apply_deep(&r[1], b), apply_deep(&r[2], b)])
-                .collect(),
-        ),
-        Term::Triple(tr) => Term::Triple(Box::new([
-            apply_deep(&tr[0], b),
-            apply_deep(&tr[1], b),
-            apply_deep(&tr[2], b),
-        ])),
-        _ => t.clone(),
-    }
-}
 
 /// The prefix of a `log:includes` pattern blank turned wildcard ([`formula_containment`]).
 /// Unforgeable (no source variable contains a `.`), and the one variable that may match a
@@ -3023,12 +3582,22 @@ const PATTERN_WILDCARD: &str = "__w.";
 /// with pattern blanks as wildcards, pattern variables binding, and scope
 /// terms — including its quantified variables — as opaque constants. Returns
 /// one binding per complete match.
-fn formula_containment(
-    scope: &[[Term; 3]],
+/// The empty scope.
+const NO_STATEMENTS: &[[Term; 3]] = &[];
+
+fn formula_containment<S: std::borrow::Borrow<[Term; 3]>>(
+    scope: &[S],
     pattern: &[[Term; 3]],
     seed: &Binding,
     bw: &BwCtx,
 ) -> Vec<Binding> {
+    // An evaluation boundary ([`within_depth`]): a seed or scope past the term-depth
+    // limit is not searched.
+    if !within_depth(seed, bw)
+        || !bw.settle(bounded::generated(&bw.truncated, scope.iter().flat_map(|s| s.borrow().iter())))
+    {
+        return Vec::new();
+    }
     // Pattern existentials (blanks) become wildcard variables.
     let pat: Vec<[Term; 3]> = pattern
         .iter()
@@ -3042,59 +3611,178 @@ fn formula_containment(
         .collect();
     let mut out = Vec::new();
     let mut steps = bounded::StepBudget::containment();
-    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut steps);
+    containment_search(&pat, scope, seed.clone(), &mut out, &mut steps, bw);
     bw.settle(steps.finish(out))
 }
 
-fn containment_search(
-    remaining: &[[Term; 3]],
-    scope: &[[Term; 3]],
-    b: Binding,
-    defers_left: usize,
+/// The depth-first search of [`formula_containment`]: every binding under which each
+/// pattern statement matches a scope statement (or virtual list structure), in match
+/// order, pushed to `out`. Each step of the search is one visit of a pattern statement,
+/// taken from `steps`. The search state is an explicit stack (one entry per matched
+/// pattern statement), so patterns of any width take no stack per statement. Every
+/// binding the search extends is checked against the term-depth limit
+/// ([`within_depth`]) before it is carried to the next statement, so every binding it
+/// carries, clones and returns is within the limit: virtual list access substitutes the
+/// binding into the pattern's own list subject, and can build a deeper value than it
+/// read.
+fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
+    pat: &[[Term; 3]],
+    scope: &[S],
+    seed: Binding,
     out: &mut Vec<Binding>,
     steps: &mut bounded::StepBudget,
+    bw: &BwCtx,
 ) {
-    if !steps.take() {
-        return;
+    /// The order the pattern statements are matched in, as indices into `pat`: as
+    /// written, until a statement is deferred behind the others.
+    #[derive(Clone)]
+    enum Order {
+        Written(usize),
+        Deferred(std::rc::Rc<[usize]>),
     }
-    let Some((pat, rest)) = remaining.split_first() else {
-        out.push(b);
-        return;
-    };
-    // Virtual rdf:first/rest over a list value — list structure is part of
-    // the formula's content for matching purposes (cwm builtins.n3 test2/4).
-    if let Term::Iri(pi) = &pat[1] {
-        if pi == parser::RDF_FIRST || pi == parser::RDF_REST {
-            match apply(&pat[0], &b) {
-                Term::List(ms) => {
-                    if !ms.is_empty() {
-                        let val = if pi == parser::RDF_FIRST {
-                            ms[0].clone()
-                        } else {
-                            Term::List(ms[1..].to_vec())
-                        };
-                        let mut nb = b.clone();
-                        if unify_term(&pat[2], &val, &mut nb) {
-                            containment_search(rest, scope, nb, rest.len(), out, steps);
-                        }
-                    }
-                    return;
-                }
-                Term::Var(_) if !rest.is_empty() && defers_left > 0 => {
-                    // Subject not yet bound — try the other triples first.
-                    let mut rotated: Vec<[Term; 3]> = rest.to_vec();
-                    rotated.push(pat.clone());
-                    containment_search(&rotated, scope, b, defers_left - 1, out, steps);
-                    return;
-                }
-                _ => {} // fall through to plain scope matching
+    impl Order {
+        fn len(&self) -> usize {
+            match self {
+                Order::Written(n) => *n,
+                Order::Deferred(o) => o.len(),
             }
         }
+        fn get(&self, at: usize) -> Option<usize> {
+            match self {
+                Order::Written(n) => (at < *n).then_some(at),
+                Order::Deferred(o) => o.get(at).copied(),
+            }
+        }
+        /// The statements after `at`, then the one at `at`.
+        fn defer(&self, at: usize) -> Order {
+            let order = (at + 1..self.len()).chain([at]).filter_map(|k| self.get(k));
+            Order::Deferred(order.collect())
+        }
     }
-    for st in scope {
-        let mut nb = b.clone();
-        if (0..3).all(|k| unify_term(&pat[k], &st[k], &mut nb)) {
-            containment_search(rest, scope, nb, rest.len(), out, steps);
+    /// A visit: the pattern statements still to match (`order` from `at`), the binding
+    /// so far, and how many more times a statement whose list subject is unbound may be
+    /// deferred behind the others.
+    struct Visit {
+        order: Order,
+        at: usize,
+        b: Binding,
+        defers_left: usize,
+    }
+    /// Pattern statement `pi` being matched against the scope: its visit, and the next
+    /// scope statement to try.
+    struct Scan {
+        visit: Visit,
+        pi: usize,
+        next: usize,
+    }
+    // At most one scan per pattern statement is in progress.
+    let mut scans: Vec<Scan> = Vec::with_capacity(pat.len());
+    let mut visit = Some(Visit {
+        order: Order::Written(pat.len()),
+        at: 0,
+        b: seed,
+        defers_left: pat.len(),
+    });
+    loop {
+        if let Some(Visit {
+            order,
+            at,
+            b,
+            defers_left,
+        }) = visit.take()
+        {
+            if !steps.take() {
+                return;
+            }
+            let Some(pi) = order.get(at) else {
+                out.push(b);
+                continue;
+            };
+            let p = &pat[pi];
+            let rest = order.len() - at - 1;
+            // Virtual rdf:first/rest over a list value — list structure is part of
+            // the formula's content for matching purposes (cwm builtins.n3 test2/4).
+            if let Term::Iri(pred) = &p[1] {
+                if pred == parser::RDF_FIRST || pred == parser::RDF_REST {
+                    let Some(subject) = bounded::substitute(&p[0], &b, &bw.truncated) else {
+                        continue;
+                    };
+                    match subject {
+                        Term::List(ms) => {
+                            if !ms.is_empty() {
+                                // The tail is sized before it is built.
+                                let val = if pred == parser::RDF_FIRST {
+                                    Some(ms[0].clone())
+                                } else {
+                                    bounded::list_tail(&ms, &bw.truncated)
+                                };
+                                let mut nb = b.clone();
+                                if val.is_some_and(|val| unify_term(&p[2], &val, &mut nb))
+                                    && within_depth(&nb, bw)
+                                {
+                                    let (at, defers_left) = (at + 1, rest);
+                                    visit = Some(Visit {
+                                        order,
+                                        at,
+                                        b: nb,
+                                        defers_left,
+                                    });
+                                }
+                            }
+                            continue;
+                        }
+                        Term::Var(_) if rest > 0 && defers_left > 0 => {
+                            // Subject not yet bound — try the other triples first.
+                            let order = order.defer(at);
+                            let defers_left = defers_left - 1;
+                            visit = Some(Visit {
+                                order,
+                                at: 0,
+                                b,
+                                defers_left,
+                            });
+                            continue;
+                        }
+                        _ => {} // fall through to plain scope matching
+                    }
+                }
+            }
+            scans.push(Scan {
+                visit: Visit {
+                    order,
+                    at,
+                    b,
+                    defers_left,
+                },
+                pi,
+                next: 0,
+            });
+        }
+        // Resume the innermost scan at its next matching scope statement.
+        let Some(scan) = scans.last_mut() else {
+            return;
+        };
+        let v = &scan.visit;
+        let p = &pat[scan.pi];
+        while let Some(st) = scope.get(scan.next) {
+            let st: &[Term; 3] = st.borrow();
+            scan.next += 1;
+            let mut nb = v.b.clone();
+            // A match that bound nothing new extends nothing to check.
+            if (0..3).all(|k| unify_term(&p[k], &st[k], &mut nb))
+                && (nb.len() == v.b.len() || within_depth(&nb, bw))
+            {
+                visit = Some(Visit {
+                    order: v.order.clone(),
+                    at: v.at + 1,
+                    b: nb,
+                    defers_left: v.order.len() - v.at - 1,
+                });
+                break;
+            }
+        }
+        if visit.is_none() {
+            scans.pop();
         }
     }
 }
@@ -3102,23 +3790,24 @@ fn containment_search(
 /// A parsed document's statements with rules re-encoded into their surface
 /// triple form (log:semantics / log:parsedAsN3 result formulae).
 fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
-    let quote = |ts: &[[Term; 3]]| -> Term {
+    // the rules' formulas MOVE back into statements: no copy of a parsed formula
+    let quote = |ts: Vec<[Term; 3]>| -> Term {
         if ts.is_empty() {
             // the empty formula IS the literal true
             Term::Lit("true".into(), parser::XSD_BOOLEAN.into(), None)
         } else {
-            Term::Formula(ts.to_vec())
+            Term::Formula(ts)
         }
     };
     let mut ts = parsed.facts;
     for r in parsed.rules.iter().map(parser::unscope_rule) {
-        ts.push([quote(&r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(&r.conclusion)]);
+        ts.push([quote(r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(r.conclusion)]);
     }
     for r in parsed.backward_rules.iter().map(parser::unscope_rule) {
         ts.push([
-            quote(&r.conclusion),
+            quote(r.conclusion),
             Term::Iri(parser::LOG_IMPLIED_BY.into()),
-            quote(&r.premise),
+            quote(r.premise),
         ]);
     }
     ts
@@ -3137,19 +3826,52 @@ const CLOSURE_CONCLUSION_UNIVERSAL: &str = "__uk.";
 /// The forward closure of a quoted formula under its own `=>` rules
 /// (log:supports / log:conclusion): the original triples plus everything a
 /// fixpoint run over them derives.
-fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
+/// The bytes of a formula holding `statements` ([`bounded::term_bytes`] of each term,
+/// plus one node), read from the borrowed statements.
+fn formula_bytes<'a>(statements: impl Iterator<Item = &'a [Term; 3]>) -> usize {
+    statements
+        .flatten()
+        .map(bounded::term_bytes)
+        .fold(bounded::TERM_NODE_BYTES, usize::saturating_add)
+}
+
+/// `f` over the closure of formula `ts` under its own rules: its statements plus their
+/// derivations, each once, borrowed (nothing is copied to make the closure's formula).
+fn with_formula_closure<R>(
+    ts: &[[Term; 3]],
+    bw: &BwCtx,
+    f: impl FnOnce(&[&[Term; 3]]) -> R,
+) -> R {
     // Import-cycle guard ([`VisitedDocs`]). If this exact formula's closure is already in
     // progress up the stack, re-closing it would recurse forever (the A→A / A→B→A / diamond
     // re-import non-termination path through a LIVE `log:semantics` resolver). Break the cycle
     // by returning the statements UNCLOSED — their own facts are preserved, no derivation is
     // lost that a finite closure would have added, and reasoning terminates. (No resolver, no
     // cycle: with `bw.resolver` `None` the set stays empty and this is a no-op.)
+    // The run's stack allowance, shared by every level: a chain of distinct documents
+    // (which the import-cycle guard below does not catch) nests closures, each holding
+    // its own frames on the stack. Past it the closure is refused, as a cut, and the
+    // error fails the enclosing run. `_frames` holds this closure's units until it ends.
+    // An evaluation boundary ([`within_depth`]): statements past the term-depth limit
+    // are not admitted as a nested run's facts and rules; the formula is left unclosed,
+    // as a cut.
+    if !bw.settle(bounded::generated(&bw.truncated, ts.iter().flatten())) {
+        return f(&ts.iter().collect::<Vec<_>>());
+    }
+    let _frames = match bounded::enter_closure(&bw.truncated) {
+        Ok(level) => level,
+        Err(e) => {
+            bw.nested_error.borrow_mut().get_or_insert(e);
+            return f(&ts.iter().collect::<Vec<_>>());
+        }
+    };
     let key = formula_key(ts);
-    if !bw.visited.borrow_mut().insert(key) {
-        return bw.settle(Bounded::cut(
-            ts.to_vec(),
+    if !bw.visited.borrow_mut().docs.insert(key) {
+        bw.settle(Bounded::cut(
+            (),
             "a nested closure re-entered a document already being closed and was left unclosed",
         ));
+        return f(&ts.iter().collect::<Vec<_>>());
     }
 
     let mut facts: Vec<[Term; 3]> = Vec::new();
@@ -3158,7 +3880,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // The formula's own `@forAll` universals quantify its statements, rules included, so
     // the run reads them as that document's universals (GH #6754); the derivations get
     // them back named for their place in the result formula.
-    let depth = bw.visited.borrow().len();
+    let depth = bw.visited.borrow().docs.len();
     let lift = format!("{LIFTED_UNIVERSAL}{depth}.");
     let asserted = format!("{CLOSURE_CONCLUSION_UNIVERSAL}{depth}.");
     let mut lifted = ts.to_vec();
@@ -3199,29 +3921,27 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
         &bw.truncated,
         StepMode::None,
         cycles,
+        None,
     ) {
         Ok(closed) => closed.read_further(&bw.truncated),
         Err(e) => {
             bw.nested_error
                 .borrow_mut()
                 .get_or_insert(format!("in a nested closure: {e}"));
-            bw.visited.borrow_mut().remove(&key);
-            return ts.to_vec();
+            bw.visited.borrow_mut().docs.remove(&key);
+            return f(&ts.iter().collect::<Vec<_>>());
         }
     };
     // Original statements (including the rule statements, which cwm keeps in
-    // log:conclusion output) plus the derivations.
-    let mut seen: FxHashSet<[Term; 3]> = ts.iter().cloned().collect();
-    let mut result: Vec<[Term; 3]> = ts.to_vec();
+    // log:conclusion output) plus the derivations, each once. The derivations name the
+    // formula's own universals for their place in the result formula again.
+    bw.visited.borrow_mut().docs.remove(&key);
     let mut derived: Vec<[Term; 3]> = closed.all.into_iter().collect();
     parser::own_universals_from(&mut derived, &lift);
-    for f in derived {
-        if seen.insert(f.clone()) {
-            result.push(f);
-        }
-    }
-    bw.visited.borrow_mut().remove(&key);
-    result
+    let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
+    let mut all: Vec<&[Term; 3]> = ts.iter().collect();
+    all.extend(derived.iter().filter(|f| seen.insert(f)));
+    f(&all)
 }
 
 /// The lexical string of a literal term (for `string:` builtins).
@@ -3476,9 +4196,8 @@ fn numval(t: &Term) -> Option<NumVal> {
         return v.parse::<f64>().ok().map(NumVal::F64); // no-match: ill-typed (not a double lexical form)
     }
     if let Some((int, frac)) = v.split_once('.') {
-        let digits = format!("{int}{frac}");
         // not-a-cut: settled-by-caller (past i128: f64 image; `numval_in` records the cut)
-        if let Ok(m) = digits.parse::<i128>() {
+        if let Some(m) = joined_i128(int, frac) {
             return Some(NumVal::Dec(m, frac.len() as u32));
         }
         return v.parse::<f64>().ok().map(NumVal::F64); // no-match: ill-typed (not a decimal lexical form)
@@ -3487,6 +4206,37 @@ fn numval(t: &Term) -> Option<NumVal> {
         .ok() // not-a-cut: settled-by-caller (`numval_in` records the cut)
         .map(NumVal::Int)
         .or_else(|| v.parse::<f64>().ok().map(NumVal::F64)) // no-match: ill-typed (not numeric)
+}
+
+/// `int` and `frac` read as one `i128` numeral, as `format!("{int}{frac}").parse::<i128>()`
+/// reads it, without building the joined text: an optional leading sign, then at least one
+/// ASCII digit. `None` for any other text, or a value past `i128`.
+fn joined_i128(int: &str, frac: &str) -> Option<i128> {
+    let mut bytes = int.bytes().chain(frac.bytes()).peekable();
+    let neg = match bytes.peek() {
+        Some(b'-') => true,
+        Some(b'+') => false,
+        _ => return digits_i128(bytes, false),
+    };
+    bytes.next();
+    digits_i128(bytes, neg)
+}
+
+/// The `i128` the ASCII digits `bytes` spell, negated with `neg` (accumulated toward the
+/// sign, so `i128::MIN` reads); `None` for no digits, a non-digit, or a value past `i128`.
+fn digits_i128(bytes: impl Iterator<Item = u8>, neg: bool) -> Option<i128> {
+    let mut acc: Option<i128> = None;
+    for b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        let d = i128::from(b - b'0');
+        // not-a-cut: settled-by-caller (past i128: f64 image; `numval_in` records the cut)
+        let up = acc.unwrap_or(0).checked_mul(10)?;
+        // not-a-cut: settled-by-caller (past i128: f64 image; `numval_in` records the cut)
+        acc = Some(if neg { up.checked_sub(d)? } else { up.checked_add(d)? });
+    }
+    acc
 }
 
 /// [`numval`] inside a builtin: an integer or decimal numeral whose exact value is past
@@ -3561,6 +4311,24 @@ fn fixed_digits(neg: bool, mag: u128, scale: u32) -> String {
 /// same string the exact tower renders for a value it can hold. `None` for any other
 /// lexical form.
 pub(crate) fn big_numeral_canonical(lex: &str) -> Option<String> {
+    let (sign, int, frac) = big_numeral_parts(lex)?;
+    Some(if frac.is_empty() {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac}")
+    })
+}
+
+/// The length of [`big_numeral_canonical`]'s string, computed without building it.
+fn big_numeral_canonical_len(lex: &str) -> Option<usize> {
+    let (sign, int, frac) = big_numeral_parts(lex)?;
+    let frac = if frac.is_empty() { 0 } else { frac.len() + 1 };
+    Some(sign.len() + int.len() + frac)
+}
+
+/// The sign, integer digits and fraction digits of [`big_numeral_canonical`]'s string,
+/// borrowed from `lex`.
+fn big_numeral_parts(lex: &str) -> Option<(&'static str, &str, &str)> {
     let lex = lex.trim();
     let (neg, body) = match lex.as_bytes().first()? {
         b'-' => (true, &lex[1..]),
@@ -3578,11 +4346,7 @@ pub(crate) fn big_numeral_canonical(lex: &str) -> Option<String> {
     let int = if int.is_empty() { "0" } else { int };
     let zero = int == "0" && frac.is_empty();
     let sign = if neg && !zero { "-" } else { "" };
-    Some(if frac.is_empty() {
-        format!("{sign}{int}")
-    } else {
-        format!("{sign}{int}.{frac}")
-    })
+    Some((sign, int, frac))
 }
 
 impl NumVal {
@@ -3615,6 +4379,10 @@ impl NumVal {
 /// Drop trailing zero scale: Dec(700, 2) → Dec(7, 1); Dec(30, 1) → Dec(3, 0)
 /// stays a Dec (decimal-typed inputs keep the decimal type, lexical `x.0`).
 fn dec_norm(m: i128, s: u32) -> (i128, u32) {
+    if m == 0 {
+        // Every fraction zero drops (without one loop step per zero of a long scale).
+        return (0, 0);
+    }
     let (mut m, mut s) = (m, s);
     while s > 0 && m % 10 == 0 {
         m /= 10;
@@ -3650,6 +4418,171 @@ fn numval_term(v: NumVal) -> Term {
         }
         NumVal::F64(f) => number_term(f),
     }
+}
+
+/// A numeric builtin result before its literal is rendered: a value [`numval_term`]
+/// renders, or an `f64` [`double_term`] renders. Its size comes from the value (digit
+/// count, scale, sign, exponent), so the result is checked against `max_term_bytes`
+/// before its lexical form is built (GH #6901).
+#[derive(Clone, Copy, Debug)]
+enum Numeral {
+    Num(NumVal),
+    Double(f64),
+}
+
+impl Numeral {
+    /// A count (a list or string length) as an `xsd:integer`.
+    fn count(n: usize) -> Numeral {
+        Numeral::Num(NumVal::Int(n as i128))
+    }
+
+    /// The datatype IRI of the rendered literal.
+    fn datatype(self) -> &'static str {
+        match self {
+            Numeral::Num(NumVal::Int(_)) => parser::XSD_INTEGER,
+            Numeral::Num(NumVal::Dec(..)) => parser::XSD_DECIMAL,
+            Numeral::Num(NumVal::F64(f)) if number_is_whole(f) => parser::XSD_INTEGER,
+            Numeral::Num(NumVal::F64(_)) => parser::XSD_DECIMAL,
+            Numeral::Double(_) => parser::XSD_DOUBLE,
+        }
+    }
+
+    /// The length of the rendered lexical form, computed without rendering it.
+    fn lex_len(self) -> usize {
+        match self {
+            Numeral::Num(NumVal::Int(i)) => int_lex_len(i),
+            Numeral::Num(NumVal::Dec(m, s)) => dec_lex_len(m, s),
+            Numeral::Num(NumVal::F64(f)) => number_lex_len(f),
+            Numeral::Double(f) => double_lex_len(f),
+        }
+    }
+
+    /// A cheap upper bound on [`Numeral::lex_len`]: exact for an integer; for a decimal,
+    /// the length before trailing fraction zeros are dropped; for an `f64`, the most any
+    /// `f64` prints as ([`NUMERAL_TEXT_BYTES`]).
+    fn lex_bound(self) -> usize {
+        match self {
+            Numeral::Num(NumVal::Int(i)) => int_lex_len(i),
+            Numeral::Num(NumVal::Dec(m, s)) => digit_count(m.unsigned_abs())
+                .max((s as usize).saturating_add(1))
+                .saturating_add(3),
+            Numeral::Num(NumVal::F64(_)) | Numeral::Double(_) => NUMERAL_TEXT_BYTES,
+        }
+    }
+
+    /// The [`bounded::term_bytes`] of [`Numeral::term`], computed without building it.
+    fn term_bytes(self) -> usize {
+        bounded::TERM_NODE_BYTES
+            .saturating_add(self.lex_len())
+            .saturating_add(self.datatype().len())
+    }
+
+    /// A cheap upper bound on [`Numeral::term_bytes`] (every numeric datatype IRI is at
+    /// most as long as `xsd:decimal`'s).
+    fn term_bound(self) -> usize {
+        bounded::TERM_NODE_BYTES
+            .saturating_add(self.lex_bound())
+            .saturating_add(parser::XSD_DECIMAL.len())
+    }
+
+    /// The literal.
+    fn term(self) -> Term {
+        match self {
+            Numeral::Num(v) => numval_term(v),
+            Numeral::Double(f) => double_term(f),
+        }
+    }
+}
+
+/// A numeric result of builtin `f`, sized from its value against the run's
+/// `max_term_bytes` before its literal is rendered (GH #6901): `None` when it is refused
+/// (a cut, and the run's refusal).
+fn numeric_result(run: &Truncation, cuts: &impl bounded::Sink, f: Func, n: Numeral) -> Option<Term> {
+    (!refused_term(run, cuts, Derived::Result(f), n.term_bound(), || n.term_bytes())).then(|| n.term())
+}
+
+/// The number of decimal digits of `u` (`0` has one).
+fn digit_count(u: u128) -> usize {
+    if u == 0 {
+        1
+    } else {
+        u.ilog10() as usize + 1
+    }
+}
+
+/// The length of `i.to_string()`.
+fn int_lex_len(i: i128) -> usize {
+    usize::from(i < 0) + digit_count(i.unsigned_abs())
+}
+
+/// The length of [`numval_term`]'s `xsd:decimal` lexical form of `m / 10^s`: trailing
+/// fraction zeros dropped, at least one fraction digit, and `0` for an empty integer part.
+fn dec_lex_len(m: i128, s: u32) -> usize {
+    let (m, s) = dec_norm(m, s);
+    let (digits, s) = (digit_count(m.unsigned_abs()), s as usize);
+    let body = if digits > s {
+        // `int.frac`, or `int.0` when there is no fraction.
+        (digits - s).saturating_add(1).saturating_add(s.max(1))
+    } else {
+        // `0.` then the digits, zero-padded to `s`.
+        s.saturating_add(2)
+    };
+    usize::from(m < 0).saturating_add(body)
+}
+
+/// Whether [`number_term`] renders `v` as an `xsd:integer` (whole, below 2^53).
+fn number_is_whole(v: f64) -> bool {
+    v.fract() == 0.0 && v.abs() < 9.007e15
+}
+
+/// The length of [`number_term`]'s lexical form of `v`.
+fn number_lex_len(v: f64) -> usize {
+    if number_is_whole(v) {
+        // not-a-cut: exact-cast (whole, below 2^53)
+        lex_len_of(format_args!("{}", v as i64)).len
+    } else {
+        lex_len_of(format_args!("{v}")).len
+    }
+}
+
+/// The length of [`double_term`]'s lexical form of `v`.
+fn double_lex_len(v: f64) -> usize {
+    if v.is_nan() || v == f64::INFINITY {
+        3
+    } else if v == f64::NEG_INFINITY {
+        4
+    } else {
+        // `{:e}`, with `.0` added to a mantissa that has no fraction digit.
+        let n = lex_len_of(format_args!("{v:e}"));
+        if n.dot {
+            n.len
+        } else {
+            n.len + 2
+        }
+    }
+}
+
+/// Counts the bytes a formatter writes, without keeping them, and whether one was `.`.
+#[derive(Default)]
+struct LexLen {
+    len: usize,
+    dot: bool,
+}
+
+impl std::fmt::Write for LexLen {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.len = self.len.saturating_add(s.len());
+        self.dot |= s.contains('.');
+        Ok(())
+    }
+}
+
+/// What `args` formats to, counted ([`LexLen`]).
+fn lex_len_of(args: std::fmt::Arguments<'_>) -> LexLen {
+    let mut n = LexLen::default();
+    // Writing to a counter cannot fail.
+    let _ = std::fmt::Write::write_fmt(&mut n, args);
+    n
 }
 
 registry_enum! {
@@ -3810,6 +4743,487 @@ fn functional_builtin(p: &Term) -> Option<Func> {
     }
 }
 
+/// Text a numeric argument may print as in `string:concatenation` / `string:format`, past
+/// its lexical form's length: an `f64` in plain decimal notation takes at most about 330
+/// bytes (`1e308`, or the smallest subnormal), an `i128` 40.
+const NUMERAL_TEXT_BYTES: usize = 400;
+
+/// The datatype of a language-tagged literal.
+const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+/// The formula a builtin parses N3 text into (`log:parsedAsN3`, `log:semantics`), sized
+/// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
+/// cut) or when the formula is past the run's term-size limit (a cut, and the run
+/// refused). The parser charges what it keeps against the limit before allocating it
+/// ([`bounded::parse_n3_term`]), so an expanding parse stops early. Once re-encoded, the
+/// formula is sized again at the size it will have with its blanks standardized apart
+/// (the parsed statements plus the growth of every blank label), before the run's
+/// runtime-document table ([`BwCtx::runtime_formula`]) rewrites any label.
+fn parsed_formula(
+    f: Func,
+    src: &str,
+    base: &str,
+    bw: &BwCtx,
+    pending: &bounded::Pending,
+) -> Option<Term> {
+    let parse = || {
+        // no-match: ill-typed (not N3 text; `parse_n3_term` already recorded a parser limit
+        // or the term-size refusal as a cut)
+        let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
+        Some(reencode_statements(parsed))
+    };
+    let admit = |bytes| !refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes);
+    let statements = bw.runtime_formula(src, base, parse, admit, pending)?;
+    Some(Term::Formula(statements))
+}
+
+/// What a term-size refusal names ([`bounded::derived_term`]).
+enum Derived {
+    /// The result of a functional builtin.
+    Result(Func),
+    /// The argument list a functional builtin is evaluated over.
+    Arguments(Func),
+    /// The list `log:collectAllIn` collects.
+    Collected,
+    /// The term a list generator binds (`list:member`, `list:in`, `list:iterate`).
+    Generated(ListGen),
+    /// The term `log:uri` binds.
+    Uri,
+}
+
+impl std::fmt::Display for Derived {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Derived::Result(b) => write!(f, "the result of the builtin {b:?}"),
+            Derived::Arguments(b) => write!(f, "the argument list of the builtin {b:?}"),
+            Derived::Collected => write!(f, "the list log:collectAllIn collects"),
+            Derived::Generated(g) => write!(f, "the result of the builtin {g:?}"),
+            Derived::Uri => write!(f, "the result of the builtin LogUri"),
+        }
+    }
+}
+
+/// The ONE term-size checkpoint of the text engine (GH #6771), over
+/// [`bounded::derived_term`]: `true` when the term is refused, its cut recorded on `cuts`
+/// and the run refused, which fails every closure of the run ([`Truncation::refusal`]).
+fn refused_term(
+    run: &Truncation,
+    cuts: &impl bounded::Sink,
+    what: Derived,
+    bound: usize,
+    exact: impl FnOnce() -> usize,
+) -> bool {
+    settle(cuts, bounded::derived_term(run, &what, bound, exact))
+}
+
+/// The [`bounded::term_bytes`] of the literal `true` that `log:conjunction` returns for the
+/// empty formula.
+fn conjunction_true_bytes() -> usize {
+    bounded::TERM_NODE_BYTES + "true".len() + parser::XSD_BOOLEAN.len()
+}
+
+/// The [`bounded::term_bytes`] of the list builtin `args` member `a` stands for: a
+/// first-class list, or the members of an rdf:first/rest data list walked from the store.
+fn list_member_bytes(a: &Term, facts: &FactIndex, pending: &bounded::Pending) -> usize {
+    let sum = |it: &mut dyn Iterator<Item = &Term>| {
+        it.map(bounded::term_bytes).fold(0usize, usize::saturating_add)
+    };
+    match a {
+        Term::List(ms) => sum(&mut ms.iter()),
+        other => settle(pending, fact_list_refs(other, facts)).map_or(0, |ms| sum(&mut ms.into_iter())),
+    }
+}
+
+/// A sink for the text a string builtin writes: the string itself, or (to size the
+/// result without building it) a byte count.
+trait TextOut {
+    fn put(&mut self, s: &str);
+}
+
+impl TextOut for String {
+    fn put(&mut self, s: &str) {
+        self.push_str(s);
+    }
+}
+
+/// Counts the bytes a string builtin would write.
+#[derive(Default)]
+struct TextBytes(usize);
+
+impl TextOut for TextBytes {
+    fn put(&mut self, s: &str) {
+        self.0 = self.0.saturating_add(s.len());
+    }
+}
+
+/// `time:timeZone`'s result: the explicit numeric offset of a dateTime's time part
+/// (`Z` or no offset yields nothing, as in cwm), borrowed from the lexical form.
+fn time_zone_offset(s: &str) -> Option<&str> {
+    let t = s.split('T').nth(1)?;
+    t.find(['+', '-']).map(|i| &t[i..])
+}
+
+/// The size of the term builtin `f` derives from `args`: with `exact`, its
+/// [`bounded::term_bytes`], computed without building it; without, a cheap upper bound on
+/// it from the input sizes. Every functional builtin has an entry (the match is
+/// exhaustive). 0 for a builtin sized where it builds its result: `log:dtlit`,
+/// `log:conclusion`, `log:content`, `log:parsedAsN3` / `log:semantics`, and every numeric
+/// result, which is sized from its computed value before its literal is rendered
+/// ([`numeric_result`], GH #6901).
+fn output_bytes(
+    f: Func,
+    args: &[Term],
+    facts: &FactIndex,
+    pending: &bounded::Pending,
+    exact: bool,
+) -> usize {
+    use bounded::{string_term_bytes, term_bytes, TERM_NODE_BYTES};
+    let sum = |it: &mut dyn Iterator<Item = usize>| it.fold(0usize, usize::saturating_add);
+    let lex0 = || args.first().and_then(lex).unwrap_or("");
+    match f {
+        Func::Concat if exact => string_term_bytes(sum(&mut args.iter().map(|a| concat_piece_len(a).unwrap_or(0)))),
+        Func::Concat => string_term_bytes(sum(&mut args.iter().map(|a| match a {
+            Term::Lit(v, dt, _)
+                if dt
+                    .strip_prefix("http://www.w3.org/2001/XMLSchema#")
+                    .is_some_and(|local| local != "string") =>
+            {
+                v.len().saturating_add(NUMERAL_TEXT_BYTES)
+            }
+            Term::Lit(v, _, _) | Term::Iri(v) => v.len(),
+            _ => 0,
+        }))),
+        Func::Format if exact => {
+            let mut out = TextBytes::default();
+            format_text(args, pending, &mut out).map_or(0, |()| string_term_bytes(out.0))
+        }
+        // `%d` / `%f` print any member read as a number, whatever its datatype.
+        Func::Format => string_term_bytes(sum(&mut args.iter().map(|a| {
+            lex(a).map_or(0, str::len).saturating_add(NUMERAL_TEXT_BYTES)
+        }))),
+        Func::Replace => match args {
+            [Term::Lit(s, _, _), Term::Lit(pattern, _, _), Term::Lit(r, _, _)] if exact => {
+                // A pattern that does not compile is the builtin's own cut.
+                settle(pending, bounded::regex(pattern))
+                    .map_or(0, |re| string_term_bytes(replace_bytes(&re, s, r)))
+            }
+            // Every match (at most one per position, plus one) is replaced by the
+            // replacement's text, and every `$` reference in it expands to text inside a
+            // match; matches do not overlap, so each reference adds at most the input.
+            [Term::Lit(s, _, _), _, Term::Lit(r, _, _)] => {
+                let refs = r.bytes().filter(|&c| c == b'$').count();
+                let per_match = s.len().saturating_add(1).saturating_mul(r.len());
+                string_term_bytes(
+                    s.len()
+                        .saturating_add(per_match)
+                        .saturating_add(refs.saturating_mul(s.len())),
+                )
+            }
+            _ => 0,
+        },
+        // Unicode case mapping and %XX-encoding at most triple the bytes.
+        Func::LowerCase | Func::UpperCase | Func::EncodeForUri | Func::EncodeForUriCwm
+        | Func::EncodeForFragId
+            if !exact =>
+        {
+            string_term_bytes(lex0().len().saturating_mul(3))
+        }
+        Func::LowerCase => {
+            string_term_bytes(sum(&mut lex0().chars().flat_map(char::to_lowercase).map(char::len_utf8)))
+        }
+        Func::UpperCase => {
+            string_term_bytes(sum(&mut lex0().chars().flat_map(char::to_uppercase).map(char::len_utf8)))
+        }
+        Func::EncodeForUri => string_term_bytes(sum(&mut lex0().bytes().map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_' | b'~') { 1 } else { 3 }
+        }))),
+        Func::EncodeForUriCwm | Func::EncodeForFragId => {
+            let keep_extra = cwm_uri_keeps(f);
+            string_term_bytes(sum(&mut lex0().bytes().map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, b'_' | b'.' | b'-') || keep_extra.contains(&c) {
+                    1
+                } else {
+                    3
+                }
+            })))
+        }
+        // A merge of its members' lists (first-class, or data lists walked from the store).
+        Func::Append => sum(&mut args.iter().map(|a| list_member_bytes(a, facts, pending)))
+            .saturating_add(TERM_NODE_BYTES),
+        // The distinct triples of its member formulae, or the literal `true` when there are
+        // none (the empty formula).
+        Func::Conjunction if exact => {
+            let mut seen: FxHashSet<&[Term; 3]> = FxHashSet::default();
+            let distinct: Vec<&[Term; 3]> = args
+                .iter()
+                .filter_map(|a| match a {
+                    Term::Formula(ts) => Some(ts),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|t| seen.insert(t))
+                .collect();
+            if distinct.is_empty() {
+                conjunction_true_bytes()
+            } else {
+                sum(&mut distinct.into_iter().flatten().map(term_bytes)).saturating_add(TERM_NODE_BYTES)
+            }
+        }
+        // A merged formula is at most its members together; with no triples it is `true`.
+        Func::Conjunction => sum(&mut args.iter().map(term_bytes)).max(conjunction_true_bytes()),
+        Func::Langlit => match args {
+            [Term::Lit(lex, _, _), Term::Lit(lang, _, _)] => TERM_NODE_BYTES
+                .saturating_add(lex.len())
+                .saturating_add(RDF_LANG_STRING.len())
+                .saturating_add(lang.len()),
+            _ => 0,
+        },
+        // Sized where they are built: `log:dtlit` before its own early return,
+        // `log:conclusion` from the borrowed closure, the parsed formula once parsed, and
+        // `log:content`'s literal once the resolver has supplied its text.
+        Func::Dtlit | Func::LogConclusion | Func::ParsedAsN3 | Func::Semantics | Func::Content => 0,
+        // A member of the argument list, copied.
+        Func::First => args.first().map_or(0, term_bytes),
+        Func::Last => args.last().map_or(0, term_bytes),
+        // The first capture group of the first match: at most the input; exactly, the
+        // capture (the regex is compiled, and run, without building the result).
+        Func::Scrape => match args {
+            [Term::Lit(s, _, _), Term::Lit(pattern, _, _)] if exact => settle(pending, bounded::regex(pattern))
+                .and_then(|re| re.captures(s).and_then(|c| c.get(1)).map(|m| m.len()))
+                .map_or(0, string_term_bytes),
+            _ => string_term_bytes(lex0().len()),
+        },
+        // The time zone offset: at most the input; exactly, the borrowed offset.
+        Func::TimeZone if exact => time_zone_offset(lex0()).map_or(0, |o| string_term_bytes(o.len())),
+        Func::TimeZone => string_term_bytes(lex0().len()),
+        // A number, a count or a date part: sized from its value once computed, before its
+        // literal is rendered ([`numeric_result`]).
+        Func::Length
+        | Func::StrLength
+        | Func::MemberCount
+        | Func::Sum
+        | Func::Difference
+        | Func::Product
+        | Func::Quotient
+        | Func::Remainder
+        | Func::IntegerQuotient
+        | Func::Max
+        | Func::Min
+        | Func::Exponentiation
+        | Func::Logarithm
+        | Func::Atan2
+        | Func::Negation
+        | Func::AbsoluteValue
+        | Func::Rounded
+        | Func::Floor
+        | Func::Ceiling
+        | Func::Sin
+        | Func::Cos
+        | Func::Tan
+        | Func::Asin
+        | Func::Acos
+        | Func::Atan
+        | Func::Sinh
+        | Func::Cosh
+        | Func::Tanh
+        | Func::Asinh
+        | Func::Acosh
+        | Func::Atanh
+        | Func::Degrees
+        | Func::Radians
+        | Func::Year
+        | Func::Month
+        | Func::Day
+        | Func::Hours
+        | Func::Minutes
+        | Func::Seconds
+        | Func::DayOfWeek
+        | Func::InSeconds => 0,
+    }
+}
+
+/// The bytes `regex`'s `replace_all(s, r)` writes, counted without building the output
+/// or any expansion: each match is replaced by `r`'s literal text plus the captures it
+/// names, under the regex crate's replacement syntax (`$$` is `$`; `$name` / `${name}` a
+/// group by index or name, empty if it did not participate; a `$` that starts no
+/// reference is literal).
+fn replace_bytes<'r>(re: &regex::Regex, s: &str, r: &'r str) -> usize {
+    enum Piece<'r> {
+        Text(usize),
+        Index(usize),
+        Name(&'r str),
+    }
+    let valid = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    // A reference by number, else by name.
+    let reference = |name: &'r str| name.parse::<usize>().map_or(Piece::Name(name), Piece::Index);
+    let mut pieces = Vec::new();
+    let mut rest = r;
+    while let Some(i) = rest.find('$') {
+        pieces.push(Piece::Text(i));
+        let after = &rest[i + 1..];
+        if let Some(tail) = after.strip_prefix('$') {
+            pieces.push(Piece::Text(1));
+            rest = tail;
+        } else if let Some(braced) = after.strip_prefix('{') {
+            match braced.find('}') {
+                Some(end) => {
+                    pieces.push(reference(&braced[..end]));
+                    rest = &braced[end + 1..];
+                }
+                None => {
+                    pieces.push(Piece::Text(1));
+                    rest = after;
+                }
+            }
+        } else {
+            let end = after.bytes().position(|c| !valid(c)).unwrap_or(after.len());
+            if end == 0 {
+                pieces.push(Piece::Text(1));
+            } else {
+                pieces.push(reference(&after[..end]));
+            }
+            rest = &after[end..];
+        }
+    }
+    pieces.push(Piece::Text(rest.len()));
+    let mut out = s.len();
+    for caps in re.captures_iter(s) {
+        let matched = caps.get(0).map_or(0, |m| m.len());
+        let replaced = pieces
+            .iter()
+            .map(|p| match p {
+                Piece::Text(n) => *n,
+                Piece::Index(i) => caps.get(*i).map_or(0, |m| m.len()),
+                Piece::Name(n) => caps.name(n).map_or(0, |m| m.len()),
+            })
+            .fold(0usize, usize::saturating_add);
+        out = out.saturating_sub(matched).saturating_add(replaced);
+    }
+    out
+}
+
+/// ( fmt args… ) string:format: the honest %s/%d/%f/%% subset, written to `out`; `None`
+/// for any other directive or an argument-count mismatch (which EYE throws on).
+fn format_text(args: &[Term], pending: &bounded::Pending, out: &mut impl TextOut) -> Option<()> {
+    let fmt = lex(args.first()?)?;
+    let mut argi = 1;
+    let mut chars = fmt.chars();
+    let mut buf = [0u8; 4];
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.put(c.encode_utf8(&mut buf));
+            continue;
+        }
+        match chars.next()? {
+            '%' => out.put("%"),
+            's' => {
+                out.put(lex(args.get(argi)?)?);
+                argi += 1;
+            }
+            'd' => {
+                // The integer part: exact in the exact tower, else from the f64.
+                let n = match numval_in(args.get(argi)?, pending)? {
+                    NumVal::Int(i) => i,
+                    NumVal::Dec(m, sc) => m / rep(pending, 10i128.checked_pow(sc))?,
+                    NumVal::F64(f) => i128::from(settle(pending, bounded::int_of_f64(f))?),
+                };
+                out.put(&n.to_string());
+                argi += 1;
+            }
+            'f' => {
+                // C printf's default precision, 6 digits: exact from the exact
+                // tower, else from the f64 (a numeral past i128 is a cut).
+                out.put(&fixed6(numval_in(args.get(argi)?, pending)?, pending)?);
+                argi += 1;
+            }
+            _ => return None, // unsupported directive: fail, don't mangle
+        }
+    }
+    (argi == args.len()).then_some(())
+}
+
+/// The text `string:concatenation` takes from member `a`: cwm coerces typed literals to
+/// their canonical VALUE string ("0"^^xsd:boolean → "false", 0E1 → "0") and IRIs to their
+/// text (concatenation.n3 s01); `None` for any other member.
+fn concat_piece(a: &Term) -> Option<std::borrow::Cow<'_, str>> {
+    use std::borrow::Cow;
+    Some(match a {
+        Term::Lit(v, dt, _) => match dt.strip_prefix("http://www.w3.org/2001/XMLSchema#") {
+            Some("boolean") => Cow::Borrowed(if v == "0" || v == "false" { "false" } else { "true" }),
+            Some("integer" | "decimal" | "float" | "double") => match numval(a) {
+                // A numeral past i128: its canonical value string, exactly.
+                Some(NumVal::F64(_)) if big_numeral_canonical(v).is_some() => {
+                    Cow::Owned(big_numeral_canonical(v)?)
+                }
+                Some(NumVal::Int(i)) => Cow::Owned(i.to_string()),
+                Some(NumVal::Dec(m, sc)) => {
+                    let (m, sc) = dec_norm(m, sc);
+                    if sc == 0 {
+                        Cow::Owned(m.to_string())
+                    } else {
+                        let Term::Lit(lex, _, _) = numval_term(NumVal::Dec(m, sc)) else { return None };
+                        Cow::Owned(lex)
+                    }
+                }
+                Some(NumVal::F64(f)) => {
+                    if number_is_whole(f) {
+                        // not-a-cut: exact-cast (whole, below 2^53)
+                        Cow::Owned((f as i64).to_string())
+                    } else {
+                        Cow::Owned(format!("{f}"))
+                    }
+                }
+                None => Cow::Borrowed(v),
+            },
+            _ => Cow::Borrowed(v),
+        },
+        Term::Iri(i) => Cow::Borrowed(i),
+        _ => return None,
+    })
+}
+
+/// The length of [`concat_piece`]'s text for member `a`, computed from the value without
+/// building it (GH #6901).
+fn concat_piece_len(a: &Term) -> Option<usize> {
+    Some(match a {
+        Term::Lit(v, dt, _) => match dt.strip_prefix("http://www.w3.org/2001/XMLSchema#") {
+            Some("boolean") => {
+                if v == "0" || v == "false" {
+                    5
+                } else {
+                    4
+                }
+            }
+            Some("integer" | "decimal" | "float" | "double") => match numval(a) {
+                Some(NumVal::F64(f)) => big_numeral_canonical_len(v).unwrap_or_else(|| number_lex_len(f)),
+                Some(NumVal::Int(i)) => int_lex_len(i),
+                Some(NumVal::Dec(m, sc)) => {
+                    let (m, sc) = dec_norm(m, sc);
+                    if sc == 0 {
+                        int_lex_len(m)
+                    } else {
+                        dec_lex_len(m, sc)
+                    }
+                }
+                None => v.len(),
+            },
+            _ => v.len(),
+        },
+        Term::Iri(i) => i.len(),
+        _ => return None,
+    })
+}
+
+/// The extra bytes cwm's `string:encodeForURI` / `string:encodeForFragID` keep unencoded
+/// (uriEncode-out.n3): URI keeps #'()~ but encodes '/'; FragID keeps '/' but encodes #'()~.
+fn cwm_uri_keeps(f: Func) -> &'static [u8] {
+    if matches!(f, Func::EncodeForUriCwm) {
+        b"#'()~"
+    } else {
+        b"/"
+    }
+}
+
 /// Evaluate a functional builtin `(members) op object`: resolve the list members under `b`,
 /// compute, then either bind the object variable to the result or filter if it is ground.
 /// Evaluate a functional builtin. Every fallible step inside settles into a local
@@ -3844,33 +5258,82 @@ fn eval_functional_inner(
         if members.len() != 2 {
             return None;
         }
-        let (m0, m1) = (apply(&members[0], &b), apply(&members[1], &b));
+        let run = &bw.truncated;
+        // The members as bound, borrowed: the forward result is sized before any copy.
+        let resolve = |t: &Term| -> Option<(usize, bool)> {
+            let r = match t {
+                Term::Var(v) => b.get(v)?,
+                other => other,
+            };
+            match r {
+                Term::Lit(v, _, _) => Some((v.len(), true)),
+                Term::Iri(i) => Some((i.len(), false)),
+                _ => None,
+            }
+        };
+        if let (Some((lex, true)), Some((dt, false))) = (resolve(&members[0]), resolve(&members[1])) {
+            let bytes = bounded::TERM_NODE_BYTES.saturating_add(lex).saturating_add(dt);
+            if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
+                return None;
+            }
+        }
+        let (m0, m1) = (bounded::substitute(&members[0], &b, run)?, bounded::substitute(&members[1], &b, run)?);
         let mut nb = b;
-        return match (&m0, &m1) {
-            // forward: ( "lex" xsd:dt ) → "lex"^^xsd:dt
+        return match (m0, m1) {
+            // forward: ( "lex" xsd:dt ) → "lex"^^xsd:dt (sized above; the parts are moved)
             (Term::Lit(v, _, _), Term::Iri(dt)) => {
-                let lit = Term::Lit(v.clone(), dt.clone(), None);
+                let lit = Term::Lit(v, dt, None);
                 unify_term(obj, &lit, &mut nb).then_some(nb)
             }
             // reverse: decompose a ground object literal into its parts
+            // (each part sized from the borrowed literal before it is copied)
             _ => {
-                let Term::Lit(v, dt, _) = apply(obj, &nb) else { return None };
-                (unify_term(&members[0], &Term::Lit(v.clone(), XSD_STRING.into(), None), &mut nb)
-                    && unify_term(&members[1], &Term::Iri(dt.clone()), &mut nb))
-                .then_some(nb)
+                let bound = match obj {
+                    Term::Var(v) => nb.get(v)?,
+                    other => other,
+                };
+                let Term::Lit(v, dt, _) = bound else { return None };
+                let bytes = bounded::string_term_bytes(v.len())
+                    .max(bounded::TERM_NODE_BYTES.saturating_add(dt.len()));
+                if refused_term(run, pending, Derived::Result(f), bytes, || bytes) {
+                    return None;
+                }
+                let (lex, dt) = (Term::Lit(v.clone(), XSD_STRING.into(), None), Term::Iri(dt.clone()));
+                (unify_term(&members[0], &lex, &mut nb) && unify_term(&members[1], &dt, &mut nb))
+                    .then_some(nb)
             }
         };
+    }
+    // log:conclusion closes the subject formula as bound, borrowed (not copied into an
+    // argument list). The closure ran under the run's limits; the formula holding all of
+    // it is one more term, sized from the borrowed closure before its statements are
+    // copied.
+    if let Func::LogConclusion = f {
+        let bound = match subj {
+            Term::Var(v) => b.get(v)?,
+            other => other,
+        };
+        let Term::Formula(ts) = bound else { return None };
+        let result = with_formula_closure(ts, bw, |all| {
+            let bytes = formula_bytes(all.iter().copied());
+            (!refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes))
+                .then(|| Term::Formula(all.iter().map(|t| (*t).clone()).collect()))
+        })?;
+        let mut nb = b;
+        return unify_term(obj, &result, &mut nb).then_some(nb);
     }
     // math:negation is bidirectional in EYE: `?x math:negation 3` solves
     // ?x = -3 (the one reverse mode the suites rely on).
     if matches!(f, Func::Negation) && !subj.is_ground() && !matches!(subj, Term::List(_)) {
-        let s_applied = apply(subj, &b);
+        let s_applied = bounded::substitute(subj, &b, &bw.truncated)?;
         if !s_applied.is_ground() {
-            let o_applied = apply(obj, &b);
+            let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
             if let Some(v) = numval_in(&o_applied, pending) {
                 let negated = rep(pending, numval_negate(v))?;
+                // Sized from the value before it is rendered.
+                let t = numeric_result(&bw.truncated, pending, f, Numeral::Num(negated))?;
                 let mut nb = b;
-                return unify_term(subj, &numval_term(negated), &mut nb).then_some(nb);
+                return unify_term(subj, &t, &mut nb).then_some(nb);
             }
             return None;
         }
@@ -3878,9 +5341,16 @@ fn eval_functional_inner(
     // Reverse (object-bound) modes of the invertible unary builtins:
     // `?y math:sin 0` solves y = asin 0 (cwm trig.n3 test4), and
     // `?t time:inSeconds N` formats the epoch back to a UTC dateTime.
-    if !subj.is_ground() && !matches!(subj, Term::List(_)) && !apply(subj, &b).is_ground() {
-        let o_applied = apply(obj, &b);
+    // The subject with the binding substituted, computed once: it may be a large bound
+    // string, and each copy is held while the result is sized.
+    let subj_applied = match subj {
+        Term::List(_) => None,
+        _ => Some(bounded::substitute(subj, &b, &bw.truncated)?),
+    };
+    if !subj.is_ground() && subj_applied.as_ref().is_some_and(|s| !s.is_ground()) {
+        let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
         if o_applied.is_ground() {
+            // Each result below is sized from its value before it is rendered.
             let inverse = |v: f64| -> Option<f64> {
                 Some(match f {
                     Func::Sin => v.asin(),
@@ -3903,6 +5373,10 @@ fn eval_functional_inner(
             if let Func::InSeconds = f {
                 // Exact: an epoch second count is a whole number, never an f64 image.
                 let secs = numval_whole_i64(numval_in(&o_applied, pending)?, pending)?;
+                let bytes = bounded::string_term_bytes(epoch_len(secs));
+                if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
+                    return None;
+                }
                 let mut nb = b;
                 let lit = Term::Lit(format_epoch(secs), XSD_STRING.into(), None);
                 return unify_term(subj, &lit, &mut nb).then_some(nb);
@@ -3913,8 +5387,9 @@ fn eval_functional_inner(
                     if v.is_nan() {
                         return None;
                     }
+                    let t = numeric_result(&bw.truncated, pending, f, Numeral::Double(v))?;
                     let mut nb = b;
-                    return unify_term(subj, &double_term(v), &mut nb).then_some(nb);
+                    return unify_term(subj, &t, &mut nb).then_some(nb);
                 }
             }
             return None;
@@ -3923,23 +5398,47 @@ fn eval_functional_inner(
     // Arguments: the list members (rule-local structure, a data list walked
     // from the fact store, or `rdf:nil` = the empty list), else a singleton
     // for the unary (math:/string:/time:) ops.
-    let subj_applied = apply(subj, &b);
-    let resolved_list: Option<Vec<Term>> = match &subj_applied {
-        // First-class list value (already substituted by `apply`).
-        Term::List(ms) => Some(ms.clone()),
-        // A data list written as rdf:first/rest triples, via a bound variable.
-        _ => settle(pending, fact_list(&subj_applied, facts))
-            .map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
+    // A list is sized from the borrowed terms (its members with the binding substituted,
+    // or the data list's members in the store) BEFORE it is built: a rule-local list can
+    // name a bound term many times, and a data list copies its members (GH #6771).
+    let subj_bound = match subj {
+        Term::Var(v) => b.get(v).unwrap_or(subj),
+        _ => subj,
     };
-    let was_list = resolved_list.is_some();
+    let run = &bw.truncated;
+    let (args, was_list): (Vec<Term>, bool) = if let Term::List(_) = subj_bound {
+        // First-class list value (substituted, and sized first, by `substitute`).
+        let applied = match subj_applied {
+            Some(t) => t,
+            None => bounded::substitute(subj, &b, run)?,
+        };
+        let Term::List(members) = applied else { return None };
+        (members, true)
+    } else {
+        let subj_applied = subj_applied?;
+        // A data list written as rdf:first/rest triples, via a bound variable.
+        match settle(pending, fact_list_refs(&subj_applied, facts)) {
+            Some(members) => {
+                let bytes = members
+                    .iter()
+                    .map(|m| bounded::resolved_bytes(m, &b, false))
+                    .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
+                if refused_term(&bw.truncated, pending, Derived::Arguments(f), bytes, || bytes) {
+                    return None;
+                }
+                let members = members
+                    .iter()
+                    .map(|m| bounded::substitute(m, &b, run))
+                    .collect::<Option<Vec<Term>>>()?;
+                (members, true)
+            }
+            None => (vec![subj_applied], false),
+        }
+    };
     // The list:-namespace ops are only defined ON lists.
     if matches!(f, Func::Length | Func::First | Func::Last | Func::Append) && !was_list {
         return None;
     }
-    let args: Vec<Term> = match resolved_list {
-        Some(members) => members,
-        None => vec![subj_applied.clone()],
-    };
     if args.is_empty()
         && !matches!(
             f,
@@ -3952,6 +5451,18 @@ fn eval_functional_inner(
                 | Func::Concat
         )
     {
+        return None;
+    }
+    // The result is sized from the arguments BEFORE it is built, so a term that grows
+    // every round is refused (a cut, and an error that fails the closure) instead of
+    // exhausting memory (GH #6771).
+    if refused_term(
+        &bw.truncated,
+        pending,
+        Derived::Result(f),
+        output_bytes(f, &args, facts, pending, false),
+        || output_bytes(f, &args, facts, pending, true),
+    ) {
         return None;
     }
     let result: Term = match f {
@@ -3983,51 +5494,14 @@ fn eval_functional_inner(
             // a `( … )` list: its length; a quoted formula: its DISTINCT triple count
             [Term::Formula(ts)] => {
                 let distinct: FxHashSet<&[Term; 3]> = ts.iter().collect();
-                count_term(distinct.len())
+                numeric_result(run, pending, f, Numeral::count(distinct.len()))?
             }
-            _ if was_list => count_term(args.len()),
+            _ if was_list => numeric_result(run, pending, f, Numeral::count(args.len()))?,
             _ => return None,
         },
         Func::Format => {
-            // ( fmt args… ) string:format ?out — honest %s/%d/%f/%% subset; any other
-            // directive (or an argument-count mismatch, which EYE throws on) fails.
-            let fmt = lex(&args[0])?.to_string();
             let mut out = String::new();
-            let mut argi = 1;
-            let mut chars = fmt.chars();
-            while let Some(c) = chars.next() {
-                if c != '%' {
-                    out.push(c);
-                    continue;
-                }
-                match chars.next()? {
-                    '%' => out.push('%'),
-                    's' => {
-                        out.push_str(lex(args.get(argi)?)?);
-                        argi += 1;
-                    }
-                    'd' => {
-                        // The integer part: exact in the exact tower, else from the f64.
-                        let n = match numval_in(args.get(argi)?, pending)? {
-                            NumVal::Int(i) => i,
-                            NumVal::Dec(m, sc) => m / rep(pending, 10i128.checked_pow(sc))?,
-                            NumVal::F64(f) => i128::from(settle(pending, bounded::int_of_f64(f))?),
-                        };
-                        out.push_str(&n.to_string());
-                        argi += 1;
-                    }
-                    'f' => {
-                        // C printf's default precision, 6 digits: exact from the exact
-                        // tower, else from the f64 (a numeral past i128 is a cut).
-                        out.push_str(&fixed6(numval_in(args.get(argi)?, pending)?, pending)?);
-                        argi += 1;
-                    }
-                    _ => return None, // unsupported directive: fail, don't mangle
-                }
-            }
-            if argi != args.len() {
-                return None;
-            }
+            format_text(&args, pending, &mut out)?;
             Term::Lit(out, XSD_STRING.into(), None)
         }
         Func::Scrape => {
@@ -4042,49 +5516,12 @@ fn eval_functional_inner(
         Func::Concat => {
             let mut s = String::new();
             for a in &args {
-                match a {
-                    // cwm coerces typed literals to their canonical VALUE
-                    // string ("0"^^xsd:boolean → "false", 0E1 → "0").
-                    Term::Lit(v, dt, _) => match dt.strip_prefix("http://www.w3.org/2001/XMLSchema#") {
-                        Some("boolean") => s.push_str(if v == "0" || v == "false" { "false" } else { "true" }),
-                        Some("integer" | "decimal" | "float" | "double") => {
-                            match numval(a) {
-                                // A numeral past i128: its canonical value string, exactly.
-                                Some(NumVal::F64(_)) if big_numeral_canonical(v).is_some() => {
-                                    s.push_str(&big_numeral_canonical(v)?)
-                                }
-                                Some(NumVal::Int(i)) => s.push_str(&i.to_string()),
-                                Some(NumVal::Dec(m, sc)) => {
-                                    let (m, sc) = dec_norm(m, sc);
-                                    if sc == 0 {
-                                        s.push_str(&m.to_string());
-                                    } else {
-                                        let Term::Lit(lex, _, _) = numval_term(NumVal::Dec(m, sc)) else { return None };
-                                        s.push_str(&lex);
-                                    }
-                                }
-                                Some(NumVal::F64(f)) => {
-                                    if f.fract() == 0.0 && f.abs() < 9.007e15 {
-                                        // not-a-cut: exact-cast (whole, below 2^53)
-                                        s.push_str(&(f as i64).to_string());
-                                    } else {
-                                        s.push_str(&format!("{f}"));
-                                    }
-                                }
-                                None => s.push_str(v),
-                            }
-                        }
-                        _ => s.push_str(v),
-                    },
-                    // cwm coerces IRI arguments to their text (concatenation.n3 s01).
-                    Term::Iri(i) => s.push_str(i),
-                    _ => return None,
-                }
+                s.push_str(&concat_piece(a)?);
             }
             Term::Lit(s, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
-        Func::Length => count_term(args.len()),
-        Func::StrLength => count_term(lex(&args[0])?.chars().count()),
+        Func::Length => numeric_result(run, pending, f, Numeral::count(args.len()))?,
+        Func::StrLength => numeric_result(run, pending, f, Numeral::count(lex(&args[0])?.chars().count()))?,
         Func::LowerCase => {
             Term::Lit(lex(&args[0])?.to_lowercase(), "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
@@ -4098,11 +5535,7 @@ fn eval_functional_inner(
             // cwm's quoting pairs (uriEncode-out.n3): URI keeps #'()~ but
             // encodes '/'; FragID keeps '/' but encodes #'()~. Both keep
             // alphanumerics and _.- and use uppercase hex.
-            let keep_extra: &[u8] = if matches!(f, Func::EncodeForUriCwm) {
-                b"#'()~"
-            } else {
-                b"/"
-            };
+            let keep_extra = cwm_uri_keeps(f);
             let mut out = String::new();
             for byte in lex(&args[0])?.bytes() {
                 match byte {
@@ -4115,16 +5548,19 @@ fn eval_functional_inner(
             }
             Term::Lit(out, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
-        Func::LogConclusion => match &args[..] {
-            [Term::Formula(ts)] => Term::Formula(formula_closure(ts, bw)),
-            _ => return None,
-        },
+        // Evaluated above, from the borrowed subject.
+        Func::LogConclusion => return None,
         Func::Semantics | Func::Content => match &args[..] {
             [Term::Iri(doc)] => {
                 // No resolver (document access is off for this run) leaves the document's
                 // content as unknown as a resolver that cannot supply it: both are cuts.
                 let text = settle(pending, bounded::resolved(bw.resolver.and_then(|r| r(doc))))?;
                 if matches!(f, Func::Content) {
+                    // The text is the resolver's; the literal holding it is sized first.
+                    let bytes = bounded::string_term_bytes(text.len());
+                    if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
+                        return None;
+                    }
                     Term::Lit(text, XSD_STRING.into(), None)
                 } else {
                     // cwm-faithful: `log:semantics` returns the document's PARSED statements
@@ -4132,18 +5568,14 @@ fn eval_functional_inner(
                     // taken later by `log:supports` / `log:conclusion`, which is where the
                     // import-cycle guard ([`VisitedDocs`]) applies. Resolution itself does no
                     // recursion, so no marking is needed here.
-                    // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-                    let parsed = bounded::parse_n3(&text, doc, pending).ok()?;
-                    Term::Formula(reencode_statements(parsed))
+                    parsed_formula(f, &text, doc, bw, pending)?
                 }
             }
             _ => return None,
         },
         Func::ParsedAsN3 => match &args[..] {
             [Term::Lit(src, _, _)] => {
-                // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-                let parsed = bounded::parse_n3(src, &bw.base, pending).ok()?;
-                Term::Formula(reencode_statements(parsed))
+                parsed_formula(f, src, &bw.base, bw, pending)?
             }
             _ => return None,
         },
@@ -4185,17 +5617,14 @@ fn eval_functional_inner(
         | Func::Minutes
         | Func::Seconds
         | Func::DayOfWeek
-        | Func::InSeconds => numval_term(NumVal::Int(i128::from(datetime_part(
-            lex(&args[0])?,
-            f,
-            pending,
-        )?))),
+        | Func::InSeconds => {
+            let part = i128::from(datetime_part(lex(&args[0])?, f, pending)?);
+            numeric_result(run, pending, f, Numeral::Num(NumVal::Int(part)))?
+        }
         Func::TimeZone => {
             // Only an EXPLICIT numeric offset is a time zone (cwm: `Z`/absent
             // yield nothing).
-            let s = lex(&args[0])?;
-            let t = s.split('T').nth(1)?;
-            let off = t.find(['+', '-']).map(|i| &t[i..])?;
+            let off = time_zone_offset(lex(&args[0])?)?;
             Term::Lit(off.to_string(), XSD_STRING.into(), None)
         }
         _ => {
@@ -4230,7 +5659,7 @@ fn eval_functional_inner(
             // An exact step that overflows is a cut (settled here); the f64 path below
             // still gives the approximate value, as before.
             if let Some(exact) = settle(pending, eval_exact(f, &args)) {
-                exact
+                numeric_result(run, pending, f, Numeral::Num(exact))?
             } else {
                 let nvals: Vec<NumVal> = args
                     .iter()
@@ -4340,11 +5769,8 @@ fn eval_functional_inner(
                     return None; // domain error (asin 2, acosh 0.5, …): the premise fails
                     // (NaN/INF inputs — and IEEE 0/0 — PROPAGATE instead, cwm math/inf.n3)
                 }
-                if trig_family || any_double {
-                    double_term(v)
-                } else {
-                    number_term(v)
-                }
+                let n = if trig_family || any_double { Numeral::Double(v) } else { Numeral::Num(NumVal::F64(v)) };
+                numeric_result(run, pending, f, n)?
             }
         }
     };
@@ -4354,7 +5780,7 @@ fn eval_functional_inner(
     // exact-decimal results match their reference lexical forms), else
     // structurally.
     let mut nb = b;
-    let obj_applied = apply(obj, &nb);
+    let obj_applied = bounded::substitute(obj, &nb, &bw.truncated)?;
     if obj_applied.is_ground() {
         if let (Some(x), Some(y)) = (cmp_num(&obj_applied, true), cmp_num(&result, true)) {
             return (cmp_promoted(x, y) == Some(std::cmp::Ordering::Equal)).then_some(nb);
@@ -4372,7 +5798,7 @@ fn eval_functional_inner(
 /// (doubles involved, overflow, or a non-exact quotient). The RESULT TYPE
 /// follows EYE: all-integer in → integer out; any decimal in → decimal out
 /// (with at least one fraction digit in the lexical form).
-fn eval_exact(f: Func, args: &[Term]) -> Bounded<Option<Term>> {
+fn eval_exact(f: Func, args: &[Term]) -> Bounded<Option<NumVal>> {
     let pending = bounded::Pending::default();
     let v = eval_exact_inner(f, args, &pending);
     pending.finish(v)
@@ -4384,7 +5810,7 @@ fn rep<T>(pending: &bounded::Pending, step: Option<T>) -> Option<T> {
     settle(pending, bounded::exact(step))
 }
 
-fn eval_exact_inner(f: Func, args: &[Term], pending: &bounded::Pending) -> Option<Term> {
+fn eval_exact_inner(f: Func, args: &[Term], pending: &bounded::Pending) -> Option<NumVal> {
     let vals: Vec<NumVal> = args
         .iter()
         .map(|a| numval_in(a, pending))
@@ -4572,7 +5998,7 @@ fn eval_exact_inner(f: Func, args: &[Term], pending: &bounded::Pending) -> Optio
         }
         _ => return None, // trig/log: f64 path
     };
-    Some(numval_term(out))
+    Some(out)
 }
 
 /// Extract a component of an `xsd:dateTime`/`xsd:date` lexical form for `time:` builtins.
@@ -4720,6 +6146,22 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 
 /// Epoch seconds → `YYYY-MM-DDThh:mm:ssZ` (time:inSeconds reverse mode).
 fn format_epoch(secs: i64) -> String {
+    let mut s = String::new();
+    // Writing to a `String` cannot fail.
+    let _ = write_epoch(secs, &mut s);
+    s
+}
+
+/// The length of [`format_epoch`]'s text, counted without building it.
+fn epoch_len(secs: i64) -> usize {
+    let mut n = LexLen::default();
+    // Writing to a counter cannot fail.
+    let _ = write_epoch(secs, &mut n);
+    n.len
+}
+
+/// Writes [`format_epoch`]'s text to `out`.
+fn write_epoch(secs: i64, out: &mut impl std::fmt::Write) -> std::fmt::Result {
     let days = secs.div_euclid(86400);
     let rem = secs.rem_euclid(86400);
     // civil_from_days (Hinnant)
@@ -4733,7 +6175,8 @@ fn format_epoch(secs: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    format!(
+    write!(
+        out,
         "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
         rem / 3600,
         (rem % 3600) / 60,
@@ -4761,16 +6204,11 @@ fn double_term(v: f64) -> Term {
     Term::Lit(lex, XSD_DOUBLE.into(), None)
 }
 
-/// A count (a list length, a string length) as an `xsd:integer` literal.
-fn count_term(n: usize) -> Term {
-    numval_term(NumVal::Int(n as i128))
-}
-
 /// Render an `f64` result as an N3 numeric literal (integer when whole, else decimal).
 /// A non-finite value renders as `inf` / `-inf` / `NaN`^^xsd:decimal, which `cmp_num`
 /// reads back as ±INF / NaN.
 fn number_term(v: f64) -> Term {
-    if v.fract() == 0.0 && v.abs() < 9.007e15 {
+    if number_is_whole(v) {
         // not-a-cut: exact-cast (whole, below 2^53)
         Term::Lit((v as i64).to_string(), "http://www.w3.org/2001/XMLSchema#integer".into(), None)
     } else {
@@ -4843,7 +6281,670 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 }
 
 #[cfg(test)]
+mod runtime_doc_key_golden {
+    use super::run_shared::runtime_doc_key;
+
+    /// The runtime-document key is specified, not build-dependent: these vectors were
+    /// computed independently (SHA-256 over the documented encoding, first 8 bytes). A
+    /// change here changes exported labels and provenance IRIs.
+    #[test]
+    fn runtime_doc_key_matches_golden_vectors() {
+        let x = "_:x <http://ex/p> <http://ex/o> .";
+        for (text, base, key) in [
+            ("", "", "80ab39c5ca307a54"),
+            (x, "", "36e2d3c73471b49f"),
+            (x, "http://ex/doc", "35978aa649d31637"),
+            ("ab", "c", "f053a10b92eecfd0"),
+            ("a", "bc", "ff5cfd007e1caf6c"),
+        ] {
+            assert_eq!(runtime_doc_key(text, base), key, "{text:?} {base:?}");
+        }
+    }
+
+    #[test]
+    fn runtime_label_shape() {
+        use super::run_shared::is_runtime_label;
+        for l in ["__rp0_36e2d3c73471b49f_x", "__rp12_0123456789abcdef_a.b", "__rp0_36e2d3c73471b49f__"] {
+            assert!(is_runtime_label(l), "{l}");
+        }
+        for l in [
+            "__rp0_x",
+            "__rp_36e2d3c73471b49f_x",
+            "__rp0_36E2D3C73471B49F_x",
+            "__rp0_36e2d3c73471b49_x",
+            "__rp0_36e2d3c73471b49fx",
+            "__rp0_36e2d3c73471b49f",
+            "_rp0_36e2d3c73471b49f_x",
+        ] {
+            assert!(!is_runtime_label(l), "{l}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    /// GH #6901: the length of a numeral's lexical form, computed from its value, equals
+    /// the length of the literal it renders, for every rendering (integer, decimal at any
+    /// scale, whole and fractional `f64`, `xsd:double` e-notation, non-finite values), and
+    /// the cheap bound is at least it.
+    #[test]
+    fn numeral_lengths_match_the_rendered_literals() {
+        use super::{bounded, NumVal, Numeral, Term};
+        let mut cases: Vec<Numeral> = Vec::new();
+        let ints = [
+            0i128,
+            1,
+            -1,
+            9,
+            10,
+            -10,
+            99,
+            100,
+            12345,
+            -98765,
+            i128::from(i64::MAX),
+            i128::from(i64::MIN),
+            10i128.pow(18),
+            10i128.pow(18) - 1,
+            10i128.pow(38),
+            10i128.pow(38) - 1,
+            i128::MAX,
+            i128::MIN,
+            i128::MIN + 1,
+        ];
+        for &i in &ints {
+            cases.push(Numeral::Num(NumVal::Int(i)));
+            for s in [0u32, 1, 2, 3, 5, 17, 18, 19, 37, 38, 39, 40, 41, 64, 200, 1000] {
+                cases.push(Numeral::Num(NumVal::Dec(i, s)));
+                cases.push(Numeral::Num(NumVal::Dec(i.saturating_mul(10), s)));
+                cases.push(Numeral::Num(NumVal::Dec(i.saturating_mul(1000), s)));
+            }
+        }
+        let floats = [
+            0.0f64,
+            -0.0,
+            1.0,
+            -1.0,
+            0.5,
+            -0.25,
+            7.29,
+            1.0 / 3.0,
+            -2.0 / 3.0,
+            123456.789,
+            9.006e15,
+            9.007e15,
+            -9.007e15,
+            1e16,
+            1e21,
+            1e22,
+            1e100,
+            1e300,
+            -1e300,
+            f64::MAX,
+            f64::MIN,
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE,
+            5e-324,
+            f64::from_bits(0x000f_ffff_ffff_ffff),
+            -f64::from_bits(0x0008_1234_5678_9abc),
+            f64::from_bits(0x7fef_1234_5678_9abc),
+            1e-7,
+            1.5e-5,
+            std::f64::consts::PI,
+            std::f64::consts::E * 1e10,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        for &f in &floats {
+            cases.push(Numeral::Num(NumVal::F64(f)));
+            cases.push(Numeral::Double(f));
+        }
+        for n in cases {
+            let t = n.term();
+            let Term::Lit(lex, dt, None) = &t else { panic!("{n:?}: not a plain literal: {t:?}") };
+            assert_eq!(n.lex_len(), lex.len(), "{n:?}: computed length vs rendered {lex:?}");
+            assert_eq!(n.datatype(), dt.as_str(), "{n:?}: datatype");
+            assert_eq!(n.term_bytes(), bounded::term_bytes(&t), "{n:?}: term bytes");
+            assert!(n.term_bound() >= n.term_bytes(), "{n:?}: bound below the exact size");
+        }
+        // A decimal's length follows its scale without rendering it.
+        let long = Numeral::Num(NumVal::Dec(1, u32::MAX));
+        assert_eq!(long.lex_len(), u32::MAX as usize + 2);
+        assert!(long.term_bound() >= long.term_bytes());
+        assert_eq!(Numeral::Num(NumVal::Dec(0, u32::MAX)).lex_len(), "0.0".len());
+    }
+
+    /// GH #6901: `string:concatenation`'s numeric pieces are sized from their values, and
+    /// the size is the length of the text the builtin writes.
+    #[test]
+    fn concat_piece_lengths_match_the_pieces() {
+        use super::{concat_piece, concat_piece_len, Term};
+        const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+        let big = format!("-000{}.{}000", "9".repeat(60), "1".repeat(50));
+        let tiny = format!("0.{}1", "0".repeat(400));
+        let lits: Vec<(String, &str)> = vec![
+            ("0".into(), "boolean"),
+            ("true".into(), "boolean"),
+            ("false".into(), "boolean"),
+            ("1".into(), "boolean"),
+            ("42".into(), "integer"),
+            ("-0042".into(), "integer"),
+            ("+7".into(), "integer"),
+            (" 3 ".into(), "integer"),
+            ("170141183460469231731687303715884105727".into(), "integer"),
+            ("-170141183460469231731687303715884105728".into(), "integer"),
+            ("170141183460469231731687303715884105728".into(), "integer"),
+            ("1.50".into(), "decimal"),
+            ("-0.0".into(), "decimal"),
+            ("30.0".into(), "decimal"),
+            (".5".into(), "decimal"),
+            ("-.5".into(), "decimal"),
+            ("5.".into(), "decimal"),
+            (big, "decimal"),
+            (tiny, "decimal"),
+            ("1E300".into(), "double"),
+            ("0E1".into(), "double"),
+            ("1.5e-7".into(), "double"),
+            ("-2.5E3".into(), "float"),
+            ("INF".into(), "double"),
+            ("-INF".into(), "double"),
+            ("NaN".into(), "double"),
+            ("abc".into(), "double"),
+            ("x".into(), "string"),
+            ("é".into(), "string"),
+        ];
+        let mut terms: Vec<Term> = lits
+            .into_iter()
+            .map(|(v, local)| Term::Lit(v, format!("{XSD}{local}"), None))
+            .collect();
+        terms.push(Term::Iri("http://ex/i".into()));
+        terms.push(Term::Blank("b".into()));
+        terms.push(Term::List(vec![]));
+        for t in &terms {
+            assert_eq!(concat_piece_len(t), concat_piece(t).map(|p| p.len()), "{t:?}");
+        }
+    }
+
+    /// GH #6901: a decimal's digits are read without joining them into a new string, with
+    /// exactly the result of parsing the joined text.
+    #[test]
+    fn joined_digits_read_as_the_joined_text_parses() {
+        let parts = [
+            ("", ""),
+            ("", "5"),
+            ("1", ""),
+            ("12", "34"),
+            ("-1", "5"),
+            ("+1", "5"),
+            ("-", "5"),
+            ("+", ""),
+            ("-", ""),
+            ("", "-5"),
+            ("1-", "5"),
+            ("--1", "5"),
+            ("+-1", "5"),
+            ("1_0", "5"),
+            (" 1", "5"),
+            ("0000000000000000000000000000000000000000000000", "0001"),
+            ("17014118346046923173168730371588410572", "7"),
+            ("17014118346046923173168730371588410572", "8"),
+            ("-17014118346046923173168730371588410572", "8"),
+            ("-17014118346046923173168730371588410572", "9"),
+            ("99999999999999999999999999999999999999999", "9"),
+            ("١", "2"),
+        ];
+        for (int, frac) in parts {
+            let want = format!("{int}{frac}").parse::<i128>().ok();
+            assert_eq!(super::joined_i128(int, frac), want, "{int:?} {frac:?}");
+        }
+    }
+
+    /// GH #6901: `time:inSeconds` reversed is sized from the epoch without formatting it.
+    #[test]
+    fn epoch_lengths_match_the_formatted_text() {
+        for secs in [0i64, 1, -1, 86_399, 86_400, 1_700_000_000, -62_135_596_800, -62_167_219_200, -1_000_000_000_000, 1_000_000_000_000, i64::MAX / 2, i64::MIN / 2] {
+            assert_eq!(super::epoch_len(secs), super::format_epoch(secs).len(), "{secs}");
+        }
+    }
+
+    /// GH #6771 review: the replacement size is counted, not built, and the count is what
+    /// `replace_all` writes, under every corner of the replacement syntax.
+    #[test]
+    fn replace_bytes_counts_what_replace_all_writes() {
+        let cases: &[(&str, &str, &str)] = &[
+            ("banana", "a", "[$0]"),
+            ("banana", "(a)(n)?", "$2$1$$"),
+            ("banana", "(?P<v>a)", "${v}-$v-${nope}-$nope"),
+            ("banana", "a", "$1a${1}b"),
+            ("banana", "a", "$"),
+            ("banana", "a", "x$"),
+            ("banana", "a", "${unclosed"),
+            ("banana", "a", "$-$ $."),
+            ("banana", "", "<>"),
+            ("ünïcödé", "[öé]", "$0$0"),
+            ("", "x*", "y"),
+        ];
+        for &(s, pattern, r) in cases {
+            let re = regex::Regex::new(pattern).expect("pattern");
+            let want = re.replace_all(s, r).len();
+            assert_eq!(super::replace_bytes(&re, s, r), want, "{s:?} {pattern:?} {r:?}");
+        }
+    }
+
+    /// GH #6771 review: for each functional builtin whose result `output_bytes` sizes (the
+    /// non-numeric ones; a numeric result is sized from its value, see
+    /// `numeral_lengths_match_the_rendered_literals`), the exact size equals the
+    /// [`bounded::term_bytes`] of the term the builtin actually derives, and the cheap bound
+    /// is at least it.
+    #[test]
+    fn each_sized_result_matches_the_term_the_builtin_derives() {
+        use super::{bounded, functional_builtin, output_bytes, FactIndex, Term};
+        const STRING: &str = "http://www.w3.org/2000/10/swap/string#";
+        const LIST: &str = "http://www.w3.org/2000/10/swap/list#";
+        const LOG: &str = "http://www.w3.org/2000/10/swap/log#";
+        const TIME: &str = "http://www.w3.org/2000/10/swap/time#";
+        // (builtin, subject): each subject is a first-class list or a single value.
+        let cases: &[(&str, &str, &str)] = &[
+            (STRING, "concatenation", r#"("aÉ" "b" <http://ex/i> true)"#),
+            (STRING, "format", r#"("%s and %s %%" "x" "yé")"#),
+            (STRING, "replace", r#"("banana" "(an)" "<$1$1>")"#),
+            (STRING, "lowerCase", r#""AÉ /#ẞ""#),
+            (STRING, "upperCase", r#""aé /#ß""#),
+            (STRING, "encodeForUri", r#""a É/#~(x)""#),
+            (STRING, "encodeForURI", r#""a É/#~(x)""#),
+            (STRING, "encodeForFragID", r#""a É/#~(x)""#),
+            (STRING, "scrape", r#"("key=value; rest" "=([a-z]+);")"#),
+            (LIST, "append", r#"(("a" "b") ("c") ())"#),
+            (LIST, "first", r#"("first" "second")"#),
+            (LIST, "last", r#"("first" "second")"#),
+            (LOG, "conjunction", r#"({ :s :p "a" } { :s :p "a". :s :q "b" })"#),
+            // GH #6901: no triples, so the result is the literal `true`, not a formula.
+            (LOG, "conjunction", "(true)"),
+            (LOG, "conjunction", "({} true {})"),
+            (LOG, "conjunction", "()"),
+            (STRING, "concatenation", r#"(1.50 -0042 "1E300"^^<http://www.w3.org/2001/XMLSchema#double> 0.000001 "x")"#),
+            (LOG, "langlit", r#"("chat" "fr")"#),
+            (TIME, "timeZone", r#""2024-03-15T10:30:45+05:30""#),
+            (TIME, "timeZone", r#""2024-03-15T10:30:45-11:00""#),
+        ];
+        for &(ns, name, subject) in cases {
+            let iri = format!("{ns}{name}");
+            let src = format!(
+                "@prefix : <http://ex/> .\n:in :v {subject} .\n\
+                 {{ :in :v ?s . ?s <{iri}> ?o }} => {{ :r :out ?o }} .\n"
+            );
+            let c = super::reason_n3_terms(&src, None).expect(name);
+            let input = &c.facts.iter().find(|t| t[1] == Term::Iri("http://ex/v".into())).expect("input")[2];
+            let args: Vec<Term> = match input {
+                Term::List(ms) => ms.clone(),
+                other => vec![other.clone()],
+            };
+            let out = c
+                .derived
+                .iter()
+                .find(|t| t[1] == Term::Iri("http://ex/out".into()))
+                .unwrap_or_else(|| panic!("{name}: no result"));
+            let actual = bounded::term_bytes(&out[2]);
+            let func = functional_builtin(&Term::Iri(iri.clone())).expect(name);
+            let (facts, pending) = (FactIndex::default(), bounded::Pending::default());
+            let bound = output_bytes(func, &args, &facts, &pending, false);
+            let exact = output_bytes(func, &args, &facts, &pending, true);
+            let _ = pending.finish(());
+            assert_eq!(exact, actual, "{name} {subject}: exact size vs the derived {:?}", out[2]);
+            assert!(bound >= actual, "{name} {subject}: bound {bound} < derived {actual}");
+        }
+    }
+
+    /// #6732: a document nested to the parser's limit is reasoned over on a 2 MiB stack
+    /// without overflowing: matching, instantiation, interning, serialization, proofs,
+    /// queries, and a `log:parsedAsN3` of the same document inside a rule.
+    #[test]
+    fn a_document_nested_to_the_parse_limit_reasons_on_a_small_stack() {
+        use super::parser::parse_surface_tests::{nested, on_small_stack, PRODUCTIONS};
+        let limit = super::bounded::parse_depth();
+        let rules = "{ ?s :p ?o } => { ?s :q ?o } .\n\
+            { :s :q ?o . :s :p ?o2 } => { :w :same ?o2 } .\n";
+        for production in PRODUCTIONS {
+            let results = on_small_stack(move || {
+                let doc = format!("{}{rules}", nested(production, limit));
+                let escaped = nested(production, limit)
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n");
+                let parsed_in_rule = format!(
+                    "@prefix : <http://ex/> .\n\
+                     @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     {{ \"{escaped}\" log:parsedAsN3 ?f . ?f log:includes {{ :s :p ?o }} }} \
+                     => {{ :r :got ?o }} .\n"
+                );
+                let derives = |src: &str, subject: &str| {
+                    super::reason_n3_terms(src, None).map(|c| {
+                        let subject = super::Term::Iri(format!("http://ex/{subject}"));
+                        c.derived.iter().any(|t| t[0] == subject)
+                    })
+                };
+                let terms = derives(&doc, "w");
+                let in_rule = derives(&parsed_in_rule, "r");
+                // These may refuse a term shape (e.g. a formula has no dictionary id);
+                // what matters is that they return.
+                let _ = super::reason_n3(&mut sparq_core::dict::Dict::new(), &doc);
+                let _ = super::reason_n3_proof(&mut sparq_core::dict::Dict::new(), &doc);
+                let _ = super::reason_n3_pass_all(&doc, super::RuleVars::N3);
+                let _ = super::reason_n3_query_terms(&doc, "{ :s :q ?o } => { :s :q ?o } .");
+                (terms, in_rule)
+            });
+            assert_eq!(results, (Ok(true), Ok(true)), "{production}");
+        }
+    }
+
+    /// The closure of `src` (with `resolver`) on a fresh run: its facts or error, and
+    /// the run's cut.
+    fn closure_and_cut(
+        src: &str,
+        resolver: Option<&Resolver>,
+    ) -> (Result<Vec<[Term; 3]>, String>, Option<&'static str>) {
+        let run = Truncation::top_level();
+        let r = reason_n3_terms_in(src, None, resolver, NegationCycles::Reject, &run);
+        (r.map(|c| c.facts), run.get())
+    }
+
+    /// The deepest nesting of `t`, counted in list, formula and quoted-triple levels.
+    fn depth_of(t: &Term) -> usize {
+        match t {
+            Term::List(ms) => 1 + ms.iter().map(depth_of).max().unwrap_or(0),
+            Term::Formula(ts) => 1 + ts.iter().flatten().map(depth_of).max().unwrap_or(0),
+            Term::Triple(tr) => 1 + tr.iter().map(depth_of).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    /// #6732: a rule that wraps a term in one more list each round deepens it without
+    /// end, and a chain of premise atoms deepens it within one firing. A generated term
+    /// past the term-depth limit is a cut and is dropped, so the closure ends (a negation
+    /// over it is refused), on a 2 MiB stack, and every entry point walks what it kept.
+    #[test]
+    fn rule_generated_nesting_stops_at_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let limit = super::bounded::term_depth();
+        let pre = "@prefix : <http://ex/> .\n\
+            @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
+        let round = format!("{pre}:s :p :z .\n{{ :s :p ?x }} => {{ :s :p (?x) }} .\n");
+        let wrap = 60;
+        let wide_wrap = format!(
+            "{pre}:s :p :z .\n{{ :s :p ?x }} => {{ :s :p {}?x{} }} .\n",
+            "(".repeat(wrap),
+            ")".repeat(wrap)
+        );
+        let chain: String = (0..5_000)
+            .map(|i| format!("((?y{i})) rdf:first ?y{} . ", i + 1))
+            .collect();
+        let firing = format!("{pre}:s :p :z .\n{{ :s :p ?y0 . {chain}}} => {{ :s :q ?y5000 }} .\n");
+        let negated = format!(
+            "{round}{{ :s :p ?x . ?scope log:notIncludes {{ :s :never ?x }} }} => {{ :s :ok ?x }} .\n"
+        );
+        let results = on_small_stack(move || {
+            let round_trip = closure_and_cut(&round, None);
+            let wide = closure_and_cut(&wide_wrap, None);
+            let firing = closure_and_cut(&firing, None);
+            let negated = closure_and_cut(&negated, None);
+            // The other entry points walk every kept term (interning, proofs,
+            // serialization, a query's projection) on the same stack.
+            let _ = super::reason_n3(&mut sparq_core::dict::Dict::new(), &round);
+            let _ = super::reason_n3_proof(&mut sparq_core::dict::Dict::new(), &round);
+            let _ = super::reason_n3_pass_all(&round, super::RuleVars::N3);
+            let _ = super::reason_n3_query_terms(&round, "{ :s :p ?o } => { :s :p ?o } .");
+            (round_trip, wide, firing, negated)
+        });
+        let (round_trip, wide, firing, negated) = results;
+        // One fact per depth up to the limit, each kept term within it, and a cut.
+        let (facts, cut) = round_trip;
+        let facts = facts.expect("the closure ends at the limit");
+        assert_eq!(facts.len(), limit + 1);
+        assert_eq!(facts.iter().flatten().map(depth_of).max(), Some(limit));
+        assert!(cut.is_some());
+        let (facts, cut) = wide;
+        let facts = facts.expect("the closure ends at the limit");
+        assert_eq!(facts.len(), limit / wrap + 1);
+        assert!(cut.is_some());
+        let (facts, cut) = firing;
+        let facts = facts.expect("the firing is dropped");
+        assert_eq!(facts.len(), 1);
+        assert!(cut.is_some());
+        let (refused, cut) = negated;
+        let e = refused.expect_err("a negation over the cut closure is refused");
+        assert!(e.contains("refused a negation"), "{e}");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a chain of distinct documents, each closing the next one's
+    /// `log:semantics` with `log:conclusion`, nests closures without bound, and the
+    /// import-cycle guard does not see it. Each level here closes the next from inside a
+    /// backward proof `steps` deep, after `scopes` nested store-scoped negations, next to
+    /// a fact nested 60 deep. Every level draws on the run's one stack allowance: on a
+    /// 2 MiB stack an endless chain is refused (or, when proof steps or scopes spend the
+    /// allowance first, cut), never a stack overflow; a short chain closes.
+    #[test]
+    fn nested_closures_share_the_runs_stack_allowance_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let doc = |i: usize, last: usize, steps: usize, scopes: usize| -> String {
+            if i == last {
+                return "<http://ex/end> <http://ex/is> <http://ex/reached> .".into();
+            }
+            let mut d = String::from(
+                "@prefix : <http://ex/> .\n\
+                 @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n",
+            );
+            d.push_str(&format!(":d :e {}:z{} .\n", "(".repeat(60), ")".repeat(60)));
+            for j in 0..steps {
+                d.push_str(&format!("{{ :a :p{j} :b }} <= {{ :a :p{} :b }} .\n", j + 1));
+            }
+            // An odd number of nested negations of a statement never asserted holds.
+            let negated = (0..scopes).fold(":q :never :q".to_string(), |inner, _| {
+                format!("?x log:notIncludes {{ {inner} }}")
+            });
+            let negated = if scopes == 0 {
+                String::new()
+            } else {
+                format!("{negated} . ")
+            };
+            d.push_str(&format!(
+                "{{ :a :p{steps} :b }} <= {{ {negated}<http://doc/{}> log:semantics ?f . \
+                 ?f log:conclusion ?c }} .\n",
+                i + 1
+            ));
+            d.push_str(&format!("{{ :a :p0 :b }} => {{ :s :p :o{i} }} .\n"));
+            d
+        };
+        // Whether the first document derived its fact, or the error; and the run's cut.
+        let run = move |last: usize, steps: usize, scopes: usize| {
+            on_small_stack(move || {
+                let resolver = move |iri: &str| {
+                    let n: usize = iri.strip_prefix("http://doc/")?.parse().ok()?;
+                    Some(doc(n, last, steps, scopes))
+                };
+                let top = doc(0, last, steps, scopes);
+                let (facts, cut) = closure_and_cut(&top, Some(&resolver));
+                let o0 = Term::Iri("http://ex/o0".into());
+                (facts.map(|f| f.iter().any(|t| t[2] == o0)), cut)
+            })
+        };
+        assert_eq!(run(3, 20, 0), (Ok(true), None), "a short chain closes");
+        assert_eq!(run(3, 0, 3), (Ok(true), None), "a short chain closes");
+        // Closures alone: refused when the allowance is spent.
+        let (refused, cut) = run(usize::MAX, 0, 0);
+        let e = refused.expect_err("an endless chain is refused");
+        assert!(e.contains("nested closures passed"), "{e}");
+        assert!(cut.is_some());
+        // Deep backward proofs at every level: the allowance is spent by proof steps,
+        // which is a cut (the levels above still close, over what was proved).
+        for (steps, scopes) in [(20, 0), (60, 0), (0, 31), (30, 31)] {
+            let (_, cut) = run(usize::MAX, steps, scopes);
+            assert!(cut.is_some(), "{steps} {scopes}");
+        }
+    }
+
+    /// #6732: matching a formula of many statements against another, or checking that
+    /// one includes them, takes no stack per statement: thousands of statements match
+    /// on a 2 MiB stack.
+    #[test]
+    fn wide_formulae_match_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let n = 20_000;
+        let body = ":a :b :c . ".repeat(n);
+        let rest = ":a :b :c . ".repeat(n - 1);
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             :s :p {{ {body} }} .\n\
+             :s :q {{ :a :b :c }} .\n\
+             {{ :s :p {{ :a :b ?v . {rest} }} }} => {{ :done :unified ?v }} .\n\
+             {{ :s :q ?f . ?f log:includes {{ {body} }} }} => {{ :done :included :true }} .\n"
+        );
+        let (facts, cut) = on_small_stack(move || closure_and_cut(&src, None));
+        let facts = facts.expect("closes");
+        let done = Term::Iri("http://ex/done".into());
+        let derived: Vec<&[Term; 3]> = facts.iter().filter(|t| t[0] == done).collect();
+        assert_eq!(derived.len(), 2, "{derived:?}");
+        assert_eq!(cut, None);
+    }
+
+    /// #6732: the containment search of a formula scope (`log:includes` over a quoted
+    /// formula) checks every binding it extends against the term-depth limit before
+    /// carrying it on, including the bindings virtual list access builds. A pattern
+    /// whose bindings would pass the limit is dropped as a cut, on a 2 MiB stack, and
+    /// the run ends.
+    #[test]
+    fn formula_containment_bindings_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let wrap = 60;
+        let n = 200;
+        let pattern: String = (0..n)
+            .map(|i| {
+                format!(
+                    "{}?y{i}{} rdf:first ?y{} . ",
+                    "(".repeat(wrap),
+                    ")".repeat(wrap),
+                    i + 1
+                )
+            })
+            .collect();
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n\
+             :s :p :z .\n\
+             {{ {{ :a :b :c }} log:includes {{ {pattern}}} }} => {{ :s :q ?y{n} }} .\n"
+        );
+        let (facts, cut) = on_small_stack(move || {
+            let (facts, cut) = closure_and_cut(&src, None);
+            (facts.map(|f| f.len()), cut)
+        });
+        assert_eq!(facts, Ok(1), "only the asserted fact is kept");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a backward proof step checks its instantiated goal and the substitution it
+    /// carries into the rule's premise against the term-depth limit before it evaluates
+    /// that premise. A step past the limit is dropped as a cut, on a 2 MiB stack, and
+    /// the run ends.
+    #[test]
+    fn backward_goals_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let wrap = 60;
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             :a :s :b .\n\
+             {{ ?x :r ?y }} <= {{ {}?x{} :r ?y }} .\n\
+             {{ :a :s ?b . :a :r ?y }} => {{ :a :q ?y }} .\n",
+            "(".repeat(wrap),
+            ")".repeat(wrap)
+        );
+        let (facts, cut) = on_small_stack(move || {
+            let (facts, cut) = closure_and_cut(&src, None);
+            (facts.map(|f| f.len()), cut)
+        });
+        assert_eq!(facts, Ok(1), "only the asserted fact is kept");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a nested closure (`log:supports`, `log:conclusion`) checks the statements
+    /// it is handed against the term-depth limit before it admits them as facts and
+    /// rules. A formula past the limit is not closed: the refusal is a cut, on a 2 MiB
+    /// stack, and only the formula's own statements are read.
+    #[test]
+    fn nested_closure_inputs_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let limit = super::bounded::term_depth();
+        let (outer, inner) = (limit / 2 - 4, limit / 2 - 4);
+        let wrapped = |w: usize, x: &str| format!("{}{x}{}", "(".repeat(w), ")".repeat(w));
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             :s :p {} .\n\
+             {{ :s :p ?x }} => {{ :s :p2 {} }} .\n\
+             {{ :s :p2 ?y . {{ :t :r {} . {{ :t :r ?z }} => {{ :u :v :w }} }} log:supports {{ :u :v :w }} }} \
+             => {{ :s :ok :yes }} .\n",
+            wrapped(outer, ":z"),
+            wrapped(inner, "?x"),
+            wrapped(limit - outer - inner + 1, "?y"),
+        );
+        let (facts, cut) = on_small_stack(move || closure_and_cut(&src, None));
+        let facts = facts.expect("closes");
+        let ok = [
+            Term::Iri("http://ex/s".into()),
+            Term::Iri("http://ex/ok".into()),
+            Term::Iri("http://ex/yes".into()),
+        ];
+        assert!(!facts.contains(&ok), "the formula is not closed");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a top-level run keeps terms as deep as the deepest term it was handed, an
+    /// empty innermost list or formula counted as a level of its own, so a rule copying
+    /// such a term is not cut.
+    #[test]
+    fn a_rule_copies_given_terms_ending_in_an_empty_container_uncut() {
+        let limit = super::bounded::term_depth();
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let outcomes: Vec<(&str, Option<&str>, bool)> = [
+            ("empty list", Term::List(Vec::new())),
+            ("empty formula", Term::Formula(Vec::new())),
+        ]
+        .into_iter()
+        .map(|(kind, innermost)| {
+            let mut deep = innermost;
+            for _ in 0..limit {
+                deep = Term::List(vec![deep]);
+            }
+            assert_eq!(depth_of(&deep), limit + 1);
+            let run = Truncation::top_level();
+            let rules = "{ <http://ex/s> <http://ex/p> ?x } => { <http://ex/s> <http://ex/q> ?x } .";
+            let parsed = super::bounded::parse_n3(rules, "", &run).expect("parses");
+            let docs = super::RuntimeDocs::for_sources(&[&parsed]);
+            let closure = super::reason_n3_terms_with_facts(
+                rules,
+                [[iri("s"), iri("p"), deep.clone()]],
+                NegationCycles::Reject,
+                &run,
+                &docs,
+            )
+            .expect("closes");
+            (
+                kind,
+                run.get(),
+                closure.facts.contains(&[iri("s"), iri("q"), deep]),
+            )
+        })
+        .collect();
+        // Each copy is kept, and nothing is cut.
+        assert_eq!(
+            outcomes,
+            [("empty list", None, true), ("empty formula", None, true)]
+        );
+    }
+
     /// Every registry entry's declared store read, walked over the whole registry
     /// (`ALL` is generated with each enum, so a new variant joins this walk) and checked
     /// against the expected table below. A new builtin fails here until the table says
@@ -4972,6 +7073,7 @@ mod tests {
             &truncated,
             StepMode::None,
             NegationCycles::Reject,
+            None,
         );
         truncated.get()
     }
@@ -4982,7 +7084,7 @@ mod tests {
     #[test]
     fn every_limit_records_a_cut_on_the_run_including_nested_closures() {
         std::thread::Builder::new()
-            .stack_size(256 << 20)
+            .stack_size(2 << 20)
             .spawn(every_limit_records_a_cut)
             .expect("spawn")
             .join()
@@ -6519,7 +8621,7 @@ mod tests {
 mod substrate_seam_differential {
     /// The value of [`eval_exact`], settled into a throwaway sink.
     fn exact_value(f: Func, args: &[Term]) -> Option<Term> {
-        super::bounded::settle(&std::cell::Cell::new(false), eval_exact(f, args))
+        super::bounded::settle(&std::cell::Cell::new(false), eval_exact(f, args)).map(super::numval_term)
     }
 
     /// Whether [`eval_exact`] marks a cut.
@@ -6858,5 +8960,69 @@ mod substrate_seam_differential {
             exact_value(Func::Negation, &[plain(&big.to_string())]),
             Some(lit(&(-big).to_string(), XSD_INT))
         );
+    }
+}
+
+#[cfg(test)]
+mod runtime_docs_table {
+    /// A run that parses more distinct documents at run time than its table may hold fails
+    /// with the runtime-document error and records it as a cut; with room it closes.
+    #[test]
+    fn a_run_past_the_runtime_document_table_fails_closed() {
+        let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   <http://ex/a> <http://ex/t> \"_:x <http://ex/p> 1 .\" .\n\
+                   <http://ex/b> <http://ex/t> \"_:x <http://ex/p> 2 .\" .\n\
+                   { ?d <http://ex/t> ?t . ?t log:parsedAsN3 ?f . \
+                     ?f log:includes { ?s <http://ex/p> ?n } } => { ?d <http://ex/n> ?n } .";
+        let run = |room: usize| {
+            let _room = super::bounded::RuntimeDocsOverride::set(room);
+            let limits = super::ClosureLimits::default();
+            super::reason_n3_terms_with_limits(src, None, None, Default::default(), limits)
+        };
+        assert_eq!(run(2).expect("closes").derived.len(), 2);
+        let Err(e) = run(1) else { panic!("a second document was taken by a table of one") };
+        assert!(e.contains("runtime-document limit exceeded"), "{e}");
+    }
+
+    /// Standardizing a runtime document's blanks apart lengthens each label, and that
+    /// growth is charged before any label is rewritten: a document that fits
+    /// `max_term_bytes` as parsed but not once prefixed is refused, and one whose
+    /// standardized formula is exactly the limit is kept.
+    #[test]
+    fn the_growth_of_standardized_blank_labels_is_charged_before_the_rewrite() {
+        let text: String = (0..64).map(|i| format!("_:a{i} <http://ex/p> _:b{i} . ")).collect();
+        let src = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             <http://ex/a> <http://ex/t> \"{text}\" .\n\
+             {{ <http://ex/a> <http://ex/t> ?t . ?t log:parsedAsN3 ?f }} => \
+             {{ <http://ex/a> <http://ex/out> ?f }} ."
+        );
+        let run = |max_term_bytes: usize| {
+            let limits = super::ClosureLimits { max_term_bytes, ..Default::default() };
+            super::reason_n3_terms_with_limits(&src, None, None, Default::default(), limits)
+        };
+        let closure = run(super::ClosureLimits::default().max_term_bytes).expect("closes");
+        let [d] = closure.derived.as_slice() else { panic!("{:?}", closure.derived) };
+        let super::Term::Formula(ts) = &d[2] else { panic!("{d:?}") };
+        let standardized = super::bounded::term_bytes(&d[2]);
+        let labels: Vec<&str> = ts
+            .iter()
+            .flatten()
+            .filter_map(|t| match t {
+                super::Term::Blank(l) => Some(l.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels.len(), 128);
+        let prefix = labels[0].len() - "a0".len();
+        assert!(labels[0].starts_with("__rp") && labels[0].ends_with("_a0"), "{}", labels[0]);
+        let parsed = standardized - labels.len() * prefix;
+        // Fits as parsed, not once standardized: refused, naming the builtin.
+        let Err(e) = run(standardized - 1) else { panic!("kept a formula past the limit") };
+        assert!(e.contains("max_term_bytes") && e.contains("ParsedAsN3"), "{e}");
+        assert!(parsed < standardized);
+        // Exactly the standardized size: kept, the same formula.
+        let at = run(standardized).expect("a formula at the limit is kept");
+        assert_eq!(at.derived, closure.derived);
     }
 }

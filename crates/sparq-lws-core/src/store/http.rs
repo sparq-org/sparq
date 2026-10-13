@@ -82,19 +82,21 @@ const CT_SPARQL_UPDATE: &str = "application/sparql-update";
 const ACCEPT_RESULTS_JSON: &str = "application/sparql-results+json";
 const ACCEPT_NTRIPLES: &str = "application/n-triples";
 
-/// A process-unique nonce for the race-resistant create marker: a monotonic counter combined with
-/// the boot-time nanos, so two `create_child`s (even same-IRI) get distinct markers and the success
-/// confirm is operation-scoped. Not security-sensitive (it gates no auth) — only uniqueness matters.
-fn next_nonce() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("op-{nanos:x}-{n:x}")
+/// A unique nonce for one write: the race-resistant create and delete markers, and the fence of a
+/// write that may still commit ([`sparql::update_fence`]). Fences share one graph across every
+/// resource and every client process, and stay, so a nonce must not repeat across processes or
+/// their restarts: it is 128 bits from the OS RNG. When that is unavailable, the write fails
+/// closed (as `CompositeStore::mint_blob_key` does) rather than use a nonce that could collide
+/// and let one write's fence suppress another's.
+fn next_nonce() -> Result<String, SparqError> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|e| SparqError::Backend(format!("fatal: OS RNG unavailable for a nonce: {e}")))?;
+    Ok(bytes.iter().fold(String::from("op-"), |mut acc, b| {
+        use std::fmt::Write as _;
+        let _ = write!(acc, "{b:02x}");
+        acc
+    }))
 }
 
 /// A typed SPARQ-over-HTTP error, carrying whether the failure is worth retrying.
@@ -142,6 +144,23 @@ impl SparqHttpError {
             SparqHttpError::Transport(_)
                 | SparqHttpError::Timeout(_)
                 | SparqHttpError::ServerStatus { .. }
+        )
+    }
+
+    /// Whether an UPDATE that failed this way may still commit after the client has answered:
+    /// its outcome is not known. A timeout or a transport failure can leave the request in a
+    /// socket or queued on the server (the client gives up; `sparq-server` does not stop an update
+    /// it has received), a `5xx` can be `sparq-server`'s own wait elapsing while its writer goes on
+    /// (`503`), and an unreadable `2xx` body follows a commit. Only a refusal (`4xx`, `501`), or a
+    /// request never built, is final.
+    pub fn may_commit_later(&self) -> bool {
+        matches!(
+            self,
+            SparqHttpError::Transport(_)
+                | SparqHttpError::Timeout(_)
+                | SparqHttpError::ServerStatus { .. }
+                | SparqHttpError::Body
+                | SparqHttpError::TooLarge
         )
     }
 
@@ -289,6 +308,35 @@ impl HttpSparqClient {
             .map_err(|e| SparqHttpError::Build(e.to_string()))?;
         let _ = self.send(req).await?;
         Ok(())
+    }
+
+    /// Send the fenced update `u` (tagged `nonce`, see [`sparql::update_create_child_fenced`]):
+    /// `Ok(false)` when it was applied, `Ok(true)` when it failed but may still commit and has
+    /// now been fenced ([`sparql::update_fence`]), so its outcome is final and a read tells it.
+    /// When the fence fails too, the outcome is not known: [`SparqError::Unsettled`], with what
+    /// settles it later.
+    async fn update_fenced(
+        &self,
+        u: &str,
+        nonce: &str,
+        touches: &[&str],
+    ) -> Result<bool, SparqError> {
+        match self.update_raw(u).await {
+            Ok(()) => Ok(false),
+            Err(e) if e.may_commit_later() => {
+                match self.update_raw(&sparql::update_fence(nonce)).await {
+                    Ok(()) => Ok(true),
+                    Err(fence) => Err(SparqError::Unsettled {
+                        detail: format!("{e}; fencing it failed: {fence}"),
+                        fence: super::sparq::Fence::new(
+                            nonce,
+                            touches.iter().map(|t| t.to_string()).collect(),
+                        ),
+                    }),
+                }
+            }
+            Err(e) => Err(e.into_sparq()),
+        }
     }
 
     /// Send a request under the timeout, classify the status, and read the bounded body. Returns the
@@ -494,7 +542,7 @@ impl SparqClient for HttpSparqClient {
         // A per-operation nonce so the success confirm is RACE-RESISTANT — no concurrent op writes or
         // removes THIS delete marker, so a containment mutation between the update and the confirm
         // cannot flip the result (the same pattern as the create-marker).
-        let nonce = next_nonce();
+        let nonce = next_nonce()?;
 
         // ONE SPARQL 1.1 `DELETE { } INSERT { } WHERE { }` modify: its WHERE (container-EXISTS AND
         // `ldp:contains`-empty) is evaluated ONCE pre-modification, then the multi-graph DELETE (the
@@ -504,10 +552,12 @@ impl SparqClient for HttpSparqClient {
         // (the safety invariant). Folding the parent-edge detach in here (rather than a separate later
         // `remove_child`) closes the window where a concurrent POST recreates the child and a stale
         // detach orphans it.
-        let u = sparql::update_delete_container_if_empty(iri, parent, &nonce)?;
-        self.update_raw(&u)
-            .await
-            .map_err(SparqHttpError::into_sparq)?;
+        //
+        // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
+        // the ASKs below read is final.
+        let u = sparql::update_delete_container_if_empty_fenced(iri, parent, &nonce)?;
+        let touches: Vec<&str> = std::iter::once(iri).chain(parent).collect();
+        let fenced = self.update_fenced(&u, &nonce, &touches).await?;
 
         // Disambiguate the outcome with bounded follow-up ASKs (the protocol can't return rows from an
         // UPDATE; documented). FIRST: did the guard match (⇒ the delete ran)? ASK for OUR marker — a
@@ -528,10 +578,14 @@ impl SparqClient for HttpSparqClient {
             .query_raw(&exists_q, ACCEPT_RESULTS_JSON)
             .await
             .map_err(SparqHttpError::into_sparq)?;
-        if parse_ask_json(&body).map_err(SparqHttpError::into_sparq)? {
-            Ok(DeleteOutcome::NotEmpty)
-        } else {
-            Ok(DeleteOutcome::NotFound)
+        match parse_ask_json(&body).map_err(SparqHttpError::into_sparq)? {
+            // A fenced delete that did not run may have been fenced before it ran, not refused
+            // for members: what is known is only that it did not run (and never will).
+            true if fenced => Err(SparqError::Backend(
+                "fatal: the delete failed and did not run".into(),
+            )),
+            true => Ok(DeleteOutcome::NotEmpty),
+            false => Ok(DeleteOutcome::NotFound),
         }
     }
 
@@ -545,13 +599,16 @@ impl SparqClient for HttpSparqClient {
         // confirm is RACE-RESISTANT: no concurrent remove_child / sibling create ever touches this
         // marker, so a containment-edge mutation between the update and the confirm cannot flip the
         // result (the round-4 finding — confirming on the mutable containment edge was racy).
-        let nonce = next_nonce();
+        let nonce = next_nonce()?;
 
         // ONE atomic update: DELETE any stale child record + marker, INSERT the child record + the
         // containment edge + THIS operation's marker, guarded by the container-record EXISTS in the
         // WHERE clause. A missing container ⇒ the WHERE yields nothing ⇒ nothing inserted.
         let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
-        let u = sparql::update_create_child(
+        //
+        // An update that fails but may still commit is fenced ([`Self::update_fenced`]), so what
+        // the ASK below reads is final.
+        let u = sparql::update_create_child_fenced(
             container,
             child,
             &meta.content_type,
@@ -560,9 +617,7 @@ impl SparqClient for HttpSparqClient {
             modified.as_deref(),
             &nonce,
         )?;
-        self.update_raw(&u)
-            .await
-            .map_err(SparqHttpError::into_sparq)?;
+        let fenced = self.update_fenced(&u, &nonce, &[container, child]).await?;
 
         // CONFIRM the guard matched by ASKing for OUR marker (not the shared containment edge):
         // the marker is present iff the guarded INSERT ran (container existed) AND no later op removed
@@ -576,9 +631,21 @@ impl SparqClient for HttpSparqClient {
         let created = parse_ask_json(&body).map_err(SparqHttpError::into_sparq)?;
         if created {
             Ok(())
+        } else if fenced {
+            // Fenced before it ran, or refused for a missing container: it did not commit, and
+            // never will.
+            Err(SparqError::Backend(
+                "fatal: the create failed and did not commit".into(),
+            ))
         } else {
             Err(SparqError::NotFound)
         }
+    }
+
+    async fn fence(&self, fence: &super::sparq::Fence) -> Result<(), SparqError> {
+        self.update_raw(&sparql::update_fence(fence.nonce()))
+            .await
+            .map_err(SparqHttpError::into_sparq)
     }
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
@@ -817,6 +884,23 @@ mod tests {
         assert!(!SparqHttpError::Body.is_retryable());
         assert!(!SparqHttpError::TooLarge.is_retryable());
         assert!(!SparqHttpError::Build("x".into()).is_retryable());
+    }
+
+    /// Issue #6836: an update that timed out (or whose connection failed, or that
+    /// `sparq-server` answered `503` when its own wait elapsed) may still commit; only a refusal
+    /// is final.
+    #[test]
+    fn an_update_that_may_still_commit_is_told_from_a_refused_one() {
+        assert!(SparqHttpError::Timeout(Duration::from_secs(1)).may_commit_later());
+        assert!(SparqHttpError::Transport("reset".into()).may_commit_later());
+        assert!(SparqHttpError::ServerStatus { status: 503 }.may_commit_later());
+        assert!(SparqHttpError::ServerStatus { status: 500 }.may_commit_later());
+        assert!(SparqHttpError::Body.may_commit_later());
+        assert!(SparqHttpError::TooLarge.may_commit_later());
+        assert!(!SparqHttpError::ClientStatus { status: 400 }.may_commit_later());
+        assert!(!SparqHttpError::ClientStatus { status: 501 }.may_commit_later());
+        assert!(!SparqHttpError::Build("x".into()).may_commit_later());
+        assert!(!SparqHttpError::Malformed("x".into()).may_commit_later());
     }
 
     #[test]

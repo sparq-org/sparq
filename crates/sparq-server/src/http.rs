@@ -4543,17 +4543,7 @@ fn shacl_report_to_json(report: &sparq_shacl::ValidationReport) -> String {
 
     fn push_str_lit(out: &mut String, s: &str) {
         out.push('"');
-        for c in s.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-                c => out.push(c),
-            }
-        }
+        sparq_core::json::escape_into(out, s);
         out.push('"');
     }
     fn push_field(out: &mut String, key: &str, val: Option<&str>) {
@@ -9599,45 +9589,7 @@ fn rewrite_update(update: &str, over: &UsingOverride) -> Result<String, Response
 
 /// Decodes a single `application/x-www-form-urlencoded` component (`+` → space, `%XX`).
 fn form_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 2 < bytes.len() => {
-                let hi = hex_val(bytes[i + 1]);
-                let lo = hex_val(bytes[i + 2]);
-                match (hi, lo) {
-                    (Some(h), Some(l)) => {
-                        out.push((h << 4) | l);
-                        i += 3;
-                    }
-                    _ => {
-                        out.push(b'%');
-                        i += 1;
-                    }
-                }
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    sparq_core::percent::decode(s, true)
 }
 
 fn content_type(headers: &HeaderMap) -> String {
@@ -9831,17 +9783,7 @@ fn chunked_response(
 pub(crate) fn json_error(status: StatusCode, msg: &str) -> Response {
     let mut body = String::with_capacity(msg.len() + 16);
     body.push_str("{\"error\":\"");
-    for c in msg.chars() {
-        match c {
-            '"' => body.push_str("\\\""),
-            '\\' => body.push_str("\\\\"),
-            '\n' => body.push_str("\\n"),
-            '\r' => body.push_str("\\r"),
-            '\t' => body.push_str("\\t"),
-            c if (c as u32) < 0x20 => body.push_str(&format!("\\u{:04x}", c as u32)),
-            c => body.push(c),
-        }
-    }
+    sparq_core::json::escape_into(&mut body, msg);
     body.push_str("\"}");
     Response::builder()
         .status(status)

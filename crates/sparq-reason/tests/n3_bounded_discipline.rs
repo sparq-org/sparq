@@ -324,3 +324,42 @@ fn n3_parses_go_through_the_bounded_helper() {
         hits.join("\n")
     );
 }
+
+/// GH #6771: a substitution under a rule's bindings can copy a bound term many times
+/// (`( ?s ?s … )`), so it must be sized before it is built. The ONLY substitution is
+/// `bounded::substitute` / `bounded::substitute_deep`, which size a compound term from the
+/// borrowed terms and refuse it past the run's term-size limit; the raw `apply` /
+/// `apply_deep` are private to `src/n3/bounded.rs`. This fails if any other crate source
+/// (outside its test modules) defines or calls a raw substitution, so the class of
+/// allocate-then-check bugs cannot reopen at a new call site.
+#[test]
+fn substitution_goes_through_the_bounded_module() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let raw = Regex::new(r"(^|[^\w.:])apply(_deep)?\s*\(").expect("raw-substitution pattern");
+    let mut hits = Vec::new();
+    let mut scanned = 0;
+    for path in src_files(root) {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        if rel == "src/n3/bounded.rs" {
+            continue;
+        }
+        scanned += 1;
+        let src = std::fs::read_to_string(&path).expect("read");
+        for (n, code, _) in code_lines(&src) {
+            if raw.is_match(&code) {
+                hits.push(format!("{rel}:{n}: {}", code.trim()));
+            }
+        }
+    }
+    assert!(scanned > 10, "scanned only {scanned} files");
+    assert!(
+        hits.is_empty(),
+        "raw substitution outside n3/bounded.rs (use `bounded::substitute` / \
+         `bounded::substitute_deep`, which size the term before building it):\n{}",
+        hits.join("\n")
+    );
+}

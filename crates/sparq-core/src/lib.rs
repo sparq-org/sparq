@@ -3,8 +3,11 @@
 // block. Mechanically enforces the per-site argument the unsafe-register documents.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
+pub mod baseenc;
+pub mod civil;
 pub mod compress;
 pub mod dict;
+pub mod hex;
 #[cfg(feature = "dict-spill")]
 pub mod dictspill;
 // [SONNET-4.6] sq-96hp1 (survey §A2 / research/data-structures.md §B1): the OPT-IN Elias-Fano
@@ -22,7 +25,10 @@ pub mod extsort;
 // N-Triples / N-Quads loader validates each IRI through it (fast path, oxiri-equivalent).
 #[cfg(feature = "iri-fast")]
 pub mod iri;
+pub mod json;
+pub mod net;
 mod nt;
+pub mod percent;
 // [OPUS-4.8] sq-jocpn: the opt-in native byte-level Turtle parser. OFF by default (it names
 // `oxiri` as a dep for byte-identical base resolution) so the lean default / wasm build never
 // links it and the incumbent oxttl Turtle path stays shipped until this drop-in is A/B-validated.
@@ -2354,6 +2360,8 @@ impl Graph {
             finalize.join().map_err(|_| "dict-finalize thread panicked".to_string())??;
             Ok(())
         })?;
+        // memmap2's non-unix stub has no Drop impl; on unix this unmaps the input.
+        #[allow(clippy::drop_non_drop)]
         drop(map);
         #[cfg(all(feature = "mmap", feature = "parallel"))]
         if build_timing::enabled() {
@@ -4939,7 +4947,10 @@ fn compress_perm_file_in_place(path: &std::path::Path) -> Result<(), String> {
         w.push(row).map_err(|e| e.to_string())?;
     }
     w.finish(&tmp).map_err(|e| e.to_string())?;
-    drop(map); // release the raw mapping before replacing the file underneath it
+    // Release the raw mapping before replacing the file underneath it (memmap2's
+    // non-unix stub has no Drop impl, hence the allow).
+    #[allow(clippy::drop_non_drop)]
+    drop(map);
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     Ok(())
 }
