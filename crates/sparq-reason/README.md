@@ -52,30 +52,7 @@ let g = Graph::from_parts(dict, triples);
   EYE-specific edges (quotient scale/type rule, divisor-sign remainder, integer-quotient,
   exponentiation, floor/ceiling rendering, `i128` tier) stay in a thin adapter — closures
   byte-identical (`sq-pbz04.5.1`). `reason_n3_pass_all` = EYE `--pass-all`/`-ground` (closure **plus rules**, `sq-xqchl.2`);
-  `reason_n3_query` = `--query` (`sq-xqchl.1`): a query rule evaluated over the closure by the chainer's OWN matcher — builtins/formulae/lists work there too.
-  Every forward closure is bounded by `ClosureLimits`: rounds, facts, and `max_term_bytes`
-  per derived term (default 16 MiB, GH #6771). Every term the text engine would build is
-  sized before it is built, and past a limit the call returns `Err("n3: forward closure limit
-  exceeded …")` instead of exhausting memory. Sized terms include substitutions under
-  bindings, builtin arguments and results, `log:collectAllIn` lists, `log:conclusion`
-  formulas, and `log:parsedAsN3` / `log:semantics` formulas (charged as they are parsed, and
-  sized again once the parse returns).
-  Substitution is sized because the raw substitution functions are private to `n3/bounded.rs`;
-  the guard test is a lexical tripwire, not the guarantee.
-  **Not bounded:**
-  - parser input size: the document's own parse is not charged; a `log:parsedAsN3` /
-    `log:semantics` parse allocates a literal or IRI before charging it, and charges a quoted
-    formula copied into each statement of a `;` / `,` list as one node;
-  - total memory: many distinct terms each just under the limit are bounded only by
-    `max_facts`;
-  - `log:content` text, which the caller's resolver supplies;
-  - the incremental counting engine behind `MaterializedN3Graph` (GH #6854);
-  - `compiled-rules` (GH #6855).
-
-  One over-refusal is deliberate: `log:conjunction` over many copies of one large formula is
-  refused when its argument list passes the limit, even if the merged result would fit.
-  `ClosureLimits` is `#[non_exhaustive]`: build it from `ClosureLimits::default()` and set
-  fields.
+  `reason_n3_query` = `--query` (`sq-xqchl.1`): a query rule evaluated over the closure by the chainer's OWN matcher — builtins/formulae/lists work there too. Every forward closure is bounded by `ClosureLimits` (GH #6771); what is sized and what is not: [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md).
 - **RIF-Core** (opt-in `rif-core`) — W3C RIF **Core** dialect (monotone Horn subset of
   RIF-BLD/PRD) as `rif::Document` over the N3 chainer. Atoms: frame/membership/subclass
   plus numeric/string/list builtins. **Range-restriction safety enforced** (unsafe rules
