@@ -393,9 +393,9 @@ pub(crate) fn render_term(t: &Term) -> Result<String, RenderError> {
 }
 
 /// Serialise `l` with escapes that SPARQL's code-point preprocessing leaves alone: the lexical
-/// form uses only `ECHAR` escapes (other characters are written as they are), and a value an
-/// endpoint would read as holding a `\u`/`\U` escape before parsing (a `\` followed by `u` or
-/// `U`) is `None`, as is a datatype IRI that is not an `IRIREF`.
+/// form uses only `ECHAR` escapes (other characters are written as they are), and a value whose
+/// rendering holds a complete `\u`/`\U` code-point escape, which an endpoint would expand
+/// before parsing, is `None`, as is a datatype IRI that is not an `IRIREF`.
 fn render_literal(l: &oxrdf::Literal) -> Option<String> {
     let mut out = String::with_capacity(l.value().len() + 2);
     out.push('"');
@@ -412,7 +412,7 @@ fn render_literal(l: &oxrdf::Literal) -> Option<String> {
         }
     }
     out.push('"');
-    if out.contains("\\u") || out.contains("\\U") {
+    if has_code_point_escape(&out) {
         return None;
     }
     if let Some(lang) = l.language() {
@@ -429,6 +429,20 @@ fn render_literal(l: &oxrdf::Literal) -> Option<String> {
         out.push_str(&format!("^^<{dt}>"));
     }
     Some(out)
+}
+
+/// Whether `text` holds a complete SPARQL code-point escape (`\u` and four hex digits, or
+/// `\U` and eight), which an endpoint expands before parsing.
+fn has_code_point_escape(text: &str) -> bool {
+    let b = text.as_bytes();
+    (0..b.len()).any(|i| {
+        let width = match (b[i], b.get(i + 1)) {
+            (b'\\', Some(b'u')) => 4,
+            (b'\\', Some(b'U')) => 8,
+            _ => return false,
+        };
+        b.get(i + 2..i + 2 + width).is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit))
+    })
 }
 
 /// Parse `lit` as exactly one SPARQL literal, in any of SPARQL's literal forms (short or long
@@ -842,6 +856,8 @@ mod tests {
             "\\x \\\\ u U",
             "x\"\"\"\\\"",
             "é \u{1F600}",
+            // Escape-like text that is not a complete code-point escape is left alone.
+            "\\u12 \\uZZZZ \\U0041 \\u",
         ];
         for value in cases {
             let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(value.into()));
