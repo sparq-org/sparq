@@ -93,7 +93,7 @@ pub use sparq_engine_service::service::{allowlist_entry_host_matches, allowlist_
 // The SERVICE egress address classification and SRJ term decoder, shared with
 // `sparq-fedclient` so its guard and results reader cannot drift from the engine's.
 #[cfg(feature = "service")]
-pub use sparq_engine_service::service::{is_forbidden_ip, srj_term};
+pub use sparq_engine_service::service::{is_forbidden_ip, parse_srj_into, srj_term, RowSink};
 // Bind-join (VALUES pushdown) block-size knob — the only OPT-IN tunable for the
 // SERVICE bound-join pushdown (on-by-default, correctness-preserving). [OPUS-4.8] (sq-sjkj)
 #[cfg(feature = "service")]

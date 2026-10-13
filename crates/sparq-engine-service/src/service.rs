@@ -618,7 +618,7 @@ pub fn pushable_term(t: &Term) -> bool {
 /// document buffers raw binding objects until `head` arrives, and duplicate top-level
 /// keys (malformed JSON) resolve in document order rather than DOM check order.
 #[cfg(feature = "service")]
-pub(crate) fn parse_srj_into<F: RowSink>(
+pub fn parse_srj_into<F: RowSink>(
     text: &str,
     on_row: &mut F,
 ) -> Result<Vec<Variable>, String> {
