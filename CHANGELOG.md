@@ -13,6 +13,9 @@ First release with the `sparq-rdf` PyPI wheels (the v0.1.5 wheel builds failed; 
 packages were published). Publication is not implied by this entry; verify the tagged run
 and every registry and release artifact.
 
+The entries for #6869 and #6897 were added after the v0.1.6 tag; both changes are in the
+tagged release, but the copy of this file at the tag does not list them.
+
 ### Added
 
 - **sparq-lws-core:** the type index and `QUERY` type search, paged, listed in the storage
@@ -102,6 +105,12 @@ and every registry and release artifact.
   refused instead of overflowing the stack. (#6835)
 - **sparq-reason:** base-graph blank nodes stay distinct from blank labels the N3 parser
   allocates. (#6779)
+- **sparq-reason:** the N3 evaluator bounds its stack use on untrusted input. Terms built past
+  128 levels are dropped as cuts, nested closures and proof steps share one stack allowance
+  per run, and a run with cuts refuses a later negation or aggregation instead of reading
+  missing facts. (#6869)
+- **sparq-fedclient:** the ASK reachability probe keeps an endpoint's existing query string
+  and replaces only its `query` parameter. (#6897)
 - **LWS:** a type-search filter too long to page is refused as too complex (422). (#6889)
 - **sparq-shacl:** `LATERAL` blocks are covered by the SHACL-SPARQL pre-binding checks and the
   `VALUES` push-down. (#6846)
