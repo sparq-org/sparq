@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **sparq-fedclient:** pushed-down SPARQL renders every pattern position strictly as one
+  SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
+  report `InterpError::Render`, and `push_group` returns `None` for a pattern holding a
+  variable name that is not a SPARQL `VARNAME`, an IRI with a character `IRIREF` forbids, or a
+  `"`-prefixed literal that is not exactly one SPARQL literal. Pre-rendered literals are
+  re-serialised with canonical escaping. (#6877)
 ### Fixed
 
 - **sparq-solid / sparq-prov (date stamps):** epoch seconds before 0000-03-01 now format to the

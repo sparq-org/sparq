@@ -114,6 +114,9 @@ pub enum InterpError {
     /// multi-source leaf out as a per-source UNION use [`materialize_multi_source`] /
     /// [`stream_multi_source`] (bead `sq-7yf0`), which never returns this variant.
     MultiSource { pattern: usize, sources: usize },
+    /// A leaf pattern could not be written as SPARQL, so it was not sent (see
+    /// [`crate::planner::RenderError`]).
+    Render(crate::planner::RenderError),
 }
 
 impl std::fmt::Display for InterpError {
@@ -128,6 +131,7 @@ impl std::fmt::Display for InterpError {
                  interpreter answers one source per leaf (multi-source UNION is Phase 5)",
                 pattern, sources
             ),
+            InterpError::Render(e) => write!(f, "interpreter: pattern not sent: {}", e),
         }
     }
 }
@@ -137,6 +141,12 @@ impl std::error::Error for InterpError {}
 impl From<crate::planner::ResolveError> for InterpError {
     fn from(e: crate::planner::ResolveError) -> Self {
         InterpError::Resolve(e)
+    }
+}
+
+impl From<crate::planner::RenderError> for InterpError {
+    fn from(e: crate::planner::RenderError) -> Self {
+        InterpError::Render(e)
     }
 }
 
@@ -359,7 +369,7 @@ pub(crate) fn fetch_leaf_relation(
             Ok(frag_solutions_to_relation(&pat, rows))
         }
         SourceType::Endpoint(_) | SourceType::Local(_) => {
-            let sub = lower_leaf(tp);
+            let sub = lower_leaf(tp)?;
             let body = source.execute(&sub)?;
             parse_srj(&body).map_err(InterpError::BadSrj)
         }
