@@ -439,7 +439,7 @@ fn wrap_capability_aad_is_domain_separated() {
     ));
     assert_eq!(
         unwrap(&recipient, &wrapped, CAPABILITY_WRAP_AAD).unwrap(),
-        cap.encode_secret()
+        *cap.encode_secret()
     );
 }
 
@@ -906,6 +906,60 @@ fn delegation_rejects_a_non_canonical_parent() {
         },
     )
     .unwrap();
+}
+
+// --- #3956: exercise-time epoch check ---------------------------------------
+
+#[test]
+fn check_epoch_enforces_max_epoch_ceiling() {
+    let mut g = sample_grant(); // scoped to Epoch(7)
+    g.max_epoch = Some(Epoch(9));
+    g.check_epoch(Epoch(7)).unwrap();
+    g.check_epoch(Epoch(8)).unwrap();
+    g.check_epoch(Epoch(9)).unwrap(); // the ceiling is inclusive
+    assert!(matches!(g.check_epoch(Epoch(10)), Err(Error::EpochOutOfRange(_))));
+    assert!(matches!(g.check_epoch(Epoch(u64::MAX)), Err(Error::EpochOutOfRange(_))));
+}
+
+#[test]
+fn check_epoch_rejects_epoch_before_grant_scope() {
+    let mut g = sample_grant();
+    g.max_epoch = Some(Epoch(9));
+    assert!(matches!(g.check_epoch(Epoch(6)), Err(Error::EpochOutOfRange(_))));
+    g.max_epoch = None;
+    assert!(matches!(g.check_epoch(Epoch(0)), Err(Error::EpochOutOfRange(_))));
+}
+
+#[test]
+fn check_epoch_unbounded_grant_has_no_ceiling() {
+    let g = sample_grant();
+    assert_eq!(g.max_epoch, None);
+    g.check_epoch(Epoch(7)).unwrap();
+    g.check_epoch(Epoch(u64::MAX)).unwrap();
+}
+
+#[test]
+fn check_epoch_follows_delegated_ceiling() {
+    // A delegated child carries the narrowed, admin-signed ceiling, and
+    // check_epoch enforces the child's bound, not the parent's.
+    let admin = SecretSigningKey::from_seed([1u8; 32]);
+    let mut parent = sample_grant();
+    parent.authority = vec![Authority::Read];
+    parent.sign(&admin);
+    let child = delegate(
+        &parent,
+        &admin,
+        Delegation {
+            branches: None,
+            authority: vec![Authority::Read],
+            validity: Validity { not_before: 100, not_after: 200 },
+            max_epoch: Some(8),
+        },
+    )
+    .unwrap();
+    child.check_epoch(Epoch(8)).unwrap();
+    assert!(matches!(child.check_epoch(Epoch(9)), Err(Error::EpochOutOfRange(_))));
+    parent.check_epoch(Epoch(9)).unwrap();
 }
 
 // ============================================================================

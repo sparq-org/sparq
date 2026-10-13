@@ -9599,45 +9599,7 @@ fn rewrite_update(update: &str, over: &UsingOverride) -> Result<String, Response
 
 /// Decodes a single `application/x-www-form-urlencoded` component (`+` → space, `%XX`).
 fn form_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            b'%' if i + 2 < bytes.len() => {
-                let hi = hex_val(bytes[i + 1]);
-                let lo = hex_val(bytes[i + 2]);
-                match (hi, lo) {
-                    (Some(h), Some(l)) => {
-                        out.push((h << 4) | l);
-                        i += 3;
-                    }
-                    _ => {
-                        out.push(b'%');
-                        i += 1;
-                    }
-                }
-            }
-            b => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    sparq_core::percent::decode(s, true)
 }
 
 fn content_type(headers: &HeaderMap) -> String {
