@@ -5081,7 +5081,6 @@ dependencies = [
  "oxrdf 0.3.3",
  "proptest",
  "quick-xml 0.41.0",
- "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "sparq-core",
