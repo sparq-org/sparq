@@ -86,7 +86,7 @@ fn hand_closure(dict: &Dict, facts: &[[Id; 3]]) -> BTreeSet<String> {
 /// The COMPILED-N3 path: bind the rule symbols into the dictionary, run the fixpoint.
 fn compiled_closure(dict: &Dict, facts: &[[Id; 3]], rules: &CompiledRuleSet) -> BTreeSet<String> {
     let mut d = dict.clone();
-    let out = rules.bind(&mut d).eval(&mut d, facts);
+    let out = rules.bind(&mut d).eval(&mut d, facts).expect("eval");
     as_strings(&d, &out)
 }
 
@@ -137,7 +137,7 @@ fn time_compiled(dict: &Dict, facts: &[[Id; 3]], rules: &CompiledRuleSet) -> (f6
         // call, exactly as `compiled_rules_bench` charges it.
         let mut d = dict.clone();
         let t0 = Instant::now();
-        let out = rules.bind(&mut d).eval(&mut d, facts);
+        let out = rules.bind(&mut d).eval(&mut d, facts).expect("eval");
         best = best.min(t0.elapsed().as_secs_f64() * 1e3);
         n = out.len();
     }
