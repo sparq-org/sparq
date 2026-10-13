@@ -806,6 +806,57 @@ mod tests {
         }
     }
 
+    /// SPARQL 1.1 §19.2 code-point escape preprocessing, as a conforming endpoint applies it
+    /// to the query text before parsing.
+    fn preprocess(text: &str) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(i) = rest.find('\\') {
+            out.push_str(&rest[..i]);
+            let tail = &rest[i..];
+            let width = match tail.as_bytes().get(1) {
+                Some(b'u') => 4,
+                Some(b'U') => 8,
+                _ => 0,
+            };
+            let code = tail.get(2..2 + width).filter(|h| width > 0 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+            match code.and_then(|h| char::from_u32(u32::from_str_radix(h, 16).unwrap())) {
+                Some(c) => {
+                    out.push(c);
+                    rest = &tail[2 + width..];
+                }
+                None => {
+                    out.push('\\');
+                    rest = &tail[1..];
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn rendered_literals_survive_code_point_preprocessing() {
+        let cases = [
+            "a\"b\\c\nd\re\tf\u{8}g\u{c}h\u{0}i\u{1}j\u{7F}k",
+            "\\x \\\\ u U",
+            "x\"\"\"\\\"",
+            "é \u{1F600}",
+        ];
+        for value in cases {
+            let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(value.into()));
+            let sparql = lower_leaf(&tp).unwrap().sparql;
+            let expanded = preprocess(&sparql);
+            assert_eq!(expanded, sparql, "{value:?}");
+            assert_eq!(parse_back(&expanded).object.to_string(), oxrdf::Literal::new_simple_literal(value).to_string());
+        }
+        // A value that preprocessing would change is refused rather than sent.
+        for value in ["\\u0022", "a\\U0000007Db", "\\\\u0041"] {
+            let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(value.into()));
+            assert!(matches!(lower_leaf(&tp), Err(RenderError::Literal(_))), "{value:?}");
+        }
+    }
+
     #[test]
     fn rendered_terms_parse_back_to_the_same_terms() {
         use oxrdf::{Literal, NamedNode};

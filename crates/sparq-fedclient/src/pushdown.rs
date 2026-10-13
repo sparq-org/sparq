@@ -114,7 +114,8 @@ pub fn bind_block_size(cap: &Capability) -> usize {
 /// `VARNAME`, every row must hold exactly one bound term (an IRI or a literal) per variable,
 /// and each term is written by the same strict renderer as a pattern position, so the block
 /// is exactly one `VALUES` clause whatever the inputs hold; anything else is a
-/// [`RenderError`]. `vars` empty or `tuples` empty yields an empty string (no block to push).
+/// [`RenderError`], on which a caller keeps the bind join local instead of failing the query.
+/// `vars` empty or `tuples` empty yields an empty string (no block to push).
 /// [OPUS-4.8] sq-7byx.
 pub fn render_values_block(vars: &[String], tuples: &[Vec<Term>]) -> Result<String, RenderError> {
     use std::fmt::Write as _;
