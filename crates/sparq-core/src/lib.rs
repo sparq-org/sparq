@@ -3,9 +3,11 @@
 // block. Mechanically enforces the per-site argument the unsafe-register documents.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
+pub mod baseenc;
 pub mod civil;
 pub mod compress;
 pub mod dict;
+pub mod hex;
 #[cfg(feature = "dict-spill")]
 pub mod dictspill;
 // [SONNET-4.6] sq-96hp1 (survey §A2 / research/data-structures.md §B1): the OPT-IN Elias-Fano
@@ -23,6 +25,7 @@ pub mod extsort;
 // N-Triples / N-Quads loader validates each IRI through it (fast path, oxiri-equivalent).
 #[cfg(feature = "iri-fast")]
 pub mod iri;
+pub mod json;
 mod nt;
 pub mod percent;
 // [OPUS-4.8] sq-jocpn: the opt-in native byte-level Turtle parser. OFF by default (it names

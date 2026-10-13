@@ -1,7 +1,7 @@
 {
   "base_commit": "d34b709ea9c8140c66fd67305c02d79b4cc283a5",
   "base_lock_sha256": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
-  "candidate_lock_sha256": "d4415e5e7004ca90746851e44e82f3c258b674c3fc806b54f9d41a07d886dfe7",
+  "candidate_lock_sha256": "994492342ac71a72a727de90c4eabf58c3cd436dc0c2fb96a28ccfd486ea98e8",
   "chain_root_lock_sha256": "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22",
   "chain_root_note": "chain-root.Cargo.lock is the native lock as #6647 re-pinned it; earlier unrecorded re-pins after the Wasmer edit predate it. since_chain_root is the exact difference from it to the current lock, recomputed by verify.py.",
   "removed_registry_packages": [
@@ -85,7 +85,7 @@
       },
       {
         "name": "sparq-canon",
-        "version": "0.1.5",
+        "version": "0.1.6",
         "dependencies": [
           "base16ct",
           "digest",
@@ -101,7 +101,7 @@
       },
       {
         "name": "sparq-core",
-        "version": "0.1.5",
+        "version": "0.1.6",
         "dependencies": [
           "hashbrown 0.17.1",
           "oxrdf 0.3.3",

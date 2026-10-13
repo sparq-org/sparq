@@ -93,6 +93,9 @@ impl<S: Store> Store for CountingStore<S> {
     ) -> ServerResult<DeleteOutcome> {
         self.inner.delete_container_if_empty(iri, parent).await
     }
+    async fn fence(&self, fence: &sparq_lws_core::store::Fence) -> ServerResult<()> {
+        self.inner.fence(fence).await
+    }
     async fn list_children(
         &self,
         c: &str,

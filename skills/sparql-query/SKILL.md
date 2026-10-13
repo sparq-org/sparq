@@ -72,11 +72,20 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
+- `sparq_core::baseenc::{base58btc_encode, base58btc_encode_into, base58btc_decode, base64url_encode,
+  base64url_encode_into, base64url_decode}` are the shared multibase `z` / `u` body codecs; both
+  decoders return `Result<Vec<u8>, DecodeError>` and base64url accepts only the one canonical
+  unpadded text per byte string.
 - `sparq_core::percent::{decode, encode}` are the shared percent-encoding helpers: lenient
   `decode(s, plus_as_space)` (malformed escapes kept verbatim, UTF-8 read lossily) and `encode`
   (everything outside the RFC 3986 unreserved set becomes uppercase `%XX`).
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
+- `sparq_core::hex::{encode, encode_into, decode}` are the shared base16 helpers (lowercase
+  `encode`, either case via `encode_into`, case-insensitive `decode` returning `None` on bad input).
+- `sparq_core::json::escape_into(&mut String, &str)` appends JSON string escaping (no quotes) and
+  `sparq_core::json::push_string(&mut String, &str)` appends a quoted JSON string literal; every
+  hand-written JSON serialiser in the workspace (results, reports, explain, change streams) uses them.
 - `sparq_core::civil::{days_from_civil, civil_from_days, format_utc}` convert proleptic-Gregorian
   dates to and from days since 1970-01-01 and format epoch seconds as a UTC `xsd:dateTime`
   (`YYYY-MM-DDTHH:MM:SSZ`), dependency-free.

@@ -58,7 +58,7 @@ pub use reconcile::{
     reconcile_orphans, ReconcileError, ReconcileOptions, ReconcileReport, DEFAULT_GRACE,
 };
 pub use sparq::{
-    DeleteOutcome, InMemorySparqClient, ReadPlan, ResourceMeta, SparqClient, SparqError,
+    DeleteOutcome, Fence, InMemorySparqClient, ReadPlan, ResourceMeta, SparqClient, SparqError,
 };
 pub use sparql::{BodyObject, BuildError};
 
@@ -141,8 +141,8 @@ impl ValidatedChildIri {
 /// The LWS service containers (access grants and requests, subscriptions) rely on this: when a
 /// create reports a failure, the server reads the container listing to tell whether the record
 /// was stored anyway, answering `201` if it is listed and `500` (releasing the client's quota) if
-/// it is not. That answer is exact only when the failed create had completed; one that timed out
-/// over HTTP is #6836. The in-memory and embedded backends read their own writes, as does one
+/// it is not. That answer is exact only when the failed create had completed; one that failed
+/// [unsettled](crate::error::ServerError::Unsettled) is fenced first ([`Store::fence`]). The in-memory and embedded backends read their own writes, as does one
 /// `sparq-server` behind the `http-sparq` client. A backend that cannot (an eventually
 /// consistent or replicated remote store, whose listing can lag a completed write) must not be
 /// used for an LWS server.
@@ -243,6 +243,19 @@ pub trait Store: Send + Sync {
     /// writes" section): the LWS service containers read it to settle a create that reported a
     /// failure.
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>>;
+
+    /// Make the outcome of a write that failed with [`ServerError::Unsettled`] final: once this
+    /// succeeds, that write has committed or never will, and a read tells which (and no longer
+    /// changes). Idempotent: retried until it succeeds by whoever must know the outcome.
+    ///
+    /// The default refuses: a store whose failed writes are always settled never reports one
+    /// unsettled.
+    async fn fence(&self, fence: &Fence) -> ServerResult<()> {
+        let _ = fence;
+        Err(ServerError::Storage(
+            "this store has no unsettled writes to fence".into(),
+        ))
+    }
 
     /// [`list_children`](Store::list_children) while it fits (see
     /// [`SparqClient::list_children_within`]): `None` when it does not, without the whole
@@ -401,6 +414,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             SparqError::NotFound => ServerError::NotFound,
             SparqError::QuotaExceeded => ServerError::InsufficientStorage,
             SparqError::Backend(e) => ServerError::Storage(e),
+            SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
         })
     }
 
@@ -509,6 +523,7 @@ impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
             SparqError::NotFound => ServerError::Storage("index usage lookup failed".into()),
             SparqError::QuotaExceeded => ServerError::InsufficientStorage,
             SparqError::Backend(message) => ServerError::Storage(message),
+            SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
         })?;
         Ok(StoreUsage {
             total_bytes: blob.total_bytes,
@@ -545,6 +560,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             Err(SparqError::NotFound) => Ok(None),
             Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
             Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
+            Err(SparqError::Unsettled { detail, fence }) => {
+                Err(ServerError::Unsettled { detail, fence })
+            }
         }
     }
 
@@ -649,6 +667,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             Err(SparqError::NotFound) => Err(ServerError::NotFound),
             Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
             Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
+            // Its bytes stay: the record may still commit pointing at them.
+            Err(SparqError::Unsettled { detail, fence }) => {
+                Err(ServerError::Unsettled { detail, fence })
+            }
         }
     }
 
@@ -689,8 +711,11 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 // of one whose record did not land are reclaimed here, so failed attempts do not
                 // pile up in the blob store. A record that did land (a lost reply) is kept; when
                 // that cannot be told, the bytes are left to the reconciler.
+                // A record whose commit is not settled may still land pointing at the bytes:
+                // they are left to the reconciler.
                 match self.sparq.get_meta(iri).await {
                     Ok(now) if now.blob_key == meta.blob_key => return Ok(meta),
+                    _ if matches!(e, SparqError::Unsettled { .. }) => {}
                     Ok(_) | Err(SparqError::NotFound) => self.reclaim_blob(&meta.blob_key).await,
                     Err(_) => {}
                 }
@@ -698,6 +723,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                     SparqError::NotFound => ServerError::NotFound,
                     SparqError::QuotaExceeded => ServerError::InsufficientStorage,
                     SparqError::Backend(e) => ServerError::Storage(e),
+                    SparqError::Unsettled { detail, fence } => {
+                        ServerError::Unsettled { detail, fence }
+                    }
                 })
             }
         }
@@ -710,6 +738,9 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             Err(SparqError::NotFound) => None,
             Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
             Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
+            Err(SparqError::Unsettled { detail, fence }) => {
+                return Err(ServerError::Unsettled { detail, fence })
+            }
         };
         // Detach from the parent's containment first, then drop the index record, then the bytes.
         // Index-before-bytes keeps the invariant "if it's indexed, its bytes exist" — a crash after
@@ -755,12 +786,19 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             Err(SparqError::NotFound) => None,
             Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
             Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
+            Err(SparqError::Unsettled { detail, fence }) => {
+                return Err(ServerError::Unsettled { detail, fence })
+            }
         };
         let outcome = self
             .sparq
             .delete_meta_if_empty(iri, parent)
             .await
-            .map_err(|e| ServerError::Storage(format!("{e}")))?;
+            .map_err(|e| match e {
+                // Not known yet: kept apart, so the caller can settle it (`fence`).
+                SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
+                e => ServerError::Storage(format!("{e}")),
+            })?;
         // NotEmpty / NotFound: nothing was deleted, so the bytes stay. Deleted: the record AND the parent
         // edge are gone atomically (above), so the bytes are unreferenced — reclaim them now.
         if outcome == DeleteOutcome::Deleted {
@@ -769,6 +807,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             }
         }
         Ok(outcome)
+    }
+
+    async fn fence(&self, fence: &Fence) -> ServerResult<()> {
+        self.sparq
+            .fence(fence)
+            .await
+            .map_err(|e| ServerError::Storage(format!("{e}")))
     }
 
     async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {
@@ -782,6 +827,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 SparqError::NotFound => ServerError::NotFound,
                 SparqError::QuotaExceeded => ServerError::InsufficientStorage,
                 SparqError::Backend(msg) => ServerError::Storage(msg),
+                SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
             })
     }
 

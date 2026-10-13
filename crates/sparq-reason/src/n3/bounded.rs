@@ -67,9 +67,10 @@ pub(crate) trait Sink {
 /// of one logical evaluation (nested closures, an explicit-strata pipeline, a query and
 /// the closure it projects over) records into the SAME handle, and it is never reset.
 /// The record also carries the run's [`ClosureLimits`], so every forward closure of the
-/// run (nested ones included) gets the allowance its entry point was given, and the run's
-/// refusal: the error of the first term refused for its size ([`derived_term`]), which
-/// fails every closure of the run that sees it.
+/// run (nested ones included) gets the allowance its entry point was given, the run's
+/// stack allowance ([`RUN_STACK`]), so one allowance is shared by every level, and the
+/// run's refusal: the error of the first term refused for its size ([`derived_term`]),
+/// which fails every closure of the run that sees it.
 ///
 /// The fields are private and there is no `Default`: the only ways to make a fresh record
 /// are [`Truncation::top_level`] and [`Truncation::top_level_with`], which a top-level
@@ -80,6 +81,11 @@ pub(crate) struct Truncation {
     cut: Rc<Cell<Option<&'static str>>>,
     refusal: Rc<RefCell<Option<String>>>,
     limits: ClosureLimits,
+    /// Units of the run's stack allowance held by steps in progress ([`RUN_STACK`]).
+    stack: Rc<Cell<usize>>,
+    /// How deep a term the run keeps ([`generated`]): [`TERM_DEPTH`], or the deepest term
+    /// it was given ([`given_terms`]).
+    term_depth: Rc<Cell<usize>>,
 }
 
 impl Truncation {
@@ -95,6 +101,8 @@ impl Truncation {
             cut: Rc::default(),
             refusal: Rc::default(),
             limits,
+            stack: Rc::default(),
+            term_depth: Rc::new(Cell::new(TERM_DEPTH)),
         }
     }
 
@@ -145,14 +153,24 @@ pub(crate) const fn backward_depth() -> usize {
     BW_DEPTH
 }
 
-/// One more backward rule application at `depth` remaining. `Some(depth - 1)` when the
-/// budget allows it; `None` when it is spent, which is a cut if a backward rule could
-/// still have matched the goal (`could_match`).
-pub(crate) fn backward_step(depth: usize, could_match: bool) -> Bounded<Option<usize>> {
-    match depth.checked_sub(1) {
-        Some(d) => Bounded::complete(Some(d)),
+/// One more backward rule application at `depth` remaining in the run `run`:
+/// `Some(depth - 1)` and one unit of the run's stack allowance ([`RUN_STACK`], held until
+/// the step's frames are dropped) when both allow it; `None` when either is spent, which
+/// is a cut if a backward rule could still have matched the goal (`could_match`).
+pub(crate) fn backward_step(
+    run: &Truncation,
+    depth: usize,
+    could_match: bool,
+) -> Bounded<Option<(usize, StackFrames)>> {
+    let step = depth.checked_sub(1).map(|d| (d, take_stack(run, 1)));
+    match step {
+        Some((d, Some(frames))) => Bounded::complete(Some((d, frames))),
         None if could_match => Bounded::cut(None, "backward proof search reached its depth limit"),
-        None => Bounded::complete(None),
+        Some(_) if could_match => Bounded::cut(
+            None,
+            "backward proof search reached the run's stack allowance",
+        ),
+        _ => Bounded::complete(None),
     }
 }
 
@@ -612,6 +630,166 @@ impl ClosureRounds {
 /// reasoning, by the `parse_surface_tests` and `n3::tests` small-stack tests (#6732).
 const PARSE_DEPTH: usize = 64;
 
+/// Nesting (list, formula and quoted-triple levels) a term built during evaluation may
+/// reach. A rule can wrap a term in one more level each round (`{ :s :p ?x } => { :s :p
+/// (?x) }`), and a chain of premise atoms can within one firing, so without a limit a
+/// shallow document builds terms deep enough that substitution, matching, hashing and
+/// dropping them exhaust the stack. A term evaluation builds past this is dropped as a
+/// cut ([`generated`]); everything evaluation keeps is at most this deep, and what it
+/// builds before the check is at most this plus the nesting of the rule text. A run
+/// handed deeper terms directly (as terms, not text: [`given_terms`]) keeps terms as
+/// deep as those, and no deeper. Twice [`PARSE_DEPTH`], so a parsed document
+/// (`log:semantics`, `log:parsedAsN3`) quoted as a formula value, and rules over it,
+/// stay inside. Pinned on a 2 MiB thread by the `n3::tests` small-stack tests (#6732).
+const TERM_DEPTH: usize = 2 * PARSE_DEPTH;
+
+/// Why a generated term was dropped.
+const TERM_DEPTH_CUT: &str = "a term built during evaluation passed the term-depth limit";
+
+/// Whether `t` nests at most `room` levels deep. It recurses at most `room + 1` levels,
+/// however deep `t` is.
+fn fits(t: &super::Term, room: usize) -> bool {
+    use super::Term;
+    match t {
+        Term::List(ms) => room > 0 && ms.iter().all(|m| fits(m, room - 1)),
+        Term::Formula(ts) => room > 0 && ts.iter().flatten().all(|m| fits(m, room - 1)),
+        Term::Triple(tr) => room > 0 && tr.iter().all(|m| fits(m, room - 1)),
+        Term::Iri(_) | Term::Lit(..) | Term::Blank(_) | Term::Var(_) => true,
+    }
+}
+
+/// The nesting of `t` (0 for an IRI, literal, blank node or variable; one more for each
+/// list, formula or quoted triple around it, an empty one included), walked with an
+/// explicit stack, so it takes no stack per level. It agrees with [`fits`]: `fits(t,
+/// room)` holds exactly when `depth(t) <= room`.
+fn depth(t: &super::Term) -> usize {
+    use super::Term;
+    let mut deepest = 0;
+    // Each entry: a term, and how many containers enclose it.
+    let mut stack: Vec<(&Term, usize)> = vec![(t, 0)];
+    while let Some((t, d)) = stack.pop() {
+        let below = d + 1;
+        match t {
+            Term::List(ms) => stack.extend(ms.iter().map(|m| (m, below))),
+            Term::Formula(ts) => stack.extend(ts.iter().flatten().map(|m| (m, below))),
+            Term::Triple(tr) => stack.extend(tr.iter().map(|m| (m, below))),
+            Term::Iri(_) | Term::Lit(..) | Term::Blank(_) | Term::Var(_) => continue,
+        }
+        deepest = deepest.max(below);
+    }
+    deepest
+}
+
+/// The terms a TOP-LEVEL run was handed (its facts and rules). Parsed text is within
+/// [`PARSE_DEPTH`], but a caller can hand a run terms built in code (the incremental
+/// graph's base facts): a rule that copies one builds nothing deeper than its input, so
+/// the run's term allowance ([`generated`]) is raised to the deepest of them. Rules still
+/// cannot build past it.
+pub(crate) fn given_terms<'a>(run: &Truncation, terms: impl IntoIterator<Item = &'a super::Term>) {
+    let room = run.term_depth.get();
+    // Only a term that does not fit already is measured.
+    let deepest = terms
+        .into_iter()
+        .filter(|t| !fits(t, room))
+        .map(depth)
+        .max()
+        .unwrap_or(0);
+    if deepest > run.term_depth.get() {
+        run.term_depth.set(deepest);
+    }
+}
+
+/// Terms evaluation built (a conclusion, the values of a binding) in the run `run`:
+/// `true` when every one is within the run's term allowance ([`TERM_DEPTH`], or the
+/// deepest term the run was given); otherwise `false` and a cut, and the caller drops
+/// them.
+pub(crate) fn generated<'a>(
+    run: &Truncation,
+    terms: impl IntoIterator<Item = &'a super::Term>,
+) -> Bounded<bool> {
+    let room = run.term_depth.get();
+    if terms.into_iter().all(|t| fits(t, room)) {
+        Bounded::complete(true)
+    } else {
+        Bounded::cut(false, TERM_DEPTH_CUT)
+    }
+}
+
+/// Stack one run's recursive evaluation may hold at once, in units of one backward
+/// (`<=`) proof step (the heaviest recursion per level). A backward proof step and a
+/// scoped operator's inner clause matched against the store ([`nested_step`]) each hold
+/// one unit while they run, and a nested forward closure ([`CLOSURE_FRAMES`]) holds its
+/// units while it runs. Every nested closure of the run draws on the same allowance, so
+/// a chain of distinct documents (`log:semantics` then `log:conclusion`, each closing the
+/// next) cannot reset it, and neither can a fresh backward search inside one. It
+/// is sized for the smallest stack the engine supports (a 2 MiB thread in a debug build),
+/// leaving room for a parse up to [`PARSE_DEPTH`] deep and the term walkers at the
+/// innermost level. It admits a top-level backward search of [`BW_DEPTH`] steps with room
+/// to spare, so it binds only nested evaluation. Pinned on a 2 MiB thread by the
+/// `n3::tests` small-stack tests (#6732).
+const RUN_STACK: usize = 128;
+/// The units of [`RUN_STACK`] one nested forward closure holds: its closure's own frames
+/// and the builtin evaluation that entered it.
+const CLOSURE_FRAMES: usize = 8;
+
+/// Why a nested closure was refused.
+const CLOSURE_NESTING_CUT: &str = "nested closures passed the run's stack allowance";
+
+/// Units of the run's stack allowance ([`RUN_STACK`]) held by a step in progress; dropping
+/// it gives them back.
+pub(crate) struct StackFrames {
+    held: Rc<Cell<usize>>,
+    units: usize,
+}
+
+impl Drop for StackFrames {
+    fn drop(&mut self) {
+        self.held.set(self.held.get().saturating_sub(self.units));
+    }
+}
+
+/// Take `units` of the run's stack allowance, or `None` when that would pass it.
+fn take_stack(run: &Truncation, units: usize) -> Option<StackFrames> {
+    let held = run.stack.get() + units;
+    (held <= RUN_STACK).then(|| {
+        run.stack.set(held);
+        StackFrames {
+            held: Rc::clone(&run.stack),
+            units,
+        }
+    })
+}
+
+/// One more nested premise evaluation of the run `run` (the inner clause of
+/// `log:notIncludes`, `log:collectAllIn`, `log:forAllIn` or a store-scoped
+/// `log:includes`, matched against the store), holding one unit of the run's stack
+/// allowance until dropped. `None` when it is spent, which is a cut: the clause is not
+/// evaluated, so a negation or aggregation over it is then refused.
+pub(crate) fn nested_step(run: &Truncation) -> Bounded<Option<StackFrames>> {
+    match take_stack(run, 1) {
+        Some(frames) => Bounded::complete(Some(frames)),
+        None => Bounded::cut(
+            None,
+            "a scoped clause nested past the run's stack allowance",
+        ),
+    }
+}
+
+/// One more nested forward closure of the run `run` (`log:conclusion`,
+/// `log:supports`), holding its units of the run's stack allowance until dropped. Past
+/// the allowance the closure cannot be computed: the cut is recorded on `run` and the
+/// closure fails with an error, which refuses the enclosing run.
+pub(crate) fn enter_closure(run: &Truncation) -> Result<StackFrames, String> {
+    take_stack(run, CLOSURE_FRAMES).ok_or_else(|| {
+        run.record(CLOSURE_NESTING_CUT);
+        format!(
+            "n3: {CLOSURE_NESTING_CUT}: log:conclusion / log:supports closures nested too \
+             deep (each nested closure, and each backward proof step, holds part of a \
+             stack allowance of {RUN_STACK} units)"
+        )
+    })
+}
+
 /// A limit was hit. Only this module can make one (its fields are private), and the
 /// only way to use it during evaluation is [`parse_n3`], which records it as a cut.
 #[derive(Debug)]
@@ -631,6 +809,12 @@ impl LimitError {
 #[cfg(test)]
 pub(crate) const fn parse_depth() -> usize {
     PARSE_DEPTH
+}
+
+/// The deepest term evaluation keeps.
+#[cfg(test)]
+pub(crate) const fn term_depth() -> usize {
+    TERM_DEPTH
 }
 
 /// The parser entering nesting level `depth`: an error past [`PARSE_DEPTH`].
@@ -1163,9 +1347,23 @@ mod tests {
 
     #[test]
     fn each_limit_reports_a_cut_and_keeps_its_value() {
-        assert_eq!(cut_of(backward_step(3, true)), (Some(2), false));
-        assert_eq!(cut_of(backward_step(0, true)), (None, true));
-        assert_eq!(cut_of(backward_step(0, false)), (None, false));
+        let run = Truncation::top_level();
+        let step = |depth, could_match| {
+            let (s, cut) = cut_of(backward_step(&run, depth, could_match));
+            (s.map(|(d, _)| d), cut)
+        };
+        assert_eq!(step(3, true), (Some(2), false));
+        assert_eq!(step(0, true), (None, true));
+        assert_eq!(step(0, false), (None, false));
+        // The run's stack allowance: held while a step runs, given back when it ends.
+        let held: Vec<_> = (0..RUN_STACK).map(|_| take_stack(&run, 1)).collect();
+        assert!(held.iter().all(Option::is_some));
+        assert_eq!(step(3, true), (None, true));
+        assert_eq!(step(3, false), (None, false));
+        assert!(enter_closure(&run).is_err());
+        drop(held);
+        assert_eq!(step(3, true), (Some(2), false));
+        assert!(enter_closure(&run).is_ok());
 
         let mut b = StepBudget::containment();
         while b.take() {}
@@ -1248,5 +1446,38 @@ mod tests {
         assert_eq!(cut_of(whole_i64_of_f64(f64::NAN)), (None, false));
         assert_eq!(cut_of(dropped_fraction("000")), ((), false));
         assert_eq!(cut_of(dropped_fraction("5")), ((), true));
+    }
+
+    /// #6732: `depth` counts every list, formula and quoted triple as a level, an empty
+    /// one included, so it agrees with `fits`.
+    #[test]
+    fn depth_counts_empty_containers_as_fits_does() {
+        use super::super::Term;
+        let atom = Term::Iri("http://ex/a".into());
+        let empties = [
+            atom.clone(),
+            Term::List(Vec::new()),
+            Term::Formula(Vec::new()),
+            Term::Triple(Box::new([atom.clone(), atom.clone(), atom])),
+        ];
+        for innermost in empties {
+            let mut t = innermost;
+            for wraps in 0..4 {
+                let d = depth(&t);
+                assert!(fits(&t, d), "{t:?} fits its depth");
+                assert!(d == 0 || !fits(&t, d - 1), "{t:?} needs its depth");
+                if wraps % 2 == 0 {
+                    t = Term::List(vec![t]);
+                } else {
+                    t = Term::Formula(vec![[
+                        Term::Iri("http://ex/s".into()),
+                        Term::Iri("http://ex/p".into()),
+                        t,
+                    ]]);
+                }
+            }
+        }
+        assert_eq!(depth(&Term::List(vec![Term::List(Vec::new())])), 2);
+        assert_eq!(depth(&Term::Formula(Vec::new())), 1);
     }
 }

@@ -305,20 +305,10 @@ INVALID for that kernel.\n",
 // is small and fixed).
 // ---------------------------------------------------------------------------
 
-/// Emit a JSON string literal, escaping the characters that can appear in the
-/// fixed workload/host notes (`"` and `\`). The notes never contain control
-/// characters, so a full escaper is unnecessary.
+/// Emit a JSON string literal.
 fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            _ => out.push(c),
-        }
-    }
-    out.push('"');
+    let mut out = String::new();
+    sparq_core::json::push_string(&mut out, s);
     out
 }
 
