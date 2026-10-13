@@ -56,12 +56,23 @@ fn scope_cases() -> Vec<String> {
     ["notIncludes", "includes", "supports"].iter().flat_map(|op| {
         [
             format!("{{ ?scope log:{op} {{ @forAll :x. :x :p :b }} }} => {{ :hit :by :rule }}."),
-            // The quantifier may be nested inside the pattern.
-            format!("{{ ?scope log:{op} {{ :a :says {{ @forAll :x. :x :p :b }} }} }} => {{ :hit :by :rule }}."),
+            // A pattern's own universal mentioned inside a nested formula of the pattern.
+            format!("{{ ?scope log:{op} {{ @forAll :x. :a :says {{ :x :p :b }} }} }} => {{ :hit :by :rule }}."),
+            // A quantified pattern nested in an aggregation clause.
+            format!("{{ ( :t {{ ?s log:{op} {{ @forAll :x. :x :p :b }} }} ?l ) log:collectAllIn ?scope }} => {{ :hit :by :rule }}."),
         ]
     }).chain([
         "{ ( ?x { @forAll :x. :x :p :b } ?list ) log:collectAllIn ?scope } => { :hit :by :rule }.".into(),
         "{ ( { @forAll :x. :x :p :b } { :a :p :b } ) log:forAllIn ?scope } => { :hit :by :rule }.".into(),
+        "{ ( { :a :p :b } { @forAll :x. :x :p :b } ) log:forAllIn ?scope } => { :hit :by :rule }.".into(),
+        // A quantified CLAUSE of an aggregation nested in another aggregation's clause.
+        "{ ( ?inner { ( :t { @forAll :x. :x :p :b } ?inner ) log:collectAllIn ?scope } ?outer ) \
+           log:collectAllIn ?scope } => { :hit :by :rule }.".into(),
+        "{ ( { ( { @forAll :x. :x :p :b } { :a :p :b } ) log:forAllIn ?scope } { :a :p :b } ) \
+           log:forAllIn ?scope } => { :hit :by :rule }.".into(),
+        // A clause's own universal mentioned in a template nested in it: the clause binds it.
+        "{ ( ?inner { @forAll :x. :x :p :b. ( { :x :q :b } { :a :p :b } ?inner ) log:collectAllIn ?scope } ?outer ) \
+           log:collectAllIn ?scope } => { :hit :by :rule }.".into(),
     ]).map(|src| format!("@prefix : <{EX}>. {src}")).collect()
 }
 
@@ -357,5 +368,88 @@ fn a_bound_unquantified_containment_pattern_is_not_refused() {
         let base = parser::parse(&src).expect("parses").facts;
         let g = sparq_reason::MaterializedN3Graph::new(&src, &base).expect("accepted");
         assert_eq!(g.stratification_warning(), None, "{src}");
+    }
+}
+
+/// GH #6851 review: a template stays a value however deep its aggregation sits — here
+/// inside another aggregation's clause — so its own universal is allowed there too.
+#[test]
+fn a_quantified_template_nested_in_a_clause_is_collected() {
+    let src = ":a :p :b.
+        {
+          ( ?inner {
+              ( { @forAll :x. :x :q :b } { :a :p :b } ?inner ) log:collectAllIn ?scope
+            } ?outer ) log:collectAllIn ?scope
+        } => { :got :list ?outer }.";
+    let facts = closure(src);
+    let template = parser::parse(&format!("@prefix : <{EX}>. :t :is {{ @forAll :x. :x :q :b }}."))
+        .expect("parses")
+        .facts[0][2]
+        .clone();
+    let want = [iri("got"), iri("list"), Term::List(vec![Term::List(vec![template])])];
+    assert!(facts.contains(&want), "{facts:?}");
+    let base = parser::parse(&format!("@prefix : <{EX}>. {src}")).expect("parses").facts;
+    assert!(sparq_reason::MaterializedN3Graph::new(&format!("@prefix : <{EX}>. {src}"), &base).is_ok());
+}
+
+/// A containment pattern is a clause, but a formula quoted INSIDE it is a value, matched
+/// by identity like a quoted formula anywhere in a premise: its own universal is allowed.
+#[test]
+fn a_quoted_formula_inside_a_containment_pattern_matches_by_identity() {
+    let facts = closure(
+        ":k :is { :a :says { @forAll :x. :x :p :b } }.
+         { :k :is ?f. ?f log:includes { :a :says { @forAll :x. :x :p :b } } } => { :hit :by :identity }.
+         { :k :is ?f. ?f log:includes { :a :says { :c :p :b } } } => { :hit :by :instance }.",
+    );
+    assert!(has(&facts, "hit", "by", "identity"), "{facts:?}");
+    assert!(!has(&facts, "hit", "by", "instance"), "{facts:?}");
+}
+
+/// GH #6851 review: a document parsed at run time becomes a quoted formula, so its
+/// top-level `@forAll` binds in that formula — the same term as the inline spelling.
+#[test]
+fn a_parsed_document_s_universal_is_its_formula_s_own() {
+    let src = ":f :is { @forAll :x. :x :p :b }.
+        { :f :is ?f. \"@prefix : <http://ex/>. @forAll :x. :x :p :b.\" log:parsedAsN3 ?g.
+          ?f log:equalTo ?g } => { :parsed :equals :inline }.
+        { :f :is ?f. \"@prefix : <http://ex/>. @forAll :x. { :x :p :b } => { :x :q :b }.\" log:parsedAsN3 ?g.
+          { @forAll :x. { :x :p :b } => { :x :q :b } } log:equalTo ?g } => { :parsed :equals :inlineRule }.";
+    let facts = closure(src);
+    assert!(has(&facts, "parsed", "equals", "inline"), "{facts:?}");
+    assert!(has(&facts, "parsed", "equals", "inlineRule"), "{facts:?}");
+    // A formula fact under a DOCUMENT-level `@forAll` is a different term: its `:x` is
+    // bound outside the formula.
+    let facts = closure(
+        "@forAll :x. :f :is { :x :p :b }.
+         { :f :is ?f. \"@prefix : <http://ex/>. @forAll :x. :x :p :b.\" log:parsedAsN3 ?g.
+           ?f log:notEqualTo ?g } => { :parsed :differs :fromDocumentLevel }.",
+    );
+    assert!(has(&facts, "parsed", "differs", "fromDocumentLevel"), "{facts:?}");
+    // log:semantics parses the same way.
+    let sem = format!(
+        "@prefix : <{EX}>. :f :is {{ @forAll :x. :x :p :b }}.
+         {{ :f :is ?f. <http://doc/d> log:semantics ?g. ?f log:equalTo ?g }} => {{ :sem :equals :inline }}."
+    );
+    let resolver = |iri: &str| (iri == "http://doc/d").then(|| format!("@prefix : <{EX}>. @forAll :x. :x :p :b."));
+    let facts = sparq_reason::n3::reason_n3_terms_with_resolver(&sem, None, Some(&resolver as &sparq_reason::n3::Resolver))
+        .expect("reasons")
+        .facts;
+    assert!(has(&facts, "sem", "equals", "inline"), "{facts:?}");
+}
+
+/// GH #6851 review: a parsed document bound as an aggregation clause is a quantified clause,
+/// refused like the inline one.
+#[test]
+fn a_parsed_quantified_clause_is_rejected() {
+    for rule in [
+        "( :t ?c ?l ) log:collectAllIn { :a :p :b }",
+        "( ?c { :a :p :b } ) log:forAllIn { :a :p :b }",
+        "{ :a :p :b } log:includes ?c",
+    ] {
+        let src = format!(
+            "@prefix : <{EX}>. :a :p :b.
+             {{ \"@prefix : <http://ex/>. @forAll :x. :x :p :b.\" log:parsedAsN3 ?c. {rule} }} => {{ :hit :by :rule }}."
+        );
+        assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), QUANTIFIER_ERROR, "{src}");
     }
 }

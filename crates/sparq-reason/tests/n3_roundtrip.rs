@@ -176,10 +176,29 @@ fn n3_string(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
 
+/// `t`, `depth` formula boundaries below a document that becomes a quoted formula, with
+/// that document's universals (`__ua.<iri>`) named as the formula's own
+/// (`__uf.<depth>.<iri>`, GH #6754).
+fn quoted_document_universals(t: &Term, depth: usize) -> Term {
+    match t {
+        Term::Var(v) => match universal_of(v) {
+            Some(i) => var(&format!("__uf.{depth}.{i}")),
+            None => t.clone(),
+        },
+        Term::List(ms) => Term::List(ms.iter().map(|m| quoted_document_universals(m, depth)).collect()),
+        Term::Triple(tr) => Term::Triple(Box::new(tr.clone().map(|m| quoted_document_universals(&m, depth)))),
+        Term::Formula(ts) => formula(
+            ts.iter().map(|r| r.clone().map(|m| quoted_document_universals(&m, depth + 1))).collect(),
+        ),
+        _ => t.clone(),
+    }
+}
+
 /// Against the reasoner: `log:parsedAsN3` of the written text, and `log:semantics` of it
-/// as a resolved document, both yield the very formula the writer started from.
+/// as a resolved document, both yield the formula the writer started from, its
+/// document-level universals now that formula's own (GH #6851 review).
 fn check_through_the_reasoner(s: &[Term; 3], text: &str) {
-    let norm = s.clone().map(|t| normalise(&t));
+    let norm = s.clone().map(|t| quoted_document_universals(&normalise(&t), 0));
     let src = format!(
         "{{ \"{}\" <http://www.w3.org/2000/10/swap/log#parsedAsN3> ?g }} => {{ <http://ex/got> <http://ex/is> ?g }}.\n\
          {{ <http://ex/doc> <http://www.w3.org/2000/10/swap/log#semantics> ?g }} => {{ <http://ex/sem> <http://ex/is> ?g }}.\n",
@@ -360,11 +379,12 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
         "@forAll :x.\n{ :x :p :b } => { :x :q :b }.\n:c :p :b.\n",
         // Codex round 2: a formula fact compared with the rule's own formula.
         "@forAll :x.\n:a :p { :x :q :z }.\n:b :p { ?x :q :z }.\n{ :a :p ?f. ?f log:notEqualTo { :x :q :z } } => { :bad :is true }.\n",
-        // Codex round 4 (1): against a formula parsed from a literal.
-        "@forAll :x.\n:a :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
+        // Codex round 4 (1): against a formula parsed from a literal (whose top-level
+        // `@forAll` is the parsed formula's own, GH #6851 review).
+        "@forAll :x.\n:a :p { @forAll :x. :x :q :z }.\n:b :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
         // Codex round 6 (1): the IRI also used plainly at the top level, before the
         // declaration — the formula declares for itself.
-        ":x :marker :z.\n@forAll :x.\n:a :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
+        ":x :marker :z.\n@forAll :x.\n:a :p { @forAll :x. :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
         // A universal in the body and in a nested head formula, beside a source `?x`.
         "@forAll :x.\n{ :x :p ?x } => { :x :q { :x :r ?x } }.\n:a :p :b.\n",
         // A bare top-level universal fact: its binder is the document, which declares it
@@ -894,10 +914,11 @@ fn formula_equality_is_the_same_after_a_round_trip() {
                :f5 :is { _:b :q :o }.\n\
                :f6 :is { _:c :q :o }.\n\
                :f7 :is { :x :q ?v. _:b :r :x }.\n\
+               :f8 :is { @forAll :x. :x :q :o }.\n\
                \"@prefix : <http://ex/>. @forAll :x. :g :is { :x :q :o }.\" log:parsedAsN3 :lit.\n\
                { ?a :is ?f. ?b :is ?g. ?f log:equalTo ?g } => { ?a :eq ?b }.\n\
                { ?a :is ?f. ?b :is ?g. ?f log:notEqualTo ?g } => { ?a :ne ?b }.\n\
-               { ?a :is ?f. \"@prefix : <http://ex/>. @forAll :x. :g :is { :x :q :o }.\" log:parsedAsN3 ?d. \
+               { ?a :is ?f. \"@prefix : <http://ex/>. :g :is { @forAll :x. :x :q :o }.\" log:parsedAsN3 ?d. \
                  ?d log:includes { :g :is ?g }. ?f log:equalTo ?g } => { ?a :eq :parsed }.\n\
                { ?a :is ?f. \"@prefix : <http://ex/>. :g :is { ?v :q :o }.\" log:parsedAsN3 ?d. \
                  ?d log:includes { :g :is ?g }. ?f log:equalTo ?g } => { ?a :eq :parsedVar }.\n";
@@ -912,7 +933,7 @@ fn formula_equality_is_the_same_after_a_round_trip() {
     };
     let original = closure(src);
     // The comparisons really ran, both ways, including against the parsed formulae.
-    for want in ["f1\"), Iri(\"http://ex/eq\"), Iri(\"http://ex/f2", "f1\"), Iri(\"http://ex/ne\"), Iri(\"http://ex/f3", "f1\"), Iri(\"http://ex/eq\"), Iri(\"http://ex/parsed\")", "f3\"), Iri(\"http://ex/eq\"), Iri(\"http://ex/parsedVar\")"] {
+    for want in ["f1\"), Iri(\"http://ex/eq\"), Iri(\"http://ex/f2", "f1\"), Iri(\"http://ex/ne\"), Iri(\"http://ex/f3", "f8\"), Iri(\"http://ex/eq\"), Iri(\"http://ex/parsed\")", "f3\"), Iri(\"http://ex/eq\"), Iri(\"http://ex/parsedVar\")"] {
         assert!(original.iter().any(|f| f.contains(want)), "{want}: {original:#?}");
     }
     let doc = reason_n3_pass_all(src, RuleVars::N3).unwrap_or_else(|e| panic!("{e}"));

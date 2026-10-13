@@ -873,8 +873,8 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     )?
     .top_level();
     // Universals are written as their own IRIs under `@forAll` declarations, so the output
-    // re-parses to the very same `__ua.<iri>` terms — the identity a `log:parsedAsN3`
-    // literal or a second reasoning pass produces too (GH #5391, GH #6701 review).
+    // re-parses to the very same `__ua.<iri>` terms — the identity a second reasoning pass
+    // produces too (GH #5391, GH #6701 review).
     let facts: Vec<&[Term; 3]> = facts.all.iter().collect();
     let echoed: Vec<(&Rule, RuleKind)> = rules
         .iter()
@@ -2879,17 +2879,6 @@ fn frees_quoted_universal(t: &Term) -> bool {
 /// tracked in GH #6882).
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 
-/// Whether `t` holds a variable named under `prefix`, at any depth.
-fn holds_var_prefixed(t: &Term, prefix: &str) -> bool {
-    match t {
-        Term::Var(v) => v.starts_with(prefix),
-        Term::Formula(ts) => ts.iter().flatten().any(|t| holds_var_prefixed(t, prefix)),
-        Term::List(ms) => ms.iter().any(|t| holds_var_prefixed(t, prefix)),
-        Term::Triple(tr) => tr.iter().any(|t| holds_var_prefixed(t, prefix)),
-        _ => false,
-    }
-}
-
 /// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the
 /// clause of `( template clause list )`, both clauses of `( clause-a clause-b )`. The
 /// template and the result list are values, not clauses. A subject of another shape
@@ -2902,31 +2891,104 @@ fn aggregation_clauses(op: CollectOp, subject: &Term) -> &[Term] {
     }
 }
 
-/// Whether an aggregation clause would need quantified matching: a formula-level
-/// universal (or a premise universal) anywhere in it.
+/// The one walk behind every antecedent-quantifier check (GH #6754): does an EXECUTABLE
+/// formula — a rule premise, an aggregation clause, a containment pattern, at any nesting
+/// depth — bind a universal that occurs anywhere below it? Matching such a formula would
+/// need quantified (wildcard) matching, which no engine does soundly.
+///
+/// `levels` holds the formula levels from the walk's root to the current one, innermost
+/// last: whether each is executed (`true`) or a value. A position is executable only
+/// where the matcher runs it: the object pattern of `log:includes` / `notIncludes` /
+/// `supports`, the clause of `( template clause list ) log:collectAllIn`, and both clauses
+/// of `log:forAllIn` — each inside an executable conjunction. Everything else (an
+/// aggregation template, a scope, an ordinary quoted formula term, and every atom of a
+/// value) is a value, matched by identity, so its own universals are allowed while those
+/// of an enclosing executable formula are not. A universal whose binder lies past the
+/// root, or a malformed one, counts as quantified (fail-closed).
+struct QuantifierWalk {
+    levels: Vec<bool>,
+}
+
+impl QuantifierWalk {
+    /// The premise `atoms` of a rule (an executable root; its own universals are the
+    /// rule's `__up.` markers).
+    fn premise(atoms: &[[Term; 3]]) -> bool {
+        QuantifierWalk { levels: vec![true] }.conjunction(atoms)
+    }
+
+    /// A term bound into an executable position at run time: a formula there is a clause.
+    fn bound_clause(t: &Term) -> bool {
+        QuantifierWalk { levels: Vec::new() }.term(t, true)
+    }
+
+    /// An executable conjunction at the current level.
+    fn conjunction(&mut self, atoms: &[[Term; 3]]) -> bool {
+        atoms.iter().any(|[s, p, o]| {
+            if scope_op(p).is_some() {
+                self.term(s, false) || self.term(p, false) || self.term(o, true)
+            } else if let Some(op) = collect_op(p) {
+                let subject = match s {
+                    Term::List(ms) => {
+                        let clauses = aggregation_clauses(op, s);
+                        ms.iter().any(|m| self.term(m, clauses.iter().any(|c| std::ptr::eq(c, m))))
+                    }
+                    other => self.term(other, false),
+                };
+                subject || self.term(p, false) || self.term(o, false)
+            } else {
+                [s, p, o].into_iter().any(|t| self.term(t, false))
+            }
+        })
+    }
+
+    /// `t` at the current level: a formula in an executable position is a clause.
+    fn term(&mut self, t: &Term, executable: bool) -> bool {
+        match t {
+            Term::Var(v) => self.bound_by_executable(v),
+            Term::Formula(ts) => {
+                self.levels.push(executable);
+                let found = if executable {
+                    self.conjunction(ts)
+                } else {
+                    ts.iter().flatten().any(|m| self.term(m, false))
+                };
+                self.levels.pop();
+                found
+            }
+            Term::List(ms) => ms.iter().any(|m| self.term(m, false)),
+            Term::Triple(tr) => tr.iter().any(|m| self.term(m, false)),
+            _ => false,
+        }
+    }
+
+    /// Whether the universal `v` names is bound by an executable level.
+    fn bound_by_executable(&self, v: &str) -> bool {
+        if v.starts_with(serialize::PREMISE_UNIVERSAL) {
+            // only a rule premise binds one, and it is executable
+            return true;
+        }
+        if !v.starts_with(serialize::FORMULA_UNIVERSAL) {
+            return false;
+        }
+        let Some((n, _)) = serialize::formula_universal(v) else { return true };
+        self.levels.len().checked_sub(n + 1).is_none_or(|binder| self.levels[binder])
+    }
+}
+
+/// Whether a clause bound at run time (an aggregation clause or a containment pattern
+/// reached through a variable) would need quantified matching ([`QuantifierWalk`]).
 fn quantified_clause(clause: &Term) -> bool {
-    holds_var_prefixed(clause, serialize::FORMULA_UNIVERSAL)
-        || holds_var_prefixed(clause, serialize::PREMISE_UNIVERSAL)
+    QuantifierWalk::bound_clause(clause)
 }
 
 /// Reject antecedent quantifiers that the rule matchers cannot soundly evaluate. This
-/// sees the clauses as written; an aggregation clause reached through a variable is
-/// checked again on its bound value when it is evaluated ([`match_premise_seeded`]).
+/// sees the clauses as written, at every nesting depth; a clause reached through a variable
+/// is checked again on its bound value when it is evaluated ([`match_premise_seeded`]),
+/// by the same walk.
 pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), String> {
     for rule in parsed.rules.iter().chain(&parsed.backward_rules) {
-        for atom in &rule.premise {
-            // Ordinary quoted formula terms retain identity matching. Containment patterns
-            // and aggregation clauses would instead need quantified wildcard matching.
-            let scoped = if scope_op(&atom[1]).is_some() {
-                holds_var_prefixed(&atom[2], serialize::FORMULA_UNIVERSAL)
-            } else if let Some(op) = collect_op(&atom[1]) {
-                aggregation_clauses(op, &atom[0]).iter().any(quantified_clause)
-            } else {
-                false
-            };
-            if scoped || atom.iter().any(|t| holds_var_prefixed(t, serialize::PREMISE_UNIVERSAL)) {
-                return Err(QUANTIFIED_ANTECEDENT.into());
-            }
+        if QuantifierWalk::premise(&rule.premise) {
+            return Err(QUANTIFIED_ANTECEDENT.into());
         }
     }
     Ok(())
@@ -3849,7 +3911,9 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
 }
 
 /// A parsed document's statements with rules re-encoded into their surface
-/// triple form (log:semantics / log:parsedAsN3 result formulae).
+/// triple form (log:semantics / log:parsedAsN3 result formulae). The document's universals
+/// are already the result formula's own: [`bounded::parse_n3_term`] parses its top level as
+/// a formula scope, and [`parser::unscope_rule`] gives each rule side back its own.
 fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
     // the rules' formulas MOVE back into statements: no copy of a parsed formula
     let quote = |ts: Vec<[Term; 3]>| -> Term {

@@ -145,12 +145,48 @@ pub(crate) fn parse_charged_checked(
     extra: impl IntoIterator<Item = [Term; 3]>,
     allowance: Option<usize>,
 ) -> Result<Parsed, ParseFailure> {
+    parse_charged(src, base, extra, allowance, false)
+}
+
+/// As [`parse_charged_checked`], for a document that becomes a QUOTED FORMULA
+/// (`log:parsedAsN3`, `log:semantics`): its top level is that formula, so a top-level
+/// `@forAll` binds in it exactly as `{ @forAll … }` written inline does (GH #6754) — each
+/// mention reads as [`FORMULA_UNIVERSAL`] named for its depth below the document, never as
+/// a document-level [`UNIVERSAL_VAR`]. The parsed formula is then the same term as its
+/// inline spelling, and an executable clause holding it is checked like one.
+pub(crate) fn parse_quoted_charged_checked(
+    src: &str,
+    base: &str,
+    allowance: Option<usize>,
+) -> Result<Parsed, ParseFailure> {
+    parse_charged(src, base, std::iter::empty(), allowance, true)
+}
+
+fn parse_charged(
+    src: &str,
+    base: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
+    allowance: Option<usize>,
+    quoted: bool,
+) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
     p.left = allowance;
     p.allowance = allowance.unwrap_or(0);
+    let frame = std::mem::size_of::<std::collections::HashMap<String, Term>>();
     let r = p.new_string(&[base]).and_then(|b| {
         p.base = b;
-        parse_document(&mut p, base, extra)
+        if quoted {
+            // The document's own quantifier scope is a formula's: charged like one, and
+            // given back once the parse is done.
+            p.charge(frame)?;
+            p.quants.push(Default::default());
+        }
+        let parsed = parse_document(&mut p, base, extra);
+        if quoted {
+            p.quants.pop();
+            p.release(frame);
+        }
+        parsed
     });
     r.map_err(|m| match p.stopped.take() {
         Some(e) => ParseFailure::Resource(e),
