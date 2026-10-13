@@ -2041,8 +2041,14 @@ fn arrayvec_default() -> ureq::unversioned::resolver::ResolvedSocketAddrs {
 }
 
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-impl Transport for HttpTransport {
-    fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String> {
+impl HttpTransport {
+    /// POST `query` to `endpoint` through the SSRF-guarded agent and return the response, or
+    /// the SERVICE error text for a transport failure or a non-2xx status.
+    fn post(
+        &self,
+        endpoint: &str,
+        query: &str,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
         // [OPUS-4.8] sq-g2xs: ureq-3 builds an `Agent` from a `Config` + a custom resolver via
         // `Agent::with_parts`; the resolver carries the default-deny SSRF policy exactly as in
         // ureq 2 (the resolved-and-vetted IP is the dialled IP — no DNS-rebinding re-resolve).
@@ -2058,7 +2064,7 @@ impl Transport for HttpTransport {
         // POST with the query in an `application/x-www-form-urlencoded` `query=` field
         // (SPARQL Protocol §2.1.2 "query via POST with URL-encoded parameters") — the
         // most broadly supported method and not subject to URL-length limits.
-        let resp = agent
+        agent
             .post(endpoint)
             // Prefer JSON, but accept XML — some endpoints ignore `Accept` and only emit
             // SPARQL-Results-XML, which `parse_results` now handles (bead sq-ycu). [OPUS-4.8]
@@ -2066,23 +2072,29 @@ impl Transport for HttpTransport {
                 "Accept",
                 "application/sparql-results+json, application/sparql-results+xml;q=0.9",
             )
-            .send_form([("query", query)]);
-        match resp {
-            // ureq-3 caps `read_to_string` at 10 MiB by default; a federated SELECT result can
-            // exceed that, so raise the limit generously (a finite cap still bounds memory).
-            Ok(mut r) => r
-                .body_mut()
-                .with_config()
-                .limit(SERVICE_MAX_BODY_BYTES)
-                .read_to_string()
-                .map_err(|e| format!("SERVICE: reading response from {endpoint}: {e}")),
-            // ureq-3 surfaces non-2xx as `Error::StatusCode`; treat both transport and HTTP
-            // errors uniformly (the caller decides SILENT vs propagate).
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("SERVICE: endpoint {endpoint} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("SERVICE: request to {endpoint} failed: {e}")),
-        }
+            .send_form([("query", query)])
+            .map_err(|e| match e {
+                // ureq-3 surfaces non-2xx as `Error::StatusCode`; treat both transport and HTTP
+                // errors uniformly (the caller decides SILENT vs propagate).
+                ureq::Error::StatusCode(code) => {
+                    format!("SERVICE: endpoint {endpoint} returned HTTP {code}")
+                }
+                e => format!("SERVICE: request to {endpoint} failed: {e}"),
+            })
+    }
+}
+
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+impl Transport for HttpTransport {
+    fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String> {
+        // ureq-3 caps `read_to_string` at 10 MiB by default; a federated SELECT result can
+        // exceed that, so raise the limit generously (a finite cap still bounds memory).
+        self.post(endpoint, query)?
+            .body_mut()
+            .with_config()
+            .limit(SERVICE_MAX_BODY_BYTES)
+            .read_to_string()
+            .map_err(|e| format!("SERVICE: reading response from {endpoint}: {e}"))
     }
 }
 
@@ -2097,35 +2109,13 @@ impl ReaderTransport for HttpTransport {
         endpoint: &str,
         query: &str,
     ) -> Result<Box<dyn std::io::Read + 'a>, String> {
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-engine/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
-            EgressFilterResolver,
-        );
-        let resp = agent
-            .post(endpoint)
-            .header(
-                "Accept",
-                "application/sparql-results+json, application/sparql-results+xml;q=0.9",
-            )
-            .send_form([("query", query)]);
-        match resp {
-            Ok(r) => {
-                // Return the body as a capped byte reader — no `read_to_string`, no
-                // String allocation for the whole body. The limit is the same cap as
-                // the `Transport` path so the body-byte bound is preserved.
-                let reader = r.into_body().into_with_config().limit(SERVICE_MAX_BODY_BYTES).reader();
-                Ok(Box::new(reader))
-            }
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("SERVICE: endpoint {endpoint} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("SERVICE: request to {endpoint} failed: {e}")),
-        }
+        let resp = self.post(endpoint, query)?;
+        Ok(Box::new(
+            resp.into_body()
+                .into_with_config()
+                .limit(SERVICE_MAX_BODY_BYTES)
+                .reader(),
+        ))
     }
 }
 

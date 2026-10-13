@@ -66,6 +66,8 @@
 // Fable re-review when available.
 
 use crate::source::pct_encode;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ureq_egress::{Client, EgressFilterResolver};
 use sparq_fedplan::{SourceDescriptor, SourceId};
 
 // ─── Vocabulary IRIs (must match sparq-server/src/descriptors.rs exactly) ────────────
@@ -775,62 +777,16 @@ impl HttpFetcher {
     }
 }
 
-/// ureq resolver enforcing the SSRF egress policy on the *resolved* addresses
-/// (DNS-rebinding-safe): it resolves the host, drops every [`is_forbidden_ip`] address
-/// (unless the bare host is on the allowlist), and returns only survivors — so ureq dials
-/// only vetted IPs. Mirrors the engine's `EgressFilterResolver`.
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
-struct EgressFilterResolver {
-    allow_private: std::sync::Arc<std::collections::HashSet<String>>,
-}
-
-// [OPUS-4.8] sq-g2xs: ureq-3's `Resolver` takes a parsed `&http::Uri` (+ config + timeout) and
-// returns an `ArrayVec<SocketAddr, 16>` rather than ureq-2's `&str` netloc → `Vec`. The SSRF
-// policy is byte-for-byte the ureq-2 one; the shared `crate::ureq_egress` helpers carry the
-// ureq-3 boilerplate so the three sparq-fedclient transports share one implementation. (The engine
-// SERVICE resolver applies equivalent, unit-tested logic via its own inline copy — `sparq-engine`
-// cannot depend on `sparq-fedclient` — so it does not share this module.)
-#[cfg(not(target_arch = "wasm32"))]
-impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        _config: &ureq::config::Config,
-        _timeout: ureq::unversioned::transport::NextTimeout,
-    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        let (host_port, host, port) = crate::ureq_egress::uri_host_port(uri).ok_or_else(|| {
-            crate::ureq_egress::egress_refused(format!(
-                "discovery egress refused: request URI {uri} has no host authority to vet"
-            ))
-        })?;
-        // Port-scoped allowlist: a `host:port` entry re-opens a private host only on its exact
-        // dialled port (shared host:port rule with the engine SERVICE guard; sq-vbnyc).
-        let allowed = crate::ureq_egress::allowlist_permits(&self.allow_private, &host, port);
-        crate::ureq_egress::filter_resolved(&host_port, allowed, is_forbidden_ip, || {
-            format!(
-                "discovery egress refused: {host_port} resolves only to private/internal \
-                 addresses (default-deny SSRF policy; allow it with \
-                 HttpFetcher::allow_private_host)"
-            )
-        })
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str, accept: &str) -> Result<String, String> {
         // [OPUS-4.8] sq-g2xs: ureq-3 `Agent::with_parts` + the default-deny SSRF resolver — ureq
         // dials only the addresses the resolver returns (the vetted IP is the dialled IP).
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
+        let agent = crate::ureq_egress::agent(
+            self.timeout,
             EgressFilterResolver {
                 allow_private: std::sync::Arc::clone(&self.allow_private),
+                client: Client::Discovery,
             },
         );
         match agent.get(url).header("Accept", accept).call() {
@@ -1477,6 +1433,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
     fn resolver_denying() -> EgressFilterResolver {
         EgressFilterResolver {
             allow_private: std::sync::Arc::new(std::collections::HashSet::new()),
+            client: Client::Discovery,
         }
     }
 
@@ -1486,6 +1443,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         set.insert(host.to_ascii_lowercase());
         EgressFilterResolver {
             allow_private: std::sync::Arc::new(set),
+            client: Client::Discovery,
         }
     }
 
