@@ -590,6 +590,9 @@ pub(crate) fn check_effects(
          named graphs only)"
             .to_owned()
     };
+    // Graphs earlier effects of this request wrote or created: a later `CLEAR`/`DROP NAMED`
+    // empties them too, though the store before the request did not hold them.
+    let mut written: Vec<&NamedNode> = Vec::new();
     for effect in effects {
         match effect {
             UpdateEffect::Delta { slot, deletes, .. } => match slot {
@@ -600,6 +603,7 @@ pub(crate) fn check_effects(
                         Need::Write
                     };
                     need_on(n, base)?;
+                    written.push(n);
                 }
                 Some(_) => return Err("update denied: a graph name that is not an IRI".into()),
                 None => return Err(default_denied()),
@@ -612,9 +616,15 @@ pub(crate) fn check_effects(
                     for g in store_named_graphs(graph) {
                         need_on(&g, Need::Write)?;
                     }
+                    for g in &written {
+                        need_on(g, Need::Write)?;
+                    }
                 }
             },
-            UpdateEffect::Create(Term::NamedNode(n)) => need_on(n, Need::WriteOrAppend)?,
+            UpdateEffect::Create(Term::NamedNode(n)) => {
+                need_on(n, Need::WriteOrAppend)?;
+                written.push(n);
+            }
             UpdateEffect::Create(_) => {
                 return Err("update denied: a graph name that is not an IRI".into())
             }

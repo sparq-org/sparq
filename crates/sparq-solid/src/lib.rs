@@ -913,7 +913,20 @@ impl PodStore {
         // [OPUS-4.8] sq-j8qtt: reuse the persistent per-generation index (built once,
         // dropped on `reindex`) instead of rebuilding it on every call.
         let d = decide::decide_one(self.acl_index(), &self.auth, session, resource, mode);
-        self.apply_odrl(d, session, resource, mode)
+        self.unless_recovering(self.apply_odrl(d, session, resource, mode))
+    }
+
+    /// Deny, retryably, every decision while the graph holds a committed update it could not
+    /// finish applying (see [`PodStore::commit`]): its state may be partial until a reopen.
+    fn unless_recovering(&self, mut d: WacDecision) -> WacDecision {
+        if self.graph.needs_recovery() {
+            d.allow = false;
+            d.granted_modes.clear();
+            if d.status == AclStatus::Resolved {
+                d.status = AclStatus::Unloaded;
+            }
+        }
+        d
     }
 
     /// Remove the modes an attached ODRL prohibition denies (issue #6743) from a point
@@ -953,7 +966,7 @@ impl PodStore {
             .iter()
             .map(|(resource, mode)| {
                 let d = decide::decide_one(index, &self.auth, session, resource, *mode);
-                self.apply_odrl(d, session, resource, *mode)
+                self.unless_recovering(self.apply_odrl(d, session, resource, *mode))
             })
             .collect()
     }
@@ -1041,7 +1054,7 @@ impl PodStore {
         // The child-name refusal above stays first; a prohibition on the container or on
         // the child it would mint can only narrow what is left.
         let d = self.apply_odrl(d, session, container, mode);
-        self.apply_odrl(d, session, &format!("{container}{child_name}"), mode)
+        self.unless_recovering(self.apply_odrl(d, session, &format!("{container}{child_name}"), mode))
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
@@ -1102,6 +1115,11 @@ impl PodStore {
     /// Generation pinning (#1584): the `auth` snapshot is pinned ONCE per call, so a racing
     /// re-materialization never yields a half-old/half-new set.
     fn session_sets(&self, s: &Session, mode: Mode) -> SessionSets {
+        // A graph left part-way through a committed update is visible to no one until a
+        // reopen completes it (see [`PodStore::commit`]).
+        if self.graph.needs_recovery() {
+            return SessionEntry::sets_from(Vec::new());
+        }
         let key = (
             s.agent.map(str::to_owned),
             s.client.map(str::to_owned),
@@ -1575,7 +1593,7 @@ impl PodStore {
         allow(dead_code)
     )]
     pub(crate) fn may_install_grants(&self) -> bool {
-        !self.view_dropped
+        !self.view_dropped && !self.graph.needs_recovery()
     }
 
     /// The auth view a grant source other than the static WAC/ACP rules writes its grants
@@ -1595,8 +1613,9 @@ impl PodStore {
     /// allows: `None` (nothing touched) while the view is dropped, else the number retracted.
     #[cfg(feature = "odrl-bridge")]
     fn refresh_bridged(&mut self) -> Option<usize> {
-        let Self { graph, bridge_ledger, view_dropped, .. } = self;
-        (!*view_dropped).then(|| bridge_ledger.refresh(graph))
+        let usable = self.may_install_grants();
+        let Self { graph, bridge_ledger, .. } = self;
+        usable.then(|| bridge_ledger.refresh(graph))
     }
 
     /// [OPUS-4.8] sq-h3uk — evaluate an ODRL `policy` against `request` and, on a

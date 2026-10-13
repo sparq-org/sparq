@@ -3220,6 +3220,17 @@ impl Graph {
         Ok(())
     }
 
+    /// Refuse while any journal frame is committed and not cleared: rewriting the directory
+    /// (compaction, vacuum) would persist a state that may lack part of the frame and drop
+    /// the journal that holds it.
+    fn refuse_if_txn_open(&self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        if self.txn.as_ref().is_some_and(|j| j.pending) {
+            return Err(NEEDS_RECOVERY.to_owned());
+        }
+        Ok(())
+    }
+
     /// [OPUS-4.8] (review 1593) DURABLY empties this graph's default-graph content while
     /// PRESERVING its directory / WAL association — the durable replacement for
     /// `*graph = empty_graph()` on a directory-backed graph (where the latter dropped the WAL
@@ -3437,6 +3448,7 @@ impl Graph {
     /// possible. The string-parsing entry point for bindings (wasm/python) callers.
     pub fn apply_delta_nquads(&mut self, inserts: &str, deletes: &str) -> Result<(), String> {
         use oxrdf::GraphName;
+        self.refuse_if_abandoned()?;
         type Slot = Option<Term>;
         // Per-graph delta: `(slot, inserts, deletes)` — one entry per distinct graph.
         type SlotDelta = (Slot, Vec<[Term; 3]>, Vec<[Term; 3]>);
@@ -3621,6 +3633,7 @@ impl Graph {
     /// then swapped in via rename) and the write-ahead log truncated; the graph re-opens
     /// memory-mapped from the new base.
     pub fn compact(&mut self) -> Result<(), String> {
+        self.refuse_if_txn_open()?;
         #[cfg(feature = "mmap")]
         let dir = self.wal.as_ref().map(|w| w.dir.clone());
         // Fold the structural-fork layers first (ids unchanged throughout): named
@@ -3763,6 +3776,7 @@ impl Graph {
     /// external backups), which the storage/backup tier must handle per the retention-erasure
     /// runbook.
     pub fn vacuum(&mut self) -> Result<(), String> {
+        self.refuse_if_txn_open()?;
         #[cfg(feature = "mmap")]
         let dir = self.wal.as_ref().map(|w| w.dir.clone());
         // Re-intern the whole live dataset into a fresh graph with an EMPTY dictionary, so any
@@ -4402,8 +4416,23 @@ impl TxnJournal {
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
-        self.file.write_all(&buf)?;
-        self.file.sync_data()?;
+        let start = self.file.metadata()?.len();
+        let written = self.file.write_all(&buf).and_then(|()| self.file.sync_data());
+        #[cfg(test)]
+        let written = written.and_then(|()| match tests::FAIL_JOURNAL_SYNC.with(std::cell::Cell::get) {
+            true => Err(std::io::Error::other("injected journal sync failure")),
+            false => Ok(()),
+        });
+        if let Err(e) = written {
+            // The frame may be on disk in whole or in part. Put the journal back to where it
+            // was, durably; failing that, nothing more may be written until a reopen decides
+            // what the journal holds.
+            if self.file.set_len(start).and_then(|()| self.file.sync_data()).is_err() {
+                self.pending = true;
+                self.abandoned = true;
+            }
+            return Err(e);
+        }
         self.pending = true;
         Ok(())
     }
@@ -6405,6 +6434,10 @@ pub(crate) const fn miri_n(full: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    thread_local! {
+        /// Makes the journal's frame sync fail after the frame is written.
+        pub(super) static FAIL_JOURNAL_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
     use super::*;
 
     // ---- sq-1ivw7: predicate-range object term-kind (predicate_has_literal_object) ----
@@ -10866,6 +10899,8 @@ mod tests {
             assert!(g.needs_recovery(), "and is abandoned");
             assert!(g.apply_delta(std::slice::from_ref(&b), &[]).is_err());
             assert!(g.ensure_named(&named("z")).is_err());
+            assert!(g.apply_delta_nquads("<http://ex/a> <http://ex/b> <http://ex/c> <http://ex/q> .", "").is_err());
+            assert!(g.compact().is_err() && g.vacuum().is_err(), "no rewrite drops the journal");
             assert!(g.commit_txn(&[TxnRecord::Insert(None, b.clone())]).is_err());
             assert!(g.clear_txn().is_err(), "the journal is kept for the redo");
         }
@@ -10875,6 +10910,33 @@ mod tests {
         assert_eq!(x.map(|v| v.len()), Some(1), "the committed record was redone");
         assert!(dump_terms(&g).is_empty(), "the refused write left no trace");
         g.apply_delta(std::slice::from_ref(&b), &[]).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A journal write whose sync fails is rolled back: the commit fails, nothing is left in
+    /// the journal for a reopen to redo, and the next commit goes ahead.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn failed_journal_sync_rolls_the_frame_back() {
+        let dir = txn_tmp_dir("syncfail");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_str("", "ntriples").unwrap().save(&dir).unwrap();
+        let a = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        let b = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            FAIL_JOURNAL_SYNC.with(|f| f.set(true));
+            let res = g.commit_txn(&[TxnRecord::Insert(None, a.clone())]);
+            FAIL_JOURNAL_SYNC.with(|f| f.set(false));
+            assert!(res.is_err());
+            assert!(!g.needs_recovery());
+            assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap().len(), 0, "frame rolled back");
+            g.commit_txn(&[TxnRecord::Insert(None, b.clone())]).unwrap();
+        }
+        let g = Graph::open(&dir).unwrap();
+        let rows = dump_terms(&g);
+        assert_eq!(rows.len(), 1, "only the second frame is redone: {rows:?}");
+        assert!(rows[0].0.contains("/s2"));
         std::fs::remove_dir_all(&dir).ok();
     }
 

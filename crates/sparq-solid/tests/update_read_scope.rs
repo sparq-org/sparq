@@ -404,10 +404,24 @@ fn an_unfinished_commit_is_completed_by_a_reopen() {
         .commit_txn(&[sparq_core::TxnRecord::Insert(Some(iri("https://pod.ex/out")), journaled)])
         .expect("commits");
     let write = "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"later\" } }";
-    assert!(s.update_as(&bob(), write).is_err());
+    assert!(out_readable(&s));
+    assert!(s.update_as(&bob(), write).is_err(), "the pending frame refuses the next commit");
     assert!(s.graph.needs_recovery());
     assert!(!out_readable(&s), "reads are denied");
     assert!(s.update_as(&bob(), write).is_err());
+    assert!(s.materialize_wac().is_err());
+    drop(s);
+
+    // Reached without an update through the store, the state is refused just the same.
+    let mut s = reopen(&dir);
+    s.graph
+        .commit_txn(&[sparq_core::TxnRecord::CreateGraph(iri("https://pod.ex/other"))])
+        .expect("commits");
+    s.graph.abandon_txn();
+    assert!(!out_readable(&s), "reads are denied");
+    assert!(s.accessible(&bob(), Mode::Read).is_empty());
+    let d = s.decide(&bob(), "https://pod.ex/out", Mode::Read);
+    assert!(!d.allow && d.status == sparq_solid::AclStatus::Unloaded, "{d:?}");
     assert!(s.materialize_wac().is_err());
     drop(s);
     let mut s = reopen(&dir);
@@ -439,4 +453,43 @@ fn unreadable_and_absent_sources_are_refused_alike() {
         e.replace(g, "<graph>")
     };
     assert_eq!(refusal("https://pod.ex/private"), refusal("https://pod.ex/absent"));
+}
+
+/// `CLEAR NAMED` needs write on every graph it empties, including one an earlier operation of
+/// the same request created: the owner may write every existing graph but only append to
+/// `new`, so creating `new` and then clearing every graph is refused.
+#[test]
+fn clearing_every_graph_covers_graphs_created_earlier_in_the_request() {
+    const OWNER: &str = "https://owner.ex/card#me";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let rule = |doc: &str, target: &str, scope: &str, modes: &[&str]| {
+        let mut nq = format!(
+            "<{doc}#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL}Authorization> <{doc}> .\n\
+             <{doc}#r> <{ACL}{scope}> <{target}> <{doc}> .\n\
+             <{doc}#r> <{ACL}agent> <{OWNER}> <{doc}> .\n"
+        );
+        for m in modes {
+            nq += &format!("<{doc}#r> <{ACL}mode> <{ACL}{m}> <{doc}> .\n");
+        }
+        nq
+    };
+    let mut nq = String::from("<urn:s> <urn:p> \"kept\" <https://pod.ex/a> .\n");
+    nq += &rule("https://pod.ex/.acl", "https://pod.ex/", "default", &["Read", "Write", "Control"]);
+    nq += &rule("https://pod.ex/.acl", "https://pod.ex/", "accessTo", &["Read", "Write", "Control"]);
+    nq += &rule("https://pod.ex/new.acl", "https://pod.ex/new", "accessTo", &["Append", "Control"]);
+    let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+    s.materialize_wac().expect("wac");
+    let owner = Session { agent: Some(OWNER), client: None, issuer: None, now: None };
+    let before = snapshot(&s);
+    s.update_as(&owner, "CLEAR NAMED").expect("write on every existing graph");
+    let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+    s.materialize_wac().expect("wac");
+    let e = s
+        .update_as(
+            &owner,
+            "INSERT DATA { GRAPH <https://pod.ex/new> { <urn:n> <urn:p> 1 } } ; CLEAR NAMED",
+        )
+        .expect_err("new is append-only");
+    assert!(e.contains("https://pod.ex/new"), "{e}");
+    assert_eq!(snapshot(&s), before, "nothing applied");
 }
