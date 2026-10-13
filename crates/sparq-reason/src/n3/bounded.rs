@@ -350,6 +350,61 @@ impl ClosureRounds {
     }
 }
 
+/// Default [`runtime_docs`]: distinct documents (by text and base) one runtime-document
+/// table may take.
+const RUNTIME_DOCS: usize = 100_000;
+
+/// Why a run was stopped by [`runtime_docs`].
+const RUNTIME_DOCS_CUT: &str = "runtime-document limit exceeded";
+
+/// Distinct documents (by text and base) one runtime-document table may take: a run's
+/// own table, or a `MaterializedN3Graph`'s, which lives as long as the graph. The table
+/// keeps a constant-size entry per document (its SHA-256 digest and label prefix, never
+/// its text), so this bounds its memory; one more document fails the run
+/// ([`runtime_docs_exceeded`]).
+pub(crate) fn runtime_docs() -> usize {
+    #[cfg(test)]
+    if let Some(n) = RUNTIME_DOCS_OVERRIDE.with(Cell::get) {
+        return n;
+    }
+    RUNTIME_DOCS
+}
+
+/// The error of a run whose runtime-document table is full, the cut recorded on `cuts`.
+pub(crate) fn runtime_docs_exceeded(cuts: &impl Sink) -> String {
+    cuts.record(RUNTIME_DOCS_CUT);
+    format!(
+        "n3: {RUNTIME_DOCS_CUT}: a run (or a MaterializedN3Graph over its life) parses at \
+         most {} distinct documents at run time",
+        runtime_docs()
+    )
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// A lowered [`runtime_docs`] for tables made on this thread.
+    static RUNTIME_DOCS_OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Lowers [`runtime_docs`] on this thread until dropped.
+#[cfg(test)]
+pub(crate) struct RuntimeDocsOverride;
+
+#[cfg(test)]
+impl RuntimeDocsOverride {
+    pub(crate) fn set(n: usize) -> RuntimeDocsOverride {
+        RUNTIME_DOCS_OVERRIDE.with(|c| c.set(Some(n)));
+        RuntimeDocsOverride
+    }
+}
+
+#[cfg(test)]
+impl Drop for RuntimeDocsOverride {
+    fn drop(&mut self) {
+        RUNTIME_DOCS_OVERRIDE.with(|c| c.set(None));
+    }
+}
+
 /// Bracket nesting the N3 parser accepts: `{ }` formulae, `( )` lists, `[ ]` blank-node
 /// property lists and `<< >>` quoted triples, counted together. The recursive descent
 /// recurses once per level, so this is sized for the smallest stack the parser supports:

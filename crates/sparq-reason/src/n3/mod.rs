@@ -202,12 +202,15 @@ type VisitedDocs = std::rc::Rc<std::cell::RefCell<run_shared::RunShared>>;
 
 pub(crate) use run_shared::RuntimeDocs;
 
+
 /// The state one top-level run shares with all of its nested closures, and the table of
 /// documents parsed at run time, which can outlive a run (a `MaterializedN3Graph` keeps
 /// one for its whole life). Private fields and one constructor each: a run cannot hold a
 /// table that was not made fresh against its sources.
 mod run_shared {
-    use super::{document_blank_labels, fresh_blank_prefix, parser, Term, VisitedDocs};
+    use super::{
+        bounded, document_blank_labels, fresh_blank_prefix, parser, Term, VisitedDocs,
+    };
     use rustc_hash::{FxHashMap, FxHashSet};
 
     pub(super) struct RunShared {
@@ -221,7 +224,7 @@ mod run_shared {
     /// The table of documents parsed at run time (`log:parsedAsN3`, `log:semantics`) and
     /// the ONE allocator of their blank labels. Such a document's blanks are its own: they
     /// are standardized apart into `{prefix}{key}_{label}`, `key` the document's
-    /// [`runtime_doc_key`] (a specified hash of its text and base, its scope). So a label
+    /// scope key ([`runtime_doc_digest`], a specified hash of its text and base). So a label
     /// depends on the document alone, never on the order a run meets documents in, nor
     /// on the build: the same text under the same base always parses to the same formula
     /// (a materialization and a proof re-derivation agree, and exported proof keys are
@@ -229,22 +232,46 @@ mod run_shared {
     /// already taken is refused, failing the run. No runtime text can spell a label of
     /// the sources the table was made for: `prefix` is the smallest `__rp{k}_` no blank of
     /// any of them starts with, except a source blank spelled exactly as a runtime blank
-    /// (`__rp{k}_{key}_<label>`, as an exported closure writes it), which names that
-    /// runtime document's blank; so re-reasoning exported output keeps `k`. Cloning
-    /// shares the table.
+    /// (`__rp{k}_{key}_<label>`), which names that runtime document's blank whether an
+    /// exported closure or a person wrote it; so re-reasoning exported output keeps `k`.
+    /// Per document the table keeps a constant-size entry (the full SHA-256 digest, for
+    /// the collision refusal, and the label prefix), never the text or base, and it takes
+    /// at most [`bounded::runtime_docs`] documents: one more fails the run with a cut. It
+    /// finds a known document again by a 128-bit hash of its text and base under random
+    /// per-process SipHash keys. Cloning shares the table.
     #[derive(Clone)]
     pub(crate) struct RuntimeDocs(std::rc::Rc<std::cell::RefCell<DocTable>>);
 
     struct DocTable {
         prefix: String,
-        /// The keys taken. Every document holding one is in `given`, so a key met again
-        /// for a document missing from `given` is a collision.
-        keys: FxHashSet<String>,
-        /// Each document's label prefix (`{prefix}{key}_`), keyed by text, then by base
-        /// (looked up without allocating): a run re-evaluates a parse builtin on every
-        /// round, and its SHA-256 key needs computing once. Only the prefix is kept, not
-        /// the statements, so the table stays small.
-        given: FxHashMap<String, Vec<(String, String)>>,
+        /// Keys of the per-process index: two independently, randomly keyed SipHash
+        /// states, so `by_doc` finds a document again without the table keeping its
+        /// text or base.
+        index: (std::hash::RandomState, std::hash::RandomState),
+        /// Each known document's entry, by its 128-bit keyed hash of `(text, base)`.
+        by_doc: FxHashMap<u128, u32>,
+        /// Each entry by its 8-byte scope key, for the collision refusal.
+        by_key: FxHashMap<u64, u32>,
+        /// One constant-size entry per document: its SHA-256 digest and label prefix.
+        entries: Vec<DocEntry>,
+        /// Documents this table may hold ([`bounded::runtime_docs`]).
+        room: usize,
+    }
+
+    /// What the table keeps of one document: its full SHA-256 digest (to tell two
+    /// documents sharing an 8-byte scope key apart) and its label prefix
+    /// `{prefix}{key}_`, whose length is the same for every entry of a table.
+    struct DocEntry {
+        digest: [u8; 32],
+        prefix: String,
+    }
+
+    /// Why the table refused a document.
+    pub(super) enum Refusal {
+        /// Another document has its scope key.
+        Collision,
+        /// The table is full ([`bounded::runtime_docs`]).
+        Full,
     }
 
     impl RuntimeDocs {
@@ -270,20 +297,30 @@ mod run_shared {
             let other: FxHashSet<&str> =
                 labels.iter().copied().filter(|l| !is_runtime_label(l)).collect();
             let prefix = fresh_blank_prefix(&other, "__rp");
-            let (keys, given) = (FxHashSet::default(), FxHashMap::default());
-            let table = DocTable { prefix, keys, given };
+            RuntimeDocs::with_room(prefix, bounded::runtime_docs())
+        }
+
+        fn with_room(prefix: String, room: usize) -> RuntimeDocs {
+            let table = DocTable {
+                prefix,
+                index: Default::default(),
+                by_doc: FxHashMap::default(),
+                by_key: FxHashMap::default(),
+                entries: Vec::new(),
+                room,
+            };
             RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
         }
 
         /// The statements of the document parsed from `text` under `base` (by `parse`),
         /// with its blanks standardized apart; `Ok(None)` when `parse` fails, `Err` when
-        /// another document has its key.
+        /// the table refuses the document.
         fn formula(
             &self,
             text: &str,
             base: &str,
             parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
-        ) -> Result<Option<Vec<[Term; 3]>>, String> {
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
             let Some(mut ts) = parse() else { return Ok(None) };
             fn has_blank(t: &Term) -> bool {
                 match t {
@@ -317,33 +354,65 @@ mod run_shared {
 
     impl DocTable {
         /// The label prefix for the blanks of the document parsed from `text` under
-        /// `base`; `Err` when another document has its key.
-        fn prefix_for(&mut self, text: &str, base: &str) -> Result<&str, String> {
-            let known = self.given.get(text).and_then(|bs| bs.iter().position(|(b, _)| b == base));
-            if known.is_none() {
-                let key = runtime_doc_key(text, base);
-                let mut prefix = String::with_capacity(self.prefix.len() + key.len() + 1);
-                prefix.push_str(&self.prefix);
-                prefix.push_str(&key);
-                prefix.push('_');
-                if !self.keys.insert(key) {
-                    return Err(
-                        "n3: two documents parsed at run time share a blank-node scope key; \
-                         refused rather than let their blank nodes alias"
-                            .to_string(),
-                    );
-                }
-                self.given.entry(text.to_string()).or_default().push((base.to_string(), prefix));
+        /// `base`; `Err` when another document has its key or the table is full (the
+        /// table is then unchanged).
+        fn prefix_for(&mut self, text: &str, base: &str) -> Result<&str, Refusal> {
+            let id = self.doc_id(text, base);
+            if let Some(&at) = self.by_doc.get(&id) {
+                return Ok(&self.entries[at as usize].prefix);
             }
-            let docs = &self.given[text];
-            let at = known.unwrap_or(docs.len() - 1);
-            Ok(&docs[at].1)
+            let digest = runtime_doc_digest(text, base);
+            let key = u64::from_be_bytes(digest[..8].try_into().expect("8 bytes"));
+            let at = match self.by_key.get(&key) {
+                Some(&at) if self.entries[at as usize].digest == digest => at,
+                Some(_) => return Err(Refusal::Collision),
+                None => {
+                    if self.entries.len() >= self.room {
+                        return Err(Refusal::Full);
+                    }
+                    let mut prefix = String::with_capacity(self.prefix.len() + 17);
+                    prefix.push_str(&self.prefix);
+                    sparq_core::hex::encode_into(&digest[..8], false, &mut prefix);
+                    prefix.push('_');
+                    // An index; `room` keeps the table far below u32::MAX entries.
+                    let at = u32::try_from(self.entries.len()).map_err(|_| Refusal::Full)?;
+                    self.entries.push(DocEntry { digest, prefix });
+                    self.by_key.insert(key, at);
+                    at
+                }
+            };
+            self.by_doc.insert(id, at);
+            Ok(&self.entries[at as usize].prefix)
+        }
+
+        /// The keyed 128-bit hash of `(text, base)` that indexes `by_doc`, each part
+        /// preceded by its length.
+        fn doc_id(&self, text: &str, base: &str) -> u128 {
+            use std::hash::{BuildHasher, Hasher};
+            let half = |state: &std::hash::RandomState| {
+                let mut h = state.build_hasher();
+                for part in [text, base] {
+                    h.write_usize(part.len());
+                    h.write(part.as_bytes());
+                }
+                h.finish()
+            };
+            (u128::from(half(&self.index.0)) << 64) | u128::from(half(&self.index.1))
+        }
+
+        /// The bytes the table keeps per document: the same for every document,
+        /// whatever its text and base.
+        #[cfg(test)]
+        fn bytes_per_entry(&self) -> Vec<usize> {
+            let slot = std::mem::size_of::<(u128, u32)>() + std::mem::size_of::<(u64, u32)>();
+            let entry = std::mem::size_of::<DocEntry>() + slot;
+            self.entries.iter().map(|e| entry + e.prefix.capacity()).collect()
         }
     }
 
     /// Whether `label` has the exact shape of a standardized runtime blank:
     /// `__rp{k}_{key}_<label>` with `k` decimal digits and `key` 16 lowercase hex digits
-    /// ([`runtime_doc_key`]).
+    /// ([`runtime_doc_digest`]).
     pub(super) fn is_runtime_label(label: &str) -> bool {
         let Some(rest) = label.strip_prefix("__rp") else { return false };
         let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
@@ -354,12 +423,13 @@ mod run_shared {
             && rest.as_bytes().get(16) == Some(&b'_')
     }
 
-    /// The scope key of a document parsed at run time: the first 8 bytes, as 16 lowercase
-    /// hex digits, of SHA-256 over `"sparq-n3-runtime-doc\0"`, then the UTF-8 `text` and
-    /// the UTF-8 `base`, each preceded by its byte length as a big-endian `u64`. Specified
-    /// (not a std hasher), so it is the same on every build: it reaches exported labels,
-    /// proof keys and provenance IRIs.
-    pub(crate) fn runtime_doc_key(text: &str, base: &str) -> String {
+    /// The SHA-256 digest of a document parsed at run time: SHA-256 over
+    /// `"sparq-n3-runtime-doc\0"`, then the UTF-8 `text` and the UTF-8 `base`, each
+    /// preceded by its byte length as a big-endian `u64`. Its first 8 bytes, as 16
+    /// lowercase hex digits, are the document's scope key in its blank labels. Specified
+    /// (not a std hasher), so the key is the same on every build: it reaches exported
+    /// labels, proof keys and provenance IRIs.
+    fn runtime_doc_digest(text: &str, base: &str) -> [u8; 32] {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
         h.update(b"sparq-n3-runtime-doc\0");
@@ -367,7 +437,13 @@ mod run_shared {
             h.update((part.len() as u64).to_be_bytes());
             h.update(part.as_bytes());
         }
-        sparq_core::hex::encode(&h.finalize()[..8])
+        h.finalize().into()
+    }
+
+    /// The scope key of a document parsed at run time ([`runtime_doc_digest`]).
+    #[cfg(test)]
+    pub(crate) fn runtime_doc_key(text: &str, base: &str) -> String {
+        sparq_core::hex::encode(&runtime_doc_digest(text, base)[..8])
     }
 
     impl RunShared {
@@ -388,8 +464,47 @@ mod run_shared {
             text: &str,
             base: &str,
             parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
-        ) -> Result<Option<Vec<[Term; 3]>>, String> {
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
             self.runtime.formula(text, base, parse)
+        }
+    }
+
+    #[cfg(test)]
+    mod table_tests {
+        use super::{Refusal, RuntimeDocs, Term};
+
+
+        /// A document of `text` whose one blank is `_:x`.
+        fn doc() -> Option<Vec<[Term; 3]>> {
+            let iri = |s: &str| Term::Iri(s.to_string());
+            Some(vec![[Term::Blank("x".into()), iri("http://ex/p"), iri("http://ex/o")]])
+        }
+
+        /// When full the table refuses a new document without taking it, and still
+        /// serves the documents it holds.
+        #[test]
+        fn a_full_table_refuses_without_inserting() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 2);
+            let a = t.formula("a", "", doc).ok().flatten().expect("a");
+            assert!(t.formula("b", "", doc).is_ok());
+            assert!(matches!(t.formula("c", "", doc), Err(Refusal::Full)));
+            assert_eq!(t.0.borrow().entries.len(), 2);
+            assert_eq!(t.formula("a", "", doc).ok().flatten(), Some(a));
+            assert!(matches!(t.formula("c", "", doc), Err(Refusal::Full)));
+        }
+
+        /// The table keeps the same number of bytes for a one-byte text as for a
+        /// megabyte one (and for a long base).
+        #[test]
+        fn an_entry_does_not_grow_with_its_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let big = "y".repeat(1 << 20);
+            for (text, base) in [("a", ""), (big.as_str(), ""), ("a", big.as_str())] {
+                assert!(t.formula(text, base, doc).is_ok());
+            }
+            let sizes = t.0.borrow().bytes_per_entry();
+            assert_eq!(sizes.len(), 3);
+            assert!(sizes.iter().all(|&n| n == sizes[0]), "{sizes:?}");
         }
     }
 }
@@ -442,13 +557,15 @@ impl BwCtx<'_> {
         };
         let visited = self.visited.clone();
         let made = visited.borrow().parsed_formula(text, base, parse);
-        match made {
-            Ok(ts) => ts,
-            Err(e) => {
-                self.nested_error.borrow_mut().get_or_insert(e);
-                None
-            }
-        }
+        let e = match made {
+            Ok(ts) => return ts,
+            Err(run_shared::Refusal::Collision) => "n3: two documents parsed at run time share a \
+                 blank-node scope key; refused rather than let their blank nodes alias"
+                .to_string(),
+            Err(run_shared::Refusal::Full) => bounded::runtime_docs_exceeded(pending),
+        };
+        self.nested_error.borrow_mut().get_or_insert(e);
+        None
     }
 
     /// Use a budgeted or fallible step's result, recording a cut on the run
@@ -7597,5 +7714,27 @@ mod substrate_seam_differential {
             exact_value(Func::Negation, &[plain(&big.to_string())]),
             Some(lit(&(-big).to_string(), XSD_INT))
         );
+    }
+}
+
+#[cfg(test)]
+mod runtime_docs_table {
+    /// A run that parses more distinct documents at run time than its table may hold fails
+    /// with the runtime-document error and records it as a cut; with room it closes.
+    #[test]
+    fn a_run_past_the_runtime_document_table_fails_closed() {
+        let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   <http://ex/a> <http://ex/t> \"_:x <http://ex/p> 1 .\" .\n\
+                   <http://ex/b> <http://ex/t> \"_:x <http://ex/p> 2 .\" .\n\
+                   { ?d <http://ex/t> ?t . ?t log:parsedAsN3 ?f . \
+                     ?f log:includes { ?s <http://ex/p> ?n } } => { ?d <http://ex/n> ?n } .";
+        let run = |room: usize| {
+            let _room = super::bounded::RuntimeDocsOverride::set(room);
+            let limits = super::ClosureLimits::default();
+            super::reason_n3_terms_with_limits(src, None, None, Default::default(), limits)
+        };
+        assert_eq!(run(2).expect("closes").derived.len(), 2);
+        let Err(e) = run(1) else { panic!("a second document was taken by a table of one") };
+        assert!(e.contains("runtime-document limit exceeded"), "{e}");
     }
 }
