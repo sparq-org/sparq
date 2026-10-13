@@ -197,6 +197,11 @@ jobs:
       - name: Build full-featured wasm bundle (shacl,jsonld,… — the SHACL specs need it)
         if: needs.config.outputs.mode == 'full'
         run: cd ../js && npm run build:wasm
+      # /surface/inference loads the tier-b reasoner bundle separately; without it the axe
+      # sweep audits the "Reasoner failed to load" state (#6891). Same command as pages.yml.
+      - name: Build W-reason wasm bundle
+        if: needs.config.outputs.mode == 'full'
+        run: cd ../js && npm run build:reason-wasm
       - name: Sync wasm bundle into site/public/wasm/
         if: needs.config.outputs.mode == 'full'
         run: npm run sync-wasm
