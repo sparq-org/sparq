@@ -379,3 +379,94 @@ fn the_round_and_fact_allowance_bounds_insert_and_delete() {
     assert_eq!(g.len(), 15);
     assert_eq!(g.mode(), N3Mode::Counting);
 }
+
+/// A recursive layer feeding a counted rule: the counted wave runs after the layer's.
+const LAYER_THEN_COUNTED: &str = "@prefix : <http://ex/>.\n\
+     { ?x :t ?y. ?y :t ?z } => { ?x :t ?z }.\n\
+     { ?x :t ?y } => { ?x :u ?y. ?y :v ?x }.\n";
+
+fn as_set(facts: &[[Term; 3]]) -> FxHashSet<[Term; 3]> {
+    facts.iter().cloned().collect()
+}
+
+/// The last wave of a propagation is checked too: a closure one fact past `max_facts` is
+/// refused, and one of exactly `max_facts` facts is accepted, when it is built.
+#[test]
+fn a_final_wave_past_the_fact_allowance_is_refused_at_construction() {
+    let fact = [ex("s"), ex("a"), ex("o")];
+    // The chain closes at 3 facts, the last derived in the final wave.
+    let e = MaterializedN3Graph::with_limits(CHAIN, std::slice::from_ref(&fact), rounds(16, 2))
+        .err()
+        .expect("3 facts do not fit in 2");
+    assert_limit_error("construction, final wave", &e);
+    let g = MaterializedN3Graph::with_limits(CHAIN, std::slice::from_ref(&fact), rounds(16, 3))
+        .expect("exactly 3 facts fit");
+    assert_eq!(g.len(), 3);
+    assert_eq!(g.mode(), N3Mode::Counting);
+    assert_matches_batch(
+        &g,
+        CHAIN,
+        &as_set(&[fact]),
+        rounds(16, 3),
+        "construction, boundary",
+    );
+}
+
+#[test]
+fn a_final_wave_past_the_fact_allowance_is_refused_on_insert() {
+    let fact = [ex("s"), ex("a"), ex("o")];
+    let mut g = MaterializedN3Graph::with_limits(CHAIN, &[], rounds(16, 2)).expect("empty");
+    g.insert(std::slice::from_ref(&fact));
+    assert_limit_error(
+        "insert, final wave",
+        g.stratification_warning().expect("refused"),
+    );
+    assert_eq!(g.closure(), vec![fact.clone()], "fails closed to the base");
+    assert_matches_batch(
+        &g,
+        CHAIN,
+        &as_set(std::slice::from_ref(&fact)),
+        rounds(16, 2),
+        "insert",
+    );
+
+    let mut g = MaterializedN3Graph::with_limits(CHAIN, &[], rounds(16, 3)).expect("empty");
+    g.insert(std::slice::from_ref(&fact));
+    assert_eq!(g.stratification_warning(), None);
+    assert_eq!(g.len(), 3);
+    assert_eq!(g.mode(), N3Mode::Counting);
+}
+
+/// A delete that brings a refused graph back re-derives its recursive layer and the
+/// counted wave after it: the closure that results is checked in full.
+#[test]
+fn a_layer_re_derivation_after_delete_is_checked_to_its_last_wave() {
+    let chain = path(6);
+    // 21 :t pairs, each with a :u and a :v copy (63 facts); after deleting n3 -> n4,
+    // 6 + 3 pairs and their copies (27 facts). Every allowance below 27 must refuse.
+    let after: Vec<[Term; 3]> = chain.iter().filter(|f| f != &&chain[3]).cloned().collect();
+    for max_facts in 9..=28 {
+        let fits = max_facts >= 27;
+        let l = rounds(1000, max_facts);
+        let mut g = MaterializedN3Graph::with_limits(LAYER_THEN_COUNTED, &[], l).expect("empty");
+        g.insert(&chain);
+        assert!(
+            g.stratification_warning().is_some(),
+            "63 facts do not fit in {max_facts}"
+        );
+        g.delete(std::slice::from_ref(&chain[3]));
+        let at = format!("delete, max_facts {max_facts}");
+        if fits {
+            assert_eq!(g.stratification_warning(), None, "{at}");
+            assert_eq!(g.len(), 27, "{at}");
+            assert_eq!(g.mode(), N3Mode::Counting, "{at}");
+        } else {
+            assert_limit_error(
+                &at,
+                g.stratification_warning().expect("27 facts do not fit"),
+            );
+            assert_eq!(g.len(), after.len(), "{at}: fails closed to the base");
+        }
+        assert_matches_batch(&g, LAYER_THEN_COUNTED, &as_set(&after), l, &at);
+    }
+}

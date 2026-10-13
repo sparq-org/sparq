@@ -2609,7 +2609,12 @@ impl MaterializedN3Graph {
     ///
     /// The counting path sizes each term it would build (a builtin's argument list and
     /// result) with the text engine's checkpoint before building it, and charges each
-    /// propagation one round per wave against the round and fact allowance. When the
+    /// propagation one round per wave against the round allowance. Each new distinct fact
+    /// is checked against the fact allowance as it is collected, and the closure after each
+    /// wave (the last included), so a closure of exactly `max_facts` facts is accepted and
+    /// none larger is published. The per-wave binding rows and the multiset of rule
+    /// firings are not charged: they are bounded by the firings of one wave, not by the
+    /// fact allowance. When the
     /// counting path passes a limit, the graph rebuilds through the checked batch engine
     /// under the same limits, so it ends in the state a batch run over the current facts
     /// gives. When that run refuses the closure, the graph fails closed: its closure is
@@ -2891,7 +2896,6 @@ impl MaterializedN3Graph {
         let cuts = self.cuts.clone();
         let mut rounds = bounded::ClosureRounds::forward(&cuts);
         while !pending.is_empty() {
-            rounds.round(self.index.all.len(), &cuts)?;
             let mut pend_set: FxHashSet<[N3Term; 3]> = pending.iter().cloned().collect();
             for f in &pending {
                 if inserting {
@@ -2900,6 +2904,9 @@ impl MaterializedN3Graph {
                     self.index.remove(f);
                 }
             }
+            // Charged with the wave in the index, so the closure a propagation publishes
+            // (its last wave included) never holds more than the fact allowance.
+            rounds.round(self.index.all.len(), &cuts)?;
             let mut next: Vec<[N3Term; 3]> = Vec::new();
             let mut queued: FxHashSet<[N3Term; 3]> = FxHashSet::default();
             // 1. Recursive layers (dependency order), recomputed when touched. This runs
@@ -2948,6 +2955,7 @@ impl MaterializedN3Graph {
                     for f in added {
                         if !self.index.contains(&f) && queued.insert(f.clone()) {
                             next.push(f);
+                            rounds.hold(self.index.all.len().saturating_add(next.len()), &cuts)?;
                         }
                     }
                 } else {
@@ -3020,6 +3028,8 @@ impl MaterializedN3Graph {
                         && queued.insert(g.clone())
                     {
                         next.push(g);
+                        // Each new distinct fact is checked as it is collected.
+                        rounds.hold(self.index.all.len().saturating_add(next.len()), &cuts)?;
                     }
                 }
             } else {
@@ -3081,9 +3091,11 @@ impl MaterializedN3Graph {
             local.insert(f.clone());
         }
         let mut pending = seed;
+        // Facts the local fixpoint holds that the closure does not (yet): with the
+        // closure's own, what the closure would hold.
+        let mut grown = 0usize;
         while !pending.is_empty() {
-            let held = self.index.all.len().saturating_add(local.all.len().saturating_sub(seed_set.len()));
-            rounds.round(held, &cuts)?;
+            rounds.round(self.index.all.len().saturating_add(grown), &cuts)?;
             let mut emissions = Vec::new();
             {
                 let cx = N3Cx {
@@ -3116,6 +3128,10 @@ impl MaterializedN3Graph {
             let mut fresh = Vec::new();
             for g in emissions {
                 if local.insert(g.clone()) {
+                    if !self.index.contains(&g) {
+                        grown += 1;
+                        rounds.hold(self.index.all.len().saturating_add(grown), &cuts)?;
+                    }
                     fresh.push(g);
                 }
             }

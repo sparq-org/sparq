@@ -347,7 +347,10 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// result with the text engine's own checkpoint before building it; its conclusions are
 /// variables, IRIs and literals, so they build no new term. Each propagation is charged
 /// one round per wave (and per round of a recursive layer's local fixpoint) against the
-/// round and fact allowance. Past any limit the graph rebuilds through the batch engine
+/// round allowance; each new distinct fact is checked against the fact allowance as it is
+/// collected, and the closure after each wave, so no published closure holds more than
+/// `max_facts` facts (the binding rows and rule firings of one wave are not charged).
+/// Past any limit the graph rebuilds through the batch engine
 /// under the same limits, so it holds the batch engine's closure or fails closed with its
 /// error. Its rounds are not the batch engine's schedule, so under equal round or fact
 /// limits it can hold a closure a from-scratch batch run near the boundary refuses.
@@ -683,15 +686,29 @@ impl ClosureRounds {
                 self.left = left;
                 Ok(())
             }
-            _ => {
-                cuts.record(CLOSURE_CUT);
-                Err(format!(
-                    "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
-                     the rules keep deriving new facts (raise ClosureLimits to allow more)",
-                    self.limits.max_rounds, self.limits.max_facts
-                ))
-            }
+            _ => Err(self.exceeded(cuts)),
         }
+    }
+
+    /// The fact allowance alone, without spending a round: `Err` (the cut recorded on
+    /// `cuts`) when a closure holding `facts` facts is past it. The incremental counting
+    /// engine checks each new fact against it as it is collected, so no wave holds more
+    /// distinct facts than the allowance before it is refused.
+    pub(crate) fn hold(&self, facts: usize, cuts: &impl Sink) -> Result<(), String> {
+        if facts <= self.limits.max_facts {
+            return Ok(());
+        }
+        Err(self.exceeded(cuts))
+    }
+
+    /// The error of a closure past its allowance, the cut recorded on `cuts`.
+    fn exceeded(&self, cuts: &impl Sink) -> String {
+        cuts.record(CLOSURE_CUT);
+        format!(
+            "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
+             the rules keep deriving new facts (raise ClosureLimits to allow more)",
+            self.limits.max_rounds, self.limits.max_facts
+        )
     }
 }
 
