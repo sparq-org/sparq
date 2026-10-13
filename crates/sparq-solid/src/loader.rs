@@ -480,9 +480,14 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
     }
 }
 
-/// Whether `iri` is a bare `scheme://` with no authority — above every authority root.
+/// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
+/// root. The `://` must follow the scheme itself (an opaque IRI such as
+/// `urn:example:x://` does not match).
 fn is_authority_less(iri: &str) -> bool {
-    iri.find("://").is_some_and(|i| i + 3 == iri.len())
+    let Some(scheme) = iri.strip_suffix("://") else { return false };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
 /// Solid slash-semantics parent of an IRI (None at/above the authority root).
@@ -515,6 +520,8 @@ mod tests {
         assert!(!super::is_authority_less("https://pod.ex/"));
         assert!(!super::is_authority_less("file:///pod/"));
         assert!(!super::is_authority_less("urn:x:y"));
+        assert!(!super::is_authority_less("urn:example:resource://"));
+        assert!(super::is_authority_less("HTTPS://"));
     }
 
     #[test]

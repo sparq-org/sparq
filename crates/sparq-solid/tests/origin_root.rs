@@ -110,3 +110,21 @@ fn sessions_cannot_write_bare_scheme_graphs() {
         );
     }
 }
+
+#[test]
+fn opaque_iris_ending_in_scheme_delimiter_keep_their_grants() {
+    let r = "urn:example:resource://";
+    let g = format!("{r}.acr");
+    let nq = format!(
+        "<{r}> <https://ex.dev/ns#x> \"y\" <{r}> .\n\
+         <{g}> <{ACP}resource> <{r}> <{g}> .\n\
+         <{g}> <{ACP}accessControl> <{g}#c> <{g}> .\n\
+         <{g}#c> <{ACP}apply> <{g}#p> <{g}> .\n\
+         <{g}#p> <{ACP}allow> <{ACL}Read> <{g}> .\n\
+         <{g}#p> <{ACP}anyOf> <{g}#m> <{g}> .\n\
+         <{g}#m> <{ACP}agent> <{BOB}> <{g}> .\n"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+    store.materialize_acp().expect("materializes");
+    assert!(store.accessible(&bob(), Mode::Read).iter().any(|n| n.as_str() == r));
+}
