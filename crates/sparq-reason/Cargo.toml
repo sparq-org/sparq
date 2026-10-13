@@ -188,6 +188,11 @@ smallvec = { workspace = true, optional = true }
 # wasm-portable: sparq-reason ships to the browser via the tier-b sparq-reason-wasm bundle
 # ([OPUS-4.8] sq-6qw3) — regex compiles to wasm32-unknown-unknown.
 regex = "1"
+# Runtime-parsed N3 documents are keyed by a SPECIFIED hash (SHA-256 of their text and base,
+# GH #6775): the key reaches exported blank labels and proof keys, so it must not change
+# between builds as a std hasher may. Pure Rust and wasm-portable; already in the workspace
+# tree (0.10, as sparq-canon / sparq-crdt pin it).
+sha2 = "0.10"
 # [SONNET-4.6] sq-pbz04.5.3 — RIF/XML importer; OPTIONAL, linked only by `rif-xml`.
 # No `encoding` feature: RIF/XML from the W3C test suite is UTF-8; non-UTF-8 XML will
 # fail at parse with EncodingError::Utf8 (acceptable fail-closed posture).  Dropping

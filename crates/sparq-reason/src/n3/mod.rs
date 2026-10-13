@@ -195,7 +195,376 @@ pub type Resolver = dyn Fn(&str) -> Option<String>;
 /// Keying on formula CONTENT (not the document IRI) means the guard needs no extra plumbing
 /// through the lazy `log:semantics` → `log:supports` evaluation hand-off, and is exact for
 /// the recursion that actually loops (a formula closing itself, transitively).
-type VisitedDocs = std::rc::Rc<std::cell::RefCell<FxHashSet<u64>>>;
+///
+/// The same shared state carries the runtime-document table, so every nested closure
+/// draws runtime-parse blank labels from ONE table ([`run_shared::RuntimeDocs`]).
+type VisitedDocs = std::rc::Rc<std::cell::RefCell<run_shared::RunShared>>;
+
+pub(crate) use run_shared::RuntimeDocs;
+
+
+/// The state one top-level run shares with all of its nested closures, and the table of
+/// documents parsed at run time, which can outlive a run (a `MaterializedN3Graph` keeps
+/// one for its whole life). Private fields and one constructor each: a run cannot hold a
+/// table that was not made fresh against its sources.
+mod run_shared {
+    use super::{
+        bounded, document_blank_labels, formula_bytes, fresh_blank_prefix, parser, Term,
+        VisitedDocs,
+    };
+    use rustc_hash::{FxHashMap, FxHashSet};
+
+    pub(super) struct RunShared {
+        /// Content keys of the formulas whose closure is in progress (the import-cycle
+        /// guard, [`VisitedDocs`]).
+        pub(super) docs: FxHashSet<u64>,
+        /// Blank labels for documents parsed at run time.
+        runtime: RuntimeDocs,
+    }
+
+    /// The table of documents parsed at run time (`log:parsedAsN3`, `log:semantics`) and
+    /// the ONE allocator of their blank labels. Such a document's blanks are its own: they
+    /// are standardized apart into `{prefix}{key}_{label}`, `key` the document's
+    /// scope key ([`runtime_doc_digest`], a specified hash of its text and base). So a label
+    /// depends on the document alone, never on the order a run meets documents in, nor
+    /// on the build: the same text under the same base always parses to the same formula
+    /// (a materialization and a proof re-derivation agree, and exported proof keys are
+    /// stable). Two documents never share a blank: a second document whose key is
+    /// already taken is refused, failing the run. No runtime text can spell a label of
+    /// the sources the table was made for: `prefix` is the smallest `__rp{k}_` no blank of
+    /// any of them starts with, except a source blank spelled exactly as a runtime blank
+    /// (`__rp{k}_{key}_<label>`), which names that runtime document's blank whether an
+    /// exported closure or a person wrote it; so re-reasoning exported output keeps `k`.
+    /// Per document the table keeps a constant-size entry (the full SHA-256 digest, for
+    /// the collision refusal, and the label prefix), never the text or base, and it takes
+    /// at most [`bounded::runtime_docs`] documents: one more fails the run with a cut. It
+    /// finds a known document again by that digest (one SHA-256 per runtime parse).
+    /// Cloning shares the table.
+    #[derive(Clone)]
+    pub(crate) struct RuntimeDocs(std::rc::Rc<std::cell::RefCell<DocTable>>);
+
+    struct DocTable {
+        prefix: String,
+        /// Each known document's entry, by its full SHA-256 digest.
+        by_doc: FxHashMap<[u8; 32], u32>,
+        /// Each entry by its 8-byte scope key, for the collision refusal.
+        by_key: FxHashMap<u64, u32>,
+        /// One constant-size entry per document: its SHA-256 digest and label prefix.
+        entries: Vec<DocEntry>,
+        /// Documents this table may hold ([`bounded::runtime_docs`]).
+        room: usize,
+    }
+
+    /// What the table keeps of one document: its full SHA-256 digest (to tell two
+    /// documents sharing an 8-byte scope key apart) and its label prefix
+    /// `{prefix}{key}_`, whose length is the same for every entry of a table.
+    struct DocEntry {
+        digest: [u8; 32],
+        prefix: String,
+    }
+
+    /// Why the table refused a document.
+    pub(super) enum Refusal {
+        /// Another document has its scope key.
+        Collision,
+        /// The table is full ([`bounded::runtime_docs`]).
+        Full,
+    }
+
+    impl RuntimeDocs {
+        /// A table for runs over `sources` (every document whose blanks the runs hold: a
+        /// query passes its data and its query document, a `MaterializedN3Graph` its
+        /// rules document).
+        pub(crate) fn for_sources(sources: &[&parser::Parsed]) -> RuntimeDocs {
+            let mut labels = FxHashSet::default();
+            for p in sources {
+                labels.extend(document_blank_labels(p));
+            }
+            RuntimeDocs::for_labels(&labels)
+        }
+
+        /// [`for_sources`](Self::for_sources) given the sources' blank labels
+        /// ([`document_blank_labels`]), for a run that has already collected them.
+        pub(super) fn for_labels(labels: &FxHashSet<&str>) -> RuntimeDocs {
+            // A source label spelled exactly as a runtime blank (`__rp{k}_{key}_<label>`)
+            // is one: it was exported from an earlier run (`reason_n3_pass_all` output,
+            // a serialized closure) and names that runtime document's blank. It does not
+            // push `k` up, so re-reasoning an exported closure keeps the same `k` and the
+            // reparsed document's blanks are the exported nodes (a fixed point).
+            let other: FxHashSet<&str> =
+                labels.iter().copied().filter(|l| !is_runtime_label(l)).collect();
+            let prefix = fresh_blank_prefix(&other, "__rp");
+            RuntimeDocs::with_room(prefix, bounded::runtime_docs())
+        }
+
+        fn with_room(prefix: String, room: usize) -> RuntimeDocs {
+            let table = DocTable {
+                prefix,
+                by_doc: FxHashMap::default(),
+                by_key: FxHashMap::default(),
+                entries: Vec::new(),
+                room,
+            };
+            RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
+        }
+
+        /// The statements of the document parsed from `text` under `base` (by `parse`),
+        /// with its blanks standardized apart; `Ok(None)` when `parse` fails or `admit`
+        /// refuses the standardized formula's size, `Err` when the table refuses the
+        /// document. `admit` gets that size ([`formula_bytes`] of the statements once
+        /// every blank label carries its prefix) computed from the parsed statements,
+        /// before any label is rewritten and before the table takes the document.
+        fn formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
+            let Some(mut ts) = parse() else { return Ok(None) };
+            // Each blank label grows by the label prefix, the same length for every
+            // document of the table.
+            let blanks = ts.iter().map(blank_occurrences).fold(0, usize::saturating_add);
+            let grown = blanks.saturating_mul(self.0.borrow().label_prefix_len());
+            let bytes = formula_bytes(ts.iter()).saturating_add(grown);
+            if !admit(bytes) {
+                return Ok(None);
+            }
+            // A document with no blank has nothing to standardize apart (and needs no key).
+            if blanks == 0 {
+                return Ok(Some(ts));
+            }
+            let mut t = self.0.borrow_mut();
+            let prefix = t.prefix_for(text, base)?;
+            // In place: only the blank labels are rewritten, nothing else is copied.
+            fn go(t: &mut Term, p: &str) {
+                match t {
+                    Term::Blank(l) => l.insert_str(0, p),
+                    Term::List(ms) => ms.iter_mut().for_each(|m| go(m, p)),
+                    Term::Formula(rs) => rs.iter_mut().flatten().for_each(|m| go(m, p)),
+                    Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, p)),
+                    _ => {}
+                }
+            }
+            ts.iter_mut().flatten().for_each(|t| go(t, prefix));
+            debug_assert_eq!(formula_bytes(ts.iter()), bytes, "the admitted size is the size");
+            Ok(Some(ts))
+        }
+    }
+
+    /// The blank-label occurrences in `t`, through nested lists, formulas and quoted
+    /// triples (walked with an explicit stack, as [`bounded::term_bytes`] walks).
+    fn blank_occurrences(t: &[Term; 3]) -> usize {
+        let mut n = 0usize;
+        let mut stack: Vec<&Term> = t.iter().collect();
+        while let Some(t) = stack.pop() {
+            match t {
+                Term::Blank(_) => n += 1,
+                Term::List(ms) => stack.extend(ms),
+                Term::Formula(rs) => stack.extend(rs.iter().flatten()),
+                Term::Triple(tr) => stack.extend(tr.iter()),
+                _ => {}
+            }
+        }
+        n
+    }
+
+    /// The hex digits of a scope key in a label prefix.
+    const KEY_HEX: usize = 16;
+
+    impl DocTable {
+        /// The length of every label prefix `{prefix}{key}_` of this table.
+        fn label_prefix_len(&self) -> usize {
+            self.prefix.len() + KEY_HEX + 1
+        }
+
+        /// The label prefix for the blanks of the document parsed from `text` under
+        /// `base`; `Err` when another document has its key or the table is full (the
+        /// table is then unchanged).
+        fn prefix_for(&mut self, text: &str, base: &str) -> Result<&str, Refusal> {
+            let digest = runtime_doc_digest(text, base);
+            if let Some(&at) = self.by_doc.get(&digest) {
+                return Ok(&self.entries[at as usize].prefix);
+            }
+            let key = scope_key(&digest);
+            let at = match self.by_key.get(&key) {
+                Some(&at) if self.entries[at as usize].digest == digest => at,
+                Some(_) => return Err(Refusal::Collision),
+                None => {
+                    if self.entries.len() >= self.room {
+                        return Err(Refusal::Full);
+                    }
+                    let mut prefix = String::with_capacity(self.label_prefix_len());
+                    prefix.push_str(&self.prefix);
+                    sparq_core::hex::encode_into(&digest[..8], false, &mut prefix);
+                    prefix.push('_');
+                    debug_assert_eq!(prefix.len(), self.label_prefix_len());
+                    // An index; `room` keeps the table far below u32::MAX entries.
+                    let at = u32::try_from(self.entries.len()).map_err(|_| Refusal::Full)?;
+                    self.entries.push(DocEntry { digest, prefix });
+                    self.by_key.insert(key, at);
+                    at
+                }
+            };
+            self.by_doc.insert(digest, at);
+            Ok(&self.entries[at as usize].prefix)
+        }
+
+        /// The bytes the table keeps per document: the same for every document,
+        /// whatever its text and base.
+        #[cfg(test)]
+        fn bytes_per_entry(&self) -> Vec<usize> {
+            let slot = std::mem::size_of::<([u8; 32], u32)>() + std::mem::size_of::<(u64, u32)>();
+            let entry = std::mem::size_of::<DocEntry>() + slot;
+            self.entries.iter().map(|e| entry + e.prefix.capacity()).collect()
+        }
+    }
+
+    /// Whether `label` has the exact shape of a standardized runtime blank:
+    /// `__rp{k}_{key}_<label>` with `k` decimal digits and `key` 16 lowercase hex digits
+    /// ([`runtime_doc_digest`]).
+    pub(super) fn is_runtime_label(label: &str) -> bool {
+        let Some(rest) = label.strip_prefix("__rp") else { return false };
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let Some(rest) = rest[digits..].strip_prefix('_') else { return false };
+        let key = rest.as_bytes().get(..16);
+        digits > 0
+            && key.is_some_and(|k| k.iter().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+            && rest.as_bytes().get(16) == Some(&b'_')
+    }
+
+    /// The 8-byte scope key of a document: the first 8 bytes of its digest.
+    fn scope_key(digest: &[u8; 32]) -> u64 {
+        #[cfg(test)]
+        if table_tests::SAME_KEY.with(std::cell::Cell::get) {
+            return 0;
+        }
+        u64::from_be_bytes(digest[..8].try_into().expect("8 bytes"))
+    }
+
+    /// The SHA-256 digest of a document parsed at run time: SHA-256 over
+    /// `"sparq-n3-runtime-doc\0"`, then the UTF-8 `text` and the UTF-8 `base`, each
+    /// preceded by its byte length as a big-endian `u64`. Its first 8 bytes, as 16
+    /// lowercase hex digits, are the document's scope key in its blank labels. Specified
+    /// (not a std hasher), so the key is the same on every build: it reaches exported
+    /// labels, proof keys and provenance IRIs.
+    fn runtime_doc_digest(text: &str, base: &str) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"sparq-n3-runtime-doc\0");
+        for part in [text, base] {
+            h.update((part.len() as u64).to_be_bytes());
+            h.update(part.as_bytes());
+        }
+        h.finalize().into()
+    }
+
+    /// The scope key of a document parsed at run time ([`runtime_doc_digest`]).
+    #[cfg(test)]
+    pub(crate) fn runtime_doc_key(text: &str, base: &str) -> String {
+        sparq_core::hex::encode(&runtime_doc_digest(text, base)[..8])
+    }
+
+    impl RunShared {
+        /// The shared state of one top-level run drawing on `runtime`.
+        pub(super) fn new(runtime: RuntimeDocs) -> VisitedDocs {
+            let shared = RunShared { docs: FxHashSet::default(), runtime };
+            std::rc::Rc::new(std::cell::RefCell::new(shared))
+        }
+
+        /// The shared state of a top-level run over `sources`, with a table of its own.
+        pub(super) fn for_sources(sources: &[&parser::Parsed]) -> VisitedDocs {
+            RunShared::new(RuntimeDocs::for_sources(sources))
+        }
+
+        /// [`RuntimeDocs::formula`] on the run's table.
+        pub(super) fn parsed_formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
+            self.runtime.formula(text, base, parse, admit)
+        }
+    }
+
+    #[cfg(test)]
+    mod table_tests {
+        use super::{Refusal, RuntimeDocs, Term};
+
+        std::thread_local! {
+            /// Gives every document the same scope key, forcing a key collision.
+            pub(super) static SAME_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        /// Two different documents sharing a scope key are told apart by their full
+        /// digest: the second is refused, while the first, met again, keeps its prefix.
+        #[test]
+        fn a_scope_key_collision_is_refused_and_a_known_document_is_kept() {
+            SAME_KEY.with(|c| c.set(true));
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let a = t.formula("a", "", doc, |_| true);
+            let b = t.formula("b", "", doc, |_| true);
+            let again = t.formula("a", "", doc, |_| true);
+            SAME_KEY.with(|c| c.set(false));
+            assert!(matches!(b, Err(Refusal::Collision)));
+            assert_eq!(a.ok().flatten(), again.ok().flatten());
+            assert_eq!(t.0.borrow().entries.len(), 1);
+        }
+
+
+        /// A document of `text` whose one blank is `_:x`.
+        fn doc() -> Option<Vec<[Term; 3]>> {
+            let iri = |s: &str| Term::Iri(s.to_string());
+            Some(vec![[Term::Blank("x".into()), iri("http://ex/p"), iri("http://ex/o")]])
+        }
+
+        /// When full the table refuses a new document without taking it, and still
+        /// serves the documents it holds.
+        #[test]
+        fn a_full_table_refuses_without_inserting() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 2);
+            let a = t.formula("a", "", doc, |_| true).ok().flatten().expect("a");
+            assert!(t.formula("b", "", doc, |_| true).is_ok());
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
+            assert_eq!(t.0.borrow().entries.len(), 2);
+            assert_eq!(t.formula("a", "", doc, |_| true).ok().flatten(), Some(a));
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
+        }
+
+        /// `admit` gets the size the formula has once standardized apart, and a refusal
+        /// leaves the table without the document (nothing was prefixed).
+        #[test]
+        fn admit_sees_the_standardized_size_before_the_table_takes_the_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let mut seen = 0;
+            let refused = t.formula("a", "", doc, |n| {
+                seen = n;
+                false
+            });
+            assert!(matches!(refused, Ok(None)));
+            assert!(t.0.borrow().entries.is_empty());
+            let kept = t.formula("a", "", doc, |_| true).ok().flatten().expect("kept");
+            assert_eq!(super::formula_bytes(kept.iter()), seen);
+            assert_eq!(t.0.borrow().entries.len(), 1);
+        }
+
+        /// The table keeps the same number of bytes for a one-byte text as for a
+        /// megabyte one (and for a long base).
+        #[test]
+        fn an_entry_does_not_grow_with_its_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let big = "y".repeat(1 << 20);
+            for (text, base) in [("a", ""), (big.as_str(), ""), ("a", big.as_str())] {
+                assert!(t.formula(text, base, doc, |_| true).is_ok());
+            }
+            let sizes = t.0.borrow().bytes_per_entry();
+            assert_eq!(sizes.len(), 3);
+            assert!(sizes.iter().all(|&n| n == sizes[0]), "{sizes:?}");
+        }
+    }
+}
 
 /// A stable structural key for a quoted formula, used by the import-cycle guard
 /// ([`VisitedDocs`]) to recognise a closure that is already in progress up the stack.
@@ -224,12 +593,36 @@ struct BwCtx<'a> {
     /// Why a search of this run (or of a nested closure it reached) was cut short, if one
     /// was ([`Truncation`]).
     truncated: Truncation,
-    /// The caller blank namespace of the `MaterializedN3Graph` the run serves, if any
-    /// ([`run_closure`]'s `caller_ns`).
-    caller_ns: Option<String>,
 }
 
 impl BwCtx<'_> {
+    /// The statements `parse` makes of the document parsed at run time from `text` (under
+    /// `base`), with its blanks standardized apart through the run's table
+    /// ([`run_shared::RunShared::parsed_formula`]). `None` when the text does not parse,
+    /// when `admit` refuses the size the standardized formula will have (checked before
+    /// any label is rewritten), or when the table refuses the document (the refusal
+    /// fails the run).
+    fn runtime_formula(
+        &self,
+        text: &str,
+        base: &str,
+        parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+        admit: impl FnOnce(usize) -> bool,
+        pending: &bounded::Pending,
+    ) -> Option<Vec<[Term; 3]>> {
+        let visited = self.visited.clone();
+        let made = visited.borrow().parsed_formula(text, base, parse, admit);
+        let e = match made {
+            Ok(ts) => return ts,
+            Err(run_shared::Refusal::Collision) => "n3: two documents parsed at run time share a \
+                 blank-node scope key; refused rather than let their blank nodes alias"
+                .to_string(),
+            Err(run_shared::Refusal::Full) => bounded::runtime_docs_exceeded(pending),
+        };
+        self.nested_error.borrow_mut().get_or_insert(e);
+        None
+    }
+
     /// Use a budgeted or fallible step's result, recording a cut on the run
     /// ([`bounded::settle`]).
     fn settle<T>(&self, b: Bounded<T>) -> T {
@@ -264,17 +657,17 @@ fn negation_gate(bw: &BwCtx) -> bool {
 }
 
 impl<'a> BwCtx<'a> {
-    fn new(rules: &'a [Rule], truncated: Truncation) -> BwCtx<'a> {
+    /// A context sharing `visited` with the run it belongs to.
+    fn new(rules: &'a [Rule], truncated: Truncation, visited: VisitedDocs) -> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
             base: String::new(),
             resolver: None,
-            visited: VisitedDocs::default(),
+            visited,
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
             truncated,
-            caller_ns: None,
         }
     }
 }
@@ -568,17 +961,20 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
     // One run: the data closure and the query premises share one cut record.
     let truncated = cuts;
+    // ... and one runtime-parse allocator, fresh against both documents: a text the query
+    // parses never spells a blank of the data closure.
+    let shared = run_shared::RunShared::for_sources(&[&data_parsed, &query_parsed]);
     let facts = run_closure(
         data_parsed,
         None,
-        Some(VisitedDocs::default()),
+        Some(shared.clone()),
         &truncated,
         StepMode::None,
         NegationCycles::Reject,
         None,
     )?
     .read_further(&truncated);
-    let mut bw = BwCtx::new(&backward, truncated);
+    let mut bw = BwCtx::new(&backward, truncated, shared);
     bw.base = base;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
@@ -781,10 +1177,13 @@ fn stratified_in(
         parsed.facts.append(&mut carried);
         // An incomplete closure (rules FailClosed skipped) taints the whole rest of the
         // pipeline: every later document's negation gate reads `truncated`.
+        // Each stratum's runtime parses are standardized apart against its own source,
+        // which holds the earlier strata's carried (renamed) closure.
+        let shared = run_shared::RunShared::for_sources(&[&parsed]);
         let closure = run_closure(
             parsed,
             None,
-            Some(VisitedDocs::default()),
+            Some(shared),
             &truncated,
             StepMode::None,
             cycles,
@@ -820,50 +1219,9 @@ fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
 /// blank labels (GH #6775): the smallest `__bs{k}_` prefix no blank label of the rules
 /// document starts with. The parser's own labels (`_b<n>` for `[]`, `_:x` as written,
 /// `__path<n>`, `__ex_<local>`) are all in `parsed`, so none starts with it, and the
-/// `__sk…`/`__st…` labels the engine mints are other families. A document parsed at run
-/// time cannot spell it either ([`runtime_document`]).
+/// `__sk…`/`__st…`/`__rp…` labels the engine mints are other families.
 pub(crate) fn fresh_base_blank_prefix(parsed: &parser::Parsed) -> String {
     fresh_blank_prefix(&document_blank_labels(parsed), "__bs")
-}
-
-/// The statements of a document parsed at run time (`log:parsedAsN3`, `log:semantics`),
-/// or `None`, recording a cut on the run, when the run serves a `MaterializedN3Graph`
-/// and one of the document's blank labels starts with that graph's caller namespace
-/// `caller_ns` (its exact `__bs{k}_` prefix): such a text could otherwise name a caller's
-/// blank node, which only the caller introduces. Without a caller namespace (every batch
-/// and query run) nothing is refused. The document's other blanks keep their labels as
-/// written; standardizing runtime documents apart is a separate change.
-fn runtime_document(
-    parsed: parser::Parsed,
-    pending: &bounded::Pending,
-    caller_ns: Option<&str>,
-) -> Option<Vec<[Term; 3]>> {
-    // a walk, not a set of the labels: the parsed document was charged against the run's
-    // term-size limit, and nothing else is allocated before it is sized
-    let spells_caller = caller_ns.is_some_and(|ns| {
-        let rule_terms = parsed
-            .rules
-            .iter()
-            .chain(&parsed.backward_rules)
-            .flat_map(|r| r.premise.iter().chain(&r.conclusion));
-        parsed
-            .facts
-            .iter()
-            .chain(rule_terms)
-            .flatten()
-            .any(|t| any_blank_label(t, &|l| l.starts_with(ns)))
-    });
-    if spells_caller {
-        return settle(
-            pending,
-            Bounded::cut(
-                None,
-                "a document parsed at run time spells a blank label in the caller namespace \
-                 of the MaterializedN3Graph it serves; it was refused",
-            ),
-        );
-    }
-    Some(reencode_statements(parsed))
 }
 
 /// Every blank label reachable in `t`, including nested list members, formula
@@ -879,18 +1237,6 @@ fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
         }
         Term::Triple(tr) => tr.iter().for_each(|m| term_blank_labels(m, out)),
         _ => {}
-    }
-}
-
-/// Does a blank label reachable in `t` (as [`term_blank_labels`] reaches them) satisfy
-/// `hit`?
-fn any_blank_label(t: &Term, hit: &impl Fn(&str) -> bool) -> bool {
-    match t {
-        Term::Blank(l) => hit(l),
-        Term::List(ms) => ms.iter().any(|m| any_blank_label(m, hit)),
-        Term::Formula(ts) => ts.iter().flatten().any(|m| any_blank_label(m, hit)),
-        Term::Triple(tr) => tr.iter().any(|m| any_blank_label(m, hit)),
-        _ => false,
     }
 }
 
@@ -964,7 +1310,7 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
     extra: impl IntoIterator<Item = [Term; 3]>,
     cuts: &Truncation,
-    caller_ns: Option<&str>,
+    runtime: Option<&RuntimeDocs>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
     let (facts, steps, _) = run_closure(
@@ -974,7 +1320,7 @@ pub(crate) fn reason_n3_terms_proof(
         cuts,
         StepMode::Full,
         NegationCycles::Reject,
-        caller_ns,
+        runtime,
     )?
     .top_level();
     Ok((facts.all, steps))
@@ -1105,7 +1451,7 @@ pub(crate) fn reason_n3_terms_with_facts(
     extra: impl IntoIterator<Item = [Term; 3]>,
     cycles: NegationCycles,
     truncated: &Truncation,
-    caller_ns: &str,
+    runtime: &RuntimeDocs,
 ) -> Result<N3Closure, String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, truncated)?;
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
@@ -1116,7 +1462,7 @@ pub(crate) fn reason_n3_terms_with_facts(
         truncated,
         StepMode::Conclusions,
         cycles,
-        Some(caller_ns),
+        Some(runtime),
     )?
     .top_level();
     Ok(N3Closure {
@@ -1182,9 +1528,11 @@ impl Closure {
 fn run_closure(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
-    // The import-cycle guard ([`VisitedDocs`]). `None` for a TOP-LEVEL run (a fresh,
-    // empty set); a nested run reached through `formula_closure` passes the PARENT's set so
-    // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
+    // The import-cycle guard and runtime-parse allocator ([`VisitedDocs`]). `None` for a
+    // TOP-LEVEL run (made fresh against `parsed`); a nested run reached through
+    // `formula_closure` passes the PARENT's, so a `log:semantics` / `log:content` document
+    // IRI active up the stack is still recognised, and a query or a pipeline stratum passes
+    // the one its entry point made.
     // `Some` also means a caller reads this closure further (a query, the next document
     // of an explicit pipeline, a nested closure's consumer).
     inherit: Option<VisitedDocs>,
@@ -1194,21 +1542,33 @@ fn run_closure(
     mode: StepMode,
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
-    // The caller blank namespace of the `MaterializedN3Graph` this run serves (its exact
-    // `__bs{k}_` prefix), if any: a document parsed at run time may not spell a label in
-    // it ([`runtime_document`]). A nested run passes its parent's.
-    caller_ns: Option<&str>,
+    // The runtime-document table a TOP-LEVEL run draws on when its caller keeps one across
+    // runs (a `MaterializedN3Graph`); `None` makes one fresh against `parsed`. Ignored
+    // with `inherit`, whose run state already carries its table.
+    runtime: Option<&RuntimeDocs>,
 ) -> Result<Closure, String> {
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
     // from being captured by a minted conclusion blank. Labels ingested later
     // through document builtins or nested closure evaluation are outside this
     // initial-source guarantee.
-    let sk_prefix = fresh_blank_prefix(&document_blank_labels(&parsed), "__sk");
+    let labels = document_blank_labels(&parsed);
+    let sk_prefix = fresh_blank_prefix(&labels, "__sk");
+    // A caller reads this closure further (a query, the next document of an explicit
+    // pipeline, a nested closure's consumer).
+    let read_further = inherit.is_some();
+    let visited = match inherit {
+        Some(v) => v,
+        None => run_shared::RunShared::new(match runtime {
+            Some(r) => r.clone(),
+            // One scan of the document's labels serves both namespaces.
+            None => RuntimeDocs::for_labels(&labels),
+        }),
+    };
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
     // A top-level run keeps terms as deep as those it was handed (terms built in code can
     // nest past the parser's limit); rules cannot build deeper ([`bounded::given_terms`]).
-    if inherit.is_none() {
+    if !read_further {
         let rule_terms = rules
             .iter()
             .chain(&backward_rules)
@@ -1228,17 +1588,10 @@ fn run_closure(
     // loop below. Rules on a cycle through negation follow `cycles`.
     let strata = strata::stratify(&rules, &backward_rules, cycles)?;
     let mut facts = FactIndex::from_iter(facts0);
-    let mut bw = BwCtx::new(&backward_rules, truncated.clone());
+    let mut bw = BwCtx::new(&backward_rules, truncated.clone(), visited);
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
-    bw.caller_ns = caller_ns.map(str::to_string);
-    // A caller reads this closure further (a query, the next document of an explicit
-    // pipeline, a nested closure's consumer).
-    let read_further = inherit.is_some();
-    if let Some(v) = inherit {
-        bw.visited = v;
-    }
     // Derivation steps at the term level (interned to ids once at the end).
     let mut steps: Vec<DerivationStep> = Vec::new();
 
@@ -3381,7 +3734,7 @@ fn with_formula_closure<R>(
         }
     };
     let key = formula_key(ts);
-    if !bw.visited.borrow_mut().insert(key) {
+    if !bw.visited.borrow_mut().docs.insert(key) {
         bw.settle(Bounded::cut(
             (),
             "a nested closure re-entered a document already being closed and was left unclosed",
@@ -3423,20 +3776,20 @@ fn with_formula_closure<R>(
         &bw.truncated,
         StepMode::None,
         cycles,
-        bw.caller_ns.as_deref(),
+        None,
     ) {
         Ok(closed) => closed.read_further(&bw.truncated),
         Err(e) => {
             bw.nested_error
                 .borrow_mut()
                 .get_or_insert(format!("in a nested closure: {e}"));
-            bw.visited.borrow_mut().remove(&key);
+            bw.visited.borrow_mut().docs.remove(&key);
             return f(&ts.iter().collect::<Vec<_>>());
         }
     };
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations, each once.
-    bw.visited.borrow_mut().remove(&key);
+    bw.visited.borrow_mut().docs.remove(&key);
     let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
     let mut all: Vec<&[Term; 3]> = ts.iter().collect();
     all.extend(closed.all.iter().filter(|f| seen.insert(f)));
@@ -4041,8 +4394,10 @@ const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langSt
 /// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
 /// cut) or when the formula is past the run's term-size limit (a cut, and the run
 /// refused). The parser charges what it keeps against the limit before allocating it
-/// ([`bounded::parse_n3_term`]), so an expanding parse stops early; the formula is sized
-/// again here once [`runtime_document`] has re-encoded it.
+/// ([`bounded::parse_n3_term`]), so an expanding parse stops early. Once re-encoded, the
+/// formula is sized again at the size it will have with its blanks standardized apart
+/// (the parsed statements plus the growth of every blank label), before the run's
+/// runtime-document table ([`BwCtx::runtime_formula`]) rewrites any label.
 fn parsed_formula(
     f: Func,
     src: &str,
@@ -4050,18 +4405,14 @@ fn parsed_formula(
     bw: &BwCtx,
     pending: &bounded::Pending,
 ) -> Option<Term> {
-    // no-match: ill-typed (not N3 text; `parse_n3_term` already recorded a parser limit
-    // or the term-size refusal as a cut)
-    let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
-    let statements = runtime_document(parsed, pending, bw.caller_ns.as_deref())?;
-    let bytes = statements
-        .iter()
-        .flatten()
-        .map(bounded::term_bytes)
-        .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
-    if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
-        return None;
-    }
+    let parse = || {
+        // no-match: ill-typed (not N3 text; `parse_n3_term` already recorded a parser limit
+        // or the term-size refusal as a cut)
+        let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
+        Some(reencode_statements(parsed))
+    };
+    let admit = |bytes| !refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes);
+    let statements = bw.runtime_formula(src, base, parse, admit, pending)?;
     Some(Term::Formula(statements))
 }
 
@@ -5523,6 +5874,47 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 }
 
 #[cfg(test)]
+mod runtime_doc_key_golden {
+    use super::run_shared::runtime_doc_key;
+
+    /// The runtime-document key is specified, not build-dependent: these vectors were
+    /// computed independently (SHA-256 over the documented encoding, first 8 bytes). A
+    /// change here changes exported labels and provenance IRIs.
+    #[test]
+    fn runtime_doc_key_matches_golden_vectors() {
+        let x = "_:x <http://ex/p> <http://ex/o> .";
+        for (text, base, key) in [
+            ("", "", "80ab39c5ca307a54"),
+            (x, "", "36e2d3c73471b49f"),
+            (x, "http://ex/doc", "35978aa649d31637"),
+            ("ab", "c", "f053a10b92eecfd0"),
+            ("a", "bc", "ff5cfd007e1caf6c"),
+        ] {
+            assert_eq!(runtime_doc_key(text, base), key, "{text:?} {base:?}");
+        }
+    }
+
+    #[test]
+    fn runtime_label_shape() {
+        use super::run_shared::is_runtime_label;
+        for l in ["__rp0_36e2d3c73471b49f_x", "__rp12_0123456789abcdef_a.b", "__rp0_36e2d3c73471b49f__"] {
+            assert!(is_runtime_label(l), "{l}");
+        }
+        for l in [
+            "__rp0_x",
+            "__rp_36e2d3c73471b49f_x",
+            "__rp0_36E2D3C73471B49F_x",
+            "__rp0_36e2d3c73471b49_x",
+            "__rp0_36e2d3c73471b49fx",
+            "__rp0_36e2d3c73471b49f",
+            "_rp0_36e2d3c73471b49f_x",
+        ] {
+            assert!(!is_runtime_label(l), "{l}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     /// GH #6771 review: the replacement size is counted, not built, and the count is what
     /// `replace_all` writes, under every corner of the replacement syntax.
@@ -5930,12 +6322,15 @@ mod tests {
             }
             assert_eq!(depth_of(&deep), limit + 1);
             let run = Truncation::top_level();
+            let rules = "{ <http://ex/s> <http://ex/p> ?x } => { <http://ex/s> <http://ex/q> ?x } .";
+            let parsed = super::bounded::parse_n3(rules, "", &run).expect("parses");
+            let docs = super::RuntimeDocs::for_sources(&[&parsed]);
             let closure = super::reason_n3_terms_with_facts(
-                "{ <http://ex/s> <http://ex/p> ?x } => { <http://ex/s> <http://ex/q> ?x } .",
+                rules,
                 [[iri("s"), iri("p"), deep.clone()]],
                 NegationCycles::Reject,
                 &run,
-                "__bs0_",
+                &docs,
             )
             .expect("closes");
             (
@@ -7967,5 +8362,69 @@ mod substrate_seam_differential {
             exact_value(Func::Negation, &[plain(&big.to_string())]),
             Some(lit(&(-big).to_string(), XSD_INT))
         );
+    }
+}
+
+#[cfg(test)]
+mod runtime_docs_table {
+    /// A run that parses more distinct documents at run time than its table may hold fails
+    /// with the runtime-document error and records it as a cut; with room it closes.
+    #[test]
+    fn a_run_past_the_runtime_document_table_fails_closed() {
+        let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   <http://ex/a> <http://ex/t> \"_:x <http://ex/p> 1 .\" .\n\
+                   <http://ex/b> <http://ex/t> \"_:x <http://ex/p> 2 .\" .\n\
+                   { ?d <http://ex/t> ?t . ?t log:parsedAsN3 ?f . \
+                     ?f log:includes { ?s <http://ex/p> ?n } } => { ?d <http://ex/n> ?n } .";
+        let run = |room: usize| {
+            let _room = super::bounded::RuntimeDocsOverride::set(room);
+            let limits = super::ClosureLimits::default();
+            super::reason_n3_terms_with_limits(src, None, None, Default::default(), limits)
+        };
+        assert_eq!(run(2).expect("closes").derived.len(), 2);
+        let Err(e) = run(1) else { panic!("a second document was taken by a table of one") };
+        assert!(e.contains("runtime-document limit exceeded"), "{e}");
+    }
+
+    /// Standardizing a runtime document's blanks apart lengthens each label, and that
+    /// growth is charged before any label is rewritten: a document that fits
+    /// `max_term_bytes` as parsed but not once prefixed is refused, and one whose
+    /// standardized formula is exactly the limit is kept.
+    #[test]
+    fn the_growth_of_standardized_blank_labels_is_charged_before_the_rewrite() {
+        let text: String = (0..64).map(|i| format!("_:a{i} <http://ex/p> _:b{i} . ")).collect();
+        let src = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             <http://ex/a> <http://ex/t> \"{text}\" .\n\
+             {{ <http://ex/a> <http://ex/t> ?t . ?t log:parsedAsN3 ?f }} => \
+             {{ <http://ex/a> <http://ex/out> ?f }} ."
+        );
+        let run = |max_term_bytes: usize| {
+            let limits = super::ClosureLimits { max_term_bytes, ..Default::default() };
+            super::reason_n3_terms_with_limits(&src, None, None, Default::default(), limits)
+        };
+        let closure = run(super::ClosureLimits::default().max_term_bytes).expect("closes");
+        let [d] = closure.derived.as_slice() else { panic!("{:?}", closure.derived) };
+        let super::Term::Formula(ts) = &d[2] else { panic!("{d:?}") };
+        let standardized = super::bounded::term_bytes(&d[2]);
+        let labels: Vec<&str> = ts
+            .iter()
+            .flatten()
+            .filter_map(|t| match t {
+                super::Term::Blank(l) => Some(l.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels.len(), 128);
+        let prefix = labels[0].len() - "a0".len();
+        assert!(labels[0].starts_with("__rp") && labels[0].ends_with("_a0"), "{}", labels[0]);
+        let parsed = standardized - labels.len() * prefix;
+        // Fits as parsed, not once standardized: refused, naming the builtin.
+        let Err(e) = run(standardized - 1) else { panic!("kept a formula past the limit") };
+        assert!(e.contains("max_term_bytes") && e.contains("ParsedAsN3"), "{e}");
+        assert!(parsed < standardized);
+        // Exactly the standardized size: kept, the same formula.
+        let at = run(standardized).expect("a formula at the limit is kept");
+        assert_eq!(at.derived, closure.derived);
     }
 }
