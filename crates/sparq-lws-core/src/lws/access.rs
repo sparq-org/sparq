@@ -642,7 +642,7 @@ pub enum Aside {
 
 /// [`Aside`] for `agent` and `action` on the set-aside resource at `uri`, decided as
 /// [`allowed`] decided before the stuck change to it began: on what it was then (whether it was
-/// there, its metadata and its format, see [`Prior`](super::Prior)), with the grants in force
+/// there, its metadata and its format, see `Prior`), with the grants in force
 /// now. What the change may have written meanwhile (new content, new types, a `pending` mark)
 /// is never read for it: a grant the change would newly satisfy is not met, and one it would
 /// stop meeting still is. What the change left untouched is read as stored. An error when that
