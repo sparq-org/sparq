@@ -1435,10 +1435,11 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
     let mut targets = 0usize;
-    for (target, params) in parse_links(&req.header_all(header::LINK)) {
-        let Some(rel) = params.get("rel") else {
+    for link in parse_links(&req.header_all(header::LINK)) {
+        let Some(rel) = link.param("rel") else {
             continue;
         };
+        let target = link.target.to_string();
         // Every target is a URI reference (RFC 8288 section 3), resolved by the one IRI parser;
         // one that is not refuses the request before anything is written.
         let Some(resolved) = resolve_reference(uri, &target) else {
@@ -1580,13 +1581,11 @@ async fn create<S: Store + 'static>(
     if !parent.ends_with('/') {
         return method_not_allowed(&allow_for(parent, false));
     }
-    let is_container = parse_links(&req.header_all(header::LINK))
-        .iter()
-        .any(|(t, p)| {
-            t == &format!("{LWS_NS}Container")
-                && p.get("rel")
-                    .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
-        });
+    let is_container = parse_links(&req.header_all(header::LINK)).any(|l| {
+        l.target.strip_prefix(LWS_NS) == Some("Container")
+            && l.param("rel")
+                .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
+    });
     let base_name = sanitize_slug(req.header("slug"))
         .unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     // The container's lock is held shared from the choice of a free name through the create and
@@ -4639,6 +4638,51 @@ mod tests {
 
     fn path_of(uri: &str) -> &str {
         uri.strip_prefix(BASE).unwrap()
+    }
+
+    /// Review finding: a `;` inside a quoted parameter split it, so a title holding
+    /// `; rel=type` beside a container type link made a POST create a container (dropping its
+    /// body) though the link's relation is `describedby`.
+    #[tokio::test]
+    async fn a_quoted_semicolon_declares_nothing() {
+        let st = state().await;
+        let link =
+            r#"<https://www.w3.org/ns/lws#Container>; title="note; rel=type"; rel=describedby"#;
+        let uri = post(&st, "n.txt", "text/plain", "kept", &[("link", link)]).await;
+        let r = call(&st, "GET", path_of(&uri), &[], "").await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(&body_of(r).await[..], b"kept");
+    }
+
+    /// Review finding (#6839): an extension relation is kept as it was spelled, as the type
+    /// index's search keys it (`index::relation_key`), so a search by that spelling finds it.
+    #[tokio::test]
+    async fn an_extension_relation_is_kept_as_spelled() {
+        let st = state().await;
+        let link = r#"<https://t.example/x>; rel="https://E.example/Rel""#;
+        let uri = post(&st, "e.txt", "text/plain", "x", &[("link", link)]).await;
+        let r = call(
+            &st,
+            "GET",
+            &format!("{}{META_SUFFIX}", path_of(&uri)),
+            &[],
+            "",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let doc = json_of(r).await;
+        let entry = doc["linkset"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["anchor"] == uri.as_str())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            entry["https://E.example/Rel"][0]["href"],
+            "https://t.example/x"
+        );
+        assert!(entry.get("https://e.example/rel").is_none());
     }
 
     #[tokio::test]
