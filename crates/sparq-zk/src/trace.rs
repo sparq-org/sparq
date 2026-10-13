@@ -216,7 +216,20 @@ impl ZkDataset {
 
     /// Evaluates a SELECT/ASK over the union with the zk trace armed,
     /// resolves leaf references, and applies the Q6 bnode guard.
+    ///
+    /// A `FROM` / `FROM NAMED` dataset clause is refused up front with
+    /// [`TraceError::Query`], the same rule the verifier applies: the union
+    /// has no named graphs, so the clause would otherwise evaluate over an
+    /// empty dataset and yield an empty trace.
     pub fn query_traced(&self, sparql: &str) -> Result<TracedExecution, TraceError> {
+        if let Ok(query) = spargebra::SparqlParser::new().parse_query(sparql) {
+            if query.dataset().is_some() {
+                return Err(TraceError::Query(format!(
+                    "outside the stage-1 verifiable fragment: {}",
+                    crate::verify::DATASET_CLAUSE_REASON
+                )));
+            }
+        }
         let _guard = sparq_engine::zk::install();
         let result =
             sparq_engine::query(&self.union, sparql).map_err(TraceError::Query)?;

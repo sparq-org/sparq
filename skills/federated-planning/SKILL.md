@@ -369,7 +369,8 @@ since:
   single-pattern `SELECT` and returns `Result<SubQuery, RenderError>`: each position is
   rendered strictly as one SPARQL term (a `VARNAME` variable, an IRI with no character
   `IRIREF` forbids, a pre-rendered `"…"` literal that parses as exactly one SPARQL literal and is
-  re-serialised, or a bare value as an escaped string), and anything else is a
+  re-serialised, or a bare value as an escaped string; literals are written with `ECHAR` escapes
+  only, and one whose value an endpoint's `\u`/`\U` preprocessing would change is refused), and anything else is a
   `RenderError` (`InterpError::Render` in the interpreters, `None` from `push_group`) so
   nothing is sent; `materialize_single_source` walks the `JoinTree`, fetches each
   leaf's SRJ through the Phase-2 adapter, parses it, and natural-joins in the plan's join
@@ -396,13 +397,20 @@ since:
   member — exactly-one-source, same-source, share-a-variable, via union-find); a cross-source
   or zero-source pattern is excluded. `push_group(...)` builds the **maximal sub-algebra** per
   group: projection trimmed to the join + output vars, the FILTER conjuncts the source's
-  `FilterClass` covers AND that pass the common-variable check, `ORDER`/`LIMIT` when the
-  capability allows — a full endpoint gets the whole group as one multi-pattern `SELECT`, a
+  `FilterClass` covers AND that pass the common-variable check AND whose `Filter::expr` text
+  parses as exactly one SPARQL expression over only the conjunct's declared `vars` with no
+  `EXISTS` or `\u`/`\U` code-point escape (anything else stays a local filter, whose
+  variables the group then all stay projected), `ORDER`/`LIMIT` when the capability allows (`LIMIT`
+  only when no conjunct stays local)
+  (`ORDER BY` keys are typed `OrderKey { var, descending }` — `OrderKey::asc`/`desc` — and a key
+  whose name is not a `VARNAME` makes `push_group` return `None`) — a full endpoint gets the whole group as one multi-pattern `SELECT`, a
   fragment source answers one pattern only (no collapse, no filter pushed — honest about a
   fragment server's access unit). `common_variable_check(filter, group_vars)` is the **exact**
   check Comunica omits (#834/#609): push a conjunct only when *every* variable it references is
-  bound by the group. `render_values_block` / `bind_block_size` are the cross-group bind-join
-  block primitive (VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
+  bound by the group. `render_values_block(vars, &[Vec<Term>])` / `bind_block_size` are the
+  cross-group bind-join block primitive (each cell goes through the same strict term renderer;
+  a variable cell, a row whose length differs from `vars`, or a bad variable name is a
+  `RenderError`; VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
   plain TPF), mirroring `sparq-engine`'s `pub(crate)` `service.rs` helpers. Pushdown only ever
   **narrows** a source's result, so it is correctness-preserving; the FILTER model is light
   (the parsed-query FILTER algebra wiring is Phase 5).
