@@ -298,12 +298,10 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// backward-rule projection), the list `log:collectAllIn` collects, and the formula
 /// `log:conclusion` returns. The formula `log:parsedAsN3` / `log:semantics` parses is
 /// charged by its parser for each term it builds and each statement it keeps as it goes,
-/// and sized again once the parse returns it. Numeric lexical forms (arithmetic and other
-/// numeric results, and the numeric pieces of `string:concatenation`) are rendered first
-/// and then checked when the term is admitted, so their transient rendering is not
-/// checked in advance (GH #6901). The size is approximate: string bytes plus a fixed cost
-/// per node. Binding a variable to a term that already exists (premise matching,
-/// `log:includes`) copies that term; it builds nothing new and is not sized again.
+/// and sized again once the parse returns it. Numeric results are not covered (below). The
+/// size is approximate: string bytes plus a fixed cost per node. Binding a variable to a
+/// term that already exists (premise matching, `log:includes`) copies that term; it builds
+/// nothing new and is not sized again.
 ///
 /// Substitution is sized because the raw substitution functions are private to this
 /// module; the guard test `substitution_goes_through_the_bounded_module` is a lexical
@@ -316,7 +314,11 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///   `log:semantics` parse is, but it allocates a literal or IRI before charging it, and
 ///   charges a quoted formula copied into each statement of a `;` / `,` list as one node,
 ///   so it can allocate past the limit before it is refused;
-/// * numeric lexical forms, rendered before they are checked (GH #6901, above);
+/// * numeric results, as on main (GH #6901): the forward and reverse results of the
+///   arithmetic and other numeric builtins, and the canonical numeric pieces
+///   `string:concatenation` renders. Their size entries are fixed estimates that do not
+///   follow a decimal's scale, and the rendered form is not checked against this limit
+///   anywhere;
 /// * the text a resolver supplies (`log:content`, `log:semantics`), which the caller
 ///   allocates before it is sized (the literal or formula built from it is refused);
 /// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
@@ -345,7 +347,8 @@ pub struct ClosureLimits {
     /// Approximate bytes of one term the closure may derive (a builtin's argument list or
     /// result, a parsed or concluded formula, a conclusion's compound term): its strings
     /// plus a fixed cost per node, counted through nested lists, formulas and quoted
-    /// triples, and checked before the term is built. Default 16 MiB.
+    /// triples. The terms it covers are checked before they are built; numeric results
+    /// are not covered (see the type's docs, GH #6901). Default 16 MiB.
     pub max_term_bytes: usize,
 }
 
@@ -395,8 +398,9 @@ pub(crate) fn string_term_bytes(lex: usize) -> usize {
     lex.saturating_add(XSD_STRING_LEN + TERM_NODE_BYTES)
 }
 
-/// The ONE checkpoint every term the text engine derives passes (GH #6771): before it is
-/// built, except a numeric lexical form, which is rendered first (GH #6901). `bound` is an upper bound on the term's [`term_bytes`], computed from
+/// The ONE checkpoint the terms the text engine sizes pass before they are built
+/// (GH #6771; numeric results are not covered, GH #6901). `bound` is an upper bound on the
+/// term's [`term_bytes`], computed from
 /// borrowed inputs without building anything; `exact` is its exact size, computed (again
 /// without building it) only when `bound` is over the limit, so a loose bound never
 /// refuses a term that fits.

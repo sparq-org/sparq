@@ -3785,8 +3785,9 @@ fn refused_term(
 }
 
 /// The size [`output_bytes`] gives a number, a count or a date part: [`NUMERAL_TEXT_BYTES`]
-/// of lexical form, a datatype IRI and one node. It does not follow a decimal's scale: a
-/// numeric result is rendered, then checked when the derived fact is admitted (GH #6901).
+/// of lexical form, a datatype IRI and one node. It is a fixed estimate that does not
+/// follow a decimal's scale, and the rendered number is not checked against
+/// `max_term_bytes` anywhere: numeric results are not covered (GH #6901).
 const NUMBER_TERM_BYTES: usize = bounded::TERM_NODE_BYTES + NUMERAL_TEXT_BYTES + 64;
 
 /// The [`bounded::term_bytes`] of the list builtin `args` member `a` stands for: a
@@ -3833,8 +3834,8 @@ fn time_zone_offset(s: &str) -> Option<&str> {
 /// The size of the term builtin `f` derives from `args`: with `exact`, its
 /// [`bounded::term_bytes`], computed without building it; without, a cheap upper bound on
 /// it from the input sizes. Every functional builtin has an entry (the match is
-/// exhaustive). A numeric result's entry is a fixed estimate, and its rendering is checked
-/// only when the fact is admitted (GH #6901). 0 for a builtin sized where it builds its
+/// exhaustive). A numeric result's entry is a fixed estimate, and numeric results are not
+/// covered by `max_term_bytes` (GH #6901). 0 for a builtin sized where it builds its
 /// result (`log:dtlit`, `log:conclusion`, `log:content`, `log:parsedAsN3` /
 /// `log:semantics`).
 fn output_bytes(
@@ -3958,7 +3959,7 @@ fn output_bytes(
         // The time zone offset: at most the input; exactly, the borrowed offset.
         Func::TimeZone if exact => time_zone_offset(lex0()).map_or(0, |o| string_term_bytes(o.len())),
         Func::TimeZone => string_term_bytes(lex0().len()),
-        // A number, a count or a date part.
+        // A number, a count or a date part: a fixed estimate (not covered, GH #6901).
         Func::Length
         | Func::StrLength
         | Func::MemberCount
@@ -4257,7 +4258,7 @@ fn eval_functional_inner(
         let s_applied = bounded::substitute(subj, &b, &bw.truncated)?;
         if !s_applied.is_ground() {
             let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
-            // A number: sized as one ([`NUMBER_TERM_BYTES`]) before it is built.
+            // A fixed estimate ([`NUMBER_TERM_BYTES`]); numeric results are not covered (GH #6901).
             if refused_term(&bw.truncated, pending, Derived::Result(f), NUMBER_TERM_BYTES, || NUMBER_TERM_BYTES) {
                 return None;
             }
@@ -4281,7 +4282,7 @@ fn eval_functional_inner(
     if !subj.is_ground() && subj_applied.as_ref().is_some_and(|s| !s.is_ground()) {
         let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
         if o_applied.is_ground() {
-            // A number or a dateTime: sized as a number before it is built.
+            // A fixed estimate ([`NUMBER_TERM_BYTES`]); numeric results are not covered (GH #6901).
             if refused_term(&bw.truncated, pending, Derived::Result(f), NUMBER_TERM_BYTES, || NUMBER_TERM_BYTES) {
                 return None;
             }
@@ -5228,8 +5229,8 @@ mod tests {
     }
 
     /// GH #6771 review: for each functional builtin whose result is sized before it is
-    /// built (the non-numeric ones; numeric results are rendered, then checked when the
-    /// fact is admitted), the exact size equals the [`bounded::term_bytes`] of the term
+    /// built (the non-numeric ones; numeric results are not covered, GH #6901), the exact
+    /// size equals the [`bounded::term_bytes`] of the term
     /// the builtin actually derives, and the cheap bound is at least it.
     #[test]
     fn each_sized_result_matches_the_term_the_builtin_derives() {
