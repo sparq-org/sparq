@@ -107,7 +107,7 @@ pub struct JoinEdge {
 
 /// Rejection reason for a `FROM` / `FROM NAMED` dataset clause. Shared by
 /// every query-text entry point so the two gates give one answer.
-const DATASET_CLAUSE_REASON: &str = "FROM / FROM NAMED (dataset clauses name graphs — contradictory with graph-set privacy; the committed union is the dataset)";
+pub(crate) const DATASET_CLAUSE_REASON: &str = "FROM / FROM NAMED (dataset clauses name graphs — contradictory with graph-set privacy; the committed union is the dataset)";
 
 /// Fails closed on a query carrying a `FROM` / `FROM NAMED` dataset clause
 /// (sq-p2hci).
