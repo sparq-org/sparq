@@ -111,7 +111,9 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // written in place: the operator waits for the premise that binds it (an unbound SCOPE
 // variable means the store and is not waited for; when no premise can bind a pattern /
 // clause / aggregation subject given through a variable, the rule is refused: "N3: no
-// evaluation order binds every required input …"). UNSUPPORTED inside a backward (`<=`)
+// evaluation order binds every required input …"; a positive containment / collectAllIn
+// given its formula through a variable may bind ANY variable, so whatever needs one waits
+// for it). UNSUPPORTED inside a backward (`<=`)
 // rule: a pattern, or a collectAllIn / forAllIn clause or subject, reached through a
 // variable there fails the run ("N3: a formula bound through a variable is unsupported
 // inside a backward rule …"; write it in the rule; full support:

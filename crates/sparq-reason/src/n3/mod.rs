@@ -2609,6 +2609,13 @@ fn reads_outside_joins(p: &[Term; 3]) -> bool {
 /// still-unbound variable; when only such operators remain, no order binds their inputs
 /// and the rule is refused ([`NO_EVALUATION_ORDER`]). A builtin the fallback runs with an
 /// input unbound fails its premise as before.
+///
+/// A positive containment or a `log:collectAllIn` whose pattern, clause or subject is
+/// given through a variable has UNKNOWN outputs (they depend on the formula it is given):
+/// while it remains, it counts as able to bind every unbound variable, so a defaulted
+/// scope waits for it; it runs as soon as its own pattern is bound; and once it has run, a
+/// variable no remaining atom mentions counts as possibly bound (it is checked at run
+/// time).
 fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
     fn term_vars(t: &Term, out: &mut FxHashSet<String>) {
         match t {
@@ -2628,37 +2635,66 @@ fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
         term_vars(t, &mut s);
         s
     };
+    // A positive containment (`log:includes` / `log:supports`) or a `log:collectAllIn`
+    // whose pattern, clause or subject is given through a variable: what it binds depends
+    // on the formula it is given at run time, so it may bind any variable. (`notIncludes`
+    // and `forAllIn` bind nothing outward.)
+    let unknown_outputs = |j: usize| {
+        let atom = &premise[j];
+        match (scope_op(&atom[1]), collect_op(&atom[1])) {
+            (Some(ScopeOp::Includes | ScopeOp::Supports), _) => matches!(&atom[2], Term::Var(_)),
+            (_, Some(op @ CollectOp::CollectAll)) => {
+                matches!(&atom[0], Term::Var(_))
+                    || aggregation_clauses(op, &atom[0]).iter().any(|c| matches!(c, Term::Var(_)))
+            }
+            _ => false,
+        }
+    };
+    // Whether atom `j` mentions `v` other than as its own defaulted scope (a scope variable
+    // is never bound by its operator; unbound, it means the store).
+    let mentions = |j: usize, v: &str| {
+        let atom = &premise[j];
+        let scope_at = if scope_op(&atom[1]).is_some() {
+            Some(0)
+        } else if collect_op(&atom[1]).is_some() {
+            Some(2)
+        } else {
+            None
+        };
+        atom.iter().enumerate().any(|(k, t)| {
+            !(Some(k) == scope_at && matches!(t, Term::Var(_))) && vars_of(t).contains(v)
+        })
+    };
     let mut remaining: Vec<usize> = (0..premise.len()).collect();
     let mut produced: FxHashSet<String> = FxHashSet::default();
+    // Whether an atom of unknown outputs has been scheduled: from then on a variable no
+    // remaining atom mentions may have been bound by it, and whether it was is known only
+    // at run time (an input still unbound then fails its premise, as any unbound input).
+    let mut wild = false;
     let mut out: Vec<[Term; 3]> = Vec::new();
     while !remaining.is_empty() {
-        let bound = |t: &Term| match t {
-            Term::Var(v) => produced.contains(v),
+        // Whether variable `v` is (or may already be) bound, for atom `i`.
+        let var_bound = |i: usize, v: &str| {
+            produced.contains(v) || (wild && !remaining.iter().any(|&j| j != i && mentions(j, v)))
+        };
+        let all_bound = |i: usize, t: &Term| vars_of(t).iter().all(|v| var_bound(i, v));
+        let bound = |i: usize, t: &Term| match t {
+            Term::Var(v) => var_bound(i, v),
             _ => true,
         };
-        // Whether atom `j` could bind `v`: it mentions `v` other than as its own defaulted
-        // scope (a scope variable is never bound by its operator; unbound, it means the
-        // store).
-        let could_bind = |j: usize, v: &str| {
-            let atom = &premise[j];
-            let scope_at = if scope_op(&atom[1]).is_some() {
-                Some(0)
-            } else if collect_op(&atom[1]).is_some() {
-                Some(2)
-            } else {
-                None
-            };
-            atom.iter().enumerate().any(|(k, t)| {
-                !(Some(k) == scope_at && matches!(t, Term::Var(_))) && vars_of(t).contains(v)
-            })
-        };
+        // Whether atom `j` could bind `v`: it mentions it, or its outputs are unknown.
+        let could_bind = |j: usize, v: &str, unknown: bool| mentions(j, v) || (unknown && unknown_outputs(j));
         // A defaulted scope: bound (tier 0), or unbound with no other remaining atom that
         // could bind it (tier 1). One another atom could still bind waits for it, as does a
-        // compound scope with unbound variables.
+        // compound scope with unbound variables. An atom of unknown outputs waits only for
+        // atoms that mention the scope, so two of them never wait for each other.
         let scope_tier = |i: usize, scope: &Term| -> Option<usize> {
+            let count_unknown = !unknown_outputs(i);
             match scope {
-                _ if vars_of(scope).is_subset(&produced) => Some(0),
-                Term::Var(v) if !remaining.iter().any(|&j| j != i && could_bind(j, v)) => Some(1),
+                _ if all_bound(i, scope) => Some(0),
+                Term::Var(v) if !remaining.iter().any(|&j| j != i && could_bind(j, v, count_unknown)) => {
+                    Some(1)
+                }
                 _ => None,
             }
         };
@@ -2668,8 +2704,8 @@ fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
             if is_join_atom(pat) {
                 return Some(0);
             }
-            let subj_ready = vars_of(&pat[0]).is_subset(&produced);
-            let obj_ready = vars_of(&pat[2]).is_subset(&produced);
+            let subj_ready = all_bound(i, &pat[0]);
+            let obj_ready = all_bound(i, &pat[2]);
             let ready = |r: bool| r.then_some(0);
             if builtin(&pat[1]).is_some() {
                 return ready(subj_ready && obj_ready); // comparison: both are inputs
@@ -2684,14 +2720,22 @@ fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
             // variables of a pattern written in place are its outputs. Its scope is
             // defaulted.
             if scope_op(&pat[1]).is_some() {
-                return if bound(&pat[2]) { scope_tier(i, &pat[0]) } else { None };
+                // An atom of unknown outputs runs as soon as its pattern is bound.
+                return if !bound(i, &pat[2]) {
+                    None
+                } else if unknown_outputs(i) {
+                    scope_tier(i, &pat[0]).map(|_| 0)
+                } else {
+                    scope_tier(i, &pat[0])
+                };
             }
             // An aggregation needs its subject list and every clause given through a
             // variable; the template, the list and a written clause's variables are its
             // own. It reads the store's complete answer, so it runs after every atom that
             // binds all its inputs. Its scope is defaulted.
             if let Some(op) = collect_op(&pat[1]) {
-                let required = bound(&pat[0]) && aggregation_clauses(op, &pat[0]).iter().all(bound);
+                let required =
+                    bound(i, &pat[0]) && aggregation_clauses(op, &pat[0]).iter().all(|c| bound(i, c));
                 return if required { scope_tier(i, &pat[2]).map(|t| t.max(1)) } else { None };
             }
             // functional / binder op: bidirectional ops accept either side; the rest need
@@ -2707,10 +2751,12 @@ fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
         let unbound_formula = |i: usize| {
             let pat = &premise[i];
             if scope_op(&pat[1]).is_some() {
-                return !bound(&pat[2]);
+                return !bound(i, &pat[2]);
             }
             match collect_op(&pat[1]) {
-                Some(op) => !bound(&pat[0]) || !aggregation_clauses(op, &pat[0]).iter().all(bound),
+                Some(op) => {
+                    !bound(i, &pat[0]) || !aggregation_clauses(op, &pat[0]).iter().all(|c| bound(i, c))
+                }
                 None => false,
             }
         };
@@ -2727,6 +2773,7 @@ fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
             },
         };
         let i = remaining.remove(pos);
+        wild |= unknown_outputs(i);
         for t in &premise[i] {
             term_vars(t, &mut produced); // its outputs are now available
         }

@@ -342,6 +342,35 @@ fn a_shared_store_scope_does_not_block_the_pattern_producer() {
     }
 }
 
+/// A pattern given through a variable may bind variables nothing in the rule mentions
+/// (its outputs are known only at run time): an operator needing one waits for it rather
+/// than being refused, and a store-scoped consumer whose scope it binds waits for it
+/// rather than reading the store early, as with the pattern written in the rule.
+#[test]
+fn a_bound_pattern_may_bind_what_its_rule_does_not_mention() {
+    let facts = ":cfg :outer { :cfg :inner ?f }. :cfg :inner { :a :p :b }.
+         :cfg :wrap { :cfg :scope ?s }. :cfg :scope { :c :p :b }.";
+    let src = format!(
+        "{} {facts}",
+        doc("{ :cfg :outer ?outer. ?store log:includes ?outer. { :a :p :b } log:includes ?f } => { :r :includes :hit }.")
+    );
+    let want = vec![fired("includes", "hit")];
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+    assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+    // `{ :c :p :b }` is not in the store, only in the formula the bound pattern binds `?s` to.
+    for pattern in ["?o", "{ :cfg :scope ?s }"] {
+        let src = format!(
+            "{} {facts}",
+            doc(&format!(
+                "{{ ?s log:includes {{ :c :p :b }}. :cfg :wrap ?o. ?store log:includes {pattern} }} => {{ :r :includes :scope }}."
+            ))
+        );
+        let want = vec![fired("includes", "scope")];
+        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+        assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+    }
+}
+
 /// The compiled evaluator has no variable pattern: it refuses the rule, so its callers
 /// route the document to the batch engine instead of diverging from it.
 #[cfg(feature = "compiled-rules")]
