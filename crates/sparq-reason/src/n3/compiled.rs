@@ -83,9 +83,13 @@
 //! fact allowance is checked against the facts held at the start of each round. Each
 //! term a builtin builds (its result, and the argument list a `( … )` subject would be
 //! in the text engine) is sized with the text engine's helpers BEFORE it is built.
-//! Conclusions copy ids the premise bound, so they build no new term. Past any
-//! allowance evaluation stops with the text engine's `"forward closure limit exceeded"`
-//! error, never a truncated closure.
+//! Conclusions copy ids the premise bound, so they build no new term. Each round's join
+//! work is charged against `max_join_rows` (GH #6938): every row a pattern join emits (the
+//! anti-join of a `log:notIncludes` included), before its repeated-variable check, and
+//! each conclusion a rule fires, as one batch before any is instantiated. The first round
+//! of a stratum is naive, as the text engine's is. Past any allowance evaluation stops
+//! with the text engine's `"forward closure limit exceeded"` error, never a truncated
+//! closure.
 //!
 //! It is bounded by the same limits as the text engine and refuses with the same error,
 //! but it does not run the same fixpoint schedule: the text engine's closing naive check
@@ -102,7 +106,7 @@ use super::model::Term;
 use super::{refused_term, Derived, Func};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts};
-use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget}; // not-a-limit: unbounded-join
+use sparq_substrate::join::{self as sjoin, JoinKeys};
 use sparq_substrate::rows::{Row, NO_ID};
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
@@ -1138,6 +1142,8 @@ impl BoundRuleSet<'_> {
         let cs = self.compiled;
         // The closure's round and fact allowance (the text engine's `ClosureRounds`).
         let mut allowance = bounded::ClosureRounds::forward(&run);
+        // Each round's join rows and firings (the text engine's `JoinWork`).
+        let work = bounded::JoinWork::forward(&run);
         for stratum in 0..strata.n_strata {
             if stratum > 0 {
                 delta = store.list.clone();
@@ -1145,6 +1151,7 @@ impl BoundRuleSet<'_> {
             let mut first_round = true;
             loop {
                 bounded::ClosureRounds::round(&mut allowance, store.all.len(), &run)?;
+                work.round();
                 let mut produced: Vec<[Id; 3]> = Vec::new();
                 for (ri, rule) in cs.rules.iter().enumerate() {
                     if strata
@@ -1154,9 +1161,12 @@ impl BoundRuleSet<'_> {
                     {
                         continue;
                     }
-                    if rule.needs_full || rule.join_steps.is_empty() {
+                    // A stratum's first round is NAIVE, as in the text engine: every rule
+                    // once over the whole store (its delta is the whole store, so seeding
+                    // each join position with it would find the same rows once per position).
+                    if first_round || rule.needs_full || rule.join_steps.is_empty() {
                         if rule.needs_full || first_round {
-                            self.run_rule(rule, &store, None, dict, &run, &mut produced);
+                            self.run_rule(rule, &store, None, dict, (&run, &work), &mut produced);
                         }
                     } else {
                         // Semi-naive: once per join position, with that pattern restricted
@@ -1167,15 +1177,15 @@ impl BoundRuleSet<'_> {
                                 &store,
                                 Some((&delta, k)),
                                 dict,
-                                &run,
+                                (&run, &work),
                                 &mut produced,
                             );
                         }
                     }
                 }
-                // A builtin refused a term past the term-size allowance: the round's
-                // derivations are incomplete, so the closure fails (the text engine's
-                // run refusal).
+                // A builtin refused a term past the term-size allowance, or the round
+                // passed its join-work allowance: the round's derivations are incomplete,
+                // so the closure fails (the text engine's run refusal).
                 if let Some(e) = run.refusal() {
                     return Err(e);
                 }
@@ -1252,7 +1262,7 @@ impl BoundRuleSet<'_> {
         store: &FactStore,
         delta_at: Option<(&[[Id; 3]], usize)>,
         dict: &mut Dict,
-        run: &Truncation,
+        (run, work): (&Truncation, &bounded::JoinWork),
         out: &mut Vec<[Id; 3]>,
     ) {
         let empty: Row = std::iter::repeat_n(NO_ID, rule.n_slots).collect();
@@ -1262,10 +1272,10 @@ impl BoundRuleSet<'_> {
                 Step::Pattern(p) => {
                     let delta = delta_at.and_then(|(d, k)| (k == si).then_some(d));
                     let cands = self.candidates(p, store, delta);
-                    rows = join_pattern(&rows, p, &cands, rule.n_slots);
+                    rows = join_pattern(&rows, p, &cands, rule.n_slots, (run, work));
                 }
                 Step::NotIncludes { pats, wildcards } => {
-                    rows = self.anti_join(rows, pats, wildcards, store, rule.n_slots);
+                    rows = self.anti_join(rows, pats, wildcards, store, rule.n_slots, (run, work));
                 }
                 Step::UnpackTriple { src, comps } => {
                     let mut next = Vec::with_capacity(rows.len());
@@ -1452,6 +1462,10 @@ impl BoundRuleSet<'_> {
                 return;
             }
         }
+        // The rule's firings, charged before any conclusion is instantiated.
+        if !work.charge(rows.len().saturating_mul(rule.conclusion.len()), run) {
+            return;
+        }
         for r in &rows {
             for c in &rule.conclusion {
                 let g = [
@@ -1477,6 +1491,7 @@ impl BoundRuleSet<'_> {
         wildcards: &[usize],
         store: &FactStore,
         width: usize,
+        work: (&Truncation, &bounded::JoinWork),
     ) -> Vec<Row> {
         if rows.is_empty() {
             return rows;
@@ -1484,7 +1499,7 @@ impl BoundRuleSet<'_> {
         let mut sub = rows.clone();
         for p in pats {
             let cands = self.candidates(p, store, None);
-            sub = join_pattern(&sub, p, &cands, width);
+            sub = join_pattern(&sub, p, &cands, width, work);
             if sub.is_empty() {
                 return rows; // nothing matches anywhere: notIncludes holds for every row
             }
@@ -1506,7 +1521,19 @@ impl BoundRuleSet<'_> {
 /// variables' columns (a repeated new variable within the atom becomes an equality
 /// check). This is the reasoner's thin layout adapter over the generic kernels, the same
 /// pattern as `crate::substrate_join` — no third join implementation.
-fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> Vec<Row> {
+///
+/// Every row the kernel emits is charged to the round's join-work allowance
+/// ([`bounded::JoinWork`]). The kernel checks the rows left once per candidate fact it
+/// probes ([`bounded::RowsLeft`]), so it stops at most one candidate's matches past the
+/// allowance; the rows are then charged in one batch, which refuses the run exactly when
+/// they pass it.
+fn join_pattern(
+    rows: &[Row],
+    p: &PatternStep,
+    cands: &[Row],
+    width: usize,
+    (run, work): (&Truncation, &bounded::JoinWork),
+) -> Vec<Row> {
     if rows.is_empty() || cands.is_empty() {
         return Vec::new();
     }
@@ -1523,9 +1550,12 @@ fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> V
         rows,
         &tables,
         &probe_only,
-        &NoBudget, // not-a-limit: unbounded-join (the join runs to completion)
+        &work.kernel_view(),
         &mut combined,
     );
+    if !work.charge(combined.len(), run) {
+        return Vec::new();
+    }
     let mut out = Vec::with_capacity(combined.len());
     'row: for c in &combined {
         let (b, f) = c.split_at(width);

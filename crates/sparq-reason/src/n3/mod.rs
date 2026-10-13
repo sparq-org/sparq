@@ -593,6 +593,9 @@ struct BwCtx<'a> {
     /// Why a search of this run (or of a nested closure it reached) was cut short, if one
     /// was ([`Truncation`]).
     truncated: Truncation,
+    /// The current round's join-work allowance ([`bounded::JoinWork`]): every binding row
+    /// a premise of this run produces, and every rule firing, is charged to it.
+    work: bounded::JoinWork,
 }
 
 impl BwCtx<'_> {
@@ -636,7 +639,8 @@ impl BwCtx<'_> {
 /// before any matching by [`strata::stratify`]) and no search was cut short
 /// ([`Truncation`]). Otherwise, unless the caller opted in to
 /// [`NegationCycles::SinglePass`], the evaluation is refused: the binding is dropped and
-/// the run fails with the reason. Truncation is sticky and only grows, so a cut search
+/// the run fails with the reason (or, when a limit refused the run, with that refusal,
+/// which the run returns anyway). Truncation is sticky and only grows, so a cut search
 /// that happened before the negation, or during its inner search, is always seen here;
 /// a later cut cannot change a set a stratified negation already read.
 fn negation_gate(bw: &BwCtx) -> bool {
@@ -645,6 +649,10 @@ fn negation_gate(bw: &BwCtx) -> bool {
     };
     if bw.cycles == NegationCycles::SinglePass {
         return true;
+    }
+    // A run refused by its ClosureLimits fails with that refusal, which names the limit.
+    if bw.truncated.refusal().is_some() {
+        return false;
     }
     bw.nested_error.borrow_mut().get_or_insert_with(|| {
         format!(
@@ -667,6 +675,7 @@ impl<'a> BwCtx<'a> {
             visited,
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
+            work: bounded::JoinWork::forward(&truncated),
             truncated,
         }
     }
@@ -1776,6 +1785,7 @@ fn run_closure(
         let mut closing_check = false;
         loop {
             bounded::ClosureRounds::round(&mut allowance, facts.all.len(), truncated)?;
+            bw.work.round();
             // A nested closure failed, or the negation gate refused, in an earlier round:
             // the run fails with that error at the end anyway, so stop here instead of
             // re-evaluating (a failed nested closure is retried every round, and each
@@ -1804,6 +1814,10 @@ fn run_closure(
                         }
                         // forward: Δ ⋈ GEN — extend the new path by generator edges at its end.
                         if let Some(zs) = st.gen_out.get(&f[2]) {
+                            // One firing per generator edge, charged before any is built.
+                            if !bw.work.charge(zs.len(), truncated) {
+                                break;
+                            }
                             for z in zs {
                                 let g = [f[0].clone(), st.pred.clone(), z.clone()];
                                 if !facts.contains(&g) {
@@ -1820,6 +1834,9 @@ fn run_closure(
                         // path ending at its start (the po index, incl. same-round delta paths).
                         if st.gen_set.contains(f) {
                             if let Some(xs) = facts.po.get(&(st.pred.clone(), f[0].clone())) {
+                                if !bw.work.charge(xs.len(), truncated) {
+                                    break;
+                                }
                                 for x in xs {
                                     let g = [x.clone(), st.pred.clone(), f[2].clone()];
                                     if !facts.contains(&g) {
@@ -1865,6 +1882,10 @@ fn run_closure(
                     bs
                 };
                 let (concl_blanks, concl_vars) = &concl_meta[ri];
+                // The rule's firings, charged before any conclusion is instantiated.
+                if !bw.work.charge(bindings.len().saturating_mul(rule.conclusion.len()), truncated) {
+                    continue;
+                }
                 for b in bindings {
                     // Fresh conclusion existentials: rename the conclusion's blanks
                     // once per distinct (rule, conclusion-binding) firing.
@@ -2192,6 +2213,9 @@ fn match_premise_admitted(
         let mut seeds = Vec::new();
         for fact in delta {
             if let Some(nb) = unify(&premise[k], fact, seed) {
+                if !bw.work.charge(1, &bw.truncated) {
+                    return Vec::new();
+                }
                 seeds.push(nb);
             }
         }
@@ -2268,6 +2292,10 @@ fn match_premise_admitted(
                         next.push(b);
                     }
                 } else {
+                    // Each match is a row of this step, charged before it is kept.
+                    if !bw.work.charge(matches.len(), &bw.truncated) {
+                        return Vec::new();
+                    }
                     next.extend(matches.into_iter().filter(|nb| within_depth(nb, bw)));
                 }
             }
@@ -2425,6 +2453,9 @@ fn match_premise_admitted(
                         };
                         let mut nb = b.clone();
                         if unify_term(var_pos, &target, &mut nb) && within_depth(&nb, bw) {
+                            if !bw.work.charge(1, &bw.truncated) {
+                                return Vec::new();
+                            }
                             next.push(nb);
                         }
                     }
@@ -2472,6 +2503,9 @@ fn match_premise_admitted(
                             };
                             let mut nb = b.clone();
                             if val.is_some_and(|val| unify_term(&pat[2], &val, &mut nb)) && within_depth(&nb, bw) {
+                                if !bw.work.charge(1, run) {
+                                    return Vec::new();
+                                }
                                 next.push(nb);
                             }
                         }
@@ -2481,6 +2515,10 @@ fn match_premise_admitted(
                 let cands = facts.candidates(&s_a, &p_a, &o_a);
                 for fact in &cands {
                     if let Some(nb) = unify(pat, fact, b) {
+                        // Each row is charged before it is kept ([`bounded::JoinWork`]).
+                        if !bw.work.charge(1, run) {
+                            return Vec::new();
+                        }
                         next.push(nb);
                     }
                 }
@@ -2492,11 +2530,11 @@ fn match_premise_admitted(
                     let step = bounded::backward_step(&bw.truncated, depth, could_match);
                     // `_frames` holds the step's unit of the run's stack allowance.
                     if let Some((d, _frames)) = bw.settle(step) {
-                        next.extend(
-                            backward_prove(pat, b, facts, bw, d)
-                                .into_iter()
-                                .filter(|nb| within_depth(nb, bw)),
-                        );
+                        let proofs = backward_prove(pat, b, facts, bw, d);
+                        if !bw.work.charge(proofs.len(), run) {
+                            return Vec::new();
+                        }
+                        next.extend(proofs.into_iter().filter(|nb| within_depth(nb, bw)));
                     }
                 }
             }
