@@ -1,5 +1,4 @@
-//! GH #6771: the terms the N3 text engine sizes are sized BEFORE they are built (numeric
-//! results are not covered by `max_term_bytes`, GH #6901). This
+//! GH #6771: the terms the N3 text engine sizes are sized BEFORE they are built. This
 //! binary counts live heap bytes with a counting global allocator and drives each
 //! builtin's result path (and the other derived-term paths: substitution, aggregation,
 //! conclusions) past a small `max_term_bytes`: the call must fail with the closure-limit
@@ -241,14 +240,18 @@ fn cases() -> Vec<Case> {
     let small = format!(":a :p \"{}\".\n", "x".repeat(SMALL));
     let refs = times("?s", K);
     vec![
-        // Each builtin's own result, from arguments that fit.
-        case(
-            "string:concatenation",
-            String::new(),
-            &format!("{{ ({doubles}) string:concatenation ?t }} => {{ :a :out ?t }}."),
-            &format!("{{ ({doubles}) list:length ?n }} => {{ :a :ok true }}."),
-            300 * 301,
-            "the result of the builtin Concat",
+        // Each builtin's own result, from arguments that fit. The numeric pieces are sized
+        // from their values, so the bytes allocated show no rendering of them (GH #6901).
+        checked(
+            Check::Allocated,
+            case(
+                "string:concatenation",
+                String::new(),
+                &format!("{{ ({doubles}) string:concatenation ?t }} => {{ :a :out ?t }}."),
+                &format!("{{ ({doubles}) list:length ?n }} => {{ :a :ok true }}."),
+                300 * 301,
+                "the result of the builtin Concat",
+            ),
         ),
         case(
             "string:format",

@@ -354,3 +354,84 @@ fn a_dtlit_over_the_limit_is_refused() {
     );
     assert_eq!(close(&small, ClosureLimits::default()), Ok(3));
 }
+
+/// GH #6901: the bytes of a literal with lexical form `lex` and datatype `dt`, as
+/// `max_term_bytes` counts them (string bytes plus one node).
+fn literal_bytes(lex: &str, dt: &str) -> usize {
+    std::mem::size_of::<sparq_reason::n3::Term>() + lex.len() + dt.len()
+}
+
+const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
+const XSD_DOUBLE: &str = "http://www.w3.org/2001/XMLSchema#double";
+const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
+const MATH: &str = "@prefix math: <http://www.w3.org/2000/10/swap/math#>.\n";
+
+/// Each `(rule, result)`: `doc` closes to `facts` facts under a limit of exactly the
+/// result's size, and is refused one byte below it.
+fn assert_exact_limit(facts: &str, cases: &[(&str, &str, usize)], want: usize) {
+    for &(what, rule, size) in cases {
+        let doc = format!("{PREFIXES}{MATH}{facts}{rule}\n");
+        assert_eq!(close(&doc, term_limit(size)), Ok(want), "{what}: at its size ({size})");
+        assert_term_limit(what, close(&doc, term_limit(size - 1)));
+    }
+}
+
+/// GH #6901: an exact decimal result is sized from its value, scale included: accepted
+/// under a limit of exactly its size and refused one byte below, forward and reversed.
+#[test]
+fn a_decimal_result_is_sized_from_its_scale() {
+    let x = format!("0.{}1", "0".repeat(1000));
+    let size = literal_bytes(&format!("-{x}"), XSD_DECIMAL);
+    assert_exact_limit(
+        &format!(":a :p {x}.\n"),
+        &[
+            ("math:negation", "{ :a :p ?x. ?x math:negation ?y } => { :a :q ?y }.", size),
+            ("math:negation reversed", "{ :a :p ?x. ?y math:negation ?x } => { :a :q ?y }.", size),
+        ],
+        2,
+    );
+}
+
+/// GH #6901: an `f64` result is sized from the text it renders as: an `xsd:double`
+/// forward and reversed, and an `xsd:decimal` from a power past the exact tower.
+#[test]
+fn a_floating_result_is_sized_from_its_rendering() {
+    let asin = format!("{:e}", 0.5f64.asin());
+    let double = literal_bytes(&asin, XSD_DOUBLE);
+    // 10^300 is past the exact tower, so it is computed as an f64 and printed in full.
+    let power = literal_bytes(&format!("{}", 10f64.powf(300.0)), XSD_DECIMAL);
+    assert_exact_limit(
+        ":a :p 0.5.\n",
+        &[
+            ("math:asin", "{ :a :p ?x. ?x math:asin ?y } => { :a :q ?y }.", double),
+            ("math:sin reversed", "{ :a :p ?x. ?y math:sin ?x } => { :a :q ?y }.", double),
+            ("math:exponentiation", "{ :a :p ?x. (10 300) math:exponentiation ?y } => { :a :q ?y }.", power),
+        ],
+        2,
+    );
+}
+
+/// GH #6901: `string:concatenation` sizes a numeric piece by the canonical text it
+/// writes (a double of five lexical bytes writes 301 digits).
+#[test]
+fn concatenated_numeric_pieces_are_sized_from_their_values() {
+    let size = literal_bytes(&format!("{}", 1e300f64), XSD_STRING);
+    assert_exact_limit(
+        ":a :p \"1E300\"^^<http://www.w3.org/2001/XMLSchema#double>.\n",
+        &[("string:concatenation", "{ :a :p ?x. (?x) string:concatenation ?y } => { :a :q ?y }.", size)],
+        2,
+    );
+}
+
+/// GH #6901 (review of #6833): `log:conjunction` of no formulae returns the literal
+/// `true`, which is sized as that literal.
+#[test]
+fn an_empty_conjunction_is_sized_as_the_literal_it_returns() {
+    let size = literal_bytes("true", XSD_BOOLEAN);
+    assert_exact_limit(
+        "",
+        &[("log:conjunction", "{ () log:conjunction ?f } => { :a :q ?f }.", size)],
+        1,
+    );
+}
