@@ -228,7 +228,10 @@ mod run_shared {
     /// stable). Two documents never share a blank: a second document whose key is
     /// already taken is refused, failing the run. No runtime text can spell a label of
     /// the sources the table was made for: `prefix` is the smallest `__rp{k}_` no blank of
-    /// any of them starts with. Cloning shares the table.
+    /// any of them starts with, except a source blank spelled exactly as a runtime blank
+    /// (`__rp{k}_{key}_<label>`, as an exported closure writes it), which names that
+    /// runtime document's blank; so re-reasoning exported output keeps `k`. Cloning
+    /// shares the table.
     #[derive(Clone)]
     pub(crate) struct RuntimeDocs(std::rc::Rc<std::cell::RefCell<DocTable>>);
 
@@ -259,7 +262,14 @@ mod run_shared {
         /// [`for_sources`](Self::for_sources) given the sources' blank labels
         /// ([`document_blank_labels`]), for a run that has already collected them.
         pub(super) fn for_labels(labels: &FxHashSet<&str>) -> RuntimeDocs {
-            let prefix = fresh_blank_prefix(labels, "__rp");
+            // A source label spelled exactly as a runtime blank (`__rp{k}_{key}_<label>`)
+            // is one: it was exported from an earlier run (`reason_n3_pass_all` output,
+            // a serialized closure) and names that runtime document's blank. It does not
+            // push `k` up, so re-reasoning an exported closure keeps the same `k` and the
+            // reparsed document's blanks are the exported nodes (a fixed point).
+            let other: FxHashSet<&str> =
+                labels.iter().copied().filter(|l| !is_runtime_label(l)).collect();
+            let prefix = fresh_blank_prefix(&other, "__rp");
             let (keys, given) = (FxHashSet::default(), FxHashMap::default());
             let table = DocTable { prefix, keys, given };
             RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
@@ -329,6 +339,19 @@ mod run_shared {
             let at = known.unwrap_or(docs.len() - 1);
             Ok(&docs[at].1)
         }
+    }
+
+    /// Whether `label` has the exact shape of a standardized runtime blank:
+    /// `__rp{k}_{key}_<label>` with `k` decimal digits and `key` 16 lowercase hex digits
+    /// ([`runtime_doc_key`]).
+    pub(super) fn is_runtime_label(label: &str) -> bool {
+        let Some(rest) = label.strip_prefix("__rp") else { return false };
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let Some(rest) = rest[digits..].strip_prefix('_') else { return false };
+        let key = rest.as_bytes().get(..16);
+        digits > 0
+            && key.is_some_and(|k| k.iter().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+            && rest.as_bytes().get(16) == Some(&b'_')
     }
 
     /// The scope key of a document parsed at run time: the first 8 bytes, as 16 lowercase
@@ -5185,6 +5208,25 @@ mod runtime_doc_key_golden {
             ("a", "bc", "ff5cfd007e1caf6c"),
         ] {
             assert_eq!(runtime_doc_key(text, base), key, "{text:?} {base:?}");
+        }
+    }
+
+    #[test]
+    fn runtime_label_shape() {
+        use super::run_shared::is_runtime_label;
+        for l in ["__rp0_36e2d3c73471b49f_x", "__rp12_0123456789abcdef_a.b", "__rp0_36e2d3c73471b49f__"] {
+            assert!(is_runtime_label(l), "{l}");
+        }
+        for l in [
+            "__rp0_x",
+            "__rp_36e2d3c73471b49f_x",
+            "__rp0_36E2D3C73471B49F_x",
+            "__rp0_36e2d3c73471b49_x",
+            "__rp0_36e2d3c73471b49fx",
+            "__rp0_36e2d3c73471b49f",
+            "_rp0_36e2d3c73471b49f_x",
+        ] {
+            assert!(!is_runtime_label(l), "{l}");
         }
     }
 }
