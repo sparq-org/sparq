@@ -30,6 +30,7 @@
 // the whole grammar we tokenise. (Named graphs are handled by `prettyTrig`, which wraps each
 // graph's triples in a `GRAPH <g> { … }` block.)
 
+import { isWritablePrefixBinding } from "./rdf-syntax.js";
 import { COMMON_PREFIXES, type PrefixBinding } from "./sparql-prefixes.js";
 
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
@@ -253,9 +254,10 @@ export function parseNTriples(input: string): {
 // Turtle local-name (PN_LOCAL) acceptance — conservative: a local part we can write WITHOUT
 // percent/backslash escaping. If the suffix would need escaping we keep the IRI in full `<…>`
 // form (always valid), rather than risk producing an unparseable prefixed name. Allowed: the
-// ASCII name chars plus `_`, `-`, `.`, `:` and `%` (already-encoded). We forbid a leading or
-// trailing `.` (Turtle PN_LOCAL rule) by checking the ends.
-const PN_LOCAL_OK = /^[A-Za-z0-9_%:]([A-Za-z0-9_.\-%:]*[A-Za-z0-9_%:])?$/;
+// ASCII name chars plus `_`, `-`, `.`, `:` and a complete `%XX` escape (PLX). We forbid a leading
+// `-` or `.` and a trailing `.` (Turtle PN_LOCAL rule) by checking the ends.
+const PN_LOCAL_OK =
+  /^(?:[A-Za-z0-9_:]|%[0-9A-Fa-f]{2})(?:(?:[A-Za-z0-9_.\-:]|%[0-9A-Fa-f]{2})*(?:[A-Za-z0-9_\-:]|%[0-9A-Fa-f]{2}))?$/;
 
 /** A prefix candidate: a label and the namespace IRI it abbreviates. */
 interface PrefixCandidate {
@@ -267,13 +269,15 @@ interface PrefixCandidate {
  * Build the ordered list of prefix candidates to try when abbreviating IRIs: the caller's
  * `extra` bindings first (so a query's own declarations win), then the well-known
  * {@link COMMON_PREFIXES}, de-duplicated by namespace IRI (first label for an IRI wins). The
- * empty-prefix `:` is allowed.
+ * empty-prefix `:` is allowed. A binding whose label is not a `PN_PREFIX` or whose IRI cannot
+ * be written inside `<…>` is dropped, so it never reaches the `@prefix` header (#6719).
  */
 function prefixCandidates(extra: readonly PrefixBinding[]): PrefixCandidate[] {
   const out: PrefixCandidate[] = [];
   const seenIri = new Set<string>();
   const seenPrefix = new Set<string>();
   for (const b of [...extra, ...COMMON_PREFIXES]) {
+    if (!isWritablePrefixBinding(b)) continue;
     if (seenIri.has(b.iri) || seenPrefix.has(b.prefix)) continue;
     seenIri.add(b.iri);
     seenPrefix.add(b.prefix);

@@ -10,7 +10,7 @@
 //! `storage`.
 //!
 //! The access grant service and the access request service are LWS containers at
-//! [`GRANTS_PATH`](super::GRANTS_PATH) and [`REQUESTS_PATH`](super::REQUESTS_PATH). Only the owner
+//! [`GRANTS_PATH`] and [`REQUESTS_PATH`]. Only the owner
 //! may grant access or list grants; any authenticated agent may ask for access, and may read and
 //! withdraw what it asked. Both are stored through the [`Store`], so they survive a restart on a
 //! durable backend, and kept in memory for authorization.
@@ -654,6 +654,55 @@ pub async fn allowed<S: Store + 'static>(
     decide(state, action, uri, agent, &meta, None).await
 }
 
+/// Whether `agent` may learn that the set-aside resource at `uri` is set aside: never whether it
+/// may be served or changed, which waits until it is put back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Aside {
+    /// It may act on it.
+    Allowed,
+    /// It may not.
+    Denied,
+    /// The resource was not there before the stuck change (to anyone but the owner).
+    Missing,
+}
+
+/// [`Aside`] for `agent` and `action` on the set-aside resource at `uri`, decided as
+/// [`allowed`] decided before the stuck change to it began: on what it was then (whether it was
+/// there, its metadata and its format, see [`Prior`](super::Prior)), with the grants in force
+/// now. What the change may have written meanwhile (new content, new types, a `pending` mark)
+/// is never read for it: a grant the change would newly satisfy is not met, and one it would
+/// stop meeting still is. What the change left untouched is read as stored. An error when that
+/// cannot be read.
+pub async fn aside<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<Aside, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(Aside::Allowed);
+    }
+    let prior = state.locks.prior(uri);
+    let existed = match prior.existed {
+        Some(existed) => existed,
+        None => state.store.exists(uri).await?,
+    };
+    if !existed {
+        return Ok(Aside::Missing);
+    }
+    let meta = match prior.meta {
+        Some(meta) => meta,
+        None => state.resource_meta(uri).await?,
+    };
+    Ok(
+        if decide(state, action, uri, agent, &meta, prior.format).await? {
+            Aside::Allowed
+        } else {
+            Aside::Denied
+        },
+    )
+}
+
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
 /// and its format. A Delete is announced once the resource is gone, so each delivery of it is
 /// authorized against this snapshot (and the grants as they stand then).
@@ -1006,6 +1055,14 @@ pub async fn handle<S: Store + 'static>(
         id = &id[..id.len() - META_SUFFIX.len()];
     }
     let owner = state.cfg.open || (agent.subject.is_some() && agent.subject == state.cfg.owner);
+    // Whether what the request is to is set aside is said only to a caller that may act on it:
+    // the owner, who may act on every record, at once; anyone else once authorized below.
+    let unavailable = || super::resources::unavailable(state, req);
+    if owner {
+        if let Some(refused) = unavailable() {
+            return refused;
+        }
+    }
     if id.is_empty() {
         if linkset {
             return if owner {
@@ -1024,6 +1081,9 @@ pub async fn handle<S: Store + 'static>(
             Method::POST => {
                 if !state.cfg.open && (agent.subject.is_none() || (grants && !owner)) {
                     return state.deny(agent);
+                }
+                if let Some(refused) = unavailable() {
+                    return refused;
                 }
                 // A conditional create is evaluated against the listing.
                 let held =
@@ -1057,6 +1117,9 @@ pub async fn handle<S: Store + 'static>(
     let mine = owner || (agent.subject.is_some() && agent.subject == record.author);
     if !mine {
         return state.deny(agent);
+    }
+    if let Some(refused) = unavailable() {
+        return refused;
     }
     // A quarantined record (unreadable at the start) is never served; the owner deletes it.
     if record.quarantined && matches!(req.method, Method::GET | Method::HEAD) {

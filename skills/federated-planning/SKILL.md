@@ -350,7 +350,10 @@ since:
     `allowlist_entry_host_matches` for the host-level "is this host on the list at all" query), so
     the **fedclient guard and the engine SERVICE guard decide every host:port case identically**
     — one source of truth, no divergent copy of the parsing (port-0/overflow/IPv6-bracket/
-    trailing-colon all fail-CLOSED). The same port-scoping flows through `EgressGuard::check_addr`
+    trailing-colon all fail-CLOSED). The address classifier is shared the same way:
+    `sparq_fedclient::is_forbidden_ip` and `discovery::is_forbidden_ip` re-export
+    `sparq_engine::is_forbidden_ip`, and remote SPARQL-Results-JSON terms decode through
+    `sparq_engine::srj_term`. The same port-scoping flows through `EgressGuard::check_addr`
     / `check_endpoint` and all three native ureq SSRF resolvers (`HttpTransport` /
     `HttpFragmentTransport` / discovery `HttpFetcher`). There is no wildcard port and no global
     bypass; default-deny stays default-deny. Use `EgressGuard::is_allowed_port(host, port)` for the

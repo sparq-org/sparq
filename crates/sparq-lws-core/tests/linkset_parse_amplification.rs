@@ -5,6 +5,8 @@
 //! and mixes of them, repeated up to the body limit, with a counting allocator, so a change in
 //! the parser's allocation (a larger map node, a larger initial capacity) fails here first.
 
+#![warn(clippy::undocumented_unsafe_blocks)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -16,22 +18,30 @@ struct Counting;
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 static PEAK: AtomicUsize = AtomicUsize::new(0);
 
+// SAFETY: every method forwards verbatim to `System` with the same arguments, so `System`
+// discharges all of `GlobalAlloc`'s obligations; the wrapper only reads `Layout::size()` / the
+// new size and updates atomic counters, and never dereferences or keeps a returned pointer.
 unsafe impl GlobalAlloc for Counting {
+    // SAFETY: the caller's `layout` contract is forwarded to `System.alloc` unchanged.
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         let now = LIVE.fetch_add(l.size(), Ordering::SeqCst) + l.size();
         PEAK.fetch_max(now, Ordering::SeqCst);
         System.alloc(l)
     }
+    // SAFETY: `p` came from this allocator with `l`, so from `System` (every allocation here
+    // is forwarded to it).
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
         LIVE.fetch_sub(l.size(), Ordering::SeqCst);
         System.dealloc(p, l)
     }
+    // SAFETY: the caller's `p` / `l` / `n` contract is forwarded to `System.realloc` unchanged.
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
         // The old buffer and the new one may both be live while it is copied: both count.
         let both = LIVE.fetch_add(n, Ordering::SeqCst) + n;
         PEAK.fetch_max(both, Ordering::SeqCst);
         let q = System.realloc(p, l, n);
-        LIVE.fetch_sub(l.size(), Ordering::SeqCst);
+        // On failure the old buffer stays and the new one never existed.
+        LIVE.fetch_sub(if q.is_null() { n } else { l.size() }, Ordering::SeqCst);
         q
     }
 }
