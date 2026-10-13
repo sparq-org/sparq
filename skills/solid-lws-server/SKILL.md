@@ -514,8 +514,8 @@ What the server exposes, all discoverable from the storage description
   relations change only with `Prefer: set-linkset`.
 - Link relations, registered and extension (URI) alike, compare case-insensitively (RFC 8288
   section 2.1.2) wherever they are keyed, matched or searched: two spellings of one relation in
-  a request's Link headers or a linkset are one relation, kept under the first spelling given,
-  and a type search names it in any case.
+  a request's Link headers or a linkset are one relation, stored and served under the first
+  spelling met with the targets of both, and a type search names it in any case.
 - Every write and delete runs its store calls in a task that holds the resource's locks until
   the store answers, so a client that disconnects cannot release them early.
 - A grant or subscription `DELETE` takes effect once its stored record is gone, even if cleaning

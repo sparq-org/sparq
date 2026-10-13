@@ -4007,7 +4007,56 @@ fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
             Some(e)
         })
         .collect();
-    Resolved(json!({"linkset": kept}))
+    Resolved(json!({"linkset": joined_relations(kept)}))
+}
+
+/// `entries` with each relation of an anchor under one spelling, the first met: relations are
+/// compared by [`relation_key`], so two spellings of one relation are one relation, stored and
+/// served as one. Within an entry their targets are joined (each target once, attributes and
+/// all, in the order met); across entries, a later one is renamed to the first spelling.
+fn joined_relations(entries: Vec<Value>) -> Vec<Value> {
+    let mut spellings: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, String>,
+    > = Default::default();
+    entries
+        .into_iter()
+        .map(|e| {
+            let Value::Object(fields) = e else {
+                return e;
+            };
+            let anchor = fields
+                .get("anchor")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let spellings = spellings.entry(anchor).or_default();
+            let mut out = Map::new();
+            for (k, v) in fields {
+                if k == "anchor" {
+                    out.insert(k, v);
+                    continue;
+                }
+                let key = spellings
+                    .entry(relation_key(&k))
+                    .or_insert_with(|| k.clone())
+                    .clone();
+                match (out.get_mut(&key), v) {
+                    (Some(Value::Array(have)), Value::Array(more)) => {
+                        for t in more {
+                            if !have.contains(&t) {
+                                have.push(t);
+                            }
+                        }
+                    }
+                    (_, v) => {
+                        out.insert(key, v);
+                    }
+                }
+            }
+            Value::Object(out)
+        })
+        .collect()
 }
 
 /// The user-managed links a linkset document holds about `uri`, by relation: what the type
@@ -5366,6 +5415,81 @@ mod tests {
             vec!["https://ex.org/schema".to_string()]
         );
         assert!(m.types.is_empty());
+    }
+
+    /// Review of #6899: a linkset PATCH naming one relation in two spellings joined them only in
+    /// the links the index matches; the stored linkset kept both, and was served split. It is
+    /// stored and served as one relation, under the first spelling, its targets whole.
+    #[tokio::test]
+    async fn linkset_patch_joins_spellings_of_a_relation() {
+        let st = state().await;
+        let uri = post(&st, "j.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let patch = json!({"linkset": [
+            {"anchor": uri, "https://e.example/REL": [{"href": "https://t.example/y", "title": "Y"}],
+             "https://E.example/Rel": [{"href": "https://t.example/x"}]},
+            {"anchor": uri, "HTTPS://E.EXAMPLE/REL": [{"href": "https://t.example/z"}, {"href": "https://t.example/x"}]},
+        ]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&patch),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let stored = st.resource_meta(&uri).await.unwrap();
+        for doc in [&doc, stored.linkset.as_ref().unwrap()] {
+            let mut targets = Vec::new();
+            for e in doc["linkset"].as_array().unwrap() {
+                if e["anchor"] != uri.as_str() {
+                    continue;
+                }
+                for (k, v) in e.as_object().unwrap() {
+                    if relation_key(k) == "https://e.example/rel" {
+                        assert_eq!(k, "https://E.example/Rel", "{doc}");
+                        targets.extend(v.as_array().unwrap().iter().cloned());
+                    }
+                }
+            }
+            assert_eq!(
+                targets,
+                [
+                    json!({"href": "https://t.example/x"}),
+                    json!({"href": "https://t.example/y", "title": "Y"}),
+                    json!({"href": "https://t.example/z"}),
+                    json!({"href": "https://t.example/x"}),
+                ],
+                "{doc}"
+            );
+        }
+        assert_eq!(
+            stored.links.keys().collect::<Vec<_>>(),
+            ["https://E.example/Rel"]
+        );
+        assert_eq!(
+            stored.links["https://E.example/Rel"],
+            [
+                "https://t.example/x",
+                "https://t.example/y",
+                "https://t.example/z"
+            ]
+        );
+        // A linkset stored split before spellings were joined is served joined.
+        let mut split = stored.clone();
+        split.linkset = Some(json!({"linkset": [{"anchor": uri,
+            "https://e.example/REL": [{"href": "https://t.example/y"}],
+            "https://E.example/Rel": [{"href": "https://t.example/x"}]}]}));
+        st.put_resource_meta(&uri, &split).await.unwrap();
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let e = &doc["linkset"][0];
+        assert_eq!(
+            e["https://E.example/Rel"],
+            json!([{"href": "https://t.example/x"}, {"href": "https://t.example/y"}])
+        );
+        assert!(e.get("https://e.example/REL").is_none(), "{doc}");
     }
 
     #[test]
