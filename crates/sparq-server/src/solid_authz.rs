@@ -1026,6 +1026,10 @@ fn parse_wire_credential(obj: &serde_json::Map<String, serde_json::Value>) -> Re
 /// [SONNET-4.6] (sq-pfae.17) Decode a 64-hex-char (32-byte) salt from a hex string. Fail-closed.
 #[cfg(feature = "solid-authz-trust")]
 fn decode_salt_hex(hex: &str) -> Option<[u8; 32]> {
+    // Reject a wrong length before decoding allocates anything for it.
+    if hex.len() != 64 {
+        return None;
+    }
     sparq_core::hex::decode(hex)?.try_into().ok()
 }
 
@@ -2004,6 +2008,18 @@ pub(crate) async fn query_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn decode_salt_hex_requires_exactly_32_bytes() {
+        let ok = "ab".repeat(32);
+        assert_eq!(decode_salt_hex(&ok), Some([0xab; 32]));
+        assert_eq!(decode_salt_hex(&ok.to_uppercase()), Some([0xab; 32]));
+        assert_eq!(decode_salt_hex(&ok[..62]), None);
+        assert_eq!(decode_salt_hex(&format!("{ok}ab")), None);
+        assert_eq!(decode_salt_hex(&"ab".repeat(4096)), None);
+        assert_eq!(decode_salt_hex(&format!("{}zz", &ok[..62])), None);
+    }
 
     // A tiny WAC dataset: alice has Read on the root `.acl`, inherited by `notes/n1`.
     const WAC_NQUADS: &str = r#"
