@@ -1,4 +1,5 @@
 // AUTHORED-BY Claude Opus 4.8
+#![forbid(unsafe_code)]
 //! EXPERIMENTAL solid-server-rs binary entry point.
 //!
 //! Boots the vertical slice: an axum server with **real** DPoP-bound Solid-OIDC auth (delegated to
