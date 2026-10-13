@@ -12,7 +12,32 @@ use serde_json::{json, Map, Value};
 #[allow(dead_code)]
 mod service;
 
-use service::{parse_srj, parse_srx, ServiceRelation};
+use service::{parse_srj_into, parse_srx_into};
+
+/// A fully-collected remote SELECT result (`None` = unbound).
+#[derive(Debug, PartialEq)]
+struct ServiceRelation {
+    vars: Vec<Variable>,
+    rows: Vec<Vec<Option<Term>>>,
+}
+
+fn parse_srj(text: &str) -> Result<ServiceRelation, String> {
+    let mut rows = Vec::new();
+    let vars = parse_srj_into(text, &mut |row| {
+        rows.push(row);
+        Ok(())
+    })?;
+    Ok(ServiceRelation { vars, rows })
+}
+
+fn parse_srx(text: &str) -> Result<ServiceRelation, String> {
+    let mut rows = Vec::new();
+    let vars = parse_srx_into(text, &mut |row| {
+        rows.push(row);
+        Ok(())
+    })?;
+    Ok(ServiceRelation { vars, rows })
+}
 
 fn variable_strategy() -> impl Strategy<Value = Vec<Variable>> {
     (1_usize..=4).prop_map(|len| {
