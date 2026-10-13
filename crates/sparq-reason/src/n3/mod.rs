@@ -237,19 +237,15 @@ mod run_shared {
     /// Per document the table keeps a constant-size entry (the full SHA-256 digest, for
     /// the collision refusal, and the label prefix), never the text or base, and it takes
     /// at most [`bounded::runtime_docs`] documents: one more fails the run with a cut. It
-    /// finds a known document again by a 128-bit hash of its text and base under random
-    /// per-process SipHash keys. Cloning shares the table.
+    /// finds a known document again by that digest (one SHA-256 per runtime parse).
+    /// Cloning shares the table.
     #[derive(Clone)]
     pub(crate) struct RuntimeDocs(std::rc::Rc<std::cell::RefCell<DocTable>>);
 
     struct DocTable {
         prefix: String,
-        /// Keys of the per-process index: two independently, randomly keyed SipHash
-        /// states, so `by_doc` finds a document again without the table keeping its
-        /// text or base.
-        index: (std::hash::RandomState, std::hash::RandomState),
-        /// Each known document's entry, by its 128-bit keyed hash of `(text, base)`.
-        by_doc: FxHashMap<u128, u32>,
+        /// Each known document's entry, by its full SHA-256 digest.
+        by_doc: FxHashMap<[u8; 32], u32>,
         /// Each entry by its 8-byte scope key, for the collision refusal.
         by_key: FxHashMap<u64, u32>,
         /// One constant-size entry per document: its SHA-256 digest and label prefix.
@@ -303,7 +299,6 @@ mod run_shared {
         fn with_room(prefix: String, room: usize) -> RuntimeDocs {
             let table = DocTable {
                 prefix,
-                index: Default::default(),
                 by_doc: FxHashMap::default(),
                 by_key: FxHashMap::default(),
                 entries: Vec::new(),
@@ -357,12 +352,11 @@ mod run_shared {
         /// `base`; `Err` when another document has its key or the table is full (the
         /// table is then unchanged).
         fn prefix_for(&mut self, text: &str, base: &str) -> Result<&str, Refusal> {
-            let id = self.doc_id(text, base);
-            if let Some(&at) = self.by_doc.get(&id) {
+            let digest = runtime_doc_digest(text, base);
+            if let Some(&at) = self.by_doc.get(&digest) {
                 return Ok(&self.entries[at as usize].prefix);
             }
-            let digest = runtime_doc_digest(text, base);
-            let key = u64::from_be_bytes(digest[..8].try_into().expect("8 bytes"));
+            let key = scope_key(&digest);
             let at = match self.by_key.get(&key) {
                 Some(&at) if self.entries[at as usize].digest == digest => at,
                 Some(_) => return Err(Refusal::Collision),
@@ -381,30 +375,15 @@ mod run_shared {
                     at
                 }
             };
-            self.by_doc.insert(id, at);
+            self.by_doc.insert(digest, at);
             Ok(&self.entries[at as usize].prefix)
-        }
-
-        /// The keyed 128-bit hash of `(text, base)` that indexes `by_doc`, each part
-        /// preceded by its length.
-        fn doc_id(&self, text: &str, base: &str) -> u128 {
-            use std::hash::{BuildHasher, Hasher};
-            let half = |state: &std::hash::RandomState| {
-                let mut h = state.build_hasher();
-                for part in [text, base] {
-                    h.write_usize(part.len());
-                    h.write(part.as_bytes());
-                }
-                h.finish()
-            };
-            (u128::from(half(&self.index.0)) << 64) | u128::from(half(&self.index.1))
         }
 
         /// The bytes the table keeps per document: the same for every document,
         /// whatever its text and base.
         #[cfg(test)]
         fn bytes_per_entry(&self) -> Vec<usize> {
-            let slot = std::mem::size_of::<(u128, u32)>() + std::mem::size_of::<(u64, u32)>();
+            let slot = std::mem::size_of::<([u8; 32], u32)>() + std::mem::size_of::<(u64, u32)>();
             let entry = std::mem::size_of::<DocEntry>() + slot;
             self.entries.iter().map(|e| entry + e.prefix.capacity()).collect()
         }
@@ -421,6 +400,15 @@ mod run_shared {
         digits > 0
             && key.is_some_and(|k| k.iter().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
             && rest.as_bytes().get(16) == Some(&b'_')
+    }
+
+    /// The 8-byte scope key of a document: the first 8 bytes of its digest.
+    fn scope_key(digest: &[u8; 32]) -> u64 {
+        #[cfg(test)]
+        if table_tests::SAME_KEY.with(std::cell::Cell::get) {
+            return 0;
+        }
+        u64::from_be_bytes(digest[..8].try_into().expect("8 bytes"))
     }
 
     /// The SHA-256 digest of a document parsed at run time: SHA-256 over
@@ -472,6 +460,26 @@ mod run_shared {
     #[cfg(test)]
     mod table_tests {
         use super::{Refusal, RuntimeDocs, Term};
+
+        std::thread_local! {
+            /// Gives every document the same scope key, forcing a key collision.
+            pub(super) static SAME_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        /// Two different documents sharing a scope key are told apart by their full
+        /// digest: the second is refused, while the first, met again, keeps its prefix.
+        #[test]
+        fn a_scope_key_collision_is_refused_and_a_known_document_is_kept() {
+            SAME_KEY.with(|c| c.set(true));
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let a = t.formula("a", "", doc);
+            let b = t.formula("b", "", doc);
+            let again = t.formula("a", "", doc);
+            SAME_KEY.with(|c| c.set(false));
+            assert!(matches!(b, Err(Refusal::Collision)));
+            assert_eq!(a.ok().flatten(), again.ok().flatten());
+            assert_eq!(t.0.borrow().entries.len(), 1);
+        }
 
 
         /// A document of `text` whose one blank is `_:x`.
