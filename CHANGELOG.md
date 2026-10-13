@@ -121,15 +121,18 @@ Both changes are in that commit, but its copy of this file does not list them.
   bound through a variable is matched as the bound formula, as when written inline; it was
   matched as the empty pattern, so `log:includes` held vacuously and `log:notIncludes`
   never fired. The operator waits for the premise that binds the pattern (an unbound
-  scope variable means the store and is not waited for), and inside a backward rule a
-  bound pattern, like a bound `log:collectAllIn` / `log:forAllIn` clause, shares the rule's
-  variables as an inline one does. An
+  scope variable means the store and is not waited for). Inside a backward (`<=`) rule a
+  pattern, or a `log:collectAllIn` / `log:forAllIn` clause or subject, reached through a
+  variable is unsupported and fails the run with
+  `N3: a formula bound through a variable is unsupported inside a backward rule …`, as does
+  one anywhere that holds a backward rule's renamed variable (`?__bw<n>_…`, a source
+  variable spelled that way included); written in the rule it works as before (#6943). An
   unbound or non-formula object (including a string spelled `"true"`; only `{}` is the
   empty pattern) now fails the premise. With the store as the scope,
   the automatic stratification counts a variable pattern as every predicate: a
   `log:notIncludes` over one is a negation cycle (refused by default, evaluated under the
   `NegationCycles` opt-ins), and a `log:includes` / `log:supports` whose bound pattern
-  itself negates over the store fails the run. (#6936)
+  itself negates over the store fails the run. (#6936, refs #6943)
 - **Release pipeline:** release files are staged in an empty `release-assets/` directory.
   v0.1.5 published the repository's `assets/logo.svg` as an extra asset with no provenance;
   every other v0.1.5 asset is covered by the isolated-builder bundles. (#6812)

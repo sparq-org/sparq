@@ -109,9 +109,13 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // A log:includes / log:notIncludes / log:supports PATTERN bound through a variable
 // (`:cfg :pat ?f. ?s log:includes ?f`) is the formula it is bound to, matched exactly as if
 // written in place: the operator waits for the premise that binds it (an unbound SCOPE
-// variable means the store and is not waited for), and inside a backward rule the formula
-// takes that application's variable renaming, as a bound collectAllIn / forAllIn clause
-// does (only the rule's own variable names are mapped). An unbound or non-formula
+// variable means the store and is not waited for). UNSUPPORTED inside a backward (`<=`)
+// rule: a pattern, or a collectAllIn / forAllIn clause or subject, reached through a
+// variable there fails the run ("N3: a formula bound through a variable is unsupported
+// inside a backward rule …"; write it in the rule; full support:
+// https://github.com/sparq-org/sparq/issues/6943), and so does a bound one anywhere that
+// holds a backward rule's renamed variable (`?__bw<n>_…`, so a source variable spelled
+// that way is refused too, fail-closed). An unbound or non-formula
 // object (a "true" string included; only `{}` is the empty pattern) fails the premise
 // (GH #6936). Store-scoped, the
 // stratification counts it as EVERY predicate: under notIncludes negatively, so the rule is

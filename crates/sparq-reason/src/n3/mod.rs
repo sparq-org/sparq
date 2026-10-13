@@ -584,10 +584,6 @@ fn formula_key(ts: &[[Term; 3]]) -> u64 {
 struct BwCtx<'a> {
     rules: &'a [Rule],
     rename: std::cell::Cell<usize>,
-    /// The backward-rule application whose renamed premise is being evaluated, if any: its
-    /// [`rename_vars`] space and the index of its rule in `rules`. A formula bound through a
-    /// variable there is resolved into it ([`into_application`]).
-    application: std::cell::Cell<Option<(usize, usize)>>,
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
@@ -668,7 +664,6 @@ impl<'a> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
-            application: std::cell::Cell::new(None),
             base: String::new(),
             resolver: None,
             visited,
@@ -2237,9 +2232,6 @@ fn match_premise_admitted(
                 // The pattern: a formula written in place, or the formula a variable is
                 // bound to, matched exactly as if it were written in place (GH #6936). Any
                 // other object is no pattern, and fails the premise for this binding.
-                // A bound formula is resolved into the active backward-rule application,
-                // as a formula written in the rule is ([`into_application`]).
-                let renamed: std::borrow::Cow<'_, Term>;
                 let inner: &[[Term; 3]] = match &pat[2] {
                     Term::Formula(t) => t,
                     Term::Var(_) => match resolved(&pat[2], &b) {
@@ -2250,13 +2242,11 @@ fn match_premise_admitted(
                             bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                             continue;
                         }
-                        val @ Term::Formula(_) => {
-                            renamed = into_application(val, bw);
-                            match &*renamed {
-                                Term::Formula(t) => t,
-                                _ => continue,
-                            }
+                        val if is_formula(val) && backward_bound(&pat[2], val) => {
+                            bw.nested_error.borrow_mut().get_or_insert_with(|| BACKWARD_BOUND_FORMULA.into());
+                            continue;
                         }
+                        Term::Formula(t) => t,
                         val if empty_formula(val) => NO_STATEMENTS,
                         // Unbound, or no formula: no pattern.
                         _ => continue,
@@ -2373,20 +2363,23 @@ fn match_premise_admitted(
                     bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                     continue;
                 }
-                // A clause reached through a variable is resolved into the active backward-rule
-                // application, as a clause written in the rule is ([`into_application`]).
+                // A subject or clause reached through a variable of a backward rule, or
+                // holding one, is refused ([`backward_bound`]).
                 let written = aggregation_clauses(op, &pat[0]);
-                let clauses: Vec<std::borrow::Cow<'_, Term>> = aggregation_clauses(op, &subj)
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| match written.get(i) {
-                        Some(Term::Formula(_) | Term::Lit(..)) => std::borrow::Cow::Borrowed(c),
-                        _ => into_application(c, bw),
+                if (matches!(&pat[0], Term::Var(_)) && backward_bound(&pat[0], &subj))
+                    || aggregation_clauses(op, &subj).iter().enumerate().any(|(i, c)| match written.get(i) {
+                        Some(Term::Formula(_) | Term::Lit(..)) => false,
+                        Some(reaching) => is_formula(c) && backward_bound(reaching, c),
+                        // the whole subject was reached through a variable: checked above
+                        None => false,
                     })
-                    .collect();
+                {
+                    bw.nested_error.borrow_mut().get_or_insert_with(|| BACKWARD_BOUND_FORMULA.into());
+                    continue;
+                }
                 match op {
                     CollectOp::CollectAll => {
-                        let ([template, _, list_pat], [clause]) = (&members[..], &clauses[..]) else { continue };
+                        let [template, clause, list_pat] = &members[..] else { continue };
                         let Some(sols) = solve(clause, &b) else { continue };
                         if !negation_gate(bw) {
                             continue;
@@ -2413,7 +2406,7 @@ fn match_premise_admitted(
                         }
                     }
                     CollectOp::ForAll => {
-                        let [ca, cb] = &clauses[..] else { continue };
+                        let [ca, cb] = &members[..] else { continue };
                         let Some(sols_a) = solve(ca, &b) else { continue };
                         let holds = sols_a
                             .iter()
@@ -2745,7 +2738,7 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
         return Vec::new();
     }
     let mut out = Vec::new();
-    for (ri, rule) in bw.rules.iter().enumerate() {
+    for rule in bw.rules {
         for concl in &rule.conclusion {
             // Cheap gate: ground predicates must agree before we rename/unify anything.
             if let (Term::Iri(gp), Term::Iri(cp)) = (&goal[1], &concl[1]) {
@@ -2769,10 +2762,7 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            let outer = bw.application.replace(Some((n, ri)));
-            let sols = match_premise_seeded(&prem, facts, &subst, None, bw, depth);
-            bw.application.set(outer);
-            for sol in sols {
+            for sol in match_premise_seeded(&prem, facts, &subst, None, bw, depth) {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -2828,52 +2818,31 @@ fn rename_vars(t: &Term, n: usize) -> Term {
     }
 }
 
-/// A formula bound at run time to a variable of a backward rule's premise (a containment
-/// pattern, an aggregation clause), resolved into the rule application being evaluated
-/// ([`BwCtx::application`]), so that it shares that application's bindings exactly as the
-/// same formula written in the rule does. Only the rule's own variable names, as written
-/// (its rule variables and the document-level universals it mentions), are mapped to the
-/// application's names ([`rename_vars`]); a variable already in some application's form,
-/// any other variable, and a formula-local universal are left alone, so a formula that
-/// already belongs to the application (bound from one of its own terms) is unchanged.
-/// Outside a backward application (a forward rule) the rule's variables are the binding's
-/// own: nothing to map.
-fn into_application<'t>(t: &'t Term, bw: &BwCtx) -> std::borrow::Cow<'t, Term> {
-    use std::borrow::Cow;
-    fn names<'r>(t: &'r Term, out: &mut FxHashSet<&'r str>) {
+/// Whether `v` is in the standardize-apart namespace of backward-rule applications
+/// ([`application_var`]: `__bw<n>_…`). A source variable spelled that way is too.
+fn application_form(v: &str) -> bool {
+    v.strip_prefix("__bw")
+        .and_then(|r| r.split_once('_'))
+        .is_some_and(|(n, _)| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+}
+
+/// Whether a formula (a containment pattern, an aggregation clause or subject) bound at run
+/// time cannot be evaluated soundly: it was reached through a variable of a backward
+/// rule's renamed premise, or it holds such a variable (one that escaped a backward
+/// proof's projection). Its variables would not share the backward application's
+/// bindings the way a formula written in the rule does, so it is refused
+/// ([`BACKWARD_BOUND_FORMULA`]) rather than matched with them unbound.
+fn backward_bound(reaching: &Term, value: &Term) -> bool {
+    fn mentions(t: &Term) -> bool {
         match t {
-            Term::Var(v) if !quoted_universal(v) => {
-                out.insert(v);
-            }
-            Term::Formula(ts) => ts.iter().flatten().for_each(|m| names(m, out)),
-            Term::List(ms) => ms.iter().for_each(|m| names(m, out)),
-            Term::Triple(tr) => tr.iter().for_each(|m| names(m, out)),
-            _ => {}
+            Term::Var(v) => application_form(v),
+            Term::Formula(ts) => ts.iter().flatten().any(mentions),
+            Term::List(ms) => ms.iter().any(mentions),
+            Term::Triple(tr) => tr.iter().any(mentions),
+            _ => false,
         }
     }
-    fn map(t: &Term, n: usize, own: &FxHashSet<&str>) -> Term {
-        match t {
-            Term::Var(v) if own.contains(v.as_str()) => Term::Var(application_var(n, v)),
-            Term::Formula(ts) => Term::Formula(
-                ts.iter().map(|tr| [map(&tr[0], n, own), map(&tr[1], n, own), map(&tr[2], n, own)]).collect(),
-            ),
-            Term::List(ms) => Term::List(ms.iter().map(|m| map(m, n, own)).collect()),
-            Term::Triple(tr) => {
-                Term::Triple(Box::new([map(&tr[0], n, own), map(&tr[1], n, own), map(&tr[2], n, own)]))
-            }
-            _ => t.clone(),
-        }
-    }
-    let Some((n, ri)) = bw.application.get() else { return Cow::Borrowed(t) };
-    let Some(rule) = bw.rules.get(ri) else { return Cow::Borrowed(t) };
-    let mut own = FxHashSet::default();
-    rule.premise.iter().chain(&rule.conclusion).flatten().for_each(|m| names(m, &mut own));
-    let mut mentioned = FxHashSet::default();
-    names(t, &mut mentioned);
-    if mentioned.is_disjoint(&own) {
-        return Cow::Borrowed(t);
-    }
-    Cow::Owned(map(t, n, &own))
+    matches!(reaching, Term::Var(v) if application_form(v)) || mentions(value)
 }
 
 /// `t` resolved through any chain of variable bindings in `b`, borrowed (bounded against
@@ -2890,6 +2859,11 @@ fn resolved<'t>(t: &'t Term, b: &'t Binding) -> &'t Term {
         }
     }
     cur
+}
+
+/// Whether `t` is a formula: a `{ … }` term, or the empty formula ([`empty_formula`]).
+fn is_formula(t: &Term) -> bool {
+    matches!(t, Term::Formula(_)) || empty_formula(t)
 }
 
 /// Whether `t` is the empty formula `{}`, which the parser reads as the boolean `true`
@@ -3048,6 +3022,13 @@ fn frees_quoted_universal(t: &Term) -> bool {
 const BOUND_STORE_NEGATION: &str = "N3: a store-scoped log:includes / log:supports pattern \
     bound through a variable holds a store-scoped log:notIncludes / log:collectAllIn / \
     log:forAllIn, which the stratification cannot see; write the pattern in the rule";
+
+/// A formula bound through a variable inside a backward rule ([`backward_bound`]); full
+/// support is tracked in <https://github.com/sparq-org/sparq/issues/6943>.
+const BACKWARD_BOUND_FORMULA: &str = "N3: a formula bound through a variable is unsupported \
+    inside a backward rule (a log:includes / log:notIncludes / log:supports pattern, or a \
+    log:collectAllIn / log:forAllIn clause or subject, given through a variable of a <= rule \
+    or holding one; write it in the rule, see GH #6943)";
 
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 

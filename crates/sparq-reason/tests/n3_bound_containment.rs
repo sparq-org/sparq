@@ -215,38 +215,6 @@ fn only_the_empty_formula_is_the_empty_pattern() {
     }
 }
 
-/// A bound pattern shares the variables of the rule it is matched in, as the same formula
-/// written there does: a backward rule's renamed document-level universal (and a forward
-/// rule's) constrains the stored formula's mention of it.
-#[test]
-fn a_bound_pattern_shares_the_rules_variables() {
-    let backward = |pat: &str| {
-        format!(
-            "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
-             @forAll :x.
-             :cfg :pat {{ :x :p :b }}.
-             {{ :x :hit :yes }} <= {{ :cfg :pat ?f. {{ :a :p :b }} log:includes {pat} }}.
-             {{ :c :hit :yes }} => {{ :r :fired :c }}.
-             {{ :a :hit :yes }} => {{ :r :fired :a }}."
-        )
-    };
-    let forward = |pat: &str| {
-        format!(
-            "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
-             @forAll :x.
-             :cfg :pat {{ :x :p :b }}. :a :q :yes. :c :q :yes.
-             {{ :x :q :yes. :cfg :pat ?f. {{ :a :p :b }} log:includes {pat} }} => {{ :r :fired :x }}."
-        )
-    };
-    let want = vec![[iri("r"), iri("fired"), iri("a")]];
-    for make in [&backward as &dyn Fn(&str) -> String, &forward] {
-        for pat in ["?f", "{ :x :p :b }"] {
-            let src = make(pat);
-            assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-        }
-    }
-}
-
 /// A backward rule's document with `@forAll :x`, the premise `premise` proving
 /// `?x :hit :yes`, and forward rules reporting which of `:a` / `:c` was proved.
 fn backward_doc(facts: &str, premise: &str) -> String {
@@ -261,35 +229,81 @@ fn backward_doc(facts: &str, premise: &str) -> String {
     )
 }
 
-/// A formula that already belongs to the backward-rule application (bound from one of
-/// its own terms, here through `list:member`) keeps the application's variables: it is
-/// not renamed a second time, which would free them.
+const BACKWARD_REFUSED: &str = "N3: a formula bound through a variable is unsupported inside a backward rule";
+
+fn refused(src: &str) {
+    let err = text(src, NegationCycles::Reject).expect_err("refused");
+    assert!(err.starts_with(BACKWARD_REFUSED), "{src}: {err}");
+}
+
+/// Inside a backward rule a pattern or clause reached through a variable is refused (its
+/// variables would not share the rule application's bindings; GH #6943). The same
+/// formula written in the rule works as before.
 #[test]
-fn a_bound_pattern_from_the_applications_own_term_keeps_its_bindings() {
+fn a_formula_bound_inside_a_backward_rule_is_refused() {
     let want = vec![[iri("r"), iri("fired"), iri("a")]];
-    for premise in [
-        "( { :x :p :b } ) list:member ?f. { :a :p :b } log:includes ?f",
-        "{ :a :p :b } log:includes { :x :p :b }",
+    let stored = ":cfg :pat { :x :p :b }.";
+    for (bound, inline) in [
+        (":cfg :pat ?f. { :a :p :b } log:includes ?f", "{ :a :p :b } log:includes { :x :p :b }"),
+        // A formula from the application's own term, through list:member.
+        ("( { :x :p :b } ) list:member ?f. { :a :p :b } log:includes ?f", "{ :a :p :b } log:includes { :x :p :b }"),
+        (":cfg :pat ?f. ( {} ?f ) log:forAllIn { :a :p :b }", "( {} { :x :p :b } ) log:forAllIn { :a :p :b }"),
+        (":cfg :pat ?f. ( :t ?f ( :t ) ) log:collectAllIn { :a :p :b }", "( :t { :x :p :b } ( :t ) ) log:collectAllIn { :a :p :b }"),
     ] {
-        let src = backward_doc("", premise);
-        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+        refused(&backward_doc(stored, bound));
+        let src = backward_doc(stored, inline);
+        assert_eq!(text(&src, NegationCycles::Reject).expect("inline"), want, "{src}");
+    }
+    // A bound aggregation SUBJECT (template, clause and result pattern together).
+    for (fact, premise) in [
+        (":cfg :agg ( {} { :x :p :b } ).", ":cfg :agg ?s. ?s log:forAllIn { :a :p :b }"),
+        (":cfg :agg ( :t { :x :p :b } ( :t ) ).", ":cfg :agg ?s. ?s log:collectAllIn { :a :p :b }"),
+    ] {
+        refused(&backward_doc(fact, premise));
     }
 }
 
-/// An aggregation clause bound through a variable shares a backward rule's variables as
-/// the clause written in the rule does (#6851's bound-clause path).
+/// A formula that escapes a backward proof holds that application's variables, which a
+/// later premise would rebind freely: a forward rule refuses it as a bound pattern. A
+/// source variable spelled in that namespace is refused the same way (fail-closed).
 #[test]
-fn a_bound_aggregation_clause_shares_the_rules_variables() {
+fn a_formula_holding_a_backward_variable_is_refused() {
+    let escaped = format!(
+        "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
+         @prefix list: <http://www.w3.org/2000/10/swap/list#>.
+         {{ ?x :pattern ?f }} <= {{ ( {{ ?x :p :b }} ) list:member ?f }}.
+         {{ :c :pattern ?f. {{ :a :p :b }} log:includes ?f }} => {{ :r :fired :c }}."
+    );
+    refused(&escaped);
+    let spelled = doc(":cfg :odd { ?__bw0_x :p :b }. { :cfg :odd ?f. { :a :p :b } log:includes ?f } => { :r :fired :odd }.");
+    refused(&spelled);
+}
+
+/// Forward rules keep bound patterns, clauses and aggregation subjects, sharing the rule's
+/// variables through the binding.
+#[test]
+fn a_bound_formula_in_a_forward_rule_shares_the_rules_variables() {
+    let forward = |pat: &str| {
+        format!(
+            "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
+             @forAll :x.
+             :cfg :pat {{ :x :p :b }}. :a :q :yes. :c :q :yes.
+             {{ :x :q :yes. :cfg :pat ?f. {{ :a :p :b }} log:includes {pat} }} => {{ :r :fired :x }}."
+        )
+    };
     let want = vec![[iri("r"), iri("fired"), iri("a")]];
-    for clause in ["?f", "{ :x :p :b }"] {
-        for aggregation in [
-            format!("( {{}} {clause} ) log:forAllIn {{ :a :p :b }}"),
-            format!("( :t {clause} ( :t ) ) log:collectAllIn {{ :a :p :b }}"),
-        ] {
-            let src = backward_doc(":cfg :pat { :x :p :b }.", &format!(":cfg :pat ?f. {aggregation}"));
-            assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-        }
+    for pat in ["?f", "{ :x :p :b }"] {
+        let src = forward(pat);
+        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
     }
+    let src = doc(
+        ":cfg :all ( {} { :a :p :b } ). :cfg :one { :a :p :b }.
+         { :cfg :all ?s. ?s log:forAllIn { :a :p :b } } => { :r :fired :subject }.
+         { :cfg :one ?f. ( :t ?f ( :t ) ) log:collectAllIn { :a :p :b } } => { :r :fired :clause }.",
+    );
+    let mut want = vec![[iri("r"), iri("fired"), iri("clause")], [iri("r"), iri("fired"), iri("subject")]];
+    want.sort_by_key(|t| format!("{t:?}"));
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
 }
 
 /// An unbound scope variable means the store, so it is no input to wait for: an operator
