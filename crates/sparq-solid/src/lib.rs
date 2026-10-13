@@ -480,7 +480,6 @@ impl PodStore {
     /// other pod's cached view (issue #1571). The public method keeps the full-clear default.
     /// [OPUS-4.8] sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
-        self.refuse_if_needs_recovery()?;
         let stats = materialize_wac(&mut self.graph)?;
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
@@ -644,7 +643,6 @@ impl PodStore {
         credentials: &VerifiedCredentials,
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
-        self.refuse_if_needs_recovery()?;
         let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
@@ -913,20 +911,7 @@ impl PodStore {
         // [OPUS-4.8] sq-j8qtt: reuse the persistent per-generation index (built once,
         // dropped on `reindex`) instead of rebuilding it on every call.
         let d = decide::decide_one(self.acl_index(), &self.auth, session, resource, mode);
-        self.unless_recovering(self.apply_odrl(d, session, resource, mode))
-    }
-
-    /// Deny, retryably, every decision while the graph holds a committed update it could not
-    /// finish applying (see [`PodStore::commit`]): its state may be partial until a reopen.
-    fn unless_recovering(&self, mut d: WacDecision) -> WacDecision {
-        if self.graph.needs_recovery() {
-            d.allow = false;
-            d.granted_modes.clear();
-            if d.status == AclStatus::Resolved {
-                d.status = AclStatus::Unloaded;
-            }
-        }
-        d
+        self.apply_odrl(d, session, resource, mode)
     }
 
     /// Remove the modes an attached ODRL prohibition denies (issue #6743) from a point
@@ -966,7 +951,7 @@ impl PodStore {
             .iter()
             .map(|(resource, mode)| {
                 let d = decide::decide_one(index, &self.auth, session, resource, *mode);
-                self.unless_recovering(self.apply_odrl(d, session, resource, *mode))
+                self.apply_odrl(d, session, resource, *mode)
             })
             .collect()
     }
@@ -1054,7 +1039,7 @@ impl PodStore {
         // The child-name refusal above stays first; a prohibition on the container or on
         // the child it would mint can only narrow what is left.
         let d = self.apply_odrl(d, session, container, mode);
-        self.unless_recovering(self.apply_odrl(d, session, &format!("{container}{child_name}"), mode))
+        self.apply_odrl(d, session, &format!("{container}{child_name}"), mode)
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
@@ -1115,11 +1100,6 @@ impl PodStore {
     /// Generation pinning (#1584): the `auth` snapshot is pinned ONCE per call, so a racing
     /// re-materialization never yields a half-old/half-new set.
     fn session_sets(&self, s: &Session, mode: Mode) -> SessionSets {
-        // A graph left part-way through a committed update is visible to no one until a
-        // reopen completes it (see [`PodStore::commit`]).
-        if self.graph.needs_recovery() {
-            return SessionEntry::sets_from(Vec::new());
-        }
         let key = (
             s.agent.map(str::to_owned),
             s.client.map(str::to_owned),
@@ -1288,12 +1268,6 @@ impl PodStore {
     ///   (never permissive), at the cost of denying some updates a per-solution check
     ///   might allow.
     ///
-    /// The request is all-or-nothing, however many operations it has: every operation is
-    /// authorized before anything is committed, and the commit is one journaled unit on a
-    /// directory-backed store. Should applying it fail after that commit point, the store
-    /// refuses every request and every re-materialization until it is reopened, which
-    /// completes the update.
-    ///
     /// On a permitted update that touched an `.acl`/`.acr`/group document — a static
     /// control-doc write, a static write to a graph the current access-control documents
     /// reference via `acl:agentGroup` (a **group document**, which has no naming
@@ -1375,9 +1349,13 @@ impl PodStore {
     /// refusing the operations. Authorization is unchanged — a budget can only turn a
     /// permitted update into an error, never a denied one into a write.
     ///
-    /// Failure semantics are otherwise exactly [`PodStore::update_as`]'s: the whole request
-    /// is all-or-nothing, so a budget that trips part-way through a multi-operation
-    /// (`;`-separated) request changes nothing.
+    /// Failure semantics are otherwise exactly [`PodStore::update_as`]'s, including its
+    /// engine-inherited **non-atomicity on error**: a budget that trips part-way through a
+    /// multi-operation (`;`-separated) request leaves the earlier operations' prefix
+    /// applied. A single operation's WHERE is fully evaluated before any of its delta is
+    /// applied, so the common case — one over-budget `DELETE/INSERT … WHERE` — mutates
+    /// nothing. A caller needing all-or-nothing request semantics should wrap this in its
+    /// own fork/commit, exactly as it must around [`PodStore::update_as`].
     ///
     /// An unlimited budget is byte-for-byte [`PodStore::update_as`].
     ///
@@ -1420,7 +1398,6 @@ impl PodStore {
     ) -> Result<(), String> {
         // Every update takes this one path. Authorize against the CURRENT auth view before
         // anything is applied (fail-closed); this static check fails fast.
-        self.refuse_if_needs_recovery()?;
         let auth = Arc::clone(&self.auth);
         let upd = sparq_engine::parse_update_rec2013(sparql)?;
         // Every pattern the update evaluates runs under the session's read view, the same
@@ -1442,7 +1419,8 @@ impl PodStore {
                     Ok(false),
                     "the static check covers a data-only update's effects"
                 );
-                return self.commit(&effects, false);
+                return sparq_engine::apply_effects(&mut self.graph, &effects)
+                    .map_err(|e| format!("the update could not be committed: {e}"));
             }
         }
         // A single `DELETE`/`INSERT … WHERE` (the LDP PATCH shape) whose static targets leave
@@ -1464,7 +1442,8 @@ impl PodStore {
                     &veto,
                 )?;
                 if !wrote_rules {
-                    return self.commit(&effects, false);
+                    return sparq_engine::apply_effects(&mut self.graph, &effects)
+                        .map_err(|e| format!("the update could not be committed: {e}"));
                 }
             }
         }
@@ -1526,7 +1505,13 @@ impl PodStore {
         drop(candidate);
         // Commit: the effects to the store itself (one journaled, durable commit for a
         // directory-backed graph), then the view rebuilt from the rules now stored.
-        self.commit(&effects, rules_changed)?;
+        if let Err(e) = sparq_engine::apply_effects(&mut self.graph, &effects) {
+            // Part of it may be applied in memory: the rules may no longer match the view.
+            if rules_changed {
+                self.drop_auth_view();
+            }
+            return Err(format!("the update could not be committed: {e}"));
+        }
         if rules_changed {
             let rebuilt = if acp {
                 self.materialize_acp().map(drop)
@@ -1542,32 +1527,6 @@ impl PodStore {
                      ({e}); every request is denied until it is re-materialized"
                 ));
             }
-        }
-        Ok(())
-    }
-
-    /// Commit an authorized update's effects to the store: one journaled, all-or-nothing
-    /// commit on a directory-backed graph. Should applying them fail part-way, the view goes
-    /// when the rules may have changed, and also whenever the graph holds a committed update it
-    /// could not finish applying: until a reopen completes it, the store's state is partial, so
-    /// every request is denied and materializing is refused.
-    fn commit(&mut self, effects: &[sparq_engine::UpdateEffect], rules_changed: bool) -> Result<(), String> {
-        if let Err(e) = sparq_engine::apply_effects(&mut self.graph, effects) {
-            if rules_changed || self.graph.needs_recovery() {
-                self.drop_auth_view();
-            }
-            return Err(format!("the update could not be committed: {e}"));
-        }
-        Ok(())
-    }
-
-    /// Refuse to update or re-materialize a store whose graph holds a committed update it could
-    /// not finish applying (see [`PodStore::commit`]).
-    fn refuse_if_needs_recovery(&self) -> Result<(), String> {
-        if self.graph.needs_recovery() {
-            return Err("the store holds a committed update that was not fully applied; reopen \
-                        it to complete the update"
-                .to_owned());
         }
         Ok(())
     }
@@ -1593,7 +1552,7 @@ impl PodStore {
         allow(dead_code)
     )]
     pub(crate) fn may_install_grants(&self) -> bool {
-        !self.view_dropped && !self.graph.needs_recovery()
+        !self.view_dropped
     }
 
     /// The auth view a grant source other than the static WAC/ACP rules writes its grants
@@ -1613,9 +1572,8 @@ impl PodStore {
     /// allows: `None` (nothing touched) while the view is dropped, else the number retracted.
     #[cfg(feature = "odrl-bridge")]
     fn refresh_bridged(&mut self) -> Option<usize> {
-        let usable = self.may_install_grants();
-        let Self { graph, bridge_ledger, .. } = self;
-        usable.then(|| bridge_ledger.refresh(graph))
+        let Self { graph, bridge_ledger, view_dropped, .. } = self;
+        (!*view_dropped).then(|| bridge_ledger.refresh(graph))
     }
 
     /// [OPUS-4.8] sq-h3uk — evaluate an ODRL `policy` against `request` and, on a

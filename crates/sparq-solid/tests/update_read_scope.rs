@@ -307,31 +307,9 @@ fn reopen(dir: &std::path::Path) -> PodStore {
     s
 }
 
-/// Every non-reserved named graph and its triples, as terms: comparable across a reopen.
-fn dataset(s: &PodStore) -> std::collections::BTreeMap<String, Vec<String>> {
-    s.graph
-        .named
-        .iter()
-        .filter(|(n, _)| !n.to_string().contains("urn:sparq:"))
-        .map(|(n, g)| {
-            let scan = g.store.scan(&[None, None, None]);
-            let mut rows: Vec<String> = scan
-                .rows
-                .iter()
-                .map(|r| {
-                    let [a, b, c] = scan.to_spo(r).map(|id| g.dict.term(id).to_string());
-                    format!("{a} {b} {c}")
-                })
-                .collect();
-            rows.sort();
-            (n.to_string(), rows)
-        })
-        .collect()
-}
-
-/// Variable-target updates are durable, alone or in a multi-operation request, including
-/// the graphs such a request creates and removes; a refused multi-operation request changes
-/// neither memory nor disk.
+/// A variable-target update is durable, and so are later writes. On a directory-backed
+/// store a multi-operation request that includes one is refused and changes neither memory
+/// nor disk, while a multi-operation request with static targets still runs.
 #[test]
 fn variable_target_updates_stay_durable() {
     let (mut s, dir) = durable_store("ok");
@@ -346,94 +324,29 @@ fn variable_target_updates_stay_durable() {
          DELETE WHERE { GRAPH <https://pod.ex/out> { <urn:o> ?p ?o } }",
     )
     .expect("static targets in one request");
-    s.update_as(
-        &bob(),
-        "DROP GRAPH <https://pod.ex/wonly> ; \
-         INSERT { GRAPH ?g { <urn:v> <urn:p> \"both\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } } ; \
-         DELETE { GRAPH ?g { <urn:m> ?p ?o } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { <urn:m> ?p ?o } }",
-    )
-    .expect("a variable target with a graph removal in one request");
-    let wonly = "<https://pod.ex/wonly>";
-    assert!(!dataset(&s).contains_key(wonly));
-    let live = dataset(&s);
+    let live = out(&s);
     drop(s);
-    let mut s = reopen(&dir);
-    assert_eq!(dataset(&s), live, "the reopened store differs");
-    let text = out(&s);
-    for v in ["var", "both"] {
-        assert!(text.contains(v), "{v} lost: {text}");
+    let back = out(&reopen(&dir));
+    for v in ["var", "multi"] {
+        assert!(live.contains(v) && back.contains(v), "{v} lost: {back}");
     }
-    assert!(!text.contains("\"out\"") && !text.contains("multi"), "a delete was lost: {text}");
-
-    s.update_as(
-        &bob(),
-        "CREATE GRAPH <https://pod.ex/wonly> ; \
-         INSERT { GRAPH ?g { <urn:c> <urn:p> \"created\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
-    )
-    .expect("a variable target with a graph creation in one request");
-    assert_eq!(dataset(&s).get(wonly), Some(&Vec::new()), "the created graph is empty");
-    let live = dataset(&s);
-    drop(s);
-    assert_eq!(dataset(&reopen(&dir)), live, "the reopened store differs");
+    assert!(!back.contains("\"out\""), "the delete was lost: {back}");
     std::fs::remove_dir_all(&dir).ok();
 
     let (mut s, dir) = durable_store("refused");
-    let before = dataset(&s);
-    s.update_as(
-        &bob(),
-        "DROP GRAPH <https://pod.ex/wonly> ; \
-         INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
-         INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } WHERE { GRAPH ?g { } }",
-    )
-    .expect_err("pub is not writable");
-    assert_eq!(dataset(&s), before, "memory changed");
+    let before = out(&s);
+    let e = s
+        .update_as(
+            &bob(),
+            "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
+             INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
+        )
+        .expect_err("a variable target must be sent on its own");
+    assert!(e.contains("directory-backed store"), "{e}");
+    assert_eq!(out(&s), before, "memory changed");
     drop(s);
-    assert_eq!(dataset(&reopen(&dir)), before, "disk changed");
+    assert_eq!(out(&reopen(&dir)), before, "disk changed");
     std::fs::remove_dir_all(&dir).ok();
-}
-
-/// A committed update the store could not finish applying leaves it refusing every request
-/// and every re-materialization; a reopen completes the update and the store works again.
-#[test]
-fn an_unfinished_commit_is_completed_by_a_reopen() {
-    let (mut s, dir) = durable_store("unfinished");
-    let iri = |v: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(v));
-    let journaled = [iri("urn:j"), iri("urn:p"), oxrdf::Literal::new_simple_literal("journaled").into()];
-    // A committed frame whose application never finished, as a crash part-way would leave it.
-    s.graph
-        .commit_txn(&[sparq_core::TxnRecord::Insert(Some(iri("https://pod.ex/out")), journaled)])
-        .expect("commits");
-    let write = "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"later\" } }";
-    assert!(out_readable(&s));
-    assert!(s.update_as(&bob(), write).is_err(), "the pending frame refuses the next commit");
-    assert!(s.graph.needs_recovery());
-    assert!(!out_readable(&s), "reads are denied");
-    assert!(s.update_as(&bob(), write).is_err());
-    assert!(s.materialize_wac().is_err());
-    drop(s);
-
-    // Reached without an update through the store, the state is refused just the same.
-    let mut s = reopen(&dir);
-    s.graph
-        .commit_txn(&[sparq_core::TxnRecord::CreateGraph(iri("https://pod.ex/other"))])
-        .expect("commits");
-    s.graph.abandon_txn();
-    assert!(!out_readable(&s), "reads are denied");
-    assert!(s.accessible(&bob(), Mode::Read).is_empty());
-    let d = s.decide(&bob(), "https://pod.ex/out", Mode::Read);
-    assert!(!d.allow && d.status == sparq_solid::AclStatus::Unloaded, "{d:?}");
-    assert!(s.materialize_wac().is_err());
-    drop(s);
-    let mut s = reopen(&dir);
-    let text = out(&s);
-    assert!(text.contains("journaled") && !text.contains("later"), "{text}");
-    s.update_as(&bob(), write).expect("writes work again");
-    std::fs::remove_dir_all(&dir).ok();
-}
-
-fn out_readable(s: &PodStore) -> bool {
-    s.query_json_as(&bob(), Mode::Read, "SELECT ?s WHERE { GRAPH <https://pod.ex/out> { ?s ?p ?o } }")
-        .is_ok_and(|j| j.contains("urn:o"))
 }
 
 /// Naming an unreadable source is refused with the same error whether or not the graph
@@ -492,4 +405,30 @@ fn clearing_every_graph_covers_graphs_created_earlier_in_the_request() {
         .expect_err("new is append-only");
     assert!(e.contains("https://pod.ex/new"), "{e}");
     assert_eq!(snapshot(&s), before, "nothing applied");
+}
+
+/// On a store with no directory behind it, a multi-operation request with a variable target
+/// is all-or-nothing, graph removal included: a target bob cannot write in the last
+/// operation leaves the graphs earlier operations dropped and wrote untouched,
+/// and the same request with a writable target applies every operation.
+#[test]
+fn in_memory_multi_operation_requests_are_all_or_nothing() {
+    let request = |using: &str| {
+        format!(
+            "DROP GRAPH <https://pod.ex/wonly> ; \
+             INSERT DATA {{ GRAPH <https://pod.ex/out> {{ <urn:m> <urn:p> \"multi\" }} }} ; \
+             INSERT {{ GRAPH ?g {{ <urn:f> <urn:p> \"var\" }} }} {using} WHERE {{ GRAPH ?g {{ }} }}"
+        )
+    };
+    let mut s = store();
+    let before = snapshot(&s);
+    s.update_as(&bob(), &request("")).expect_err("pub is not writable");
+    assert_eq!(snapshot(&s), before, "nothing applied");
+
+    s.update_as(&bob(), &request("USING NAMED <https://pod.ex/out>"))
+        .expect("every target is writable");
+    let after = snapshot(&s);
+    assert!(!after.contains_key("<https://pod.ex/wonly>"), "{after:?}");
+    let text = out(&s);
+    assert!(text.contains("multi") && text.contains("var"), "{text}");
 }

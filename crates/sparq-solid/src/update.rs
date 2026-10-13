@@ -32,7 +32,9 @@
 //!   evaluation, so the graphs authorized are exactly the graphs written. A destination
 //!   that is not a writable named graph denies the update before it writes anything.
 //!   The whole request runs on a fork and is committed only once every operation has
-//!   been authorized, so a denial in any operation leaves the store untouched;
+//!   been authorized, so a denial in any operation leaves the store untouched. On a
+//!   directory-backed store such an operation must still be the whole request: a request
+//!   with several operations that includes one is refused there;
 //! - a target whose graph name cannot be determined statically — a `CLEAR`/`DROP` of
 //!   `ALL`/`NAMED` graphs — is treated *conservatively*: the actor must be able to write
 //!   **every** named graph currently in the store, or the whole update is denied.
@@ -455,6 +457,18 @@ pub(crate) fn check(
     veto: &Veto<'_>,
 ) -> Result<Permit, String> {
     let mut reqs = analyze(upd);
+
+    // A `GRAPH ?var` target is authorized while its operation runs on the fork, so a denial
+    // in any operation discards the whole request. On a directory-backed store the commit of a
+    // multi-operation request is not yet one durable unit when it creates or removes graphs, so
+    // there such an operation must still be the whole request.
+    if reqs.var_graphs && upd.operations.len() > 1 && graph.is_directory_backed() {
+        return Err(
+            "update denied: on a directory-backed store, a DELETE/INSERT … WHERE with a \
+             variable GRAPH target must be sent as a request of its own"
+                .to_owned(),
+        );
+    }
 
     if reqs.touches_default {
         return Err(
