@@ -13,6 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose length is ≡ 1 mod 4 even when the leftover bits are zero (for example `ugAAAA`);
   such a body has no byte-string meaning, and every other non-canonical form was already
   refused. A list published by a conforming encoder is unaffected. (#6873)
+- **sparq-fedclient:** pushed-down SPARQL renders every pattern position strictly as one
+  SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
+  report `InterpError::Render`, and `push_group` returns `None` for a pattern holding a
+  variable name that is not a SPARQL `VARNAME`, an IRI with a character `IRIREF` forbids, or a
+  `"`-prefixed literal that is not exactly one SPARQL literal. Pre-rendered literals are
+  re-serialised with canonical escaping. (#6877)
+
+### Fixed
+
+- **sparq-solid / sparq-prov (date stamps):** epoch seconds before 0000-03-01 now format to the
+  correct proleptic-Gregorian date. The previous conversion was one day late there (and could
+  emit 29 February in a non-leap year); the only dates it already got right were
+  29 February of years divisible by 400. For such instants a trust-graph grant's
+  `auth:notAfter` and its deterministic grant IRI change (for example `-62167219200` now formats
+  as `0000-01-01`, not `0000-01-02`), and years -1 to -999 are now written with four digits
+  after the sign (`-0001`, not `-001`), as XSD requires. Instants from 0000-03-01 onwards are
+  unchanged; signature inputs and PROV IRIs are unaffected. (#6864)
 
 ## [0.1.5] - 2026-10-10
 

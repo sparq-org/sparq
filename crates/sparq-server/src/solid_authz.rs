@@ -1026,27 +1026,11 @@ fn parse_wire_credential(obj: &serde_json::Map<String, serde_json::Value>) -> Re
 /// [SONNET-4.6] (sq-pfae.17) Decode a 64-hex-char (32-byte) salt from a hex string. Fail-closed.
 #[cfg(feature = "solid-authz-trust")]
 fn decode_salt_hex(hex: &str) -> Option<[u8; 32]> {
+    // Reject a wrong length before decoding allocates anything for it.
     if hex.len() != 64 {
         return None;
     }
-    let mut out = [0u8; 32];
-    for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
-        let hi = hex_nibble(chunk[0])?;
-        let lo = hex_nibble(chunk[1])?;
-        out[i] = (hi << 4) | lo;
-    }
-    Some(out)
-}
-
-/// [SONNET-4.6] (sq-pfae.17) Decode a single hex nibble. Fail-closed.
-#[cfg(feature = "solid-authz-trust")]
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    sparq_core::hex::decode(hex)?.try_into().ok()
 }
 
 /// [SONNET-4.6] (sq-pfae.17) Build a `sparq_trust::policy::ShapeRef` for a `trust:forPredicate`
@@ -2024,6 +2008,18 @@ pub(crate) async fn query_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn decode_salt_hex_requires_exactly_32_bytes() {
+        let ok = "ab".repeat(32);
+        assert_eq!(decode_salt_hex(&ok), Some([0xab; 32]));
+        assert_eq!(decode_salt_hex(&ok.to_uppercase()), Some([0xab; 32]));
+        assert_eq!(decode_salt_hex(&ok[..62]), None);
+        assert_eq!(decode_salt_hex(&format!("{ok}ab")), None);
+        assert_eq!(decode_salt_hex(&"ab".repeat(4096)), None);
+        assert_eq!(decode_salt_hex(&format!("{}zz", &ok[..62])), None);
+    }
 
     // A tiny WAC dataset: alice has Read on the root `.acl`, inherited by `notes/n1`.
     const WAC_NQUADS: &str = r#"

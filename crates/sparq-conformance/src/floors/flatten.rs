@@ -12,7 +12,7 @@
 /// generates the node map (§7.2), folds named graphs under `@graph`, sorts by `@id`,
 /// and drops empty nodes, and the result is deep-compared to the suite's NORMATIVE
 /// expected document via `json_ld_equal` (object key order insignificant; array order
-/// significant only inside `@list`; integers exact, non-integral as f64) — the SAME
+/// significant only inside `@list` and a `@json` payload; integers exact, non-integral as f64) — the SAME
 /// comparator the `expand` lane uses (sq-kk1mq). This is a document-level oracle, not
 /// an RDF round-trip, so it detects JSON-LD structure the RDF oracle could not.
 ///

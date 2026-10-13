@@ -387,34 +387,12 @@ fn decode_varint(bytes: &[u8]) -> Option<(u64, &[u8])> {
     None // truncated
 }
 
-/// Lowercase-hex encode. `pub(crate)` so the `expression` module's
-/// [`crate::expression::ChallengeNonce::generate`] renders its CSPRNG draw with
-/// the same encoder rather than a second copy of it (`expression` implies `did`).
-pub(crate) fn to_hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        // Positional args (CodeQL rust/unused-variable false-positive avoidance).
-        s.push_str(&format!("{:02x}", b));
-    }
-    s
-}
+/// Lowercase-hex encode, shared with the `expression` module's challenge nonces.
+pub(crate) use sparq_core::hex::encode as to_hex;
 
 /// Decode lowercase/uppercase hex (optional `0x`), `None` on odd length / bad nibble.
 fn from_hex(s: &str) -> Option<Vec<u8>> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    if !s.len().is_multiple_of(2) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(s.len() / 2);
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let hi = (bytes[i] as char).to_digit(16)?;
-        let lo = (bytes[i + 1] as char).to_digit(16)?;
-        out.push((hi * 16 + lo) as u8);
-        i += 2;
-    }
-    Some(out)
+    sparq_core::hex::decode(s.strip_prefix("0x").unwrap_or(s))
 }
 
 #[cfg(test)]

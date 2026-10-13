@@ -439,7 +439,7 @@ fn wrap_capability_aad_is_domain_separated() {
     ));
     assert_eq!(
         unwrap(&recipient, &wrapped, CAPABILITY_WRAP_AAD).unwrap(),
-        cap.encode_secret()
+        *cap.encode_secret()
     );
 }
 
@@ -908,6 +908,60 @@ fn delegation_rejects_a_non_canonical_parent() {
     .unwrap();
 }
 
+// --- #3956: exercise-time epoch check ---------------------------------------
+
+#[test]
+fn check_epoch_enforces_max_epoch_ceiling() {
+    let mut g = sample_grant(); // scoped to Epoch(7)
+    g.max_epoch = Some(Epoch(9));
+    g.check_epoch(Epoch(7)).unwrap();
+    g.check_epoch(Epoch(8)).unwrap();
+    g.check_epoch(Epoch(9)).unwrap(); // the ceiling is inclusive
+    assert!(matches!(g.check_epoch(Epoch(10)), Err(Error::EpochOutOfRange(_))));
+    assert!(matches!(g.check_epoch(Epoch(u64::MAX)), Err(Error::EpochOutOfRange(_))));
+}
+
+#[test]
+fn check_epoch_rejects_epoch_before_grant_scope() {
+    let mut g = sample_grant();
+    g.max_epoch = Some(Epoch(9));
+    assert!(matches!(g.check_epoch(Epoch(6)), Err(Error::EpochOutOfRange(_))));
+    g.max_epoch = None;
+    assert!(matches!(g.check_epoch(Epoch(0)), Err(Error::EpochOutOfRange(_))));
+}
+
+#[test]
+fn check_epoch_unbounded_grant_has_no_ceiling() {
+    let g = sample_grant();
+    assert_eq!(g.max_epoch, None);
+    g.check_epoch(Epoch(7)).unwrap();
+    g.check_epoch(Epoch(u64::MAX)).unwrap();
+}
+
+#[test]
+fn check_epoch_follows_delegated_ceiling() {
+    // A delegated child carries the narrowed, admin-signed ceiling, and
+    // check_epoch enforces the child's bound, not the parent's.
+    let admin = SecretSigningKey::from_seed([1u8; 32]);
+    let mut parent = sample_grant();
+    parent.authority = vec![Authority::Read];
+    parent.sign(&admin);
+    let child = delegate(
+        &parent,
+        &admin,
+        Delegation {
+            branches: None,
+            authority: vec![Authority::Read],
+            validity: Validity { not_before: 100, not_after: 200 },
+            max_epoch: Some(8),
+        },
+    )
+    .unwrap();
+    child.check_epoch(Epoch(8)).unwrap();
+    assert!(matches!(child.check_epoch(Epoch(9)), Err(Error::EpochOutOfRange(_))));
+    parent.check_epoch(Epoch(9)).unwrap();
+}
+
 // ============================================================================
 // Block & commit envelopes
 // ============================================================================
@@ -1030,6 +1084,77 @@ fn commit_sign_verify_and_id_stable() {
     let commit2 = Commit::decode(&pt, lim()).unwrap();
     assert_eq!(commit, commit2);
     commit2.verify().unwrap();
+}
+
+// --- #4260: the parent list is a canonical set ------------------------------
+
+fn two_parent_commit(parents: Vec<CommitId>) -> Commit {
+    Commit {
+        repo: RepoId::from_bytes([1u8; 32]),
+        branch: BranchId::from_bytes([2u8; 32]),
+        epoch: Epoch(7),
+        parents,
+        author: AuthorKeyId::from_bytes([0u8; 32]),
+        clock: 42,
+        crdt_kind: "or-set-quads-v0".to_string(),
+        operations: vec![ObjectId::from_bytes([5u8; 32])],
+        snapshot: None,
+        author_sig: None,
+    }
+}
+
+/// Replace every occurrence of the 32-byte `from` run in `bytes` with `to`.
+fn splice32(bytes: &mut [u8], from: [u8; 32], to: [u8; 32]) {
+    let mut i = 0;
+    while i + 32 <= bytes.len() {
+        if bytes[i..i + 32] == from {
+            bytes[i..i + 32].copy_from_slice(&to);
+            i += 32;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+#[test]
+fn commit_decode_rejects_reordered_parents() {
+    let (lo, hi) = ([0x11u8; 32], [0x22u8; 32]);
+    let canonical = two_parent_commit(vec![CommitId::from_bytes(lo), CommitId::from_bytes(hi)]);
+    let mut bytes = canonical.encode();
+    Commit::decode(&bytes, lim()).unwrap();
+    // Swap the two parents on the wire: same logical commit, different bytes.
+    splice32(&mut bytes, lo, [0xEEu8; 32]);
+    splice32(&mut bytes, hi, lo);
+    splice32(&mut bytes, [0xEEu8; 32], hi);
+    assert!(matches!(Commit::decode(&bytes, lim()), Err(Error::NonCanonical(_))));
+}
+
+#[test]
+fn commit_decode_rejects_duplicate_parents() {
+    let (lo, hi) = ([0x11u8; 32], [0x22u8; 32]);
+    let canonical = two_parent_commit(vec![CommitId::from_bytes(lo), CommitId::from_bytes(hi)]);
+    let mut bytes = canonical.encode();
+    splice32(&mut bytes, hi, lo);
+    assert!(matches!(Commit::decode(&bytes, lim()), Err(Error::NonCanonical(_))));
+}
+
+#[test]
+fn commit_encode_canonicalizes_parent_set() {
+    let (a, b) = (CommitId::from_bytes([0x11u8; 32]), CommitId::from_bytes([0x22u8; 32]));
+    let canonical = two_parent_commit(vec![a, b]);
+    let author = SecretSigningKey::from_seed([3u8; 32]);
+    // Reordered and duplicated in memory: one logical commit, one encoding.
+    for parents in [vec![b, a], vec![a, b, a], vec![b, b, a, a]] {
+        let mut c = two_parent_commit(parents);
+        assert_eq!(c.encode(), canonical.encode());
+        assert_eq!(c.signing_bytes(), canonical.signing_bytes());
+        c.sign(&author);
+        c.verify().unwrap();
+        let decoded = Commit::decode(&c.encode(), lim()).unwrap();
+        assert_eq!(decoded.parents, vec![a, b]);
+        assert_eq!(decoded.encode(), c.encode());
+        decoded.verify().unwrap();
+    }
 }
 
 // ============================================================================

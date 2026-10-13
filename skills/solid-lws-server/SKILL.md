@@ -64,7 +64,14 @@ Set `PSS_SPARQ_BACKEND` to one of:
   `SOLID_SERVER_SPARQ_DIR` for a directory-backed graph; without it the graph is
   ephemeral.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
-  `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL.
+  `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
+  read its own writes: a query sent after an update has completed must see what the
+  update committed (one `sparq-server` does). An eventually consistent or replicated
+  endpoint that can lag is not supported, because the LWS server decides what a failed
+  write left behind by reading the store straight after it. An update that times out
+  can still commit on the service afterwards. The creates and removals of grants,
+  requests and subscriptions are fenced against that, but resource writes and their
+  rollback are not, so the native LWS server still refuses this backend (below).
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -233,12 +240,17 @@ Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
-because a remote write reported as failed may still commit later and nothing fences it yet.
+because a remote write reported as failed may still commit later. Only the creates and
+removals of service records (grants, requests, subscriptions) are fenced against that (see
+below); resource writes, and putting a failed change back, are not.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), the server at most 512 of each (507),
 and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
 access grant 256 KiB; these limits apply while the body is read. The owner's subscriptions have a
-separate share of 512. An access document nested too deeply to store and read back gets 400. A
+separate share of 512. Stored requests or subscriptions past these quotas at startup (stored
+before a quota was lowered, or written to the store directly) are all loaded and none is removed;
+the start logs a line naming the container and what is past which quota, and no new one is
+admitted to a share until it is under its quota. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -374,13 +386,27 @@ What the server exposes, all discoverable from the storage description
   stored, and writes the record. A write that reports a failure is checked against the listing:
   listed, the create answers `201` and the record is in force; not listed, `500`; not known
   (the listing cannot be read), `500` "not known" with the request open to retry, and the
-  record is put in force once the listing shows it. A record is announced (`Create`) as it is
+  record is put in force once the listing shows it. A write whose outcome can still change
+  (over the `http` backend, an update that timed out or failed in transit, which `sparq-server`
+  may still apply) is fenced first: the client writes a fence that the update, if it has not
+  been applied yet, finds and then does nothing. Only a listing read after the fence counts
+  as "not listed"; until the fence lands, the create answers `500` "not known" and keeps the
+  record's lock and quota place, and the record is put in force if it landed. A fence is
+  one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
+  fences may still arrive at any time): the graph grows by one triple per write that failed this
+  way. At most 256 record changes are in progress or being settled at once; past that, a new
+  create or removal answers `503` with `Retry-After`. The tasks that settle them belong to the
+  server's state and end when it is dropped, leaving the record as the store has it for the next
+  start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
   takes the record's lock and the container's the same way (at most two seconds, then `503`),
   and takes the grant out of force while the removal runs, and keeps it out only once the removal
   is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
   revoked; `500` "still stored" when the record is still listed (the grant back in force); `500` "not known" when it
-  cannot be read again, with the grant left in force. A record holds its place in the request
+  cannot be read again, with the grant left in force. A removal whose outcome can still change
+  is fenced the same way: until its fence lands, the answer is `500` "not known yet", the grant
+  stays out of force, and it is removed or put back once the listing read after the fence
+  says which. A record holds its place in the request
   quota until the store confirms it is gone: while its create's outcome is not known and while
   its withdrawal runs. Nothing a start puts back in the background begins until every step of
   the start that can fail has succeeded. A stored grant or request that cannot be read stops
@@ -411,22 +437,46 @@ What the server exposes, all discoverable from the storage description
   whose stored body is not a subscription is quarantined as access records are: listed to the
   owner, counted against both shares, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
-  Each topic of a new subscription is checked under its lock, waited for at most two seconds
-  (then `503`). The bound on deliveries prepared for one change counts only authorized ones: a
-  subscriber that may not read the resource takes no place from one that may.
+  Each topic of a new subscription is checked before its lock is taken: one the subscriber may
+  not read is refused (`403`, or `401` anonymous) at once, whatever its state. One it may read
+  is checked again under its lock, waited for at most two seconds (then `503`), or answered `503`
+  at once while set aside. The bound on deliveries prepared for one change counts only authorized
+  ones: a subscriber that may not read the resource takes no place from one that may. Once it is
+  reached the subscriptions left are neither authorized nor notified, and are logged and counted
+  apart (`Notifier::unprepared`) from dropped deliveries (`Notifier::dropped`), each of which was
+  owed. Both are counted in memory from the start, and only for a change that happened (a delete
+  that fails counts nothing). The authorization for one change has no budget of its own (one
+  party's subscriptions that may not read the resource could spend it before an authorized one is
+  reached): the subscription quotas cap it at one check per subscription in force (at most
+  1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
+  resource's access taken for the change, so its metadata is read and the grants are scanned
+  once per change. A recursive delete too large to put back is refused before any of its
+  notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
   anything is removed. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
-  (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once while a background task, holding their
+  (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
   the half-done state in between; a recursive delete sets aside everything under it it had not
   reached too. A request already waiting on a lock when its resource is set aside is answered
   `503` then, not left waiting. A resource stays set aside until every stuck change to it is
   put back. While set-aside changes hold 256 MiB or more to put back, new writes are answered
-  `503` too (reads go on). A write's container is touched by the task that runs its store
+  `503` too (reads go on). Every route but the type index and search authorizes a request
+  before it says anything of this:
+  a caller that may not act on the resource (or record) gets the same `401`/`403`/`404` it gets
+  when nothing is set aside. Whether it may is decided on what the resource was before the stuck
+  change began (whether it was there, its metadata and its format, as the change's journal
+  staged them before its first step), never on what the change wrote meanwhile: access the
+  change would newly grant is not met, and access it would remove still is. When that cannot
+  be read, only the owner hears of the state. A new subscription is told its container is set
+  aside only once every topic is authorized. One window is not covered: while a failed change is
+  still being put back under its locks (its first few tries, before it is set aside), a request
+  is authorized on what is stored at that moment, which may be the change's own new metadata. A
+  caller only that metadata authorizes then waits on the lock, and is answered `503` if the change
+  is set aside meanwhile (once it is set aside, the same caller gets `403`). A write's container is touched by the task that runs its store
   calls, so a client that goes away mid-write cannot leave the container's date behind. A
   create whose store reply was lost is removed whole the same way. A write that changes
   metadata and a recursive delete first store a durable intent: what each resource it will

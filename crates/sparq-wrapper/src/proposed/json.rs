@@ -183,10 +183,10 @@ impl Projector<'_> {
 
     fn write_node(&mut self, term: &Term, depth: usize) {
         self.out.push_str("{\"@id\":");
-        write_json_string(&term_id(term), &mut self.out);
+        push_string(&mut self.out, &term_id(term));
         for (predicate, objects) in outgoing(self.graph, term) {
             self.out.push(',');
-            write_json_string(&predicate, &mut self.out);
+            push_string(&mut self.out, &predicate);
             self.out.push_str(":[");
             for (index, object) in objects.iter().enumerate() {
                 if index > 0 {
@@ -201,7 +201,7 @@ impl Projector<'_> {
 
     fn write_reference(&mut self, term: &Term) {
         self.out.push_str("{\"@ref\":");
-        write_json_string(&term_id(term), &mut self.out);
+        push_string(&mut self.out, &term_id(term));
         self.out.push('}');
     }
 
@@ -212,19 +212,19 @@ impl Projector<'_> {
     /// direction.
     fn write_literal(&mut self, literal: &Literal) {
         self.out.push_str("{\"@value\":");
-        write_json_string(literal.value(), &mut self.out);
+        push_string(&mut self.out, literal.value());
         match literal.language() {
             Some(language) => {
                 self.out.push_str(",\"@language\":");
-                write_json_string(language, &mut self.out);
+                push_string(&mut self.out, language);
                 if let Some(direction) = literal.direction() {
                     self.out.push_str(",\"@direction\":");
-                    write_json_string(&direction.to_string(), &mut self.out);
+                    push_string(&mut self.out, &direction.to_string());
                 }
             }
             None => {
                 self.out.push_str(",\"@type\":");
-                write_json_string(literal.datatype().as_str(), &mut self.out);
+                push_string(&mut self.out, literal.datatype().as_str());
             }
         }
         self.out.push('}');
@@ -264,27 +264,7 @@ fn outgoing(graph: &Graph, focus: &Term) -> BTreeMap<String, Vec<Term>> {
     edges
 }
 
-/// Appends `value` as a quoted, escaped JSON string.
-fn write_json_string(value: &str, out: &mut String) {
-    out.push('"');
-    for character in value.chars() {
-        match character {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            // Every other C0 control is illegal unescaped in a JSON string.
-            control if control < '\u{20}' => {
-                out.push_str(&format!("\\u{:04x}", control as u32));
-            }
-            other => out.push(other),
-        }
-    }
-    out.push('"');
-}
+use sparq_core::json::push_string;
 
 #[cfg(test)]
 mod tests {
