@@ -3113,6 +3113,253 @@ mod tests {
         assert_eq!(prepared, ["bob", "erin-app", "owner"]);
     }
 
+    /// The subscriptions a change to `/r` (a `text/plain` resource) prepares deliveries for, and
+    /// the agents a read decides may read it, one subscription per agent, after `setup` has
+    /// written the grants, the metadata and the failures of the case. For a Delete, a read is
+    /// decided as its deliveries are checked: against the snapshot of the resource taken while
+    /// it was there (`None` when that could not be taken).
+    async fn prepared_and_reads(
+        kind: &'static str,
+        grants: &[(&str, Value)],
+        setup: impl FnOnce(&mut super::super::ResourceMeta, &test_store::FlakyStore),
+    ) -> (Vec<String>, Option<Vec<String>>) {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = test_store::FlakyStore::new();
+        let state = LwsState::new(store.clone(), cfg).await.unwrap();
+        let root = state.cfg.storage();
+        let r = state.cfg.absolute("/r");
+        state
+            .store
+            .write(&r, Bytes::from("r"), "text/plain")
+            .await
+            .unwrap();
+        for (id, access) in grants {
+            state
+                .access
+                .put_grant_for_test(id, access::policies(access, &root).unwrap());
+        }
+        let mut meta = state.resource_meta(&r).await.unwrap();
+        setup(&mut meta, &store);
+        state.put_resource_meta(&r, &meta).await.ok();
+        let agents = [
+            ("bob", Some("https://bob.example/#me"), None),
+            ("carol", Some("https://carol.example/#me"), None),
+            ("dave", Some("https://dave.example/#me"), None),
+            (
+                "erin-app",
+                Some("https://erin.example/#me"),
+                Some("https://app.example/"),
+            ),
+            (
+                "erin-other",
+                Some("https://erin.example/#me"),
+                Some("https://other.example/"),
+            ),
+            ("frank", Some("https://frank.example/#me"), None),
+            ("owner", Some("https://owner.example/#me"), None),
+            ("anonymous", None, None),
+        ];
+        for (id, subject, client) in agents {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: subject.map(str::to_string),
+                client: client.map(str::to_string),
+                topics: vec![root.clone()],
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        let event = Event {
+            kind,
+            uri: r.clone(),
+            is_container: false,
+            relation: None,
+        };
+        let snapshot = if kind == "Delete" {
+            access::Snapshot::take(&state, &r).await.ok()
+        } else {
+            None
+        };
+        let mut prepared: Vec<String> = state
+            .notify
+            .prepare(&state, &event)
+            .await
+            .pending
+            .iter()
+            .map(|p| p.watch.subscription.clone())
+            .collect();
+        prepared.sort();
+        if kind == "Delete" && snapshot.is_none() {
+            return (prepared, None);
+        }
+        let mut reads = Vec::new();
+        for (id, subject, client) in agents {
+            let agent = Agent {
+                subject: subject.map(str::to_string),
+                client: client.map(str::to_string),
+            };
+            let reads_it = match &snapshot {
+                Some(s) => access::allowed_as(&state, Action::Read, &r, &agent, s).await,
+                None => state.allowed(Action::Read, &r, &agent).await,
+            };
+            if reads_it {
+                reads.push(id.to_string());
+            }
+        }
+        reads.sort();
+        (prepared, Some(reads))
+    }
+
+    /// Issue #6874: preparation decides from one snapshot of the resource's access
+    /// ([`access::ResourceAccess`]); it agrees with a read for every kind of grant and
+    /// constraint, the creator, pending metadata and a backend that fails to read. A Delete's
+    /// deliveries are checked against a second snapshot ([`access::Snapshot`]), taken in the
+    /// same preparation: the two agree too, and where that one cannot be taken nothing is
+    /// prepared, so a subscriber never hears of a change one of them would refuse it.
+    #[tokio::test]
+    async fn preparation_decides_as_a_read_does_for_every_kind_of_access() {
+        let read = |who: &str, constraint: Value| {
+            json!([{"type": ["AccessPolicy"], "action": ["read"], "assignee": who,
+                "constraint": constraint}])
+        };
+        let c = |left: &str, op: &str, right: Value| json!([{"leftOperand": left, "operator": op, "rightOperand": right}]);
+        let (bob, carol, dave) = (
+            "https://bob.example/#me",
+            "https://carol.example/#me",
+            "https://dave.example/#me",
+        );
+        let types = [
+            (
+                "bob",
+                read(bob, c("type", "eq", json!("https://e.example/T"))),
+            ),
+            (
+                "carol",
+                read(carol, c("type", "isAnyOf", json!(["DataResource"]))),
+            ),
+            (
+                "dave",
+                read(dave, c("type", "eq", json!("https://e.example/Other"))),
+            ),
+        ];
+        let formats = [
+            ("bob", read(bob, c("format", "eq", json!("text/plain")))),
+            (
+                "carol",
+                read(carol, c("format", "isAnyOf", json!(["text/turtle"]))),
+            ),
+        ];
+        let times = [
+            (
+                "bob",
+                read(bob, c("dateTime", "lt", json!("2999-01-01T00:00:00Z"))),
+            ),
+            (
+                "carol",
+                read(carol, c("dateTime", "lt", json!("2000-01-01T00:00:00Z"))),
+            ),
+            (
+                "dave",
+                read(dave, c("dateTime", "gt", json!("2000-01-01T00:00:00Z"))),
+            ),
+        ];
+        let everyone = [("anyone", read(super::super::FOAF_AGENT, json!([])))];
+        let any_app = [(
+            "app",
+            read(
+                super::super::FOAF_AGENT,
+                c("client", "eq", json!("https://app.example/")),
+            ),
+        )];
+        let bob_reads = [("bob", read(bob, json!([])))];
+        let dave_modifies = [(
+            "dave",
+            json!([{"type": ["AccessPolicy"], "action": ["modify"], "assignee": dave}]),
+        )];
+        let typed = |m: &mut super::super::ResourceMeta, _: &test_store::FlakyStore| {
+            m.types = vec!["https://e.example/T".into()];
+        };
+        let created_by_carol = |m: &mut super::super::ResourceMeta, _: &test_store::FlakyStore| {
+            m.creator = Some("https://carol.example/#me".into());
+        };
+        let pending = |m: &mut super::super::ResourceMeta, _: &test_store::FlakyStore| {
+            m.creator = Some("https://carol.example/#me".into());
+            m.pending = true;
+        };
+        let meta_unreadable = |_: &mut super::super::ResourceMeta, s: &test_store::FlakyStore| {
+            *s.fail_read_of.lock().unwrap() =
+                Some(super::super::meta_key("http://localhost:3000/r"));
+        };
+        let format_unreadable = |_: &mut super::super::ResourceMeta, s: &test_store::FlakyStore| {
+            s.fail_meta.store(true, Ordering::SeqCst);
+        };
+        type Setup = fn(&mut super::super::ResourceMeta, &test_store::FlakyStore);
+        type Case<'a> = (&'a str, &'a [(&'a str, Value)], Setup, &'a [&'a str]);
+        let cases: Vec<Case<'_>> = vec![
+            ("type", &types, typed, &["bob", "carol", "owner"]),
+            ("format", &formats, |_, _| {}, &["bob", "owner"]),
+            ("dateTime", &times, |_, _| {}, &["bob", "dave", "owner"]),
+            (
+                "foaf:Agent",
+                &everyone,
+                |_, _| {},
+                &[
+                    "anonymous",
+                    "bob",
+                    "carol",
+                    "dave",
+                    "erin-app",
+                    "erin-other",
+                    "frank",
+                    "owner",
+                ],
+            ),
+            (
+                "foaf:Agent with a client",
+                &any_app,
+                |_, _| {},
+                &["erin-app", "owner"],
+            ),
+            (
+                "creator",
+                &dave_modifies,
+                created_by_carol,
+                &["carol", "owner"],
+            ),
+            ("pending", &bob_reads, pending, &["carol", "owner"]),
+            (
+                "metadata unreadable",
+                &bob_reads,
+                meta_unreadable,
+                &["owner"],
+            ),
+            (
+                "format unreadable",
+                &bob_reads,
+                format_unreadable,
+                &["owner"],
+            ),
+        ];
+        for (case, grants, setup, want) in cases {
+            let (prepared, reads) = prepared_and_reads("Update", grants, setup).await;
+            assert_eq!(Some(&prepared), reads.as_ref(), "{case}");
+            assert_eq!(prepared, want, "{case}");
+            let (prepared, reads) = prepared_and_reads("Delete", grants, setup).await;
+            match reads {
+                Some(reads) => {
+                    assert_eq!(prepared, reads, "{case}: delete");
+                    assert_eq!(prepared, want, "{case}: delete");
+                }
+                // The resource's state could not be read: nothing is announced, to anyone.
+                None => assert!(prepared.is_empty(), "{case}: delete {prepared:?}"),
+            }
+        }
+    }
+
     /// Codex review of #6841: a delete prepares its notifications before the removal is tried,
     /// and preparing counted what it left out at once, so a delete that failed (nothing removed,
     /// nothing announced) still moved both counters. They move only for a delete that happened.
