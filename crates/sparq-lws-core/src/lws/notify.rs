@@ -1550,9 +1550,17 @@ async fn subscribe<S: Store + 'static>(
             None => {
                 // A topic being changed is decided as a set-aside one is, on what it was before
                 // the change began.
-                let hidden = !state.visible(resource);
+                let mut hidden = !state.visible(resource);
                 let aside = hidden || state.locks.changing(resource);
-                if !readable(resource, aside).await {
+                let mut may = readable(resource, aside).await;
+                // One that began while what is stored was read is decided as if it began first.
+                if !aside {
+                    hidden = !state.visible(resource);
+                    if hidden || state.locks.changing(resource) {
+                        may = readable(resource, true).await;
+                    }
+                }
+                if !may {
                     return cannot_read();
                 }
                 if hidden {
@@ -3828,6 +3836,65 @@ mod tests {
         assert_eq!(subscribe().await, None, "the reader waits on the change");
         drop(held);
         assert_eq!(subscribe().await, Some(StatusCode::CREATED));
+    }
+
+    /// Review of #6925: a change can begin while the topic check reads what is stored without
+    /// the lock. Whether one is in flight is checked again once the reads are over, and the
+    /// topic is then decided on what it was before the change.
+    #[tokio::test]
+    async fn a_change_that_begins_during_a_topic_check_decides_it() {
+        use test_store::{agent, closed_state, data, grant_read};
+        let (state, store) = closed_state(100).await;
+        let b = data(&state, "b").await;
+        grant_read(&state, "https://reader.example/#me", &[&b]).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() =
+            Some((super::super::meta_key(&b), gate.clone()));
+        let subscribing = {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [b.clone()],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let (state, who) = (state.clone(), agent("https://reader.example/#me"));
+            tokio::spawn(async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                tokio::time::timeout(
+                    Duration::from_millis(500),
+                    test_store::route_as(&state, req, &who),
+                )
+                .await
+                .ok()
+                .map(|r| r.status())
+            })
+        };
+        // The topic's lock is held, so the check reads without it; it has read the metadata.
+        let held = state.locks.lock(&b).await.unwrap();
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // The change begins, and before it b's metadata could not be read (so every grant fails
+        // closed on it).
+        let before = super::super::Prior {
+            meta: Some(super::super::ResourceMeta {
+                pending: true,
+                ..super::super::ResourceMeta::default()
+            }),
+            ..Default::default()
+        };
+        state
+            .locks
+            .changing_from([(b.clone(), before)].into_iter().collect());
+        gate.add_permits(1);
+        assert_eq!(subscribing.await.unwrap(), Some(StatusCode::FORBIDDEN));
+        state.locks.landed(std::slice::from_ref(&b));
+        drop(held);
     }
 
     /// Issue #6814: the service routes answered `503` for a set-aside record before they

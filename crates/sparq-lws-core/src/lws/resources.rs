@@ -204,28 +204,43 @@ async fn authorize_unlocked<S: Store + 'static>(
         return Some(authorized_aside(state, action, uri, agent).await);
     }
     if state.locks.changing(uri) {
-        // What is stored may be the change part way, or being put back: the caller is decided
-        // on what the resource was before it began, and only one it allowed waits for the lock
-        // (the check that counts is made again under it).
-        return match super::access::aside(state, action, uri, agent).await {
-            Ok(super::access::Aside::Allowed) => full(state, method),
-            Ok(super::access::Aside::Missing) if state.needs_auth(agent) => {
-                Some(state.challenge(None))
-            }
-            Ok(super::access::Aside::Missing) => Some(problem(StatusCode::NOT_FOUND, None)),
-            Ok(super::access::Aside::Denied) | Err(_) => Some(state.deny(agent)),
-        };
+        return in_flight(state, action, uri, agent, method).await;
     }
-    match state.store.exists(uri).await {
-        Ok(true) => {}
-        Ok(false) if state.needs_auth(agent) => return Some(state.challenge(None)),
-        Ok(false) => return Some(problem(StatusCode::NOT_FOUND, None)),
-        Err(e) => return Some(store_error(e)),
+    let decided = match state.store.exists(uri).await {
+        Ok(true) => recheck(state, action, uri, agent).await.err(),
+        Ok(false) if state.needs_auth(agent) => Some(state.challenge(None)),
+        Ok(false) => Some(problem(StatusCode::NOT_FOUND, None)),
+        Err(e) => Some(store_error(e)),
+    };
+    // A change may have begun while what is stored was read (it is published before its first
+    // write, so what was read may be its own): then the stored state decides nothing, and the
+    // caller is decided as it would have been had the change begun first.
+    if !state.visible(uri) {
+        return Some(authorized_aside(state, action, uri, agent).await);
     }
-    if let Err(refused) = recheck(state, action, uri, agent).await {
-        return Some(refused);
+    if state.locks.changing(uri) {
+        return in_flight(state, action, uri, agent, method).await;
     }
-    full(state, method)
+    decided.or_else(|| full(state, method))
+}
+
+/// [`authorize_unlocked`] for a resource a journaled change is in flight to: what is stored may
+/// be the change part way, or being put back, so the caller is decided on what the resource was
+/// before it began, and only one it allowed waits for the lock (the check that counts is made
+/// again under it).
+async fn in_flight<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+    method: &Method,
+) -> Option<Response> {
+    match super::access::aside(state, action, uri, agent).await {
+        Ok(super::access::Aside::Allowed) => full(state, method),
+        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => Some(state.challenge(None)),
+        Ok(super::access::Aside::Missing) => Some(problem(StatusCode::NOT_FOUND, None)),
+        Ok(super::access::Aside::Denied) | Err(_) => Some(state.deny(agent)),
+    }
 }
 
 /// The answer to a request for `uri` while it is set aside: `503` (with a `Retry-After`) to a
@@ -10480,6 +10495,73 @@ mod tests {
         assert!(r.status().is_success(), "{}", r.status());
         assert!(!st.locks.changing(&a));
         assert_eq!(get("https://new.example/#me").await, StatusCode::OK);
+    }
+
+    /// Review of #6925: a change can begin while a request reads what is stored without the
+    /// lock, so what it read may be the change's own. Whether a change is in flight is checked
+    /// again once the reads are over: the caller is then decided on what the resource was
+    /// before the change, and the grantee the change would add is refused at once.
+    #[tokio::test]
+    async fn a_change_that_begins_during_a_check_decides_it() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, data, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
+        let a = data(&st, "a").await;
+        let private = "https://e.example/Private";
+        let body = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://new.example/#me",
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": private}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &body.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // What the change will have written by the time the request reads it: the private type.
+        let before = st.resource_meta(&a).await.unwrap();
+        let mut new = before.clone();
+        new.types = vec![private.to_string()];
+        st.put_resource_meta(&a, &new).await.unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() = Some((meta_key(&a), gate.clone()));
+        let get = {
+            let (st, who) = (st.clone(), agent("https://new.example/#me"));
+            tokio::spawn(async move {
+                let r = req(Method::GET, "/a", &[], "");
+                tokio::time::timeout(Duration::from_millis(500), handle(&st, &r, &who))
+                    .await
+                    .ok()
+                    .map(|r| r.status())
+            })
+        };
+        // The request has read the metadata, and nothing was in flight when it began.
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // The change begins: it holds the lock and publishes what the resource was before it.
+        let held = st.locks.lock(&a).await.unwrap();
+        let prior = super::super::Prior {
+            meta: Some(before),
+            ..Default::default()
+        };
+        st.locks
+            .changing_from([(a.clone(), prior)].into_iter().collect());
+        gate.add_permits(1);
+        assert_eq!(get.await.unwrap(), Some(StatusCode::FORBIDDEN));
+        st.locks.landed(std::slice::from_ref(&a));
+        drop(held);
     }
 
     /// Issue #6814: a set-aside resource that was not there before the stuck change (a create
