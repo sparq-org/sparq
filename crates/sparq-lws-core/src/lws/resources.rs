@@ -16,9 +16,9 @@ use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::notify::Event;
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
-    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
-    JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
-    REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
+    problem, relation_key, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT,
+    GRANTS_PATH, JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS,
+    META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -1415,12 +1415,28 @@ fn sanitize_slug(slug: Option<&str>) -> Option<String> {
 /// User-managed links by relation.
 type Links = std::collections::BTreeMap<String, Vec<String>>;
 
-/// A relation's key: an extension relation (a URI) as it is, a registered one lower-cased.
+/// A relation as it is stored: an extension relation (a URI) as it was first spelled, a registered
+/// one lower-cased. Relations are compared by [`relation_key`], so a second spelling of a stored
+/// relation joins it (see [`Spellings`]).
 fn rel_key(r: &str) -> String {
     if r.contains(':') {
         r.to_string()
     } else {
         r.to_ascii_lowercase()
+    }
+}
+
+/// The spelling each relation is stored under, by its [`relation_key`]: the first one met.
+#[derive(Default)]
+struct Spellings(std::collections::HashMap<String, String>);
+
+impl Spellings {
+    /// The key `r` is stored under: the spelling of the first relation compared equal to it.
+    fn of(&mut self, r: &str) -> String {
+        self.0
+            .entry(relation_key(r))
+            .or_insert_with(|| rel_key(r))
+            .clone()
     }
 }
 
@@ -1435,6 +1451,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
     let mut targets = 0usize;
+    let mut spellings = Spellings::default();
     for link in parse_links(&req.header_all(header::LINK)) {
         let Some(rel) = link.param("rel") else {
             continue;
@@ -1457,7 +1474,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
             ));
         }
         for r in rel.split_whitespace() {
-            let key = rel_key(r);
+            let key = spellings.of(r);
             if key == "type" {
                 if !target.starts_with(LWS_NS)
                     && is_uri(&target)
@@ -1465,7 +1482,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
                 {
                     types.push(target.clone());
                 }
-            } else if !STRUCTURAL_RELATIONS.contains(&key.as_str())
+            } else if !STRUCTURAL_RELATIONS.contains(&relation_key(&key).as_str())
                 && seen.insert((key.clone(), resolved.clone()))
             {
                 // Held to the caps a linkset PATCH holds its result to, so the linkset these
@@ -3979,7 +3996,9 @@ fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
         .filter_map(|mut e| {
             if anchored_at(&e, uri) {
                 let o = e.as_object_mut()?;
-                o.retain(|k, _| k == "anchor" || !SERVER_MANAGED.contains(&rel_key(k).as_str()));
+                o.retain(|k, _| {
+                    k == "anchor" || !SERVER_MANAGED.contains(&relation_key(k).as_str())
+                });
                 // An entry left with nothing but its anchor says nothing.
                 if o.len() <= 1 {
                     return None;
@@ -4000,6 +4019,7 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
     let mut links = Links::new();
     let mut seen: std::collections::HashMap<String, std::collections::HashSet<&str>> =
         Default::default();
+    let mut spellings = Spellings::default();
     for entry in doc
         .0
         .get("linkset")
@@ -4009,10 +4029,10 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
         .filter(|e| anchored_at(e, uri))
     {
         for (rel, targets) in entry.as_object().into_iter().flatten() {
-            let key = rel_key(rel);
-            if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&key.as_str()) {
+            if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&relation_key(rel).as_str()) {
                 continue;
             }
+            let key = spellings.of(rel);
             let seen = seen.entry(key.clone()).or_default();
             let out = links.entry(key).or_default();
             for href in targets
@@ -4690,6 +4710,27 @@ mod tests {
 
     /// Review finding (#6839): an extension relation is kept as it was spelled, as the type
     /// index's search keys it (`index::relation_key`), so a search by that spelling finds it.
+    /// Issue #6863: a linkset naming one extension relation in two spellings keys one relation,
+    /// under the first spelling, and a structural relation in any case is not user-managed.
+    #[test]
+    fn a_linkset_keys_a_relation_once_in_any_case() {
+        let uri = "https://s/r";
+        let doc = Resolved(json!({"linkset": [
+            {"anchor": uri, "https://E.example/Rel": [{"href": "https://t/x"}]},
+            {"anchor": uri, "https://e.example/REL": [{"href": "https://t/y"}, {"href": "https://t/x"}],
+             "UP": [{"href": "https://s/"}], "Author": [{"href": "https://a/me"}]},
+        ]}));
+        let links = links_of(&doc, uri);
+        assert_eq!(
+            links.keys().collect::<Vec<_>>(),
+            ["author", "https://E.example/Rel"]
+        );
+        assert_eq!(
+            links["https://E.example/Rel"],
+            ["https://t/x", "https://t/y"]
+        );
+    }
+
     #[tokio::test]
     async fn an_extension_relation_is_kept_as_spelled() {
         let st = state().await;
