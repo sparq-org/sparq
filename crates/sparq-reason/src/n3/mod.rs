@@ -811,7 +811,9 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     None => c.clone(),
                 };
                 if let Some(g) = ground_triple(&c, &b) {
-                    if emitted.insert(g.clone()) {
+                    // A conclusion past the term-depth limit is dropped, as a cut.
+                    if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
+                    {
                         out.push(g);
                     }
                 }
@@ -1369,6 +1371,15 @@ fn run_closure(
         }),
     };
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
+    // A top-level run keeps terms as deep as those it was handed (terms built in code can
+    // nest past the parser's limit); rules cannot build deeper ([`bounded::given_terms`]).
+    if !read_further {
+        let rule_terms = rules
+            .iter()
+            .chain(&backward_rules)
+            .flat_map(|r| r.premise.iter().chain(&r.conclusion).flatten());
+        bounded::given_terms(truncated, facts0.iter().flatten().chain(rule_terms));
+    }
     // Premises evaluate left-to-right with no coroutining — reorder each
     // premise so a builtin runs only after the atoms that produce its inputs
     // (cwm evaluates builtins "when ready"; concat.n3 test13f writes the
@@ -1562,6 +1573,13 @@ fn run_closure(
         let mut closing_check = false;
         loop {
             bounded::ClosureRounds::round(&mut allowance, facts.all.len(), truncated)?;
+            // A nested closure failed, or the negation gate refused, in an earlier round:
+            // the run fails with that error at the end anyway, so stop here instead of
+            // re-evaluating (a failed nested closure is retried every round, and each
+            // retry re-runs every level under it).
+            if let Some(e) = bw.nested_error.take() {
+                return Err(e);
+            }
             // A round with `first_round` set is NAIVE: every rule over the whole fact set.
             let naive_round = first_round;
             let mut produced: Vec<DerivationStep> = Vec::new();
@@ -1671,7 +1689,10 @@ fn run_closure(
                             None => c.clone(),
                         };
                         if let Some(g) = ground_triple(&c, &b) {
-                            if !facts.contains(&g) {
+                            // A conclusion past the term-depth limit is dropped, as a cut.
+                            if !facts.contains(&g)
+                                && bw.settle(bounded::generated(&bw.truncated, &g))
+                            {
                                 // The supporting facts: premise patterns instantiated under b that
                                 // are actual facts (excludes builtins / list structure).
                                 let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
@@ -1935,7 +1956,25 @@ fn match_premise(premise: &[[Term; 3]], facts: &FactIndex, bw: &BwCtx) -> Vec<Bi
 /// driver, by running once per join-atom index, considers only bindings that involve ≥1 new
 /// fact. `None` = naive (every join atom matches all facts); also used for the negation
 /// sub-formula recursion.
+///
+/// An evaluation boundary ([`within_depth`]): a `seed` past the term-depth limit is
+/// refused, as a cut, before any atom is evaluated under it.
 fn match_premise_seeded(
+    premise: &[[Term; 3]],
+    facts: &FactIndex,
+    seed: &Binding,
+    delta_at: Option<(&FxHashSet<[Term; 3]>, usize)>,
+    bw: &BwCtx,
+    depth: usize,
+) -> Vec<Binding> {
+    if !seed.is_empty() && !within_depth(seed, bw) {
+        return Vec::new();
+    }
+    match_premise_admitted(premise, facts, seed, delta_at, bw, depth)
+}
+
+/// [`match_premise_seeded`] for a `seed` already within the term-depth limit.
+fn match_premise_admitted(
     premise: &[[Term; 3]],
     facts: &FactIndex,
     seed: &Binding,
@@ -1959,8 +1998,9 @@ fn match_premise_seeded(
         let rest: Vec<[Term; 3]> =
             premise.iter().enumerate().filter(|&(i, _)| i != k).map(|(_, p)| p.clone()).collect();
         let mut out = Vec::new();
+        // Each seed extends the admitted `seed` with parts of stored facts only.
         for s in &seeds {
-            out.extend(match_premise_seeded(&rest, facts, s, None, bw, depth));
+            out.extend(match_premise_admitted(&rest, facts, s, None, bw, depth));
         }
         return out;
     }
@@ -2000,7 +2040,12 @@ fn match_premise_seeded(
                     // `{}` parses as the literal true — the EMPTY formula:
                     // it includes nothing (and notIncludes everything).
                     Term::Lit(v, _, _) if v == "true" => formula_containment(&[], inner, &b, bw),
-                    _ => match_premise_seeded(inner, facts, &b, None, bw, depth),
+                    // The store as the scope: the clause recurses into premise matching,
+                    // holding a unit of the run's stack allowance (`_frames`).
+                    _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
+                        Some(_frames) => match_premise_seeded(inner, facts, &b, None, bw, depth),
+                        None => Vec::new(),
+                    },
                 };
                 // Every negation passes the gate, whatever it found.
                 if is_not {
@@ -2008,7 +2053,7 @@ fn match_premise_seeded(
                         next.push(b);
                     }
                 } else {
-                    next.extend(matches);
+                    next.extend(matches.into_iter().filter(|nb| within_depth(nb, bw)));
                 }
             }
             bindings = next;
@@ -2057,7 +2102,13 @@ fn match_premise_seeded(
                         Term::Lit(v, _, _) if v == "true" => {
                             formula_containment(&[], atoms, seed, bw)
                         }
-                        _ => match_premise_seeded(atoms, facts, seed, None, bw, depth),
+                        // The store as the scope: as for the scoped operators above.
+                        _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
+                            Some(_frames) => {
+                                match_premise_seeded(atoms, facts, seed, None, bw, depth)
+                            }
+                            None => Vec::new(),
+                        },
                     })
                 };
                 let subj = apply(&pat[0], &b);
@@ -2072,7 +2123,7 @@ fn match_premise_seeded(
                         let collected =
                             Term::List(sols.iter().map(|s| apply_deep(template, s)).collect());
                         let mut nb = b.clone();
-                        if unify_term(list_pat, &collected, &mut nb) {
+                        if unify_term(list_pat, &collected, &mut nb) && within_depth(&nb, bw) {
                             next.push(nb);
                         }
                     }
@@ -2122,7 +2173,7 @@ fn match_premise_seeded(
                             ]),
                         };
                         let mut nb = b.clone();
-                        if unify_term(var_pos, &target, &mut nb) {
+                        if unify_term(var_pos, &target, &mut nb) && within_depth(&nb, bw) {
                             next.push(nb);
                         }
                     }
@@ -2133,11 +2184,13 @@ fn match_premise_seeded(
             bindings = bindings
                 .into_iter()
                 .filter_map(|b| bw.settle(eval_functional(f, &pat[0], &pat[2], facts, bw, b)))
+                .filter(|nb| within_depth(nb, bw))
                 .collect();
         } else if let Some(op) = binder_builtin(&pat[1]) {
             bindings = bindings
                 .into_iter()
                 .filter_map(|b| bw.settle(eval_binder(op, &pat[0], &pat[2], b)))
+                .filter(|nb| within_depth(nb, bw))
                 .collect();
         } else if let Some(op) = builtin(&pat[1]) {
             bindings.retain(|b| bw.settle(eval_builtin(op, &pat[0], &pat[2], b)));
@@ -2159,7 +2212,7 @@ fn match_premise_seeded(
                                 Term::List(ms[1..].to_vec())
                             };
                             let mut nb = b.clone();
-                            if unify_term(&pat[2], &val, &mut nb) {
+                            if unify_term(&pat[2], &val, &mut nb) && within_depth(&nb, bw) {
                                 next.push(nb);
                             }
                         }
@@ -2177,8 +2230,14 @@ fn match_premise_seeded(
                         bw.rules.iter().flat_map(|r| &r.conclusion).any(
                             |c| !matches!((&p_a, &c[1]), (Term::Iri(a), Term::Iri(b)) if a != b),
                         );
-                    if let Some(d) = bw.settle(bounded::backward_step(depth, could_match)) {
-                        next.extend(backward_prove(pat, b, facts, bw, d));
+                    let step = bounded::backward_step(&bw.truncated, depth, could_match);
+                    // `_frames` holds the step's unit of the run's stack allowance.
+                    if let Some((d, _frames)) = bw.settle(step) {
+                        next.extend(
+                            backward_prove(pat, b, facts, bw, d)
+                                .into_iter()
+                                .filter(|nb| within_depth(nb, bw)),
+                        );
                     }
                 }
             }
@@ -2189,6 +2248,31 @@ fn match_premise_seeded(
         }
     }
     bindings
+}
+
+/// Whether every value `b` binds is within the term-depth limit
+/// ([`bounded::generated`]). A binding an atom built past it is dropped, as a cut: the
+/// premise atoms that can build a deeper value than they read (builtins, list
+/// generators, virtual list access, scoped operators, backward proofs) filter their
+/// bindings through here, so every binding a premise carries forward is within it. The
+/// containment search of a formula scope ([`containment_search`]) checks each binding it
+/// extends here too, before carrying it to its next statement.
+///
+/// The invariant: nothing past the limit enters an evaluation. Each recursive evaluation
+/// boundary checks what it is handed before it evaluates anything, and refuses it as a
+/// cut:
+/// - premise evaluation from a seed ([`match_premise_seeded`]): the seed, which covers a
+///   backward proof step's substitution, a store-scoped clause's binding and a
+///   `log:collectAllIn` / `log:forAllIn` clause's binding;
+/// - a backward proof step ([`backward_prove`]): its instantiated goal;
+/// - a formula-scope search ([`formula_containment`]): its seed and the scope;
+/// - a nested closure ([`formula_closure`], `log:supports` / `log:conclusion`): the
+///   statements it would admit as facts and rules.
+///
+/// A top-level run's own input is admitted by raising the limit to it
+/// ([`bounded::given_terms`]); parsed text is within the parser's nesting limit.
+fn within_depth(b: &Binding, bw: &BwCtx) -> bool {
+    bw.settle(bounded::generated(&bw.truncated, b.values()))
 }
 
 /// Whether a premise reads the fact store outside its join atoms, from each relation's
@@ -2299,6 +2383,12 @@ fn is_join_atom(pat: &[Term; 3]) -> bool {
 /// variables and a depth bound (`depth` counts REMAINING backward applications).
 fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, depth: usize) -> Vec<Binding> {
     let goal = [apply(&pat[0], b), apply(&pat[1], b), apply(&pat[2], b)];
+    // An evaluation boundary ([`within_depth`]): a goal past the term-depth limit is not
+    // resolved. Each rule's substitution is checked where its premise is evaluated
+    // ([`match_premise_seeded`]).
+    if !bw.settle(bounded::generated(&bw.truncated, &goal)) {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for rule in bw.rules {
         for concl in &rule.conclusion {
@@ -2498,46 +2588,55 @@ fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
     }
 }
 
-/// Multiset unification of two formula bodies under `b` (small formulae;
-/// backtracking with a binding clone per branch).
+/// Multiset unification of two formula bodies under `b`: a backtracking search that
+/// matches pattern statement `i` to an unused value statement, with a binding clone per
+/// branch. The search state is an explicit stack (one entry per matched statement), so
+/// formulae of any width take no stack per statement.
 fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
     if ps.len() != vs.len() {
         return false;
     }
-    fn go(
-        i: usize,
-        ps: &[[Term; 3]],
-        vs: &[[Term; 3]],
-        used: &mut [bool],
-        b: &Binding,
-    ) -> Option<Binding> {
+    let mut used = vec![false; vs.len()];
+    // `stack[i]`: the binding after matching `ps[..i]`, and the next value statement to
+    // try for `ps[i]`.
+    let mut stack: Vec<(Binding, usize)> = Vec::with_capacity(ps.len() + 1);
+    stack.push((b.clone(), 0));
+    while !stack.is_empty() {
+        let i = stack.len() - 1;
+        let (cur, next) = &mut stack[i];
         if i == ps.len() {
-            return Some(b.clone());
+            *b = std::mem::take(cur);
+            return true;
         }
-        for j in 0..vs.len() {
+        let mut found = None;
+        while *next < vs.len() {
+            let j = *next;
+            *next += 1;
             if used[j] {
                 continue;
             }
-            let mut nb = b.clone();
+            let mut nb = cur.clone();
             if (0..3).all(|k| unify_term(&ps[i][k], &vs[j][k], &mut nb)) {
+                found = Some((j, nb));
+                break;
+            }
+        }
+        match found {
+            Some((j, nb)) => {
                 used[j] = true;
-                let done = go(i + 1, ps, vs, used, &nb);
-                used[j] = false;
-                if done.is_some() {
-                    return done;
+                stack.push((nb, 0));
+            }
+            None => {
+                // `ps[i]` has no match left: undo the match of `ps[i - 1]` and try its
+                // next value statement.
+                stack.pop();
+                if let Some((_, next)) = stack.last() {
+                    used[next - 1] = false;
                 }
             }
         }
-        None
     }
-    let mut used = vec![false; vs.len()];
-    match go(0, ps, vs, &mut used, b) {
-        Some(nb) => {
-            *b = nb;
-            true
-        }
-        None => false,
-    }
+    false
 }
 
 /// Substitute bound variables in `t` (recursing into list members); returns the
@@ -3147,6 +3246,13 @@ fn formula_containment(
     seed: &Binding,
     bw: &BwCtx,
 ) -> Vec<Binding> {
+    // An evaluation boundary ([`within_depth`]): a seed or scope past the term-depth
+    // limit is not searched.
+    if !within_depth(seed, bw)
+        || !bw.settle(bounded::generated(&bw.truncated, scope.iter().flatten()))
+    {
+        return Vec::new();
+    }
     // Pattern existentials (blanks) become wildcard variables.
     let pat: Vec<[Term; 3]> = pattern
         .iter()
@@ -3160,59 +3266,171 @@ fn formula_containment(
         .collect();
     let mut out = Vec::new();
     let mut steps = bounded::StepBudget::containment();
-    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut steps);
+    containment_search(&pat, scope, seed.clone(), &mut out, &mut steps, bw);
     bw.settle(steps.finish(out))
 }
 
+/// The depth-first search of [`formula_containment`]: every binding under which each
+/// pattern statement matches a scope statement (or virtual list structure), in match
+/// order, pushed to `out`. Each step of the search is one visit of a pattern statement,
+/// taken from `steps`. The search state is an explicit stack (one entry per matched
+/// pattern statement), so patterns of any width take no stack per statement. Every
+/// binding the search extends is checked against the term-depth limit
+/// ([`within_depth`]) before it is carried to the next statement, so every binding it
+/// carries, clones and returns is within the limit: virtual list access substitutes the
+/// binding into the pattern's own list subject, and can build a deeper value than it
+/// read.
 fn containment_search(
-    remaining: &[[Term; 3]],
+    pat: &[[Term; 3]],
     scope: &[[Term; 3]],
-    b: Binding,
-    defers_left: usize,
+    seed: Binding,
     out: &mut Vec<Binding>,
     steps: &mut bounded::StepBudget,
+    bw: &BwCtx,
 ) {
-    if !steps.take() {
-        return;
+    /// The order the pattern statements are matched in, as indices into `pat`: as
+    /// written, until a statement is deferred behind the others.
+    #[derive(Clone)]
+    enum Order {
+        Written(usize),
+        Deferred(std::rc::Rc<[usize]>),
     }
-    let Some((pat, rest)) = remaining.split_first() else {
-        out.push(b);
-        return;
-    };
-    // Virtual rdf:first/rest over a list value — list structure is part of
-    // the formula's content for matching purposes (cwm builtins.n3 test2/4).
-    if let Term::Iri(pi) = &pat[1] {
-        if pi == parser::RDF_FIRST || pi == parser::RDF_REST {
-            match apply(&pat[0], &b) {
-                Term::List(ms) => {
-                    if !ms.is_empty() {
-                        let val = if pi == parser::RDF_FIRST {
-                            ms[0].clone()
-                        } else {
-                            Term::List(ms[1..].to_vec())
-                        };
-                        let mut nb = b.clone();
-                        if unify_term(&pat[2], &val, &mut nb) {
-                            containment_search(rest, scope, nb, rest.len(), out, steps);
-                        }
-                    }
-                    return;
-                }
-                Term::Var(_) if !rest.is_empty() && defers_left > 0 => {
-                    // Subject not yet bound — try the other triples first.
-                    let mut rotated: Vec<[Term; 3]> = rest.to_vec();
-                    rotated.push(pat.clone());
-                    containment_search(&rotated, scope, b, defers_left - 1, out, steps);
-                    return;
-                }
-                _ => {} // fall through to plain scope matching
+    impl Order {
+        fn len(&self) -> usize {
+            match self {
+                Order::Written(n) => *n,
+                Order::Deferred(o) => o.len(),
             }
         }
+        fn get(&self, at: usize) -> Option<usize> {
+            match self {
+                Order::Written(n) => (at < *n).then_some(at),
+                Order::Deferred(o) => o.get(at).copied(),
+            }
+        }
+        /// The statements after `at`, then the one at `at`.
+        fn defer(&self, at: usize) -> Order {
+            let order = (at + 1..self.len()).chain([at]).filter_map(|k| self.get(k));
+            Order::Deferred(order.collect())
+        }
     }
-    for st in scope {
-        let mut nb = b.clone();
-        if (0..3).all(|k| unify_term(&pat[k], &st[k], &mut nb)) {
-            containment_search(rest, scope, nb, rest.len(), out, steps);
+    /// A visit: the pattern statements still to match (`order` from `at`), the binding
+    /// so far, and how many more times a statement whose list subject is unbound may be
+    /// deferred behind the others.
+    struct Visit {
+        order: Order,
+        at: usize,
+        b: Binding,
+        defers_left: usize,
+    }
+    /// Pattern statement `pi` being matched against the scope: its visit, and the next
+    /// scope statement to try.
+    struct Scan {
+        visit: Visit,
+        pi: usize,
+        next: usize,
+    }
+    // At most one scan per pattern statement is in progress.
+    let mut scans: Vec<Scan> = Vec::with_capacity(pat.len());
+    let mut visit = Some(Visit {
+        order: Order::Written(pat.len()),
+        at: 0,
+        b: seed,
+        defers_left: pat.len(),
+    });
+    loop {
+        if let Some(Visit {
+            order,
+            at,
+            b,
+            defers_left,
+        }) = visit.take()
+        {
+            if !steps.take() {
+                return;
+            }
+            let Some(pi) = order.get(at) else {
+                out.push(b);
+                continue;
+            };
+            let p = &pat[pi];
+            let rest = order.len() - at - 1;
+            // Virtual rdf:first/rest over a list value — list structure is part of
+            // the formula's content for matching purposes (cwm builtins.n3 test2/4).
+            if let Term::Iri(pred) = &p[1] {
+                if pred == parser::RDF_FIRST || pred == parser::RDF_REST {
+                    match apply(&p[0], &b) {
+                        Term::List(ms) => {
+                            if !ms.is_empty() {
+                                let val = if pred == parser::RDF_FIRST {
+                                    ms[0].clone()
+                                } else {
+                                    Term::List(ms[1..].to_vec())
+                                };
+                                let mut nb = b.clone();
+                                if unify_term(&p[2], &val, &mut nb) && within_depth(&nb, bw) {
+                                    let (at, defers_left) = (at + 1, rest);
+                                    visit = Some(Visit {
+                                        order,
+                                        at,
+                                        b: nb,
+                                        defers_left,
+                                    });
+                                }
+                            }
+                            continue;
+                        }
+                        Term::Var(_) if rest > 0 && defers_left > 0 => {
+                            // Subject not yet bound — try the other triples first.
+                            let order = order.defer(at);
+                            let defers_left = defers_left - 1;
+                            visit = Some(Visit {
+                                order,
+                                at: 0,
+                                b,
+                                defers_left,
+                            });
+                            continue;
+                        }
+                        _ => {} // fall through to plain scope matching
+                    }
+                }
+            }
+            scans.push(Scan {
+                visit: Visit {
+                    order,
+                    at,
+                    b,
+                    defers_left,
+                },
+                pi,
+                next: 0,
+            });
+        }
+        // Resume the innermost scan at its next matching scope statement.
+        let Some(scan) = scans.last_mut() else {
+            return;
+        };
+        let v = &scan.visit;
+        let p = &pat[scan.pi];
+        while let Some(st) = scope.get(scan.next) {
+            scan.next += 1;
+            let mut nb = v.b.clone();
+            // A match that bound nothing new extends nothing to check.
+            if (0..3).all(|k| unify_term(&p[k], &st[k], &mut nb))
+                && (nb.len() == v.b.len() || within_depth(&nb, bw))
+            {
+                visit = Some(Visit {
+                    order: v.order.clone(),
+                    at: v.at + 1,
+                    b: nb,
+                    defers_left: v.order.len() - v.at - 1,
+                });
+                break;
+            }
+        }
+        if visit.is_none() {
+            scans.pop();
         }
     }
 }
@@ -3252,6 +3470,23 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // by returning the statements UNCLOSED — their own facts are preserved, no derivation is
     // lost that a finite closure would have added, and reasoning terminates. (No resolver, no
     // cycle: with `bw.resolver` `None` the set stays empty and this is a no-op.)
+    // The run's stack allowance, shared by every level: a chain of distinct documents
+    // (which the import-cycle guard below does not catch) nests closures, each holding
+    // its own frames on the stack. Past it the closure is refused, as a cut, and the
+    // error fails the enclosing run. `_frames` holds this closure's units until it ends.
+    // An evaluation boundary ([`within_depth`]): statements past the term-depth limit
+    // are not admitted as a nested run's facts and rules; the formula is left unclosed,
+    // as a cut.
+    if !bw.settle(bounded::generated(&bw.truncated, ts.iter().flatten())) {
+        return ts.to_vec();
+    }
+    let _frames = match bounded::enter_closure(&bw.truncated) {
+        Ok(level) => level,
+        Err(e) => {
+            bw.nested_error.borrow_mut().get_or_insert(e);
+            return ts.to_vec();
+        }
+    };
     let key = formula_key(ts);
     if !bw.visited.borrow_mut().docs.insert(key) {
         return bw.settle(Bounded::cut(
@@ -4996,6 +5231,313 @@ mod tests {
             });
             assert_eq!(results, (Ok(true), Ok(true)), "{production}");
         }
+    }
+
+    /// The closure of `src` (with `resolver`) on a fresh run: its facts or error, and
+    /// the run's cut.
+    fn closure_and_cut(
+        src: &str,
+        resolver: Option<&Resolver>,
+    ) -> (Result<Vec<[Term; 3]>, String>, Option<&'static str>) {
+        let run = Truncation::top_level();
+        let r = reason_n3_terms_in(src, None, resolver, NegationCycles::Reject, &run);
+        (r.map(|c| c.facts), run.get())
+    }
+
+    /// The deepest nesting of `t`, counted in list, formula and quoted-triple levels.
+    fn depth_of(t: &Term) -> usize {
+        match t {
+            Term::List(ms) => 1 + ms.iter().map(depth_of).max().unwrap_or(0),
+            Term::Formula(ts) => 1 + ts.iter().flatten().map(depth_of).max().unwrap_or(0),
+            Term::Triple(tr) => 1 + tr.iter().map(depth_of).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    /// #6732: a rule that wraps a term in one more list each round deepens it without
+    /// end, and a chain of premise atoms deepens it within one firing. A generated term
+    /// past the term-depth limit is a cut and is dropped, so the closure ends (a negation
+    /// over it is refused), on a 2 MiB stack, and every entry point walks what it kept.
+    #[test]
+    fn rule_generated_nesting_stops_at_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let limit = super::bounded::term_depth();
+        let pre = "@prefix : <http://ex/> .\n\
+            @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
+        let round = format!("{pre}:s :p :z .\n{{ :s :p ?x }} => {{ :s :p (?x) }} .\n");
+        let wrap = 60;
+        let wide_wrap = format!(
+            "{pre}:s :p :z .\n{{ :s :p ?x }} => {{ :s :p {}?x{} }} .\n",
+            "(".repeat(wrap),
+            ")".repeat(wrap)
+        );
+        let chain: String = (0..5_000)
+            .map(|i| format!("((?y{i})) rdf:first ?y{} . ", i + 1))
+            .collect();
+        let firing = format!("{pre}:s :p :z .\n{{ :s :p ?y0 . {chain}}} => {{ :s :q ?y5000 }} .\n");
+        let negated = format!(
+            "{round}{{ :s :p ?x . ?scope log:notIncludes {{ :s :never ?x }} }} => {{ :s :ok ?x }} .\n"
+        );
+        let results = on_small_stack(move || {
+            let round_trip = closure_and_cut(&round, None);
+            let wide = closure_and_cut(&wide_wrap, None);
+            let firing = closure_and_cut(&firing, None);
+            let negated = closure_and_cut(&negated, None);
+            // The other entry points walk every kept term (interning, proofs,
+            // serialization, a query's projection) on the same stack.
+            let _ = super::reason_n3(&mut sparq_core::dict::Dict::new(), &round);
+            let _ = super::reason_n3_proof(&mut sparq_core::dict::Dict::new(), &round);
+            let _ = super::reason_n3_pass_all(&round, super::RuleVars::N3);
+            let _ = super::reason_n3_query_terms(&round, "{ :s :p ?o } => { :s :p ?o } .");
+            (round_trip, wide, firing, negated)
+        });
+        let (round_trip, wide, firing, negated) = results;
+        // One fact per depth up to the limit, each kept term within it, and a cut.
+        let (facts, cut) = round_trip;
+        let facts = facts.expect("the closure ends at the limit");
+        assert_eq!(facts.len(), limit + 1);
+        assert_eq!(facts.iter().flatten().map(depth_of).max(), Some(limit));
+        assert!(cut.is_some());
+        let (facts, cut) = wide;
+        let facts = facts.expect("the closure ends at the limit");
+        assert_eq!(facts.len(), limit / wrap + 1);
+        assert!(cut.is_some());
+        let (facts, cut) = firing;
+        let facts = facts.expect("the firing is dropped");
+        assert_eq!(facts.len(), 1);
+        assert!(cut.is_some());
+        let (refused, cut) = negated;
+        let e = refused.expect_err("a negation over the cut closure is refused");
+        assert!(e.contains("refused a negation"), "{e}");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a chain of distinct documents, each closing the next one's
+    /// `log:semantics` with `log:conclusion`, nests closures without bound, and the
+    /// import-cycle guard does not see it. Each level here closes the next from inside a
+    /// backward proof `steps` deep, after `scopes` nested store-scoped negations, next to
+    /// a fact nested 60 deep. Every level draws on the run's one stack allowance: on a
+    /// 2 MiB stack an endless chain is refused (or, when proof steps or scopes spend the
+    /// allowance first, cut), never a stack overflow; a short chain closes.
+    #[test]
+    fn nested_closures_share_the_runs_stack_allowance_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let doc = |i: usize, last: usize, steps: usize, scopes: usize| -> String {
+            if i == last {
+                return "<http://ex/end> <http://ex/is> <http://ex/reached> .".into();
+            }
+            let mut d = String::from(
+                "@prefix : <http://ex/> .\n\
+                 @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n",
+            );
+            d.push_str(&format!(":d :e {}:z{} .\n", "(".repeat(60), ")".repeat(60)));
+            for j in 0..steps {
+                d.push_str(&format!("{{ :a :p{j} :b }} <= {{ :a :p{} :b }} .\n", j + 1));
+            }
+            // An odd number of nested negations of a statement never asserted holds.
+            let negated = (0..scopes).fold(":q :never :q".to_string(), |inner, _| {
+                format!("?x log:notIncludes {{ {inner} }}")
+            });
+            let negated = if scopes == 0 {
+                String::new()
+            } else {
+                format!("{negated} . ")
+            };
+            d.push_str(&format!(
+                "{{ :a :p{steps} :b }} <= {{ {negated}<http://doc/{}> log:semantics ?f . \
+                 ?f log:conclusion ?c }} .\n",
+                i + 1
+            ));
+            d.push_str(&format!("{{ :a :p0 :b }} => {{ :s :p :o{i} }} .\n"));
+            d
+        };
+        // Whether the first document derived its fact, or the error; and the run's cut.
+        let run = move |last: usize, steps: usize, scopes: usize| {
+            on_small_stack(move || {
+                let resolver = move |iri: &str| {
+                    let n: usize = iri.strip_prefix("http://doc/")?.parse().ok()?;
+                    Some(doc(n, last, steps, scopes))
+                };
+                let top = doc(0, last, steps, scopes);
+                let (facts, cut) = closure_and_cut(&top, Some(&resolver));
+                let o0 = Term::Iri("http://ex/o0".into());
+                (facts.map(|f| f.iter().any(|t| t[2] == o0)), cut)
+            })
+        };
+        assert_eq!(run(3, 20, 0), (Ok(true), None), "a short chain closes");
+        assert_eq!(run(3, 0, 3), (Ok(true), None), "a short chain closes");
+        // Closures alone: refused when the allowance is spent.
+        let (refused, cut) = run(usize::MAX, 0, 0);
+        let e = refused.expect_err("an endless chain is refused");
+        assert!(e.contains("nested closures passed"), "{e}");
+        assert!(cut.is_some());
+        // Deep backward proofs at every level: the allowance is spent by proof steps,
+        // which is a cut (the levels above still close, over what was proved).
+        for (steps, scopes) in [(20, 0), (60, 0), (0, 31), (30, 31)] {
+            let (_, cut) = run(usize::MAX, steps, scopes);
+            assert!(cut.is_some(), "{steps} {scopes}");
+        }
+    }
+
+    /// #6732: matching a formula of many statements against another, or checking that
+    /// one includes them, takes no stack per statement: thousands of statements match
+    /// on a 2 MiB stack.
+    #[test]
+    fn wide_formulae_match_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let n = 20_000;
+        let body = ":a :b :c . ".repeat(n);
+        let rest = ":a :b :c . ".repeat(n - 1);
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             :s :p {{ {body} }} .\n\
+             :s :q {{ :a :b :c }} .\n\
+             {{ :s :p {{ :a :b ?v . {rest} }} }} => {{ :done :unified ?v }} .\n\
+             {{ :s :q ?f . ?f log:includes {{ {body} }} }} => {{ :done :included :true }} .\n"
+        );
+        let (facts, cut) = on_small_stack(move || closure_and_cut(&src, None));
+        let facts = facts.expect("closes");
+        let done = Term::Iri("http://ex/done".into());
+        let derived: Vec<&[Term; 3]> = facts.iter().filter(|t| t[0] == done).collect();
+        assert_eq!(derived.len(), 2, "{derived:?}");
+        assert_eq!(cut, None);
+    }
+
+    /// #6732: the containment search of a formula scope (`log:includes` over a quoted
+    /// formula) checks every binding it extends against the term-depth limit before
+    /// carrying it on, including the bindings virtual list access builds. A pattern
+    /// whose bindings would pass the limit is dropped as a cut, on a 2 MiB stack, and
+    /// the run ends.
+    #[test]
+    fn formula_containment_bindings_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let wrap = 60;
+        let n = 200;
+        let pattern: String = (0..n)
+            .map(|i| {
+                format!(
+                    "{}?y{i}{} rdf:first ?y{} . ",
+                    "(".repeat(wrap),
+                    ")".repeat(wrap),
+                    i + 1
+                )
+            })
+            .collect();
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n\
+             :s :p :z .\n\
+             {{ {{ :a :b :c }} log:includes {{ {pattern}}} }} => {{ :s :q ?y{n} }} .\n"
+        );
+        let (facts, cut) = on_small_stack(move || {
+            let (facts, cut) = closure_and_cut(&src, None);
+            (facts.map(|f| f.len()), cut)
+        });
+        assert_eq!(facts, Ok(1), "only the asserted fact is kept");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a backward proof step checks its instantiated goal and the substitution it
+    /// carries into the rule's premise against the term-depth limit before it evaluates
+    /// that premise. A step past the limit is dropped as a cut, on a 2 MiB stack, and
+    /// the run ends.
+    #[test]
+    fn backward_goals_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let wrap = 60;
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             :a :s :b .\n\
+             {{ ?x :r ?y }} <= {{ {}?x{} :r ?y }} .\n\
+             {{ :a :s ?b . :a :r ?y }} => {{ :a :q ?y }} .\n",
+            "(".repeat(wrap),
+            ")".repeat(wrap)
+        );
+        let (facts, cut) = on_small_stack(move || {
+            let (facts, cut) = closure_and_cut(&src, None);
+            (facts.map(|f| f.len()), cut)
+        });
+        assert_eq!(facts, Ok(1), "only the asserted fact is kept");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a nested closure (`log:supports`, `log:conclusion`) checks the statements
+    /// it is handed against the term-depth limit before it admits them as facts and
+    /// rules. A formula past the limit is not closed: the refusal is a cut, on a 2 MiB
+    /// stack, and only the formula's own statements are read.
+    #[test]
+    fn nested_closure_inputs_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let limit = super::bounded::term_depth();
+        let (outer, inner) = (limit / 2 - 4, limit / 2 - 4);
+        let wrapped = |w: usize, x: &str| format!("{}{x}{}", "(".repeat(w), ")".repeat(w));
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             :s :p {} .\n\
+             {{ :s :p ?x }} => {{ :s :p2 {} }} .\n\
+             {{ :s :p2 ?y . {{ :t :r {} . {{ :t :r ?z }} => {{ :u :v :w }} }} log:supports {{ :u :v :w }} }} \
+             => {{ :s :ok :yes }} .\n",
+            wrapped(outer, ":z"),
+            wrapped(inner, "?x"),
+            wrapped(limit - outer - inner + 1, "?y"),
+        );
+        let (facts, cut) = on_small_stack(move || closure_and_cut(&src, None));
+        let facts = facts.expect("closes");
+        let ok = [
+            Term::Iri("http://ex/s".into()),
+            Term::Iri("http://ex/ok".into()),
+            Term::Iri("http://ex/yes".into()),
+        ];
+        assert!(!facts.contains(&ok), "the formula is not closed");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a top-level run keeps terms as deep as the deepest term it was handed, an
+    /// empty innermost list or formula counted as a level of its own, so a rule copying
+    /// such a term is not cut.
+    #[test]
+    fn a_rule_copies_given_terms_ending_in_an_empty_container_uncut() {
+        let limit = super::bounded::term_depth();
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let outcomes: Vec<(&str, Option<&str>, bool)> = [
+            ("empty list", Term::List(Vec::new())),
+            ("empty formula", Term::Formula(Vec::new())),
+        ]
+        .into_iter()
+        .map(|(kind, innermost)| {
+            let mut deep = innermost;
+            for _ in 0..limit {
+                deep = Term::List(vec![deep]);
+            }
+            assert_eq!(depth_of(&deep), limit + 1);
+            let run = Truncation::top_level();
+            let rules = "{ <http://ex/s> <http://ex/p> ?x } => { <http://ex/s> <http://ex/q> ?x } .";
+            let parsed = super::bounded::parse_n3(rules, "", &run).expect("parses");
+            let docs = super::RuntimeDocs::for_sources(&[&parsed]);
+            let closure = super::reason_n3_terms_with_facts(
+                rules,
+                [[iri("s"), iri("p"), deep.clone()]],
+                NegationCycles::Reject,
+                &run,
+                &docs,
+            )
+            .expect("closes");
+            (
+                kind,
+                run.get(),
+                closure.facts.contains(&[iri("s"), iri("q"), deep]),
+            )
+        })
+        .collect();
+        // Each copy is kept, and nothing is cut.
+        assert_eq!(
+            outcomes,
+            [("empty list", None, true), ("empty formula", None, true)]
+        );
     }
 
     /// Every registry entry's declared store read, walked over the whole registry

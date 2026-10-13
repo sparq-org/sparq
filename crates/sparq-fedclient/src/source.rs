@@ -814,6 +814,17 @@ impl FragTerm {
     pub fn iri(s: impl Into<String>) -> FragTerm {
         FragTerm::Iri(s.into())
     }
+
+    /// This term in N-Triples lexical form, the grammar the server reads for TPF query
+    /// parameters and for the brTPF binding wire: an IRI is `<…>`-wrapped, a blank node is
+    /// `_:…`, and a literal keeps the `"…"`/`@lang`/`^^<dt>` decoration it already stores.
+    pub(crate) fn to_ntriples(&self) -> String {
+        match self {
+            FragTerm::Iri(s) => format!("<{s}>"),
+            FragTerm::Blank(s) => format!("_:{s}"),
+            FragTerm::Literal(s) => s.clone(),
+        }
+    }
 }
 
 /// One position of a TPF triple-pattern request: a bound [`FragTerm`] or a query variable.
@@ -1044,7 +1055,7 @@ impl HttpFragmentTransport {
                 out.push(sep);
                 out.push_str(key);
                 out.push('=');
-                out.push_str(&pct_encode(&term_to_ntriples(term)));
+                out.push_str(&pct_encode(&term.to_ntriples()));
                 sep = '&';
             }
         }
@@ -1075,20 +1086,6 @@ pub(crate) fn pct_encode(value: &str) -> String {
         .remove(b'_')
         .remove(b'~');
     percent_encoding::utf8_percent_encode(value, UNRESERVED).to_string()
-}
-
-/// Render a [`FragTerm`] in N-Triples lexical form (the TPF query-parameter grammar the server
-/// reads): an IRI is `<…>`-wrapped, a blank node is `_:…`, a literal carries its
-/// `"…"`/`@lang`/`^^<dt>` decoration verbatim (the `FragTerm::Literal` model already stores it).
-/// Identical to `crate::wire`'s private renderer; inlined here so the transport has no cross-
-/// module private dependency. [OPUS-4.8] sq-yzca.
-#[cfg(not(target_arch = "wasm32"))]
-fn term_to_ntriples(term: &FragTerm) -> String {
-    match term {
-        FragTerm::Iri(s) => format!("<{s}>"),
-        FragTerm::Blank(s) => format!("_:{s}"),
-        FragTerm::Literal(s) => s.clone(),
-    }
 }
 
 /// Convert one parsed oxrdf [`oxrdf::Term`] (a triple object) into a [`FragTerm`], preserving the

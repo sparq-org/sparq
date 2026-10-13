@@ -7,21 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-13
+
+First release with the `sparq-rdf` PyPI wheels (the v0.1.5 wheel builds failed; npm 0.1.5
+packages were published). Publication is not implied by this entry; verify the tagged run
+and every registry and release artifact.
+
+### Added
+
+- **sparq-lws-core:** the type index and `QUERY` type search, paged, listed in the storage
+  description. Experimental. (#6650)
+- **sparq-lws-core:** the token endpoint accepts OpenID Connect ID tokens, with DPoP proofs
+  for bound ones. (#6721)
+- **LWS authentication suites as packages:** `sparq-lws-authn` defines the suite interface;
+  `sparq-lws-authn-saml` adds SAML 2.0 subject tokens, `sparq-lws-authn-openid` holds the
+  OpenID Connect suite and `sparq-lws-authn-ssi` the did:key and controlled identifier
+  suites. A deployment chooses which suites the token endpoint offers. Experimental, not
+  published to crates.io. (#6819, #6820, #6821)
+- **CI:** hosted previews of the site, specs and papers for pull requests that change them.
+  (#6818)
+- **Research prototypes** (proof-methods/, not part of the shipped runtime): a Noir opening
+  written with field-constraint rotations and additions (#6815), and tamper checks for both
+  Noir openings plus a gate-count script (#6816).
+
+- **sparq-e2ee-ng:** `PublicGrant::check_epoch` enforces a grant's signed `max_epoch`
+  ceiling. (#6853)
+- **Research prototypes** (zk/, not part of the shipped runtime): one variable-length BLAKE3
+  opening for the 64-bit integer result circuits (#6829).
+
 ### Changed
 
+- **LWS token endpoint:** a SAML 2.0 subject token is refused unless the assertion's
+  `NameID` is an http(s) URL. Every subject token's expiry is checked again just before an
+  access token is issued, still with the clock-skew allowance, so a token that expires while
+  its documents are fetched is refused. (#6819, #6821)
 - **sparq-trust (status lists):** `decode_encoded_list` now rejects a `u` (base64url) body
   whose length is ≡ 1 mod 4 even when the leftover bits are zero (for example `ugAAAA`);
   such a body has no byte-string meaning, and every other non-canonical form was already
   refused. A list published by a conforming encoder is unaffected. (#6873)
-- **sparq-fedclient:** pushed-down SPARQL renders every pattern position strictly as one
-  SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
+- **Breaking (sparq-fedclient):** pushed-down SPARQL renders every pattern position strictly as
+  one SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
   report `InterpError::Render`, and `push_group` returns `None` for a pattern holding a
   variable name that is not a SPARQL `VARNAME`, an IRI with a character `IRIREF` forbids, or a
   `"`-prefixed literal that is not exactly one SPARQL literal. Pre-rendered literals are
   re-serialised with canonical escaping. (#6877)
+- **Breaking (sparq-e2ee-ng):** `encode_secret` returns `Zeroizing<Vec<u8>>`, built in one
+  buffer that is wiped on drop (#6862). `Commit::decode` refuses a parent set that is not
+  sorted and duplicate-free, and `Commit::encode` writes it that way (#6845).
+- **Breaking (sparq-lws-core):** `parse_links` returns an iterator of `Link` values parsed on
+  demand, so the header caps bound the parsing work (#6839). The notification sender takes a
+  `Prepared` batch; `Notifier::dropped()` counts only notifications that were owed, and
+  subscriptions past the delivery bound are counted by `Notifier::unprepared()` (#6841).
+- **sparq-reason:** deleting from a materialized graph with an RDFS meta schema runs an
+  incremental DRed delete instead of rebuilding the closure. (#6842)
+- **sparq-solid:** a rules-free `DELETE`/`INSERT … WHERE` update commits without forking the
+  store. (#6830)
+- **SERVICE and sparq-fedclient** share one SPARQL results decoder and SRJ driver, one SSRF
+  resolver, and one pattern and N-Triples term renderer; sparq-fedclient parses federation
+  results with the engine's streaming SRJ reader. (#6840, #6872, #6879, #6884, #6895, #6896,
+  #6898)
+- **sparq-core:** shared hex, percent, JSON-string, civil-date, base58btc and base64url codecs
+  replace per-crate copies. (#6850, #6864, #6866, #6868, #6873)
+- **sparq-shacl:** one JS report renderer replaces the two wasm copies, with public
+  `to_js_json` and `message_text` helpers on the report. (#6856)
+- **CI:** zk-native-composition also runs when `supply-chain/config.toml` changes (#6861); the
+  LWS.NET suite's own 57 test definitions run as a ratchet (#6831).
 
 ### Fixed
 
+- **Release pipeline:** release files are staged in an empty `release-assets/` directory.
+  v0.1.5 published the repository's `assets/logo.svg` as an extra asset with no provenance;
+  every other v0.1.5 asset is covered by the isolated-builder bundles. (#6812)
+- **Publish pipeline:** the `sparq-rdf` wheel build no longer passes `--release` with
+  `--profile`, which current maturin rejects, and the npm provenance checks wait for the
+  registry to serve the new version. (#6817)
 - **sparq-solid / sparq-prov (date stamps):** epoch seconds before 0000-03-01 now format to the
   correct proleptic-Gregorian date. The previous conversion was one day late there (and could
   emit 29 February in a non-leap year); the only dates it already got right were
@@ -30,6 +89,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `0000-01-01`, not `0000-01-02`), and years -1 to -999 are now written with four digits
   after the sign (`-0001`, not `-001`), as XSD requires. Instants from 0000-03-01 onwards are
   unchanged; signature inputs and PROV IRIs are unaffected. (#6864)
+- **SSRF:** the egress classifier shared by SERVICE, sparq-fedclient and the LWS federation
+  client refuses every non-global address range. (#6852, #6870)
+- **LWS:** SAML subject confirmations are alternatives, as SAML Core defines them: one
+  satisfied bearer confirmation confirms the assertion (#6827); the server checks authorization before revealing set-aside or lock state
+  (#6848); a store write that times out is treated as having an unknown outcome (#6860); the
+  server binary forbids unsafe code (#6876).
+- **sparq-mpc:** federated plans fail closed when a participant has no privacy policy. (#6825)
+- **JavaScript:** the remaining RDF and SPARQL text builders validate interpolated terms
+  against the grammar. (#6826)
+- **sparq-reason:** the N3 nesting limit fits a 2 MiB thread stack, so deeply nested input is
+  refused instead of overflowing the stack. (#6835)
+- **sparq-reason:** base-graph blank nodes stay distinct from blank labels the N3 parser
+  allocates. (#6779)
+- **LWS:** a type-search filter too long to page is refused as too complex (422). (#6889)
+- **sparq-shacl:** `LATERAL` blocks are covered by the SHACL-SPARQL pre-binding checks and the
+  `VALUES` push-down. (#6846)
+- **JSON-LD conformance:** the oracles compare arrays inside `@json` literals in order. (#6857)
+- **CI:** the scheduled and full-sweep runs are green again (#6824, #6837), and the nightly
+  visual sweep builds its inputs first and pushes re-minted baselines to a review branch
+  (#6858, #6887, #6890, #6892, #6893).
 
 ## [0.1.5] - 2026-10-10
 
@@ -764,7 +843,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sparq-org/sparq/compare/v0.1.2...v0.1.3
