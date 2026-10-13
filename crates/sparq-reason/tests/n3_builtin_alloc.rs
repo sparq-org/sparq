@@ -1,4 +1,5 @@
-//! GH #6771: every term the N3 text engine derives is sized BEFORE it is built. This
+//! GH #6771: the terms the N3 text engine derives are sized BEFORE they are built (numeric
+//! lexical forms excepted: they are rendered, then checked, GH #6901). This
 //! binary counts live heap bytes with a counting global allocator and drives each
 //! builtin's result path (and the other derived-term paths: substitution, aggregation,
 //! conclusions) past a small `max_term_bytes`: the call must fail with the closure-limit
@@ -495,6 +496,30 @@ fn cases() -> Vec<Case> {
                 "{ :a :l ?l. ?l list:length ?n } => { :a :ok true }.",
                 BIG,
                 "the result of the builtin Last",
+            ),
+        ),
+        // A virtual rdf:rest of a list value; the control takes rdf:first by the same
+        // path, so both hold the same copy of the list.
+        checked(
+            Check::Allocated,
+            case(
+                "rdf:rest of a list value",
+                format!(":a :l (\"a\" \"{}\").\n", y),
+                "{ :a :l ?l. ?l rdf:rest ?t } => { :a :out ?t }.",
+                "{ :a :l ?l. ?l rdf:first ?h } => { :a :ok true }.",
+                BIG,
+                "the rest of a list (rdf:rest)",
+            ),
+        ),
+        checked(
+            Check::Allocated,
+            case(
+                "rdf:rest in a formula search",
+                format!(":a :f {{ :s :p (\"a\" \"{}\") }}.\n", y),
+                "{ :a :f ?f. ?f log:includes { :s :p ?l. ?l rdf:rest ?t } } => { :a :out true }.",
+                "{ :a :f ?f. ?f log:includes { :s :p ?l. ?l rdf:first ?h } } => { :a :ok true }.",
+                BIG,
+                "the rest of a list (rdf:rest)",
             ),
         ),
         checked(

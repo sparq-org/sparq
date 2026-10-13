@@ -289,15 +289,18 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// nested `log:conclusion` closure of a run gets the same limits as the run, not a share
 /// of them.
 ///
-/// `max_term_bytes` (GH #6771) bounds each term the text engine would build: every
-/// builtin's result (a functional builtin's, `log:uri` either way, `log:dtlit` reversed,
-/// the member or pair a list generator binds, the literal `log:content` returns), a
-/// functional builtin's argument list, any term substituted under a rule's bindings (a
-/// conclusion, a premise pattern, a scope or collection template, a backward-rule
-/// projection), the list `log:collectAllIn` collects, the formula `log:conclusion`
-/// returns, and the formula `log:parsedAsN3` / `log:semantics` parses. Each is sized from
-/// borrowed inputs before it is built, except the parsed formula, which is sized once the
-/// parse returns it. The size is approximate: string bytes plus a fixed cost per node.
+/// `max_term_bytes` (GH #6771) bounds each term the text engine would build. These are
+/// sized from borrowed inputs before they are built: every non-numeric builtin result (a
+/// functional builtin's, `log:uri` either way, `log:dtlit` reversed, the member or pair a
+/// list generator binds, the tail a virtual `rdf:rest` binds, the literal `log:content`
+/// returns), a functional builtin's argument list, any term substituted under a rule's
+/// bindings (a conclusion, a premise pattern, a scope or collection template, a
+/// backward-rule projection), the list `log:collectAllIn` collects, and the formula
+/// `log:conclusion` returns. The formula `log:parsedAsN3` / `log:semantics` parses is
+/// sized once the parse returns it. Numeric lexical forms (arithmetic and other numeric
+/// results, and the numeric pieces of `string:concatenation`) are rendered first and then
+/// checked when the term is admitted, so their transient rendering is not checked in
+/// advance (GH #6901). The size is approximate: string bytes plus a fixed cost per node.
 /// Binding a variable to a term that already exists (premise matching, `log:includes`)
 /// copies that term; it builds nothing new and is not sized again.
 ///
@@ -312,6 +315,7 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///   `log:semantics` one) allocates the terms it builds before its result is sized, so
 ///   its memory is bounded by its input text, and a short prefix used many times
 ///   expands before the formula is refused;
+/// * numeric lexical forms, rendered before they are checked (GH #6901, above);
 /// * the text a resolver supplies (`log:content`, `log:semantics`), which the caller
 ///   allocates before it is sized (the literal or formula built from it is refused);
 /// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
@@ -390,8 +394,8 @@ pub(crate) fn string_term_bytes(lex: usize) -> usize {
     lex.saturating_add(XSD_STRING_LEN + TERM_NODE_BYTES)
 }
 
-/// The ONE checkpoint every term the text engine derives passes before it is built
-/// (GH #6771). `bound` is an upper bound on the term's [`term_bytes`], computed from
+/// The ONE checkpoint every term the text engine derives passes (GH #6771): before it is
+/// built, except a numeric lexical form, which is rendered first (GH #6901). `bound` is an upper bound on the term's [`term_bytes`], computed from
 /// borrowed inputs without building anything; `exact` is its exact size, computed (again
 /// without building it) only when `bound` is over the limit, so a loose bound never
 /// refuses a term that fits.
@@ -440,6 +444,27 @@ pub(crate) fn resolved_bytes(t: &Term, b: &super::Binding, deep: bool) -> usize 
 }
 
 /// What a substitution refusal names.
+/// What a virtual `rdf:rest` builds, for the refusal message.
+struct ListTail;
+
+impl std::fmt::Display for ListTail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the rest of a list (rdf:rest)")
+    }
+}
+
+/// The list after `ms`'s first member, as a virtual `rdf:rest` of a list value binds it:
+/// sized from the borrowed members before it is built, and `None` (with the refusal
+/// recorded on `run`) past the limit. `ms` must not be empty.
+pub(crate) fn list_tail(ms: &[Term], run: &Truncation) -> Option<Term> {
+    let rest = &ms[1..];
+    let bytes = rest.iter().map(term_bytes).fold(TERM_NODE_BYTES, usize::saturating_add);
+    if settle(run, derived_term(run, &ListTail, bytes, || bytes)) {
+        return None;
+    }
+    Some(Term::List(rest.to_vec()))
+}
+
 struct Substituted;
 
 impl std::fmt::Display for Substituted {

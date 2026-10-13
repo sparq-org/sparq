@@ -1944,13 +1944,14 @@ fn match_premise_seeded(
                 if let (Term::List(ms), Term::Iri(pi)) = (&s_a, &p_a) {
                     if pi == parser::RDF_FIRST || pi == parser::RDF_REST {
                         if !ms.is_empty() {
+                            // The tail is sized before it is built.
                             let val = if pi == parser::RDF_FIRST {
-                                ms[0].clone()
+                                Some(ms[0].clone())
                             } else {
-                                Term::List(ms[1..].to_vec())
+                                bounded::list_tail(ms, run)
                             };
                             let mut nb = b.clone();
-                            if unify_term(&pat[2], &val, &mut nb) {
+                            if val.is_some_and(|val| unify_term(&pat[2], &val, &mut nb)) {
                                 next.push(nb);
                             }
                         }
@@ -2976,13 +2977,14 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
             match subject {
                 Term::List(ms) => {
                     if !ms.is_empty() {
+                        // The tail is sized before it is built.
                         let val = if pi == parser::RDF_FIRST {
-                            ms[0].clone()
+                            Some(ms[0].clone())
                         } else {
-                            Term::List(ms[1..].to_vec())
+                            bounded::list_tail(&ms, run)
                         };
                         let mut nb = b.clone();
-                        if unify_term(&pat[2], &val, &mut nb) {
+                        if val.is_some_and(|val| unify_term(&pat[2], &val, &mut nb)) {
                             containment_search(rest, scope, nb, rest.len(), out, steps, run);
                         }
                     }
@@ -3779,8 +3781,9 @@ fn refused_term(
     settle(cuts, bounded::derived_term(run, &what, bound, exact))
 }
 
-/// The size [`output_bytes`] gives a number, a count or a date part: its lexical form
-/// (at most [`NUMERAL_TEXT_BYTES`]), a datatype IRI and one node.
+/// The size [`output_bytes`] gives a number, a count or a date part: [`NUMERAL_TEXT_BYTES`]
+/// of lexical form, a datatype IRI and one node. It does not follow a decimal's scale: a
+/// numeric result is rendered, then checked when the derived fact is admitted (GH #6901).
 const NUMBER_TERM_BYTES: usize = bounded::TERM_NODE_BYTES + NUMERAL_TEXT_BYTES + 64;
 
 /// The [`bounded::term_bytes`] of the list builtin `args` member `a` stands for: a
@@ -3817,13 +3820,20 @@ impl TextOut for TextBytes {
     }
 }
 
+/// `time:timeZone`'s result: the explicit numeric offset of a dateTime's time part
+/// (`Z` or no offset yields nothing, as in cwm), borrowed from the lexical form.
+fn time_zone_offset(s: &str) -> Option<&str> {
+    let t = s.split('T').nth(1)?;
+    t.find(['+', '-']).map(|i| &t[i..])
+}
+
 /// The size of the term builtin `f` derives from `args`: with `exact`, its
 /// [`bounded::term_bytes`], computed without building it; without, a cheap upper bound on
-/// it from the input sizes. Every builtin has an entry (the match is exhaustive). 0 for a
-/// builtin whose result is never larger than one of its inputs (a part of one, a number,
-/// a fixed-size value), or is sized where it is built (`log:conclusion` after its closure,
-/// `log:parsedAsN3` / `log:semantics` while parsing); `log:content` is the text the
-/// caller's resolver supplies.
+/// it from the input sizes. Every functional builtin has an entry (the match is
+/// exhaustive). A numeric result's entry is a fixed estimate, and its rendering is checked
+/// only when the fact is admitted (GH #6901). 0 for a builtin sized where it builds its
+/// result (`log:dtlit`, `log:conclusion`, `log:content`, `log:parsedAsN3` /
+/// `log:semantics`).
 fn output_bytes(
     f: Func,
     args: &[Term],
@@ -3942,7 +3952,8 @@ fn output_bytes(
                 .map_or(0, string_term_bytes),
             _ => string_term_bytes(lex0().len()),
         },
-        // The time zone offset: a part of the input.
+        // The time zone offset: at most the input; exactly, the borrowed offset.
+        Func::TimeZone if exact => time_zone_offset(lex0()).map_or(0, |o| string_term_bytes(o.len())),
         Func::TimeZone => string_term_bytes(lex0().len()),
         // A number, a count or a date part.
         Func::Length
@@ -4540,9 +4551,7 @@ fn eval_functional_inner(
         Func::TimeZone => {
             // Only an EXPLICIT numeric offset is a time zone (cwm: `Z`/absent
             // yield nothing).
-            let s = lex(&args[0])?;
-            let t = s.split('T').nth(1)?;
-            let off = t.find(['+', '-']).map(|i| &t[i..])?;
+            let off = time_zone_offset(lex(&args[0])?)?;
             Term::Lit(off.to_string(), XSD_STRING.into(), None)
         }
         _ => {
@@ -5215,32 +5224,61 @@ mod tests {
         }
     }
 
-    /// GH #6771 review: every functional builtin has a size entry (`output_bytes` matches
-    /// exhaustively), and for each one the cheap bound is at least the exact size, on
-    /// arguments that exercise the string, list and formula builtins.
+    /// GH #6771 review: for each functional builtin whose result is sized before it is
+    /// built (the non-numeric ones; numeric results are rendered, then checked when the
+    /// fact is admitted), the exact size equals the [`bounded::term_bytes`] of the term
+    /// the builtin actually derives, and the cheap bound is at least it.
     #[test]
-    fn every_builtin_has_a_size_whose_bound_covers_it() {
-        use super::{bounded, output_bytes, FactIndex, Func, Term};
-        let s = |v: &str| Term::Lit(v.into(), "http://www.w3.org/2001/XMLSchema#string".into(), None);
-        let d = Term::Lit("1E300".into(), "http://www.w3.org/2001/XMLSchema#double".into(), None);
-        let f = Term::Formula(vec![[s("a"), s("b"), s("c")]]);
-        let samples: Vec<Vec<Term>> = vec![
-            vec![s("aÉ /#ß%x"), s("(É)"), s("$1$1${1}$$")],
-            vec![s("%s and %d and %f %%"), s("x"), d.clone(), d.clone()],
-            vec![d.clone(), s("y"), Term::Iri("http://ex/i".into())],
-            vec![Term::List(vec![s("a"), d.clone()]), Term::List(vec![s("b")])],
-            vec![f.clone(), f.clone(), Term::Formula(vec![[s("x"), s("y"), s("z")]])],
-            vec![s("lex"), s("en")],
+    fn each_sized_result_matches_the_term_the_builtin_derives() {
+        use super::{bounded, functional_builtin, output_bytes, FactIndex, Term};
+        const STRING: &str = "http://www.w3.org/2000/10/swap/string#";
+        const LIST: &str = "http://www.w3.org/2000/10/swap/list#";
+        const LOG: &str = "http://www.w3.org/2000/10/swap/log#";
+        const TIME: &str = "http://www.w3.org/2000/10/swap/time#";
+        // (builtin, subject): each subject is a first-class list or a single value.
+        let cases: &[(&str, &str, &str)] = &[
+            (STRING, "concatenation", r#"("aÉ" "b" <http://ex/i> true)"#),
+            (STRING, "format", r#"("%s and %s %%" "x" "yé")"#),
+            (STRING, "replace", r#"("banana" "(an)" "<$1$1>")"#),
+            (STRING, "lowerCase", r#""AÉ /#ẞ""#),
+            (STRING, "upperCase", r#""aé /#ß""#),
+            (STRING, "encodeForUri", r#""a É/#~(x)""#),
+            (STRING, "encodeForURI", r#""a É/#~(x)""#),
+            (STRING, "encodeForFragID", r#""a É/#~(x)""#),
+            (STRING, "scrape", r#"("key=value; rest" "=([a-z]+);")"#),
+            (LIST, "append", r#"(("a" "b") ("c") ())"#),
+            (LIST, "first", r#"("first" "second")"#),
+            (LIST, "last", r#"("first" "second")"#),
+            (LOG, "conjunction", r#"({ :s :p "a" } { :s :p "a". :s :q "b" })"#),
+            (LOG, "langlit", r#"("chat" "fr")"#),
+            (TIME, "timeZone", r#""2024-03-15T10:30:45+05:30""#),
+            (TIME, "timeZone", r#""2024-03-15T10:30:45-11:00""#),
         ];
-        let facts = FactIndex::default();
-        for &func in Func::ALL {
-            for args in &samples {
-                let pending = bounded::Pending::default();
-                let bound = output_bytes(func, args, &facts, &pending, false);
-                let exact = output_bytes(func, args, &facts, &pending, true);
-                assert!(exact <= bound, "{func:?} {args:?}: exact {exact} > bound {bound}");
-                let _ = pending.finish(());
-            }
+        for &(ns, name, subject) in cases {
+            let iri = format!("{ns}{name}");
+            let src = format!(
+                "@prefix : <http://ex/> .\n:in :v {subject} .\n\
+                 {{ :in :v ?s . ?s <{iri}> ?o }} => {{ :r :out ?o }} .\n"
+            );
+            let c = super::reason_n3_terms(&src, None).expect(name);
+            let input = &c.facts.iter().find(|t| t[1] == Term::Iri("http://ex/v".into())).expect("input")[2];
+            let args: Vec<Term> = match input {
+                Term::List(ms) => ms.clone(),
+                other => vec![other.clone()],
+            };
+            let out = c
+                .derived
+                .iter()
+                .find(|t| t[1] == Term::Iri("http://ex/out".into()))
+                .unwrap_or_else(|| panic!("{name}: no result"));
+            let actual = bounded::term_bytes(&out[2]);
+            let func = functional_builtin(&Term::Iri(iri.clone())).expect(name);
+            let (facts, pending) = (FactIndex::default(), bounded::Pending::default());
+            let bound = output_bytes(func, &args, &facts, &pending, false);
+            let exact = output_bytes(func, &args, &facts, &pending, true);
+            let _ = pending.finish(());
+            assert_eq!(exact, actual, "{name} {subject}: exact size vs the derived {:?}", out[2]);
+            assert!(bound >= actual, "{name} {subject}: bound {bound} < derived {actual}");
         }
     }
 
