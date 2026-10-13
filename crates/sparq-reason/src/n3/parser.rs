@@ -129,10 +129,14 @@ pub(crate) fn parse_with_extra_checked(
 ///   statement takes the term itself), the node a property list names, a path step's
 ///   variable, a quantified term, and a rule's renamed premise blanks.
 ///
+/// Also charged: the initial `base` (before it is copied), each directive's map entry and
+/// each open formula's quantifier scope, and the table of a rule's premise blanks.
+///
 /// A parse whose result is its only use of a term is charged exactly the result's
-/// [`super::bounded::term_bytes`] (plus its directives). Not charged: the scratch buffer
-/// one token is read into before it is resolved or expanded (no larger than that token
-/// of `src`, and dropped before the next), a vector's spare capacity, and `extra`.
+/// [`super::bounded::term_bytes`] (plus its base and directives). Not charged: the scratch
+/// buffer one token is read into before it is resolved or expanded, and an error message
+/// (each no larger than about one token of `src`, and dropped); the spare capacity of a
+/// string, vector or map; the parser's fixed-size state; and `extra`.
 pub(crate) fn parse_charged_checked(
     src: &str,
     base: &str,
@@ -140,10 +144,12 @@ pub(crate) fn parse_charged_checked(
     allowance: Option<usize>,
 ) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
-    p.base = base.to_string();
     p.left = allowance;
     p.allowance = allowance.unwrap_or(0);
-    let r = parse_document(&mut p, base, extra);
+    let r = p.new_string(&[base]).and_then(|b| {
+        p.base = b;
+        parse_document(&mut p, base, extra)
+    });
     r.map_err(|m| match p.stopped.take() {
         Some(e) => ParseFailure::Resource(e),
         None => ParseFailure::Syntax(m),
@@ -162,6 +168,9 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
         _ => Vec::new(),
     };
     let is_true = |t: &Term| matches!(t, Term::Lit(v, _, _) if v == "true");
+    // rules written with the legacy `log:impliedBy`, which a re-encoding spells
+    // `log:isImpliedBy` (`reencode_statements`)
+    let mut legacy = 0usize;
     facts.retain_mut(|[s, pred, o]| {
         let Term::Iri(i) = &*pred else {
             return true;
@@ -181,6 +190,7 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
             // goal instantiates the variables — a forward reversal would derive nothing.
             (Term::Formula(_), Term::Formula(_)) if implied_by => {
                 backward_rules.push(Rule { premise: take(o), conclusion: take(s) });
+                legacy += usize::from(i == LOG_IMPLIED_BY_LEGACY);
             }
             // `{} => { conclusion }` — `{}` IS the literal true (N3 CG), an
             // always-true premise: fires unconditionally.
@@ -191,6 +201,7 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
             // idiom for backward base cases).
             (Term::Formula(_), l) if implied_by && is_true(l) => {
                 backward_rules.push(Rule { premise: Vec::new(), conclusion: take(s) });
+                legacy += usize::from(i == LOG_IMPLIED_BY_LEGACY);
             }
             _ => return true,
         }
@@ -214,36 +225,50 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
     // pinned by
     // `tests/n3_pass_all.rs::a_source_variable_spelled_like_the_rewrite_stays_a_variable`.
     for (ri, r) in rules.iter_mut().chain(backward_rules.iter_mut()).enumerate() {
-        let mut premise_blanks: std::collections::HashSet<String> = Default::default();
-        collect_blanks(&r.premise, false, &mut premise_blanks);
-        if premise_blanks.is_empty() {
+        let Rule { premise, conclusion } = r;
+        // Every blank `rewrite_terms` reaches in the premise is a premise blank (the two
+        // walk the same terms), so the premise renames all of them; the conclusion renames
+        // those whose label is one.
+        let mut occurrences = 0usize;
+        each_blank(premise, &mut |_| occurrences += 1);
+        if occurrences == 0 {
             continue;
         }
-        // The new names, charged before they are allocated (the old ones are dropped).
+        let renamed = |l: &str| PREMISE_BLANK_VAR.len() + decimal_digits(ri) + 1 + l.len();
+        // The set borrows the premise's labels; its table, and the new names, are charged
+        // before they are allocated (the old names are dropped).
+        let table = premise_blank_table_bytes(occurrences);
+        p.charge(table)?;
+        let mut premise_blanks: std::collections::HashSet<&str> =
+            std::collections::HashSet::with_capacity(occurrences);
+        each_blank(premise, &mut |l| {
+            premise_blanks.insert(l);
+        });
         if p.left.is_some() {
-            let digits = decimal_digits(ri);
-            let grown = std::cell::Cell::new(0usize);
-            let measure = |t: &mut Term| {
-                if let Term::Blank(l) = t {
-                    if premise_blanks.contains(l.as_str()) {
-                        grown.set(grown.get().saturating_add(PREMISE_BLANK_VAR.len() + digits + 1 + l.len()));
-                    }
+            let mut grown = 0usize;
+            each_blank(premise, &mut |l| grown = grown.saturating_add(renamed(l)));
+            each_blank(conclusion, &mut |l| {
+                if premise_blanks.contains(l) {
+                    grown = grown.saturating_add(renamed(l));
                 }
-            };
-            rewrite_terms(&mut r.premise, false, &measure);
-            rewrite_terms(&mut r.conclusion, false, &measure);
-            p.charge(grown.get())?;
+            });
+            p.charge(grown)?;
         }
         let rename = |t: &mut Term| {
             if let Term::Blank(l) = t {
-                if premise_blanks.contains(l.as_str()) {
-                    *t = Term::Var(format!("{}{}.{}", PREMISE_BLANK_VAR, ri, l));
-                }
+                *t = Term::Var(format!("{}{}.{}", PREMISE_BLANK_VAR, ri, l));
             }
         };
-        rewrite_terms(&mut r.premise, false, &rename);
-        rewrite_terms(&mut r.conclusion, false, &rename);
+        rewrite_terms(conclusion, false, &|t: &mut Term| {
+            if matches!(t, Term::Blank(l) if premise_blanks.contains(l.as_str())) {
+                rename(t);
+            }
+        });
+        drop(premise_blanks);
+        p.release(table);
+        rewrite_terms(premise, false, &rename);
     }
+    p.charge(legacy.saturating_mul(LOG_IMPLIED_BY.len() - LOG_IMPLIED_BY_LEGACY.len()))?;
     p.charge(base.len())?;
     Ok(Parsed { facts, rules, backward_rules, base: base.to_string() })
 }
@@ -265,37 +290,31 @@ fn well_known_prefix(pfx: &str) -> Option<&'static str> {
     })
 }
 
-/// Collect blank labels; `into_formulae` controls whether quoted `{ … }`
-/// graphs are descended into (lists always are — they are plain structure).
-fn collect_blanks(stmts: &[[Term; 3]], into_formulae: bool, out: &mut std::collections::HashSet<String>) {
-    for row in stmts {
-        for t in row {
-            collect_blanks_term(t, into_formulae, out);
-        }
+/// Call `f` on the label of each blank in `stmts` that [`rewrite_terms`] (not into
+/// formulae) reaches: lists and quoted triples are walked, quoted formulae are not.
+fn each_blank<'a>(stmts: &'a [[Term; 3]], f: &mut impl FnMut(&'a str)) {
+    for t in stmts.iter().flatten() {
+        each_blank_term(t, f);
     }
 }
 
-fn collect_blanks_term(t: &Term, into_formulae: bool, out: &mut std::collections::HashSet<String>) {
+fn each_blank_term<'a>(t: &'a Term, f: &mut impl FnMut(&'a str)) {
     match t {
-        Term::Blank(l) => {
-            out.insert(l.clone());
-        }
-        Term::Formula(inner) if into_formulae => collect_blanks(inner, into_formulae, out),
-        Term::List(ms) => {
-            for m in ms {
-                collect_blanks_term(m, into_formulae, out);
-            }
-        }
+        Term::Blank(l) => f(l),
+        Term::List(ms) => ms.iter().for_each(|m| each_blank_term(m, f)),
         // Quoted triples are TRANSPARENT structure (like lists): a premise
         // blank inside `<< … >>` is a rule-scoped existential and becomes a
         // matching variable. [FABLE-5]
-        Term::Triple(t) => {
-            for m in t.iter() {
-                collect_blanks_term(m, into_formulae, out);
-            }
-        }
+        Term::Triple(t) => t.iter().for_each(|m| each_blank_term(m, f)),
         _ => {}
     }
+}
+
+/// An upper bound on the bytes of a hash set of `n` borrowed labels: its buckets (a power
+/// of two at least 8/7 of `n`) of one `&str` and one control byte each.
+fn premise_blank_table_bytes(n: usize) -> usize {
+    let buckets = n.saturating_mul(8).div_euclid(7).saturating_add(1).next_power_of_two();
+    buckets.saturating_mul(std::mem::size_of::<&str>() + 1).saturating_add(16)
 }
 
 fn rewrite_terms(stmts: &mut [[Term; 3]], into_formulae: bool, f: &impl Fn(&mut Term)) {
@@ -610,6 +629,7 @@ impl<'a> Parser<'a> {
                 let name = self.new_string(&["__ex_", local])?;
                 self.node(Term::Blank(name))?
             };
+            self.charge(std::mem::size_of::<(String, Term)>())?; // the map entry
             self.quants.last_mut().expect("scope stack").insert(iri, term);
             if !self.eat(b',') {
                 break;
@@ -656,6 +676,7 @@ impl<'a> Parser<'a> {
         let pfx = self.read_pname_prefix()?;
         self.ws();
         let iri = self.read_iriref()?;
+        self.charge(std::mem::size_of::<(String, String)>())?; // the map entry
         self.prefixes.insert(pfx, iri);
         let dotted = self.eat(b'.');
         if self.strict && at_form != dotted {
@@ -690,6 +711,7 @@ impl<'a> Parser<'a> {
             if name.is_empty() {
                 break;
             }
+            self.charge(std::mem::size_of::<String>())?; // the set entry
             kws.insert(name);
             if !self.eat(b',') {
                 break;
@@ -1401,7 +1423,9 @@ impl<'a> Parser<'a> {
     fn read_formula(&mut self) -> Result<Term, String> {
         self.enter()?;
         self.eat(b'{');
-        self.quants.push(Default::default()); // formula-local quantifier scope
+        // formula-local quantifier scope (released when the formula closes)
+        self.charge(std::mem::size_of::<std::collections::HashMap<String, Term>>())?;
+        self.quants.push(Default::default());
         let mut triples = Vec::new();
         loop {
             self.ws();
@@ -1422,6 +1446,7 @@ impl<'a> Parser<'a> {
             }
         }
         self.quants.pop();
+        self.release(std::mem::size_of::<std::collections::HashMap<String, Term>>());
         self.depth -= 1;
         if triples.is_empty() {
             // `{}` IS the literal true (N3 CG: the empty graph holds vacuously).
@@ -1458,7 +1483,8 @@ impl<'a> Parser<'a> {
         }
         self.i += 2;
         self.depth -= 1;
-        self.node(Term::Triple(Box::new([s, p, o])))
+        self.charge(super::bounded::TERM_NODE_BYTES)?;
+        Ok(Term::Triple(Box::new([s, p, o])))
     }
 
     fn read_collection(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
@@ -1489,7 +1515,8 @@ impl<'a> Parser<'a> {
         let node = if !self.strict && self.keyword("id") {
             let named = self.term(out)?;
             if !matches!(named, Term::Iri(_)) {
-                return Err(format!("iriPropertyList id must be an IRI, got {}", super::serialize::display_lossy(&named)));
+                // the term is not printed: a charged parse holds no second copy of it
+                return Err(format!("iriPropertyList id must be an IRI (before byte {})", self.i));
             }
             named
         } else {
@@ -1721,6 +1748,17 @@ mod resolve_iri_tests {
 #[cfg(test)]
 pub(super) mod parse_surface_tests {
     use super::*;
+
+    /// The initial base is charged before it is copied: a base past the allowance stops
+    /// the parse before it reads a byte (here, before the syntax error it would report).
+    #[test]
+    fn an_initial_base_past_the_allowance_is_refused_before_it_is_copied() {
+        let base = format!("http://ex/{}/", "a".repeat(4096));
+        let refused = parse_charged_checked("@@@", &base, std::iter::empty(), Some(1024));
+        assert!(matches!(refused, Err(ParseFailure::Resource(_))), "refused for its base");
+        let fits = parse_charged_checked("@@@", &base, std::iter::empty(), Some(1 << 20));
+        assert!(matches!(fits, Err(ParseFailure::Syntax(_))), "a syntax error once it fits");
+    }
 
     /// A named property list (`[ id <s> … ]`) is built once: the node it names is
     /// charged once, and each statement that keeps it once more.

@@ -330,8 +330,9 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///   only by `max_facts`;
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
-///   holds only scratch copies of one token at a time, the vectors' spare capacity, and
-///   the text it parses;
+///   holds only a scratch copy of one token (or a token-sized error message) at a time,
+///   the spare capacity of its strings, vectors and maps, its fixed-size state, and the
+///   text it parses;
 /// * numeric results, as on main (GH #6901): the forward and reverse results of the
 ///   arithmetic and other numeric builtins, and the canonical numeric pieces
 ///   `string:concatenation` renders. Their size entries are fixed estimates that do not

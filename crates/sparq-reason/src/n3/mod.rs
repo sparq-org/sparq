@@ -838,8 +838,20 @@ fn runtime_document(
     pending: &bounded::Pending,
     caller_ns: Option<&str>,
 ) -> Option<Vec<[Term; 3]>> {
+    // a walk, not a set of the labels: the parsed document was charged against the run's
+    // term-size limit, and nothing else is allocated before it is sized
     let spells_caller = caller_ns.is_some_and(|ns| {
-        document_blank_labels(&parsed).iter().any(|l| l.starts_with(ns))
+        let rule_terms = parsed
+            .rules
+            .iter()
+            .chain(&parsed.backward_rules)
+            .flat_map(|r| r.premise.iter().chain(&r.conclusion));
+        parsed
+            .facts
+            .iter()
+            .chain(rule_terms)
+            .flatten()
+            .any(|t| any_blank_label(t, &|l| l.starts_with(ns)))
     });
     if spells_caller {
         return settle(
@@ -867,6 +879,18 @@ fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
         }
         Term::Triple(tr) => tr.iter().for_each(|m| term_blank_labels(m, out)),
         _ => {}
+    }
+}
+
+/// Does a blank label reachable in `t` (as [`term_blank_labels`] reaches them) satisfy
+/// `hit`?
+fn any_blank_label(t: &Term, hit: &impl Fn(&str) -> bool) -> bool {
+    match t {
+        Term::Blank(l) => hit(l),
+        Term::List(ms) => ms.iter().any(|m| any_blank_label(m, hit)),
+        Term::Formula(ts) => ts.iter().flatten().any(|m| any_blank_label(m, hit)),
+        Term::Triple(tr) => tr.iter().any(|m| any_blank_label(m, hit)),
+        _ => false,
     }
 }
 
