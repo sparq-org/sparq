@@ -256,3 +256,69 @@ fn formula_level_universals_round_trip_through_pass_all() {
     assert_eq!(a.rules[0].conclusion, b.rules[0].conclusion, "{doc}");
     assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
 }
+
+/// Aggregation clauses reached through a variable: [`validate_rule_quantifiers`] cannot see
+/// them in the rule text, so `log:forAllIn` / `log:collectAllIn` check the bound clause
+/// before evaluating it and fail the run with the same error (a quantified clause would
+/// otherwise have no solutions and `log:forAllIn` would hold vacuously).
+fn bound_clause_cases() -> Vec<String> {
+    [
+        // A formula scope: a store scope over a variable clause is already refused by
+        // stratification (it cannot pin the clause's predicates).
+        // The whole clause list is a variable's value.
+        ":cfg :clauses ( { @forAll :x. :x :p :b } { :a :p :b } ). \
+         { :cfg :clauses ?cs. ?cs log:forAllIn { :a :p :b } } => { :hit :by :rule }.",
+        ":cfg :clauses ( { :a :p :b } { @forAll :x. :x :p :b } ). \
+         { :cfg :clauses ?cs. ?cs log:forAllIn { :a :p :b } } => { :hit :by :rule }.",
+        // A variable clause inside a written list.
+        ":cfg :clause { @forAll :x. :x :p :b }. \
+         { :cfg :clause ?c. ( ?c { :a :p :b } ) log:forAllIn { :a :p :b } } => { :hit :by :rule }.",
+        ":cfg :clause { @forAll :x. :x :p :b }. \
+         { :cfg :clause ?c. ( :t ?c ?l ) log:collectAllIn { :a :p :b } } => { :got :list ?l }.",
+        // A variable subject.
+        ":cfg :query ( :t { @forAll :x. :x :p :b } :out ). \
+         { :cfg :query ?q. ?q log:collectAllIn { :a :p :b } } => { :hit :by :rule }.",
+    ]
+    .iter()
+    .map(|src| format!("@prefix : <{EX}>. :a :p :b. {src}"))
+    .collect()
+}
+
+#[test]
+fn a_bound_quantified_aggregation_clause_is_rejected() {
+    for src in bound_clause_cases() {
+        assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), QUANTIFIER_ERROR, "{src}");
+    }
+}
+
+#[test]
+fn a_bound_quantified_aggregation_clause_fails_the_incremental_graph() {
+    for src in bound_clause_cases() {
+        // The graph reasons over base facts given as terms; the document's facts go there.
+        let base = parser::parse(&src).expect("parses").facts;
+        // Its first materialization reaches the clause and refuses the document.
+        let err = sparq_reason::MaterializedN3Graph::new(&src, &base).err().expect("rejected");
+        assert!(err.starts_with(QUANTIFIER_ERROR), "{src}: {err}");
+    }
+}
+
+/// The `log:collectAllIn` template and a value bound into a written clause are values, not
+/// matching clauses: a closed quantified formula there keeps identity matching.
+#[test]
+fn a_quantified_template_or_bound_value_is_collected() {
+    let quoted = |facts: &[[Term; 3]], s: &str, p: &str| {
+        facts.iter().any(|f| {
+            f[0] == iri(s)
+                && f[1] == iri(p)
+                && matches!(&f[2], Term::List(ms) if matches!(&ms[..], [Term::Formula(ts)] if ts.len() == 1))
+        })
+    };
+    let facts = closure(
+        ":a :p :b. { ( { @forAll :x. :x :q :b } { :a :p :b } ?l ) log:collectAllIn ?scope } => { :got :list ?l }.",
+    );
+    assert!(quoted(&facts, "got", "list"), "{facts:?}");
+    let facts = closure(
+        ":a :says { @forAll :x. :x :q :z }. { ( ?f { :a :says ?f } ?l ) log:collectAllIn ?scope } => { :got :saw ?l }.",
+    );
+    assert!(quoted(&facts, "got", "saw"), "{facts:?}");
+}

@@ -2316,6 +2316,18 @@ fn match_premise_admitted(
                 };
                 let Some(subj) = bounded::substitute(&pat[0], &b, &bw.truncated) else { continue };
                 let Term::List(members) = &subj else { continue };
+                // A clause reached through a variable (the subject, or a list member) was
+                // not visible to [`validate_rule_quantifiers`]; its bound value is checked
+                // here and refused the same way, failing the run. A clause written as a
+                // formula was checked there: a value bound into it is an ordinary term,
+                // matched by identity.
+                if aggregation_clauses(op, &subj).iter().enumerate().any(|(i, c)| {
+                    let written = aggregation_clauses(op, &pat[0]).get(i);
+                    !matches!(written, Some(Term::Formula(_) | Term::Lit(..))) && quantified_clause(c)
+                }) {
+                    bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
+                    continue;
+                }
                 match op {
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
@@ -2733,14 +2745,14 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
         return true;
     }
     match (&aw, &cw) {
-        (Term::Var(v), _) if !quoted_universal(v) => {
+        (Term::Var(v), _) if !unbindable_var(v) => {
             if frees_quoted_universal(&cw) {
                 return false;
             }
             s.insert(v.clone(), cw.clone());
             true
         }
-        (_, Term::Var(v)) if !quoted_universal(v) => {
+        (_, Term::Var(v)) if !unbindable_var(v) => {
             if frees_quoted_universal(&aw) {
                 return false;
             }
@@ -2824,6 +2836,18 @@ fn quoted_universal(v: &str) -> bool {
     v.starts_with(serialize::FORMULA_UNIVERSAL)
 }
 
+/// A variable no matcher may bind: a quoted formula's universal, or a rule premise's own
+/// universal (`__up.`), which [`validate_rule_quantifiers`] rejects before any matching.
+/// Should one reach a matcher anyway, it matches only itself instead of binding as an
+/// ordinary variable (and a debug build stops).
+fn unbindable_var(v: &str) -> bool {
+    if v.starts_with(serialize::PREMISE_UNIVERSAL) {
+        debug_assert!(false, "premise universal {v} reached a matcher past validate_rule_quantifiers");
+        return true;
+    }
+    quoted_universal(v)
+}
+
 /// Would binding a rule variable to `t` take a quoted formula's universal out of the formula
 /// that binds it — does `t` mention one whose declaring formula is not inside `t`?
 fn frees_quoted_universal(t: &Term) -> bool {
@@ -2839,32 +2863,57 @@ fn frees_quoted_universal(t: &Term) -> bool {
     go(t, 0)
 }
 
-/// Reject antecedent quantifiers that the rule matchers cannot soundly evaluate.
-pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), String> {
-    fn has(t: &Term, prefix: &str) -> bool {
-        match t {
-            Term::Var(v) => v.starts_with(prefix),
-            Term::Formula(ts) => ts.iter().flatten().any(|t| has(t, prefix)),
-            Term::List(ms) => ms.iter().any(|t| has(t, prefix)),
-            Term::Triple(tr) => tr.iter().any(|t| has(t, prefix)),
-            _ => false,
-        }
+/// The refusal for a rule antecedent no engine can match soundly (GH #6754; support is
+/// tracked in GH #6882).
+const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
+
+/// Whether `t` holds a variable named under `prefix`, at any depth.
+fn holds_var_prefixed(t: &Term, prefix: &str) -> bool {
+    match t {
+        Term::Var(v) => v.starts_with(prefix),
+        Term::Formula(ts) => ts.iter().flatten().any(|t| holds_var_prefixed(t, prefix)),
+        Term::List(ms) => ms.iter().any(|t| holds_var_prefixed(t, prefix)),
+        Term::Triple(tr) => tr.iter().any(|t| holds_var_prefixed(t, prefix)),
+        _ => false,
     }
+}
+
+/// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the
+/// clause of `( template clause list )`, both clauses of `( clause-a clause-b )`. The
+/// template and the result list are values, not clauses. A subject of another shape
+/// yields none (its evaluation fails the premise anyway).
+fn aggregation_clauses(op: CollectOp, subject: &Term) -> &[Term] {
+    match (op, subject) {
+        (CollectOp::CollectAll, Term::List(ms)) if ms.len() == 3 => &ms[1..2],
+        (CollectOp::ForAll, Term::List(ms)) if ms.len() == 2 => &ms[..],
+        _ => &[],
+    }
+}
+
+/// Whether an aggregation clause would need quantified matching: a formula-level
+/// universal (or a premise universal) anywhere in it.
+fn quantified_clause(clause: &Term) -> bool {
+    holds_var_prefixed(clause, serialize::FORMULA_UNIVERSAL)
+        || holds_var_prefixed(clause, serialize::PREMISE_UNIVERSAL)
+}
+
+/// Reject antecedent quantifiers that the rule matchers cannot soundly evaluate. This
+/// sees the clauses as written; an aggregation clause reached through a variable is
+/// checked again on its bound value when it is evaluated ([`match_premise_seeded`]).
+pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), String> {
     for rule in parsed.rules.iter().chain(&parsed.backward_rules) {
         for atom in &rule.premise {
-            // Ordinary quoted formula terms retain identity matching. Containment and
-            // aggregation patterns would instead need quantified wildcard matching.
-            let scoped_pattern = if scope_op(&atom[1]).is_some() {
-                Some(&atom[2])
-            } else if collect_op(&atom[1]).is_some() {
-                Some(&atom[0])
+            // Ordinary quoted formula terms retain identity matching. Containment patterns
+            // and aggregation clauses would instead need quantified wildcard matching.
+            let scoped = if scope_op(&atom[1]).is_some() {
+                holds_var_prefixed(&atom[2], serialize::FORMULA_UNIVERSAL)
+            } else if let Some(op) = collect_op(&atom[1]) {
+                aggregation_clauses(op, &atom[0]).iter().any(quantified_clause)
             } else {
-                None
+                false
             };
-            if atom.iter().any(|t| has(t, serialize::PREMISE_UNIVERSAL))
-                || scoped_pattern.is_some_and(|t| has(t, serialize::FORMULA_UNIVERSAL))
-            {
-                return Err("N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)".into());
+            if scoped || atom.iter().any(|t| holds_var_prefixed(t, serialize::PREMISE_UNIVERSAL)) {
+                return Err(QUANTIFIED_ANTECEDENT.into());
             }
         }
     }
@@ -2873,7 +2922,7 @@ pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), S
 
 fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
     match (pat, val) {
-        (Term::Var(v), _) if quoted_universal(v) => pat == val,
+        (Term::Var(v), _) if unbindable_var(v) => pat == val,
         (Term::Var(v), _) => match b.get(v) {
             Some(existing) => existing == val,
             None => {

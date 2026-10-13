@@ -729,22 +729,23 @@ impl<'a> Parser<'a> {
 
     /// A charged copy of the quantified stand-in for `iri`, innermost scope first. A
     /// formula-level universal (its frame holds the bare [`FORMULA_UNIVERSAL`] marker) is
-    /// named by its de Bruijn distance from this mention to the declaring formula.
+    /// named by its de Bruijn distance from this mention to the declaring formula. The
+    /// copy is sized from the borrowed frame entry and charged before it is built.
     fn quantified(&mut self, iri: &str) -> Result<Option<Term>, String> {
         let top = self.quants.len() - 1;
-        let Some(t) = self.quants.iter().enumerate().rev().find_map(|(k, frame)| {
-            frame.get(iri).map(|t| match t {
-                Term::Var(v) if v == FORMULA_UNIVERSAL => {
-                    Term::Var(format!("{FORMULA_UNIVERSAL}{}.{iri}", top - k))
-                }
-                other => other.clone(),
-            })
-        }) else {
+        let Some((k, stand_in)) =
+            self.quants.iter().enumerate().rev().find_map(|(k, frame)| frame.get(iri).map(|t| (k, t)))
+        else {
             return Ok(None);
         };
-        // Charged after the copy is made: one stand-in, bounded by the source IRI's length.
-        self.charge(super::bounded::term_bytes(&t))?;
-        Ok(Some(t))
+        if matches!(stand_in, Term::Var(v) if v == FORMULA_UNIVERSAL) {
+            let n = top - k;
+            self.charge(formula_universal_bytes(n, iri))?;
+            return Ok(Some(Term::Var(format!("{FORMULA_UNIVERSAL}{n}.{iri}"))));
+        }
+        let bytes = super::bounded::term_bytes(stand_in);
+        self.charge(bytes)?;
+        Ok(self.quants[k].get(iri).cloned())
     }
 
     /// The term the IRI `iri` (charged) reads as: its quantified stand-in, the empty list
@@ -1656,6 +1657,13 @@ pub(super) fn resolve_iri(base: &str, iri: &str) -> String {
 }
 
 /// The number of decimal digits `n` prints with.
+/// The charged size of the term `?__uf.<n>.<iri>`: the name plus one term node.
+fn formula_universal_bytes(n: usize, iri: &str) -> usize {
+    (FORMULA_UNIVERSAL.len() + decimal_digits(n) + 1)
+        .saturating_add(iri.len())
+        .saturating_add(super::bounded::TERM_NODE_BYTES)
+}
+
 fn decimal_digits(mut n: usize) -> usize {
     let mut digits = 1;
     while n >= 10 {
@@ -1900,6 +1908,41 @@ pub(super) mod parse_surface_tests {
             };
             let fits: usize =
                 parsed.facts.iter().flatten().map(super::super::bounded::term_bytes).sum();
+            assert!(
+                parse_charged_checked(src, "", std::iter::empty(), Some(fits)).is_ok(),
+                "{src} fits {fits} bytes"
+            );
+            assert!(
+                matches!(
+                    parse_charged_checked(src, "", std::iter::empty(), Some(fits - 1)),
+                    Err(ParseFailure::Resource(_))
+                ),
+                "{src} does not fit {} bytes",
+                fits - 1
+            );
+        }
+    }
+
+    /// A formula-level universal's per-mention name (`?__uf.<n>.<iri>`) is charged before
+    /// it is built, at the size it has. A formula fact holding mentions at several de Bruijn
+    /// distances needs exactly its terms' bytes plus the declaration's scope entry (the
+    /// declared IRI kept as the key, the marker string, its node and the map entry), and is
+    /// refused one byte short.
+    #[test]
+    fn formula_universal_mentions_fit_the_allowance_exactly() {
+        let declaration = "http://ex/x".len()
+            + FORMULA_UNIVERSAL.len()
+            + super::super::bounded::TERM_NODE_BYTES
+            + std::mem::size_of::<(String, Term)>();
+        for src in [
+            "<http://ex/a> <http://ex/p> { @forAll <http://ex/x> . <http://ex/x> <http://ex/q> <http://ex/z> } .",
+            "<http://ex/a> <http://ex/p> { @forAll <http://ex/x> . <http://ex/x> <http://ex/q> { <http://ex/x> <http://ex/r> <http://ex/x> } } .",
+        ] {
+            let Ok(parsed) = parse_charged_checked(src, "", std::iter::empty(), None) else {
+                panic!("{src} is N3")
+            };
+            let fits: usize = declaration
+                + parsed.facts.iter().flatten().map(super::super::bounded::term_bytes).sum::<usize>();
             assert!(
                 parse_charged_checked(src, "", std::iter::empty(), Some(fits)).is_ok(),
                 "{src} fits {fits} bytes"
