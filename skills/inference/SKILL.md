@@ -108,8 +108,10 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
 // A log:includes / log:notIncludes / log:supports PATTERN bound through a variable
 // (`:cfg :pat ?f. ?s log:includes ?f`) is the formula it is bound to, matched exactly as if
-// written in place: the operator waits for the premise that binds it, and inside a backward
-// rule the formula takes that application's variable renaming. An unbound or non-formula
+// written in place: the operator waits for the premise that binds it (an unbound SCOPE
+// variable means the store and is not waited for), and inside a backward rule the formula
+// takes that application's variable renaming, as a bound collectAllIn / forAllIn clause
+// does (only the rule's own variable names are mapped). An unbound or non-formula
 // object (a "true" string included; only `{}` is the empty pattern) fails the premise
 // (GH #6936). Store-scoped, the
 // stratification counts it as EVERY predicate: under notIncludes negatively, so the rule is

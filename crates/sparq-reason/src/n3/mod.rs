@@ -584,10 +584,10 @@ fn formula_key(ts: &[[Term; 3]]) -> u64 {
 struct BwCtx<'a> {
     rules: &'a [Rule],
     rename: std::cell::Cell<usize>,
-    /// The backward-rule application ([`rename_vars`] space) whose renamed premise is being
-    /// evaluated, if any: a containment pattern bound through a variable there is renamed
-    /// into it, as the premise's own formulas are.
-    application: std::cell::Cell<Option<usize>>,
+    /// The backward-rule application whose renamed premise is being evaluated, if any: its
+    /// [`rename_vars`] space and the index of its rule in `rules`. A formula bound through a
+    /// variable there is resolved into it ([`into_application`]).
+    application: std::cell::Cell<Option<(usize, usize)>>,
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
@@ -2237,10 +2237,9 @@ fn match_premise_admitted(
                 // The pattern: a formula written in place, or the formula a variable is
                 // bound to, matched exactly as if it were written in place (GH #6936). Any
                 // other object is no pattern, and fails the premise for this binding.
-                // Inside a backward rule's premise the bound formula takes that rule
-                // application's renaming, as a formula written there does, so its variables
-                // share the application's bindings ([`BwCtx::application`]).
-                let renamed: Term;
+                // A bound formula is resolved into the active backward-rule application,
+                // as a formula written in the rule is ([`into_application`]).
+                let renamed: std::borrow::Cow<'_, Term>;
                 let inner: &[[Term; 3]] = match &pat[2] {
                     Term::Formula(t) => t,
                     Term::Var(_) => match resolved(&pat[2], &b) {
@@ -2251,16 +2250,13 @@ fn match_premise_admitted(
                             bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                             continue;
                         }
-                        val @ Term::Formula(t) => match bw.application.get() {
-                            Some(n) => {
-                                renamed = rename_vars(val, n);
-                                match &renamed {
-                                    Term::Formula(t) => t,
-                                    _ => continue,
-                                }
+                        val @ Term::Formula(_) => {
+                            renamed = into_application(val, bw);
+                            match &*renamed {
+                                Term::Formula(t) => t,
+                                _ => continue,
                             }
-                            None => t,
-                        },
+                        }
                         val if empty_formula(val) => NO_STATEMENTS,
                         // Unbound, or no formula: no pattern.
                         _ => continue,
@@ -2377,9 +2373,20 @@ fn match_premise_admitted(
                     bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                     continue;
                 }
+                // A clause reached through a variable is resolved into the active backward-rule
+                // application, as a clause written in the rule is ([`into_application`]).
+                let written = aggregation_clauses(op, &pat[0]);
+                let clauses: Vec<std::borrow::Cow<'_, Term>> = aggregation_clauses(op, &subj)
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| match written.get(i) {
+                        Some(Term::Formula(_) | Term::Lit(..)) => std::borrow::Cow::Borrowed(c),
+                        _ => into_application(c, bw),
+                    })
+                    .collect();
                 match op {
                     CollectOp::CollectAll => {
-                        let [template, clause, list_pat] = &members[..] else { continue };
+                        let ([template, _, list_pat], [clause]) = (&members[..], &clauses[..]) else { continue };
                         let Some(sols) = solve(clause, &b) else { continue };
                         if !negation_gate(bw) {
                             continue;
@@ -2406,7 +2413,7 @@ fn match_premise_admitted(
                         }
                     }
                     CollectOp::ForAll => {
-                        let [ca, cb] = &members[..] else { continue };
+                        let [ca, cb] = &clauses[..] else { continue };
                         let Some(sols_a) = solve(ca, &b) else { continue };
                         let holds = sols_a
                             .iter()
@@ -2592,10 +2599,20 @@ fn reads_outside_joins(p: &[Term; 3]) -> bool {
 }
 
 /// Stable-reorder a premise so each builtin atom comes after the atoms that
-/// can produce its input variables. Join atoms are always "ready" and keep
-/// their relative order; a builtin whose inputs are not yet available is
-/// deferred. If nothing is ready (e.g. the unbound-scope negation idiom) the
-/// first remaining atom runs, preserving the legacy order.
+/// can produce its input variables. Join atoms are always ready and keep
+/// their relative order; an atom whose inputs are not yet available is
+/// deferred.
+///
+/// An input is REQUIRED (a builtin's operands, a containment pattern or aggregation
+/// clause given through a variable) or DEFAULTED: an unbound scope variable of a scoped
+/// operator (`log:includes` / `notIncludes` / `supports`, `log:collectAllIn` /
+/// `forAllIn`) means the current store. Each step takes, in written order, the first atom
+/// of the best available tier: every input bound; else required inputs bound and each
+/// defaulted one unbound with no other remaining atom mentioning it, so it can only ever
+/// mean the store (aggregations, which read the store's complete answer, always take
+/// this tier). A defaulted input another remaining atom mentions is waited for. When no
+/// atom is ready the first remaining one runs (the legacy order, deterministic); an
+/// operator it leaves with an unbound required input fails its premise (fail-closed).
 fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
     fn term_vars(t: &Term, out: &mut FxHashSet<String>) {
         match t {
@@ -2619,30 +2636,57 @@ fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
     let mut produced: FxHashSet<String> = FxHashSet::default();
     let mut out: Vec<[Term; 3]> = Vec::new();
     while !remaining.is_empty() {
-        let ready = |i: usize| -> bool {
+        let bound = |t: &Term| match t {
+            Term::Var(v) => produced.contains(v),
+            _ => true,
+        };
+        // A defaulted scope: bound (tier 0), or unbound with no other remaining atom that
+        // mentions it (tier 1). One another atom may still bind waits for it, as does a
+        // compound scope with unbound variables.
+        let scope_tier = |i: usize, scope: &Term| -> Option<usize> {
+            match scope {
+                _ if vars_of(scope).is_subset(&produced) => Some(0),
+                Term::Var(v)
+                    if !remaining
+                        .iter()
+                        .any(|&j| j != i && premise[j].iter().any(|t| vars_of(t).contains(v))) =>
+                {
+                    Some(1)
+                }
+                _ => None,
+            }
+        };
+        // The tier of atom `i` (lower runs first), `None` while a required input is unbound.
+        let tier = |i: usize| -> Option<usize> {
             let pat = &premise[i];
             if is_join_atom(pat) {
-                return true;
+                return Some(0);
             }
             let subj_ready = vars_of(&pat[0]).is_subset(&produced);
             let obj_ready = vars_of(&pat[2]).is_subset(&produced);
+            let ready = |r: bool| r.then_some(0);
             if builtin(&pat[1]).is_some() {
-                return subj_ready && obj_ready; // comparison: both are inputs
+                return ready(subj_ready && obj_ready); // comparison: both are inputs
             }
             if let Some(gen) = list_generator(&pat[1]) {
-                return match gen {
+                return ready(match gen {
                     ListGen::Member | ListGen::Iterate => subj_ready,
                     ListGen::In => obj_ready,
-                };
+                });
             }
-            // A scope op also needs a pattern given through a variable (GH #6936); the
-            // variables of a pattern written in place are its outputs.
+            // A scope op needs a pattern given through a variable (GH #6936); the
+            // variables of a pattern written in place are its outputs. Its scope is
+            // defaulted.
             if scope_op(&pat[1]).is_some() {
-                let pattern_ready = match &pat[2] {
-                    Term::Var(v) => produced.contains(v),
-                    _ => true,
-                };
-                return subj_ready && pattern_ready;
+                return if bound(&pat[2]) { scope_tier(i, &pat[0]) } else { None };
+            }
+            // An aggregation needs its subject list and every clause given through a
+            // variable; the template, the list and a written clause's variables are its
+            // own. It reads the store's complete answer, so it runs after every atom that
+            // binds all its inputs. Its scope is defaulted.
+            if let Some(op) = collect_op(&pat[1]) {
+                let required = bound(&pat[0]) && aggregation_clauses(op, &pat[0]).iter().all(bound);
+                return if required { scope_tier(i, &pat[2]).map(|t| t.max(1)) } else { None };
             }
             // functional / binder op: bidirectional ops accept either side; the rest need
             // the subject.
@@ -2650,13 +2694,11 @@ fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
                 functional_builtin(&pat[1]),
                 Some(Func::Dtlit | Func::Negation | Func::InSeconds)
             ) || binder_builtin(&pat[1]).is_some();
-            if bidi {
-                subj_ready || obj_ready
-            } else {
-                subj_ready
-            }
+            ready(if bidi { subj_ready || obj_ready } else { subj_ready })
         };
-        let pos = remaining.iter().position(|&i| ready(i)).unwrap_or(0);
+        let tiers: Vec<Option<usize>> = remaining.iter().map(|&i| tier(i)).collect();
+        let best = tiers.iter().flatten().min().copied();
+        let pos = best.and_then(|b| tiers.iter().position(|&t| t == Some(b))).unwrap_or(0);
         let i = remaining.remove(pos);
         for t in &premise[i] {
             term_vars(t, &mut produced); // its outputs are now available
@@ -2703,7 +2745,7 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
         return Vec::new();
     }
     let mut out = Vec::new();
-    for rule in bw.rules {
+    for (ri, rule) in bw.rules.iter().enumerate() {
         for concl in &rule.conclusion {
             // Cheap gate: ground predicates must agree before we rename/unify anything.
             if let (Term::Iri(gp), Term::Iri(cp)) = (&goal[1], &concl[1]) {
@@ -2727,7 +2769,7 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            let outer = bw.application.replace(Some(n));
+            let outer = bw.application.replace(Some((n, ri)));
             let sols = match_premise_seeded(&prem, facts, &subst, None, bw, depth);
             bw.application.set(outer);
             for sol in sols {
@@ -2761,13 +2803,18 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
     out
 }
 
+/// The name rule variable `v` takes in the standardize-apart space of application `n`.
+fn application_var(n: usize, v: &str) -> String {
+    format!("__bw{n}_{v}")
+}
+
 /// `t` with every variable renamed into the standardize-apart space of rule application `n`
 /// (recursing into quoted formulae).
 fn rename_vars(t: &Term, n: usize) -> Term {
     match t {
         // A quoted formula's own universal is not a rule variable (GH #6754).
         Term::Var(v) if quoted_universal(v) => t.clone(),
-        Term::Var(v) => Term::Var(format!("__bw{n}_{v}")),
+        Term::Var(v) => Term::Var(application_var(n, v)),
         Term::Formula(ts) => Term::Formula(
             ts.iter().map(|tr| [rename_vars(&tr[0], n), rename_vars(&tr[1], n), rename_vars(&tr[2], n)]).collect(),
         ),
@@ -2779,6 +2826,54 @@ fn rename_vars(t: &Term, n: usize) -> Term {
         ])),
         _ => t.clone(),
     }
+}
+
+/// A formula bound at run time to a variable of a backward rule's premise (a containment
+/// pattern, an aggregation clause), resolved into the rule application being evaluated
+/// ([`BwCtx::application`]), so that it shares that application's bindings exactly as the
+/// same formula written in the rule does. Only the rule's own variable names, as written
+/// (its rule variables and the document-level universals it mentions), are mapped to the
+/// application's names ([`rename_vars`]); a variable already in some application's form,
+/// any other variable, and a formula-local universal are left alone, so a formula that
+/// already belongs to the application (bound from one of its own terms) is unchanged.
+/// Outside a backward application (a forward rule) the rule's variables are the binding's
+/// own: nothing to map.
+fn into_application<'t>(t: &'t Term, bw: &BwCtx) -> std::borrow::Cow<'t, Term> {
+    use std::borrow::Cow;
+    fn names<'r>(t: &'r Term, out: &mut FxHashSet<&'r str>) {
+        match t {
+            Term::Var(v) if !quoted_universal(v) => {
+                out.insert(v);
+            }
+            Term::Formula(ts) => ts.iter().flatten().for_each(|m| names(m, out)),
+            Term::List(ms) => ms.iter().for_each(|m| names(m, out)),
+            Term::Triple(tr) => tr.iter().for_each(|m| names(m, out)),
+            _ => {}
+        }
+    }
+    fn map(t: &Term, n: usize, own: &FxHashSet<&str>) -> Term {
+        match t {
+            Term::Var(v) if own.contains(v.as_str()) => Term::Var(application_var(n, v)),
+            Term::Formula(ts) => Term::Formula(
+                ts.iter().map(|tr| [map(&tr[0], n, own), map(&tr[1], n, own), map(&tr[2], n, own)]).collect(),
+            ),
+            Term::List(ms) => Term::List(ms.iter().map(|m| map(m, n, own)).collect()),
+            Term::Triple(tr) => {
+                Term::Triple(Box::new([map(&tr[0], n, own), map(&tr[1], n, own), map(&tr[2], n, own)]))
+            }
+            _ => t.clone(),
+        }
+    }
+    let Some((n, ri)) = bw.application.get() else { return Cow::Borrowed(t) };
+    let Some(rule) = bw.rules.get(ri) else { return Cow::Borrowed(t) };
+    let mut own = FxHashSet::default();
+    rule.premise.iter().chain(&rule.conclusion).flatten().for_each(|m| names(m, &mut own));
+    let mut mentioned = FxHashSet::default();
+    names(t, &mut mentioned);
+    if mentioned.is_disjoint(&own) {
+        return Cow::Borrowed(t);
+    }
+    Cow::Owned(map(t, n, &own))
 }
 
 /// `t` resolved through any chain of variable bindings in `b`, borrowed (bounded against

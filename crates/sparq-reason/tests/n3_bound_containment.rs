@@ -247,6 +247,66 @@ fn a_bound_pattern_shares_the_rules_variables() {
     }
 }
 
+/// A backward rule's document with `@forAll :x`, the premise `premise` proving
+/// `?x :hit :yes`, and forward rules reporting which of `:a` / `:c` was proved.
+fn backward_doc(facts: &str, premise: &str) -> String {
+    format!(
+        "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
+         @prefix list: <http://www.w3.org/2000/10/swap/list#>.
+         @forAll :x.
+         {facts}
+         {{ :x :hit :yes }} <= {{ {premise} }}.
+         {{ :c :hit :yes }} => {{ :r :fired :c }}.
+         {{ :a :hit :yes }} => {{ :r :fired :a }}."
+    )
+}
+
+/// A formula that already belongs to the backward-rule application (bound from one of
+/// its own terms, here through `list:member`) keeps the application's variables: it is
+/// not renamed a second time, which would free them.
+#[test]
+fn a_bound_pattern_from_the_applications_own_term_keeps_its_bindings() {
+    let want = vec![[iri("r"), iri("fired"), iri("a")]];
+    for premise in [
+        "( { :x :p :b } ) list:member ?f. { :a :p :b } log:includes ?f",
+        "{ :a :p :b } log:includes { :x :p :b }",
+    ] {
+        let src = backward_doc("", premise);
+        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+    }
+}
+
+/// An aggregation clause bound through a variable shares a backward rule's variables as
+/// the clause written in the rule does (#6851's bound-clause path).
+#[test]
+fn a_bound_aggregation_clause_shares_the_rules_variables() {
+    let want = vec![[iri("r"), iri("fired"), iri("a")]];
+    for clause in ["?f", "{ :x :p :b }"] {
+        for aggregation in [
+            format!("( {{}} {clause} ) log:forAllIn {{ :a :p :b }}"),
+            format!("( :t {clause} ( :t ) ) log:collectAllIn {{ :a :p :b }}"),
+        ] {
+            let src = backward_doc(":cfg :pat { :x :p :b }.", &format!(":cfg :pat ?f. {aggregation}"));
+            assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+        }
+    }
+}
+
+/// An unbound scope variable means the store, so it is no input to wait for: an operator
+/// whose only unbound input is such a scope runs, and can bind the pattern another
+/// operator needs, in either written order.
+#[test]
+fn a_store_scoped_operator_can_bind_another_operators_pattern() {
+    let consumer = "{ :a :p :b } log:includes ?f";
+    let producer = "?scope log:includes { :cfg :hit ?f }";
+    for premise in [format!("{consumer}. {producer}"), format!("{producer}. {consumer}")] {
+        let src = doc(&format!("{{ {premise} }} => {{ :r :includes :hit }}."));
+        let want = vec![fired("includes", "hit")];
+        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+        assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+    }
+}
+
 /// The compiled evaluator has no variable pattern: it refuses the rule, so its callers
 /// route the document to the batch engine instead of diverging from it.
 #[cfg(feature = "compiled-rules")]

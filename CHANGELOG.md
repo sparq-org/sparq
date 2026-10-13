@@ -120,8 +120,10 @@ Both changes are in that commit, but its copy of this file does not list them.
 - **sparq-reason (N3):** a `log:includes` / `log:notIncludes` / `log:supports` pattern
   bound through a variable is matched as the bound formula, as when written inline; it was
   matched as the empty pattern, so `log:includes` held vacuously and `log:notIncludes`
-  never fired. The operator waits for the premise that binds the pattern, and inside a
-  backward rule the bound formula shares the rule's variables as an inline one does. An
+  never fired. The operator waits for the premise that binds the pattern (an unbound
+  scope variable means the store and is not waited for), and inside a backward rule a
+  bound pattern, like a bound `log:collectAllIn` / `log:forAllIn` clause, shares the rule's
+  variables as an inline one does. An
   unbound or non-formula object (including a string spelled `"true"`; only `{}` is the
   empty pattern) now fails the premise. With the store as the scope,
   the automatic stratification counts a variable pattern as every predicate: a
