@@ -38,7 +38,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # gated in the target block below, exactly as it was in sparq-engine: SERVICE makes no sense
 # in the browser (no arbitrary cross-origin HTTP, no blocking I/O), so the HTTP stack never
 # enters a wasm bundle even if the feature were forced on for a wasm target.
-service = ["dep:serde", "dep:serde_json", "dep:quick-xml", "dep:ureq", "dep:rustc-hash"]
+service = ["dep:serde", "dep:serde_json", "dep:quick-xml", "dep:ureq"]
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
@@ -47,9 +47,6 @@ sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = fal
 # oxrdf terms (Term / Variable / NamedNode / Literal / …) are the SERVICE result vocabulary
 # the parsers build and the caller interns; already in the engine's dep tree.
 oxrdf.workspace = true
-# rustc-hash (FxHashMap) backs the SRX parser's per-row binding accumulator; already in the
-# workspace tree (sparq-core / sparq-engine). Pulled in only when `service` is on.
-rustc-hash = { workspace = true, optional = true }
 # SPARQL-Results-JSON streaming parse drives serde's `DeserializeSeed`/`Visitor` traits
 # directly (one binding object at a time — no whole-document DOM). serde is pulled in only
 # by `service`; no derive, default-features off (only the core `serde::de` traits are used).
