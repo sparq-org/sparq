@@ -2364,7 +2364,7 @@ fn link_param(s: &str) -> Option<(&str, &str, &str)> {
 }
 
 /// The links of a Link header value (RFC 8288 section 3), read as they are needed: a caller that
-/// stops at a bound (see [`check_headers`]) has spent nothing on what lies past it, and nothing
+/// stops at a bound (see `check_headers`) has spent nothing on what lies past it, and nothing
 /// is allocated. Reading stops at the first part that is not a `link-value`: a target without its
 /// `>` or with a `<` in it, or parameters that are not `link-param`s (a quoted string never
 /// closed among them); nothing after it is read as a link.
