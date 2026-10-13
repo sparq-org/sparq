@@ -738,19 +738,29 @@ mod materialise_budget_tests {
     }
 
     /// A query cancelled after evaluation but while its terms are materialised returns the
-    /// budget error, not a complete or shortened result.
+    /// budget error, not a complete or shortened result, on the sequential path and (with
+    /// `parallel`, at `PAR_THRESHOLD` rows or more) the parallel one.
     #[test]
     fn a_select_cancelled_while_materialising_returns_the_budget_error() {
-        let nt: String = (0..3000).map(|i| format!("<http://ex/s{i}> <http://ex/p> \"v{i}\" .\n")).collect();
-        let graph = Graph::load_str(&nt, "ntriples").unwrap();
-        let flag = Arc::new(AtomicBool::new(false));
-        let budget = QueryBudget::cancelled_by(Arc::clone(&flag));
-        let q = "SELECT ?s ?v WHERE { ?s <http://ex/p> ?v }";
-        assert_eq!(crate::query_with_budget(&graph, q, &budget).unwrap().rows.len(), 3000);
-        let set = Arc::clone(&flag);
-        BEFORE_MATERIALISE.with(|hook| hook.set(Some(Box::new(move || set.store(true, std::sync::atomic::Ordering::Relaxed)))));
-        let err = crate::query_with_budget(&graph, q, &budget).unwrap_err();
-        assert!(err.contains("budget exceeded"), "{err}");
+        // The larger size takes the parallel branch when `parallel` is on.
+        #[cfg(feature = "parallel")]
+        const _: () = assert!(PAR_THRESHOLD < 51_000);
+        for n in [3_000, 51_000] {
+            let nt: String = (0..n).map(|i| format!("<http://ex/s{i}> <http://ex/p> \"v{i}\" .\n")).collect();
+            let graph = Graph::load_str(&nt, "ntriples").unwrap();
+            let flag = Arc::new(AtomicBool::new(false));
+            let budget = QueryBudget::cancelled_by(Arc::clone(&flag));
+            let q = "SELECT ?s ?v WHERE { ?s <http://ex/p> ?v }";
+            assert_eq!(crate::query_with_budget(&graph, q, &budget).unwrap().rows.len(), n);
+            let set = Arc::clone(&flag);
+            BEFORE_MATERIALISE.with(|hook| {
+                hook.set(Some(Box::new(move || set.store(true, std::sync::atomic::Ordering::Relaxed))))
+            });
+            let Err(err) = crate::query_with_budget(&graph, q, &budget) else {
+                panic!("{n} rows: the result was returned");
+            };
+            assert!(err.contains("query budget exceeded (cancelled"), "{n} rows: {err}");
+        }
     }
 
     /// A budget that falls due while rows are materialised stops the loop early, and the gate
