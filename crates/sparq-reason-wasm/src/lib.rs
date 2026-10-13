@@ -199,25 +199,7 @@ impl Reasoner {
     }
 }
 
-/// Appends `s` to `out` as a JSON string literal (quotes + minimal escaping). The bundle
-/// carries no serde, so — exactly like the lean bundle's SPARQL-JSON serialiser — strings
-/// are escaped by hand. Escapes the two mandatory characters (`"` and `\`) plus the C0
-/// control characters JSON forbids unescaped.
-pub(crate) fn push_json_string(out: &mut String, s: &str) {
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-}
+pub(crate) use sparq_core::json::push_string as push_json_string;
 
 #[cfg(test)]
 mod tests {

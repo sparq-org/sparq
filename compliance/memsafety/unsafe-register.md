@@ -49,11 +49,12 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**93 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
+**97 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
-with its 8 sites confined to two **example benchmark harnesses'** counting allocators, which
+with its 12 sites confined to the counting allocators of two **example benchmark harnesses** and
+one **integration test**, which
 a custom `#[global_allocator]` unavoidably requires; **`sparq-lws-wasm`** (sq-wubkf) is the one
 crate whose 4 allocator sites are **SHIPPING** — a `#[global_allocator]` is the only way to bound
 wasm32 linear memory, so that crate's root is `deny(unsafe_code)` with a single
@@ -244,11 +245,13 @@ Miri does not cover it (Miri supplies its own allocator and does not model a
 | `tests/service_stream_bounded.rs:98` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
 | `tests/service_stream_bounded.rs:106` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; only the returned pointer's nullness is inspected before recording the delta. |
 
-### `sparq-lws-core` — 8 sites (example-only counting global allocators) [FABLE-5]
+### `sparq-lws-core` — 12 sites (example- and test-only counting global allocators) [FABLE-5]
 
 (sq-gg0qq.2 — crate imported whole from jeswr/solid-server-rs.) The **library and the
-server binary** are `#![forbid(unsafe_code)]` and ship **zero** `unsafe`. These 8 sites
-live entirely in two **example** benchmark harnesses (never the shipped server): the
+server binary** are `#![forbid(unsafe_code)]` and ship **zero** `unsafe`. These 12 sites
+live entirely in two **example** benchmark harnesses and one **integration test** (never the
+shipped server): the linkset parse-amplification test `tests/linkset_parse_amplification.rs`
+(measures peak live bytes while a PATCH body is read, the bound `LINKSET_PATCH_BODY` rests on), the
 deterministic allocation-count microbench `examples/read_response_alloc_microbench.rs`
 (counts `GlobalAlloc::alloc`/`realloc` ops on the GET/HEAD read-response header path) and
 the shared harness module `examples/support/mod.rs` (`#[path]`-included by the
@@ -261,7 +264,7 @@ identical arguments, so `System` discharges all of `GlobalAlloc`'s obligations; 
 wrappers only read `Layout::size()`/`new_size`/an armed flag and bump `Relaxed` atomics —
 no pointer `System` returns is ever dereferenced, retained, or aliased. Bounded by
 **review + the trivial forward-to-`System` argument**, enforced by the file-local
-`#![warn(clippy::undocumented_unsafe_blocks)]` in both files (each `unsafe impl` carries a
+`#![warn(clippy::undocumented_unsafe_blocks)]` in all three files (each `unsafe impl` carries a
 `// SAFETY:` comment). Miri does not model a `#[global_allocator]` that calls `System`;
 the examples run on the standard toolchain.
 
@@ -275,6 +278,10 @@ the examples run on the standard toolchain.
 | `examples/support/mod.rs:78` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; `layout.size()` is only read into the byte counter. |
 | `examples/support/mod.rs:83` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
 | `examples/support/mod.rs:86` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; `new_size` is only read into the byte counter. |
+| `tests/linkset_parse_amplification.rs:24` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `SeqCst` live/peak byte counters. TEST-only; lib + bin stay `forbid(unsafe_code)`. |
+| `tests/linkset_parse_amplification.rs:26` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged; `layout.size()` is only read into the counters. |
+| `tests/linkset_parse_amplification.rs:33` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
+| `tests/linkset_parse_amplification.rs:38` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; the returned pointer is only null-checked to keep the counter right. |
 
 ### `sparq-lws-wasm` — 4 sites (the SHIPPING bounded `#[global_allocator]`) [SONNET-4.6]
 

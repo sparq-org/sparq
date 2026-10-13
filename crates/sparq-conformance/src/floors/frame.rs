@@ -20,7 +20,7 @@
 /// * **New (native pipeline, THIS floor): 92/92** under the STRONGER normative
 ///   document oracle — the framed output is deep-compared to the suite's expected
 ///   document with `json_ld_equal` (object key order insignificant; array order
-///   significant only inside `@list`), and the 3 NegativeEvaluationTests are RUN
+///   significant only inside `@list` and a `@json` payload), and the 3 NegativeEvaluationTests are RUN
 ///   (pass iff `frame()` raises exactly the manifest's `expectErrorCode`:
 ///   `invalid frame`, `invalid @embed value`), not skipped.
 ///

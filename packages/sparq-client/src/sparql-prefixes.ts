@@ -7,6 +7,8 @@
 // the same logic serves the Next.js site and the Tauri 2 webview, and is unit-testable in
 // `node:test`. It takes no opinion on UI; a component decides how to surface the suggestion.
 
+import { isWritablePrefixBinding } from "./rdf-syntax.js";
+
 /** A well-known prefix → namespace IRI binding. */
 export interface PrefixBinding {
   prefix: string;
@@ -63,15 +65,18 @@ export function declaredPrefixes(query: string): Set<string> {
  * empty prefix `:` is represented by the empty-string label. First declaration of a label wins.
  * Best-effort over the highlight grammar (not a full parse) — intended for re-using the user's
  * own prefixes when abbreviating result IRIs (see `prettyTurtle`). [OPUS-4.8] sq-gb4o (#805)
+ *
+ * A declaration whose label is not a `PN_PREFIX` or whose IRI holds a character IRIREF forbids
+ * is skipped, so every returned binding can be written back as a declaration unchanged (#6719).
  */
 export function declaredPrefixBindings(query: string): PrefixBinding[] {
   const out: PrefixBinding[] = [];
   const seen = new Set<string>();
   for (const m of query.matchAll(DECLARED_WITH_IRI_RE)) {
-    const prefix = m[1] ?? "";
-    if (seen.has(prefix)) continue;
-    seen.add(prefix);
-    out.push({ prefix, iri: m[2] });
+    const binding = { prefix: m[1] ?? "", iri: m[2] };
+    if (seen.has(binding.prefix) || !isWritablePrefixBinding(binding)) continue;
+    seen.add(binding.prefix);
+    out.push(binding);
   }
   return out;
 }
@@ -98,15 +103,26 @@ export function missingCommonPrefixes(query: string): PrefixBinding[] {
 }
 
 /** Render `PREFIX foo: <iri>` lines for the given bindings (one per line, no trailing
- * newline). */
+ * newline). Throws when a label is not a `PN_PREFIX` or an IRI holds a character IRIREF
+ * forbids, rather than emit a declaration that ends early (#6719). */
 export function renderPrefixLines(bindings: readonly PrefixBinding[]): string {
-  return bindings.map((b) => `PREFIX ${b.prefix}: <${b.iri}>`).join("\n");
+  return bindings
+    .map((b) => {
+      if (!isWritablePrefixBinding(b)) {
+        throw new Error(
+          `renderPrefixLines: ${JSON.stringify(b.prefix)} -> ${JSON.stringify(b.iri)} is not a writable PREFIX declaration`,
+        );
+      }
+      return `PREFIX ${b.prefix}: <${b.iri}>`;
+    })
+    .join("\n");
 }
 
 /**
  * Prepend the given prefix declarations to a query, skipping any the query already declares,
  * and separating the inserted block from the body with a blank line. Returns the query
- * unchanged when there is nothing new to add. Pure — does not mutate its input.
+ * unchanged when there is nothing new to add. Pure — does not mutate its input. Throws as
+ * {@link renderPrefixLines} does for a binding that cannot be declared as written.
  */
 export function withPrefixes(query: string, bindings: readonly PrefixBinding[]): string {
   const declared = declaredPrefixes(query);

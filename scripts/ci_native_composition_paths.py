@@ -20,6 +20,8 @@ def relevant_path(path: str) -> bool:
         "bench/zk-bindings/protocol.json", "bench/zk-bindings/inventory.json",
         "bench/zk-bindings/native_ci.py", "bench/zk-bindings/test_native_ci.py",
         "bench/zk-bindings/test_harness.py",
+        # vendor-support/wasmer/verify.py requires the wasmer-derive audit policy here.
+        "supply-chain/config.toml",
     }
 
 

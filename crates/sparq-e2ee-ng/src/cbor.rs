@@ -22,12 +22,12 @@
 use crate::error::{Error, Result};
 
 // ---- major types -----------------------------------------------------------
-const MAJOR_UINT: u8 = 0;
+pub(crate) const MAJOR_UINT: u8 = 0;
 const MAJOR_NINT: u8 = 1;
-const MAJOR_BYTES: u8 = 2;
+pub(crate) const MAJOR_BYTES: u8 = 2;
 const MAJOR_TEXT: u8 = 3;
 const MAJOR_ARRAY: u8 = 4;
-const MAJOR_MAP: u8 = 5;
+pub(crate) const MAJOR_MAP: u8 = 5;
 
 /// Parser limits (§8.1 "deployment limits"). A block/message that declares more
 /// than any of these is rejected before any allocation proportional to the
@@ -82,22 +82,7 @@ impl Writer {
     }
 
     fn head(&mut self, major: u8, arg: u64) {
-        let mt = major << 5;
-        if arg <= 23 {
-            self.buf.push(mt | arg as u8);
-        } else if arg <= u8::MAX as u64 {
-            self.buf.push(mt | 24);
-            self.buf.push(arg as u8);
-        } else if arg <= u16::MAX as u64 {
-            self.buf.push(mt | 25);
-            self.buf.extend_from_slice(&(arg as u16).to_be_bytes());
-        } else if arg <= u32::MAX as u64 {
-            self.buf.push(mt | 26);
-            self.buf.extend_from_slice(&(arg as u32).to_be_bytes());
-        } else {
-            self.buf.push(mt | 27);
-            self.buf.extend_from_slice(&arg.to_be_bytes());
-        }
+        push_head(&mut self.buf, major, arg);
     }
 
     /// Encode an unsigned integer.
@@ -153,6 +138,31 @@ impl Writer {
         self
     }
 }
+
+/// Append a shortest-form CBOR head (`major` type, argument `arg`) to `buf`.
+/// At most [`MAX_HEAD_LEN`] bytes. Shared by [`Writer`] and the secret-bearing
+/// encoder in `capability`, which writes into its own pre-reserved buffer.
+pub(crate) fn push_head(buf: &mut Vec<u8>, major: u8, arg: u64) {
+    let mt = major << 5;
+    if arg <= 23 {
+        buf.push(mt | arg as u8);
+    } else if arg <= u8::MAX as u64 {
+        buf.push(mt | 24);
+        buf.push(arg as u8);
+    } else if arg <= u16::MAX as u64 {
+        buf.push(mt | 25);
+        buf.extend_from_slice(&(arg as u16).to_be_bytes());
+    } else if arg <= u32::MAX as u64 {
+        buf.push(mt | 26);
+        buf.extend_from_slice(&(arg as u32).to_be_bytes());
+    } else {
+        buf.push(mt | 27);
+        buf.extend_from_slice(&arg.to_be_bytes());
+    }
+}
+
+/// Upper bound on the length of one CBOR head written by [`push_head`].
+pub(crate) const MAX_HEAD_LEN: usize = 9;
 
 /// Encode a single unsigned integer to canonical CBOR bytes.
 pub fn enc_uint(v: u64) -> Vec<u8> {

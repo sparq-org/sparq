@@ -313,6 +313,28 @@ jobs:
       - name: Sync wasm bundle into site/public/wasm/
         if: needs.config.outputs.mode == 'full'
         run: npm run sync-wasm
+      # The Playwright web server runs `next dev` without the prebuild, so the paper and spec
+      # pages render their "not built yet" placeholder unless the Typst fragments exist on disk.
+      # Build them on the host before the container run, as the a11y sweep does above.
+      - name: Install Typst CLI (pinned, SHA-256 verified)
+        if: needs.config.outputs.mode == 'full'
+        run: |
+          set -euo pipefail
+          TYPST_VERSION=v0.15.0
+          TYPST_SHA256=59b207df01be2dab9f13e80f73d04d7ff8273ffd46b3dd1b9eef5c60f3eeabea
+          url="https://github.com/typst/typst/releases/download/${TYPST_VERSION}/typst-x86_64-unknown-linux-musl.tar.xz"
+          curl -sSfL -o /tmp/typst.tar.xz "$url"
+          echo "${TYPST_SHA256}  /tmp/typst.tar.xz" | sha256sum -c -
+          tar -xf /tmp/typst.tar.xz -C /tmp
+          mkdir -p "$HOME/.local/bin"
+          cp /tmp/typst-x86_64-unknown-linux-musl/typst "$HOME/.local/bin/typst"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/typst" --version
+      - name: Build spec + paper fragments (Typst)
+        if: needs.config.outputs.mode == 'full'
+        run: |
+          npm run build-specs
+          npm run build-papers
       - name: Determinism grep gate (no waitForTimeout calls)
         if: needs.config.outputs.mode == 'full'
         run: npm run test:e2e:grep-gate
@@ -360,6 +382,68 @@ jobs:
             site/playwright-report/
           if-no-files-found: ignore
           retention-days: 14
+
+  # Dispatch-only companion to the re-baseline path above: publishes the re-minted PNGs to a
+  # throwaway `vr-refresh/<run id>` branch, so a reviewer (or an agent session whose network
+  # cannot reach artifact storage) can read them from git, eyeball each one, and open a PR with
+  # only the intended changes. Nothing is merged here; main is never written. `contents: write`
+  # is scoped to this job alone, and the job runs only for a manual dispatch from main.
+  push-refreshed-baselines:
+    name: push refreshed visual baselines to a review branch (dispatch-only)
+    needs: [config, visual-sweep]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.config.outputs.vr_refresh == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Download the re-minted baselines
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: refreshed-visual-baselines
+          path: ${{ runner.temp }}/vr-artifact
+      - name: Commit them to vr-refresh/<run id>
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="vr-refresh/${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          # Take only regular PNG files under the two baseline directories; anything else in the
+          # artifact is reported and left out.
+          src="${RUNNER_TEMP}/vr-artifact"
+          dest="site/e2e/visual/baselines"
+          png_magic="$(printf '\x89PNG\r\n\x1a\n' | od -An -tx1)"
+          while IFS= read -r -d '' f; do
+            rel="${f#"$src"/}"
+            case "$rel" in
+              *..*) echo "skipping ${rel}: unexpected path"; continue ;;
+              visual-desktop/*.png|visual-mobile/*.png) ;;
+              *) echo "skipping ${rel}: not a baseline PNG"; continue ;;
+            esac
+            if [ "$(head -c 8 "$f" | od -An -tx1)" != "$png_magic" ]; then
+              echo "skipping ${rel}: not a PNG file"; continue
+            fi
+            mkdir -p "$(dirname "${dest}/${rel}")"
+            cp "$f" "${dest}/${rel}"
+          done < <(find "$src" -type f -print0)
+          find "$src" -type l -printf 'skipping %P: symlink\n'
+          git add -- "$dest"
+          if git diff --cached --quiet; then
+            echo "No baseline changed; nothing to push."
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m "chore(site): re-minted visual baselines from run ${GITHUB_RUN_ID} (unreviewed)"
+          # The empty lease makes the push fail if the branch already exists, so it only ever creates.
+          git push --force-with-lease="refs/heads/${branch}:" \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/${branch}"
+          echo "Pushed ${branch}. Review every changed PNG before taking any into a PR." >> "$GITHUB_STEP_SUMMARY"
 
   # ── Category 3: cross-browser P1 journeys (firefox + webkit) ─────────────────────────────
   cross-browser:

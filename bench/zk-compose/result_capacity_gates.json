@@ -8,25 +8,25 @@
     "note": "Earlier GPT-6 measurement over superseded Noir bytes (older compose_core/src/lib.nr, no version-4 files). Kept for history only; it is not the measurement bound to source_files."
   },
   "measured_source": {
-    "recorded_by": "OPUS-5.5",
-    "source_commit": "14d426bde6557ffc3621f50fd34133f8d278aea9",
-    "source_tree": "c076ab7f82bd8b770c92cded76e21363266bc258",
-    "observed_at_utc": "2026-09-26T13:38:08.582199+00:00",
-    "platform": "Linux x86_64 EC2 work box",
+    "source_commit": "0b570a5c46e7dee04981d26f33c3e74b5160fa5c",
+    "source_tree": "8e16b9ccd821a4b3b46e3063257589840ba32514",
+    "observed_at_utc": "2026-10-12T21:46:14+00:00",
+    "platform": "Linux x86_64 shared cloud work box",
     "canonical": false,
     "tool_executable_sha256": {
       "nargo": "0852cd5631ac5ca25f744f25c931e3cff16351d9bcdbfb03cebb48a4494a0fe3",
       "bb": "d7621dfb151f55c23fb04bf274f366a6a1e0516b85a3cf0ae9165a9952509793"
     },
-    "job_sha256": "8045b96ad07910bcc2d5f72d23a241bf27a5a201a84997eb8081cfa32be6a378",
-    "independent_handoff_sha256": "36bdbdd26a2238e5a140e8c00dedc4afe68dc7657b29e2728b95c2e8b045603c"
+    "job_sha256": "f3f43b02dea5c8f0ae68cdf41cfd6e2811b9e4d5078711f6a86e3d2464c2ab1e",
+    "independent_handoff_sha256": "66ff73e60b956ba259aa8bcec72f4d4ec4d811e035be6becd03933025c2e22ef"
   },
-  "measurement_method": "[OPUS-5.5] At measured_source, each listed member was compiled with the pinned nargo and measured with `bb gates -s ultra_honk`; the compiled artifact was rehashed on the remote host. Every circuit_size and ACIR bytecode hash equalled the value already recorded here, so no member value changed.",
-  "limitations": "[OPUS-5.5] One independent non-canonical work-box run; future CI replays are still required. Static circuit size only; no timing was taken and no earlier timing is relabelled. source_files, not source_commit, binds the Noir bytes.",
+  "measurement_method": "At measured_source, two independent runs from clean git archives of source_commit compiled every listed member with the pinned nargo, hashed the ACIR bytecode, ABI and artifact, measured `bb gates -s ultra_honk` and, for the v1 members, regenerated the noir-recursive verification key (bench/zk-compose/scripts/remeasure_result_evidence.py). The two runs agreed on every circuit size, ACIR, ABI, key and gate log hash; every v1 ACIR, ABI and key equalled its baseline record. The compiled artifact embeds its checkout path, so artifact_sha256 is kept as recorded. The two-run agreement was checked outside the repository and cannot be reproduced from it alone: job_sha256 and independent_handoff_sha256 identify the job manifest and the second run's output, which are retained outside the repository, and that output includes path-dependent artifact hashes, so a rerun will not reproduce its digest.",
+  "limitations": "Non-canonical: measured on a shared work box, not a dedicated machine; future CI replays are still required. Static compile, circuit size and key identity only; no timing, soundness or external-audit claim. source_files, not source_commit, binds the Noir bytes.",
   "nargo_version": "nargo version = 1.0.0-beta.21\nnoirc version = 1.0.0-beta.21+89a0f0faf3a5f1273c8ac4843b7877882437e277\n(git version hash: 89a0f0faf3a5f1273c8ac4843b7877882437e277, is dirty: false)",
   "bb_version": "5.0.0-nightly.20260324",
   "comparison_base": "713025dc0fcdcbdcd070ba4dcbde524be50ba055",
   "source_files": {
+    "zk/compose/compose_core/src/blake3_literal.nr": "42a83191069ed5848fd0a3ec4ee4c22698d76fc5098d9d3590bd132742946e03",
     "zk/compose/compose_core/src/derivation.nr": "cd6e9ebd2b77265d8535e26108558dc3e87eb5d7d674f4f9ce0849df3c0cba5d",
     "zk/compose/compose_core/src/entail.nr": "a6793433075b49bc50d535c400e5141d62b74e1ceaf68aa67608dea63c56f25c",
     "zk/compose/compose_core/src/filter_float.nr": "de9ae1c384c760a4a74f5c74e42bd9f403eca72db12f7716ab899e7d0d747ea8",
@@ -37,13 +37,13 @@
     "zk/compose/compose_core/src/holder.nr": "188547970112d6ddd02ebbb36a7745a66ef69e5ee3130c39b28ab9ab285f31e5",
     "zk/compose/compose_core/src/issuer.nr": "526117da030c2be5b69d34aff7aa04d51081d7200cc35fb853d86ae961980e36",
     "zk/compose/compose_core/src/join.nr": "584777b6c74b0c1986dddb95ecf2c0a501993e9baf4f813ac9a04929a293d0b3",
-    "zk/compose/compose_core/src/lib.nr": "7c8177062cb77aa566e1b3d552013c7423107e8f93f13d4cd751e429426cc289",
+    "zk/compose/compose_core/src/lib.nr": "4e1120eeb438cb38000e1c7b12598bfb9f50a23d85938a0db9712d5ad768a91b",
     "zk/compose/compose_core/src/n3.nr": "6af6c777a5ac26d53c722cbc6f93f4b89e64efa3e03a02c2cf15815a2acb491a",
     "zk/compose/compose_core/src/path.nr": "9c3d3bbf417e169e7b236eae9e40505200b832af4a59980577e3b8ab5f2e807d",
     "zk/compose/compose_core/src/result.nr": "573287c58a8981a9add36c98c0cbab3fb8d53b1d4bed5bc916d3d8659176acf3",
-    "zk/compose/compose_core/src/result_integer.nr": "bbc2708d4aea762024012e8004081529763b0c648889b750e39099be80d2a6c6",
+    "zk/compose/compose_core/src/result_integer.nr": "2171a7dfa4ff44a6701c8e8fabd86d8e7f49fd477be9310f6e3719dea2bb057b",
     "zk/compose/compose_core/src/result_public.nr": "e546207a0f726050e60576d52d5c3f0c17e98838dad1fa2a0210ff4069778fd2",
-    "zk/compose/compose_core/src/result_signed_integer.nr": "00e3a145242e7e5a809b91dc3b4862b78c82d93217288a46094ef4e94bde7706",
+    "zk/compose/compose_core/src/result_signed_integer.nr": "3c77f2b721a3f0503c05c6bacaaf1416c23307ca6f2e967b442bff236c40b23b",
     "zk/compose/compose_core/src/revoke.nr": "46b78bfc9164a9b531b03a86f67508ded3f27989bcc0be9d29377d610cc12089",
     "zk/compose/compose_core/src/sameas.nr": "3efdb7675101ac68fd42a94b4943a111bc41f8e79d8403f5866dd623503033cf",
     "zk/compose/compose_core/src/scan.nr": "98aa1352d6391b7a66093b5207ee2dfe20e2e63ecf399f5ca3cd5b57b3d84738",
@@ -146,16 +146,16 @@
       "acir_bytecode_sha256": "eabe4c1578eb0e494a5c52948777c914b18c1f4e87b368444b0980c82695151b"
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 462049,
-      "acir_bytecode_sha256": "457572732890e59403f43d07d383510ddd63195fe963f50792272574042bad24"
+      "circuit_size": 107640,
+      "acir_bytecode_sha256": "34d0d45db87cbccd18e96da4310d63f4fbe9632afcc401bd1a02cc3eca784f31"
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 462597,
-      "acir_bytecode_sha256": "b6c7cb56f9a879a82d1116eaca22ba976306a01304c3c62412789b3607d107f2"
+      "circuit_size": 108188,
+      "acir_bytecode_sha256": "2daff5908595d982d2b9d144f3eac49005996fe06001ded559c0d7804040e621"
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 462832,
-      "acir_bytecode_sha256": "d894345ebaee45832eb7b47b3772eac50a2bc51b4598b9219eab1a0edcecb272"
+      "circuit_size": 108423,
+      "acir_bytecode_sha256": "e897cd87e85b61b21eba8bb2778a7fb1d55b099c7eb01545a51db96ab0e5ce62"
     },
     "result_v2_k1_n16_p3_r4_f2_i8_d17": {
       "circuit_size": 69619,
@@ -174,16 +174,16 @@
       "acir_bytecode_sha256": "3b2ddec768d8485a89b2598e83f6dc27df9cdea6963213c2f1e74eb7143a628f"
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 488858,
-      "acir_bytecode_sha256": "8389e9b07f5750b9e07e06c8072c9718e7dde2af85d6046ae318eedbe6e0dc4c"
+      "circuit_size": 134452,
+      "acir_bytecode_sha256": "f36cf15aad468f2008a5c01ff4e5a2df3496c0491ac7a1c905cb09c60255b6f2"
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 489954,
-      "acir_bytecode_sha256": "270d7273d89ca3f1c8e128153bf38ad98ba72fc7e4b59dd66bf7a8899392a668"
+      "circuit_size": 135548,
+      "acir_bytecode_sha256": "66f47cda448ca1b59aa5ad05ba2c372447dfa37e6dd4e68b2f309d6240790846"
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 490424,
-      "acir_bytecode_sha256": "caac29170d101dfa3c5b7117930fd198fb418639ecda11a499322eec41da5274"
+      "circuit_size": 136018,
+      "acir_bytecode_sha256": "555ab43deea263adaecfaf8b0d4494f352ccc63c015b8a7d4826abcff11817d0"
     },
     "result_v2_k2_n16_p3_r4_f2_i8_d17": {
       "circuit_size": 96979,

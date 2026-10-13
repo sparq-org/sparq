@@ -1423,6 +1423,32 @@ impl PodStore {
                     .map_err(|e| format!("the update could not be committed: {e}"));
             }
         }
+        // A single `DELETE`/`INSERT … WHERE` (the LDP PATCH shape) whose static targets leave
+        // the rules alone needs no fork either: its effects are computed against the store
+        // read-only (one evaluation of the WHERE, under the same read view and budget),
+        // authorized, and only then committed. A refusal or an error before the commit leaves
+        // the store untouched, as on the fork. Should the effects reach the rules after all,
+        // the fork below takes over, so rules are never committed without being tried first.
+        if !permit.rematerialize && !permit.var_graphs {
+            if let Some(effects) =
+                sparq_engine::where_update_effects(&self.graph, &upd, reads.as_ref(), budget)?
+            {
+                let wrote_rules = update::check_effects(
+                    &self.graph,
+                    &auth,
+                    s,
+                    &effects,
+                    self.group_docs(),
+                    &veto,
+                )?;
+                if !wrote_rules {
+                    return sparq_engine::apply_effects(&mut self.graph, &effects)
+                        .map_err(|e| format!("the update could not be committed: {e}"));
+                }
+            }
+        }
+        #[cfg(test)]
+        update_path_tests::FORKS.with(|n| n.set(n.get() + 1));
         // Run the checked algebra on a fork, under the same read view and budget, capturing
         // what it actually did. An error (a failing operation, a denied `GRAPH ?var`
         // destination, a budget overrun) discards the fork: nothing is applied. A `GRAPH ?var`
@@ -1927,6 +1953,9 @@ impl PodStore {
 
 #[cfg(all(test, any(feature = "odrl-bridge", feature = "trust-graph")))]
 mod dropped_view_tests;
+
+#[cfg(test)]
+mod update_path_tests;
 
 #[cfg(test)]
 mod scoped_cache_tests {

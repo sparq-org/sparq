@@ -51,9 +51,6 @@ pub async fn handle<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
-    if let Some(refused) = unavailable(state, req) {
-        return refused;
-    }
     // A write or a delete waits for its locks and checks its preconditions in the request, where
     // a client that goes away (or a timeout) cancels the wait; only its store calls run in a
     // task of their own, once they are ready to start (see [`hold_locks`]).
@@ -93,13 +90,21 @@ pub(crate) fn set_aside_meanwhile() -> Response {
 }
 
 /// [`set_aside`] for the resource `req` is to (a linkset's resource for the linkset): the check
-/// every route makes first.
+/// a service route makes once it has authorized the request, so that only a caller that may act
+/// on the resource learns it is set aside.
 pub(crate) fn unavailable<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
 ) -> Option<Response> {
     let target = req.path.strip_suffix(META_SUFFIX).unwrap_or(&req.path);
     set_aside(state, &state.cfg.absolute(target), &req.method)
+}
+
+/// The refusal of a new change while set-aside changes hold as much as they may
+/// ([`may_write`](super::LwsState::may_write)), for an authorized request.
+fn full<S: Store + 'static>(state: &LwsState<S>, method: &Method) -> Option<Response> {
+    (!method.is_safe() && !state.may_write())
+        .then(|| retry_later("failed changes are still being put back"))
 }
 
 async fn handle_now<S: Store + 'static>(
@@ -137,9 +142,12 @@ async fn handle_now<S: Store + 'static>(
         // was authorized on a missing target, so nothing is served or changed: every method on it
         // is a 404, and answering it here (rather than in the handler) means a resource that
         // appears after this check is never read or written without its permission check.
-        if let Some(refused) = authorize_unlocked(state, action, &uri, agent).await {
+        if let Some(refused) = authorize_unlocked(state, action, &uri, agent, &req.method).await {
             return refused;
         }
+    } else if let Some(refused) = set_aside(state, &uri, &req.method) {
+        // The storage description is public: anyone may learn the root is set aside.
+        return refused;
     }
     match req.method {
         Method::GET | Method::HEAD => read(state, req, agent, &uri).await,
@@ -178,19 +186,57 @@ async fn recheck<S: Store + 'static>(
 /// The existence and permission check a request passes before it takes a lock: `None` when it may
 /// go on, else the response refusing it (a missing target is a challenge or a 404, as in
 /// [`handle_now`]). The check that counts is repeated under the lock.
+///
+/// Only once the request is authorized does it learn that `uri` is set aside, or that new
+/// changes wait while set-aside ones are put back ([`set_aside`]): a caller that may not act on
+/// the resource gets the same `401`/`403`/`404` whatever its state. A set-aside resource is
+/// [`authorized_aside`].
 async fn authorize_unlocked<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
     uri: &str,
     agent: &Agent,
+    method: &Method,
 ) -> Option<Response> {
+    if !state.visible(uri) {
+        return Some(authorized_aside(state, action, uri, agent).await);
+    }
     match state.store.exists(uri).await {
         Ok(true) => {}
         Ok(false) if state.needs_auth(agent) => return Some(state.challenge(None)),
         Ok(false) => return Some(problem(StatusCode::NOT_FOUND, None)),
         Err(e) => return Some(store_error(e)),
     }
-    recheck(state, action, uri, agent).await.err()
+    if let Err(refused) = recheck(state, action, uri, agent).await {
+        return Some(refused);
+    }
+    full(state, method)
+}
+
+/// The answer to a request for `uri` while it is set aside: `503` (with a `Retry-After`) to a
+/// caller that may act on it, and to anyone else what it would get were the resource not set
+/// aside (a challenge, a `403`, or the `404` of a missing resource).
+///
+/// What the decision rests on is the resource's own metadata (its creator and types) and its
+/// format, which the stuck change may itself be part way through: a new format or new types
+/// may have landed before putting them back stalled. So it is made on what the resource was
+/// before the change began, as the change's journal staged it before its first step
+/// ([`access::aside`](super::access::aside)): a caller whose access the change would newly
+/// grant is refused, and a grantee whose access it would remove is told to retry. What cannot
+/// be read for it (the store fails while the change is stuck) refuses: it fails closed,
+/// revealing nothing.
+async fn authorized_aside<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Response {
+    match super::access::aside(state, action, uri, agent).await {
+        Ok(super::access::Aside::Allowed) => set_aside_meanwhile(),
+        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => state.challenge(None),
+        Ok(super::access::Aside::Missing) => problem(StatusCode::NOT_FOUND, None),
+        Ok(super::access::Aside::Denied) | Err(_) => state.deny(agent),
+    }
 }
 
 fn allow_for(uri: &str, is_root: bool) -> String {
@@ -1389,10 +1435,11 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
     let mut targets = 0usize;
-    for (target, params) in parse_links(&req.header_all(header::LINK)) {
-        let Some(rel) = params.get("rel") else {
+    for link in parse_links(&req.header_all(header::LINK)) {
+        let Some(rel) = link.param("rel") else {
             continue;
         };
+        let target = link.target.to_string();
         // Every target is a URI reference (RFC 8288 section 3), resolved by the one IRI parser;
         // one that is not refuses the request before anything is written.
         let Some(resolved) = resolve_reference(uri, &target) else {
@@ -1534,13 +1581,11 @@ async fn create<S: Store + 'static>(
     if !parent.ends_with('/') {
         return method_not_allowed(&allow_for(parent, false));
     }
-    let is_container = parse_links(&req.header_all(header::LINK))
-        .iter()
-        .any(|(t, p)| {
-            t == &format!("{LWS_NS}Container")
-                && p.get("rel")
-                    .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
-        });
+    let is_container = parse_links(&req.header_all(header::LINK)).any(|l| {
+        l.target.strip_prefix(LWS_NS) == Some("Container")
+            && l.param("rel")
+                .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
+    });
     let base_name = sanitize_slug(req.header("slug"))
         .unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     // The container's lock is held shared from the choice of a free name through the create and
@@ -1691,7 +1736,7 @@ async fn create<S: Store + 'static>(
                     // member or its metadata in between; what is left then is set aside with
                     // the locks (see [`LwsState::set_aside`](super::LwsState::set_aside)).
                     let mut undo = Vec::new();
-                    if matches!(e, ServerError::Storage(_)) {
+                    if matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. }) {
                         undo.push(super::Undo::Remove {
                             iri: child.clone(),
                             parent: parent.clone(),
@@ -1749,7 +1794,7 @@ async fn create<S: Store + 'static>(
 }
 
 /// A member name in `parent` that is free, with the locks of both its spellings (`name/`, then
-/// `name`, in [`lock_order`]): `base_name`, else `base_name-2`, `-3`, ... and past
+/// `name`, in `lock_order`): `base_name`, else `base_name-2`, `-3`, ... and past
 /// [`NUMBERED_NAMES`] a random suffix, [`RANDOM_NAMES`] times, then a 409. A name is free when
 /// its locks can be taken now and, under them, neither spelling exists; a reserved name
 /// ([`RESERVED_ROOT_NAMES`]) never is. Under the locks the answer holds: only a create makes a
@@ -1825,7 +1870,7 @@ async fn current<S: Store + 'static>(
 /// A create takes its container's lock (shared: creates in one container exclude each other by
 /// the new member's lock alone) across the choice of a free name and the create, and the new
 /// member's lock across its content and metadata (as a delete holds it across their removal),
-/// and a recursive delete takes the lock of every resource it removes (see [`lock_subtree`]), so neither
+/// and a recursive delete takes the lock of every resource it removes (see `lock_subtree`), so neither
 /// can interleave with the other or with a conditional write.
 ///
 /// Limit: the locks live in this process. Several server processes over one store do not see each
@@ -1836,6 +1881,9 @@ pub struct IriLocks {
     /// The IRIs set aside ([`LwsState::set_aside`](super::LwsState::set_aside)), each with how
     /// many set-aside changes are to it.
     hidden: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// What each IRI set aside was before the stuck change to it began (see
+    /// [`Prior`](super::Prior)), kept while it is set aside.
+    priors: std::sync::Mutex<std::collections::HashMap<String, super::Prior>>,
     /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
     hid: tokio::sync::Notify,
     /// How many times anything was set aside: a walk over many resources reads it before and
@@ -1856,7 +1904,7 @@ const LOCK_SWEEP_FLOOR: usize = 1024;
 
 impl IriLocks {
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
-    /// IRI first, ties in byte order ([`lock_order`]), so a child always before its container and
+    /// IRI first, ties in byte order (`lock_order`), so a child always before its container and
     /// never the other way, and two writers cannot deadlock.
     ///
     /// Every lock is taken only while `iri` is [visible](Self::visible): `None` at once when it
@@ -1876,7 +1924,7 @@ impl IriLocks {
     }
 
     /// Take the lock of `iri` if it is free and visible, without waiting: the one way to take a
-    /// lock out of [`lock_order`], since it cannot deadlock.
+    /// lock out of `lock_order`, since it cannot deadlock.
     pub fn try_lock(&self, iri: &str) -> Option<IriGuard> {
         let guard = self.mutex(iri).try_write_owned().ok()?;
         self.visible(iri).then_some(guard)
@@ -1906,12 +1954,35 @@ impl IriLocks {
         self.set_asides.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Set `iris` aside (once more each), and wake every wait for a lock so it checks again.
-    pub(crate) fn hide(&self, iris: &[String]) {
+    /// What `iri`, set aside, was before the stuck change to it began, as far as the change
+    /// says (see [`Prior`](super::Prior)); the default (what is stored now) when it says
+    /// nothing, or when `iri` is not set aside.
+    pub(crate) fn prior(&self, iri: &str) -> super::Prior {
+        self.priors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(iri)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Set `iris` aside (once more each), with what they were before the change (`priors`; for
+    /// one already set aside, what an earlier stuck change says comes first), and wake every
+    /// wait for a lock so it checks again.
+    pub(crate) fn hide(
+        &self,
+        iris: &[String],
+        mut priors: std::collections::HashMap<String, super::Prior>,
+    ) {
         {
             let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
+            let mut kept = self.priors.lock().unwrap_or_else(|e| e.into_inner());
             for iri in iris {
                 *hidden.entry(iri.clone()).or_default() += 1;
+                // What an earlier change left untouched, a later one found as it was.
+                if let Some(prior) = priors.remove(iri) {
+                    kept.entry(iri.clone()).or_default().or(prior);
+                }
             }
             self.set_asides
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1928,6 +1999,10 @@ impl IriLocks {
                 *e.get_mut() -= 1;
                 if *e.get() == 0 {
                     e.remove();
+                    self.priors
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(iri);
                 }
             }
         }
@@ -2037,7 +2112,7 @@ where
                     // write cannot then hide it from a subscriber who may read the result.
                     let pending = match &event {
                         Some(event) => state.notify.prepare(&state, event).await,
-                        None => Vec::new(),
+                        None => Default::default(),
                     };
                     match container {
                         Some(container) => touch_after(&state, locks, &container).await,
@@ -2096,7 +2171,11 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
     let parent = parent_of(uri, &state.cfg.storage());
     let landed = |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>,
                   undone: bool| {
-        !undone && matches!(outcome, Ok(_) | Err(ServerError::Storage(_)))
+        !undone
+            && matches!(
+                outcome,
+                Ok(_) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+            )
     };
     // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
     // metadata was modified"); none of one that may not have happened.
@@ -2504,7 +2583,7 @@ fn read_json_patch(body: &[u8]) -> Result<Value, Response> {
     Ok(patch)
 }
 
-/// Read `body` as a PATCH reads it ([`read_json_patch`]), keeping nothing: whether it is a
+/// Read `body` as a PATCH reads it (`read_json_patch`), keeping nothing: whether it is a
 /// JSON Patch. Public only so the measured bound [`LINKSET_PARSE_AMPLIFICATION`] is tested on
 /// the parsing a linkset PATCH does.
 #[doc(hidden)]
@@ -2744,7 +2823,7 @@ fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, Patch
 }
 
 /// [`json_patch`], with every value measured, when `in_memory`, by what it allocates as well as
-/// its serialized size ([`value_cost`]). The target is charged before it is copied, and each
+/// its serialized size (`value_cost`). The target is charged before it is copied, and each
 /// value an operation adds before it is cloned, so a patch past the budget allocates nothing
 /// to find that out.
 fn json_patch_within(
@@ -3390,24 +3469,6 @@ async fn delete<S: Store + 'static>(
             return r;
         }
     }
-    // Who hears of each removal is decided before the resources go, while who may read each can
-    // still be decided; the notifications go out only once the whole removal happened. A recursive
-    // delete removes every descendant, and each removal is a Delete of its own.
-    let mut notices = Vec::with_capacity(doomed.len());
-    // They share the delivery queue's bound: what is prepared past it would be dropped when
-    // sent, and is not held while the removals run.
-    let mut room = state.cfg.delivery.queue;
-    for (gone, origin) in doomed.iter().cloned() {
-        let event = Event {
-            kind: "Delete",
-            is_container: gone.ends_with('/'),
-            uri: gone,
-            relation: origin.map(|p| ("origin", p)),
-        };
-        let pending = state.notify.prepare_at_most(state, &event, room).await;
-        room = room.saturating_sub(pending.len());
-        notices.push(pending);
-    }
     // The removals, the notifications of those that happened and the touch of the container run
     // in a task that holds the subtree's locks, and the listing lock, until the removals are
     // over (see [`hold_locks`]). A removal that was put back changed nothing; what could not be
@@ -3415,7 +3476,32 @@ async fn delete<S: Store + 'static>(
     let removal = {
         let state = state.clone();
         async move {
-            let (removed, outcome, left) = remove(&state, &doomed).await;
+            // A subtree too large to remove atomically is refused before anything is removed,
+            // and before anyone's notifications are prepared: an oversized delete does none of
+            // that work.
+            let mut journal = state.journal();
+            if let Err(e) = stage_removal(&mut journal, &doomed).await {
+                return ((Vec::new(), Err(e)), None);
+            }
+            // Who hears of each removal is decided before the resources go, while who may read
+            // each can still be decided; the notifications go out only once the whole removal
+            // happened. A recursive delete removes every descendant, and each removal is a
+            // Delete of its own. They share the delivery queue's bound: what is prepared past it
+            // would be dropped when sent, and is not held while the removals run.
+            let mut notices = Vec::with_capacity(doomed.len());
+            let mut room = state.cfg.delivery.queue;
+            for (gone, origin) in doomed.iter().cloned() {
+                let event = Event {
+                    kind: "Delete",
+                    is_container: gone.ends_with('/'),
+                    uri: gone,
+                    relation: origin.map(|p| ("origin", p)),
+                };
+                let prepared = state.notify.prepare_at_most(&state, &event, room).await;
+                room = room.saturating_sub(prepared.len());
+                notices.push(prepared);
+            }
+            let (removed, outcome, left) = remove_staged(journal, &doomed).await;
             // Only a delete that happened whole is announced. One that failed was put back, or
             // what could not be is set aside, so nothing it touched is announced as gone.
             if outcome.is_ok() {
@@ -3468,7 +3554,7 @@ async fn subtree<S: Store + 'static>(
 /// The exclusive lock of one IRI (see [`IriLocks`]).
 pub type IriGuard = tokio::sync::OwnedRwLockWriteGuard<()>;
 
-/// Lock `uri` and everything under it, in [`lock_order`], and return the guards with the subtree
+/// Lock `uri` and everything under it, in `lock_order`, and return the guards with the subtree
 /// (as [`subtree`] lists it) that holds while they are held. The subtree is listed, locked, and
 /// listed again; when a member arrived or left in between, the locks are released and it starts
 /// over. A create holds its container's lock (shared) until its member exists, so once every
@@ -3509,13 +3595,9 @@ async fn lock_subtree<S: Store + 'static>(
     )))
 }
 
-/// Remove the resources of a locked [`subtree`], members before their containers, each before its
-/// metadata (which says who may act on it, so it goes only once the resource has), through one
-/// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
-/// removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)), with
-/// the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), the
-/// outcome, and what could not be put back (when something could not, every one of `doomed`
-/// counts as gone). A subtree too large to put back is refused (409) before anything is removed.
+/// [`stage_removal`] then [`remove_staged`], in a journal of their own. (A DELETE takes the two
+/// steps itself, preparing its notifications in between.)
+#[cfg(test)]
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
@@ -3528,6 +3610,7 @@ async fn remove<S: Store + 'static>(
 }
 
 /// [`remove`], recorded in `journal`.
+#[cfg(test)]
 async fn remove_in<S: Store + 'static>(
     mut journal: super::Journal<'_, S>,
     doomed: &[(String, Option<String>)],
@@ -3536,17 +3619,40 @@ async fn remove_in<S: Store + 'static>(
     Result<(), ServerError>,
     Option<super::Unsettled>,
 ) {
-    // Everything the removal could need to put back is read first: a subtree too large to
-    // remove atomically is refused before any of it is removed.
-    for (node, parent) in doomed {
-        let staged = match journal.stage_member(node, parent.as_deref()).await {
-            Ok(()) => journal.stage(&meta_key(node)).await,
-            Err(e) => Err(e),
-        };
-        if let Err(e) = staged {
-            return (Vec::new(), Err(e), None);
-        }
+    if let Err(e) = stage_removal(&mut journal, doomed).await {
+        return (Vec::new(), Err(e), None);
     }
+    remove_staged(journal, doomed).await
+}
+
+/// Read into `journal` everything removing `doomed` could need to put back: a subtree too large
+/// to remove atomically is refused (409) before any of it is removed.
+async fn stage_removal<S: Store + 'static>(
+    journal: &mut super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> Result<(), ServerError> {
+    for (node, parent) in doomed {
+        journal.stage_member(node, parent.as_deref()).await?;
+        journal.stage(&meta_key(node)).await?;
+    }
+    Ok(())
+}
+
+/// Remove the resources of a locked [`subtree`], staged in `journal` by [`stage_removal`],
+/// members before their containers, each before its metadata (which says who may act on it, so
+/// it goes only once the resource has): the delete is whole or not at all. At the first failure
+/// every removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)),
+/// with the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), the
+/// outcome, and what could not be put back (when something could not, every one of `doomed`
+/// counts as gone).
+async fn remove_staged<S: Store + 'static>(
+    mut journal: super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> (
+    Vec<String>,
+    Result<(), ServerError>,
+    Option<super::Unsettled>,
+) {
     let mut failed = None;
     for (node, parent) in doomed {
         // The record and its parent's membership edge go in one step, data resources included:
@@ -3633,7 +3739,7 @@ fn target_attribute_ok(key: &str, value: &Value) -> bool {
 enum Unresolved {
     /// An anchor or href is not a URI reference, or a target attribute is misshapen.
     Invalid,
-    /// The document passes a cap, or resolving it could pass the budget ([`linkset_cost`]).
+    /// The document passes a cap, or resolving it could pass the budget (`linkset_cost`).
     TooLarge,
 }
 
@@ -3641,7 +3747,7 @@ enum Unresolved {
 /// metadata, which stores the linkset, may hold.
 const LINKSET_SERVED_BYTES: usize = super::MAX_META_BYTES;
 
-/// The most memory reading a JSON Patch body ([`read_json_patch`]) holds at once per byte of
+/// The most memory reading a JSON Patch body (`read_json_patch`) holds at once per byte of
 /// it, at most: measured as peak live bytes with a counting allocator over the smallest
 /// syntactic units, numbers, escapes, long keys, deep nesting and mixes of them, repeated
 /// (`tests/linkset_parse_amplification.rs`), whose worst is objects nested in objects (about
@@ -3665,8 +3771,8 @@ fn has_scheme(s: &str) -> bool {
 }
 
 /// What a linkset PATCH may allocate for any one document it holds: the patch as parsed, the
-/// stored linkset as patched (every clone checked first, [`value_cost`]), and resolving and
-/// indexing the result ([`linkset_cost`]).
+/// stored linkset as patched (every clone checked first, `value_cost`), and resolving and
+/// indexing the result (`linkset_cost`).
 pub const LINKSET_COST_BUDGET: usize = 2 << 20;
 
 /// Restore, in place, the strings of a document read with its numbers as text
@@ -3733,7 +3839,7 @@ fn value_cost(v: &Value) -> usize {
 /// deriving its indexed links ([`links_of`]), can allocate. Every string the document holds is
 /// copied at most twice (into the resolved document, and into the indexed links), so its
 /// serialized size is charged twice; every value it holds is charged what it allocates
-/// ([`value_cost`]), so empty relations, long attribute arrays and objects count; and every
+/// (`value_cost`), so empty relations, long attribute arrays and objects count; and every
 /// relative anchor and href may grow by the base when it is resolved. Computed from the parsed
 /// document before any of that work is done; `None` when the document passes a cap (entries, targets, or an
 /// anchor's, relation's or href's length).
@@ -3808,7 +3914,7 @@ impl Resolved {
 /// delivers it, not the resource it describes). [`Unresolved::Invalid`] when one is not a URI
 /// reference (RFC 3986), or a target attribute has not the shape RFC 9264 gives it
 /// ([`target_attribute_ok`]), which the document may not hold. Before anything is resolved, the
-/// document is held to the caps and its [`linkset_cost`] to `budget`: past either it is
+/// document is held to the caps and its `linkset_cost` to `budget`: past either it is
 /// [`Unresolved::TooLarge`], and nothing is built.
 fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, Unresolved> {
     use Unresolved::Invalid;
@@ -4037,7 +4143,7 @@ fn served_linkset(
 /// Whether a linkset document, as served, is one a PATCH may change: what a PATCH checks its
 /// target against before it applies anything, and what applying none of it (`[]`) and resolving
 /// the result against the linkset's own URI (`base_len` bytes long) then costs and is capped by
-/// ([`linkset_cost`], which charges at least the target's size and [`value_cost`]), with the
+/// (`linkset_cost`, which charges at least the target's size and `value_cost`), with the
 /// document within what the metadata holds ([`LINKSET_SERVED_BYTES`]). Every write that changes
 /// a linkset (POST, PUT and PATCH) checks the document it would serve with this, so whatever it
 /// stores can be patched within [`LINKSET_COST_BUDGET`]. Metadata stored before this was checked
@@ -4096,7 +4202,7 @@ async fn linkset<S: Store + 'static>(
     };
     // A request is authorized once before it waits for the resource's lock, so one that may not
     // touch the resource never queues behind a write (holding its admission slot while it waits).
-    if let Some(refused) = authorize_unlocked(state, action, uri, agent).await {
+    if let Some(refused) = authorize_unlocked(state, action, uri, agent, &req.method).await {
         return refused;
     }
     // The resource's lock is taken before the permission check that counts, so the decision holds
@@ -4309,7 +4415,10 @@ async fn linkset<S: Store + 'static>(
             let parent = parent_of(uri, &state.cfg.storage());
             let event = updated(uri);
             let after = move |w: &Result<(), ServerError>| {
-                let landed = matches!(w, Ok(()) | Err(ServerError::Storage(_)));
+                let landed = matches!(
+                    w,
+                    Ok(()) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+                );
                 (parent.filter(|_| landed), w.is_ok().then_some(event))
             };
             let locks = (guard, listing.take());
@@ -4563,6 +4672,51 @@ mod tests {
 
     fn path_of(uri: &str) -> &str {
         uri.strip_prefix(BASE).unwrap()
+    }
+
+    /// Review finding: a `;` inside a quoted parameter split it, so a title holding
+    /// `; rel=type` beside a container type link made a POST create a container (dropping its
+    /// body) though the link's relation is `describedby`.
+    #[tokio::test]
+    async fn a_quoted_semicolon_declares_nothing() {
+        let st = state().await;
+        let link =
+            r#"<https://www.w3.org/ns/lws#Container>; title="note; rel=type"; rel=describedby"#;
+        let uri = post(&st, "n.txt", "text/plain", "kept", &[("link", link)]).await;
+        let r = call(&st, "GET", path_of(&uri), &[], "").await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(&body_of(r).await[..], b"kept");
+    }
+
+    /// Review finding (#6839): an extension relation is kept as it was spelled, as the type
+    /// index's search keys it (`index::relation_key`), so a search by that spelling finds it.
+    #[tokio::test]
+    async fn an_extension_relation_is_kept_as_spelled() {
+        let st = state().await;
+        let link = r#"<https://t.example/x>; rel="https://E.example/Rel""#;
+        let uri = post(&st, "e.txt", "text/plain", "x", &[("link", link)]).await;
+        let r = call(
+            &st,
+            "GET",
+            &format!("{}{META_SUFFIX}", path_of(&uri)),
+            &[],
+            "",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let doc = json_of(r).await;
+        let entry = doc["linkset"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["anchor"] == uri.as_str())
+            .unwrap()
+            .clone();
+        assert_eq!(
+            entry["https://E.example/Rel"][0]["href"],
+            "https://t.example/x"
+        );
+        assert!(entry.get("https://e.example/rel").is_none());
     }
 
     #[tokio::test]
@@ -8192,6 +8346,62 @@ mod tests {
         }
     }
 
+    /// Codex review of #6841: a recursive delete prepared every descendant's notifications (an
+    /// authorization check per subscription for each) before it found out the subtree was too
+    /// large to remove atomically. The size is settled first: an oversized delete prepares
+    /// nothing.
+    #[tokio::test]
+    async fn a_delete_too_large_to_undo_prepares_no_notification() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::sync::atomic::Ordering;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        // A store with room for more than the delete's journal may hold.
+        let roomy = crate::store::InMemoryStoreLimits::new(256 << 20, 4096);
+        let st = LwsState::new(FlakyStore::with_limits(roomy), cfg)
+            .await
+            .unwrap();
+        let root = st.cfg.storage();
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "d"), ("link", CONTAINER_LINK)],
+                "",
+            ),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let d = format!("{root}d/");
+        // Three members, together past what the delete's journal may hold to put back.
+        let big = Bytes::from(vec![b'x'; 24 << 20]);
+        for slug in ["a", "b", "c"] {
+            st.store
+                .create_in_container(&d, &format!("{d}{slug}"), big.clone(), "text/plain")
+                .await
+                .unwrap();
+        }
+        st.notify
+            .subscribe_root_for_test(&root, "http://127.0.0.1:9/inbox");
+        let delete = |path: &str, h: &[(&str, &str)]| {
+            let r = req(Method::DELETE, path, h, "");
+            let st = st.clone();
+            async move { handle(&st, &r, &Agent::anonymous()).await }
+        };
+        let r = delete("/d/", &[("depth", "infinity")]).await;
+        assert_eq!(r.status(), StatusCode::CONFLICT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 0);
+        for slug in ["a", "b", "c"] {
+            assert!(st.store.exists(&format!("{d}{slug}")).await.unwrap());
+        }
+        // One member alone fits, and its delete is prepared.
+        let r = delete("/d/a", &[]).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 1);
+    }
+
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
     /// the next resource created at the IRI (a failed delete is now put back whole); and a create
     /// wrote its content before its creator metadata, so a failure in between left the new
@@ -8332,7 +8542,8 @@ mod tests {
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
-        // No room in the delivery queue: every notification made is counted as dropped.
+        // No room in the delivery queue: every subscription that hears of a change is counted as
+        // not prepared.
         cfg.delivery = super::super::notify::DeliveryLimits {
             queue: 0,
             workers: 1,
@@ -8357,13 +8568,13 @@ mod tests {
         assert!(cancelled.is_err());
         gate.add_permits(1);
         for _ in 0..200 {
-            if st.notify.dropped() > 0 {
+            if st.notify.unprepared() > 0 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(st.store.exists(&format!("{root}x")).await.unwrap());
-        assert_eq!(st.notify.dropped(), 1, "the Create was never announced");
+        assert_eq!(st.notify.unprepared(), 1, "the Create was never announced");
         assert_ne!(st.resource_meta(&root).await.unwrap().version, version);
     }
 
@@ -9582,5 +9793,400 @@ mod tests {
             ),
             Ok(json!({"a": [1, 2, 3]}))
         );
+    }
+
+    /// A response as a caller sees it: its status, its headers (but the date) and its body.
+    async fn seen(r: Response) -> (StatusCode, Vec<(String, String)>, Bytes) {
+        let mut headers: Vec<(String, String)> = r
+            .headers()
+            .iter()
+            .filter(|(k, _)| *k != header::DATE)
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or_default().to_string()))
+            .collect();
+        headers.sort();
+        let status = r.status();
+        (status, headers, body_of(r).await)
+    }
+
+    /// Issue #6814: a request to a set-aside resource was answered `503` before it was
+    /// authorized, so a caller that may not act on the resource could tell a stuck change to it
+    /// from a resource it simply may not read. It is authorized first: for every method, on a
+    /// data resource, a container and their linksets, whoever may not act on the resource gets
+    /// exactly what it gets for one in no such state (status, headers and body), and only
+    /// whoever may is told to retry.
+    #[tokio::test]
+    async fn only_a_caller_that_may_act_learns_a_resource_is_set_aside() {
+        use super::super::test_store::{
+            agent, closed_state, data, grant_read, request as req, route_as, stick, OWNER,
+        };
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let (a, b) = (data(&st, "a").await, data(&st, "b").await);
+        for c in ["c/", "d/"] {
+            st.store
+                .create_in_container(&root, &format!("{root}{c}"), Bytes::new(), LWS_JSON)
+                .await
+                .unwrap();
+            st.store
+                .create_in_container(
+                    &format!("{root}{c}"),
+                    &format!("{root}{c}x"),
+                    "x".into(),
+                    "text/plain",
+                )
+                .await
+                .unwrap();
+        }
+        let (c, d) = (format!("{root}c/"), format!("{root}d/"));
+        let reader = agent("https://reader.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let owner = agent(OWNER);
+        let anonymous = Agent::anonymous();
+        grant_read(&st, "https://reader.example/#me", &[&a, &b, &c, &d]).await;
+        let ask = |m: Method, p: &str, who: &Agent| {
+            let (st, who) = (st.clone(), who.clone());
+            let r = req(m, p, &[("content-type", "text/plain"), ("slug", "n")], "z");
+            async move {
+                seen(
+                    tokio::time::timeout(std::time::Duration::from_secs(1), route_as(&st, r, &who))
+                        .await
+                        .expect("answered at once"),
+                )
+                .await
+            }
+        };
+        // a is set aside (a stuck write to it), and with it the root listing it; c is set
+        // aside, as a stuck create of a member of it is. b and d are not.
+        stick(&st, &store, &a).await;
+        stick(&st, &store, &format!("{c}new")).await;
+        assert!(!st.visible(&c) && !st.visible(&root) && st.visible(&d));
+        let methods = [
+            Method::GET,
+            Method::HEAD,
+            Method::OPTIONS,
+            Method::PUT,
+            Method::PATCH,
+            Method::POST,
+            Method::DELETE,
+        ];
+        let pairs = [
+            ("/a", "/b"),
+            ("/a.meta", "/b.meta"),
+            ("/c/", "/d/"),
+            ("/c/.meta", "/d/.meta"),
+        ];
+        for m in &methods {
+            for (aside, other) in pairs {
+                for who in [&stranger, &anonymous] {
+                    let got = ask(m.clone(), aside, who).await;
+                    assert!(got.0.is_client_error(), "{m} {aside}: {}", got.0);
+                    assert_eq!(got, ask(m.clone(), other, who).await, "{m} {aside}");
+                    assert!(got.1.iter().all(|(k, _)| k != "retry-after"), "{m} {aside}");
+                }
+                // The owner may act on it: it is told to retry.
+                let got = ask(m.clone(), aside, &owner).await;
+                assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m} {aside}");
+                assert!(got.1.iter().any(|(k, _)| k == "retry-after"));
+                // The reader may read it, not change it.
+                let got = ask(m.clone(), aside, &reader).await;
+                if matches!(*m, Method::GET | Method::HEAD | Method::OPTIONS) {
+                    assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE, "{m} {aside}");
+                } else {
+                    assert!(got.0.is_client_error(), "{m} {aside}: {}", got.0);
+                    assert_eq!(got, ask(m.clone(), other, &reader).await, "{m} {aside}");
+                }
+            }
+        }
+        // The storage description is public: anyone may learn its root is set aside.
+        let description = req(Method::GET, "/", &[("accept", LWS_CID)], "");
+        assert_eq!(
+            handle(&st, &description, &anonymous).await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // While set-aside changes hold as much as they may, a write is refused with `503` only
+        // to whoever may make it.
+        st.set_aside_bytes.store(
+            super::super::MAX_SET_ASIDE_BYTES,
+            std::sync::atomic::Ordering::Release,
+        );
+        for who in [&stranger, &reader] {
+            assert_eq!(ask(Method::PUT, "/b", who).await.0, StatusCode::FORBIDDEN);
+            assert_eq!(ask(Method::POST, "/d/", who).await.0, StatusCode::FORBIDDEN);
+        }
+        assert_eq!(
+            ask(Method::PUT, "/b", &owner).await.0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(ask(Method::GET, "/b", &reader).await.0, StatusCode::OK);
+        st.set_aside_bytes
+            .store(0, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Issue #6814: whether a caller may act on a set-aside resource rests on its metadata and
+    /// format, which the stuck change may have rewritten before putting them back stalled. It
+    /// is decided on what the resource was before the change began: a type or format the change
+    /// wrote never newly satisfies a grant, and one it took away still does. When that cannot
+    /// be read, everyone but the owner is refused.
+    #[tokio::test]
+    async fn a_set_aside_resource_is_decided_by_what_it_was_before_the_change() {
+        use super::super::test_store::{agent, closed_state, data, request as req, OWNER};
+        use super::super::{meta_key, Undo, Unsettled};
+        let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
+        let a = data(&st, "a").await;
+        let (public, private) = ("https://e.example/Public", "https://e.example/Private");
+        let mut meta = st.resource_meta(&a).await.unwrap();
+        meta.types = vec![public.to_string()];
+        st.put_resource_meta(&a, &meta).await.unwrap();
+        let grant = |who: &str, constraint: Value| {
+            let body = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": ["AccessGrant"],
+                "storage": st.cfg.storage(),
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": who,
+                    "constraint": [constraint]}],
+            });
+            let (st, owner) = (st.clone(), owner.clone());
+            async move {
+                let r = super::super::access::handle(
+                    &st,
+                    &req(
+                        Method::POST,
+                        GRANTS_PATH,
+                        &[("content-type", LWS_JSON)],
+                        &body.to_string(),
+                    ),
+                    &owner,
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+            }
+        };
+        let type_is = |t: &str| json!({"leftOperand": "type", "operator": "eq", "rightOperand": t});
+        grant("https://old.example/#me", type_is(public)).await;
+        grant("https://new.example/#me", type_is(private)).await;
+        grant(
+            "https://turtle.example/#me",
+            json!({"leftOperand": "format", "operator": "eq", "rightOperand": "text/turtle"}),
+        )
+        .await;
+        let get = |path: &str, who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            let r = req(Method::GET, path, &[], "");
+            async move { handle(&st, &r, &who).await.status() }
+        };
+        assert_eq!(get("/a", "https://old.example/#me").await, StatusCode::OK);
+        assert_eq!(
+            get("/a", "https://new.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/a", "https://turtle.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        // A change to Turtle content of the private type landed whole (its content, then its
+        // metadata), then failed, and putting it back keeps failing: what is stored is the new
+        // state, and the journal holds the old.
+        let key = meta_key(&a);
+        let old_content = st.store.read(&a).await.unwrap();
+        let old_meta = st.store.read(&key).await.unwrap();
+        st.store
+            .write(&a, Bytes::from("<> a <x:y> ."), "text/turtle")
+            .await
+            .unwrap();
+        let mut new = meta.clone();
+        new.types = vec![private.to_string()];
+        st.put_resource_meta(&a, &new).await.unwrap();
+        *store.fail_restore_of.lock().unwrap() = Some(a.clone());
+        st.set_aside(
+            Unsettled(vec![
+                Undo::Restore {
+                    key: a.clone(),
+                    prior: Some((old_content.body, old_content.meta)),
+                },
+                Undo::Restore {
+                    key,
+                    prior: Some((old_meta.body, old_meta.meta)),
+                },
+            ]),
+            (),
+        );
+        assert!(!st.visible(&a));
+        // Whoever could read it before is told to retry; whoever the change would newly let read
+        // it is refused, as is a stranger.
+        let unavailable = StatusCode::SERVICE_UNAVAILABLE;
+        assert_eq!(get("/a", "https://old.example/#me").await, unavailable);
+        assert_eq!(
+            get("/a", "https://new.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/a", "https://turtle.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/a", "https://stranger.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(get("/a", OWNER).await, unavailable);
+        // A stuck change that left the metadata untouched is decided on the metadata as stored;
+        // when that cannot be read, everyone but the owner is refused.
+        let b = data(&st, "b").await;
+        st.put_resource_meta(&b, &meta).await.unwrap();
+        let old_b = st.store.read(&b).await.unwrap();
+        // (Its existence cannot be read either: putting it back keeps failing, and what the
+        // change says of it is all the decision reads.)
+        *store.fail_exists_of.lock().unwrap() = Some(b.clone());
+        st.set_aside(
+            Unsettled(vec![Undo::Recreate {
+                iri: b.clone(),
+                parent: Some(st.cfg.storage()),
+                body: old_b.body,
+                meta: old_b.meta,
+            }]),
+            (),
+        );
+        assert!(!st.visible(&b));
+        assert_eq!(get("/b", "https://old.example/#me").await, unavailable);
+        *store.fail_read_of.lock().unwrap() = Some(meta_key(&b));
+        assert_eq!(
+            get("/b", "https://old.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            get("/b", "https://stranger.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        let r = handle(&st, &req(Method::GET, "/b", &[], ""), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(get("/b", OWNER).await, unavailable);
+        *store.fail_read_of.lock().unwrap() = None;
+        *store.fail_exists_of.lock().unwrap() = None;
+    }
+
+    /// Issue #6814: a set-aside resource that was not there before the stuck change (a create
+    /// part way) is, to whoever may not act on it, the `404` (or challenge) of any missing
+    /// resource.
+    #[tokio::test]
+    async fn a_missing_set_aside_resource_is_missing_to_a_stranger() {
+        use super::super::test_store::{agent, closed_state, stick, OWNER};
+        let (st, store) = closed_state(100).await;
+        let gone = st.cfg.absolute("/gone");
+        stick(&st, &store, &gone).await;
+        let get = |path: &str, who: &Agent| {
+            let (st, who) = (st.clone(), who.clone());
+            let r = super::super::test_store::request(Method::GET, path, &[], "");
+            async move { handle(&st, &r, &who).await.status() }
+        };
+        let stranger = agent("https://stranger.example/#me");
+        assert_eq!(get("/gone", &stranger).await, StatusCode::NOT_FOUND);
+        assert_eq!(get("/never", &stranger).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            get("/gone", &Agent::anonymous()).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get("/gone", &agent(OWNER)).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    /// Review finding (#6848): a metadata change writes the metadata twice through its journal
+    /// (the old metadata marked `pending`, then the new), so putting it back holds two steps for
+    /// one key, newest first, the newer holding the `pending` intermediate. The state kept for
+    /// deciding who may learn the resource is set aside must be the oldest: here, over a real
+    /// PUT whose last metadata write lands but reports a failure and whose putting back stalls,
+    /// the grantee of the old type is still told to retry.
+    #[tokio::test]
+    async fn a_stuck_metadata_change_is_decided_on_the_metadata_before_it() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
+        let (public, private) = ("https://e.example/Public", "https://e.example/Private");
+        for (who, ty) in [
+            ("https://old.example/#me", public),
+            ("https://new.example/#me", private),
+        ] {
+            let grant = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": ["AccessGrant"],
+                "storage": st.cfg.storage(),
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": who,
+                    "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": ty}]}],
+            });
+            let r = super::super::access::handle(
+                &st,
+                &req(
+                    Method::POST,
+                    GRANTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &grant.to_string(),
+                ),
+                &owner,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, "x"),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let uri = st.cfg.absolute("/doc.txt");
+        let put = |ty: &str, body: &str| {
+            let link = format!("<{ty}>; rel=\"type\"");
+            req(
+                Method::PUT,
+                "/doc.txt",
+                &[("content-type", "text/plain"), ("link", &link)],
+                body,
+            )
+        };
+        let get = |who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            async move {
+                handle(&st, &req(Method::GET, "/doc.txt", &[], ""), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert!(handle(&st, &put(public, "public"), &owner)
+            .await
+            .status()
+            .is_success());
+        assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
+        // The PUT to the private type: the pending mark is written, then the content, then the
+        // new metadata, which lands but reports a failure; putting the metadata back stalls.
+        let key = meta_key(&uri);
+        *store.lose_nth_write_of.lock().unwrap() = Some((key.clone(), 2));
+        *store.fail_restore_of.lock().unwrap() = Some(key.clone());
+        let r = handle(&st, &put(private, "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri));
+        assert_eq!(
+            st.resource_meta(&uri).await.unwrap().types,
+            vec![private.to_string()],
+            "the new metadata landed"
+        );
+        assert_eq!(
+            get("https://old.example/#me").await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+        assert_eq!(
+            get("https://stranger.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(get(OWNER).await, StatusCode::SERVICE_UNAVAILABLE);
+        // Once put back, the old metadata decides, as before the PUT.
+        *store.fail_restore_of.lock().unwrap() = None;
+        super::super::test_store::put_back(&st, &uri).await;
+        assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
+        assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
     }
 }
