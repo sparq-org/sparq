@@ -389,29 +389,24 @@ fn fits(t: &super::Term, room: usize) -> bool {
     }
 }
 
-/// The nesting of `t` (0 for an IRI, literal, blank node or variable), walked with an
-/// explicit stack, so it takes no stack per level.
+/// The nesting of `t` (0 for an IRI, literal, blank node or variable; one more for each
+/// list, formula or quoted triple around it, an empty one included), walked with an
+/// explicit stack, so it takes no stack per level. It agrees with [`fits`]: `fits(t,
+/// room)` holds exactly when `depth(t) <= room`.
 fn depth(t: &super::Term) -> usize {
     use super::Term;
-    fn children(t: &Term) -> Vec<&Term> {
-        match t {
-            Term::List(ms) => ms.iter().collect(),
-            Term::Formula(ts) => ts.iter().flatten().collect(),
-            Term::Triple(tr) => tr.iter().collect(),
-            Term::Iri(_) | Term::Lit(..) | Term::Blank(_) | Term::Var(_) => Vec::new(),
-        }
-    }
     let mut deepest = 0;
-    let mut stack: Vec<(&Term, usize)> = children(t).into_iter().map(|c| (c, 1)).collect();
-    if !stack.is_empty() {
-        deepest = 1;
-    }
+    // Each entry: a term, and how many containers enclose it.
+    let mut stack: Vec<(&Term, usize)> = vec![(t, 0)];
     while let Some((t, d)) = stack.pop() {
-        let below = children(t);
-        if !below.is_empty() {
-            deepest = deepest.max(d + 1);
-            stack.extend(below.into_iter().map(|c| (c, d + 1)));
+        let below = d + 1;
+        match t {
+            Term::List(ms) => stack.extend(ms.iter().map(|m| (m, below))),
+            Term::Formula(ts) => stack.extend(ts.iter().flatten().map(|m| (m, below))),
+            Term::Triple(tr) => stack.extend(tr.iter().map(|m| (m, below))),
+            Term::Iri(_) | Term::Lit(..) | Term::Blank(_) | Term::Var(_) => continue,
         }
+        deepest = deepest.max(below);
     }
     deepest
 }
@@ -1115,5 +1110,38 @@ mod tests {
         assert_eq!(cut_of(whole_i64_of_f64(f64::NAN)), (None, false));
         assert_eq!(cut_of(dropped_fraction("000")), ((), false));
         assert_eq!(cut_of(dropped_fraction("5")), ((), true));
+    }
+
+    /// #6732: `depth` counts every list, formula and quoted triple as a level, an empty
+    /// one included, so it agrees with `fits`.
+    #[test]
+    fn depth_counts_empty_containers_as_fits_does() {
+        use super::super::Term;
+        let atom = Term::Iri("http://ex/a".into());
+        let empties = [
+            atom.clone(),
+            Term::List(Vec::new()),
+            Term::Formula(Vec::new()),
+            Term::Triple(Box::new([atom.clone(), atom.clone(), atom])),
+        ];
+        for innermost in empties {
+            let mut t = innermost;
+            for wraps in 0..4 {
+                let d = depth(&t);
+                assert!(fits(&t, d), "{t:?} fits its depth");
+                assert!(d == 0 || !fits(&t, d - 1), "{t:?} needs its depth");
+                if wraps % 2 == 0 {
+                    t = Term::List(vec![t]);
+                } else {
+                    t = Term::Formula(vec![[
+                        Term::Iri("http://ex/s".into()),
+                        Term::Iri("http://ex/p".into()),
+                        t,
+                    ]]);
+                }
+            }
+        }
+        assert_eq!(depth(&Term::List(vec![Term::List(Vec::new())])), 2);
+        assert_eq!(depth(&Term::Formula(Vec::new())), 1);
     }
 }

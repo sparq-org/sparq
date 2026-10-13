@@ -1996,7 +1996,9 @@ fn match_premise_seeded(
 /// ([`bounded::generated`]). A binding an atom built past it is dropped, as a cut: the
 /// premise atoms that can build a deeper value than they read (builtins, list
 /// generators, virtual list access, scoped operators, backward proofs) filter their
-/// bindings through here, so every binding a premise carries forward is within it.
+/// bindings through here, so every binding a premise carries forward is within it. The
+/// containment search of a formula scope ([`containment_search`]) checks each binding it
+/// extends here too, before carrying it to its next statement.
 fn within_depth(b: &Binding, bw: &BwCtx) -> bool {
     bw.settle(bounded::generated(&bw.truncated, b.values()))
 }
@@ -2979,7 +2981,7 @@ fn formula_containment(
         .collect();
     let mut out = Vec::new();
     let mut steps = bounded::StepBudget::containment();
-    containment_search(&pat, scope, seed.clone(), &mut out, &mut steps);
+    containment_search(&pat, scope, seed.clone(), &mut out, &mut steps, bw);
     bw.settle(steps.finish(out))
 }
 
@@ -2987,13 +2989,19 @@ fn formula_containment(
 /// pattern statement matches a scope statement (or virtual list structure), in match
 /// order, pushed to `out`. Each step of the search is one visit of a pattern statement,
 /// taken from `steps`. The search state is an explicit stack (one entry per matched
-/// pattern statement), so patterns of any width take no stack per statement.
+/// pattern statement), so patterns of any width take no stack per statement. Every
+/// binding the search extends is checked against the term-depth limit
+/// ([`within_depth`]) before it is carried to the next statement, so every binding it
+/// carries, clones and returns is within the limit: virtual list access substitutes the
+/// binding into the pattern's own list subject, and can build a deeper value than it
+/// read.
 fn containment_search(
     pat: &[[Term; 3]],
     scope: &[[Term; 3]],
     seed: Binding,
     out: &mut Vec<Binding>,
     steps: &mut bounded::StepBudget,
+    bw: &BwCtx,
 ) {
     /// The order the pattern statements are matched in, as indices into `pat`: as
     /// written, until a statement is deferred behind the others.
@@ -3075,7 +3083,7 @@ fn containment_search(
                                     Term::List(ms[1..].to_vec())
                                 };
                                 let mut nb = b.clone();
-                                if unify_term(&p[2], &val, &mut nb) {
+                                if unify_term(&p[2], &val, &mut nb) && within_depth(&nb, bw) {
                                     let (at, defers_left) = (at + 1, rest);
                                     visit = Some(Visit {
                                         order,
@@ -3123,7 +3131,10 @@ fn containment_search(
         while let Some(st) = scope.get(scan.next) {
             scan.next += 1;
             let mut nb = v.b.clone();
-            if (0..3).all(|k| unify_term(&p[k], &st[k], &mut nb)) {
+            // A match that bound nothing new extends nothing to check.
+            if (0..3).all(|k| unify_term(&p[k], &st[k], &mut nb))
+                && (nb.len() == v.b.len() || within_depth(&nb, bw))
+            {
                 visit = Some(Visit {
                     order: v.order.clone(),
                     at: v.at + 1,
@@ -5082,6 +5093,81 @@ mod tests {
         let derived: Vec<&[Term; 3]> = facts.iter().filter(|t| t[0] == done).collect();
         assert_eq!(derived.len(), 2, "{derived:?}");
         assert_eq!(cut, None);
+    }
+
+    /// #6732: the containment search of a formula scope (`log:includes` over a quoted
+    /// formula) checks every binding it extends against the term-depth limit before
+    /// carrying it on, including the bindings virtual list access builds. A pattern
+    /// whose bindings would pass the limit is dropped as a cut, on a 2 MiB stack, and
+    /// the run ends.
+    #[test]
+    fn formula_containment_bindings_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let wrap = 60;
+        let n = 200;
+        let pattern: String = (0..n)
+            .map(|i| {
+                format!(
+                    "{}?y{i}{} rdf:first ?y{} . ",
+                    "(".repeat(wrap),
+                    ")".repeat(wrap),
+                    i + 1
+                )
+            })
+            .collect();
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n\
+             :s :p :z .\n\
+             {{ {{ :a :b :c }} log:includes {{ {pattern}}} }} => {{ :s :q ?y{n} }} .\n"
+        );
+        let (facts, cut) = on_small_stack(move || {
+            let (facts, cut) = closure_and_cut(&src, None);
+            (facts.map(|f| f.len()), cut)
+        });
+        assert_eq!(facts, Ok(1), "only the asserted fact is kept");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a top-level run keeps terms as deep as the deepest term it was handed, an
+    /// empty innermost list or formula counted as a level of its own, so a rule copying
+    /// such a term is not cut.
+    #[test]
+    fn a_rule_copies_given_terms_ending_in_an_empty_container_uncut() {
+        let limit = super::bounded::term_depth();
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let outcomes: Vec<(&str, Option<&str>, bool)> = [
+            ("empty list", Term::List(Vec::new())),
+            ("empty formula", Term::Formula(Vec::new())),
+        ]
+        .into_iter()
+        .map(|(kind, innermost)| {
+            let mut deep = innermost;
+            for _ in 0..limit {
+                deep = Term::List(vec![deep]);
+            }
+            assert_eq!(depth_of(&deep), limit + 1);
+            let run = Truncation::top_level();
+            let closure = super::reason_n3_terms_with_facts(
+                "{ <http://ex/s> <http://ex/p> ?x } => { <http://ex/s> <http://ex/q> ?x } .",
+                [[iri("s"), iri("p"), deep.clone()]],
+                NegationCycles::Reject,
+                &run,
+            )
+            .expect("closes");
+            (
+                kind,
+                run.get(),
+                closure.facts.contains(&[iri("s"), iri("q"), deep]),
+            )
+        })
+        .collect();
+        // Each copy is kept, and nothing is cut.
+        assert_eq!(
+            outcomes,
+            [("empty list", None, true), ("empty formula", None, true)]
+        );
     }
 
     /// Every registry entry's declared store read, walked over the whole registry
