@@ -256,6 +256,12 @@ impl Bytes {
 
     /// Converts this backing to aligned owned bytes and swaps only the dense f32 word range.
     /// The caller must first validate the entire container, including its trailing index.
+    // On wasm32 the `Map` arm is compiled out, leaving one arm; the match stays so
+    // both targets share one body.
+    #[cfg_attr(
+        target_arch = "wasm32",
+        allow(clippy::infallible_destructuring_match)
+    )]
     fn into_owned_swapped(self, start: usize, end: usize) -> Bytes {
         let mut owned = match self {
             #[cfg(not(target_arch = "wasm32"))]
