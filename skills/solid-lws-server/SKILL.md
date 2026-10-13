@@ -245,7 +245,10 @@ Anyone authenticated may hold at most 16 access requests and 16 subscriptions (4
 that; the owner's subscriptions are not counted), the server at most 512 of each (507),
 and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
 access grant 256 KiB; these limits apply while the body is read. The owner's subscriptions have a
-separate share of 512. An access document nested too deeply to store and read back gets 400. A
+separate share of 512. Stored requests or subscriptions past these quotas at startup (stored
+before a quota was lowered, or written to the store directly) are all loaded and none is removed;
+the start logs a line naming the container and what is past which quota, and no new one is
+admitted to a share until it is under its quota. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -422,8 +425,18 @@ What the server exposes, all discoverable from the storage description
   Each topic of a new subscription is checked before its lock is taken: one the subscriber may
   not read is refused (`403`, or `401` anonymous) at once, whatever its state. One it may read
   is checked again under its lock, waited for at most two seconds (then `503`), or answered `503`
-  at once while set aside. The bound on deliveries prepared for one change counts only authorized ones: a
-  subscriber that may not read the resource takes no place from one that may.
+  at once while set aside. The bound on deliveries prepared for one change counts only authorized
+  ones: a subscriber that may not read the resource takes no place from one that may. Once it is
+  reached the subscriptions left are neither authorized nor notified, and are logged and counted
+  apart (`Notifier::unprepared`) from dropped deliveries (`Notifier::dropped`), each of which was
+  owed. Both are counted in memory from the start, and only for a change that happened (a delete
+  that fails counts nothing). The authorization for one change has no budget of its own (one
+  party's subscriptions that may not read the resource could spend it before an authorized one is
+  reached): the subscription quotas cap it at one check per subscription in force (at most
+  1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
+  resource's access taken for the change, so its metadata is read and the grants are scanned
+  once per change. A recursive delete too large to put back is refused before any of its
+  notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,

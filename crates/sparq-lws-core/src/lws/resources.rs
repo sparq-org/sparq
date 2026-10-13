@@ -2112,7 +2112,7 @@ where
                     // write cannot then hide it from a subscriber who may read the result.
                     let pending = match &event {
                         Some(event) => state.notify.prepare(&state, event).await,
-                        None => Vec::new(),
+                        None => Default::default(),
                     };
                     match container {
                         Some(container) => touch_after(&state, locks, &container).await,
@@ -3465,24 +3465,6 @@ async fn delete<S: Store + 'static>(
             return r;
         }
     }
-    // Who hears of each removal is decided before the resources go, while who may read each can
-    // still be decided; the notifications go out only once the whole removal happened. A recursive
-    // delete removes every descendant, and each removal is a Delete of its own.
-    let mut notices = Vec::with_capacity(doomed.len());
-    // They share the delivery queue's bound: what is prepared past it would be dropped when
-    // sent, and is not held while the removals run.
-    let mut room = state.cfg.delivery.queue;
-    for (gone, origin) in doomed.iter().cloned() {
-        let event = Event {
-            kind: "Delete",
-            is_container: gone.ends_with('/'),
-            uri: gone,
-            relation: origin.map(|p| ("origin", p)),
-        };
-        let pending = state.notify.prepare_at_most(state, &event, room).await;
-        room = room.saturating_sub(pending.len());
-        notices.push(pending);
-    }
     // The removals, the notifications of those that happened and the touch of the container run
     // in a task that holds the subtree's locks, and the listing lock, until the removals are
     // over (see [`hold_locks`]). A removal that was put back changed nothing; what could not be
@@ -3490,7 +3472,32 @@ async fn delete<S: Store + 'static>(
     let removal = {
         let state = state.clone();
         async move {
-            let (removed, outcome, left) = remove(&state, &doomed).await;
+            // A subtree too large to remove atomically is refused before anything is removed,
+            // and before anyone's notifications are prepared: an oversized delete does none of
+            // that work.
+            let mut journal = state.journal();
+            if let Err(e) = stage_removal(&mut journal, &doomed).await {
+                return ((Vec::new(), Err(e)), None);
+            }
+            // Who hears of each removal is decided before the resources go, while who may read
+            // each can still be decided; the notifications go out only once the whole removal
+            // happened. A recursive delete removes every descendant, and each removal is a
+            // Delete of its own. They share the delivery queue's bound: what is prepared past it
+            // would be dropped when sent, and is not held while the removals run.
+            let mut notices = Vec::with_capacity(doomed.len());
+            let mut room = state.cfg.delivery.queue;
+            for (gone, origin) in doomed.iter().cloned() {
+                let event = Event {
+                    kind: "Delete",
+                    is_container: gone.ends_with('/'),
+                    uri: gone,
+                    relation: origin.map(|p| ("origin", p)),
+                };
+                let prepared = state.notify.prepare_at_most(&state, &event, room).await;
+                room = room.saturating_sub(prepared.len());
+                notices.push(prepared);
+            }
+            let (removed, outcome, left) = remove_staged(journal, &doomed).await;
             // Only a delete that happened whole is announced. One that failed was put back, or
             // what could not be is set aside, so nothing it touched is announced as gone.
             if outcome.is_ok() {
@@ -3584,13 +3591,9 @@ async fn lock_subtree<S: Store + 'static>(
     )))
 }
 
-/// Remove the resources of a locked [`subtree`], members before their containers, each before its
-/// metadata (which says who may act on it, so it goes only once the resource has), through one
-/// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
-/// removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)), with
-/// the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), the
-/// outcome, and what could not be put back (when something could not, every one of `doomed`
-/// counts as gone). A subtree too large to put back is refused (409) before anything is removed.
+/// [`stage_removal`] then [`remove_staged`], in a journal of their own. (A DELETE takes the two
+/// steps itself, preparing its notifications in between.)
+#[cfg(test)]
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
@@ -3603,6 +3606,7 @@ async fn remove<S: Store + 'static>(
 }
 
 /// [`remove`], recorded in `journal`.
+#[cfg(test)]
 async fn remove_in<S: Store + 'static>(
     mut journal: super::Journal<'_, S>,
     doomed: &[(String, Option<String>)],
@@ -3611,17 +3615,40 @@ async fn remove_in<S: Store + 'static>(
     Result<(), ServerError>,
     Option<super::Unsettled>,
 ) {
-    // Everything the removal could need to put back is read first: a subtree too large to
-    // remove atomically is refused before any of it is removed.
-    for (node, parent) in doomed {
-        let staged = match journal.stage_member(node, parent.as_deref()).await {
-            Ok(()) => journal.stage(&meta_key(node)).await,
-            Err(e) => Err(e),
-        };
-        if let Err(e) = staged {
-            return (Vec::new(), Err(e), None);
-        }
+    if let Err(e) = stage_removal(&mut journal, doomed).await {
+        return (Vec::new(), Err(e), None);
     }
+    remove_staged(journal, doomed).await
+}
+
+/// Read into `journal` everything removing `doomed` could need to put back: a subtree too large
+/// to remove atomically is refused (409) before any of it is removed.
+async fn stage_removal<S: Store + 'static>(
+    journal: &mut super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> Result<(), ServerError> {
+    for (node, parent) in doomed {
+        journal.stage_member(node, parent.as_deref()).await?;
+        journal.stage(&meta_key(node)).await?;
+    }
+    Ok(())
+}
+
+/// Remove the resources of a locked [`subtree`], staged in `journal` by [`stage_removal`],
+/// members before their containers, each before its metadata (which says who may act on it, so
+/// it goes only once the resource has): the delete is whole or not at all. At the first failure
+/// every removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)),
+/// with the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), the
+/// outcome, and what could not be put back (when something could not, every one of `doomed`
+/// counts as gone).
+async fn remove_staged<S: Store + 'static>(
+    mut journal: super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> (
+    Vec<String>,
+    Result<(), ServerError>,
+    Option<super::Unsettled>,
+) {
     let mut failed = None;
     for (node, parent) in doomed {
         // The record and its parent's membership edge go in one step, data resources included:
@@ -8312,6 +8339,62 @@ mod tests {
         }
     }
 
+    /// Codex review of #6841: a recursive delete prepared every descendant's notifications (an
+    /// authorization check per subscription for each) before it found out the subtree was too
+    /// large to remove atomically. The size is settled first: an oversized delete prepares
+    /// nothing.
+    #[tokio::test]
+    async fn a_delete_too_large_to_undo_prepares_no_notification() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::sync::atomic::Ordering;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        // A store with room for more than the delete's journal may hold.
+        let roomy = crate::store::InMemoryStoreLimits::new(256 << 20, 4096);
+        let st = LwsState::new(FlakyStore::with_limits(roomy), cfg)
+            .await
+            .unwrap();
+        let root = st.cfg.storage();
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "d"), ("link", CONTAINER_LINK)],
+                "",
+            ),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let d = format!("{root}d/");
+        // Three members, together past what the delete's journal may hold to put back.
+        let big = Bytes::from(vec![b'x'; 24 << 20]);
+        for slug in ["a", "b", "c"] {
+            st.store
+                .create_in_container(&d, &format!("{d}{slug}"), big.clone(), "text/plain")
+                .await
+                .unwrap();
+        }
+        st.notify
+            .subscribe_root_for_test(&root, "http://127.0.0.1:9/inbox");
+        let delete = |path: &str, h: &[(&str, &str)]| {
+            let r = req(Method::DELETE, path, h, "");
+            let st = st.clone();
+            async move { handle(&st, &r, &Agent::anonymous()).await }
+        };
+        let r = delete("/d/", &[("depth", "infinity")]).await;
+        assert_eq!(r.status(), StatusCode::CONFLICT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 0);
+        for slug in ["a", "b", "c"] {
+            assert!(st.store.exists(&format!("{d}{slug}")).await.unwrap());
+        }
+        // One member alone fits, and its delete is prepared.
+        let r = delete("/d/a", &[]).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 1);
+    }
+
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
     /// the next resource created at the IRI (a failed delete is now put back whole); and a create
     /// wrote its content before its creator metadata, so a failure in between left the new
@@ -8452,7 +8535,8 @@ mod tests {
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
-        // No room in the delivery queue: every notification made is counted as dropped.
+        // No room in the delivery queue: every subscription that hears of a change is counted as
+        // not prepared.
         cfg.delivery = super::super::notify::DeliveryLimits {
             queue: 0,
             workers: 1,
@@ -8477,13 +8561,13 @@ mod tests {
         assert!(cancelled.is_err());
         gate.add_permits(1);
         for _ in 0..200 {
-            if st.notify.dropped() > 0 {
+            if st.notify.unprepared() > 0 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(st.store.exists(&format!("{root}x")).await.unwrap());
-        assert_eq!(st.notify.dropped(), 1, "the Create was never announced");
+        assert_eq!(st.notify.unprepared(), 1, "the Create was never announced");
         assert_ne!(st.resource_meta(&root).await.unwrap().version, version);
     }
 

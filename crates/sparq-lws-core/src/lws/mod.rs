@@ -1779,6 +1779,47 @@ impl Quota {
             author,
         })
     }
+
+    /// What of the records in force is past this quota, for the start's log: `held` records
+    /// counted against it overall, and the author of each one counted against its author's
+    /// share. `None` when nothing is. Records past a quota (stored before it was lowered, or
+    /// written to the store directly) are kept; [`Quota::reserve`] refuses a new one to a share
+    /// until that share is under its quota again.
+    pub(crate) fn past<'a>(
+        &self,
+        held: usize,
+        authors: impl IntoIterator<Item = Option<&'a str>>,
+    ) -> Option<String> {
+        let mut by_author = std::collections::HashMap::<Option<&str>, usize>::new();
+        for a in authors {
+            *by_author.entry(a).or_default() += 1;
+        }
+        let over: Vec<usize> = by_author
+            .into_values()
+            .filter(|n| *n > self.per_author)
+            .collect();
+        let mut past = Vec::new();
+        if held > self.total {
+            past.push(format!("{held} held, of at most {}", self.total));
+        }
+        if let Some(most) = over.iter().max() {
+            past.push(format!(
+                "{} author(s) holding more than {} each (at most {most})",
+                over.len(),
+                self.per_author
+            ));
+        }
+        (!past.is_empty()).then(|| past.join("; "))
+    }
+}
+
+/// Log, at the start, that the records of `what` stored in `container` are past their quota
+/// (`past`, from [`Quota::past`]). None is removed: each is a user's record.
+pub(crate) fn report_past_quota(what: &str, container: &str, past: &str) {
+    eprintln!(
+        "lws: the {what} stored in {container} are past their quota: {past}; none is removed, \
+         and no new one is admitted to a share until it is under its quota"
+    );
 }
 
 pub(crate) use sparq_lws_authn::{expansion_budget, triple_bytes};
@@ -2458,10 +2499,15 @@ pub(crate) mod test_store {
 
     impl FlakyStore {
         pub fn new() -> Self {
+            Self::with_limits(crate::store::InMemoryStoreLimits::default())
+        }
+
+        /// Holding at most what `limits` allow.
+        pub fn with_limits(limits: crate::store::InMemoryStoreLimits) -> Self {
             Self {
                 inner: Arc::new(CompositeStore::new(
-                    InMemorySparqClient::default(),
-                    InMemoryBlobStore::default(),
+                    InMemorySparqClient::with_limits(limits),
+                    InMemoryBlobStore::with_limits(limits),
                 )),
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
