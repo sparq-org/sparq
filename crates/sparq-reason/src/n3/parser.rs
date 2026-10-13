@@ -135,8 +135,8 @@ pub(crate) fn parse_with_extra_checked(
 /// A parse whose result is its only use of a term is charged exactly the result's
 /// [`super::bounded::term_bytes`] (plus its base and directives). Not charged: the scratch
 /// buffer one token is read into before it is resolved or expanded, and an error message
-/// (each no larger than about one token of `src`, and dropped); the spare capacity of a
-/// string, vector or map; the parser's fixed-size state; and `extra`.
+/// that quotes a token (each bounded by the length of the source token, and dropped); the
+/// spare capacity of a string, vector or map; the parser's fixed-size state; and `extra`.
 pub(crate) fn parse_charged_checked(
     src: &str,
     base: &str,
@@ -171,6 +171,14 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
     // rules written with the legacy `log:impliedBy`, which a re-encoding spells
     // `log:isImpliedBy` (`reencode_statements`)
     let mut legacy = 0usize;
+    // An always-true side is any literal spelled "true"; a re-encoding writes it as the
+    // `xsd:boolean` true, which may be larger than the literal the parse charged (and
+    // dropped with the rule's statement): the growth, charged before `Parsed` is returned.
+    let mut true_growth = 0usize;
+    let mut respelled = |l: &Term| {
+        let grown = true_literal_bytes().saturating_sub(super::bounded::term_bytes(l));
+        true_growth = true_growth.saturating_add(grown);
+    };
     facts.retain_mut(|[s, pred, o]| {
         let Term::Iri(i) = &*pred else {
             return true;
@@ -195,11 +203,13 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
             // `{} => { conclusion }` — `{}` IS the literal true (N3 CG), an
             // always-true premise: fires unconditionally.
             (l, Term::Formula(_)) if implies && is_true(l) => {
+                respelled(l);
                 rules.push(Rule { premise: Vec::new(), conclusion: take(o) });
             }
             // { conclusion } <= true. — an always-provable backward fact schema (EYE's
             // idiom for backward base cases).
             (Term::Formula(_), l) if implied_by && is_true(l) => {
+                respelled(l);
                 backward_rules.push(Rule { premise: Vec::new(), conclusion: take(s) });
                 legacy += usize::from(i == LOG_IMPLIED_BY_LEGACY);
             }
@@ -269,6 +279,7 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
         rewrite_terms(premise, false, &rename);
     }
     p.charge(legacy.saturating_mul(LOG_IMPLIED_BY.len() - LOG_IMPLIED_BY_LEGACY.len()))?;
+    p.charge(true_growth)?;
     p.charge(base.len())?;
     Ok(Parsed { facts, rules, backward_rules, base: base.to_string() })
 }
@@ -287,6 +298,15 @@ fn well_known_prefix(pfx: &str) -> Option<&'static str> {
         "list" => "http://www.w3.org/2000/10/swap/list#",
         "time" => "http://www.w3.org/2000/10/swap/time#",
         _ => return None,
+    })
+}
+
+/// The [`super::bounded::term_bytes`] of the `xsd:boolean` true a re-encoding writes for
+/// an always-true rule side (`reencode_statements`).
+fn true_literal_bytes() -> usize {
+    static BYTES: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *BYTES.get_or_init(|| {
+        super::bounded::term_bytes(&Term::Lit("true".into(), XSD_BOOLEAN.into(), None))
     })
 }
 
@@ -1748,6 +1768,39 @@ mod resolve_iri_tests {
 #[cfg(test)]
 pub(super) mod parse_surface_tests {
     use super::*;
+
+    /// An always-true rule side spelled with a short datatype (`"true"^^<a:b>`) is
+    /// re-encoded as the `xsd:boolean` true: the growth is charged by the parse, so the
+    /// re-encoded document fits the allowance exactly.
+    #[test]
+    fn always_true_rule_sides_respelled_on_reencoding_are_charged() {
+        let mut src = String::new();
+        for i in 0..64 {
+            src.push_str(&format!("\"true\"^^<a:b> => {{ <http://ex/s{i}> <http://ex/p> <http://ex/o> }} .\n"));
+            src.push_str(&format!("{{ <http://ex/t{i}> <http://ex/p> <http://ex/o> }} <= \"true\"^^<a:b> .\n"));
+        }
+        let Ok(parsed) = parse_charged_checked(&src, "", std::iter::empty(), None) else {
+            panic!("N3")
+        };
+        assert_eq!((parsed.rules.len(), parsed.backward_rules.len()), (64, 64));
+        let fits: usize = super::super::reencode_statements(parsed)
+            .iter()
+            .flatten()
+            .map(super::super::bounded::term_bytes)
+            .sum();
+        assert!(
+            parse_charged_checked(&src, "", std::iter::empty(), Some(fits)).is_ok(),
+            "fits {fits} bytes"
+        );
+        assert!(
+            matches!(
+                parse_charged_checked(&src, "", std::iter::empty(), Some(fits - 1)),
+                Err(ParseFailure::Resource(_))
+            ),
+            "does not fit {} bytes",
+            fits - 1
+        );
+    }
 
     /// The initial base is charged before it is copied: a base past the allowance stops
     /// the parse before it reads a byte (here, before the syntax error it would report).
