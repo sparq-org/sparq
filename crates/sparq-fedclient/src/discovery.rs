@@ -696,7 +696,8 @@ impl<'a> PatternProbeSession<'a> {
     }
 }
 
-#[cfg(feature = "pattern_probe")]
+/// The GET form of `query` against `endpoint`: `query=` is appended with `&` when the endpoint
+/// URL already carries a query string, else with `?`.
 fn probe_url(endpoint: &str, query: &str) -> String {
     let separator = if endpoint.contains('?') { '&' } else { '?' };
     format!("{endpoint}{separator}query={}", pct_encode(query))
@@ -930,7 +931,7 @@ pub fn discover(endpoint: &str, fetcher: &dyn Fetcher) -> Result<Discovery, Stri
 /// [`Fetcher`] can express. Returns the boolean answer, or an error if the endpoint is
 /// unreachable or returns a non-ASK body.
 fn ask_probe(endpoint: &str, fetcher: &dyn Fetcher) -> Result<bool, String> {
-    let url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
+    let url = probe_url(endpoint, ASK_PROBE);
     let body = fetcher
         .get(&url, "application/sparql-results+json")
         .map_err(|e| format!("discovery: ASK probe to {endpoint} failed: {e}"))?;
@@ -1330,6 +1331,16 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         let ask_url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
         let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": false }"#);
         let d = discover(endpoint, &fetcher).expect("a false ASK still proves reachability");
+        assert_eq!(d.provenance, Provenance::AskProbe);
+    }
+
+    #[test]
+    fn ask_probe_appends_to_an_existing_query_string() {
+        // An endpoint URL that already carries a query string gets `&query=`, not a second `?`.
+        let endpoint = "http://keyed/sparql?default-graph-uri=urn%3Ag";
+        let ask_url = format!("{endpoint}&query={}", pct_encode(ASK_PROBE));
+        let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": true }"#);
+        let d = discover(endpoint, &fetcher).expect("the probe reaches the keyed endpoint");
         assert_eq!(d.provenance, Provenance::AskProbe);
     }
 
