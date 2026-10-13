@@ -913,64 +913,83 @@ pub fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
         }
         // Both "literal" and the legacy "typed-literal" (pre-2013 endpoints) map here.
         Some("literal") | Some("typed-literal") | None => {
-            let value = get("value")
-                .ok_or_else(|| "SERVICE: literal binding without value".to_string())?
-                .to_string();
-            if let Some(lang) = get("xml:lang") {
-                // [OPUS-4.8] sq-s955: the INBOUND counterpart to the outbound `its:dir`
-                // emission (sq-bj7o, `json.rs::term_to_json`). A remote endpoint's SPARQL 1.2
-                // results carry the RDF 1.2 base direction as a SEPARATE `its:dir` field
-                // alongside the bare `xml:lang` tag; reading only `xml:lang` dropped the
-                // direction, so a `dirLangString` arrived as a plain language-tagged literal
-                // and silently lost its direction on the way in. We now reconstruct the
-                // directional literal, validating the direction through the single source of
-                // truth (`dict::parse_base_direction`, also used by the stored-slot,
-                // materialised and outbound paths). An ABSENT or INVALID `its:dir` degrades
-                // to a plain language-tagged literal — the SAME decision `split_lang_dir` /
-                // `reconstruct_ref` make for a malformed stored slot — so all four paths AGREE
-                // on `(lang, dir)`.
-                match get("its:dir").and_then(sparq_core::dict::parse_base_direction) {
-                    Some(dir) => Ok(Term::Literal(
-                        Literal::new_directional_language_tagged_literal(value, lang, dir).map_err(
-                            |e| format!("SERVICE: bad language tag {lang:?}: {e}"),
-                        )?,
-                    )),
-                    None => Ok(Term::Literal(
-                        Literal::new_language_tagged_literal(value, lang)
-                            .map_err(|e| format!("SERVICE: bad language tag {lang:?}: {e}"))?,
-                    )),
-                }
-            } else if let Some(dt) = get("datatype") {
-                let dt = NamedNode::new(dt).map_err(|e| format!("SERVICE: bad datatype {dt:?}: {e}"))?;
-                Ok(Term::Literal(Literal::new_typed_literal(value, dt)))
-            } else {
-                Ok(Term::Literal(Literal::new_simple_literal(value)))
-            }
+            let value =
+                get("value").ok_or_else(|| "SERVICE: literal binding without value".to_string())?;
+            literal(
+                value.to_string(),
+                get("xml:lang"),
+                get("its:dir"),
+                get("datatype"),
+            )
         }
         Some("triple") => {
             let v = val
                 .get("value")
                 .ok_or_else(|| "SERVICE: triple term without value".to_string())?;
             let part = |k: &str| -> Result<Term, String> {
-                srj_term(v.get(k).ok_or_else(|| format!("SERVICE: triple term without {k}"))?)
+                srj_term(
+                    v.get(k)
+                        .ok_or_else(|| format!("SERVICE: triple term without {k}"))?,
+                )
             };
-            let subject = match part("subject")? {
-                Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
-                Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
-                other => return Err(format!("SERVICE: invalid triple-term subject: {other}")),
-            };
-            let predicate = match part("predicate")? {
-                Term::NamedNode(n) => n,
-                other => return Err(format!("SERVICE: invalid triple-term predicate: {other}")),
-            };
-            Ok(Term::Triple(Box::new(Triple {
-                subject,
-                predicate,
-                object: part("object")?,
-            })))
+            triple_term(part("subject")?, part("predicate")?, part("object")?)
         }
         Some(other) => Err(format!("SERVICE: unknown binding type {other:?}")),
     }
+}
+
+/// A literal from a results binding's lexical value and its optional `xml:lang`, `its:dir`
+/// and `datatype`, shared by the SRJ and SRX readers.
+///
+/// [OPUS-4.8] sq-s955: a SPARQL 1.2 result carries the RDF 1.2 base direction as a separate
+/// `its:dir` next to the bare language tag, so a language-tagged value with a valid direction
+/// becomes a `dirLangString`. The direction is validated by `dict::parse_base_direction`, the
+/// same rule the stored-slot, materialised and outbound paths use; an absent or invalid
+/// `its:dir` degrades to a plain language-tagged literal, as `split_lang_dir` /
+/// `reconstruct_ref` do for a malformed stored slot.
+#[cfg(feature = "service")]
+fn literal(
+    value: String,
+    lang: Option<&str>,
+    dir: Option<&str>,
+    datatype: Option<&str>,
+) -> Result<Term, String> {
+    if let Some(lang) = lang {
+        let bad_lang = |e| format!("SERVICE: bad language tag {lang:?}: {e}");
+        Ok(Term::Literal(
+            match dir.and_then(sparq_core::dict::parse_base_direction) {
+                Some(dir) => Literal::new_directional_language_tagged_literal(value, lang, dir)
+                    .map_err(bad_lang)?,
+                None => Literal::new_language_tagged_literal(value, lang).map_err(bad_lang)?,
+            },
+        ))
+    } else if let Some(dt) = datatype {
+        let dt = NamedNode::new(dt).map_err(|e| format!("SERVICE: bad datatype {dt:?}: {e}"))?;
+        Ok(Term::Literal(Literal::new_typed_literal(value, dt)))
+    } else {
+        Ok(Term::Literal(Literal::new_simple_literal(value)))
+    }
+}
+
+/// A SPARQL 1.2 triple term from its parsed parts, shared by the SRJ and SRX readers: the
+/// subject must be an IRI or blank node and the predicate an IRI.
+#[cfg(feature = "service")]
+fn triple_term(subject: Term, predicate: Term, object: Term) -> Result<Term, String> {
+    let subject = match subject {
+        Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
+        Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
+        other => return Err(format!("SERVICE: invalid triple-term subject: {other}")),
+    };
+    let Term::NamedNode(predicate) = predicate else {
+        return Err(format!(
+            "SERVICE: invalid triple-term predicate: {predicate}"
+        ));
+    };
+    Ok(Term::Triple(Box::new(Triple {
+        subject,
+        predicate,
+        object,
+    })))
 }
 
 // ---------------------------------------------------------------------------
@@ -1011,50 +1030,37 @@ fn resolve_xml_entity(name: &str) -> Result<String, String> {
     Err(format!("SERVICE: unknown XML entity &{name};"))
 }
 
-/// Reconstruct one term from an SRX value element's collected attributes/text. Mirrors the
-/// conformance suite's `make_term` and the SRJ `srj_term` (uri / bnode / plain, language-
-/// tagged — incl. the SPARQL 1.2 `its:dir` directional literal — and typed literals).
+/// The open SRX value element (`<uri>`, `<bnode>` or `<literal>`): its kind, its literal
+/// attributes, and the character data collected so far.
 #[cfg(feature = "service")]
-fn srx_term(
-    kind: &str,
+struct SrxValue {
+    kind: &'static str,
     lang: Option<String>,
     dir: Option<String>,
-    dt: Option<String>,
+    datatype: Option<String>,
     text: String,
-) -> Result<Term, String> {
-    match kind {
-        "uri" => Ok(Term::NamedNode(
-            NamedNode::new(&text).map_err(|e| format!("SERVICE: bad IRI {text:?}: {e}"))?,
-        )),
-        "bnode" => Ok(Term::BlankNode(
-            BlankNode::new(&text).map_err(|e| format!("SERVICE: bad bnode {text:?}: {e}"))?,
-        )),
-        // "literal" (and any other leaf, defensively).
-        _ => {
-            if let Some(lang) = lang {
-                // A `<literal xml:lang="…" its:dir="…">` is an RDF 1.2 dirLangString. As in
-                // the SRJ path (sq-s955), an ABSENT or INVALID direction degrades to a plain
-                // language-tagged literal so all parse paths agree on `(lang, dir)`.
-                match dir
-                    .as_deref()
-                    .and_then(sparq_core::dict::parse_base_direction)
-                {
-                    Some(direction) => Ok(Term::Literal(
-                        Literal::new_directional_language_tagged_literal(text, &lang, direction)
-                            .map_err(|e| format!("SERVICE: bad language tag {lang:?}: {e}"))?,
-                    )),
-                    None => Ok(Term::Literal(
-                        Literal::new_language_tagged_literal(text, &lang)
-                            .map_err(|e| format!("SERVICE: bad language tag {lang:?}: {e}"))?,
-                    )),
-                }
-            } else if let Some(dt) = dt {
-                let dt =
-                    NamedNode::new(&dt).map_err(|e| format!("SERVICE: bad datatype {dt:?}: {e}"))?;
-                Ok(Term::Literal(Literal::new_typed_literal(text, dt)))
-            } else {
-                Ok(Term::Literal(Literal::new_simple_literal(text)))
+}
+
+#[cfg(feature = "service")]
+impl SrxValue {
+    /// The term this element denotes: the SRX counterpart of `srj_term`'s leaf arms.
+    fn into_term(self) -> Result<Term, String> {
+        let text = self.text;
+        match self.kind {
+            "uri" => Ok(Term::NamedNode(
+                NamedNode::new(&text).map_err(|e| format!("SERVICE: bad IRI {text:?}: {e}"))?,
+            )),
+            "bnode" => {
+                Ok(Term::BlankNode(BlankNode::new(&text).map_err(|e| {
+                    format!("SERVICE: bad bnode {text:?}: {e}")
+                })?))
             }
+            _ => literal(
+                text,
+                self.lang.as_deref(),
+                self.dir.as_deref(),
+                self.datatype.as_deref(),
+            ),
         }
     }
 }
@@ -1120,13 +1126,12 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
     use quick_xml::events::Event;
 
     let mut vars: Vec<Variable> = Vec::new();
-    // Per-row map of variable-name → term; projected positionally over `vars` at </result>.
-    let mut cur_row: rustc_hash::FxHashMap<String, Term> = rustc_hash::FxHashMap::default();
-    let mut cur_var: Option<String> = None;
-    // The open value element: (kind, xml:lang, its:dir, datatype, text).
-    #[allow(clippy::type_complexity)]
-    let mut cur_val: Option<(String, Option<String>, Option<String>, Option<String>, String)> =
-        None;
+    // The current row, positional over `vars`: a binding for an undeclared variable is
+    // ignored, a repeated binding keeps the last term, and a missing one is UNBOUND.
+    let mut cur_row: Vec<Option<Term>> = Vec::new();
+    // The column of the open `<binding name=…>` (the first declared variable of that name).
+    let mut cur_var: Option<usize> = None;
+    let mut cur_val: Option<SrxValue> = None;
     // SPARQL 1.2 `<triple>` nesting: each frame is (active slot, [s, p, o]).
     let mut triple_stack: Vec<(usize, [Option<Term>; 3])> = Vec::new();
     let mut in_boolean = false;
@@ -1137,13 +1142,16 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
     fn commit(
         term: Term,
         triple_stack: &mut [(usize, [Option<Term>; 3])],
-        cur_row: &mut rustc_hash::FxHashMap<String, Term>,
-        cur_var: &Option<String>,
+        cur_row: &mut Vec<Option<Term>>,
+        cur_var: Option<usize>,
     ) {
         if let Some((slot, parts)) = triple_stack.last_mut() {
             parts[*slot] = Some(term);
-        } else if let Some(var) = cur_var.clone() {
-            cur_row.insert(var, term);
+        } else if let Some(col) = cur_var {
+            if cur_row.len() <= col {
+                cur_row.resize(col + 1, None);
+            }
+            cur_row[col] = Some(term);
         }
     }
     fn set_slot(triple_stack: &mut [(usize, [Option<Term>; 3])], slot: usize) {
@@ -1164,13 +1172,12 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                     Event::Start(e) | Event::Empty(e) => e,
                     _ => unreachable!(),
                 };
-                let name = e.local_name();
-                let name = std::str::from_utf8(name.as_ref()).unwrap_or("").to_string();
                 let attr = |key: &str| -> Option<String> {
                     e.attributes().filter_map(|a| a.ok()).find_map(|a| {
                         let k = std::str::from_utf8(a.key.as_ref()).ok()?;
                         // Matches a bare key or any namespaced `*:key` (e.g. `xml:lang`).
-                        if k == key || k.ends_with(&format!(":{key}")) {
+                        let prefix = k.strip_suffix(key)?;
+                        if prefix.is_empty() || prefix.ends_with(':') {
                             quick_xml::escape::unescape(std::str::from_utf8(&a.value).ok()?)
                                 .ok()
                                 .map(std::borrow::Cow::into_owned)
@@ -1179,43 +1186,48 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                         }
                     })
                 };
-                match name.as_str() {
-                    "variable" => {
+                let value = |kind| SrxValue {
+                    kind,
+                    lang: None,
+                    dir: None,
+                    datatype: None,
+                    text: String::new(),
+                };
+                match e.local_name().as_ref() {
+                    b"variable" => {
                         if let Some(v) = attr("name") {
                             vars.push(Variable::new(&v).map_err(|e| {
                                 format!("SERVICE: bad result variable {v:?}: {e}")
                             })?);
                         }
                     }
-                    "result" => cur_row.clear(),
-                    "binding" => cur_var = attr("name"),
-                    "uri" | "bnode" => cur_val = Some((name, None, None, None, String::new())),
-                    "literal" => {
-                        cur_val = Some((
-                            name,
-                            attr("lang"),
-                            attr("dir"),
-                            attr("datatype"),
-                            String::new(),
-                        ))
+                    b"result" => cur_row.clear(),
+                    b"binding" => {
+                        cur_var = attr("name")
+                            .and_then(|name| vars.iter().position(|v| v.as_str() == name))
                     }
-                    "triple" => triple_stack.push((0, [None, None, None])),
-                    "subject" => set_slot(&mut triple_stack, 0),
-                    "predicate" => set_slot(&mut triple_stack, 1),
-                    "object" => set_slot(&mut triple_stack, 2),
-                    "boolean" => in_boolean = true,
+                    b"uri" => cur_val = Some(value("uri")),
+                    b"bnode" => cur_val = Some(value("bnode")),
+                    b"literal" => {
+                        cur_val = Some(SrxValue {
+                            lang: attr("lang"),
+                            dir: attr("dir"),
+                            datatype: attr("datatype"),
+                            ..value("literal")
+                        })
+                    }
+                    b"triple" => triple_stack.push((0, [None, None, None])),
+                    b"subject" => set_slot(&mut triple_stack, 0),
+                    b"predicate" => set_slot(&mut triple_stack, 1),
+                    b"object" => set_slot(&mut triple_stack, 2),
+                    b"boolean" => in_boolean = true,
                     _ => {}
                 }
                 // Self-closing value elements (`<literal/>`, `<bnode/>`) get no End event:
                 // commit the (empty-text) term right away.
                 if is_empty {
-                    if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                        commit(
-                            srx_term(&kind, lang, dir, dt, t)?,
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
+                    if let Some(v) = cur_val.take() {
+                        commit(v.into_term()?, &mut triple_stack, &mut cur_row, cur_var);
                     }
                 }
             }
@@ -1227,7 +1239,7 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                 if in_boolean {
                     boolean = Some(s.trim() == "true");
                 } else if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&s);
+                    v.text.push_str(&s);
                 }
             }
             // A `&amp;` / `&lt;` / numeric `&#38;` / `&#x26;` reference inside the open
@@ -1235,60 +1247,35 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
             Event::GeneralRef(r) => {
                 if let Some(v) = cur_val.as_mut() {
                     let name = r.decode().map_err(|e| e.to_string())?;
-                    v.4.push_str(&resolve_xml_entity(&name)?);
+                    v.text.push_str(&resolve_xml_entity(&name)?);
                 }
             }
             Event::CData(t) => {
                 if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&String::from_utf8_lossy(&t));
+                    v.text.push_str(&String::from_utf8_lossy(&t));
                 }
             }
             Event::End(e) => {
                 let name = e.local_name();
                 match name.as_ref() {
                     b"uri" | b"bnode" | b"literal" => {
-                        if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                            commit(
-                                srx_term(&kind, lang, dir, dt, t)?,
-                                &mut triple_stack,
-                                &mut cur_row,
-                                &cur_var,
-                            );
+                        if let Some(v) = cur_val.take() {
+                            commit(v.into_term()?, &mut triple_stack, &mut cur_row, cur_var);
                         }
                     }
                     b"triple" => {
                         let Some((_, [s, p, o])) = triple_stack.pop() else {
                             return Err("SERVICE: stray </triple> in results XML".into());
                         };
-                        let subject = match s {
-                            Some(Term::NamedNode(n)) => NamedOrBlankNode::NamedNode(n),
-                            Some(Term::BlankNode(b)) => NamedOrBlankNode::BlankNode(b),
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term subject: {other:?}"
-                                ))
-                            }
+                        let part = |t: Option<Term>, k: &str| {
+                            t.ok_or_else(|| format!("SERVICE: triple term without {k}"))
                         };
-                        let predicate = match p {
-                            Some(Term::NamedNode(n)) => n,
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term predicate: {other:?}"
-                                ))
-                            }
-                        };
-                        let object = o
-                            .ok_or_else(|| "SERVICE: triple term without object".to_string())?;
-                        commit(
-                            Term::Triple(Box::new(Triple {
-                                subject,
-                                predicate,
-                                object,
-                            })),
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
+                        let term = triple_term(
+                            part(s, "subject")?,
+                            part(p, "predicate")?,
+                            part(o, "object")?,
+                        )?;
+                        commit(term, &mut triple_stack, &mut cur_row, cur_var);
                     }
                     b"binding" => cur_var = None,
                     b"result" => {
@@ -1297,9 +1284,8 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                         // semantics the SRJ path uses. Delivered to the sink NOW
                         // (streaming, sq-my8wd.4): a sink error aborts the parse and
                         // propagates verbatim.
-                        let row: Vec<Option<Term>> =
-                            vars.iter().map(|v| cur_row.remove(v.as_str())).collect();
-                        cur_row.clear();
+                        let mut row = std::mem::take(&mut cur_row);
+                        row.resize(vars.len(), None);
                         on_row(row)?;
                     }
                     b"boolean" => in_boolean = false,
@@ -2314,6 +2300,31 @@ mod tests {
             Some(Term::NamedNode(NamedNode::new("http://ex/x").unwrap()))
         );
         assert_eq!(rel.rows[0][1], None);
+    }
+
+    #[test]
+    fn srx_projection_keeps_first_column_last_binding_and_ignores_undeclared() {
+        // A duplicated <variable> fills only its first column, a repeated binding keeps the
+        // last term, a binding for an undeclared variable is dropped, and each row starts
+        // empty.
+        let body = format!(
+            r#"<sparql xmlns="{SRX_NS}">
+              <head><variable name="a"/><variable name="b"/><variable name="a"/></head>
+              <results>
+                <result>
+                  <binding name="a"><uri>http://ex/1</uri></binding>
+                  <binding name="a"><uri>http://ex/2</uri></binding>
+                  <binding name="zz"><uri>http://ex/3</uri></binding>
+                </result>
+                <result><binding name="b"><literal>x</literal></binding></result>
+              </results>
+            </sparql>"#
+        );
+        let rel = parse_srx(&body).unwrap();
+        let iri = |s: &str| Some(Term::NamedNode(NamedNode::new(s).unwrap()));
+        assert_eq!(rel.rows[0], vec![iri("http://ex/2"), None, None]);
+        let x = Some(Term::Literal(Literal::new_simple_literal("x")));
+        assert_eq!(rel.rows[1], vec![None, x, None]);
     }
 
     #[test]
