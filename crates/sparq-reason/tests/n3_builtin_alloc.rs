@@ -1,5 +1,5 @@
-//! GH #6771: the terms the N3 text engine derives are sized BEFORE they are built (numeric
-//! lexical forms excepted: they are rendered, then checked, GH #6901). This
+//! GH #6771: the terms the N3 text engine sizes are sized BEFORE they are built (numeric
+//! results are not covered by `max_term_bytes`, GH #6901). This
 //! binary counts live heap bytes with a counting global allocator and drives each
 //! builtin's result path (and the other derived-term paths: substitution, aggregation,
 //! conclusions) past a small `max_term_bytes`: the call must fail with the closure-limit
