@@ -510,7 +510,10 @@ What the server exposes, all discoverable from the storage description
   with an `application/lws-query+json` filter), both scoped to what the caller may read.
   A QUERY's filter is always its body; the `q` parameter only carries it on the `GET` page
   links. The filter is a JSON object (`{}` matches everything; an empty body gets `400`).
-  Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. When
+  Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. A filter is at
+  most 8 KiB, so that its page links fit a request head: a longer one (up to 32 KiB, read) is
+  too complex to answer (`422`), as one with too many groups is; past 32 KiB the body is refused
+  unread (`413`). When
   any listing, permission check or metadata read fails, the whole index fails with one
   generic `500` that names no resource. Both carry an `ETag` of what they serve and
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.

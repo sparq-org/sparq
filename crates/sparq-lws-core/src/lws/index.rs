@@ -43,6 +43,12 @@ pub const MAX_FILTER_IRIS: usize = 256;
 /// (a third larger), so a filter is held to a size whose links fit well inside a request head.
 pub const MAX_FILTER_BYTES: usize = 8 * 1024;
 
+/// Most of a QUERY body read before it is refused unread (`413`). A filter past
+/// [`MAX_FILTER_BYTES`] but within this is read and refused as too complex to page (`422`, section
+/// 7.2), so whether a search is answered or refused as too complex does not turn on how long the
+/// storage's origin is: the same filter is longer by every IRI's share of a longer origin.
+pub const MAX_FILTER_READ: usize = 4 * MAX_FILTER_BYTES;
+
 /// Relations the search never indexes: structural or protocol ones (section 7.1).
 const STRUCTURAL_RELATIONS: &[&str] = &[
     "type",
@@ -478,8 +484,11 @@ async fn handle_within<S: Store + 'static>(
             }
         }
         if filter_bytes.len() > MAX_FILTER_BYTES {
+            // Too long to carry on its page links: a search too complex to answer (section
+            // 7.2), as one with too many groups is. A page link longer than any this server
+            // makes was refused above, unread.
             return problem(
-                StatusCode::PAYLOAD_TOO_LARGE,
+                StatusCode::UNPROCESSABLE_ENTITY,
                 Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
             );
         }
@@ -720,6 +729,46 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// Issue #6881: a QUERY filter past its size was refused unread (`413`), so a search naming
+    /// many types was answered on a short origin and refused on a long one, its IRIs being
+    /// longer there. Past its size, within what is read, it is too complex to page (`422`).
+    #[tokio::test]
+    async fn a_filter_too_long_to_page_is_too_complex() {
+        use super::super::test_store;
+        let (state, _) = test_store::state(1).await;
+        let search = |filter: String| {
+            let state = state.clone();
+            async move {
+                handle(
+                    &state,
+                    &test_store::request(
+                        Method::from_bytes(b"QUERY").unwrap(),
+                        TYPE_SEARCH_PATH,
+                        &[("content-type", LWS_QUERY)],
+                        &filter,
+                    ),
+                    &Agent::anonymous(),
+                )
+                .await
+                .status()
+            }
+        };
+        let types = |n: usize, origin: &str| {
+            let iris: Vec<String> = (0..n)
+                .map(|i| format!("\"{origin}/vocab#Type{i}\""))
+                .collect();
+            format!("{{\"type\": [{}]}}", iris.join(","))
+        };
+        let long = format!("https://{}.example", "o".repeat(60));
+        let filter = types(99, &long);
+        assert!(filter.len() > MAX_FILTER_BYTES && filter.len() <= MAX_FILTER_READ);
+        assert_eq!(search(filter).await, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_ne!(
+            search(types(99, "https://e.example")).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
     }
 
     #[tokio::test]
