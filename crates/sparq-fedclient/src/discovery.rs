@@ -67,7 +67,7 @@
 
 use crate::source::pct_encode;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::ureq_egress::{Client, EgressFilterResolver, GuardedHttp};
+use crate::ureq_egress::{Client, GuardedHttp};
 use sparq_fedplan::{SourceDescriptor, SourceId};
 
 // ─── Vocabulary IRIs (must match sparq-server/src/descriptors.rs exactly) ────────────
@@ -965,6 +965,8 @@ fn parse_ask_boolean(body: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::ureq_egress::EgressFilterResolver;
 
     /// A served-shape Service Description (the exact N-Triples
     /// `sparq-server/src/descriptors.rs::sd_ntriples` writes for a read-only, federation-

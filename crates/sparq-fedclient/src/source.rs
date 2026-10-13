@@ -99,7 +99,7 @@
 //! Flagged for Fable re-review when available.
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::ureq_egress::{Client, EgressFilterResolver, GuardedHttp};
+use crate::ureq_egress::{Client, GuardedHttp};
 use std::collections::HashSet;
 use std::net::IpAddr;
 
@@ -1504,6 +1504,8 @@ impl FederatedSource for LocalSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::ureq_egress::EgressFilterResolver;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::sync::Mutex;
 
