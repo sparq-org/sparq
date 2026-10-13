@@ -4543,17 +4543,7 @@ fn shacl_report_to_json(report: &sparq_shacl::ValidationReport) -> String {
 
     fn push_str_lit(out: &mut String, s: &str) {
         out.push('"');
-        for c in s.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-                c => out.push(c),
-            }
-        }
+        sparq_core::json::escape_into(out, s);
         out.push('"');
     }
     fn push_field(out: &mut String, key: &str, val: Option<&str>) {
@@ -9793,17 +9783,7 @@ fn chunked_response(
 pub(crate) fn json_error(status: StatusCode, msg: &str) -> Response {
     let mut body = String::with_capacity(msg.len() + 16);
     body.push_str("{\"error\":\"");
-    for c in msg.chars() {
-        match c {
-            '"' => body.push_str("\\\""),
-            '\\' => body.push_str("\\\\"),
-            '\n' => body.push_str("\\n"),
-            '\r' => body.push_str("\\r"),
-            '\t' => body.push_str("\\t"),
-            c if (c as u32) < 0x20 => body.push_str(&format!("\\u{:04x}", c as u32)),
-            c => body.push(c),
-        }
-    }
+    sparq_core::json::escape_into(&mut body, msg);
     body.push_str("\"}");
     Response::builder()
         .status(status)
