@@ -85,9 +85,10 @@
 // into RuntimeStats (makes the sq-s5kd CardinalityWeighted aggregation live-consumable).
 
 use crate::operators::{
-    fetch_leaf_relation, leaf_source_indices, natural_join, rel_row_project, InterpError, Relation,
+    bgp_vars, fetch_leaf_relation, natural_join, single_source_leaf, union_leaf, InterpError,
+    Relation,
 };
-use crate::planner::{lower_leaf, pattern_vars, SourceResolver};
+use crate::planner::SourceResolver;
 use crate::source::FederatedSource;
 use sparq_fedplan::{
     plan_bgp, AdaptiveExecutor, JoinTree, PatternSources, PlanOptions, ReplanOutcome, ReplanPolicy,
@@ -197,7 +198,7 @@ pub fn execute_adaptive_single_source(
     // reorders how these already-fetched relations are combined. [OPUS-4.8] sq-ij5x.
     let mut leaf_rel: std::collections::HashMap<usize, Relation> = std::collections::HashMap::new();
     for pattern in tree.join_order() {
-        let leaf = fetch_leaf(resolver, selection, source, pattern)?;
+        let leaf = single_source_leaf(resolver, selection, source, pattern)?;
         // The observed leaf cardinality IS the real row count the source returned.
         stats.record_leaf_cardinality(pattern, leaf.rows.len() as f64);
         leaf_rel.insert(pattern, leaf);
@@ -325,39 +326,10 @@ fn adaptive_join_phase(
     }
 }
 
-/// Fetch + parse one leaf pattern's sub-result from the single source, enforcing the SAME
-/// single-source guard as the static interpreters (a leaf the planner retained more than one
-/// source for is rejected with [`InterpError::MultiSource`], never silently dropped — the
-/// union-arm fan-out is [`execute_adaptive_multi_source`]'s [`fetch_leaf_union`], [FABLE-5]
-/// sq-xw8zz). [OPUS-4.8] sq-ij5x.
-fn fetch_leaf(
-    resolver: &SourceResolver<'_>,
-    selection: &[PatternSources],
-    source: &dyn FederatedSource,
-    pattern: usize,
-) -> Result<Relation, InterpError> {
-    if let Some(ps) = selection.iter().find(|ps| ps.pattern == pattern) {
-        if ps.candidates.len() > 1 {
-            return Err(InterpError::MultiSource {
-                pattern,
-                sources: ps.candidates.len(),
-            });
-        }
-    }
-    let tp = resolver.pattern(pattern)?;
-    let sub = lower_leaf(tp);
-    let body = source.execute(&sub)?;
-    crate::operators::parse_srj(&body).map_err(InterpError::BadSrj)
-}
-
-/// Answer ONE leaf pattern as the **bag-union over its retained arms**, timing each arm:
-/// resolve every retained source index to its adapter, fetch the leaf relation from each arm
-/// with the SAME per-source fetch the static multi-source interpreter uses
-/// ([`fetch_leaf_relation`], so endpoint/TPF/brTPF dispatch is identical), report each
-/// successful arm's `(source index, wall-clock latency ms)` through `observe_arm`, and
-/// concatenate the rows re-keyed onto the pattern's canonical header (SPARQL UNION multiset
-/// semantics, no de-duplication — byte-compatible with `sq-7yf0`'s
-/// [`materialize_multi_source`](crate::operators::materialize_multi_source) leaf).
+/// Answer ONE leaf pattern as the **bag-union over its retained arms**, timing each arm: the
+/// static multi-source interpreter's [`union_leaf`] (same source resolution, same
+/// [`fetch_leaf_relation`] dispatch, same re-keying), with each successful arm's
+/// `(source index, wall-clock latency ms)` reported through `observe_arm`.
 ///
 /// A failed arm reports NOTHING and fails the whole leaf closed (its measured duration is a
 /// transport error's, not a served answer's — folding it into the EWMA would make a
@@ -369,24 +341,12 @@ fn fetch_leaf_union(
     pattern: usize,
     observe_arm: &mut dyn FnMut(usize, f64),
 ) -> Result<Relation, InterpError> {
-    let tp = resolver.pattern(pattern)?;
-    let vars = pattern_vars(tp);
-    let mut union = Relation {
-        vars: vars.clone(),
-        rows: Vec::new(),
-    };
-    for idx in leaf_source_indices(selection, pattern) {
-        let source = resolver.source(idx)?;
+    union_leaf(resolver, selection, pattern, |idx, source, tp| {
         let (fetched, latency_ms) = timed(|| fetch_leaf_relation(source, tp));
         let leaf = fetched?;
         observe_arm(idx, latency_ms);
-        // Re-key onto the canonical leaf header so every arm's rows union column-aligned
-        // (a source's SRJ header may differ in order from the pattern's variable order).
-        for row in &leaf.rows {
-            union.rows.push(rel_row_project(&leaf.vars, row, &vars));
-        }
-    }
-    Ok(union)
+        Ok(leaf)
+    })
 }
 
 /// Run `f`, returning its result plus the elapsed wall-clock time in **milliseconds** — the
@@ -406,21 +366,6 @@ fn timed<T>(f: impl FnOnce() -> T) -> (T, f64) {
     {
         (f(), 0.0)
     }
-}
-
-/// All distinct variables of the resolver's BGP, in first-seen order — the `SELECT *` scope,
-/// identical to the static interpreter's projection so the adaptive result has the same
-/// header. [OPUS-4.8] sq-ij5x.
-fn bgp_vars(resolver: &SourceResolver<'_>) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for tp in &resolver.bgp().patterns {
-        for v in pattern_vars(tp) {
-            if !out.contains(&v) {
-                out.push(v);
-            }
-        }
-    }
-    out
 }
 
 /// Convenience: re-`plan_bgp` a fresh static plan from a BGP + descriptors + selection, the
