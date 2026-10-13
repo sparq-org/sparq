@@ -97,7 +97,7 @@ Source: w3c/N3 `tests/` (pinned clone). The reasoner manifest measures EYE/cwm p
   *observed*: output not isomorphic to the reference (1 vs 1 statements; expected-only e.g. [Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#test"), Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"), Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#Successful")]; actual-only e.g. [Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#test"), Iri("https://w3c.github.io/N3/tests/N3Tests/cwm_unify/unify1.n3#a"), Iri("https:/)
 - `n3/parser` — **numbers.n3**: the expected output cwm_n3/n3parser.tests_n3_10013.n3 keeps ONE statement under the generating author's local base (file:/home/syosi/...#is) while the rest were rebased — that statement can never match any correct parse.
   *observed*: parsed statements not isomorphic to the reference
-- `n3/parser` — **too-nested.n3**: cwm_syntax/too-nested.n3 nests 1080 formulae; the N3 parser rejects bracket nesting past bounded::PARSE_DEPTH (64) so untrusted input cannot overflow a 2 MiB stack. The entry is rdft:Proposed and upstream notes 'succeeding or failing doesn't prove much'.
+- `n3/parser` — **too-nested.n3**: cwm_syntax/too-nested.n3 nests 1080 formulae; the N3 parser rejects bracket nesting past bounded::PARSE_DEPTH (64) so untrusted input cannot overflow a 2 MiB stack (#6732 / #6835). The entry is rdft:Proposed and upstream notes 'succeeding or failing doesn't prove much'.
   *observed*: parse error: nesting deeper than 64
 
 ### Out-of-scope reasons
