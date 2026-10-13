@@ -52,9 +52,8 @@
 //! uses**: it resolves the host itself and refuses to dial loopback / RFC1918 / link-local
 //! (incl. the `169.254.169.254` cloud-metadata IP) / unique-local / CGNAT addresses, vetting
 //! the *resolved* IP just before connect so a DNS-rebind cannot smuggle an internal address
-//! through. The IP classifier (`is_forbidden_ip`) mirrors
-//! `sparq_engine::service::is_forbidden_ip` (which is `pub(crate)` there, so it is
-//! re-derived here rather than imported); an embedder may relax the policy per-host with
+//! through. The IP classifier (`is_forbidden_ip`) is the engine's own
+//! (`sparq_engine::is_forbidden_ip`); an embedder may relax the policy per-host with
 //! `HttpFetcher::allow_private_host`.
 //!
 //! The network is behind the [`Fetcher`](crate::discovery::Fetcher) trait seam, so the parser
@@ -67,6 +66,8 @@
 // Fable re-review when available.
 
 use crate::source::pct_encode;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ureq_egress::{Client, EgressFilterResolver};
 use sparq_fedplan::{SourceDescriptor, SourceId};
 
 // ─── Vocabulary IRIs (must match sparq-server/src/descriptors.rs exactly) ────────────
@@ -632,7 +633,10 @@ impl<'a> PatternProbeSession<'a> {
         endpoint: &str,
         pattern: &sparq_fedplan::TriplePattern,
     ) -> PatternProbeOutcome {
-        let clause = crate::planner::render_pattern_clause(pattern);
+        // A pattern that cannot be written as SPARQL is never probed; the source is kept.
+        let Ok(clause) = crate::planner::render_pattern_clause(pattern) else {
+            return PatternProbeOutcome::Unknown;
+        };
         let key = format!("{}\0{}", endpoint, clause);
         if let Some(outcome) = self.cache.get(&key).copied() {
             self.stats.cache_hits += 1;
@@ -727,39 +731,10 @@ impl Fetcher for MapFetcher {
 }
 
 /// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden (private / internal /
-/// non-global) destination for a discovery fetch — the SSRF default-deny set.
-///
-/// This **mirrors `sparq_engine::service::is_forbidden_ip`** (which is `pub(crate)` in the
-/// engine, hence re-derived here rather than imported). Forbidden ranges: loopback
-/// (`127/8`, `::1`); RFC1918 private (`10/8`, `172.16/12`, `192.168/16`); link-local
-/// (`169.254/16`, incl. the `169.254.169.254` cloud-metadata IP, and IPv6 `fe80::/10`);
-/// unique-local IPv6 (`fc00::/7`); unspecified (`0.0.0.0`, `::`); broadcast; CGNAT
-/// (`100.64/10`). IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped and re-classified as the
-/// embedded IPv4, so a private v4 cannot ride in through a v6 host literal.
+/// non-global) destination for a discovery fetch: the engine's SERVICE classification (see
+/// [`crate::source::is_forbidden_ip`]).
 #[cfg(not(target_arch = "wasm32"))]
-pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || matches!(v4.octets(), [100, b, ..] if (64..=127).contains(&b))
-            // 100.64/10 CGNAT
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(IpAddr::V4(v4));
-            }
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
-        }
-    }
-}
+pub use sparq_engine::is_forbidden_ip;
 
 /// The production network fetcher: a blocking ureq GET behind the **same default-deny SSRF
 /// egress filter the engine's SERVICE transport uses**. Native-only — neither ureq nor its
@@ -805,62 +780,16 @@ impl HttpFetcher {
     }
 }
 
-/// ureq resolver enforcing the SSRF egress policy on the *resolved* addresses
-/// (DNS-rebinding-safe): it resolves the host, drops every [`is_forbidden_ip`] address
-/// (unless the bare host is on the allowlist), and returns only survivors — so ureq dials
-/// only vetted IPs. Mirrors the engine's `EgressFilterResolver`.
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
-struct EgressFilterResolver {
-    allow_private: std::sync::Arc<std::collections::HashSet<String>>,
-}
-
-// [OPUS-4.8] sq-g2xs: ureq-3's `Resolver` takes a parsed `&http::Uri` (+ config + timeout) and
-// returns an `ArrayVec<SocketAddr, 16>` rather than ureq-2's `&str` netloc → `Vec`. The SSRF
-// policy is byte-for-byte the ureq-2 one; the shared `crate::ureq_egress` helpers carry the
-// ureq-3 boilerplate so the three sparq-fedclient transports share one implementation. (The engine
-// SERVICE resolver applies equivalent, unit-tested logic via its own inline copy — `sparq-engine`
-// cannot depend on `sparq-fedclient` — so it does not share this module.)
-#[cfg(not(target_arch = "wasm32"))]
-impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        _config: &ureq::config::Config,
-        _timeout: ureq::unversioned::transport::NextTimeout,
-    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        let (host_port, host, port) = crate::ureq_egress::uri_host_port(uri).ok_or_else(|| {
-            crate::ureq_egress::egress_refused(format!(
-                "discovery egress refused: request URI {uri} has no host authority to vet"
-            ))
-        })?;
-        // Port-scoped allowlist: a `host:port` entry re-opens a private host only on its exact
-        // dialled port (shared host:port rule with the engine SERVICE guard; sq-vbnyc).
-        let allowed = crate::ureq_egress::allowlist_permits(&self.allow_private, &host, port);
-        crate::ureq_egress::filter_resolved(&host_port, allowed, is_forbidden_ip, || {
-            format!(
-                "discovery egress refused: {host_port} resolves only to private/internal \
-                 addresses (default-deny SSRF policy; allow it with \
-                 HttpFetcher::allow_private_host)"
-            )
-        })
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str, accept: &str) -> Result<String, String> {
         // [OPUS-4.8] sq-g2xs: ureq-3 `Agent::with_parts` + the default-deny SSRF resolver — ureq
         // dials only the addresses the resolver returns (the vetted IP is the dialled IP).
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
+        let agent = crate::ureq_egress::agent(
+            self.timeout,
             EgressFilterResolver {
                 allow_private: std::sync::Arc::clone(&self.allow_private),
+                client: Client::Discovery,
             },
         );
         match agent.get(url).header("Accept", accept).call() {
@@ -1507,6 +1436,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
     fn resolver_denying() -> EgressFilterResolver {
         EgressFilterResolver {
             allow_private: std::sync::Arc::new(std::collections::HashSet::new()),
+            client: Client::Discovery,
         }
     }
 
@@ -1516,6 +1446,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         set.insert(host.to_ascii_lowercase());
         EgressFilterResolver {
             allow_private: std::sync::Arc::new(set),
+            client: Client::Discovery,
         }
     }
 

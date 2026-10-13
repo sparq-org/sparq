@@ -8,7 +8,7 @@
 /// produces a `Json` value; that value is deep-compared against the suite's
 /// expected expanded document using the runner's `json_ld_equal` comparator
 /// (object key order insignificant; array order SIGNIFICANT only inside `@list`
-/// values, insignificant elsewhere; numeric equality as f64).
+/// values and (recursively) a `@json` literal payload, insignificant elsewhere; numeric equality as f64).
 ///
 /// ## Oracle-correction rationale
 ///

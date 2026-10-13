@@ -38,7 +38,7 @@
 //! makes **no** soundness/privacy/security claim. Its documented assumption is the design
 //! record's constraint C-B (§2.2): the privacy descriptor is the **source's own declaration**;
 //! this adapter merely *reads* it to route, and a later phase has each source *re-enforce* it
-//! fail-closed, so a lying planner cannot widen disclosure. The adapter itself enforces nothing
+//! fail-closed against the declared envelope. The adapter itself enforces nothing
 //! cryptographic — see the crate `README.md` and the design record.
 //!
 //! [OPUS-4.8] sq-fix4.
