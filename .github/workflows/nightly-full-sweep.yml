@@ -142,7 +142,7 @@ jobs:
           esac
           echo "a11y: no forced failure"
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -233,7 +233,7 @@ jobs:
         run: npm run test:e2e
       - name: Upload Playwright report on failure
         if: failure() && needs.config.outputs.mode == 'full'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-a11y-report
           path: |
@@ -264,7 +264,7 @@ jobs:
           esac
           echo "visual: no forced failure"
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -365,7 +365,7 @@ jobs:
         run: npm run vr:update
       - name: Upload regenerated baselines for review
         if: always() && needs.config.outputs.vr_refresh == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: refreshed-visual-baselines
           path: site/e2e/visual/baselines/
@@ -374,7 +374,7 @@ jobs:
 
       - name: Upload visual diff artifacts on failure
         if: failure() && needs.config.outputs.mode == 'full'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-visual-diffs
           path: |
@@ -401,7 +401,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download the re-minted baselines
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: refreshed-visual-baselines
           path: ${{ runner.temp }}/vr-artifact
@@ -470,7 +470,7 @@ jobs:
           esac
           echo "cross-browser: no forced failure"
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -529,7 +529,7 @@ jobs:
             --project firefox --project webkit
       - name: Upload Playwright report on failure
         if: failure() && needs.config.outputs.mode == 'full'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-cross-browser-report
           path: |
@@ -575,7 +575,7 @@ jobs:
         if: needs.config.outputs.mode == 'full'
         with:
           targets: wasm32-unknown-unknown
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: needs.config.outputs.mode == 'full'
         with:
           node-version: 22
@@ -671,7 +671,7 @@ jobs:
             xvfb-run --auto-servernum dbus-run-session -- npm run test:e2e
       - name: Upload failure artifacts
         if: always() && needs.config.outputs.mode == 'full'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nightly-tauri-e2e-artifacts
           path: gui/e2e/artifacts/

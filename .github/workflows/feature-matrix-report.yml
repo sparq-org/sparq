@@ -121,14 +121,14 @@ jobs:
       # this run's own scope). A missing pattern is not an error (v4+), so a run that
       # assembled zero legs simply yields empty dirs — handled below.
       - name: Download the per-leg results artifacts (by run-id)
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: feature-matrix-results-*
           path: fmg-results
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
       - name: Download the selected-matrix + metadata artifacts (by run-id)
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: feature-matrix-{selected,metadata}
           path: fmg-meta
