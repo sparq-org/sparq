@@ -509,8 +509,8 @@ fn explicit_denies_and_ungoverned_graphs_win() {
     assert!(!open.decide(&carol, N2, Mode::Read).allow);
 }
 
-/// A permission never grants a change to a group document an ACL references: that
-/// would let the grantee add itself to a group the ACL grants `Control` to.
+/// A permission never grants a change to, or the creation of, a group document an ACL
+/// references: those documents are inputs of the auth view, like the ACL itself.
 #[test]
 fn referenced_group_documents_are_not_granted_changes() {
     let group = "https://pod.ex/groups/admins";
