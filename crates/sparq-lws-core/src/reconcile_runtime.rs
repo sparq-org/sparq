@@ -83,6 +83,10 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.remove_child(container, child).await
     }
 
+    async fn fence(&self, fence: &sparq_lws_core::store::Fence) -> Result<(), SparqError> {
+        self.0.fence(fence).await
+    }
+
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
         self.0.list_children(container).await
     }

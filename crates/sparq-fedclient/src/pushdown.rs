@@ -72,6 +72,7 @@
 // bind-join block primitive. Phase 4 owns this module; Phase 5 owns operators.rs/stream.rs.
 // Flagged for Fable re-review when available.
 
+use crate::planner::{pattern_vars, render_pattern_clause};
 use crate::source::{BindJoin, Capability, FilterClass, Interface, SubQuery};
 use sparq_fedplan::{Bgp, PatternSources, Term, TriplePattern};
 
@@ -371,8 +372,9 @@ pub struct PushedGroup {
 ///   fragment path uses minimally — honest, not an overclaim that a fragment server answers a
 ///   multi-pattern BGP.)
 ///
-/// Returns `None` only when the group is empty or names a pattern index out of range for the
-/// BGP (a malformed group — fail closed rather than emit a partial query). [OPUS-4.8] sq-7byx.
+/// Returns `None` when the group is empty, names a pattern index out of range for the BGP, or
+/// has a pattern position that cannot be written as one SPARQL term (see
+/// [`crate::planner::RenderError`]): fail closed rather than emit a partial or altered query. [OPUS-4.8] sq-7byx.
 pub fn push_group(
     group: &ExclusiveGroup,
     bgp: &Bgp,
@@ -427,20 +429,13 @@ pub fn push_group(
     }
 
     // --- Render the pattern block (one pattern for a fragment source, all for an endpoint).
-    let render_pat = |tp: &TriplePattern| -> String {
-        format!(
-            "{} {} {}",
-            render_term(&tp.subject),
-            render_term(&tp.predicate),
-            render_term(&tp.object)
-        )
-    };
     let body = if fragment {
-        render_pat(pats[0])
+        render_pattern_clause(pats[0]).ok()?
     } else {
         pats.iter()
-            .map(|tp| render_pat(tp))
-            .collect::<Vec<_>>()
+            .map(|tp| render_pattern_clause(tp))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?
             .join(" . ")
     };
 
@@ -493,54 +488,6 @@ pub fn push_group(
         pushed_filters,
         local_filters,
     })
-}
-
-/// The variables a pattern produces, de-duplicated in subject→predicate→object position
-/// order. (Local copy so pushdown does not reach into the planner module's helper; the
-/// shapes are identical.) [OPUS-4.8] sq-7byx.
-fn pattern_vars(tp: &TriplePattern) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for t in [&tp.subject, &tp.predicate, &tp.object] {
-        if let Term::Var(v) = t {
-            if !out.iter().any(|n| n == &v.0) {
-                out.push(v.0.clone());
-            }
-        }
-    }
-    out
-}
-
-/// Render a light `sparq-fedplan` [`Term`] as a SPARQL term string: a variable as `?name`,
-/// an IRI in `<>`, a literal verbatim if it already carries SPARQL literal syntax (a leading
-/// `"`) else quoted + escaped. Same convention as `planner::render_term`. [OPUS-4.8] sq-7byx.
-fn render_term(t: &Term) -> String {
-    match t {
-        Term::Var(v) => format!("?{}", v.0),
-        Term::Iri(iri) => format!("<{}>", iri),
-        Term::Literal(lit) => {
-            if lit.starts_with('"') {
-                lit.clone()
-            } else {
-                format!("\"{}\"", escape_literal(lit))
-            }
-        }
-    }
-}
-
-/// Minimal SPARQL string-literal escaping for a bare lexical value. [OPUS-4.8] sq-7byx.
-fn escape_literal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            _ => out.push(c),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -917,6 +864,27 @@ mod tests {
             patterns: vec![9], // out of range
         };
         let cap = Capability::endpoint();
+        assert!(push_group(&group, &bgp, &cap, &[], &[], &[], None).is_none());
+    }
+
+    #[test]
+    fn push_group_with_an_unrenderable_term_fails_closed() {
+        // Any pattern in the group that cannot be written as one SPARQL term stops the whole
+        // group, for an endpoint (all patterns) and a fragment source (the first pattern).
+        let bgp = Bgp::new(vec![
+            tp(var("s"), iri("http://ex/p"), var("o")),
+            tp(var("o"), iri("http://ex/q> ?x <http://ex/r"), var("z")),
+        ]);
+        let group = ExclusiveGroup {
+            source: 0,
+            patterns: vec![0, 1],
+        };
+        assert!(push_group(&group, &bgp, &Capability::endpoint(), &[], &[], &[], None).is_none());
+        let group = ExclusiveGroup {
+            source: 0,
+            patterns: vec![1],
+        };
+        let cap = Capability::tpf();
         assert!(push_group(&group, &bgp, &cap, &[], &[], &[], None).is_none());
     }
 

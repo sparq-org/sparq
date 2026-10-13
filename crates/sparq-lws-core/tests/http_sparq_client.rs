@@ -56,6 +56,12 @@ struct MockMode {
     children_row_missing_binding: bool,
     /// Sleep this long BEFORE sending any response (headers + body) — for the whole-request timeout.
     delay: Option<Duration>,
+    /// The next fenced update (a create or an empty-delete) is applied this long after it arrives,
+    /// in a task of its own, and answered only long after the client gave up: as `sparq-server`'s
+    /// writer goes on with an update whose HTTP wait has elapsed (#6836).
+    commit_late: Option<Duration>,
+    /// Fence updates answer `503`, as while the endpoint cannot apply them.
+    fail_fences: bool,
 }
 
 /// The mock's tiny store: resource IRI → its index record; container IRI → child IRIs; resource IRI
@@ -73,6 +79,9 @@ struct MockStore {
     /// container IRI → its per-operation DELETE-marker nonces (the race-resistant empty-delete confirm,
     /// stored in a separate scratch graph keyed by the container IRI as the marker subject).
     delete_markers: HashMap<String, Vec<String>>,
+    /// The nonces fenced (`INSERT DATA` into the fences graph): a fenced update carrying one of
+    /// them does nothing.
+    fences: Vec<String>,
     /// The last SPARQL string the mock received (so a test can assert on the query text/escaping).
     last_sparql: Option<String>,
     /// Total protocol requests received (so a test can pin how many round-trips an op cost).
@@ -137,6 +146,23 @@ async fn handle_sparql(
     }
 
     if ct.starts_with("application/sparql-update") {
+        if is_fence(&sparql) && mode.fail_fences {
+            return (StatusCode::SERVICE_UNAVAILABLE, "fences fail").into_response();
+        }
+        let late = if sparql.contains("#fenced>") {
+            state.mode.lock().unwrap().commit_late.take()
+        } else {
+            None
+        };
+        if let Some(after) = late {
+            let (state, sparql) = (state.clone(), sparql.clone());
+            tokio::spawn(async move {
+                tokio::time::sleep(after).await;
+                apply_update(&state, &sparql);
+            });
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            return StatusCode::NO_CONTENT.into_response();
+        }
         apply_update(&state, &sparql);
         return StatusCode::NO_CONTENT.into_response();
     }
@@ -165,6 +191,20 @@ async fn handle_sparql(
 /// is written. See `apply_delete_container_modify`.
 fn apply_update(state: &MockState, sparql: &str) {
     let mut store = state.store.lock().unwrap();
+    // A fence: `INSERT DATA { GRAPH <…#fences> { <record> <…#fenced> "nonce" } }`.
+    if is_fence(sparql) {
+        let nonce = extract_literals(sparql).pop().unwrap_or_default();
+        store.fences.push(nonce);
+        return;
+    }
+    // A fenced update whose nonce is fenced does nothing (its `FILTER NOT EXISTS`).
+    if sparql.contains("#fenced>")
+        && extract_literals(sparql)
+            .iter()
+            .any(|l| store.fences.contains(l))
+    {
+        return;
+    }
     // delete_container_if_empty: a SINGLE `DELETE { container-graph ; parent-edge } INSERT { marker }
     // WHERE { exists+empty guard }` modify, recognised by the `deleteMarker` predicate (distinguishing
     // it from create_child's `createMarker`). Model SPARQL 1.1 sequencing FAITHFULLY: split on the
@@ -260,6 +300,11 @@ fn apply_update(state: &MockState, sparql: &str) {
             }
         }
     }
+}
+
+/// Whether `sparql` is a fence ([`sparq_lws_core::store::sparql::update_fence`]).
+fn is_fence(sparql: &str) -> bool {
+    sparql.starts_with("INSERT DATA") && sparql.contains("#fences>")
 }
 
 /// Answer a query (ASK exists / SELECT meta / SELECT children / CONSTRUCT) from the store.
@@ -1361,4 +1406,149 @@ async fn live_sparq_round_trip() {
 
     // Clean up the parent.
     c.delete_meta(parent).await.ok();
+}
+
+// ---------------------------------------------------------------------------
+// #6836: a write that times out may still commit; its fence makes the outcome final.
+// ---------------------------------------------------------------------------
+
+/// A create whose update times out but is applied a little later: the client fences it, and its
+/// marker, read after the fence, shows it committed.
+#[tokio::test]
+async fn a_create_that_times_out_and_commits_is_confirmed_after_its_fence() {
+    let (url, state) = spawn_mock().await;
+    let c = HttpSparqClient::with_timeout(url, Duration::from_millis(300));
+    c.put_meta(CONTAINER, meta()).await.unwrap();
+    state.mode.lock().unwrap().commit_late = Some(Duration::from_millis(50));
+    c.create_child(CONTAINER, CHILD, meta()).await.unwrap();
+    assert_eq!(
+        c.list_children(CONTAINER).await.unwrap(),
+        vec![CHILD.to_string()]
+    );
+    assert_eq!(state.store.lock().unwrap().fences.len(), 1);
+}
+
+/// A create whose update times out and arrives only after its fence: it did not commit, and
+/// never does. The client says so as a final failure, not a missing container.
+#[tokio::test]
+async fn a_create_fenced_before_it_commits_never_commits() {
+    let (url, state) = spawn_mock().await;
+    let c = HttpSparqClient::with_timeout(url, Duration::from_millis(300));
+    c.put_meta(CONTAINER, meta()).await.unwrap();
+    state.mode.lock().unwrap().commit_late = Some(Duration::from_millis(1500));
+    match c.create_child(CONTAINER, CHILD, meta()).await {
+        Err(SparqError::Backend(msg)) => assert!(msg.contains("did not commit"), "{msg}"),
+        other => panic!("expected a final failure, got {other:?}"),
+    }
+    tokio::time::sleep(Duration::from_millis(1800)).await;
+    assert!(c.list_children(CONTAINER).await.unwrap().is_empty());
+    assert!(!c.exists(CHILD).await.unwrap());
+}
+
+/// A create whose update times out and whose fence fails too is unsettled: the error carries the
+/// fence, and the outcome is final once that fence succeeds.
+#[tokio::test]
+async fn a_create_that_cannot_be_fenced_is_unsettled_until_it_is() {
+    let (url, state) = spawn_mock().await;
+    let c = HttpSparqClient::with_timeout(url, Duration::from_millis(300));
+    c.put_meta(CONTAINER, meta()).await.unwrap();
+    {
+        let mut mode = state.mode.lock().unwrap();
+        mode.commit_late = Some(Duration::from_millis(100));
+        mode.fail_fences = true;
+    }
+    let fence = match c.create_child(CONTAINER, CHILD, meta()).await {
+        Err(SparqError::Unsettled { fence, .. }) => fence,
+        other => panic!("expected an unsettled failure, got {other:?}"),
+    };
+    // Landed after the client answered.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        c.list_children(CONTAINER).await.unwrap(),
+        vec![CHILD.to_string()]
+    );
+    assert!(c.fence(&fence).await.is_err());
+    state.mode.lock().unwrap().fail_fences = false;
+    c.fence(&fence).await.unwrap();
+    assert_eq!(
+        c.list_children(CONTAINER).await.unwrap(),
+        vec![CHILD.to_string()]
+    );
+}
+
+/// The mirror: an empty-delete whose update times out and arrives only after its fence did not
+/// run. It is a final failure, not "not empty".
+#[tokio::test]
+async fn a_delete_fenced_before_it_commits_never_runs() {
+    let (url, state) = spawn_mock().await;
+    let c = HttpSparqClient::with_timeout(url, Duration::from_millis(300));
+    c.put_meta(CONTAINER, meta()).await.unwrap();
+    c.create_child(CONTAINER, CHILD, meta()).await.unwrap();
+    state.mode.lock().unwrap().commit_late = Some(Duration::from_millis(1500));
+    match c.delete_meta_if_empty(CHILD, Some(CONTAINER)).await {
+        Err(SparqError::Backend(msg)) => assert!(msg.contains("did not run"), "{msg}"),
+        other => panic!("expected a final failure, got {other:?}"),
+    }
+    tokio::time::sleep(Duration::from_millis(1800)).await;
+    assert!(c.exists(CHILD).await.unwrap());
+    assert_eq!(
+        c.list_children(CONTAINER).await.unwrap(),
+        vec![CHILD.to_string()]
+    );
+}
+
+/// The mirror: an empty-delete whose update times out but is applied before its fence ran.
+#[tokio::test]
+async fn a_delete_that_times_out_and_commits_is_confirmed_after_its_fence() {
+    let (url, state) = spawn_mock().await;
+    let c = HttpSparqClient::with_timeout(url, Duration::from_millis(300));
+    c.put_meta(CONTAINER, meta()).await.unwrap();
+    c.create_child(CONTAINER, CHILD, meta()).await.unwrap();
+    state.mode.lock().unwrap().commit_late = Some(Duration::from_millis(50));
+    assert_eq!(
+        c.delete_meta_if_empty(CHILD, Some(CONTAINER))
+            .await
+            .unwrap(),
+        DeleteOutcome::Deleted
+    );
+    assert!(!c.exists(CHILD).await.unwrap());
+}
+
+/// Codex review of #6860: a decorator over the client (`CountingSparqClient`) forwarded the
+/// writes, and their unsettled failures, but not `fence`, so every fence through it hit the
+/// refusing default and a settlement retried forever. Fenced through the decorator and the
+/// composite store, the write is settled.
+#[tokio::test]
+async fn an_unsettled_write_is_fenced_through_the_counting_decorator() {
+    use sparq_lws_core::error::ServerError;
+    use sparq_lws_core::store::counting::{BackendCounters, CountingSparqClient};
+    use sparq_lws_core::store::{CompositeStore, InMemoryBlobStore, Store};
+    let (url, state) = spawn_mock().await;
+    let counters = BackendCounters::new();
+    let client = CountingSparqClient::new(
+        HttpSparqClient::with_timeout(url, Duration::from_millis(300)),
+        counters.clone(),
+    );
+    client.put_meta(CONTAINER, meta()).await.unwrap();
+    let store = CompositeStore::new(client, InMemoryBlobStore::new());
+    {
+        let mut mode = state.mode.lock().unwrap();
+        mode.commit_late = Some(Duration::from_millis(1500));
+        mode.fail_fences = true;
+    }
+    let fence = match store
+        .create_in_container(CONTAINER, CHILD, Bytes::from_static(b"x"), "text/plain")
+        .await
+    {
+        Err(ServerError::Unsettled { fence, .. }) => fence,
+        other => panic!("expected an unsettled write, got {other:?}"),
+    };
+    state.mode.lock().unwrap().fail_fences = false;
+    let before = counters.snapshot();
+    store.fence(&fence).await.unwrap();
+    assert_eq!(counters.snapshot().since(&before).sparql_updates, 1);
+    assert_eq!(state.store.lock().unwrap().fences.len(), 1);
+    // Fenced before it landed: it never does.
+    tokio::time::sleep(Duration::from_millis(1800)).await;
+    assert!(store.list_children(CONTAINER).await.unwrap().is_empty());
 }

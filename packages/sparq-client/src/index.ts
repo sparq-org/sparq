@@ -50,6 +50,8 @@ import type {
   InitOutput,
 } from "./generated/sparq_wasm.js";
 
+import { IRI_FORBIDDEN, LANGTAG, LONE_SURROGATE, PN_CHARS_BASE } from "./rdf-syntax.js";
+
 /**
  * A forward-only cursor over a SELECT result's solution rows — the wasm-pack-generated
  * `SolutionCursor` ({@link WasmStore.queryCursor}). Each {@link WasmSolutionCursor.next}
@@ -156,22 +158,12 @@ export function termValue(t: SparqlTerm | undefined): string | undefined {
 
 const XSD_STRING_IRI = "http://www.w3.org/2001/XMLSchema#string";
 
-// A lone UTF-16 surrogate has no UTF-8 encoding and no UCHAR form, so it cannot be written.
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-// Characters N-Triples IRIREF forbids unescaped: controls, space, and <>"{}|^`\.
-const IRI_FORBIDDEN = /[\u0000-\u0020<>"{}|^`\\]/;
 // N-Triples BLANK_NODE_LABEL (the part after `_:`). PN_CHARS_U includes ':' in N-Triples.
-const PN_CHARS_BASE =
-  "A-Za-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF" +
-  "\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD" +
-  "\\u{10000}-\\u{EFFFF}";
 const PN_CHARS = `${PN_CHARS_BASE}_:\\-0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040`;
 const BLANK_NODE_LABEL = new RegExp(
   `^[${PN_CHARS_BASE}_:0-9](?:[${PN_CHARS}.]*[${PN_CHARS}])?$`,
   "u",
 );
-// N-Triples LANGTAG without the leading '@'; the RDF 1.2 direction is checked separately.
-const LANGTAG = /^[a-zA-Z]+(?:-[a-zA-Z0-9]+)*$/;
 
 /** Throws when `value` cannot be written as an N-Triples IRIREF without changing it. */
 function checkIri(value: string, what: string): string {
@@ -952,6 +944,16 @@ export {
   renderPrefixLines,
   withPrefixes,
 } from "./sparql-prefixes.js";
+
+// #6719 — the grammar checks the RDF / SPARQL text writers validate interpolated pieces with.
+export {
+  hasLoneSurrogate,
+  isLangTag,
+  isPrefixLabel,
+  isTurtleBlankNodeLabel,
+  isWritableIri,
+  isWritablePrefixBinding,
+} from "./rdf-syntax.js";
 
 // [OPUS-4.8] sq-x0kp — the framework-agnostic SPARQL-RESULTS formatting core (table
 // extraction, CSV/TSV export, raw-JSON pretty-print, ASK discrimination). Pure data shaping

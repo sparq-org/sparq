@@ -39,7 +39,8 @@ constraint C-A — and the authenticated-input attestation stay deferred and aud
   (default-deny otherwise — runs through the MPC path), emitting the
   [`sparq_mpc::pipeline::OperatorRouting`] vector the pipeline today receives hand-written. The
   [`RoutingPolicy`] knob selects the cheap default (disclose global-IRI operands) or the strict
-  "hide even a public term" route. It is routing plumbing — **not** a cryptographic guarantee; it
+  "hide even a public term" route. A participating source with no descriptor is refused, never
+  skipped. It is routing plumbing — **not** a cryptographic guarantee; it
   runs NO MPC and computes only the *proposed* partition. See [`routing`].
 * [`assemble_leakage_envelope`] + [`ratify_envelope`] (**Phase 4, implemented**) — the
   leakage-envelope assembly + **dual-ratification** gate. `assemble_leakage_envelope` derives,
@@ -48,9 +49,11 @@ constraint C-A — and the authenticated-input attestation stay deferred and aud
   (count, per-operator class + label), the disclose/hide partition, the operands each `Disclosed`
   operator exposes in the clear, and which sources participate — **over-counting, never
   under-counting** the leak. `ratify_envelope` then runs the dual gate: each **holder**
-  fail-closed-rejects a plan that would disclose one of its own private predicates (constraint
-  C-B), AND the **verifier** rejects an over-leaking envelope (one whose disclosed-operand count
-  exceeds its declared budget). It is **leakage-accounting + a plan-time policy gate — not a
+  fail-closed-rejects an envelope that *declares* a disclosure of one of its own private
+  predicates (constraint C-B; a check of the declared operand labels only — keeping them in step
+  with the executed operators is the caller's responsibility), AND the **verifier** rejects an over-leaking envelope (one whose disclosed-operand count
+  exceeds its declared budget). The holder policies must cover the participation set exactly,
+  so a missing participant policy fails closed. It is **leakage-accounting + a plan-time policy gate — not a
   cryptographic enforcement**: it runs NO MPC and makes NO soundness/privacy claim. See
   [`envelope`].
 * [`prune_source_combinations`] (**Phase 6, implemented**) — the FedUP-style **result-aware
@@ -205,7 +208,7 @@ pub use binding::{
 pub use envelope::{assemble_leakage_envelope, ratify_envelope};
 // [OPUS-4.8] sq-i1wh2: Phase 3 — the implemented disclosed/hidden routing pass + its input types.
 #[cfg(feature = "fedplan-mpc")]
-pub use routing::{route_operators, Operand, QueryOperator, RoutingPolicy};
+pub use routing::{route_operators, Operand, QueryOperator, RoutingPolicy, ANONYMOUS_GLOBAL_IRI};
 // [OPUS-4.8] sq-fix4 / sq-pwr.2: the shared seam error/phase types + the Phase-4 envelope/outcome types.
 #[cfg(feature = "fedplan-mpc")]
 pub use seam::{

@@ -66,6 +66,16 @@ pub fn p_delete_marker() -> String {
 pub fn g_delete_markers() -> String {
     format!("{PSS_NS}deleteMarkers")
 }
+/// The reserved graph that write fences are written into ([`update_fence`]): like the delete
+/// markers' graph, never a resource's own graph, so no resource's create or delete touches it.
+pub fn g_fences() -> String {
+    format!("{PSS_NS}fences")
+}
+/// Predicate: a write fence (a unique-nonce literal, the nonce of the write it fences). See
+/// [`update_fence`].
+pub fn p_fenced() -> String {
+    format!("{PSS_NS}fenced")
+}
 /// The subject every index record hangs off, *within* a resource's own named graph: a stable,
 /// reserved IRI so the record triples never collide with the resource's own RDF.
 pub fn s_record() -> String {
@@ -426,6 +436,53 @@ pub fn update_create_child(
     modified: Option<&str>,
     nonce: &str,
 ) -> Result<String, BuildError> {
+    create_child_guarded(
+        container,
+        child,
+        content_type,
+        blob_key,
+        etag,
+        modified,
+        nonce,
+        false,
+    )
+}
+
+/// [`update_create_child`], which does nothing once its `nonce` is fenced ([`update_fence`]): the
+/// form a client sends when a failed update can still commit after it has answered (an HTTP
+/// update that timed out), so that a fence can make its outcome final.
+pub fn update_create_child_fenced(
+    container: &str,
+    child: &str,
+    content_type: &str,
+    blob_key: &str,
+    etag: &str,
+    modified: Option<&str>,
+    nonce: &str,
+) -> Result<String, BuildError> {
+    create_child_guarded(
+        container,
+        child,
+        content_type,
+        blob_key,
+        etag,
+        modified,
+        nonce,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_child_guarded(
+    container: &str,
+    child: &str,
+    content_type: &str,
+    blob_key: &str,
+    etag: &str,
+    modified: Option<&str>,
+    nonce: &str,
+    fenced: bool,
+) -> Result<String, BuildError> {
     let cg = iri(child)?;
     let crec = iri_const(&s_record());
     let pct = iri_const(&p_content_type());
@@ -459,8 +516,9 @@ pub fn update_create_child(
             OPTIONAL {{ GRAPH {cg} {{ {crec} {pct} ?oldCt }} }} \
             OPTIONAL {{ GRAPH {cg} {{ {crec} {pbk} ?oldBk }} }} \
             OPTIONAL {{ GRAPH {cg} {{ {crec} {pet} ?oldEt }} }} \
-            {mod_opt}\
+            {mod_opt}{fence}\
          }}",
+        fence = fence_guard(fenced, nonce),
         mod_del = mod_del,
         mod_ins = mod_ins,
         mod_opt = mod_opt,
@@ -579,6 +637,25 @@ pub fn update_delete_container_if_empty(
     parent: Option<&str>,
     nonce: &str,
 ) -> Result<String, BuildError> {
+    delete_container_guarded(container, parent, nonce, false)
+}
+
+/// [`update_delete_container_if_empty`], which does nothing once its `nonce` is fenced
+/// ([`update_fence`]); see [`update_create_child_fenced`].
+pub fn update_delete_container_if_empty_fenced(
+    container: &str,
+    parent: Option<&str>,
+    nonce: &str,
+) -> Result<String, BuildError> {
+    delete_container_guarded(container, parent, nonce, true)
+}
+
+fn delete_container_guarded(
+    container: &str,
+    parent: Option<&str>,
+    nonce: &str,
+    fenced: bool,
+) -> Result<String, BuildError> {
     let g = iri(container)?;
     let rec = iri_const(&s_record());
     let pct = iri_const(&p_content_type());
@@ -612,7 +689,9 @@ pub fn update_delete_container_if_empty(
             GRAPH {g} {{ ?s ?p ?o }} \
             GRAPH {g} {{ {rec} {pct} ?anyCt }} \
             FILTER NOT EXISTS {{ GRAPH {g} {{ {rec} {contains} ?anyChild }} }} \
+            {fence}\
          }}",
+        fence = fence_guard(fenced, nonce),
         g = g,
         rec = rec,
         pct = pct,
@@ -622,6 +701,49 @@ pub fn update_delete_container_if_empty(
         nce = literal(nonce),
         parent_delete = parent_delete,
     ))
+}
+
+/// The `WHERE` clause that makes a fenced update ([`update_create_child_fenced`],
+/// [`update_delete_container_if_empty_fenced`]) do nothing once its `nonce` is fenced; empty for
+/// an unfenced one.
+fn fence_guard(fenced: bool, nonce: &str) -> String {
+    if !fenced {
+        return String::new();
+    }
+    format!(
+        "FILTER NOT EXISTS {{ GRAPH {fg} {{ {rec} {p} {n} }} }} ",
+        fg = iri_const(&g_fences()),
+        rec = iri_const(&s_record()),
+        p = iri_const(&p_fenced()),
+        n = literal(nonce),
+    )
+}
+
+/// UPDATE: fence the fenced update whose nonce is `nonce`, so that it does nothing if it has not
+/// been applied yet, whenever it is.
+///
+/// This is what makes the outcome of an update that failed but may still commit final. An HTTP
+/// update that timed out (or whose connection failed, or that `sparq-server` answered `503` for
+/// because its own wait elapsed) can still be queued or running on the server, and commit after
+/// the client has read that it did not. `sparq-server` applies each update atomically, one at a
+/// time, on its one writer, and answers a successful update only once a later query sees what it
+/// committed. So once this fence has succeeded, the fenced update has either been applied before
+/// it (and every later read sees it) or will find the fence when it is applied (and do nothing):
+/// a read after the fence tells its outcome, and that outcome no longer changes. No ordering of
+/// requests is relied on (the fenced update may still be in a socket, or waiting for a worker,
+/// when the fence is applied), only the atomicity of each update and read-your-writes.
+///
+/// A fence is idempotent (re-sending it is harmless) and stays: it must outlive the update it
+/// fences, which may still arrive at any time. Each is one triple, written only for an update that
+/// failed this way.
+pub fn update_fence(nonce: &str) -> String {
+    format!(
+        "INSERT DATA {{ GRAPH {fg} {{ {rec} {p} {n} }} }}",
+        fg = iri_const(&g_fences()),
+        rec = iri_const(&s_record()),
+        p = iri_const(&p_fenced()),
+        n = literal(nonce),
+    )
 }
 
 /// ASK whether a per-operation delete marker for `container` with `nonce` is present in the reserved
@@ -1372,5 +1494,59 @@ mod tests {
         assert_eq!(validate_lang("en-"), Err(BuildError::InvalidLangTag));
         assert_eq!(validate_lang("en--US"), Err(BuildError::InvalidLangTag));
         assert_eq!(validate_lang("-en"), Err(BuildError::InvalidLangTag));
+    }
+
+    /// Issue #6836: the fenced create and delete do nothing once fenced, and as before otherwise,
+    /// on the engine `sparq-server` runs (so the endpoint parses and applies them as written).
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[test]
+    fn a_fenced_update_does_nothing_once_fenced_on_the_engine() {
+        let mut g = sparq_core::Graph::load_str("", "ntriples").unwrap();
+        let run = |g: &mut sparq_core::Graph, u: &str| sparq_engine::update_in_place_atomic(g, u);
+        let ask = |g: &sparq_core::Graph, q: &str| sparq_engine::ask(g, q).unwrap();
+        let (c, a, b) = ("http://pod/c/", "http://pod/c/a", "http://pod/c/b");
+        run(
+            &mut g,
+            &format!(
+                "INSERT DATA {{ GRAPH <{c}> {{ <{r}> <{ct}> \"text/turtle\" }} }}",
+                r = s_record(),
+                ct = p_content_type()
+            ),
+        )
+        .unwrap();
+        let create = |child: &str, nonce: &str| {
+            update_create_child_fenced(c, child, "text/turtle", "bk", "\"e\"", None, nonce).unwrap()
+        };
+        // Not fenced: applied as the unfenced form is.
+        run(&mut g, &create(a, "op-a")).unwrap();
+        assert!(ask(&g, &ask_create_marker(a, "op-a").unwrap()));
+        assert!(ask(&g, &ask_contains_edge(c, a).unwrap()));
+        // Fenced first: nothing, whenever it arrives; the fence is idempotent.
+        run(&mut g, &update_fence("op-b")).unwrap();
+        run(&mut g, &update_fence("op-b")).unwrap();
+        run(&mut g, &create(b, "op-b")).unwrap();
+        assert!(!ask(&g, &ask_create_marker(b, "op-b").unwrap()));
+        assert!(!ask(&g, &ask_exists(b).unwrap()));
+        assert!(!ask(&g, &ask_contains_edge(c, b).unwrap()));
+        // Another write's fence does not touch this one.
+        run(&mut g, &create(b, "op-c")).unwrap();
+        assert!(ask(&g, &ask_contains_edge(c, b).unwrap()));
+        // A fenced delete, fenced: nothing; not fenced: as before.
+        run(&mut g, &update_fence("op-d")).unwrap();
+        run(
+            &mut g,
+            &update_delete_container_if_empty_fenced(a, Some(c), "op-d").unwrap(),
+        )
+        .unwrap();
+        assert!(ask(&g, &ask_exists(a).unwrap()));
+        assert!(!ask(&g, &ask_delete_marker(a, "op-d").unwrap()));
+        run(
+            &mut g,
+            &update_delete_container_if_empty_fenced(a, Some(c), "op-e").unwrap(),
+        )
+        .unwrap();
+        assert!(!ask(&g, &ask_exists(a).unwrap()));
+        assert!(ask(&g, &ask_delete_marker(a, "op-e").unwrap()));
+        assert!(!ask(&g, &ask_contains_edge(c, a).unwrap()));
     }
 }
