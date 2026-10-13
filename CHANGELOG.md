@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
+  16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
+  outside the crate. Start from the default and set fields:
+  `let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`. A forward N3 closure
+  whose rules would build a term past the limit (a string or list that doubles each round)
+  now returns `Err("n3: forward closure limit exceeded …")` instead of aborting on a failed
+  allocation. (#6771)
+
 ## [0.1.6] - 2026-10-13
 
 First release with the `sparq-rdf` PyPI wheels (the v0.1.5 wheel builds failed; npm 0.1.5
