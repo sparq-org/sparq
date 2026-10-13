@@ -1717,7 +1717,25 @@ fn match_premise(premise: &[[Term; 3]], facts: &FactIndex, bw: &BwCtx) -> Vec<Bi
 /// driver, by running once per join-atom index, considers only bindings that involve ≥1 new
 /// fact. `None` = naive (every join atom matches all facts); also used for the negation
 /// sub-formula recursion.
+///
+/// An evaluation boundary ([`within_depth`]): a `seed` past the term-depth limit is
+/// refused, as a cut, before any atom is evaluated under it.
 fn match_premise_seeded(
+    premise: &[[Term; 3]],
+    facts: &FactIndex,
+    seed: &Binding,
+    delta_at: Option<(&FxHashSet<[Term; 3]>, usize)>,
+    bw: &BwCtx,
+    depth: usize,
+) -> Vec<Binding> {
+    if !seed.is_empty() && !within_depth(seed, bw) {
+        return Vec::new();
+    }
+    match_premise_admitted(premise, facts, seed, delta_at, bw, depth)
+}
+
+/// [`match_premise_seeded`] for a `seed` already within the term-depth limit.
+fn match_premise_admitted(
     premise: &[[Term; 3]],
     facts: &FactIndex,
     seed: &Binding,
@@ -1741,8 +1759,9 @@ fn match_premise_seeded(
         let rest: Vec<[Term; 3]> =
             premise.iter().enumerate().filter(|&(i, _)| i != k).map(|(_, p)| p.clone()).collect();
         let mut out = Vec::new();
+        // Each seed extends the admitted `seed` with parts of stored facts only.
         for s in &seeds {
-            out.extend(match_premise_seeded(&rest, facts, s, None, bw, depth));
+            out.extend(match_premise_admitted(&rest, facts, s, None, bw, depth));
         }
         return out;
     }
@@ -1999,6 +2018,20 @@ fn match_premise_seeded(
 /// bindings through here, so every binding a premise carries forward is within it. The
 /// containment search of a formula scope ([`containment_search`]) checks each binding it
 /// extends here too, before carrying it to its next statement.
+///
+/// The invariant: nothing past the limit enters an evaluation. Each recursive evaluation
+/// boundary checks what it is handed before it evaluates anything, and refuses it as a
+/// cut:
+/// - premise evaluation from a seed ([`match_premise_seeded`]): the seed, which covers a
+///   backward proof step's substitution, a store-scoped clause's binding and a
+///   `log:collectAllIn` / `log:forAllIn` clause's binding;
+/// - a backward proof step ([`backward_prove`]): its instantiated goal;
+/// - a formula-scope search ([`formula_containment`]): its seed and the scope;
+/// - a nested closure ([`formula_closure`], `log:supports` / `log:conclusion`): the
+///   statements it would admit as facts and rules.
+///
+/// A top-level run's own input is admitted by raising the limit to it
+/// ([`bounded::given_terms`]); parsed text is within the parser's nesting limit.
 fn within_depth(b: &Binding, bw: &BwCtx) -> bool {
     bw.settle(bounded::generated(&bw.truncated, b.values()))
 }
@@ -2111,6 +2144,12 @@ fn is_join_atom(pat: &[Term; 3]) -> bool {
 /// variables and a depth bound (`depth` counts REMAINING backward applications).
 fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, depth: usize) -> Vec<Binding> {
     let goal = [apply(&pat[0], b), apply(&pat[1], b), apply(&pat[2], b)];
+    // An evaluation boundary ([`within_depth`]): a goal past the term-depth limit is not
+    // resolved. Each rule's substitution is checked where its premise is evaluated
+    // ([`match_premise_seeded`]).
+    if !bw.settle(bounded::generated(&bw.truncated, &goal)) {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for rule in bw.rules {
         for concl in &rule.conclusion {
@@ -2968,6 +3007,13 @@ fn formula_containment(
     seed: &Binding,
     bw: &BwCtx,
 ) -> Vec<Binding> {
+    // An evaluation boundary ([`within_depth`]): a seed or scope past the term-depth
+    // limit is not searched.
+    if !within_depth(seed, bw)
+        || !bw.settle(bounded::generated(&bw.truncated, scope.iter().flatten()))
+    {
+        return Vec::new();
+    }
     // Pattern existentials (blanks) become wildcard variables.
     let pat: Vec<[Term; 3]> = pattern
         .iter()
@@ -3189,6 +3235,12 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // (which the import-cycle guard below does not catch) nests closures, each holding
     // its own frames on the stack. Past it the closure is refused, as a cut, and the
     // error fails the enclosing run. `_frames` holds this closure's units until it ends.
+    // An evaluation boundary ([`within_depth`]): statements past the term-depth limit
+    // are not admitted as a nested run's facts and rules; the formula is left unclosed,
+    // as a cut.
+    if !bw.settle(bounded::generated(&bw.truncated, ts.iter().flatten())) {
+        return ts.to_vec();
+    }
     let _frames = match bounded::enter_closure(&bw.truncated) {
         Ok(level) => level,
         Err(e) => {
@@ -5127,6 +5179,62 @@ mod tests {
             (facts.map(|f| f.len()), cut)
         });
         assert_eq!(facts, Ok(1), "only the asserted fact is kept");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a backward proof step checks its instantiated goal and the substitution it
+    /// carries into the rule's premise against the term-depth limit before it evaluates
+    /// that premise. A step past the limit is dropped as a cut, on a 2 MiB stack, and
+    /// the run ends.
+    #[test]
+    fn backward_goals_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let wrap = 60;
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             :a :s :b .\n\
+             {{ ?x :r ?y }} <= {{ {}?x{} :r ?y }} .\n\
+             {{ :a :s ?b . :a :r ?y }} => {{ :a :q ?y }} .\n",
+            "(".repeat(wrap),
+            ")".repeat(wrap)
+        );
+        let (facts, cut) = on_small_stack(move || {
+            let (facts, cut) = closure_and_cut(&src, None);
+            (facts.map(|f| f.len()), cut)
+        });
+        assert_eq!(facts, Ok(1), "only the asserted fact is kept");
+        assert!(cut.is_some());
+    }
+
+    /// #6732: a nested closure (`log:supports`, `log:conclusion`) checks the statements
+    /// it is handed against the term-depth limit before it admits them as facts and
+    /// rules. A formula past the limit is not closed: the refusal is a cut, on a 2 MiB
+    /// stack, and only the formula's own statements are read.
+    #[test]
+    fn nested_closure_inputs_stay_within_the_term_depth_limit_on_a_small_stack() {
+        use super::parser::parse_surface_tests::on_small_stack;
+        let limit = super::bounded::term_depth();
+        let (outer, inner) = (limit / 2 - 4, limit / 2 - 4);
+        let wrapped = |w: usize, x: &str| format!("{}{x}{}", "(".repeat(w), ")".repeat(w));
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             :s :p {} .\n\
+             {{ :s :p ?x }} => {{ :s :p2 {} }} .\n\
+             {{ :s :p2 ?y . {{ :t :r {} . {{ :t :r ?z }} => {{ :u :v :w }} }} log:supports {{ :u :v :w }} }} \
+             => {{ :s :ok :yes }} .\n",
+            wrapped(outer, ":z"),
+            wrapped(inner, "?x"),
+            wrapped(limit - outer - inner + 1, "?y"),
+        );
+        let (facts, cut) = on_small_stack(move || closure_and_cut(&src, None));
+        let facts = facts.expect("closes");
+        let ok = [
+            Term::Iri("http://ex/s".into()),
+            Term::Iri("http://ex/ok".into()),
+            Term::Iri("http://ex/yes".into()),
+        ];
+        assert!(!facts.contains(&ok), "the formula is not closed");
         assert!(cut.is_some());
     }
 
