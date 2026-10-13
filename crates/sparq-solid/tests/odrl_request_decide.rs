@@ -430,6 +430,22 @@ fn grants_need_a_current_covered_graph() {
     assert!(reads(&s, &bob, N2));
     s.update_as(&alice, "DROP GRAPH <https://pod.ex/notes/n2>").expect("alice drops");
     assert!(!s.decide(&bob, N2, Mode::Read).allow, "dropped since");
+    // Removed, then created again under the same name: not covered until re-materialized,
+    // whether the two happen in separate updates or within one.
+    s.update_as(&alice, "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:a> <urn:b> \"2\" } }")
+        .expect("alice recreates");
+    assert!(!s.decide(&bob, N2, Mode::Read).allow, "recreated by a later update");
+    assert!(!reads(&s, &bob, N2));
+    assert!(s.decide(&bob, fresh, Mode::Read).allow);
+    s.update_as(
+        &alice,
+        &format!("DROP GRAPH <{fresh}> ; INSERT DATA {{ GRAPH <{fresh}> {{ <urn:a> <urn:b> \"3\" }} }}"),
+    )
+    .expect("alice replaces in one update");
+    assert!(!s.decide(&bob, fresh, Mode::Read).allow, "recreated within one update");
+    assert!(!reads(&s, &bob, fresh));
+    s.materialize_wac().expect("wac");
+    assert!(s.decide(&bob, N2, Mode::Read).allow && s.decide(&bob, fresh, Mode::Read).allow);
 }
 
 /// Time-windowed and recipient-scoped permissions follow the accessing session.

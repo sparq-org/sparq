@@ -991,6 +991,39 @@ impl PodStore {
             && !self.auth.denies(session, mode, target)
     }
 
+    /// Commit an authorized update's effects to the graph. A graph the update removes, at any
+    /// point in it, leaves the static coverage first: a graph of that name created again (in
+    /// this update or a later one) is covered only once a static materialization runs again.
+    fn apply_update(&mut self, effects: &[sparq_engine::UpdateEffect]) -> Result<(), String> {
+        self.forget_removed_coverage(effects);
+        sparq_engine::apply_effects(&mut self.graph, effects)
+    }
+
+    /// Drop from the static coverage every graph `effects` removes.
+    #[cfg(feature = "odrl-bridge")]
+    fn forget_removed_coverage(&mut self, effects: &[sparq_engine::UpdateEffect]) {
+        use spargebra::algebra::GraphTarget;
+        let mut covered: Option<FxHashSet<String>> = None;
+        for effect in effects {
+            let sparq_engine::UpdateEffect::Drop(target) = effect else { continue };
+            let set = covered.get_or_insert_with(|| (*self.statically_covered).clone());
+            match target {
+                GraphTarget::NamedNode(n) => {
+                    set.remove(n.as_str());
+                }
+                GraphTarget::NamedGraphs | GraphTarget::AllGraphs => set.clear(),
+                GraphTarget::DefaultGraph => {}
+            }
+        }
+        if let Some(set) = covered {
+            self.statically_covered = Arc::new(set);
+        }
+    }
+
+    /// Feature-off twin: nothing is ever covered.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn forget_removed_coverage(&mut self, _effects: &[sparq_engine::UpdateEffect]) {}
+
     /// Record the graphs a static WAC/ACP materialization just covered: every named graph
     /// outside the reserved space, each of which the loader seeded as a resource.
     #[cfg(feature = "odrl-bridge")]
@@ -1545,7 +1578,7 @@ impl PodStore {
                     Ok(false),
                     "the static check covers a data-only update's effects"
                 );
-                return sparq_engine::apply_effects(&mut self.graph, &effects)
+                return self.apply_update(&effects)
                     .map_err(|e| format!("the update could not be committed: {e}"));
             }
         }
@@ -1568,7 +1601,7 @@ impl PodStore {
                     &odrl,
                 )?;
                 if !wrote_rules {
-                    return sparq_engine::apply_effects(&mut self.graph, &effects)
+                    return self.apply_update(&effects)
                         .map_err(|e| format!("the update could not be committed: {e}"));
                 }
             }
@@ -1631,7 +1664,7 @@ impl PodStore {
         drop(candidate);
         // Commit: the effects to the store itself (one journaled, durable commit for a
         // directory-backed graph), then the view rebuilt from the rules now stored.
-        if let Err(e) = sparq_engine::apply_effects(&mut self.graph, &effects) {
+        if let Err(e) = self.apply_update(&effects) {
             // Part of it may be applied in memory: the rules may no longer match the view.
             if rules_changed {
                 self.drop_auth_view();
