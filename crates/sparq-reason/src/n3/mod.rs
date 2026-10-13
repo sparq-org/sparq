@@ -234,12 +234,14 @@ mod run_shared {
 
     struct DocTable {
         prefix: String,
-        /// Each key's document, for the collision refusal.
-        docs: FxHashMap<String, (String, String)>,
-        /// The standardized statements already made from a `(text, base)`, keyed by text,
-        /// then by base (looked up without allocating): a run re-evaluates a parse builtin
-        /// on every round, and neither the parse nor the SHA-256 key needs redoing.
-        given: FxHashMap<String, Vec<(String, Vec<[Term; 3]>)>>,
+        /// The keys taken. Every document holding one is in `given`, so a key met again
+        /// for a document missing from `given` is a collision.
+        keys: FxHashSet<String>,
+        /// Each document's label prefix (`{prefix}{key}_`), keyed by text, then by base
+        /// (looked up without allocating): a run re-evaluates a parse builtin on every
+        /// round, and its SHA-256 key needs computing once. Only the prefix is kept, not
+        /// the statements, so the table stays small.
+        given: FxHashMap<String, Vec<(String, String)>>,
     }
 
     impl RuntimeDocs {
@@ -258,29 +260,36 @@ mod run_shared {
         /// ([`document_blank_labels`]), for a run that has already collected them.
         pub(super) fn for_labels(labels: &FxHashSet<&str>) -> RuntimeDocs {
             let prefix = fresh_blank_prefix(labels, "__rp");
-            let (docs, given) = (FxHashMap::default(), FxHashMap::default());
-            let table = DocTable { prefix, docs, given };
+            let (keys, given) = (FxHashSet::default(), FxHashMap::default());
+            let table = DocTable { prefix, keys, given };
             RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
         }
 
-        /// The statements of the document parsed from `text` under `base` (by `parse`,
-        /// run only the first time), with its blanks standardized apart; `Ok(None)` when
-        /// `parse` fails, `Err` when another document has its key.
+        /// The statements of the document parsed from `text` under `base` (by `parse`),
+        /// with its blanks standardized apart; `Ok(None)` when `parse` fails, `Err` when
+        /// another document has its key.
         fn formula(
             &self,
             text: &str,
             base: &str,
             parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
         ) -> Result<Option<Vec<[Term; 3]>>, String> {
-            {
-                let t = self.0.borrow();
-                let known = t.given.get(text).and_then(|bs| bs.iter().find(|(b, _)| b == base));
-                if let Some((_, f)) = known {
-                    return Ok(Some(f.clone()));
+            let Some(mut ts) = parse() else { return Ok(None) };
+            fn has_blank(t: &Term) -> bool {
+                match t {
+                    Term::Blank(_) => true,
+                    Term::List(ms) => ms.iter().any(has_blank),
+                    Term::Formula(rs) => rs.iter().flatten().any(has_blank),
+                    Term::Triple(tr) => tr.iter().any(has_blank),
+                    _ => false,
                 }
             }
-            let Some(mut ts) = parse() else { return Ok(None) };
-            let prefix = self.prefix_for(text, base)?;
+            // A document with no blank has nothing to standardize apart (and needs no key).
+            if !ts.iter().flatten().any(has_blank) {
+                return Ok(Some(ts));
+            }
+            let mut t = self.0.borrow_mut();
+            let prefix = t.prefix_for(text, base)?;
             // In place: only the blank labels are rewritten, nothing else is copied.
             fn go(t: &mut Term, p: &str) {
                 match t {
@@ -291,27 +300,34 @@ mod run_shared {
                     _ => {}
                 }
             }
-            ts.iter_mut().flatten().for_each(|t| go(t, &prefix));
-            let entry = (base.to_string(), ts.clone());
-            self.0.borrow_mut().given.entry(text.to_string()).or_default().push(entry);
+            ts.iter_mut().flatten().for_each(|t| go(t, prefix));
             Ok(Some(ts))
         }
+    }
 
+    impl DocTable {
         /// The label prefix for the blanks of the document parsed from `text` under
         /// `base`; `Err` when another document has its key.
-        fn prefix_for(&self, text: &str, base: &str) -> Result<String, String> {
-            let mut t = self.0.borrow_mut();
-            let key = runtime_doc_key(text, base);
-            let prefix = format!("{}{key}_", t.prefix);
-            let owner = t.docs.entry(key).or_insert_with(|| (text.to_string(), base.to_string()));
-            if owner.0 != text || owner.1 != base {
-                return Err(
-                    "n3: two documents parsed at run time share a blank-node scope key; \
-                     refused rather than let their blank nodes alias"
-                        .to_string(),
-                );
+        fn prefix_for(&mut self, text: &str, base: &str) -> Result<&str, String> {
+            let known = self.given.get(text).and_then(|bs| bs.iter().position(|(b, _)| b == base));
+            if known.is_none() {
+                let key = runtime_doc_key(text, base);
+                let mut prefix = String::with_capacity(self.prefix.len() + key.len() + 1);
+                prefix.push_str(&self.prefix);
+                prefix.push_str(&key);
+                prefix.push('_');
+                if !self.keys.insert(key) {
+                    return Err(
+                        "n3: two documents parsed at run time share a blank-node scope key; \
+                         refused rather than let their blank nodes alias"
+                            .to_string(),
+                    );
+                }
+                self.given.entry(text.to_string()).or_default().push((base.to_string(), prefix));
             }
-            Ok(prefix)
+            let docs = &self.given[text];
+            let at = known.unwrap_or(docs.len() - 1);
+            Ok(&docs[at].1)
         }
     }
 
@@ -328,13 +344,7 @@ mod run_shared {
             h.update((part.len() as u64).to_be_bytes());
             h.update(part.as_bytes());
         }
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        let mut key = String::with_capacity(16);
-        for b in &h.finalize()[..8] {
-            key.push(char::from(HEX[usize::from(b >> 4)]));
-            key.push(char::from(HEX[usize::from(b & 0xf)]));
-        }
-        key
+        sparq_core::hex::encode(&h.finalize()[..8])
     }
 
     impl RunShared {
