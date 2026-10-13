@@ -725,6 +725,21 @@ impl Snapshot {
     }
 }
 
+impl Snapshot {
+    /// The snapshot of a resource whose state could not be read: its metadata marked pending, so
+    /// that, past the owner (and open mode), every grant fails closed against it, as a read of
+    /// the resource then would.
+    pub fn unreadable() -> Self {
+        Self {
+            meta: ResourceMeta {
+                pending: true,
+                ..ResourceMeta::default()
+            },
+            format: None,
+        }
+    }
+}
+
 /// As [`allowed`], against `snapshot` rather than the resource as it is now; the grants are those
 /// in force now.
 pub async fn allowed_as<S: Store + 'static>(
