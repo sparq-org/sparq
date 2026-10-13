@@ -2292,10 +2292,8 @@ fn match_premise_admitted(
                         next.push(b);
                     }
                 } else {
-                    // Each match is a row of this step, charged before it is kept.
-                    if !bw.work.charge(matches.len(), &bw.truncated) {
-                        return Vec::new();
-                    }
+                    // Each match was charged as it was found: by the containment search
+                    // over a formula scope, or by the joins of a store-scoped clause.
                     next.extend(matches.into_iter().filter(|nb| within_depth(nb, bw)));
                 }
             }
@@ -2530,11 +2528,12 @@ fn match_premise_admitted(
                     let step = bounded::backward_step(&bw.truncated, depth, could_match);
                     // `_frames` holds the step's unit of the run's stack allowance.
                     if let Some((d, _frames)) = bw.settle(step) {
-                        let proofs = backward_prove(pat, b, facts, bw, d);
-                        if !bw.work.charge(proofs.len(), run) {
-                            return Vec::new();
-                        }
-                        next.extend(proofs.into_iter().filter(|nb| within_depth(nb, bw)));
+                        // Each proof was charged as [`backward_prove`] built it.
+                        next.extend(
+                            backward_prove(pat, b, facts, bw, d)
+                                .into_iter()
+                                .filter(|nb| within_depth(nb, bw)),
+                        );
                     }
                 }
             }
@@ -2742,6 +2741,10 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                     }
                 }
                 if ok {
+                    // Each proof is a row of the goal's atom, charged before it is kept.
+                    if !bw.work.charge(1, &bw.truncated) {
+                        return Vec::new();
+                    }
                     out.push(nb);
                 }
             }
@@ -3854,6 +3857,11 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
                 return;
             }
             let Some(pi) = order.get(at) else {
+                // Each match is a binding row, charged before it is kept
+                // ([`bounded::JoinWork`]); a spent allowance ends the search.
+                if !bw.work.charge(1, &bw.truncated) {
+                    return;
+                }
                 out.push(b);
                 continue;
             };

@@ -15,14 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a limit the graph rebuilds through the batch engine, which refuses with
   `"n3: forward closure limit exceeded …"`, so the graph fails closed instead of growing a
   term every round. (#6854)
-- **sparq-reason:** `ClosureLimits::max_join_rows` (default 100,000,000) bounds the
+- **sparq-reason:** `ClosureLimits::max_join_rows` is an opt-in allowance for the
   transient work of one round of an N3 forward closure: the binding rows its premise joins
-  produce and the times its rules fire, counted together. The text engine, the
-  `compiled-rules` evaluator and the incremental counting engine of `MaterializedN3Graph`
-  charge each before it is stored; a round past the allowance returns
-  `"n3: forward closure limit exceeded … max_join_rows …"` instead of building rows that
-  multiply with each unconstrained premise pattern. `ClosureLimits` is `#[non_exhaustive]`,
-  so the new field is additive. The `compiled-rules` evaluator's first round of each stratum
+  produce and the times its rules fire, counted together. The default is unbounded, so
+  every closure accepted before is still accepted; set a limit to opt in. The text engine,
+  the `compiled-rules` evaluator and the incremental counting engine of
+  `MaterializedN3Graph` charge each before it is stored; a round past a set allowance
+  returns `"n3: forward closure limit exceeded … max_join_rows …"` instead of building rows
+  that multiply with each unconstrained premise pattern. `ClosureLimits` is
+  `#[non_exhaustive]`, so the new field is additive. The `compiled-rules` evaluator's first round of each stratum
   is now naive, as the text engine's is, instead of seeding each join position with the
   whole store. (#6938)
 

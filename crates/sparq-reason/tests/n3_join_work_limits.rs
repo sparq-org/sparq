@@ -201,13 +201,28 @@ fn text_engine_boundary_backward_proofs() {
 
 #[test]
 fn text_engine_boundary_scope_matches() {
-    // `?S log:includes` over the store: `n` rows for `:p`; per row, `n` rows for the
-    // clause and `n` matches; `n²` firings. Every round alike.
+    // `?S log:includes` over the store: `n` rows for `:p`; per row, the clause's `n` rows
+    // (its matches, charged once as its joins build them); `n²` firings. Every round
+    // alike.
     let src = doc(
         "{ ?x :p ?y. ?S log:includes { ?z :p ?w } } => { :k :v :done }.",
         &edges("p", 0, N),
     );
-    assert_text_boundary("log:includes", &src, N + 3 * N * N);
+    assert_text_boundary("log:includes", &src, N + 2 * N * N);
+}
+
+#[test]
+fn text_engine_boundary_formula_scope_matches() {
+    // `log:includes` over a written formula of `m` statements: `n` rows for `:p`; per row,
+    // `m` matches, each charged as the containment search finds it; `n·m` firings. Every
+    // round alike.
+    const M: usize = 7;
+    let scope: String = (0..M).map(|j| format!(":a :q :b{j}. ")).collect();
+    let src = doc(
+        &format!("{{ ?x :p ?y. {{ {scope}}} log:includes {{ :a :q ?z }} }} => {{ :k :v :done }}."),
+        &edges("p", 0, N),
+    );
+    assert_text_boundary("formula scope", &src, N + 2 * N * M);
 }
 
 #[test]
@@ -356,6 +371,43 @@ fn counting_engine_boundary_in_a_recursive_layer() {
     let g = graph_matches_batch(TRANS, &base, rows(8 * N - 1), "one under").expect("accepted");
     assert_eq!(g.mode(), N3Mode::Fallback);
     assert!(graph_matches_batch(TRANS, &base, rows(2 * N - 1), "under the batch charge").is_none());
+}
+
+#[test]
+fn counting_engine_layer_rounds_leave_the_wave_allowance_alone() {
+    // One construction wave over a recursive layer (`n` two-edge chains under the
+    // transitivity rule: local rounds of `8n` and `2n` rows, see the test above) and `m`
+    // facts for a counted rule (1 seed row and 1 firing each: `2m`). Each local round of
+    // the layer has its own allowance, apart from the wave's, so at `8n` both fit and the
+    // graph keeps counting. Were the local rounds charged to the wave's allowance, the
+    // counted rule would find only `8n - 2n` left and the graph would fall back.
+    const M: usize = 70;
+    let rules = "{ ?x :t ?y. ?y :t ?z } => { ?x :t ?z }.\n{ ?x :p ?y } => { ?x :q ?y }.";
+    let mut base: Vec<[Term; 3]> = (0..N)
+        .flat_map(|i| {
+            let (a, b, c) = (
+                ex(&format!("a{i}")),
+                ex(&format!("b{i}")),
+                ex(&format!("c{i}")),
+            );
+            [[a, ex("t"), b.clone()], [b, ex("t"), c]]
+        })
+        .collect();
+    base.extend(edges("p", 0, M));
+    let l = rows(8 * N);
+    assert!(
+        2 * M <= 8 * N && 2 * M > 8 * N - 2 * N,
+        "the fixture's premise"
+    );
+    let g = MaterializedN3Graph::with_limits(&format!("{PREFIXES}{rules}"), &base, l)
+        .expect("accepted without falling back");
+    assert_eq!(g.mode(), N3Mode::Counting, "{:?}", g.fallback_reason());
+    assert_eq!(g.stratification_warning(), None);
+    let held: FxHashSet<[Term; 3]> = g.closure().into_iter().collect();
+    let full = text(&doc(rules, &base), ClosureLimits::default()).expect("batch closure");
+    assert_eq!(held, full);
+    // A from-scratch batch round charges `2n + 2m` and refuses: the documented divergence.
+    assert_join_refusal("batch", text(&doc(rules, &base), l).map(|c| c.len()));
 }
 
 #[test]

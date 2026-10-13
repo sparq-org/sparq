@@ -293,10 +293,9 @@ const CLOSURE_FACTS: usize = 50_000_000;
 /// rule set builds on purpose, and small enough that a term which doubles each round
 /// (GH #6771) is refused while the closure's copies of it still fit in memory.
 const CLOSURE_TERM_BYTES: usize = 16 << 20;
-/// Default [`ClosureLimits::max_join_rows`]: binding rows and rule firings one round may
-/// produce (GH #6938). Twice the default fact allowance, so a round that reads every fact
-/// an allowed closure holds, and fires a rule for each, still fits.
-const CLOSURE_JOIN_ROWS: usize = 100_000_000;
+/// Default [`ClosureLimits::max_join_rows`] (GH #6938): unbounded, so a closure accepted
+/// before the allowance existed is still accepted. A caller opts in by setting a limit.
+const CLOSURE_JOIN_ROWS: usize = usize::MAX;
 
 /// Why a forward closure was stopped by its [`ClosureLimits`].
 const CLOSURE_CUT: &str = "forward closure limit exceeded";
@@ -338,22 +337,27 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// `max_join_rows` (GH #6938) bounds the transient work of one round: the binding rows its
 /// premise joins produce and the times its rules fire. Without it their number grows with
 /// the product of the pattern matches (a premise of k unconstrained patterns over n facts
-/// makes n^k rows) even when the distinct facts fit. Each round of a closure gets the
-/// allowance afresh, and every engine charges the same two things:
+/// makes n^k rows) even when the distinct facts fit. The default is unbounded
+/// (`usize::MAX`), so no closure accepted without the allowance is refused by default; set
+/// a limit to opt in. Each round of a closure gets the allowance afresh, and every engine
+/// charges the same two things:
 /// * a **row** for each binding row a premise step that can multiply rows produces: a
 ///   join atom (each stored fact it matches, each backward proof of it, and the delta
 ///   facts a semi-naive round seeds it with), a list generator (`list:member`, `list:in`,
-///   `list:iterate`) and `log:includes` (each match). A step that keeps at most one row per
-///   input row (a filter, a functional builtin, a negation, `log:collectAllIn`) cannot
-///   multiply them and is not charged. The rows a store-scoped clause (`log:notIncludes`,
-///   `log:collectAllIn`, `log:forAllIn` over the store) or a backward rule's premise
-///   produces are charged the same way, to the round that evaluates them;
+///   `list:iterate`), and each match a formula-scope search finds (`log:includes`,
+///   `log:notIncludes`, `log:collectAllIn` and `log:forAllIn` over a written formula). A
+///   step that keeps at most one row per input row (a filter, a functional builtin, the
+///   outcome of a negation or an aggregation) cannot multiply them and is not charged. The
+///   rows a store-scoped clause (`log:includes`, `log:notIncludes`, `log:collectAllIn`,
+///   `log:forAllIn` over the store) or a backward rule's premise produces are charged the
+///   same way, to the round that evaluates them;
 /// * a **firing** for each conclusion triple a complete premise binding instantiates, and
 ///   for each conclusion the transitivity fast path instantiates, whether or not the fact
 ///   is new.
 ///
 /// The text engine and the counting engine charge each row as it is produced, before it
-/// is stored, so a round never holds more charged rows than the allowance. The compiled
+/// is stored (a backward proof as it is projected onto its goal, a formula-scope match as
+/// the search finds it), so a round never holds more charged rows than the allowance. The compiled
 /// evaluator's hash join checks the allowance once per candidate fact it probes, so a
 /// join stops at most one candidate's matches past it. Every engine charges a rule's
 /// firings in one batch, once its premise is evaluated and before any conclusion is
@@ -365,11 +369,15 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///
 /// What it does not bound:
 /// * the closure's total memory: many distinct terms just under the limit are bounded
-///   only by `max_facts`, and the rows of one round only by `max_join_rows`, whose
-///   default is sized for large closures, not for a small memory budget (set it lower,
-///   as `max_facts`, to bound a run's memory);
-/// * the work of a formula-scope search (`log:includes` over a written formula), bounded
-///   by its own step budget, beyond the matches it returns;
+///   only by `max_facts`, and the rows of one round only by `max_join_rows`, which is
+///   unbounded unless set;
+/// * the steps of a formula-scope search beyond the matches it finds: each search is
+///   bounded by its own step budget (`CONTAINMENT_BUDGET`, through
+///   `StepBudget::containment`), and a search it stops is a cut;
+/// * the backtracking of formula unification (a `{ … }` pattern matched against a
+///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding
+///   and holds one binding per pattern statement, so it adds no rows, but no budget bounds
+///   its branches (up to k! for a formula of k statements);
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time
@@ -437,13 +445,13 @@ pub struct ClosureLimits {
     /// Binding rows and rule firings one round of the closure may produce, counted
     /// together: each row a join atom, list generator or `log:includes` produces, and each
     /// conclusion triple a rule instantiates (see the type's docs for exactly what is
-    /// charged and when). Default 100,000,000.
+    /// charged and when). Default unbounded (`usize::MAX`): set a limit to opt in.
     pub max_join_rows: usize,
 }
 
 impl Default for ClosureLimits {
-    /// 1,000,000 rounds, 50,000,000 facts, 16 MiB per derived term and 100,000,000 join
-    /// rows per round.
+    /// 1,000,000 rounds, 50,000,000 facts, 16 MiB per derived term and unbounded join rows
+    /// per round.
     fn default() -> Self {
         ClosureLimits {
             max_rounds: CLOSURE_ROUNDS,
@@ -1450,7 +1458,7 @@ mod tests {
                 max_rounds: 1_000_000,
                 max_facts: 50_000_000,
                 max_term_bytes: 16 << 20,
-                max_join_rows: 100_000_000,
+                max_join_rows: usize::MAX,
             }
         );
         let sink = Cell::new(false);

@@ -2955,7 +2955,7 @@ impl MaterializedN3Graph {
                     continue;
                 }
                 let (added, removed) =
-                    self.recompute_layer(ok, &compiled, li, &unsupported, (&mut rounds, &work))?;
+                    self.recompute_layer(ok, &compiled, li, &unsupported, &mut rounds)?;
                 if unsupported.get() {
                     self.data_fallback =
                         Some("evaluation met data outside the builtin-parity whitelist".into());
@@ -3098,7 +3098,7 @@ impl MaterializedN3Graph {
         compiled: &N3Compiled,
         li: usize,
         unsupported: &Cell<bool>,
-        (rounds, work): (&mut bounded::ClosureRounds, &bounded::JoinWork),
+        rounds: &mut bounded::ClosureRounds,
     ) -> Result<LayerDiff, String> {
         let def = &compiled.layers[li];
         let cuts = self.cuts.clone();
@@ -3126,6 +3126,8 @@ impl MaterializedN3Graph {
         // Facts the local fixpoint holds that the closure does not (yet): with the
         // closure's own, what the closure would hold.
         let mut grown = 0usize;
+        // Each local round's own join-work allowance, apart from the enclosing wave's.
+        let work = bounded::JoinWork::forward(&cuts);
         while !pending.is_empty() {
             rounds.round(self.index.all.len().saturating_add(grown), &cuts)?;
             work.round();
@@ -3137,7 +3139,7 @@ impl MaterializedN3Graph {
                     delta: None,
                     unsupported,
                     cuts: &cuts,
-                    work,
+                    work: &work,
                 };
                 for rule in &def.rules {
                     for atom in &rule.atoms {
