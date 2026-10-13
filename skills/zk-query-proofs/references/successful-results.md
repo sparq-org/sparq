@@ -124,13 +124,14 @@ continues to minimize authentication and membership counts, not the gate cost
 of competing numeric profiles.
 
 The full-width relation reconstructs the canonical unsigned decimal lexical form
-from a private `u64`, selects among fixed-length BLAKE3 token openings inside the
-circuit, and checks the original signed string commitment. Checked accumulation
-rejects overflow; leading zeros, signs, non-integer datatypes and values beyond
-`u64` are outside this profile. No issuer re-attestation or host-only
-value-to-lexical bridge replaces the commitment check. Nineteen- and twenty-digit
-tokens cross the BLAKE3 block boundary, and all private-length branches contribute
-to compiled cost. Gate snapshots report that cost; this is not a runtime speedup
+from a private `u64`, hashes the token with one variable-length BLAKE3 opening
+inside the circuit (two compressions for every length, so the length is not
+selected or revealed), and checks the original signed string commitment. The
+digits recombine to the value without wrapping; leading zeros, signs,
+non-integer datatypes and values beyond `u64` are outside this profile. No
+issuer re-attestation or host-only value-to-lexical bridge replaces the
+commitment check. Nineteen- and twenty-digit tokens cross the BLAKE3 block
+boundary; shorter tokens pay for the second compression too. Gate snapshots report that cost; this is not a runtime speedup
 claim. Canonical signed `i64` uses the separately versioned
 [signed successful-result API](signed-results.md). Arbitrary precision and other
 numeric datatypes remain outside these integer profiles.

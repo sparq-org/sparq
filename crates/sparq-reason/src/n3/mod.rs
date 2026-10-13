@@ -4698,6 +4698,48 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 
 #[cfg(test)]
 mod tests {
+    /// #6732: a document nested to the parser's limit is reasoned over on a 2 MiB stack
+    /// without overflowing: matching, instantiation, interning, serialization, proofs,
+    /// queries, and a `log:parsedAsN3` of the same document inside a rule.
+    #[test]
+    fn a_document_nested_to_the_parse_limit_reasons_on_a_small_stack() {
+        use super::parser::parse_surface_tests::{nested, on_small_stack, PRODUCTIONS};
+        let limit = super::bounded::parse_depth();
+        let rules = "{ ?s :p ?o } => { ?s :q ?o } .\n\
+            { :s :q ?o . :s :p ?o2 } => { :w :same ?o2 } .\n";
+        for production in PRODUCTIONS {
+            let results = on_small_stack(move || {
+                let doc = format!("{}{rules}", nested(production, limit));
+                let escaped = nested(production, limit)
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n");
+                let parsed_in_rule = format!(
+                    "@prefix : <http://ex/> .\n\
+                     @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     {{ \"{escaped}\" log:parsedAsN3 ?f . ?f log:includes {{ :s :p ?o }} }} \
+                     => {{ :r :got ?o }} .\n"
+                );
+                let derives = |src: &str, subject: &str| {
+                    super::reason_n3_terms(src, None).map(|c| {
+                        let subject = super::Term::Iri(format!("http://ex/{subject}"));
+                        c.derived.iter().any(|t| t[0] == subject)
+                    })
+                };
+                let terms = derives(&doc, "w");
+                let in_rule = derives(&parsed_in_rule, "r");
+                // These may refuse a term shape (e.g. a formula has no dictionary id);
+                // what matters is that they return.
+                let _ = super::reason_n3(&mut sparq_core::dict::Dict::new(), &doc);
+                let _ = super::reason_n3_proof(&mut sparq_core::dict::Dict::new(), &doc);
+                let _ = super::reason_n3_pass_all(&doc, super::RuleVars::N3);
+                let _ = super::reason_n3_query_terms(&doc, "{ :s :q ?o } => { :s :q ?o } .");
+                (terms, in_rule)
+            });
+            assert_eq!(results, (Ok(true), Ok(true)), "{production}");
+        }
+    }
+
     /// Every registry entry's declared store read, walked over the whole registry
     /// (`ALL` is generated with each enum, so a new variant joins this walk) and checked
     /// against the expected table below. A new builtin fails here until the table says
@@ -4836,7 +4878,7 @@ mod tests {
     #[test]
     fn every_limit_records_a_cut_on_the_run_including_nested_closures() {
         std::thread::Builder::new()
-            .stack_size(256 << 20)
+            .stack_size(2 << 20)
             .spawn(every_limit_records_a_cut)
             .expect("spawn")
             .join()

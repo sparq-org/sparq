@@ -10,9 +10,10 @@
 //! `source::HttpFragmentTransport`, `discovery::HttpFetcher`) install a custom resolver that
 //! enforces the **same** default-deny SSRF policy: resolve the host, drop every private/internal
 //! address (unless the bare host is explicitly allowlisted), and return only the survivors — so
-//! ureq dials only vetted IPs and there is no DNS-rebinding re-resolve window. This module factors
-//! the ureq-3 boilerplate (URI→host:port parse, the capacity-bounded filtered resolve, the refusal
-//! error) into one place so those three transports share one implementation. Native-only; only
+//! ureq dials only vetted IPs and there is no DNS-rebinding re-resolve window. This module holds
+//! that resolver ([`EgressFilterResolver`]) and the agent built around it ([`agent`]), plus the
+//! ureq-3 helpers behind them (URI→host:port parse, the capacity-bounded filtered resolve, the
+//! refusal error), so those three transports share one implementation. Native-only; only
 //! built when the `fedclient` feature pulls ureq in.
 //!
 //! The engine SERVICE resolver (`sparq-engine`'s `service.rs`) applies the *same* egress/SSRF
@@ -106,6 +107,67 @@ pub(crate) fn filter_resolved(
         return Err(egress_refused(refusal()));
     }
     Ok(permitted)
+}
+
+/// Which client is refusing, for the refusal text: the federation transports or discovery.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Client {
+    /// `source::HttpTransport` and `source::HttpFragmentTransport`.
+    Federation,
+    /// `discovery::HttpFetcher`.
+    Discovery,
+}
+
+/// The ureq resolver every sparq-fedclient HTTP transport installs. It resolves the host, drops
+/// every [`sparq_engine::is_forbidden_ip`] address unless an `allow_private` entry permits the
+/// host on the dialled port, and returns only the survivors, so ureq dials only vetted IPs and
+/// there is no resolve-then-re-resolve gap (sq-25xk).
+#[derive(Debug)]
+pub(crate) struct EgressFilterResolver {
+    pub(crate) allow_private: std::sync::Arc<std::collections::HashSet<String>>,
+    pub(crate) client: Client,
+}
+
+impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        _config: &ureq::config::Config,
+        _timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        let (who, hint) = match self.client {
+            Client::Federation => ("federation", "allowlist the host on the EgressGuard"),
+            Client::Discovery => ("discovery", "allow it with HttpFetcher::allow_private_host"),
+        };
+        let (host_port, host, port) = uri_host_port(uri).ok_or_else(|| {
+            egress_refused(format!(
+                "{who} egress refused: request URI {uri} has no host authority to vet"
+            ))
+        })?;
+        // Port-scoped allowlist: a `host:port` entry re-opens a private host only on its exact
+        // dialled port (shared host:port rule with the engine SERVICE guard; sq-vbnyc).
+        let allowed = allowlist_permits(&self.allow_private, &host, port);
+        filter_resolved(&host_port, allowed, sparq_engine::is_forbidden_ip, || {
+            format!(
+                "{who} egress refused: {host_port} resolves only to private/internal \
+                 addresses (default-deny SSRF policy; {hint})"
+            )
+        })
+    }
+}
+
+/// A ureq agent with the global `timeout`, the sparq-fedclient user agent and `resolver`. ureq
+/// connects only to the addresses the resolver returns, so the vetted IP is the dialled IP.
+pub(crate) fn agent(timeout: std::time::Duration, resolver: EgressFilterResolver) -> ureq::Agent {
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
+        .build();
+    ureq::Agent::with_parts(
+        config,
+        ureq::unversioned::transport::DefaultConnector::new(),
+        resolver,
+    )
 }
 
 // [FABLE-5] sq-3dyje.6 (mutation-kill): DIRECT unit tests for this `pub(crate)` module.

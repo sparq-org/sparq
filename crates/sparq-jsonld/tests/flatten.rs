@@ -6,8 +6,9 @@
 //! `sparq-conformance` is the gated CI lane). It walks the pinned `flatten`
 //! manifest, runs [`sparq_jsonld::flatten`] on each positive case, and deep-compares
 //! the result against the suite's NORMATIVE expected document using a native,
-//! dependency-free JSON-LD comparator (object key order insignificant; array order
-//! significant only inside `@list`) — the same oracle semantics as the conformance
+//! dependency-free JSON-LD comparator (`tests/common/mod.rs`: object key order
+//! insignificant; array order significant inside `@list` and, recursively, inside a
+//! `@json` literal payload) — the same oracle semantics as the conformance
 //! lane, but expressed over the crate's own `Json` AST so the crate keeps ZERO
 //! dependencies (no `serde_json`).
 //!
@@ -19,6 +20,9 @@
 
 use sparq_jsonld::{flatten, flatten_expanded, Json, JsonLdOptions, NoopLoader, ProcessingMode};
 use std::path::{Path, PathBuf};
+
+mod common;
+use common::json_ld_equal;
 
 /// The pinned suite root (mirrors the conformance crate's `suite_root`).
 fn suite_root() -> PathBuf {
@@ -111,56 +115,28 @@ fn doc_base(e: &Entry) -> String {
         .unwrap_or_else(|| format!("{}{}", SUITE_BASE, e.input))
 }
 
-/// Native JSON-LD document-level equality over the crate's `Json` AST: object key order
-/// insignificant, array order significant only inside a `@list` value, everything else
-/// exact (scalars are compared as their `Json::Raw`/`Json::Str` tokens). Mirrors the
-/// conformance crate's `json_ld_equal` semantics without a `serde_json` dependency.
-fn json_ld_equal(a: &Json, b: &Json) -> bool {
-    json_ld_equal_inner(a, b, false)
-}
-
-fn json_ld_equal_inner(a: &Json, b: &Json, in_list: bool) -> bool {
-    match (a, b) {
-        (Json::Str(x), Json::Str(y)) => x == y,
-        (Json::Raw(x), Json::Raw(y)) => x == y,
-        (Json::Arr(xs), Json::Arr(ys)) => {
-            if xs.len() != ys.len() {
-                return false;
-            }
-            if in_list {
-                xs.iter()
-                    .zip(ys.iter())
-                    .all(|(x, y)| json_ld_equal_inner(x, y, false))
-            } else {
-                array_equal_unordered(xs, ys)
-            }
-        }
-        (Json::Obj(xa), Json::Obj(ya)) => {
-            if xa.len() != ya.len() {
-                return false;
-            }
-            xa.iter().all(|(k, va)| {
-                ya.iter()
-                    .find(|(k2, _)| k2 == k)
-                    .is_some_and(|(_, vb)| json_ld_equal_inner(va, vb, k == "@list"))
-            })
-        }
-        _ => false,
-    }
-}
-
-fn array_equal_unordered(xs: &[Json], ys: &[Json]) -> bool {
-    let mut used = vec![false; ys.len()];
-    'outer: for x in xs {
-        for (j, y) in ys.iter().enumerate() {
-            if !used[j] && json_ld_equal_inner(x, y, false) {
-                used[j] = true;
-                continue 'outer;
-            }
-        }
-        return false;
-    }
-    true
+/// (#4264) The flatten lane's oracle must treat a `@json` literal payload as
+/// opaque JSON (array order significant, recursively). With set semantics a
+/// flatten bug that reordered a payload array would still count as a pass.
+#[test]
+fn oracle_json_payload_array_order_is_significant() {
+    let flat = |payload: &str| {
+        Json::parse(&format!(
+            r#"[{{"@id":"http://example.com/a",
+                  "http://example.com/payload":[{{"@value":{},"@type":"@json"}}]}}]"#,
+            payload
+        ))
+        .expect("valid flattened JSON")
+    };
+    assert!(!json_ld_equal(&flat("[1,2]"), &flat("[2,1]")));
+    assert!(!json_ld_equal(
+        &flat(r#"{"k":[1,2]}"#),
+        &flat(r#"{"k":[2,1]}"#)
+    ));
+    assert!(json_ld_equal(
+        &flat(r#"{"a":1,"b":[1,2]}"#),
+        &flat(r#"{"b":[1,2],"a":1}"#)
+    ));
 }
 
 /// [GPT-5.6] `flatten_expanded` is a normaliser: representative expanded inputs reach a

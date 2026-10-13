@@ -172,12 +172,12 @@ pub fn materialize_single_source(
     source: &dyn FederatedSource,
     tree: &JoinTree,
 ) -> Result<Relation, InterpError> {
-    let mut rel = materialize_node(resolver, selection, source, &tree.root)?;
+    let rel = materialize_tree(&tree.root, &mut |pattern| {
+        single_source_leaf(resolver, selection, source, pattern)
+    })?;
     // Project onto the whole-BGP variable set (first-seen position order across patterns),
     // matching what a `SELECT *` over the BGP would scope.
-    let project = bgp_vars(resolver);
-    rel = rel.project(&project);
-    Ok(rel)
+    Ok(rel.project(&bgp_vars(resolver)))
 }
 
 /// Materialise a `sparq-fedplan` [`JoinTree`] across **all retained sources per leaf**,
@@ -210,40 +210,47 @@ pub fn materialize_multi_source(
     selection: &[PatternSources],
     tree: &JoinTree,
 ) -> Result<Relation, InterpError> {
-    let mut rel = materialize_node_multi(resolver, selection, &tree.root)?;
+    let rel = materialize_tree(&tree.root, &mut |pattern| {
+        union_leaf(resolver, selection, pattern, |_, source, tp| {
+            fetch_leaf_relation(source, tp)
+        })
+    })?;
     // Project onto the whole-BGP variable set, matching `materialize_single_source`.
-    let project = bgp_vars(resolver);
-    rel = rel.project(&project);
-    Ok(rel)
+    Ok(rel.project(&bgp_vars(resolver)))
 }
 
-/// Recursively materialise one plan node into a [`Relation`], fanning each leaf out across
-/// its retained sources (the multi-source counterpart of [`materialize_node`]). [OPUS-4.8].
-fn materialize_node_multi(
-    resolver: &SourceResolver<'_>,
-    selection: &[PatternSources],
+/// Materialise one plan node into a [`Relation`]: each leaf is answered by `leaf`, and a join
+/// materialises its left subtree and its right leaf and natural-joins them. The single- and
+/// multi-source interpreters differ only in `leaf`. [OPUS-4.8] sq-j27p / sq-7yf0.
+fn materialize_tree(
     node: &JoinNode,
+    leaf: &mut dyn FnMut(usize) -> Result<Relation, InterpError>,
 ) -> Result<Relation, InterpError> {
     match node {
-        JoinNode::Leaf { pattern, .. } => materialize_leaf_multi(resolver, selection, *pattern),
+        JoinNode::Leaf { pattern, .. } => leaf(*pattern),
         JoinNode::Join { left, right, .. } => {
-            let l = materialize_node_multi(resolver, selection, left)?;
-            let r = materialize_leaf_multi(resolver, selection, *right)?;
+            let l = materialize_tree(left, leaf)?;
+            let r = leaf(*right)?;
             Ok(natural_join(&l, &r))
         }
     }
 }
 
-/// Answer ONE leaf pattern as the **bag-union over its retained sources**: fetch the leaf
-/// relation from each candidate adapter (resolved by source index through `resolver`) and
-/// concatenate the rows. The per-source relations share the same variable header (the
-/// pattern's variables in position order), so the union is a plain row concatenation —
-/// SPARQL UNION's multiset semantics, no de-duplication. [OPUS-4.8] sq-7yf0.
-fn materialize_leaf_multi(
+/// Answer ONE leaf pattern as the **bag-union over its retained sources**: resolve each
+/// candidate source index to its adapter through `resolver`, `fetch` the leaf relation from it,
+/// and concatenate the rows re-keyed onto the pattern's variable header (a source's SRJ header
+/// may differ in order). SPARQL UNION multiset semantics, no de-duplication; a pattern with no
+/// retained source is the empty relation over its variables. `fetch` receives the source index
+/// so the adaptive executor can time each arm. [OPUS-4.8] sq-7yf0, [FABLE-5] sq-xw8zz.
+pub(crate) fn union_leaf<F>(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
     pattern: usize,
-) -> Result<Relation, InterpError> {
+    mut fetch: F,
+) -> Result<Relation, InterpError>
+where
+    F: FnMut(usize, &dyn FederatedSource, &TriplePattern) -> Result<Relation, InterpError>,
+{
     let tp = resolver.pattern(pattern)?;
     let vars = pattern_vars(tp);
     let mut union = Relation {
@@ -251,10 +258,7 @@ fn materialize_leaf_multi(
         rows: Vec::new(),
     };
     for idx in leaf_source_indices(selection, pattern) {
-        let source = resolver.source(idx)?;
-        let leaf = fetch_leaf_relation(source, tp)?;
-        // Re-key onto the canonical leaf header so every source's rows union column-aligned
-        // (a source's SRJ header may differ in order from the pattern's variable order).
+        let leaf = fetch(idx, resolver.source(idx)?, tp)?;
         for row in &leaf.rows {
             union.rows.push(rel_row_project(&leaf.vars, row, &vars));
         }
@@ -276,8 +280,9 @@ pub(crate) fn leaf_source_indices(selection: &[PatternSources], pattern: usize) 
 }
 
 /// All distinct variables of the resolver's BGP, in first-seen order (subject, predicate,
-/// object within a pattern; patterns in BGP order) — the `SELECT *` scope. [OPUS-4.8] sq-j27p.
-fn bgp_vars(resolver: &SourceResolver<'_>) -> Vec<String> {
+/// object within a pattern; patterns in BGP order) — the `SELECT *` scope. Shared with the
+/// adaptive executor so every interpreter projects the same header. [OPUS-4.8] sq-j27p.
+pub(crate) fn bgp_vars(resolver: &SourceResolver<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for tp in &resolver.bgp().patterns {
         for v in pattern_vars(tp) {
@@ -289,44 +294,29 @@ fn bgp_vars(resolver: &SourceResolver<'_>) -> Vec<String> {
     out
 }
 
-/// Recursively materialise one plan node into a [`Relation`]. A leaf fetches + parses its
-/// source sub-result; a join materialises both sides and natural-joins them. [OPUS-4.8].
-fn materialize_node(
-    resolver: &SourceResolver<'_>,
-    selection: &[PatternSources],
-    source: &dyn FederatedSource,
-    node: &JoinNode,
-) -> Result<Relation, InterpError> {
-    match node {
-        JoinNode::Leaf { pattern, .. } => materialize_leaf(resolver, selection, source, *pattern),
-        JoinNode::Join { left, right, .. } => {
-            let l = materialize_node(resolver, selection, source, left)?;
-            let r = materialize_leaf(resolver, selection, source, *right)?;
-            Ok(natural_join(&l, &r))
-        }
+/// Reject (never silently drop) a leaf the planner retained more than one source for: the
+/// single-source entry points answer every leaf from one explicit source. [OPUS-4.8] sq-j27p.
+fn single_source_guard(selection: &[PatternSources], pattern: usize) -> Result<(), InterpError> {
+    match selection.iter().find(|ps| ps.pattern == pattern) {
+        Some(ps) if ps.candidates.len() > 1 => Err(InterpError::MultiSource {
+            pattern,
+            sources: ps.candidates.len(),
+        }),
+        _ => Ok(()),
     }
 }
 
-/// Fetch + parse one leaf pattern's sub-result from the single source. Enforces the
-/// single-source contract first: a leaf the planner retained more than one source for is
-/// rejected (Phase-3 is single-source). [OPUS-4.8] sq-j27p.
-fn materialize_leaf(
+/// Answer one leaf from the single `source` after the single-source guard. Shared by the
+/// materialising and adaptive single-source interpreters, so both dispatch on the source's
+/// interface through [`fetch_leaf_relation`]. [OPUS-4.8] sq-j27p.
+pub(crate) fn single_source_leaf(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
     source: &dyn FederatedSource,
     pattern: usize,
 ) -> Result<Relation, InterpError> {
-    // Single-source guard: reject (never silently drop) a leaf with >1 retained source.
-    if let Some(ps) = selection.iter().find(|ps| ps.pattern == pattern) {
-        if ps.candidates.len() > 1 {
-            return Err(InterpError::MultiSource {
-                pattern,
-                sources: ps.candidates.len(),
-            });
-        }
-    }
-    let tp = resolver.pattern(pattern)?;
-    fetch_leaf_relation(source, tp)
+    single_source_guard(selection, pattern)?;
+    fetch_leaf_relation(source, resolver.pattern(pattern)?)
 }
 
 /// Answer ONE leaf triple pattern against `source`, returning the leaf [`Relation`] —
@@ -1103,30 +1093,30 @@ pub fn stream_single_source(
     // just the inbox. [OPUS-4.8] sq-vtba.
     let leaf_count = resolver.bgp().patterns.len().max(1);
     let pool = Arc::new(ScatterPool::new(opts.workers, leaf_count));
-    let node = stream_node(resolver, selection, &source, &tree.root, &pool, opts)?;
+    let node = stream_tree(&tree.root, opts, &mut |pattern| {
+        single_source_guard(selection, pattern)?;
+        let tp = resolver.pattern(pattern)?;
+        Ok(stream_leaf(tp, vec![Arc::clone(&source)], &pool, opts))
+    })?;
     // Project onto the whole-BGP variable set, matching `materialize_single_source`.
     let project = bgp_vars(resolver);
     Ok(project_stream(node.stream, project, opts.channel_cap))
 }
 
-/// Recursively build the streaming pipeline for one plan node. A leaf becomes a fanned-out
-/// per-leaf stream; a join chains its (already-streaming) left subtree with the right leaf
-/// through a [`StreamingJoin`]. [OPUS-4.8] sq-vtba.
-fn stream_node(
-    resolver: &SourceResolver<'_>,
-    selection: &[PatternSources],
-    source: &Arc<dyn FederatedSource + Send + Sync>,
+/// Build the streaming pipeline for one plan node: each leaf's stream comes from `leaf`, and a
+/// join chains its (already-streaming) left subtree with the right leaf through a
+/// [`StreamingJoin`]. The single- and multi-source paths differ only in `leaf`.
+/// [OPUS-4.8] sq-vtba / sq-7yf0.
+fn stream_tree(
     node: &JoinNode,
-    pool: &Arc<ScatterPool>,
     opts: &StreamOptions,
+    leaf: &mut dyn FnMut(usize) -> Result<StreamNode, InterpError>,
 ) -> Result<StreamNode, InterpError> {
     match node {
-        JoinNode::Leaf { pattern, .. } => {
-            stream_leaf(resolver, selection, source, *pattern, pool, opts)
-        }
+        JoinNode::Leaf { pattern, .. } => leaf(*pattern),
         JoinNode::Join { left, right, .. } => {
-            let l = stream_node(resolver, selection, source, left, pool, opts)?;
-            let r = stream_leaf(resolver, selection, source, *right, pool, opts)?;
+            let l = stream_tree(left, opts, leaf)?;
+            let r = leaf(*right)?;
             let join = StreamingJoin::new(&l.vars, &r.vars, opts.join_opts.clone(), opts.channel_cap);
             let out_vars = join.out_vars().to_vec();
             let stream = join.run(l.stream, r.stream);
@@ -1142,66 +1132,6 @@ fn stream_node(
 struct StreamNode {
     vars: Vec<String>,
     stream: SolutionStream,
-}
-
-/// Fan one leaf's blocking fetch out onto the pool: lower the pattern, submit the
-/// `execute`+parse job, and return a [`SolutionStream`] the job feeds row-by-row. Enforces
-/// the single-source guard first (identical to Phase 3). [OPUS-4.8] sq-vtba.
-fn stream_leaf(
-    resolver: &SourceResolver<'_>,
-    selection: &[PatternSources],
-    source: &Arc<dyn FederatedSource + Send + Sync>,
-    pattern: usize,
-    pool: &Arc<ScatterPool>,
-    opts: &StreamOptions,
-) -> Result<StreamNode, InterpError> {
-    // Single-source guard: reject (never silently drop) a leaf with >1 retained source.
-    if let Some(ps) = selection.iter().find(|ps| ps.pattern == pattern) {
-        if ps.candidates.len() > 1 {
-            return Err(InterpError::MultiSource {
-                pattern,
-                sources: ps.candidates.len(),
-            });
-        }
-    }
-    let tp = resolver.pattern(pattern)?;
-    let vars = pattern_vars(tp);
-    // Clone the leaf pattern onto the worker (a light fedplan `TriplePattern`) so the blocking
-    // fetch — which dispatches on the source's interface (SRJ endpoint vs TPF/brTPF fragment) —
-    // runs the SAME `fetch_leaf_relation` the materialised interpreter uses. [OPUS-4.8] sq-yzca.
-    let tp_owned = tp.clone();
-    let (sink, stream) = SolutionStream::bounded(opts.channel_cap);
-    let source = Arc::clone(source);
-    let leaf_vars = vars.clone();
-    pool.submit(move || {
-        // Blocking fetch + parse on the worker thread (the SSRF gate / fragment fetch lives
-        // inside the source adapter). Endpoint/Local answer SRJ; Tpf/BrTpf answer typed
-        // fragment solutions — `fetch_leaf_relation` picks the path by interface.
-        match fetch_leaf_relation(source.as_ref(), &tp_owned) {
-            Ok(rel) => {
-                // Re-key each materialised row onto the leaf's variable header and feed it
-                // into the stream (the per-leaf "stream" delivers the parsed rows; the
-                // streaming win is at the JOIN level — a fast leaf feeds the join while a
-                // slow leaf is still in flight).
-                for row in rel.rows {
-                    // The source header may differ in order from the pattern's; project onto
-                    // the leaf's variable order so the join keys line up.
-                    let proj = rel_row_project(&rel.vars, &row, &leaf_vars);
-                    if !sink.emit(Solution::new(leaf_vars.clone(), proj)) {
-                        return; // consumer gone.
-                    }
-                }
-            }
-            Err(InterpError::Source(e)) => {
-                sink.emit_err(e);
-            }
-            Err(other) => {
-                sink.emit_err(FedError::Transport(other.to_string()));
-            }
-        }
-        // `sink` drops here → the per-leaf stream ends.
-    });
-    Ok(StreamNode { vars, stream })
 }
 
 /// **Stream** a `sparq-fedplan` [`JoinTree`] with **per-leaf multi-source UNION fan-out**,
@@ -1243,75 +1173,45 @@ pub fn stream_multi_source(
         .sum::<usize>()
         .max(1);
     let pool = Arc::new(ScatterPool::new(opts.workers, job_count));
-    let node = stream_node_multi(resolver, selection, adapters, &tree.root, &pool, opts)?;
+    let node = stream_tree(&tree.root, opts, &mut |pattern| {
+        let tp = resolver.pattern(pattern)?;
+        // Range-check every source index up front (fail closed before spawning any job) so a
+        // mismatched plan/adapter set surfaces a `ResolveError`, not a silent under-answer.
+        let sources = leaf_source_indices(selection, pattern)
+            .into_iter()
+            .map(|idx| {
+                adapters.get(idx).cloned().ok_or(InterpError::Resolve(
+                    crate::planner::ResolveError::SourceOutOfRange {
+                        index: idx,
+                        sources: adapters.len(),
+                    },
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(stream_leaf(tp, sources, &pool, opts))
+    })?;
     let project = bgp_vars(resolver);
     Ok(project_stream(node.stream, project, opts.channel_cap))
 }
 
-/// Recursively build the streaming pipeline for one node with per-leaf multi-source fan-out
-/// (the multi-source counterpart of [`stream_node`]). [OPUS-4.8] sq-7yf0.
-fn stream_node_multi(
-    resolver: &SourceResolver<'_>,
-    selection: &[PatternSources],
-    adapters: &[Arc<dyn FederatedSource + Send + Sync>],
-    node: &JoinNode,
+/// Fan ONE leaf's blocking fetches out onto the pool, one job per source in `sources`, all
+/// feeding a single per-leaf [`SolutionStream`] (a cloned [`SolutionSink`] per job). Each job
+/// runs the SAME [`fetch_leaf_relation`] the materialised interpreters use (so endpoint and
+/// fragment sources dispatch identically) and re-keys every row onto the pattern's variable
+/// header. The stream is the bag-union of every source's rows and ends once the last job drops
+/// its sink; with no sources it is empty. The streaming win is at the join level: a fast leaf
+/// feeds the join while a slow one is still in flight. [OPUS-4.8] sq-vtba / sq-7yf0 / sq-yzca.
+fn stream_leaf(
+    tp: &TriplePattern,
+    sources: Vec<Arc<dyn FederatedSource + Send + Sync>>,
     pool: &Arc<ScatterPool>,
     opts: &StreamOptions,
-) -> Result<StreamNode, InterpError> {
-    match node {
-        JoinNode::Leaf { pattern, .. } => {
-            stream_leaf_multi(resolver, selection, adapters, *pattern, pool, opts)
-        }
-        JoinNode::Join { left, right, .. } => {
-            let l = stream_node_multi(resolver, selection, adapters, left, pool, opts)?;
-            let r = stream_leaf_multi(resolver, selection, adapters, *right, pool, opts)?;
-            let join = StreamingJoin::new(&l.vars, &r.vars, opts.join_opts.clone(), opts.channel_cap);
-            let out_vars = join.out_vars().to_vec();
-            let stream = join.run(l.stream, r.stream);
-            Ok(StreamNode {
-                vars: out_vars,
-                stream,
-            })
-        }
-    }
-}
-
-/// Fan ONE leaf's fetches out across **every retained source** onto the pool, all feeding a
-/// single per-leaf [`SolutionStream`] (a cloned [`SolutionSink`] per source job). The
-/// resulting stream is the bag-union of every source's rows for the pattern; it ends once
-/// the last source job drops its sink. A leaf with no retained source yields an empty stream
-/// (its only sink drops immediately). Each source index is resolved against `adapters`
-/// (range-checked, same as [`SourceResolver::source`]). [OPUS-4.8] sq-7yf0.
-fn stream_leaf_multi(
-    resolver: &SourceResolver<'_>,
-    selection: &[PatternSources],
-    adapters: &[Arc<dyn FederatedSource + Send + Sync>],
-    pattern: usize,
-    pool: &Arc<ScatterPool>,
-    opts: &StreamOptions,
-) -> Result<StreamNode, InterpError> {
-    let tp = resolver.pattern(pattern)?;
+) -> StreamNode {
     let vars = pattern_vars(tp);
-    let indices = leaf_source_indices(selection, pattern);
-    // Range-check every source index up front (fail closed before spawning any job) so a
-    // mismatched plan/adapter set surfaces a `ResolveError`, not a silent under-answer.
-    for &idx in &indices {
-        if idx >= adapters.len() {
-            return Err(InterpError::Resolve(
-                crate::planner::ResolveError::SourceOutOfRange {
-                    index: idx,
-                    sources: adapters.len(),
-                },
-            ));
-        }
-    }
     let (sink, stream) = SolutionStream::bounded(opts.channel_cap);
-    for &idx in &indices {
-        let source = Arc::clone(&adapters[idx]);
+    for source in sources {
         let tp_owned = tp.clone();
         let leaf_vars = vars.clone();
-        // Each source job gets its OWN clone of the sink; the per-leaf stream ends only when
-        // the LAST clone drops (every source job finished) — the union over sources.
         let job_sink = sink.clone();
         pool.submit(move || {
             match fetch_leaf_relation(source.as_ref(), &tp_owned) {
@@ -1330,13 +1230,13 @@ fn stream_leaf_multi(
                     job_sink.emit_err(FedError::Transport(other.to_string()));
                 }
             }
-            // `job_sink` drops here → one source job done; the leaf stream ends when all do.
+            // `job_sink` drops here → one source job done.
         });
     }
-    // Drop our own retained sink so the stream is driven solely by the job clones (and an
-    // empty `indices` immediately closes the stream).
+    // Drop our own sink so the stream is driven solely by the job clones (no sources → the
+    // stream closes immediately).
     drop(sink);
-    Ok(StreamNode { vars, stream })
+    StreamNode { vars, stream }
 }
 
 /// Project one parsed SRJ row from its `src_vars` order onto `keep`'s order (an absent
@@ -2094,6 +1994,50 @@ mod tests {
         assert_eq!(rel.rows.len(), 3, "brTPF unbound scan returns the whole fragment");
     }
 
+    /// The adaptive single-source executor answers a TPF leaf through the same interface
+    /// dispatch as the static interpreters (it used to call the SRJ `execute` directly, which a
+    /// fragment source refuses as `Unsupported`).
+    #[cfg(feature = "fedclient-adaptive")]
+    #[test]
+    fn adaptive_interpreter_answers_tpf_leaf() {
+        use sparq_fedplan::ReplanPolicy;
+        let bgp = Bgp::new(vec![TriplePattern::new(
+            var("s"),
+            iri("http://ex/knows"),
+            var("o"),
+        )]);
+        let descriptors = [SourceDescriptor::builder(SourceId::new("T"))
+            .total_triples(3)
+            .build()];
+        let sel = select_sources(&bgp, &descriptors);
+        let tree = plan_bgp(&bgp, &sel, &descriptors, &PlanOptions::default()).unwrap();
+        let tpf = TpfSource::new(
+            "http://frag/tpf",
+            Box::new(FragFixture { triples: knows_triples(), page_size: 2 }),
+        );
+        let adapters: Vec<&dyn FederatedSource> = vec![&tpf];
+        let resolver = SourceResolver::new(&bgp, &adapters);
+        let reference = materialize_single_source(&resolver, &sel, &tpf, &tree).unwrap();
+        let out = crate::adaptive::execute_adaptive_single_source(
+            &bgp,
+            &descriptors,
+            &resolver,
+            &sel,
+            &tpf,
+            &tree,
+            PlanOptions::default(),
+            ReplanPolicy::default(),
+        )
+        .expect("adaptive executor answers a TPF leaf");
+        assert!(solutions_equal(
+            &out.relation.vars,
+            &out.relation.rows,
+            &reference.vars,
+            &reference.rows
+        ));
+        assert_eq!(out.relation.rows.len(), 3);
+    }
+
     /// The fragment leaf is also answered by the STREAMING interpreter (the dispatch is shared),
     /// and the streamed multiset equals the materialised one. [OPUS-4.8] sq-yzca.
     #[test]
@@ -2355,7 +2299,7 @@ mod tests {
         let ep = Endpoint::new("http://8.8.8.8/sparql", Box::new(MapTransport::new(StdHashMap::new())));
         let adapters: Vec<&dyn FederatedSource> = vec![&ep];
         let resolver = SourceResolver::new(&bgp, &adapters);
-        let leaf = materialize_leaf_multi(&resolver, &sel, 0).unwrap();
+        let leaf = union_leaf(&resolver, &sel, 0, |_, s, tp| fetch_leaf_relation(s, tp)).unwrap();
         assert_eq!(leaf.vars, vec!["s".to_string(), "o".to_string()]);
         assert!(leaf.rows.is_empty(), "no retained source ⇒ empty leaf relation");
     }

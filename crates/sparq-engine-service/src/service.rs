@@ -1426,45 +1426,131 @@ pub const SERVICE_EGRESS_REFUSED_MARKER: &str = "SERVICE egress refused";
 // at 127.0.0.1 / 169.254.169.254 is dropped before any socket is opened, and
 // there is no resolve-then-reresolve TOCTOU window.
 
-/// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden (private /
-/// internal / non-global) destination for SERVICE federation. Returns `true`
-/// when the address is in a range the default-deny policy refuses.
+/// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden destination for
+/// SERVICE federation: `true` unless the address is globally reachable unicast.
 ///
-/// Forbidden ranges:
-/// * loopback — `127.0.0.0/8`, `::1`
-/// * RFC1918 private — `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
-/// * link-local — `169.254.0.0/16` (incl. the `169.254.169.254` cloud-metadata
-///   IP) and IPv6 `fe80::/10`
-/// * unique-local IPv6 — `fc00::/7`
-/// * unspecified — `0.0.0.0`, `::`
-/// * IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped and re-classified as the
-///   embedded IPv4 address, so a private v4 cannot be smuggled through a v6 host.
+/// The rule is table-driven from the [IANA IPv4] and [IANA IPv6] Special-Purpose Address
+/// Registries (`V4_DENY`, `V6_DENY`), honouring their "Globally Reachable" column
+/// (`V4_GLOBAL`, `V6_GLOBAL` re-allow the reachable entries inside a denied block),
+/// plus multicast, the reserved space, and on IPv6 everything outside global unicast
+/// `2000::/3`. As a policy exclusion beyond the registry, ORCHIDv2 `2001:20::/28` and
+/// drone remote ID tags `2001:30::/28` are refused too: they are identifiers, never
+/// endpoint locators. Addresses that carry an IPv4 address are judged by it: IPv4-mapped
+/// `::ffff:0:0/96`, IPv4-translated `::ffff:0:0:0/96`, NAT64 `64:ff9b::/96`, 6to4
+/// `2002::/16` and Teredo `2001::/32` (forbidden if its server or de-obfuscated client
+/// address is), so a private IPv4 cannot be smuggled through an IPv6 form.
+///
+/// [IANA IPv4]: https://www.iana.org/assignments/iana-ipv4-special-registry/
+/// [IANA IPv6]: https://www.iana.org/assignments/iana-ipv6-special-registry/
 #[cfg(feature = "service")]
 pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
     match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()            // 127.0.0.0/8
-                || v4.is_private()      // 10/8, 172.16/12, 192.168/16
-                || v4.is_link_local()   // 169.254.0.0/16 (incl. 169.254.169.254)
-                || v4.is_unspecified()  // 0.0.0.0
-                // Defence-in-depth on ranges that are also internal but not
-                // covered above: broadcast, shared CGNAT (100.64/10), benchmarking.
-                || v4.is_broadcast()    // 255.255.255.255
-                || matches!(v4.octets(), [100, b, ..] if (64..=127).contains(&b)) // 100.64/10 CGNAT
-        }
-        IpAddr::V6(v6) => {
-            // Unwrap IPv4-mapped (::ffff:a.b.c.d) and re-check as IPv4 so a
-            // private v4 can't ride in through a v6 literal.
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(IpAddr::V4(v4));
-            }
-            v6.is_loopback()            // ::1
-                || v6.is_unspecified()  // ::
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
-        }
+        std::net::IpAddr::V4(v4) => v4_forbidden(v4.to_bits()),
+        std::net::IpAddr::V6(v6) => v6_forbidden(v6.to_bits()),
     }
+}
+
+#[cfg(feature = "service")]
+const fn v4(a: u8, b: u8, c: u8, d: u8) -> u32 {
+    std::net::Ipv4Addr::new(a, b, c, d).to_bits()
+}
+
+#[cfg(feature = "service")]
+#[allow(clippy::too_many_arguments)]
+const fn v6(a: u16, b: u16, c: u16, d: u16, e: u16, f: u16, g: u16, h: u16) -> u128 {
+    std::net::Ipv6Addr::new(a, b, c, d, e, f, g, h).to_bits()
+}
+
+/// IPv4 blocks that are not globally reachable: every IANA IPv4 Special-Purpose Address
+/// Registry entry marked "Globally Reachable: False" (or deprecated), plus multicast.
+#[cfg(feature = "service")]
+const V4_DENY: &[(u32, u8)] = &[
+    (v4(0, 0, 0, 0), 8),       // "this network" (incl. 0.0.0.0/32 "this host")
+    (v4(10, 0, 0, 0), 8),      // private-use
+    (v4(100, 64, 0, 0), 10),   // shared address space (CGNAT)
+    (v4(127, 0, 0, 0), 8),     // loopback
+    (v4(169, 254, 0, 0), 16),  // link-local (incl. cloud metadata 169.254.169.254)
+    (v4(172, 16, 0, 0), 12),   // private-use
+    // IETF protocol assignments, incl. the /29 DS-Lite block, the .8 dummy address
+    // and the .170/.171 NAT64 discovery addresses
+    (v4(192, 0, 0, 0), 24),
+    (v4(192, 0, 2, 0), 24),    // documentation TEST-NET-1
+    (v4(192, 88, 99, 0), 24),  // deprecated 6to4 relay anycast
+    (v4(192, 168, 0, 0), 16),  // private-use
+    (v4(198, 18, 0, 0), 15),   // benchmarking
+    (v4(198, 51, 100, 0), 24), // documentation TEST-NET-2
+    (v4(203, 0, 113, 0), 24),  // documentation TEST-NET-3
+    (v4(224, 0, 0, 0), 4),     // multicast
+    (v4(240, 0, 0, 0), 4),     // reserved (incl. limited broadcast 255.255.255.255)
+];
+
+/// Registry entries marked globally reachable that sit inside a `V4_DENY` block.
+#[cfg(feature = "service")]
+const V4_GLOBAL: &[(u32, u8)] = &[
+    (v4(192, 0, 0, 9), 32),  // Port Control Protocol anycast
+    (v4(192, 0, 0, 10), 32), // TURN relay anycast
+];
+
+/// IPv6 blocks inside global unicast `2000::/3` that are not globally reachable (the
+/// rest of the IPv6 registry lies outside `2000::/3`, which is refused wholesale).
+#[cfg(feature = "service")]
+const V6_DENY: &[(u128, u8)] = &[
+    // IETF protocol assignments: benchmarking, ORCHID and the other identifier spaces
+    (v6(0x2001, 0, 0, 0, 0, 0, 0, 0), 23),
+    (v6(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0), 32),  // documentation
+    (v6(0x3fff, 0, 0, 0, 0, 0, 0, 0), 20),      // documentation
+];
+
+/// Registry entries marked globally reachable that sit inside a `V6_DENY` block.
+#[cfg(feature = "service")]
+const V6_GLOBAL: &[(u128, u8)] = &[
+    (v6(0x2001, 1, 0, 0, 0, 0, 0, 1), 128),     // Port Control Protocol anycast
+    (v6(0x2001, 1, 0, 0, 0, 0, 0, 2), 128),     // TURN relay anycast
+    (v6(0x2001, 1, 0, 0, 0, 0, 0, 3), 128),     // DNS-SD service registration protocol anycast
+    (v6(0x2001, 3, 0, 0, 0, 0, 0, 0), 32),      // AMT
+    (v6(0x2001, 4, 0x112, 0, 0, 0, 0, 0), 48),  // AS112-v6
+];
+
+#[cfg(feature = "service")]
+fn in_v4(addr: u32, &(net, len): &(u32, u8)) -> bool {
+    (addr ^ net).checked_shr(32 - u32::from(len)).unwrap_or(0) == 0
+}
+
+#[cfg(feature = "service")]
+fn in_v6(addr: u128, &(net, len): &(u128, u8)) -> bool {
+    (addr ^ net).checked_shr(128 - u32::from(len)).unwrap_or(0) == 0
+}
+
+#[cfg(feature = "service")]
+fn v4_forbidden(addr: u32) -> bool {
+    V4_DENY.iter().any(|b| in_v4(addr, b)) && !V4_GLOBAL.iter().any(|b| in_v4(addr, b))
+}
+
+#[cfg(feature = "service")]
+fn v6_forbidden(addr: u128) -> bool {
+    // Forms that embed an IPv4 address are judged by that address.
+    // IPv4-mapped, IPv4-translated and the NAT64 well-known prefix carry it in the low 32.
+    const LOW32_V4: [(u128, u8); 3] = [
+        (v6(0, 0, 0, 0, 0, 0xffff, 0, 0), 96),
+        (v6(0, 0, 0, 0, 0xffff, 0, 0, 0), 96),
+        (v6(0x64, 0xff9b, 0, 0, 0, 0, 0, 0), 96),
+    ];
+    let low32 = addr as u32;
+    if LOW32_V4.iter().any(|b| in_v6(addr, b)) {
+        return v4_forbidden(low32);
+    }
+    if in_v6(addr, &(v6(0x2002, 0, 0, 0, 0, 0, 0, 0), 16)) {
+        return v4_forbidden((addr >> 80) as u32); // 6to4
+    }
+    if in_v6(addr, &(v6(0x2001, 0, 0, 0, 0, 0, 0, 0), 32)) {
+        // Teredo: server IPv4 in bits 64..96, client IPv4 XOR-obfuscated in the low 32.
+        return v4_forbidden((addr >> 64) as u32) || v4_forbidden(!low32);
+    }
+    // Only 2000::/3 is global unicast: loopback, unspecified, IPv4-compatible, discard,
+    // local-use NAT64, SRv6 SIDs, unique-local, link-local, site-local and multicast all
+    // fall outside it.
+    !in_v6(addr, &(v6(0x2000, 0, 0, 0, 0, 0, 0, 0), 3))
+        || (V6_DENY.iter().any(|b| in_v6(addr, b)) && !V6_GLOBAL.iter().any(|b| in_v6(addr, b)))
 }
 
 /// SERVICE egress allowlist + policy mode. A host (DNS name or IP literal, exactly
@@ -1955,8 +2041,14 @@ fn arrayvec_default() -> ureq::unversioned::resolver::ResolvedSocketAddrs {
 }
 
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-impl Transport for HttpTransport {
-    fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String> {
+impl HttpTransport {
+    /// POST `query` to `endpoint` through the SSRF-guarded agent and return the response, or
+    /// the SERVICE error text for a transport failure or a non-2xx status.
+    fn post(
+        &self,
+        endpoint: &str,
+        query: &str,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
         // [OPUS-4.8] sq-g2xs: ureq-3 builds an `Agent` from a `Config` + a custom resolver via
         // `Agent::with_parts`; the resolver carries the default-deny SSRF policy exactly as in
         // ureq 2 (the resolved-and-vetted IP is the dialled IP — no DNS-rebinding re-resolve).
@@ -1972,7 +2064,7 @@ impl Transport for HttpTransport {
         // POST with the query in an `application/x-www-form-urlencoded` `query=` field
         // (SPARQL Protocol §2.1.2 "query via POST with URL-encoded parameters") — the
         // most broadly supported method and not subject to URL-length limits.
-        let resp = agent
+        agent
             .post(endpoint)
             // Prefer JSON, but accept XML — some endpoints ignore `Accept` and only emit
             // SPARQL-Results-XML, which `parse_results` now handles (bead sq-ycu). [OPUS-4.8]
@@ -1980,23 +2072,29 @@ impl Transport for HttpTransport {
                 "Accept",
                 "application/sparql-results+json, application/sparql-results+xml;q=0.9",
             )
-            .send_form([("query", query)]);
-        match resp {
-            // ureq-3 caps `read_to_string` at 10 MiB by default; a federated SELECT result can
-            // exceed that, so raise the limit generously (a finite cap still bounds memory).
-            Ok(mut r) => r
-                .body_mut()
-                .with_config()
-                .limit(SERVICE_MAX_BODY_BYTES)
-                .read_to_string()
-                .map_err(|e| format!("SERVICE: reading response from {endpoint}: {e}")),
-            // ureq-3 surfaces non-2xx as `Error::StatusCode`; treat both transport and HTTP
-            // errors uniformly (the caller decides SILENT vs propagate).
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("SERVICE: endpoint {endpoint} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("SERVICE: request to {endpoint} failed: {e}")),
-        }
+            .send_form([("query", query)])
+            .map_err(|e| match e {
+                // ureq-3 surfaces non-2xx as `Error::StatusCode`; treat both transport and HTTP
+                // errors uniformly (the caller decides SILENT vs propagate).
+                ureq::Error::StatusCode(code) => {
+                    format!("SERVICE: endpoint {endpoint} returned HTTP {code}")
+                }
+                e => format!("SERVICE: request to {endpoint} failed: {e}"),
+            })
+    }
+}
+
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+impl Transport for HttpTransport {
+    fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String> {
+        // ureq-3 caps `read_to_string` at 10 MiB by default; a federated SELECT result can
+        // exceed that, so raise the limit generously (a finite cap still bounds memory).
+        self.post(endpoint, query)?
+            .body_mut()
+            .with_config()
+            .limit(SERVICE_MAX_BODY_BYTES)
+            .read_to_string()
+            .map_err(|e| format!("SERVICE: reading response from {endpoint}: {e}"))
     }
 }
 
@@ -2011,35 +2109,13 @@ impl ReaderTransport for HttpTransport {
         endpoint: &str,
         query: &str,
     ) -> Result<Box<dyn std::io::Read + 'a>, String> {
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-engine/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
-            EgressFilterResolver,
-        );
-        let resp = agent
-            .post(endpoint)
-            .header(
-                "Accept",
-                "application/sparql-results+json, application/sparql-results+xml;q=0.9",
-            )
-            .send_form([("query", query)]);
-        match resp {
-            Ok(r) => {
-                // Return the body as a capped byte reader — no `read_to_string`, no
-                // String allocation for the whole body. The limit is the same cap as
-                // the `Transport` path so the body-byte bound is preserved.
-                let reader = r.into_body().into_with_config().limit(SERVICE_MAX_BODY_BYTES).reader();
-                Ok(Box::new(reader))
-            }
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("SERVICE: endpoint {endpoint} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("SERVICE: request to {endpoint} failed: {e}")),
-        }
+        let resp = self.post(endpoint, query)?;
+        Ok(Box::new(
+            resp.into_body()
+                .into_with_config()
+                .limit(SERVICE_MAX_BODY_BYTES)
+                .reader(),
+        ))
     }
 }
 

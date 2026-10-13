@@ -98,6 +98,8 @@
 //! (ureq + SSRF resolver + Hydra URI-template + Turtle/TriG parse) + interpreter wiring.
 //! Flagged for Fable re-review when available.
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ureq_egress::{Client, EgressFilterResolver};
 use std::collections::HashSet;
 use std::net::IpAddr;
 
@@ -591,50 +593,6 @@ impl HttpTransport {
     }
 }
 
-/// ureq [`Resolver`](ureq::unversioned::resolver::Resolver) that enforces the SSRF egress policy on the *resolved*
-/// addresses (DNS-rebinding-safe): it resolves the host, drops every [`is_forbidden_ip`]
-/// address (unless the bare host is on the allowlist), and returns only the survivors — so
-/// ureq dials only vetted IPs and there is no resolve-then-re-resolve gap. Mirrors the
-/// engine's `service.rs` `EgressFilterResolver` and this crate's `discovery::EgressFilterResolver`.
-/// [OPUS-4.8] sq-25xk.
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
-struct EgressFilterResolver {
-    allow_private: std::sync::Arc<HashSet<String>>,
-}
-
-// [OPUS-4.8] sq-g2xs: ureq-3's `Resolver` takes a parsed `&http::Uri` (+ config + timeout) and
-// returns an `ArrayVec<SocketAddr, 16>` rather than ureq-2's `&str` netloc → `Vec`. The SSRF
-// policy is byte-for-byte the ureq-2 one (default-deny private/internal, allowlist-to-reopen,
-// DNS-rebinding-safe); the shared `crate::ureq_egress` helpers carry the ureq-3 boilerplate so
-// the three sparq-fedclient transports share one implementation. (The engine SERVICE resolver
-// applies equivalent, unit-tested logic via its own inline copy — `sparq-engine` cannot depend on
-// `sparq-fedclient` — so it does not share this module.)
-#[cfg(not(target_arch = "wasm32"))]
-impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        _config: &ureq::config::Config,
-        _timeout: ureq::unversioned::transport::NextTimeout,
-    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        let (host_port, host, port) = crate::ureq_egress::uri_host_port(uri).ok_or_else(|| {
-            crate::ureq_egress::egress_refused(format!(
-                "federation egress refused: request URI {uri} has no host authority to vet"
-            ))
-        })?;
-        // Port-scoped allowlist: a `host:port` entry re-opens a private host only on its exact
-        // dialled port (shared host:port rule with the engine SERVICE guard; sq-vbnyc).
-        let allowed = crate::ureq_egress::allowlist_permits(&self.allow_private, &host, port);
-        crate::ureq_egress::filter_resolved(&host_port, allowed, is_forbidden_ip, || {
-            format!(
-                "federation egress refused: {host_port} resolves only to private/internal \
-                 addresses (default-deny SSRF policy; allowlist the host on the EgressGuard)"
-            )
-        })
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 impl Transport for HttpTransport {
     fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String> {
@@ -642,15 +600,11 @@ impl Transport for HttpTransport {
         // `Agent::with_parts`; the resolver carries the default-deny SSRF policy exactly as in
         // ureq 2 — ureq connects only to the addresses the resolver returns, so the
         // resolved-and-vetted IP IS the dialled IP (no DNS-rebinding re-resolve window). [sq-25xk]
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
+        let agent = crate::ureq_egress::agent(
+            self.timeout,
             EgressFilterResolver {
                 allow_private: std::sync::Arc::clone(&self.allow_private),
+                client: Client::Federation,
             },
         );
         // SPARQL Protocol §2.1.2: query via POST with `application/x-www-form-urlencoded`
@@ -1193,15 +1147,11 @@ impl FragmentTransport for HttpFragmentTransport {
         // [OPUS-4.8] sq-g2xs: ureq-3 `Agent::with_parts` with the default-deny SSRF resolver —
         // ureq dials only the addresses the resolver returns, so the vetted IP IS the dialled IP
         // (no DNS-rebinding re-resolve window). Same resolver as the SRJ `HttpTransport`.
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
+        let agent = crate::ureq_egress::agent(
+            self.timeout,
             EgressFilterResolver {
                 allow_private: std::sync::Arc::clone(&self.allow_private),
+                client: Client::Federation,
             },
         );
         let body = match agent
@@ -1705,7 +1655,7 @@ mod tests {
                 "{ip} should be allowed"
             );
         }
-        assert!(!is_forbidden_ip(IpAddr::V4(Ipv4Addr::new(203, 0, 113, 5))));
+        assert!(!is_forbidden_ip(IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9))));
         assert!(!is_forbidden_ip("2606:4700:4700::1111".parse().unwrap())); // public v6
     }
 
@@ -2454,6 +2404,7 @@ mod tests {
         let set: HashSet<String> = allow.iter().map(|h| h.to_ascii_lowercase()).collect();
         EgressFilterResolver {
             allow_private: std::sync::Arc::new(set),
+            client: Client::Federation,
         }
     }
 
