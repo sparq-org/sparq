@@ -696,11 +696,22 @@ impl<'a> PatternProbeSession<'a> {
     }
 }
 
-/// The GET form of `query` against `endpoint`: `query=` is appended with `&` when the endpoint
-/// URL already carries a query string, else with `?`.
+/// The GET form of `query` against `endpoint`. The endpoint's own query parameters are kept,
+/// except any existing `query` (the SPARQL Protocol takes exactly one); empty parameters are
+/// dropped, and a fragment is removed because it is never sent to the server.
 fn probe_url(endpoint: &str, query: &str) -> String {
-    let separator = if endpoint.contains('?') { '&' } else { '?' };
-    format!("{endpoint}{separator}query={}", pct_encode(query))
+    let base = endpoint.split_once('#').map_or(endpoint, |(base, _)| base);
+    let (path, params) = base.split_once('?').unwrap_or((base, ""));
+    let mut url = format!("{path}?");
+    for param in params.split('&') {
+        if !param.is_empty() && param != "query" && !param.starts_with("query=") {
+            url.push_str(param);
+            url.push('&');
+        }
+    }
+    url.push_str("query=");
+    url.push_str(&pct_encode(query));
+    url
 }
 
 /// An in-memory fetcher mapping exact URLs → response bodies. Any URL not in the map yields a
@@ -1332,6 +1343,29 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": false }"#);
         let d = discover(endpoint, &fetcher).expect("a false ASK still proves reachability");
         assert_eq!(d.provenance, Provenance::AskProbe);
+    }
+
+    #[test]
+    fn probe_url_keeps_one_query_parameter_in_the_query_string() {
+        // (endpoint suffix after `http://e/s`, the probe URL before its `query=` parameter)
+        for (suffix, kept) in [
+            ("", "?"),
+            ("?g=x", "?g=x&"),
+            ("?g=x#top", "?g=x&"),
+            ("#top", "?"),
+            ("?query=old&g=x", "?g=x&"),
+            ("?query&g=x", "?g=x&"),
+            ("?queryx=1", "?queryx=1&"),
+            ("?", "?"),
+            ("?g=x&", "?g=x&"),
+        ] {
+            let expected = format!("http://e/s{kept}query={}", pct_encode(ASK_PROBE));
+            assert_eq!(
+                probe_url(&format!("http://e/s{suffix}"), ASK_PROBE),
+                expected,
+                "{suffix}"
+            );
+        }
     }
 
     #[test]
