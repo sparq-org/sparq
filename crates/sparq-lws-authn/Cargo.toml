@@ -22,6 +22,8 @@ oxrdf.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 p256 = { version = "0.13", features = ["ecdsa", "jwk", "std"] }
 serde_json = "1"
+# The outbound-address classifier every SSRF guard in sparq shares (`sparq_core::net`).
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false }
 sha2 = "0.10"
 tokio = { version = "1", features = ["net"] }
 url = "2"
