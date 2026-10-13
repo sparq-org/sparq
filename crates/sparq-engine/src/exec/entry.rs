@@ -7,6 +7,8 @@ pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult,
     // uninstrumented rayon branches) into the error before the expensive term
     // materialisation below.
     budget::check(bindings.rows.len())?;
+    #[cfg(test)]
+    materialise_budget_tests::BEFORE_MATERIALISE.with(|hook| hook.take().map(|f| f()));
 
     // SELECT * exposes only real variables, never synthetic blank-node variables.
     let out_vars: Vec<Variable> = bindings
@@ -728,6 +730,28 @@ mod materialise_budget_tests {
     use crate::QueryBudget;
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
+
+    thread_local! {
+        /// Runs once in `eval_select`, after its pre-materialisation budget check.
+        pub(super) static BEFORE_MATERIALISE: std::cell::Cell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::Cell::new(None) };
+    }
+
+    /// A query cancelled after evaluation but while its terms are materialised returns the
+    /// budget error, not a complete or shortened result.
+    #[test]
+    fn a_select_cancelled_while_materialising_returns_the_budget_error() {
+        let nt: String = (0..3000).map(|i| format!("<http://ex/s{i}> <http://ex/p> \"v{i}\" .\n")).collect();
+        let graph = Graph::load_str(&nt, "ntriples").unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        let budget = QueryBudget::cancelled_by(Arc::clone(&flag));
+        let q = "SELECT ?s ?v WHERE { ?s <http://ex/p> ?v }";
+        assert_eq!(crate::query_with_budget(&graph, q, &budget).unwrap().rows.len(), 3000);
+        let set = Arc::clone(&flag);
+        BEFORE_MATERIALISE.with(|hook| hook.set(Some(Box::new(move || set.store(true, std::sync::atomic::Ordering::Relaxed)))));
+        let err = crate::query_with_budget(&graph, q, &budget).unwrap_err();
+        assert!(err.contains("budget exceeded"), "{err}");
+    }
 
     /// A budget that falls due while rows are materialised stops the loop early, and the gate
     /// after it reports the budget error rather than the shortened result; an untripped budget
