@@ -1122,15 +1122,29 @@ impl<R: std::io::BufRead> SrxEvents for (quick_xml::Reader<R>, Vec<u8>) {
 #[cfg(feature = "service")]
 const SRX_NS: &[u8] = b"http://www.w3.org/2005/sparql-results#";
 
-/// The namespace declarations in scope while reading results XML, reduced to whether
-/// each one binds the results namespace. Declarations are taken from the one pass the
-/// reader makes over each tag's attributes; a full namespace-resolving reader costs more
-/// on this hot path.
+/// The W3C Internationalization Tag Set namespace, which SPARQL 1.2's `its:dir` is in.
+#[cfg(feature = "service")]
+const ITS_NS: &[u8] = b"http://www.w3.org/2005/11/its";
+
+/// A declared namespace, as far as results XML cares.
+#[cfg(feature = "service")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SrxNs {
+    Results,
+    Its,
+    /// `xmlns=""`: unprefixed elements are back in no namespace.
+    Unbound,
+    Other,
+}
+
+/// The namespace declarations in scope while reading results XML. Declarations are taken
+/// from the one pass the reader makes over each tag's attributes; a full
+/// namespace-resolving reader costs more on this hot path.
 #[cfg(feature = "service")]
 struct SrxScopes {
     depth: usize,
-    /// `(depth of the declaring element, prefix (empty for the default), binds SRX_NS)`.
-    bindings: Vec<(usize, Vec<u8>, bool)>,
+    /// `(depth of the declaring element, prefix (empty for the default), namespace)`.
+    bindings: Vec<(usize, Vec<u8>, SrxNs)>,
     /// Whether an unprefixed element is a results element, kept current as `bindings`
     /// changes, so the common unprefixed element needs no lookup.
     unprefixed_ours: bool,
@@ -1151,13 +1165,17 @@ impl SrxScopes {
     }
 
     /// Takes in the entered element's `xmlns` (empty `prefix`) or `xmlns:prefix`
-    /// declaration of `ns`.
+    /// declaration of `ns`, its attribute value with references already replaced.
     fn declare(&mut self, prefix: &[u8], ns: &[u8]) {
-        // `xmlns=""` puts unprefixed elements back in no namespace, which is read.
-        let ours = ns == SRX_NS || (prefix.is_empty() && ns.is_empty());
-        self.bindings.push((self.depth, prefix.to_vec(), ours));
+        let ns = match ns {
+            SRX_NS => SrxNs::Results,
+            ITS_NS => SrxNs::Its,
+            b"" if prefix.is_empty() => SrxNs::Unbound,
+            _ => SrxNs::Other,
+        };
+        self.bindings.push((self.depth, prefix.to_vec(), ns));
         if prefix.is_empty() {
-            self.unprefixed_ours = ours;
+            self.unprefixed_ours = matches!(ns, SrxNs::Results | SrxNs::Unbound);
         }
     }
 
@@ -1168,13 +1186,13 @@ impl SrxScopes {
         // Element names are short: a plain scan beats `QName::prefix`'s vectorised search.
         let name = name.into_inner();
         match name.iter().position(|&c| c == b':') {
-            Some(colon) => self.lookup(&name[..colon]).unwrap_or(false),
+            Some(colon) => self.lookup(&name[..colon]) == Some(SrxNs::Results),
             None => self.unprefixed_ours,
         }
     }
 
-    /// Whether the innermost declaration of `prefix` binds the results namespace.
-    fn lookup(&self, prefix: &[u8]) -> Option<bool> {
+    /// The namespace the innermost declaration of `prefix` binds.
+    fn lookup(&self, prefix: &[u8]) -> Option<SrxNs> {
         self.bindings.iter().rev().find(|(_, p, _)| p == prefix).map(|b| b.2)
     }
 
@@ -1184,7 +1202,8 @@ impl SrxScopes {
             while self.bindings.last().is_some_and(|b| b.0 == self.depth) {
                 self.bindings.pop();
             }
-            self.unprefixed_ours = self.lookup(&[]).unwrap_or(true);
+            self.unprefixed_ours =
+                matches!(self.lookup(&[]), None | Some(SrxNs::Results | SrxNs::Unbound));
         }
         self.depth = self.depth.saturating_sub(1);
     }
@@ -1252,41 +1271,57 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                     _ => unreachable!(),
                 };
                 // One pass over the attributes: namespace declarations, and the first
-                // well-formed value of each attribute the results format reads, by bare
-                // or any namespaced `*:key` name (e.g. `xml:lang`).
+                // well-formed value of each attribute the results format reads. `name`
+                // and `datatype` are unprefixed (a default namespace never applies to an
+                // attribute), `lang` is `xml:lang`, and `dir` is in the ITS namespace,
+                // resolved once the tag's own declarations are in.
                 scopes.enter();
-                let [mut name_attr, mut lang, mut dir, mut datatype] = [None, None, None, None];
+                let [mut name_attr, mut lang, mut datatype] = [None, None, None];
+                let mut dirs = Vec::new();
+                let text = |a: &quick_xml::events::attributes::Attribute<'_>| {
+                    std::str::from_utf8(&a.value)
+                        .ok()
+                        .and_then(|v| quick_xml::escape::unescape(v).ok())
+                        .map(std::borrow::Cow::into_owned)
+                };
                 for a in e.attributes().filter_map(|a| a.ok()) {
-                    let key = a.key.as_ref();
-                    match key.strip_prefix(b"xmlns") {
-                        Some([]) => {
-                            scopes.declare(&[], &a.value);
-                            continue;
-                        }
-                        Some([b':', prefix @ ..]) => {
-                            scopes.declare(prefix, &a.value);
-                            continue;
-                        }
-                        _ => {}
-                    }
-                    let local = match key.iter().rposition(|&c| c == b':') {
-                        Some(colon) => &key[colon + 1..],
-                        None => key,
+                    let key = a.key.into_inner();
+                    let prefix = match key.strip_prefix(b"xmlns") {
+                        Some([]) => Some(&[][..]),
+                        Some([b':', prefix @ ..]) => Some(prefix),
+                        _ => None,
                     };
-                    let slot = match local {
+                    if let Some(prefix) = prefix {
+                        let ns = text(&a).ok_or_else(|| {
+                            "SERVICE: invalid results XML: bad namespace declaration".to_string()
+                        })?;
+                        scopes.declare(prefix, ns.as_bytes());
+                        continue;
+                    }
+                    let slot = match key {
                         b"name" => &mut name_attr,
-                        b"lang" => &mut lang,
-                        b"dir" => &mut dir,
+                        b"xml:lang" => &mut lang,
                         b"datatype" => &mut datatype,
-                        _ => continue,
+                        _ => {
+                            if let Some(prefix) = key.strip_suffix(b":dir") {
+                                dirs.push((prefix, a));
+                            }
+                            continue;
+                        }
                     };
                     if slot.is_none() {
-                        *slot = std::str::from_utf8(&a.value)
-                            .ok()
-                            .and_then(|v| quick_xml::escape::unescape(v).ok())
-                            .map(std::borrow::Cow::into_owned);
+                        *slot = text(&a);
                     }
                 }
+                // An `its` prefix that is never declared is still read as ITS, as
+                // endpoints that omit the declaration are common.
+                let dir = dirs.iter().find_map(|(prefix, a)| {
+                    let its = match scopes.lookup(prefix) {
+                        Some(ns) => ns == SrxNs::Its,
+                        None => *prefix == b"its",
+                    };
+                    its.then(|| text(a)).flatten()
+                });
                 let ours = scopes.ours(e.name());
                 let value = |kind| SrxValue {
                     kind,
@@ -2475,6 +2510,9 @@ mod tests {
               <results>
                 <ext xmlns="http://ex/other#"><result/><boolean>true</boolean></ext>
                 <ext xmlns="http://ex/other#"/>
+                <its xmlns="http://www.w3.org/2005/11/its"><result>
+                  <binding name="a"><uri>http://ex/its</uri></binding>
+                </result></its>
                 <result>
                   <binding name="a"><literal>ke<x:literal/>pt</literal></binding>
                   <binding name="b"><x:uri>http://ex/foreign</x:uri></binding>
@@ -2503,8 +2541,22 @@ mod tests {
         check(&vars, &rows);
     }
 
+    /// Parses `body` with both the in-memory and the streaming reader, checking they agree.
+    fn parse_srx_both(body: &str) -> ServiceRelation {
+        let rel = parse_srx(body).unwrap();
+        let mut rows = Vec::new();
+        let vars = parse_srx_into_read(std::io::BufReader::new(body.as_bytes()), &mut |r| {
+            rows.push(r);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!((&vars, &rows), (&rel.vars, &rel.rows));
+        rel
+    }
+
     /// The results namespace may be bound to a prefix, or left out altogether, also by
-    /// undeclaring the default namespace with `xmlns=""`.
+    /// undeclaring the default namespace with `xmlns=""`; a declaration is compared once
+    /// its character references are replaced.
     #[test]
     fn srx_reads_a_prefixed_or_absent_results_namespace() {
         let prefixed = format!(
@@ -2522,13 +2574,55 @@ mod tests {
               <result xmlns=""><binding name="a"><uri>http://ex/a</uri></binding></result>
             </results></sparql>"#
         );
-        for body in [prefixed.as_str(), bare, undeclared.as_str()] {
-            let rel = parse_srx(body).unwrap();
+        let escaped = SRX_NS.replace('#', "&#35;");
+        let referenced = [
+            format!(
+                r#"<sparql xmlns="{escaped}"><head><variable name="a"/></head><results>
+                  <result><binding name="a"><uri>http://ex/a</uri></binding></result>
+                </results></sparql>"#
+            ),
+            prefixed.replace(&format!(r#"xmlns:s="{SRX_NS}""#), &format!(r#"xmlns:s="{escaped}""#)),
+        ];
+        assert!(referenced.iter().all(|body| body.contains("&#35;")));
+        for body in [prefixed.as_str(), bare, undeclared.as_str()]
+            .into_iter()
+            .chain(referenced.iter().map(String::as_str))
+        {
+            let rel = parse_srx_both(body);
             assert_eq!(
                 rel.rows,
                 [[Some(Term::NamedNode(NamedNode::new("http://ex/a").unwrap()))]]
             );
         }
+    }
+
+    /// Attributes are matched by namespace too: `name` and `datatype` only unprefixed,
+    /// `lang` only as `xml:lang`, and `dir` only in the ITS namespace (or an undeclared
+    /// `its` prefix). A foreign attribute with one of those local names changes nothing.
+    #[test]
+    fn srx_ignores_attributes_in_other_namespaces() {
+        let body = format!(
+            r#"<sparql xmlns="{SRX_NS}" xmlns:x="http://ex/other#"
+                xmlns:i="http://www.w3.org/2005/11/its">
+              <head><variable name="a"/><variable name="b"/><variable x:name="c"/></head>
+              <results><result>
+                <binding x:name="b" name="a"><literal
+                  x:lang="fr" xml:lang="en" x:dir="ltr" i:dir="rtl">t</literal></binding>
+                <binding name="b"><literal x:datatype="http://ex/dt" lang="fr">u</literal></binding>
+              </result></results>
+            </sparql>"#
+        );
+        let rel = parse_srx_both(&body);
+        let names: Vec<&str> = rel.vars.iter().map(Variable::as_str).collect();
+        assert_eq!(names, ["a", "b"]);
+        let a = Literal::new_directional_language_tagged_literal(
+            "t",
+            "en",
+            oxrdf::BaseDirection::Rtl,
+        )
+        .unwrap();
+        let b = Literal::new_simple_literal("u");
+        assert_eq!(rel.rows, [[Some(Term::Literal(a)), Some(Term::Literal(b))]]);
     }
 
     /// The core bead requirement: an endpoint that ignores `Accept` and returns XML must
