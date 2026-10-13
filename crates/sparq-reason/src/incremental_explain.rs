@@ -1136,9 +1136,9 @@ impl MaterializedN3Graph {
     /// node, if any, is shown in the graph's internal caller namespace.
     ///
     /// Like [`why_with`](Self::why_with), this explains the GRAPH's closure, evaluated as
-    /// the graph evaluates it (with its caller namespace, so a document parsed at run time
-    /// cannot name a caller's blank node): only the labels differ. For a standalone
-    /// document (no graph, no caller) use [`why_n3_document`].
+    /// the graph evaluates it (with its lifetime runtime-document table, so a document
+    /// parsed at run time names the same nodes as in the graph): only the labels differ.
+    /// For a standalone document (no graph, no caller) use [`why_n3_document`].
     pub fn why_document_with(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
         self.why_shown(fact, opts, &|f| f.clone())
     }
@@ -1156,9 +1156,9 @@ impl MaterializedN3Graph {
         show: &dyn Fn(&[N3Term; 3]) -> [N3Term; 3],
     ) -> Option<ProofTree> {
         // A graph explanation is of the graph's closure, evaluated as the graph evaluates
-        // (with its caller namespace). The graph's construction already rejected an
-        // evaluation that fails, so a fact in its closure that is asserted is explained as
-        // asserted without re-running it.
+        // (with its lifetime runtime-document table). The graph's construction already
+        // rejected an evaluation that fails, so a fact in its closure that is asserted is
+        // explained as asserted without re-running it.
         if !self.holds(fact) {
             return None;
         }
@@ -1169,7 +1169,7 @@ impl MaterializedN3Graph {
             opts,
             show,
             &self.cuts,
-            Some(&self.base_ns),
+            Some(&self.runtime_docs),
             true,
         )
     }
@@ -1198,8 +1198,9 @@ pub fn why_n3_document(
 
 /// The proof of `fact` (in the evaluation's own labels) under the rules `rules_src` over
 /// the asserted `base`, each fact shown through `show`. The base is re-derived as a batch
-/// run recording into `cuts`, with the caller namespace `caller_ns` if a graph's run is
-/// being explained, and `None` if that run fails or does not hold `fact`. A fact in
+/// run recording into `cuts`, drawing on the graph's lifetime runtime-document table
+/// `runtime` if a graph's run is being explained (a table of its own otherwise, as
+/// `reason_n3` has), and `None` if that run fails or does not hold `fact`. A fact in
 /// `base` is asserted; with `validated` (the caller has checked `fact` against a closure
 /// whose evaluation succeeded) it is answered without the run.
 #[allow(clippy::too_many_arguments)]
@@ -1210,7 +1211,7 @@ fn prove_n3(
     opts: ExplainOpts,
     show: &dyn Fn(&[N3Term; 3]) -> [N3Term; 3],
     cuts: &crate::n3::bounded::Truncation,
-    caller_ns: Option<&str>,
+    runtime: Option<&crate::n3::RuntimeDocs>,
     validated: bool,
 ) -> Option<ProofTree> {
     let mut b = ProofBuilder::new(opts);
@@ -1234,7 +1235,7 @@ fn prove_n3(
         rules_src,
         keyed.into_iter().map(|(_, f)| f.clone()),
         cuts,
-        caller_ns,
+        runtime,
     )
     .ok()?;
     if !facts.contains(fact) {

@@ -241,7 +241,7 @@ Risky foundations first; nothing default-facing until proven.
 | 2 | sq-tonhr.7 — Extended SHACL-CS spec (house UPD + recon; upstream when destinations exist) | site/specs, research/specs | fable | .4 .6 |
 | 3a | sq-tonhr.8 — NT/NQ grammars → generated parsers behind `shuttle-parsers` (differential + bench vs nt.rs/oxttl) | sparq-core opt-in | fable | .1 .2 |
 | 3b | sq-tonhr.9 — Turtle 1.2 + TriG generated parsers (set-identity vs oxttl 313-suite + trig; bench vs oxttl/native-ttl/serd row) | sparq-core opt-in | fable | .2 .8 |
-| 3c | sq-tonhr.10 — N3 grammar (LL(2) open question; counterexample = valid outcome) + parser vs sparq-reason incumbent (1464+4div floor) | sparq-reason opt-in | fable | .9 |
+| 3c | sq-tonhr.10 — N3 grammar (LL(2) open question; counterexample = valid outcome) + parser vs sparq-reason incumbent (1463+5div floor) | sparq-reason opt-in | fable | .9 |
 | 3d | sq-tonhr.11 — **per-syntax default-flip verdicts** (flip only on ≥ both axes; fallback feature; steering issue; adjudicate three-Turtle-impl question) | defaults + research/ | opus | .8 .9 |
 | 4 | sq-tonhr.12 — generate-mode harvest: measure the improvement thesis (divergence count or honest null) | upstream + fuzz lanes | fable | .1 .2 |
 

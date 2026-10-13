@@ -195,7 +195,376 @@ pub type Resolver = dyn Fn(&str) -> Option<String>;
 /// Keying on formula CONTENT (not the document IRI) means the guard needs no extra plumbing
 /// through the lazy `log:semantics` → `log:supports` evaluation hand-off, and is exact for
 /// the recursion that actually loops (a formula closing itself, transitively).
-type VisitedDocs = std::rc::Rc<std::cell::RefCell<FxHashSet<u64>>>;
+///
+/// The same shared state carries the runtime-document table, so every nested closure
+/// draws runtime-parse blank labels from ONE table ([`run_shared::RuntimeDocs`]).
+type VisitedDocs = std::rc::Rc<std::cell::RefCell<run_shared::RunShared>>;
+
+pub(crate) use run_shared::RuntimeDocs;
+
+
+/// The state one top-level run shares with all of its nested closures, and the table of
+/// documents parsed at run time, which can outlive a run (a `MaterializedN3Graph` keeps
+/// one for its whole life). Private fields and one constructor each: a run cannot hold a
+/// table that was not made fresh against its sources.
+mod run_shared {
+    use super::{
+        bounded, document_blank_labels, formula_bytes, fresh_blank_prefix, parser, Term,
+        VisitedDocs,
+    };
+    use rustc_hash::{FxHashMap, FxHashSet};
+
+    pub(super) struct RunShared {
+        /// Content keys of the formulas whose closure is in progress (the import-cycle
+        /// guard, [`VisitedDocs`]).
+        pub(super) docs: FxHashSet<u64>,
+        /// Blank labels for documents parsed at run time.
+        runtime: RuntimeDocs,
+    }
+
+    /// The table of documents parsed at run time (`log:parsedAsN3`, `log:semantics`) and
+    /// the ONE allocator of their blank labels. Such a document's blanks are its own: they
+    /// are standardized apart into `{prefix}{key}_{label}`, `key` the document's
+    /// scope key ([`runtime_doc_digest`], a specified hash of its text and base). So a label
+    /// depends on the document alone, never on the order a run meets documents in, nor
+    /// on the build: the same text under the same base always parses to the same formula
+    /// (a materialization and a proof re-derivation agree, and exported proof keys are
+    /// stable). Two documents never share a blank: a second document whose key is
+    /// already taken is refused, failing the run. No runtime text can spell a label of
+    /// the sources the table was made for: `prefix` is the smallest `__rp{k}_` no blank of
+    /// any of them starts with, except a source blank spelled exactly as a runtime blank
+    /// (`__rp{k}_{key}_<label>`), which names that runtime document's blank whether an
+    /// exported closure or a person wrote it; so re-reasoning exported output keeps `k`.
+    /// Per document the table keeps a constant-size entry (the full SHA-256 digest, for
+    /// the collision refusal, and the label prefix), never the text or base, and it takes
+    /// at most [`bounded::runtime_docs`] documents: one more fails the run with a cut. It
+    /// finds a known document again by that digest (one SHA-256 per runtime parse).
+    /// Cloning shares the table.
+    #[derive(Clone)]
+    pub(crate) struct RuntimeDocs(std::rc::Rc<std::cell::RefCell<DocTable>>);
+
+    struct DocTable {
+        prefix: String,
+        /// Each known document's entry, by its full SHA-256 digest.
+        by_doc: FxHashMap<[u8; 32], u32>,
+        /// Each entry by its 8-byte scope key, for the collision refusal.
+        by_key: FxHashMap<u64, u32>,
+        /// One constant-size entry per document: its SHA-256 digest and label prefix.
+        entries: Vec<DocEntry>,
+        /// Documents this table may hold ([`bounded::runtime_docs`]).
+        room: usize,
+    }
+
+    /// What the table keeps of one document: its full SHA-256 digest (to tell two
+    /// documents sharing an 8-byte scope key apart) and its label prefix
+    /// `{prefix}{key}_`, whose length is the same for every entry of a table.
+    struct DocEntry {
+        digest: [u8; 32],
+        prefix: String,
+    }
+
+    /// Why the table refused a document.
+    pub(super) enum Refusal {
+        /// Another document has its scope key.
+        Collision,
+        /// The table is full ([`bounded::runtime_docs`]).
+        Full,
+    }
+
+    impl RuntimeDocs {
+        /// A table for runs over `sources` (every document whose blanks the runs hold: a
+        /// query passes its data and its query document, a `MaterializedN3Graph` its
+        /// rules document).
+        pub(crate) fn for_sources(sources: &[&parser::Parsed]) -> RuntimeDocs {
+            let mut labels = FxHashSet::default();
+            for p in sources {
+                labels.extend(document_blank_labels(p));
+            }
+            RuntimeDocs::for_labels(&labels)
+        }
+
+        /// [`for_sources`](Self::for_sources) given the sources' blank labels
+        /// ([`document_blank_labels`]), for a run that has already collected them.
+        pub(super) fn for_labels(labels: &FxHashSet<&str>) -> RuntimeDocs {
+            // A source label spelled exactly as a runtime blank (`__rp{k}_{key}_<label>`)
+            // is one: it was exported from an earlier run (`reason_n3_pass_all` output,
+            // a serialized closure) and names that runtime document's blank. It does not
+            // push `k` up, so re-reasoning an exported closure keeps the same `k` and the
+            // reparsed document's blanks are the exported nodes (a fixed point).
+            let other: FxHashSet<&str> =
+                labels.iter().copied().filter(|l| !is_runtime_label(l)).collect();
+            let prefix = fresh_blank_prefix(&other, "__rp");
+            RuntimeDocs::with_room(prefix, bounded::runtime_docs())
+        }
+
+        fn with_room(prefix: String, room: usize) -> RuntimeDocs {
+            let table = DocTable {
+                prefix,
+                by_doc: FxHashMap::default(),
+                by_key: FxHashMap::default(),
+                entries: Vec::new(),
+                room,
+            };
+            RuntimeDocs(std::rc::Rc::new(std::cell::RefCell::new(table)))
+        }
+
+        /// The statements of the document parsed from `text` under `base` (by `parse`),
+        /// with its blanks standardized apart; `Ok(None)` when `parse` fails or `admit`
+        /// refuses the standardized formula's size, `Err` when the table refuses the
+        /// document. `admit` gets that size ([`formula_bytes`] of the statements once
+        /// every blank label carries its prefix) computed from the parsed statements,
+        /// before any label is rewritten and before the table takes the document.
+        fn formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
+            let Some(mut ts) = parse() else { return Ok(None) };
+            // Each blank label grows by the label prefix, the same length for every
+            // document of the table.
+            let blanks = ts.iter().map(blank_occurrences).fold(0, usize::saturating_add);
+            let grown = blanks.saturating_mul(self.0.borrow().label_prefix_len());
+            let bytes = formula_bytes(ts.iter()).saturating_add(grown);
+            if !admit(bytes) {
+                return Ok(None);
+            }
+            // A document with no blank has nothing to standardize apart (and needs no key).
+            if blanks == 0 {
+                return Ok(Some(ts));
+            }
+            let mut t = self.0.borrow_mut();
+            let prefix = t.prefix_for(text, base)?;
+            // In place: only the blank labels are rewritten, nothing else is copied.
+            fn go(t: &mut Term, p: &str) {
+                match t {
+                    Term::Blank(l) => l.insert_str(0, p),
+                    Term::List(ms) => ms.iter_mut().for_each(|m| go(m, p)),
+                    Term::Formula(rs) => rs.iter_mut().flatten().for_each(|m| go(m, p)),
+                    Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, p)),
+                    _ => {}
+                }
+            }
+            ts.iter_mut().flatten().for_each(|t| go(t, prefix));
+            debug_assert_eq!(formula_bytes(ts.iter()), bytes, "the admitted size is the size");
+            Ok(Some(ts))
+        }
+    }
+
+    /// The blank-label occurrences in `t`, through nested lists, formulas and quoted
+    /// triples (walked with an explicit stack, as [`bounded::term_bytes`] walks).
+    fn blank_occurrences(t: &[Term; 3]) -> usize {
+        let mut n = 0usize;
+        let mut stack: Vec<&Term> = t.iter().collect();
+        while let Some(t) = stack.pop() {
+            match t {
+                Term::Blank(_) => n += 1,
+                Term::List(ms) => stack.extend(ms),
+                Term::Formula(rs) => stack.extend(rs.iter().flatten()),
+                Term::Triple(tr) => stack.extend(tr.iter()),
+                _ => {}
+            }
+        }
+        n
+    }
+
+    /// The hex digits of a scope key in a label prefix.
+    const KEY_HEX: usize = 16;
+
+    impl DocTable {
+        /// The length of every label prefix `{prefix}{key}_` of this table.
+        fn label_prefix_len(&self) -> usize {
+            self.prefix.len() + KEY_HEX + 1
+        }
+
+        /// The label prefix for the blanks of the document parsed from `text` under
+        /// `base`; `Err` when another document has its key or the table is full (the
+        /// table is then unchanged).
+        fn prefix_for(&mut self, text: &str, base: &str) -> Result<&str, Refusal> {
+            let digest = runtime_doc_digest(text, base);
+            if let Some(&at) = self.by_doc.get(&digest) {
+                return Ok(&self.entries[at as usize].prefix);
+            }
+            let key = scope_key(&digest);
+            let at = match self.by_key.get(&key) {
+                Some(&at) if self.entries[at as usize].digest == digest => at,
+                Some(_) => return Err(Refusal::Collision),
+                None => {
+                    if self.entries.len() >= self.room {
+                        return Err(Refusal::Full);
+                    }
+                    let mut prefix = String::with_capacity(self.label_prefix_len());
+                    prefix.push_str(&self.prefix);
+                    sparq_core::hex::encode_into(&digest[..8], false, &mut prefix);
+                    prefix.push('_');
+                    debug_assert_eq!(prefix.len(), self.label_prefix_len());
+                    // An index; `room` keeps the table far below u32::MAX entries.
+                    let at = u32::try_from(self.entries.len()).map_err(|_| Refusal::Full)?;
+                    self.entries.push(DocEntry { digest, prefix });
+                    self.by_key.insert(key, at);
+                    at
+                }
+            };
+            self.by_doc.insert(digest, at);
+            Ok(&self.entries[at as usize].prefix)
+        }
+
+        /// The bytes the table keeps per document: the same for every document,
+        /// whatever its text and base.
+        #[cfg(test)]
+        fn bytes_per_entry(&self) -> Vec<usize> {
+            let slot = std::mem::size_of::<([u8; 32], u32)>() + std::mem::size_of::<(u64, u32)>();
+            let entry = std::mem::size_of::<DocEntry>() + slot;
+            self.entries.iter().map(|e| entry + e.prefix.capacity()).collect()
+        }
+    }
+
+    /// Whether `label` has the exact shape of a standardized runtime blank:
+    /// `__rp{k}_{key}_<label>` with `k` decimal digits and `key` 16 lowercase hex digits
+    /// ([`runtime_doc_digest`]).
+    pub(super) fn is_runtime_label(label: &str) -> bool {
+        let Some(rest) = label.strip_prefix("__rp") else { return false };
+        let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+        let Some(rest) = rest[digits..].strip_prefix('_') else { return false };
+        let key = rest.as_bytes().get(..16);
+        digits > 0
+            && key.is_some_and(|k| k.iter().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+            && rest.as_bytes().get(16) == Some(&b'_')
+    }
+
+    /// The 8-byte scope key of a document: the first 8 bytes of its digest.
+    fn scope_key(digest: &[u8; 32]) -> u64 {
+        #[cfg(test)]
+        if table_tests::SAME_KEY.with(std::cell::Cell::get) {
+            return 0;
+        }
+        u64::from_be_bytes(digest[..8].try_into().expect("8 bytes"))
+    }
+
+    /// The SHA-256 digest of a document parsed at run time: SHA-256 over
+    /// `"sparq-n3-runtime-doc\0"`, then the UTF-8 `text` and the UTF-8 `base`, each
+    /// preceded by its byte length as a big-endian `u64`. Its first 8 bytes, as 16
+    /// lowercase hex digits, are the document's scope key in its blank labels. Specified
+    /// (not a std hasher), so the key is the same on every build: it reaches exported
+    /// labels, proof keys and provenance IRIs.
+    fn runtime_doc_digest(text: &str, base: &str) -> [u8; 32] {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"sparq-n3-runtime-doc\0");
+        for part in [text, base] {
+            h.update((part.len() as u64).to_be_bytes());
+            h.update(part.as_bytes());
+        }
+        h.finalize().into()
+    }
+
+    /// The scope key of a document parsed at run time ([`runtime_doc_digest`]).
+    #[cfg(test)]
+    pub(crate) fn runtime_doc_key(text: &str, base: &str) -> String {
+        sparq_core::hex::encode(&runtime_doc_digest(text, base)[..8])
+    }
+
+    impl RunShared {
+        /// The shared state of one top-level run drawing on `runtime`.
+        pub(super) fn new(runtime: RuntimeDocs) -> VisitedDocs {
+            let shared = RunShared { docs: FxHashSet::default(), runtime };
+            std::rc::Rc::new(std::cell::RefCell::new(shared))
+        }
+
+        /// The shared state of a top-level run over `sources`, with a table of its own.
+        pub(super) fn for_sources(sources: &[&parser::Parsed]) -> VisitedDocs {
+            RunShared::new(RuntimeDocs::for_sources(sources))
+        }
+
+        /// [`RuntimeDocs::formula`] on the run's table.
+        pub(super) fn parsed_formula(
+            &self,
+            text: &str,
+            base: &str,
+            parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
+        ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
+            self.runtime.formula(text, base, parse, admit)
+        }
+    }
+
+    #[cfg(test)]
+    mod table_tests {
+        use super::{Refusal, RuntimeDocs, Term};
+
+        std::thread_local! {
+            /// Gives every document the same scope key, forcing a key collision.
+            pub(super) static SAME_KEY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+
+        /// Two different documents sharing a scope key are told apart by their full
+        /// digest: the second is refused, while the first, met again, keeps its prefix.
+        #[test]
+        fn a_scope_key_collision_is_refused_and_a_known_document_is_kept() {
+            SAME_KEY.with(|c| c.set(true));
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let a = t.formula("a", "", doc, |_| true);
+            let b = t.formula("b", "", doc, |_| true);
+            let again = t.formula("a", "", doc, |_| true);
+            SAME_KEY.with(|c| c.set(false));
+            assert!(matches!(b, Err(Refusal::Collision)));
+            assert_eq!(a.ok().flatten(), again.ok().flatten());
+            assert_eq!(t.0.borrow().entries.len(), 1);
+        }
+
+
+        /// A document of `text` whose one blank is `_:x`.
+        fn doc() -> Option<Vec<[Term; 3]>> {
+            let iri = |s: &str| Term::Iri(s.to_string());
+            Some(vec![[Term::Blank("x".into()), iri("http://ex/p"), iri("http://ex/o")]])
+        }
+
+        /// When full the table refuses a new document without taking it, and still
+        /// serves the documents it holds.
+        #[test]
+        fn a_full_table_refuses_without_inserting() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 2);
+            let a = t.formula("a", "", doc, |_| true).ok().flatten().expect("a");
+            assert!(t.formula("b", "", doc, |_| true).is_ok());
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
+            assert_eq!(t.0.borrow().entries.len(), 2);
+            assert_eq!(t.formula("a", "", doc, |_| true).ok().flatten(), Some(a));
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
+        }
+
+        /// `admit` gets the size the formula has once standardized apart, and a refusal
+        /// leaves the table without the document (nothing was prefixed).
+        #[test]
+        fn admit_sees_the_standardized_size_before_the_table_takes_the_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let mut seen = 0;
+            let refused = t.formula("a", "", doc, |n| {
+                seen = n;
+                false
+            });
+            assert!(matches!(refused, Ok(None)));
+            assert!(t.0.borrow().entries.is_empty());
+            let kept = t.formula("a", "", doc, |_| true).ok().flatten().expect("kept");
+            assert_eq!(super::formula_bytes(kept.iter()), seen);
+            assert_eq!(t.0.borrow().entries.len(), 1);
+        }
+
+        /// The table keeps the same number of bytes for a one-byte text as for a
+        /// megabyte one (and for a long base).
+        #[test]
+        fn an_entry_does_not_grow_with_its_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let big = "y".repeat(1 << 20);
+            for (text, base) in [("a", ""), (big.as_str(), ""), ("a", big.as_str())] {
+                assert!(t.formula(text, base, doc, |_| true).is_ok());
+            }
+            let sizes = t.0.borrow().bytes_per_entry();
+            assert_eq!(sizes.len(), 3);
+            assert!(sizes.iter().all(|&n| n == sizes[0]), "{sizes:?}");
+        }
+    }
+}
 
 /// A stable structural key for a quoted formula, used by the import-cycle guard
 /// ([`VisitedDocs`]) to recognise a closure that is already in progress up the stack.
@@ -224,12 +593,36 @@ struct BwCtx<'a> {
     /// Why a search of this run (or of a nested closure it reached) was cut short, if one
     /// was ([`Truncation`]).
     truncated: Truncation,
-    /// The caller blank namespace of the `MaterializedN3Graph` the run serves, if any
-    /// ([`run_closure`]'s `caller_ns`).
-    caller_ns: Option<String>,
 }
 
 impl BwCtx<'_> {
+    /// The statements `parse` makes of the document parsed at run time from `text` (under
+    /// `base`), with its blanks standardized apart through the run's table
+    /// ([`run_shared::RunShared::parsed_formula`]). `None` when the text does not parse,
+    /// when `admit` refuses the size the standardized formula will have (checked before
+    /// any label is rewritten), or when the table refuses the document (the refusal
+    /// fails the run).
+    fn runtime_formula(
+        &self,
+        text: &str,
+        base: &str,
+        parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+        admit: impl FnOnce(usize) -> bool,
+        pending: &bounded::Pending,
+    ) -> Option<Vec<[Term; 3]>> {
+        let visited = self.visited.clone();
+        let made = visited.borrow().parsed_formula(text, base, parse, admit);
+        let e = match made {
+            Ok(ts) => return ts,
+            Err(run_shared::Refusal::Collision) => "n3: two documents parsed at run time share a \
+                 blank-node scope key; refused rather than let their blank nodes alias"
+                .to_string(),
+            Err(run_shared::Refusal::Full) => bounded::runtime_docs_exceeded(pending),
+        };
+        self.nested_error.borrow_mut().get_or_insert(e);
+        None
+    }
+
     /// Use a budgeted or fallible step's result, recording a cut on the run
     /// ([`bounded::settle`]).
     fn settle<T>(&self, b: Bounded<T>) -> T {
@@ -264,17 +657,17 @@ fn negation_gate(bw: &BwCtx) -> bool {
 }
 
 impl<'a> BwCtx<'a> {
-    fn new(rules: &'a [Rule], truncated: Truncation) -> BwCtx<'a> {
+    /// A context sharing `visited` with the run it belongs to.
+    fn new(rules: &'a [Rule], truncated: Truncation, visited: VisitedDocs) -> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
             base: String::new(),
             resolver: None,
-            visited: VisitedDocs::default(),
+            visited,
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
             truncated,
-            caller_ns: None,
         }
     }
 }
@@ -568,17 +961,20 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
     // One run: the data closure and the query premises share one cut record.
     let truncated = cuts;
+    // ... and one runtime-parse allocator, fresh against both documents: a text the query
+    // parses never spells a blank of the data closure.
+    let shared = run_shared::RunShared::for_sources(&[&data_parsed, &query_parsed]);
     let facts = run_closure(
         data_parsed,
         None,
-        Some(VisitedDocs::default()),
+        Some(shared.clone()),
         &truncated,
         StepMode::None,
         NegationCycles::Reject,
         None,
     )?
     .read_further(&truncated);
-    let mut bw = BwCtx::new(&backward, truncated);
+    let mut bw = BwCtx::new(&backward, truncated, shared);
     bw.base = base;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
@@ -781,10 +1177,13 @@ fn stratified_in(
         parsed.facts.append(&mut carried);
         // An incomplete closure (rules FailClosed skipped) taints the whole rest of the
         // pipeline: every later document's negation gate reads `truncated`.
+        // Each stratum's runtime parses are standardized apart against its own source,
+        // which holds the earlier strata's carried (renamed) closure.
+        let shared = run_shared::RunShared::for_sources(&[&parsed]);
         let closure = run_closure(
             parsed,
             None,
-            Some(VisitedDocs::default()),
+            Some(shared),
             &truncated,
             StepMode::None,
             cycles,
@@ -820,50 +1219,9 @@ fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
 /// blank labels (GH #6775): the smallest `__bs{k}_` prefix no blank label of the rules
 /// document starts with. The parser's own labels (`_b<n>` for `[]`, `_:x` as written,
 /// `__path<n>`, `__ex_<local>`) are all in `parsed`, so none starts with it, and the
-/// `__sk…`/`__st…` labels the engine mints are other families. A document parsed at run
-/// time cannot spell it either ([`runtime_document`]).
+/// `__sk…`/`__st…`/`__rp…` labels the engine mints are other families.
 pub(crate) fn fresh_base_blank_prefix(parsed: &parser::Parsed) -> String {
     fresh_blank_prefix(&document_blank_labels(parsed), "__bs")
-}
-
-/// The statements of a document parsed at run time (`log:parsedAsN3`, `log:semantics`),
-/// or `None`, recording a cut on the run, when the run serves a `MaterializedN3Graph`
-/// and one of the document's blank labels starts with that graph's caller namespace
-/// `caller_ns` (its exact `__bs{k}_` prefix): such a text could otherwise name a caller's
-/// blank node, which only the caller introduces. Without a caller namespace (every batch
-/// and query run) nothing is refused. The document's other blanks keep their labels as
-/// written; standardizing runtime documents apart is a separate change.
-fn runtime_document(
-    parsed: parser::Parsed,
-    pending: &bounded::Pending,
-    caller_ns: Option<&str>,
-) -> Option<Vec<[Term; 3]>> {
-    // a walk, not a set of the labels: the parsed document was charged against the run's
-    // term-size limit, and nothing else is allocated before it is sized
-    let spells_caller = caller_ns.is_some_and(|ns| {
-        let rule_terms = parsed
-            .rules
-            .iter()
-            .chain(&parsed.backward_rules)
-            .flat_map(|r| r.premise.iter().chain(&r.conclusion));
-        parsed
-            .facts
-            .iter()
-            .chain(rule_terms)
-            .flatten()
-            .any(|t| any_blank_label(t, &|l| l.starts_with(ns)))
-    });
-    if spells_caller {
-        return settle(
-            pending,
-            Bounded::cut(
-                None,
-                "a document parsed at run time spells a blank label in the caller namespace \
-                 of the MaterializedN3Graph it serves; it was refused",
-            ),
-        );
-    }
-    Some(reencode_statements(parsed))
 }
 
 /// Every blank label reachable in `t`, including nested list members, formula
@@ -879,18 +1237,6 @@ fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
         }
         Term::Triple(tr) => tr.iter().for_each(|m| term_blank_labels(m, out)),
         _ => {}
-    }
-}
-
-/// Does a blank label reachable in `t` (as [`term_blank_labels`] reaches them) satisfy
-/// `hit`?
-fn any_blank_label(t: &Term, hit: &impl Fn(&str) -> bool) -> bool {
-    match t {
-        Term::Blank(l) => hit(l),
-        Term::List(ms) => ms.iter().any(|m| any_blank_label(m, hit)),
-        Term::Formula(ts) => ts.iter().flatten().any(|m| any_blank_label(m, hit)),
-        Term::Triple(tr) => tr.iter().any(|m| any_blank_label(m, hit)),
-        _ => false,
     }
 }
 
@@ -964,7 +1310,7 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
     extra: impl IntoIterator<Item = [Term; 3]>,
     cuts: &Truncation,
-    caller_ns: Option<&str>,
+    runtime: Option<&RuntimeDocs>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
     let (facts, steps, _) = run_closure(
@@ -974,7 +1320,7 @@ pub(crate) fn reason_n3_terms_proof(
         cuts,
         StepMode::Full,
         NegationCycles::Reject,
-        caller_ns,
+        runtime,
     )?
     .top_level();
     Ok((facts.all, steps))
@@ -1105,7 +1451,7 @@ pub(crate) fn reason_n3_terms_with_facts(
     extra: impl IntoIterator<Item = [Term; 3]>,
     cycles: NegationCycles,
     truncated: &Truncation,
-    caller_ns: &str,
+    runtime: &RuntimeDocs,
 ) -> Result<N3Closure, String> {
     let parsed = bounded::parse_n3_with_extra(src, "", extra, truncated)?;
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
@@ -1116,7 +1462,7 @@ pub(crate) fn reason_n3_terms_with_facts(
         truncated,
         StepMode::Conclusions,
         cycles,
-        Some(caller_ns),
+        Some(runtime),
     )?
     .top_level();
     Ok(N3Closure {
@@ -1182,9 +1528,11 @@ impl Closure {
 fn run_closure(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
-    // The import-cycle guard ([`VisitedDocs`]). `None` for a TOP-LEVEL run (a fresh,
-    // empty set); a nested run reached through `formula_closure` passes the PARENT's set so
-    // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
+    // The import-cycle guard and runtime-parse allocator ([`VisitedDocs`]). `None` for a
+    // TOP-LEVEL run (made fresh against `parsed`); a nested run reached through
+    // `formula_closure` passes the PARENT's, so a `log:semantics` / `log:content` document
+    // IRI active up the stack is still recognised, and a query or a pipeline stratum passes
+    // the one its entry point made.
     // `Some` also means a caller reads this closure further (a query, the next document
     // of an explicit pipeline, a nested closure's consumer).
     inherit: Option<VisitedDocs>,
@@ -1194,21 +1542,33 @@ fn run_closure(
     mode: StepMode,
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
-    // The caller blank namespace of the `MaterializedN3Graph` this run serves (its exact
-    // `__bs{k}_` prefix), if any: a document parsed at run time may not spell a label in
-    // it ([`runtime_document`]). A nested run passes its parent's.
-    caller_ns: Option<&str>,
+    // The runtime-document table a TOP-LEVEL run draws on when its caller keeps one across
+    // runs (a `MaterializedN3Graph`); `None` makes one fresh against `parsed`. Ignored
+    // with `inherit`, whose run state already carries its table.
+    runtime: Option<&RuntimeDocs>,
 ) -> Result<Closure, String> {
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
     // from being captured by a minted conclusion blank. Labels ingested later
     // through document builtins or nested closure evaluation are outside this
     // initial-source guarantee.
-    let sk_prefix = fresh_blank_prefix(&document_blank_labels(&parsed), "__sk");
+    let labels = document_blank_labels(&parsed);
+    let sk_prefix = fresh_blank_prefix(&labels, "__sk");
+    // A caller reads this closure further (a query, the next document of an explicit
+    // pipeline, a nested closure's consumer).
+    let read_further = inherit.is_some();
+    let visited = match inherit {
+        Some(v) => v,
+        None => run_shared::RunShared::new(match runtime {
+            Some(r) => r.clone(),
+            // One scan of the document's labels serves both namespaces.
+            None => RuntimeDocs::for_labels(&labels),
+        }),
+    };
     let parser::Parsed { facts: facts0, mut rules, mut backward_rules, base } = parsed;
     // A top-level run keeps terms as deep as those it was handed (terms built in code can
     // nest past the parser's limit); rules cannot build deeper ([`bounded::given_terms`]).
-    if inherit.is_none() {
+    if !read_further {
         let rule_terms = rules
             .iter()
             .chain(&backward_rules)
@@ -1228,17 +1588,10 @@ fn run_closure(
     // loop below. Rules on a cycle through negation follow `cycles`.
     let strata = strata::stratify(&rules, &backward_rules, cycles)?;
     let mut facts = FactIndex::from_iter(facts0);
-    let mut bw = BwCtx::new(&backward_rules, truncated.clone());
+    let mut bw = BwCtx::new(&backward_rules, truncated.clone(), visited);
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
-    bw.caller_ns = caller_ns.map(str::to_string);
-    // A caller reads this closure further (a query, the next document of an explicit
-    // pipeline, a nested closure's consumer).
-    let read_further = inherit.is_some();
-    if let Some(v) = inherit {
-        bw.visited = v;
-    }
     // Derivation steps at the term level (interned to ids once at the end).
     let mut steps: Vec<DerivationStep> = Vec::new();
 
@@ -2023,7 +2376,8 @@ fn match_premise_admitted(
                         // member, or for list:iterate an (index member) pair.
                         let mut bytes = bounded::resolved_bytes(m, b, false);
                         if let ListGen::Iterate = gen {
-                            bytes = bytes.saturating_add(2 * bounded::TERM_NODE_BYTES + NUMBER_TERM_BYTES);
+                            let index = Numeral::count(ix).term_bytes();
+                            bytes = bytes.saturating_add(bounded::TERM_NODE_BYTES).saturating_add(index);
                         }
                         if refused_term(&bw.truncated, &bw.truncated, Derived::Generated(gen), bytes, || bytes) {
                             continue;
@@ -3381,7 +3735,7 @@ fn with_formula_closure<R>(
         }
     };
     let key = formula_key(ts);
-    if !bw.visited.borrow_mut().insert(key) {
+    if !bw.visited.borrow_mut().docs.insert(key) {
         bw.settle(Bounded::cut(
             (),
             "a nested closure re-entered a document already being closed and was left unclosed",
@@ -3423,20 +3777,20 @@ fn with_formula_closure<R>(
         &bw.truncated,
         StepMode::None,
         cycles,
-        bw.caller_ns.as_deref(),
+        None,
     ) {
         Ok(closed) => closed.read_further(&bw.truncated),
         Err(e) => {
             bw.nested_error
                 .borrow_mut()
                 .get_or_insert(format!("in a nested closure: {e}"));
-            bw.visited.borrow_mut().remove(&key);
+            bw.visited.borrow_mut().docs.remove(&key);
             return f(&ts.iter().collect::<Vec<_>>());
         }
     };
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations, each once.
-    bw.visited.borrow_mut().remove(&key);
+    bw.visited.borrow_mut().docs.remove(&key);
     let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
     let mut all: Vec<&[Term; 3]> = ts.iter().collect();
     all.extend(closed.all.iter().filter(|f| seen.insert(f)));
@@ -3695,9 +4049,8 @@ fn numval(t: &Term) -> Option<NumVal> {
         return v.parse::<f64>().ok().map(NumVal::F64); // no-match: ill-typed (not a double lexical form)
     }
     if let Some((int, frac)) = v.split_once('.') {
-        let digits = format!("{int}{frac}");
         // not-a-cut: settled-by-caller (past i128: f64 image; `numval_in` records the cut)
-        if let Ok(m) = digits.parse::<i128>() {
+        if let Some(m) = joined_i128(int, frac) {
             return Some(NumVal::Dec(m, frac.len() as u32));
         }
         return v.parse::<f64>().ok().map(NumVal::F64); // no-match: ill-typed (not a decimal lexical form)
@@ -3706,6 +4059,37 @@ fn numval(t: &Term) -> Option<NumVal> {
         .ok() // not-a-cut: settled-by-caller (`numval_in` records the cut)
         .map(NumVal::Int)
         .or_else(|| v.parse::<f64>().ok().map(NumVal::F64)) // no-match: ill-typed (not numeric)
+}
+
+/// `int` and `frac` read as one `i128` numeral, as `format!("{int}{frac}").parse::<i128>()`
+/// reads it, without building the joined text: an optional leading sign, then at least one
+/// ASCII digit. `None` for any other text, or a value past `i128`.
+fn joined_i128(int: &str, frac: &str) -> Option<i128> {
+    let mut bytes = int.bytes().chain(frac.bytes()).peekable();
+    let neg = match bytes.peek() {
+        Some(b'-') => true,
+        Some(b'+') => false,
+        _ => return digits_i128(bytes, false),
+    };
+    bytes.next();
+    digits_i128(bytes, neg)
+}
+
+/// The `i128` the ASCII digits `bytes` spell, negated with `neg` (accumulated toward the
+/// sign, so `i128::MIN` reads); `None` for no digits, a non-digit, or a value past `i128`.
+fn digits_i128(bytes: impl Iterator<Item = u8>, neg: bool) -> Option<i128> {
+    let mut acc: Option<i128> = None;
+    for b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        let d = i128::from(b - b'0');
+        // not-a-cut: settled-by-caller (past i128: f64 image; `numval_in` records the cut)
+        let up = acc.unwrap_or(0).checked_mul(10)?;
+        // not-a-cut: settled-by-caller (past i128: f64 image; `numval_in` records the cut)
+        acc = Some(if neg { up.checked_sub(d)? } else { up.checked_add(d)? });
+    }
+    acc
 }
 
 /// [`numval`] inside a builtin: an integer or decimal numeral whose exact value is past
@@ -3780,6 +4164,24 @@ fn fixed_digits(neg: bool, mag: u128, scale: u32) -> String {
 /// same string the exact tower renders for a value it can hold. `None` for any other
 /// lexical form.
 pub(crate) fn big_numeral_canonical(lex: &str) -> Option<String> {
+    let (sign, int, frac) = big_numeral_parts(lex)?;
+    Some(if frac.is_empty() {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac}")
+    })
+}
+
+/// The length of [`big_numeral_canonical`]'s string, computed without building it.
+fn big_numeral_canonical_len(lex: &str) -> Option<usize> {
+    let (sign, int, frac) = big_numeral_parts(lex)?;
+    let frac = if frac.is_empty() { 0 } else { frac.len() + 1 };
+    Some(sign.len() + int.len() + frac)
+}
+
+/// The sign, integer digits and fraction digits of [`big_numeral_canonical`]'s string,
+/// borrowed from `lex`.
+fn big_numeral_parts(lex: &str) -> Option<(&'static str, &str, &str)> {
     let lex = lex.trim();
     let (neg, body) = match lex.as_bytes().first()? {
         b'-' => (true, &lex[1..]),
@@ -3797,11 +4199,7 @@ pub(crate) fn big_numeral_canonical(lex: &str) -> Option<String> {
     let int = if int.is_empty() { "0" } else { int };
     let zero = int == "0" && frac.is_empty();
     let sign = if neg && !zero { "-" } else { "" };
-    Some(if frac.is_empty() {
-        format!("{sign}{int}")
-    } else {
-        format!("{sign}{int}.{frac}")
-    })
+    Some((sign, int, frac))
 }
 
 impl NumVal {
@@ -3834,6 +4232,10 @@ impl NumVal {
 /// Drop trailing zero scale: Dec(700, 2) → Dec(7, 1); Dec(30, 1) → Dec(3, 0)
 /// stays a Dec (decimal-typed inputs keep the decimal type, lexical `x.0`).
 fn dec_norm(m: i128, s: u32) -> (i128, u32) {
+    if m == 0 {
+        // Every fraction zero drops (without one loop step per zero of a long scale).
+        return (0, 0);
+    }
     let (mut m, mut s) = (m, s);
     while s > 0 && m % 10 == 0 {
         m /= 10;
@@ -3869,6 +4271,171 @@ fn numval_term(v: NumVal) -> Term {
         }
         NumVal::F64(f) => number_term(f),
     }
+}
+
+/// A numeric builtin result before its literal is rendered: a value [`numval_term`]
+/// renders, or an `f64` [`double_term`] renders. Its size comes from the value (digit
+/// count, scale, sign, exponent), so the result is checked against `max_term_bytes`
+/// before its lexical form is built (GH #6901).
+#[derive(Clone, Copy, Debug)]
+enum Numeral {
+    Num(NumVal),
+    Double(f64),
+}
+
+impl Numeral {
+    /// A count (a list or string length) as an `xsd:integer`.
+    fn count(n: usize) -> Numeral {
+        Numeral::Num(NumVal::Int(n as i128))
+    }
+
+    /// The datatype IRI of the rendered literal.
+    fn datatype(self) -> &'static str {
+        match self {
+            Numeral::Num(NumVal::Int(_)) => parser::XSD_INTEGER,
+            Numeral::Num(NumVal::Dec(..)) => parser::XSD_DECIMAL,
+            Numeral::Num(NumVal::F64(f)) if number_is_whole(f) => parser::XSD_INTEGER,
+            Numeral::Num(NumVal::F64(_)) => parser::XSD_DECIMAL,
+            Numeral::Double(_) => parser::XSD_DOUBLE,
+        }
+    }
+
+    /// The length of the rendered lexical form, computed without rendering it.
+    fn lex_len(self) -> usize {
+        match self {
+            Numeral::Num(NumVal::Int(i)) => int_lex_len(i),
+            Numeral::Num(NumVal::Dec(m, s)) => dec_lex_len(m, s),
+            Numeral::Num(NumVal::F64(f)) => number_lex_len(f),
+            Numeral::Double(f) => double_lex_len(f),
+        }
+    }
+
+    /// A cheap upper bound on [`Numeral::lex_len`]: exact for an integer; for a decimal,
+    /// the length before trailing fraction zeros are dropped; for an `f64`, the most any
+    /// `f64` prints as ([`NUMERAL_TEXT_BYTES`]).
+    fn lex_bound(self) -> usize {
+        match self {
+            Numeral::Num(NumVal::Int(i)) => int_lex_len(i),
+            Numeral::Num(NumVal::Dec(m, s)) => digit_count(m.unsigned_abs())
+                .max((s as usize).saturating_add(1))
+                .saturating_add(3),
+            Numeral::Num(NumVal::F64(_)) | Numeral::Double(_) => NUMERAL_TEXT_BYTES,
+        }
+    }
+
+    /// The [`bounded::term_bytes`] of [`Numeral::term`], computed without building it.
+    fn term_bytes(self) -> usize {
+        bounded::TERM_NODE_BYTES
+            .saturating_add(self.lex_len())
+            .saturating_add(self.datatype().len())
+    }
+
+    /// A cheap upper bound on [`Numeral::term_bytes`] (every numeric datatype IRI is at
+    /// most as long as `xsd:decimal`'s).
+    fn term_bound(self) -> usize {
+        bounded::TERM_NODE_BYTES
+            .saturating_add(self.lex_bound())
+            .saturating_add(parser::XSD_DECIMAL.len())
+    }
+
+    /// The literal.
+    fn term(self) -> Term {
+        match self {
+            Numeral::Num(v) => numval_term(v),
+            Numeral::Double(f) => double_term(f),
+        }
+    }
+}
+
+/// A numeric result of builtin `f`, sized from its value against the run's
+/// `max_term_bytes` before its literal is rendered (GH #6901): `None` when it is refused
+/// (a cut, and the run's refusal).
+fn numeric_result(run: &Truncation, cuts: &impl bounded::Sink, f: Func, n: Numeral) -> Option<Term> {
+    (!refused_term(run, cuts, Derived::Result(f), n.term_bound(), || n.term_bytes())).then(|| n.term())
+}
+
+/// The number of decimal digits of `u` (`0` has one).
+fn digit_count(u: u128) -> usize {
+    if u == 0 {
+        1
+    } else {
+        u.ilog10() as usize + 1
+    }
+}
+
+/// The length of `i.to_string()`.
+fn int_lex_len(i: i128) -> usize {
+    usize::from(i < 0) + digit_count(i.unsigned_abs())
+}
+
+/// The length of [`numval_term`]'s `xsd:decimal` lexical form of `m / 10^s`: trailing
+/// fraction zeros dropped, at least one fraction digit, and `0` for an empty integer part.
+fn dec_lex_len(m: i128, s: u32) -> usize {
+    let (m, s) = dec_norm(m, s);
+    let (digits, s) = (digit_count(m.unsigned_abs()), s as usize);
+    let body = if digits > s {
+        // `int.frac`, or `int.0` when there is no fraction.
+        (digits - s).saturating_add(1).saturating_add(s.max(1))
+    } else {
+        // `0.` then the digits, zero-padded to `s`.
+        s.saturating_add(2)
+    };
+    usize::from(m < 0).saturating_add(body)
+}
+
+/// Whether [`number_term`] renders `v` as an `xsd:integer` (whole, below 2^53).
+fn number_is_whole(v: f64) -> bool {
+    v.fract() == 0.0 && v.abs() < 9.007e15
+}
+
+/// The length of [`number_term`]'s lexical form of `v`.
+fn number_lex_len(v: f64) -> usize {
+    if number_is_whole(v) {
+        // not-a-cut: exact-cast (whole, below 2^53)
+        lex_len_of(format_args!("{}", v as i64)).len
+    } else {
+        lex_len_of(format_args!("{v}")).len
+    }
+}
+
+/// The length of [`double_term`]'s lexical form of `v`.
+fn double_lex_len(v: f64) -> usize {
+    if v.is_nan() || v == f64::INFINITY {
+        3
+    } else if v == f64::NEG_INFINITY {
+        4
+    } else {
+        // `{:e}`, with `.0` added to a mantissa that has no fraction digit.
+        let n = lex_len_of(format_args!("{v:e}"));
+        if n.dot {
+            n.len
+        } else {
+            n.len + 2
+        }
+    }
+}
+
+/// Counts the bytes a formatter writes, without keeping them, and whether one was `.`.
+#[derive(Default)]
+struct LexLen {
+    len: usize,
+    dot: bool,
+}
+
+impl std::fmt::Write for LexLen {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.len = self.len.saturating_add(s.len());
+        self.dot |= s.contains('.');
+        Ok(())
+    }
+}
+
+/// What `args` formats to, counted ([`LexLen`]).
+fn lex_len_of(args: std::fmt::Arguments<'_>) -> LexLen {
+    let mut n = LexLen::default();
+    // Writing to a counter cannot fail.
+    let _ = std::fmt::Write::write_fmt(&mut n, args);
+    n
 }
 
 registry_enum! {
@@ -4041,8 +4608,10 @@ const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langSt
 /// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
 /// cut) or when the formula is past the run's term-size limit (a cut, and the run
 /// refused). The parser charges what it keeps against the limit before allocating it
-/// ([`bounded::parse_n3_term`]), so an expanding parse stops early; the formula is sized
-/// again here once [`runtime_document`] has re-encoded it.
+/// ([`bounded::parse_n3_term`]), so an expanding parse stops early. Once re-encoded, the
+/// formula is sized again at the size it will have with its blanks standardized apart
+/// (the parsed statements plus the growth of every blank label), before the run's
+/// runtime-document table ([`BwCtx::runtime_formula`]) rewrites any label.
 fn parsed_formula(
     f: Func,
     src: &str,
@@ -4050,18 +4619,14 @@ fn parsed_formula(
     bw: &BwCtx,
     pending: &bounded::Pending,
 ) -> Option<Term> {
-    // no-match: ill-typed (not N3 text; `parse_n3_term` already recorded a parser limit
-    // or the term-size refusal as a cut)
-    let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
-    let statements = runtime_document(parsed, pending, bw.caller_ns.as_deref())?;
-    let bytes = statements
-        .iter()
-        .flatten()
-        .map(bounded::term_bytes)
-        .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
-    if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
-        return None;
-    }
+    let parse = || {
+        // no-match: ill-typed (not N3 text; `parse_n3_term` already recorded a parser limit
+        // or the term-size refusal as a cut)
+        let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
+        Some(reencode_statements(parsed))
+    };
+    let admit = |bytes| !refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes);
+    let statements = bw.runtime_formula(src, base, parse, admit, pending)?;
     Some(Term::Formula(statements))
 }
 
@@ -4104,11 +4669,11 @@ fn refused_term(
     settle(cuts, bounded::derived_term(run, &what, bound, exact))
 }
 
-/// The size [`output_bytes`] gives a number, a count or a date part: [`NUMERAL_TEXT_BYTES`]
-/// of lexical form, a datatype IRI and one node. It is a fixed estimate that does not
-/// follow a decimal's scale, and the rendered number is not checked against
-/// `max_term_bytes` anywhere: numeric results are not covered (GH #6901).
-const NUMBER_TERM_BYTES: usize = bounded::TERM_NODE_BYTES + NUMERAL_TEXT_BYTES + 64;
+/// The [`bounded::term_bytes`] of the literal `true` that `log:conjunction` returns for the
+/// empty formula.
+fn conjunction_true_bytes() -> usize {
+    bounded::TERM_NODE_BYTES + "true".len() + parser::XSD_BOOLEAN.len()
+}
 
 /// The [`bounded::term_bytes`] of the list builtin `args` member `a` stands for: a
 /// first-class list, or the members of an rdf:first/rest data list walked from the store.
@@ -4154,10 +4719,10 @@ fn time_zone_offset(s: &str) -> Option<&str> {
 /// The size of the term builtin `f` derives from `args`: with `exact`, its
 /// [`bounded::term_bytes`], computed without building it; without, a cheap upper bound on
 /// it from the input sizes. Every functional builtin has an entry (the match is
-/// exhaustive). A numeric result's entry is a fixed estimate, and numeric results are not
-/// covered by `max_term_bytes` (GH #6901). 0 for a builtin sized where it builds its
-/// result (`log:dtlit`, `log:conclusion`, `log:content`, `log:parsedAsN3` /
-/// `log:semantics`).
+/// exhaustive). 0 for a builtin sized where it builds its result: `log:dtlit`,
+/// `log:conclusion`, `log:content`, `log:parsedAsN3` / `log:semantics`, and every numeric
+/// result, which is sized from its computed value before its literal is rendered
+/// ([`numeric_result`], GH #6901).
 fn output_bytes(
     f: Func,
     args: &[Term],
@@ -4169,9 +4734,7 @@ fn output_bytes(
     let sum = |it: &mut dyn Iterator<Item = usize>| it.fold(0usize, usize::saturating_add);
     let lex0 = || args.first().and_then(lex).unwrap_or("");
     match f {
-        Func::Concat if exact => {
-            string_term_bytes(sum(&mut args.iter().map(|a| concat_piece(a).map_or(0, |p| p.len()))))
-        }
+        Func::Concat if exact => string_term_bytes(sum(&mut args.iter().map(|a| concat_piece_len(a).unwrap_or(0)))),
         Func::Concat => string_term_bytes(sum(&mut args.iter().map(|a| match a {
             Term::Lit(v, dt, _)
                 if dt
@@ -4240,20 +4803,27 @@ fn output_bytes(
         // A merge of its members' lists (first-class, or data lists walked from the store).
         Func::Append => sum(&mut args.iter().map(|a| list_member_bytes(a, facts, pending)))
             .saturating_add(TERM_NODE_BYTES),
-        // The distinct triples of its member formulae.
+        // The distinct triples of its member formulae, or the literal `true` when there are
+        // none (the empty formula).
         Func::Conjunction if exact => {
             let mut seen: FxHashSet<&[Term; 3]> = FxHashSet::default();
-            let distinct = args
+            let distinct: Vec<&[Term; 3]> = args
                 .iter()
                 .filter_map(|a| match a {
                     Term::Formula(ts) => Some(ts),
                     _ => None,
                 })
                 .flatten()
-                .filter(|t| seen.insert(t));
-            sum(&mut distinct.flat_map(|t| t.iter()).map(term_bytes)).saturating_add(TERM_NODE_BYTES)
+                .filter(|t| seen.insert(t))
+                .collect();
+            if distinct.is_empty() {
+                conjunction_true_bytes()
+            } else {
+                sum(&mut distinct.into_iter().flatten().map(term_bytes)).saturating_add(TERM_NODE_BYTES)
+            }
         }
-        Func::Conjunction => sum(&mut args.iter().map(term_bytes)),
+        // A merged formula is at most its members together; with no triples it is `true`.
+        Func::Conjunction => sum(&mut args.iter().map(term_bytes)).max(conjunction_true_bytes()),
         Func::Langlit => match args {
             [Term::Lit(lex, _, _), Term::Lit(lang, _, _)] => TERM_NODE_BYTES
                 .saturating_add(lex.len())
@@ -4279,7 +4849,8 @@ fn output_bytes(
         // The time zone offset: at most the input; exactly, the borrowed offset.
         Func::TimeZone if exact => time_zone_offset(lex0()).map_or(0, |o| string_term_bytes(o.len())),
         Func::TimeZone => string_term_bytes(lex0().len()),
-        // A number, a count or a date part: a fixed estimate (not covered, GH #6901).
+        // A number, a count or a date part: sized from its value once computed, before its
+        // literal is rendered ([`numeric_result`]).
         Func::Length
         | Func::StrLength
         | Func::MemberCount
@@ -4320,7 +4891,7 @@ fn output_bytes(
         | Func::Minutes
         | Func::Seconds
         | Func::DayOfWeek
-        | Func::InSeconds => NUMBER_TERM_BYTES,
+        | Func::InSeconds => 0,
     }
 }
 
@@ -4448,7 +5019,7 @@ fn concat_piece(a: &Term) -> Option<std::borrow::Cow<'_, str>> {
                     }
                 }
                 Some(NumVal::F64(f)) => {
-                    if f.fract() == 0.0 && f.abs() < 9.007e15 {
+                    if number_is_whole(f) {
                         // not-a-cut: exact-cast (whole, below 2^53)
                         Cow::Owned((f as i64).to_string())
                     } else {
@@ -4460,6 +5031,38 @@ fn concat_piece(a: &Term) -> Option<std::borrow::Cow<'_, str>> {
             _ => Cow::Borrowed(v),
         },
         Term::Iri(i) => Cow::Borrowed(i),
+        _ => return None,
+    })
+}
+
+/// The length of [`concat_piece`]'s text for member `a`, computed from the value without
+/// building it (GH #6901).
+fn concat_piece_len(a: &Term) -> Option<usize> {
+    Some(match a {
+        Term::Lit(v, dt, _) => match dt.strip_prefix("http://www.w3.org/2001/XMLSchema#") {
+            Some("boolean") => {
+                if v == "0" || v == "false" {
+                    5
+                } else {
+                    4
+                }
+            }
+            Some("integer" | "decimal" | "float" | "double") => match numval(a) {
+                Some(NumVal::F64(f)) => big_numeral_canonical_len(v).unwrap_or_else(|| number_lex_len(f)),
+                Some(NumVal::Int(i)) => int_lex_len(i),
+                Some(NumVal::Dec(m, sc)) => {
+                    let (m, sc) = dec_norm(m, sc);
+                    if sc == 0 {
+                        int_lex_len(m)
+                    } else {
+                        dec_lex_len(m, sc)
+                    }
+                }
+                None => v.len(),
+            },
+            _ => v.len(),
+        },
+        Term::Iri(i) => i.len(),
         _ => return None,
     })
 }
@@ -4578,14 +5181,12 @@ fn eval_functional_inner(
         let s_applied = bounded::substitute(subj, &b, &bw.truncated)?;
         if !s_applied.is_ground() {
             let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
-            // A fixed estimate ([`NUMBER_TERM_BYTES`]); numeric results are not covered (GH #6901).
-            if refused_term(&bw.truncated, pending, Derived::Result(f), NUMBER_TERM_BYTES, || NUMBER_TERM_BYTES) {
-                return None;
-            }
             if let Some(v) = numval_in(&o_applied, pending) {
                 let negated = rep(pending, numval_negate(v))?;
+                // Sized from the value before it is rendered.
+                let t = numeric_result(&bw.truncated, pending, f, Numeral::Num(negated))?;
                 let mut nb = b;
-                return unify_term(subj, &numval_term(negated), &mut nb).then_some(nb);
+                return unify_term(subj, &t, &mut nb).then_some(nb);
             }
             return None;
         }
@@ -4602,10 +5203,7 @@ fn eval_functional_inner(
     if !subj.is_ground() && subj_applied.as_ref().is_some_and(|s| !s.is_ground()) {
         let o_applied = bounded::substitute(obj, &b, &bw.truncated)?;
         if o_applied.is_ground() {
-            // A fixed estimate ([`NUMBER_TERM_BYTES`]); numeric results are not covered (GH #6901).
-            if refused_term(&bw.truncated, pending, Derived::Result(f), NUMBER_TERM_BYTES, || NUMBER_TERM_BYTES) {
-                return None;
-            }
+            // Each result below is sized from its value before it is rendered.
             let inverse = |v: f64| -> Option<f64> {
                 Some(match f {
                     Func::Sin => v.asin(),
@@ -4628,6 +5226,10 @@ fn eval_functional_inner(
             if let Func::InSeconds = f {
                 // Exact: an epoch second count is a whole number, never an f64 image.
                 let secs = numval_whole_i64(numval_in(&o_applied, pending)?, pending)?;
+                let bytes = bounded::string_term_bytes(epoch_len(secs));
+                if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
+                    return None;
+                }
                 let mut nb = b;
                 let lit = Term::Lit(format_epoch(secs), XSD_STRING.into(), None);
                 return unify_term(subj, &lit, &mut nb).then_some(nb);
@@ -4638,8 +5240,9 @@ fn eval_functional_inner(
                     if v.is_nan() {
                         return None;
                     }
+                    let t = numeric_result(&bw.truncated, pending, f, Numeral::Double(v))?;
                     let mut nb = b;
-                    return unify_term(subj, &double_term(v), &mut nb).then_some(nb);
+                    return unify_term(subj, &t, &mut nb).then_some(nb);
                 }
             }
             return None;
@@ -4744,9 +5347,9 @@ fn eval_functional_inner(
             // a `( … )` list: its length; a quoted formula: its DISTINCT triple count
             [Term::Formula(ts)] => {
                 let distinct: FxHashSet<&[Term; 3]> = ts.iter().collect();
-                count_term(distinct.len())
+                numeric_result(run, pending, f, Numeral::count(distinct.len()))?
             }
-            _ if was_list => count_term(args.len()),
+            _ if was_list => numeric_result(run, pending, f, Numeral::count(args.len()))?,
             _ => return None,
         },
         Func::Format => {
@@ -4770,8 +5373,8 @@ fn eval_functional_inner(
             }
             Term::Lit(s, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
-        Func::Length => count_term(args.len()),
-        Func::StrLength => count_term(lex(&args[0])?.chars().count()),
+        Func::Length => numeric_result(run, pending, f, Numeral::count(args.len()))?,
+        Func::StrLength => numeric_result(run, pending, f, Numeral::count(lex(&args[0])?.chars().count()))?,
         Func::LowerCase => {
             Term::Lit(lex(&args[0])?.to_lowercase(), "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
@@ -4867,11 +5470,10 @@ fn eval_functional_inner(
         | Func::Minutes
         | Func::Seconds
         | Func::DayOfWeek
-        | Func::InSeconds => numval_term(NumVal::Int(i128::from(datetime_part(
-            lex(&args[0])?,
-            f,
-            pending,
-        )?))),
+        | Func::InSeconds => {
+            let part = i128::from(datetime_part(lex(&args[0])?, f, pending)?);
+            numeric_result(run, pending, f, Numeral::Num(NumVal::Int(part)))?
+        }
         Func::TimeZone => {
             // Only an EXPLICIT numeric offset is a time zone (cwm: `Z`/absent
             // yield nothing).
@@ -4910,7 +5512,7 @@ fn eval_functional_inner(
             // An exact step that overflows is a cut (settled here); the f64 path below
             // still gives the approximate value, as before.
             if let Some(exact) = settle(pending, eval_exact(f, &args)) {
-                exact
+                numeric_result(run, pending, f, Numeral::Num(exact))?
             } else {
                 let nvals: Vec<NumVal> = args
                     .iter()
@@ -5020,11 +5622,8 @@ fn eval_functional_inner(
                     return None; // domain error (asin 2, acosh 0.5, …): the premise fails
                     // (NaN/INF inputs — and IEEE 0/0 — PROPAGATE instead, cwm math/inf.n3)
                 }
-                if trig_family || any_double {
-                    double_term(v)
-                } else {
-                    number_term(v)
-                }
+                let n = if trig_family || any_double { Numeral::Double(v) } else { Numeral::Num(NumVal::F64(v)) };
+                numeric_result(run, pending, f, n)?
             }
         }
     };
@@ -5052,7 +5651,7 @@ fn eval_functional_inner(
 /// (doubles involved, overflow, or a non-exact quotient). The RESULT TYPE
 /// follows EYE: all-integer in → integer out; any decimal in → decimal out
 /// (with at least one fraction digit in the lexical form).
-fn eval_exact(f: Func, args: &[Term]) -> Bounded<Option<Term>> {
+fn eval_exact(f: Func, args: &[Term]) -> Bounded<Option<NumVal>> {
     let pending = bounded::Pending::default();
     let v = eval_exact_inner(f, args, &pending);
     pending.finish(v)
@@ -5064,7 +5663,7 @@ fn rep<T>(pending: &bounded::Pending, step: Option<T>) -> Option<T> {
     settle(pending, bounded::exact(step))
 }
 
-fn eval_exact_inner(f: Func, args: &[Term], pending: &bounded::Pending) -> Option<Term> {
+fn eval_exact_inner(f: Func, args: &[Term], pending: &bounded::Pending) -> Option<NumVal> {
     let vals: Vec<NumVal> = args
         .iter()
         .map(|a| numval_in(a, pending))
@@ -5252,7 +5851,7 @@ fn eval_exact_inner(f: Func, args: &[Term], pending: &bounded::Pending) -> Optio
         }
         _ => return None, // trig/log: f64 path
     };
-    Some(numval_term(out))
+    Some(out)
 }
 
 /// Extract a component of an `xsd:dateTime`/`xsd:date` lexical form for `time:` builtins.
@@ -5400,6 +5999,22 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 
 /// Epoch seconds → `YYYY-MM-DDThh:mm:ssZ` (time:inSeconds reverse mode).
 fn format_epoch(secs: i64) -> String {
+    let mut s = String::new();
+    // Writing to a `String` cannot fail.
+    let _ = write_epoch(secs, &mut s);
+    s
+}
+
+/// The length of [`format_epoch`]'s text, counted without building it.
+fn epoch_len(secs: i64) -> usize {
+    let mut n = LexLen::default();
+    // Writing to a counter cannot fail.
+    let _ = write_epoch(secs, &mut n);
+    n.len
+}
+
+/// Writes [`format_epoch`]'s text to `out`.
+fn write_epoch(secs: i64, out: &mut impl std::fmt::Write) -> std::fmt::Result {
     let days = secs.div_euclid(86400);
     let rem = secs.rem_euclid(86400);
     // civil_from_days (Hinnant)
@@ -5413,7 +6028,8 @@ fn format_epoch(secs: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-    format!(
+    write!(
+        out,
         "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
         rem / 3600,
         (rem % 3600) / 60,
@@ -5441,16 +6057,11 @@ fn double_term(v: f64) -> Term {
     Term::Lit(lex, XSD_DOUBLE.into(), None)
 }
 
-/// A count (a list length, a string length) as an `xsd:integer` literal.
-fn count_term(n: usize) -> Term {
-    numval_term(NumVal::Int(n as i128))
-}
-
 /// Render an `f64` result as an N3 numeric literal (integer when whole, else decimal).
 /// A non-finite value renders as `inf` / `-inf` / `NaN`^^xsd:decimal, which `cmp_num`
 /// reads back as ±INF / NaN.
 fn number_term(v: f64) -> Term {
-    if v.fract() == 0.0 && v.abs() < 9.007e15 {
+    if number_is_whole(v) {
         // not-a-cut: exact-cast (whole, below 2^53)
         Term::Lit((v as i64).to_string(), "http://www.w3.org/2001/XMLSchema#integer".into(), None)
     } else {
@@ -5523,7 +6134,233 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 }
 
 #[cfg(test)]
+mod runtime_doc_key_golden {
+    use super::run_shared::runtime_doc_key;
+
+    /// The runtime-document key is specified, not build-dependent: these vectors were
+    /// computed independently (SHA-256 over the documented encoding, first 8 bytes). A
+    /// change here changes exported labels and provenance IRIs.
+    #[test]
+    fn runtime_doc_key_matches_golden_vectors() {
+        let x = "_:x <http://ex/p> <http://ex/o> .";
+        for (text, base, key) in [
+            ("", "", "80ab39c5ca307a54"),
+            (x, "", "36e2d3c73471b49f"),
+            (x, "http://ex/doc", "35978aa649d31637"),
+            ("ab", "c", "f053a10b92eecfd0"),
+            ("a", "bc", "ff5cfd007e1caf6c"),
+        ] {
+            assert_eq!(runtime_doc_key(text, base), key, "{text:?} {base:?}");
+        }
+    }
+
+    #[test]
+    fn runtime_label_shape() {
+        use super::run_shared::is_runtime_label;
+        for l in ["__rp0_36e2d3c73471b49f_x", "__rp12_0123456789abcdef_a.b", "__rp0_36e2d3c73471b49f__"] {
+            assert!(is_runtime_label(l), "{l}");
+        }
+        for l in [
+            "__rp0_x",
+            "__rp_36e2d3c73471b49f_x",
+            "__rp0_36E2D3C73471B49F_x",
+            "__rp0_36e2d3c73471b49_x",
+            "__rp0_36e2d3c73471b49fx",
+            "__rp0_36e2d3c73471b49f",
+            "_rp0_36e2d3c73471b49f_x",
+        ] {
+            assert!(!is_runtime_label(l), "{l}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    /// GH #6901: the length of a numeral's lexical form, computed from its value, equals
+    /// the length of the literal it renders, for every rendering (integer, decimal at any
+    /// scale, whole and fractional `f64`, `xsd:double` e-notation, non-finite values), and
+    /// the cheap bound is at least it.
+    #[test]
+    fn numeral_lengths_match_the_rendered_literals() {
+        use super::{bounded, NumVal, Numeral, Term};
+        let mut cases: Vec<Numeral> = Vec::new();
+        let ints = [
+            0i128,
+            1,
+            -1,
+            9,
+            10,
+            -10,
+            99,
+            100,
+            12345,
+            -98765,
+            i128::from(i64::MAX),
+            i128::from(i64::MIN),
+            10i128.pow(18),
+            10i128.pow(18) - 1,
+            10i128.pow(38),
+            10i128.pow(38) - 1,
+            i128::MAX,
+            i128::MIN,
+            i128::MIN + 1,
+        ];
+        for &i in &ints {
+            cases.push(Numeral::Num(NumVal::Int(i)));
+            for s in [0u32, 1, 2, 3, 5, 17, 18, 19, 37, 38, 39, 40, 41, 64, 200, 1000] {
+                cases.push(Numeral::Num(NumVal::Dec(i, s)));
+                cases.push(Numeral::Num(NumVal::Dec(i.saturating_mul(10), s)));
+                cases.push(Numeral::Num(NumVal::Dec(i.saturating_mul(1000), s)));
+            }
+        }
+        let floats = [
+            0.0f64,
+            -0.0,
+            1.0,
+            -1.0,
+            0.5,
+            -0.25,
+            7.29,
+            1.0 / 3.0,
+            -2.0 / 3.0,
+            123456.789,
+            9.006e15,
+            9.007e15,
+            -9.007e15,
+            1e16,
+            1e21,
+            1e22,
+            1e100,
+            1e300,
+            -1e300,
+            f64::MAX,
+            f64::MIN,
+            f64::MIN_POSITIVE,
+            -f64::MIN_POSITIVE,
+            5e-324,
+            f64::from_bits(0x000f_ffff_ffff_ffff),
+            -f64::from_bits(0x0008_1234_5678_9abc),
+            f64::from_bits(0x7fef_1234_5678_9abc),
+            1e-7,
+            1.5e-5,
+            std::f64::consts::PI,
+            std::f64::consts::E * 1e10,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        for &f in &floats {
+            cases.push(Numeral::Num(NumVal::F64(f)));
+            cases.push(Numeral::Double(f));
+        }
+        for n in cases {
+            let t = n.term();
+            let Term::Lit(lex, dt, None) = &t else { panic!("{n:?}: not a plain literal: {t:?}") };
+            assert_eq!(n.lex_len(), lex.len(), "{n:?}: computed length vs rendered {lex:?}");
+            assert_eq!(n.datatype(), dt.as_str(), "{n:?}: datatype");
+            assert_eq!(n.term_bytes(), bounded::term_bytes(&t), "{n:?}: term bytes");
+            assert!(n.term_bound() >= n.term_bytes(), "{n:?}: bound below the exact size");
+        }
+        // A decimal's length follows its scale without rendering it.
+        let long = Numeral::Num(NumVal::Dec(1, u32::MAX));
+        assert_eq!(long.lex_len(), u32::MAX as usize + 2);
+        assert!(long.term_bound() >= long.term_bytes());
+        assert_eq!(Numeral::Num(NumVal::Dec(0, u32::MAX)).lex_len(), "0.0".len());
+    }
+
+    /// GH #6901: `string:concatenation`'s numeric pieces are sized from their values, and
+    /// the size is the length of the text the builtin writes.
+    #[test]
+    fn concat_piece_lengths_match_the_pieces() {
+        use super::{concat_piece, concat_piece_len, Term};
+        const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
+        let big = format!("-000{}.{}000", "9".repeat(60), "1".repeat(50));
+        let tiny = format!("0.{}1", "0".repeat(400));
+        let lits: Vec<(String, &str)> = vec![
+            ("0".into(), "boolean"),
+            ("true".into(), "boolean"),
+            ("false".into(), "boolean"),
+            ("1".into(), "boolean"),
+            ("42".into(), "integer"),
+            ("-0042".into(), "integer"),
+            ("+7".into(), "integer"),
+            (" 3 ".into(), "integer"),
+            ("170141183460469231731687303715884105727".into(), "integer"),
+            ("-170141183460469231731687303715884105728".into(), "integer"),
+            ("170141183460469231731687303715884105728".into(), "integer"),
+            ("1.50".into(), "decimal"),
+            ("-0.0".into(), "decimal"),
+            ("30.0".into(), "decimal"),
+            (".5".into(), "decimal"),
+            ("-.5".into(), "decimal"),
+            ("5.".into(), "decimal"),
+            (big, "decimal"),
+            (tiny, "decimal"),
+            ("1E300".into(), "double"),
+            ("0E1".into(), "double"),
+            ("1.5e-7".into(), "double"),
+            ("-2.5E3".into(), "float"),
+            ("INF".into(), "double"),
+            ("-INF".into(), "double"),
+            ("NaN".into(), "double"),
+            ("abc".into(), "double"),
+            ("x".into(), "string"),
+            ("é".into(), "string"),
+        ];
+        let mut terms: Vec<Term> = lits
+            .into_iter()
+            .map(|(v, local)| Term::Lit(v, format!("{XSD}{local}"), None))
+            .collect();
+        terms.push(Term::Iri("http://ex/i".into()));
+        terms.push(Term::Blank("b".into()));
+        terms.push(Term::List(vec![]));
+        for t in &terms {
+            assert_eq!(concat_piece_len(t), concat_piece(t).map(|p| p.len()), "{t:?}");
+        }
+    }
+
+    /// GH #6901: a decimal's digits are read without joining them into a new string, with
+    /// exactly the result of parsing the joined text.
+    #[test]
+    fn joined_digits_read_as_the_joined_text_parses() {
+        let parts = [
+            ("", ""),
+            ("", "5"),
+            ("1", ""),
+            ("12", "34"),
+            ("-1", "5"),
+            ("+1", "5"),
+            ("-", "5"),
+            ("+", ""),
+            ("-", ""),
+            ("", "-5"),
+            ("1-", "5"),
+            ("--1", "5"),
+            ("+-1", "5"),
+            ("1_0", "5"),
+            (" 1", "5"),
+            ("0000000000000000000000000000000000000000000000", "0001"),
+            ("17014118346046923173168730371588410572", "7"),
+            ("17014118346046923173168730371588410572", "8"),
+            ("-17014118346046923173168730371588410572", "8"),
+            ("-17014118346046923173168730371588410572", "9"),
+            ("99999999999999999999999999999999999999999", "9"),
+            ("١", "2"),
+        ];
+        for (int, frac) in parts {
+            let want = format!("{int}{frac}").parse::<i128>().ok();
+            assert_eq!(super::joined_i128(int, frac), want, "{int:?} {frac:?}");
+        }
+    }
+
+    /// GH #6901: `time:inSeconds` reversed is sized from the epoch without formatting it.
+    #[test]
+    fn epoch_lengths_match_the_formatted_text() {
+        for secs in [0i64, 1, -1, 86_399, 86_400, 1_700_000_000, -62_135_596_800, -62_167_219_200, -1_000_000_000_000, 1_000_000_000_000, i64::MAX / 2, i64::MIN / 2] {
+            assert_eq!(super::epoch_len(secs), super::format_epoch(secs).len(), "{secs}");
+        }
+    }
+
     /// GH #6771 review: the replacement size is counted, not built, and the count is what
     /// `replace_all` writes, under every corner of the replacement syntax.
     #[test]
@@ -5548,10 +6385,11 @@ mod tests {
         }
     }
 
-    /// GH #6771 review: for each functional builtin whose result is sized before it is
-    /// built (the non-numeric ones; numeric results are not covered, GH #6901), the exact
-    /// size equals the [`bounded::term_bytes`] of the term
-    /// the builtin actually derives, and the cheap bound is at least it.
+    /// GH #6771 review: for each functional builtin whose result `output_bytes` sizes (the
+    /// non-numeric ones; a numeric result is sized from its value, see
+    /// `numeral_lengths_match_the_rendered_literals`), the exact size equals the
+    /// [`bounded::term_bytes`] of the term the builtin actually derives, and the cheap bound
+    /// is at least it.
     #[test]
     fn each_sized_result_matches_the_term_the_builtin_derives() {
         use super::{bounded, functional_builtin, output_bytes, FactIndex, Term};
@@ -5574,6 +6412,11 @@ mod tests {
             (LIST, "first", r#"("first" "second")"#),
             (LIST, "last", r#"("first" "second")"#),
             (LOG, "conjunction", r#"({ :s :p "a" } { :s :p "a". :s :q "b" })"#),
+            // GH #6901: no triples, so the result is the literal `true`, not a formula.
+            (LOG, "conjunction", "(true)"),
+            (LOG, "conjunction", "({} true {})"),
+            (LOG, "conjunction", "()"),
+            (STRING, "concatenation", r#"(1.50 -0042 "1E300"^^<http://www.w3.org/2001/XMLSchema#double> 0.000001 "x")"#),
             (LOG, "langlit", r#"("chat" "fr")"#),
             (TIME, "timeZone", r#""2024-03-15T10:30:45+05:30""#),
             (TIME, "timeZone", r#""2024-03-15T10:30:45-11:00""#),
@@ -5930,12 +6773,15 @@ mod tests {
             }
             assert_eq!(depth_of(&deep), limit + 1);
             let run = Truncation::top_level();
+            let rules = "{ <http://ex/s> <http://ex/p> ?x } => { <http://ex/s> <http://ex/q> ?x } .";
+            let parsed = super::bounded::parse_n3(rules, "", &run).expect("parses");
+            let docs = super::RuntimeDocs::for_sources(&[&parsed]);
             let closure = super::reason_n3_terms_with_facts(
-                "{ <http://ex/s> <http://ex/p> ?x } => { <http://ex/s> <http://ex/q> ?x } .",
+                rules,
                 [[iri("s"), iri("p"), deep.clone()]],
                 NegationCycles::Reject,
                 &run,
-                "__bs0_",
+                &docs,
             )
             .expect("closes");
             (
@@ -7628,7 +8474,7 @@ mod tests {
 mod substrate_seam_differential {
     /// The value of [`eval_exact`], settled into a throwaway sink.
     fn exact_value(f: Func, args: &[Term]) -> Option<Term> {
-        super::bounded::settle(&std::cell::Cell::new(false), eval_exact(f, args))
+        super::bounded::settle(&std::cell::Cell::new(false), eval_exact(f, args)).map(super::numval_term)
     }
 
     /// Whether [`eval_exact`] marks a cut.
@@ -7967,5 +8813,69 @@ mod substrate_seam_differential {
             exact_value(Func::Negation, &[plain(&big.to_string())]),
             Some(lit(&(-big).to_string(), XSD_INT))
         );
+    }
+}
+
+#[cfg(test)]
+mod runtime_docs_table {
+    /// A run that parses more distinct documents at run time than its table may hold fails
+    /// with the runtime-document error and records it as a cut; with room it closes.
+    #[test]
+    fn a_run_past_the_runtime_document_table_fails_closed() {
+        let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   <http://ex/a> <http://ex/t> \"_:x <http://ex/p> 1 .\" .\n\
+                   <http://ex/b> <http://ex/t> \"_:x <http://ex/p> 2 .\" .\n\
+                   { ?d <http://ex/t> ?t . ?t log:parsedAsN3 ?f . \
+                     ?f log:includes { ?s <http://ex/p> ?n } } => { ?d <http://ex/n> ?n } .";
+        let run = |room: usize| {
+            let _room = super::bounded::RuntimeDocsOverride::set(room);
+            let limits = super::ClosureLimits::default();
+            super::reason_n3_terms_with_limits(src, None, None, Default::default(), limits)
+        };
+        assert_eq!(run(2).expect("closes").derived.len(), 2);
+        let Err(e) = run(1) else { panic!("a second document was taken by a table of one") };
+        assert!(e.contains("runtime-document limit exceeded"), "{e}");
+    }
+
+    /// Standardizing a runtime document's blanks apart lengthens each label, and that
+    /// growth is charged before any label is rewritten: a document that fits
+    /// `max_term_bytes` as parsed but not once prefixed is refused, and one whose
+    /// standardized formula is exactly the limit is kept.
+    #[test]
+    fn the_growth_of_standardized_blank_labels_is_charged_before_the_rewrite() {
+        let text: String = (0..64).map(|i| format!("_:a{i} <http://ex/p> _:b{i} . ")).collect();
+        let src = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             <http://ex/a> <http://ex/t> \"{text}\" .\n\
+             {{ <http://ex/a> <http://ex/t> ?t . ?t log:parsedAsN3 ?f }} => \
+             {{ <http://ex/a> <http://ex/out> ?f }} ."
+        );
+        let run = |max_term_bytes: usize| {
+            let limits = super::ClosureLimits { max_term_bytes, ..Default::default() };
+            super::reason_n3_terms_with_limits(&src, None, None, Default::default(), limits)
+        };
+        let closure = run(super::ClosureLimits::default().max_term_bytes).expect("closes");
+        let [d] = closure.derived.as_slice() else { panic!("{:?}", closure.derived) };
+        let super::Term::Formula(ts) = &d[2] else { panic!("{d:?}") };
+        let standardized = super::bounded::term_bytes(&d[2]);
+        let labels: Vec<&str> = ts
+            .iter()
+            .flatten()
+            .filter_map(|t| match t {
+                super::Term::Blank(l) => Some(l.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels.len(), 128);
+        let prefix = labels[0].len() - "a0".len();
+        assert!(labels[0].starts_with("__rp") && labels[0].ends_with("_a0"), "{}", labels[0]);
+        let parsed = standardized - labels.len() * prefix;
+        // Fits as parsed, not once standardized: refused, naming the builtin.
+        let Err(e) = run(standardized - 1) else { panic!("kept a formula past the limit") };
+        assert!(e.contains("max_term_bytes") && e.contains("ParsedAsN3"), "{e}");
+        assert!(parsed < standardized);
+        // Exactly the standardized size: kept, the same formula.
+        let at = run(standardized).expect("a formula at the limit is kept");
+        assert_eq!(at.derived, closure.derived);
     }
 }

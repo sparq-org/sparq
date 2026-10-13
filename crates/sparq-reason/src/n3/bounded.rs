@@ -316,9 +316,12 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// backward-rule projection), the list `log:collectAllIn` collects, and the formula
 /// `log:conclusion` returns. The formula `log:parsedAsN3` / `log:semantics` parses is
 /// charged by its parser before each allocation it keeps (every string, term node and
-/// copy, directives included), and sized again once the parse returns it. Numeric results are not covered (below). The
-/// size is approximate: string bytes plus a fixed cost per node. Binding a variable to a
-/// term that already exists (premise matching, `log:includes`) copies that term; it builds
+/// copy, directives included), and sized again once the parse returns it. A numeric
+/// result (forward or reverse, a count or a date part) is sized from its computed value
+/// (digit count, scale, sign, exponent) before its literal is rendered (GH #6901), and
+/// `string:concatenation` sizes its numeric pieces the same way. The size is
+/// approximate: string bytes plus a fixed cost per node. Binding a variable to a term
+/// that already exists (premise matching, `log:includes`) copies that term; it builds
 /// nothing new and is not sized again.
 ///
 /// Substitution is sized because the raw substitution functions are private to this
@@ -333,11 +336,6 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time
 ///   (each bounded by the length of the source token), the spare capacity of its strings,
 ///   vectors and maps, its fixed-size state, and the text it parses;
-/// * numeric results, as on main (GH #6901): the forward and reverse results of the
-///   arithmetic and other numeric builtins, and the canonical numeric pieces
-///   `string:concatenation` renders. Their size entries are fixed estimates that do not
-///   follow a decimal's scale, and the rendered form is not checked against this limit
-///   anywhere;
 /// * the text a resolver supplies (`log:content`, `log:semantics`), which the caller
 ///   allocates before it is sized (the literal or formula built from it is refused);
 /// * the incremental counting engine behind `MaterializedN3Graph` (GH #6854; its batch
@@ -366,8 +364,8 @@ pub struct ClosureLimits {
     /// Approximate bytes of one term the closure may derive (a builtin's argument list or
     /// result, a parsed or concluded formula, a conclusion's compound term): its strings
     /// plus a fixed cost per node, counted through nested lists, formulas and quoted
-    /// triples. The terms it covers are checked before they are built; numeric results
-    /// are not covered (see the type's docs, GH #6901). Default 16 MiB.
+    /// triples. The terms it covers are checked before they are built (see the type's
+    /// docs). Default 16 MiB.
     pub max_term_bytes: usize,
 }
 
@@ -418,9 +416,8 @@ pub(crate) fn string_term_bytes(lex: usize) -> usize {
 }
 
 /// The ONE checkpoint the terms the text engine sizes pass before they are built
-/// (GH #6771; numeric results are not covered, GH #6901). `bound` is an upper bound on the
-/// term's [`term_bytes`], computed from
-/// borrowed inputs without building anything; `exact` is its exact size, computed (again
+/// (GH #6771, GH #6901). `bound` is an upper bound on the term's [`term_bytes`], computed
+/// from borrowed inputs (or a computed numeric value) without building anything; `exact` is its exact size, computed (again
 /// without building it) only when `bound` is over the limit, so a loose bound never
 /// refuses a term that fits.
 ///
@@ -618,6 +615,61 @@ impl ClosureRounds {
                 ))
             }
         }
+    }
+}
+
+/// Default [`runtime_docs`]: distinct documents (by text and base) one runtime-document
+/// table may take.
+const RUNTIME_DOCS: usize = 100_000;
+
+/// Why a run was stopped by [`runtime_docs`].
+const RUNTIME_DOCS_CUT: &str = "runtime-document limit exceeded";
+
+/// Distinct documents (by text and base) one runtime-document table may take: a run's
+/// own table, or a `MaterializedN3Graph`'s, which lives as long as the graph. The table
+/// keeps a constant-size entry per document (its SHA-256 digest and label prefix, never
+/// its text), so this bounds its memory; one more document fails the run
+/// ([`runtime_docs_exceeded`]).
+pub(crate) fn runtime_docs() -> usize {
+    #[cfg(test)]
+    if let Some(n) = RUNTIME_DOCS_OVERRIDE.with(Cell::get) {
+        return n;
+    }
+    RUNTIME_DOCS
+}
+
+/// The error of a run whose runtime-document table is full, the cut recorded on `cuts`.
+pub(crate) fn runtime_docs_exceeded(cuts: &impl Sink) -> String {
+    cuts.record(RUNTIME_DOCS_CUT);
+    format!(
+        "n3: {RUNTIME_DOCS_CUT}: a run (or a MaterializedN3Graph over its life) parses at \
+         most {} distinct documents at run time",
+        runtime_docs()
+    )
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// A lowered [`runtime_docs`] for tables made on this thread.
+    static RUNTIME_DOCS_OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Lowers [`runtime_docs`] on this thread until dropped.
+#[cfg(test)]
+pub(crate) struct RuntimeDocsOverride;
+
+#[cfg(test)]
+impl RuntimeDocsOverride {
+    pub(crate) fn set(n: usize) -> RuntimeDocsOverride {
+        RUNTIME_DOCS_OVERRIDE.with(|c| c.set(Some(n)));
+        RuntimeDocsOverride
+    }
+}
+
+#[cfg(test)]
+impl Drop for RuntimeDocsOverride {
+    fn drop(&mut self) {
+        RUNTIME_DOCS_OVERRIDE.with(|c| c.set(None));
     }
 }
 
