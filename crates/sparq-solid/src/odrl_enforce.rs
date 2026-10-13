@@ -8,16 +8,19 @@
 //! recorded asset memberships are the collection evidence.
 //!
 //! A mode is **granted** when some attached policy's [`decide`] permits every ODRL
-//! action the mode needs ([`OdrlEnforcement::grants`]):
+//! action the mode needs:
 //!
 //! - [`Mode::Read`] needs `odrl:read`;
 //! - [`Mode::Write`] needs both `odrl:modify` and `odrl:delete`, since a write can do
 //!   either;
 //! - [`Mode::Append`] needs `odrl:append`, or a `Write` grant.
 //!
-//! The store applies a grant only where the static WAC/ACP decision is authoritative
-//! and does not explicitly deny the mode, so an ACP deny still wins and a graph no
-//! access-control document governs is never granted.
+//! The store applies a grant only where the static WAC/ACP decision is authoritative,
+//! to a graph the last materialization covered, and where the auth view does not
+//! explicitly deny the mode, so an ACP deny still wins and a graph no access-control
+//! document governs, or one created since, is never granted. `Append` and `Write` are
+//! never granted on a container or on a referenced group document, so creating a
+//! resource stays with the static decision.
 //!
 //! A mode is **removed** when some attached prohibition applies (True or Unknown) to a
 //! request for any ODRL action that maps to it, after any grant:

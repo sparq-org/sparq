@@ -515,13 +515,6 @@ fn is_safe_child_segment(name: &str) -> bool {
     false
 }
 
-/// Whether minting `child_name` inside `container` passes the create name guard: the
-/// container is a container, the name is one safe segment, and it does not name an
-/// access-control document.
-pub(crate) fn create_name_is_benign(container: &str, child_name: &str) -> bool {
-    container.ends_with('/') && is_safe_child_segment(child_name) && !is_control_document_name(child_name)
-}
-
 /// The decision for "may `session` MINT a child named `child_name` inside `container`?"
 /// Shared by [`crate::PodStore::decide_create`]. [OPUS-5]
 pub(crate) fn decide_create_one(
@@ -537,7 +530,10 @@ pub(crate) fn decide_create_one(
     // `Unloaded`/`Transient` — a client retrying an escalation attempt must keep losing.
     // Ordering matters: checking the container's ACL first would let a transient ACL
     // condition downgrade a permanent refusal into "try again".
-    if !create_name_is_benign(container, child_name) {
+    if !container.ends_with('/')
+        || !is_safe_child_segment(child_name)
+        || is_control_document_name(child_name)
+    {
         // The governing ACL is still surfaced (when discoverable) so the refusal can
         // carry the `Link: rel="acl"` provenance; `granted_modes` stays EMPTY because no
         // mode grants this operation.

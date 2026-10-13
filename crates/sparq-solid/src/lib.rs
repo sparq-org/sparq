@@ -915,10 +915,10 @@ impl PodStore {
     }
 
     /// Apply the attached ODRL policies (issue #6743) to a point decision: add the modes
-    /// an attached permission grants, then remove the modes an attached prohibition
-    /// denies. Grants apply only to an authoritative (`Resolved`) decision, never
-    /// override an explicit deny of the auth view, and leave the status and
-    /// governing-ACL provenance unchanged. The identity when no policy is attached.
+    /// an attached permission grants ([`PodStore::odrl_grants`]), then remove the modes
+    /// an attached prohibition denies. Grants apply only to an authoritative (`Resolved`)
+    /// decision and leave the status and governing-ACL provenance unchanged. The
+    /// identity when no policy is attached.
     fn apply_odrl(&self, d: WacDecision, session: &Session, resource: &str, mode: Mode) -> WacDecision {
         self.apply_odrl_with(d, session, resource, mode, true)
     }
@@ -959,14 +959,21 @@ impl PodStore {
     }
 
     /// Whether an attached ODRL permission grants `mode` on `target` for `session` and
-    /// the auth view does not explicitly deny it. A group document an access-control
-    /// document references is an input of the auth view, so a permission never grants a
-    /// change to it, as it never grants one to an `.acl`/`.acr`. The caller checks that
-    /// the target's decision is authoritative.
+    /// the auth view does not explicitly deny it. The caller checks that the target's
+    /// decision is authoritative. A grant needs:
+    ///
+    /// - a target the last materialization covered, so every deny that applies to it is
+    ///   known (a graph created since, or one that does not exist, is never granted);
+    /// - for `Append`/`Write`, a target that is not a container, so creating a resource
+    ///   stays with the static WAC/ACP decision, and not a group document an
+    ///   access-control document references (an input of the auth view, like the
+    ///   `.acl`/`.acr` itself).
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        let changes = mode != Mode::Read;
         self.odrl.grants(session, mode, target)
-            && !(mode != Mode::Read && self.group_docs().contains(target))
+            && self.auth.covers(target)
+            && !(changes && (target.ends_with('/') || self.group_docs().contains(target)))
             && !self.auth.denies(session, mode, target)
     }
 
@@ -1101,15 +1108,11 @@ impl PodStore {
             child_name,
             mode,
         );
-        // The child-name refusal above stays first and is never granted over. A permission
-        // on the container can grant the create, unless the child is a group document an
-        // ACL references (an auth-view input no permission may change); a prohibition on
-        // the container or on the child it would mint can only narrow what is left.
-        let child = format!("{container}{child_name}");
-        let grant = decide::create_name_is_benign(container, child_name)
-            && !self.group_docs().contains(&child);
-        let d = self.apply_odrl_with(d, session, container, mode, grant);
-        self.apply_odrl_with(d, session, &child, mode, false)
+        // The child-name refusal above stays first. A permission never grants a create
+        // (it grants no change to a container); a prohibition on the container or on the
+        // child it would mint can only narrow what is left.
+        let d = self.apply_odrl_with(d, session, container, mode, false);
+        self.apply_odrl_with(d, session, &format!("{container}{child_name}"), mode, false)
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
@@ -1989,9 +1992,10 @@ impl PodStore {
     /// Every authorizing entry point (the reads, views and queries,
     /// [`PodStore::wac_allow`], [`PodStore::decide`], [`PodStore::decide_batch`],
     /// [`PodStore::decide_create`] and every update) then grants a mode an attached
-    /// permission permits through `decide`, where the static decision is authoritative
-    /// and does not explicitly deny it, and refuses a mode some attached prohibition
-    /// applies to. See [`odrl_enforce`] for the action-to-mode mapping and the graphs it
+    /// permission permits through `decide`, on a graph the last materialization covered
+    /// where the static decision is authoritative and does not explicitly deny it (never a
+    /// change to a container, so never a create), and refuses a mode some attached
+    /// prohibition applies to. See [`odrl_enforce`] for the action-to-mode mapping and the graphs it
     /// never touches.
     ///
     /// # Errors

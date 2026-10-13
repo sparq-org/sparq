@@ -415,8 +415,17 @@ fn permissions_grant_through_every_entry_point() {
     s.update_as(&bob, ins).expect("granted write");
     let acl = "INSERT DATA { GRAPH <https://pod.ex/.acl> { <urn:x> <urn:y> 1 } }";
     assert!(s.update_as(&bob, acl).is_err(), "rules stay the owner's");
-    assert!(s.decide_create(&bob, NOTES, "n3", Mode::Append).allow);
-    assert!(!s.decide_create(&bob, NOTES, "n3.acl", Mode::Append).allow);
+    // Creating stays with the static decision: no change to a container, no create, and
+    // nothing on a graph the last materialization did not cover.
+    for mode in [Mode::Write, Mode::Append] {
+        assert!(!s.decide(&bob, NOTES, mode).allow, "{mode:?}");
+        assert!(!s.decide_create(&bob, NOTES, "n3", mode).allow, "{mode:?}");
+    }
+    assert!(s.decide(&bob, NOTES, Mode::Read).allow, "reading the container is granted");
+    let fresh = "https://pod.ex/notes/n9";
+    assert!(!s.decide(&bob, fresh, Mode::Read).allow);
+    let create = format!("INSERT DATA {{ GRAPH <{fresh}> {{ <urn:x> <urn:y> 1 }} }}");
+    assert!(s.update_as(&bob, &create).is_err());
 }
 
 /// `Write` needs both `odrl:modify` and `odrl:delete`; `Append` needs `odrl:append` or
@@ -549,7 +558,6 @@ fn referenced_group_documents_are_not_granted_changes() {
     s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
         .expect("attach");
     let groups = "https://pod.ex/groups/";
-    assert!(s.decide_create(&bob, groups, "other", Mode::Append).allow, "ordinary child");
     for mode in [Mode::Append, Mode::Write] {
         assert!(!s.decide_create(&bob, groups, "owners", mode).allow, "{mode:?}");
     }
