@@ -2397,6 +2397,14 @@ fn link_param(s: &str) -> Option<(&str, &str, &str)> {
     }
 }
 
+/// A link relation as it is compared: lower-cased. A registered relation type and an extension
+/// one (a URI) alike are compared case-insensitively (RFC 8288 section 2.1.2), so two spellings of
+/// one relation are one relation wherever relations are keyed, matched or searched. What is stored
+/// and served keeps the spelling it was given.
+pub(crate) fn relation_key(rel: &str) -> String {
+    rel.to_ascii_lowercase()
+}
+
 /// The links of a Link header value (RFC 8288 section 3), read as they are needed: a caller that
 /// stops at a bound (see `check_headers`) has spent nothing on what lies past it, and nothing
 /// is allocated. Reading stops at the first part that is not a `link-value`: a target without its
@@ -2499,6 +2507,8 @@ pub(crate) mod test_store {
         pub lose_nth_write_of: Arc<std::sync::Mutex<Option<(String, usize)>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
+        /// `meta` of this IRI reports no modification time, as a backend that keeps none does.
+        pub timeless: Arc<std::sync::Mutex<Option<String>>>,
         /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
         /// before the rest fail.
         pub exists_answers: Arc<std::sync::atomic::AtomicUsize>,
@@ -2585,6 +2595,7 @@ pub(crate) mod test_store {
                 lose_nth_write_of: Default::default(),
                 fail_list: Default::default(),
                 fail_meta: Default::default(),
+                timeless: Default::default(),
                 exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
                 fail_after_create: Default::default(),
@@ -2712,7 +2723,13 @@ pub(crate) mod test_store {
             if self.fail_meta.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.meta(iri).await
+            let mut meta = self.inner.meta(iri).await?;
+            if self.timeless.lock().unwrap().as_deref() == Some(iri) {
+                if let Some(m) = meta.as_mut() {
+                    m.last_modified = None;
+                }
+            }
+            Ok(meta)
         }
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
             if self.fail_exists.load(Ordering::SeqCst)
@@ -3982,6 +3999,81 @@ mod tests {
             "https://e.example/\u{7f}",
         ] {
             assert!(!is_uri(bad), "{bad}");
+        }
+    }
+
+    /// Issue #6863: an extension relation was keyed as spelled, so two spellings of one relation
+    /// were two relations (RFC 8288 section 2.1.2 compares them case-insensitively). Created
+    /// under two spellings, it is one relation, kept under the first spelling and found by a
+    /// search under any.
+    #[tokio::test]
+    async fn an_extension_relation_is_one_relation_in_any_case() {
+        let (st, _store) = test_store::state(4).await;
+        let link = r#"<https://t.example/x>; rel="https://E.example/Rel", <https://t.example/y>; rel="https://e.example/REL""#;
+        let r = route(
+            &st,
+            request(
+                Method::POST,
+                "/",
+                &[
+                    ("content-type", "text/plain"),
+                    ("slug", "m"),
+                    ("link", link),
+                ],
+                "x",
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let uri = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        let path = uri.strip_prefix("http://localhost:3000").unwrap();
+        let r = route(
+            &st,
+            request(Method::GET, &format!("{path}{META_SUFFIX}"), &[], ""),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let doc = test_store::body_json(r).await;
+        let entry = doc["linkset"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["anchor"] == uri.as_str())
+            .unwrap()
+            .clone();
+        let hrefs: Vec<&str> = entry["https://E.example/Rel"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["href"].as_str())
+            .collect();
+        assert_eq!(hrefs, ["https://t.example/x", "https://t.example/y"]);
+        assert!(entry.get("https://e.example/REL").is_none(), "{entry}");
+        for (rel, target) in [
+            ("https://e.example/rel", "https://t.example/x"),
+            ("https://E.EXAMPLE/REL", "https://t.example/y"),
+            ("https://E.example/Rel", "https://t.example/y"),
+        ] {
+            let filter = json!({ rel: [target] }).to_string();
+            let r = route(
+                &st,
+                request(
+                    Method::from_bytes(b"QUERY").unwrap(),
+                    TYPE_SEARCH_PATH,
+                    &[("content-type", index::LWS_QUERY)],
+                    &filter,
+                ),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::OK, "{filter}");
+            let doc = test_store::body_json(r).await;
+            let ids: Vec<&str> = doc["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|i| i["id"].as_str())
+                .collect();
+            assert_eq!(ids, [uri.as_str()], "{filter}");
         }
     }
 

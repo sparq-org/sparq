@@ -16,9 +16,9 @@ use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::notify::Event;
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
-    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
-    JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
-    REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
+    problem, relation_key, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT,
+    GRANTS_PATH, JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS,
+    META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -1142,14 +1142,15 @@ async fn members<S: Store + 'static>(
         if child.ends_with('/') {
             item.insert("type".into(), Value::String("Container".into()));
             let cmeta = state.resource_meta(&child).await?;
-            let modified = cmeta
-                .modified_ms
-                .or(meta.last_modified.map(epoch_ms))
-                .unwrap_or_default();
-            item.insert(
-                "modified".into(),
-                Value::String(format_rfc3339(to_secs(modified) as i64)),
-            );
+            // A time that is not known is not listed (it SHOULD be present, not must), rather
+            // than listed as the epoch: the listing's own date rests on its members' (see
+            // [`listing`]).
+            if let Some(modified) = cmeta.modified_ms.or(meta.last_modified.map(epoch_ms)) {
+                item.insert(
+                    "modified".into(),
+                    Value::String(format_rfc3339(to_secs(modified) as i64)),
+                );
+            }
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         } else {
             item.insert("type".into(), Value::String("DataResource".into()));
@@ -1157,11 +1158,12 @@ async fn members<S: Store + 'static>(
             // and modified SHOULD be. The size is measured only for the members a page shows
             // (see [`with_sizes`]): every member's content is not read to serve one page.
             item.insert("format".into(), Value::String(meta.content_type.clone()));
-            let modified = meta.last_modified.map(epoch_ms).unwrap_or_default();
-            item.insert(
-                "modified".into(),
-                Value::String(format_rfc3339(to_secs(modified) as i64)),
-            );
+            if let Some(modified) = meta.last_modified.map(epoch_ms) {
+                item.insert(
+                    "modified".into(),
+                    Value::String(format_rfc3339(to_secs(modified) as i64)),
+                );
+            }
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         }
         out.push((Value::Object(item), meta));
@@ -1255,21 +1257,22 @@ async fn listing<S: Store + 'static>(
     // The listing changed no earlier than any member it lists did, so its Last-Modified is the
     // latest of the container's own and every listed member's: an If-Modified-Since never meets a
     // 304 for a listing whose members moved on since. A container whose own time could not be
-    // moved on after a change to it has none, until it is.
-    let modified = (!untouched).then(|| {
-        all.iter()
-            .filter_map(|(m, _)| m["modified"].as_str().and_then(parse_rfc3339))
-            .filter_map(|t| u64::try_from(t).ok())
-            .fold(
-                to_secs(
-                    cmeta
-                        .modified_ms
-                        .or(meta.last_modified.map(epoch_ms))
-                        .unwrap_or_default(),
-                ),
-                u64::max,
-            )
-    });
+    // moved on after a change to it has none, until it is; nor has one whose own time, or a
+    // member's, is not known, since either could have changed at any time.
+    let times: Option<Vec<u64>> = all
+        .iter()
+        .map(|(m, _)| {
+            m["modified"]
+                .as_str()
+                .and_then(parse_rfc3339)
+                .and_then(|t| u64::try_from(t).ok())
+        })
+        .collect();
+    let own = cmeta.modified_ms.or(meta.last_modified.map(epoch_ms));
+    let modified = (!untouched)
+        .then_some(())
+        .zip(own.zip(times))
+        .map(|((), (own, times))| times.into_iter().fold(to_secs(own), u64::max));
     // Each page is its own representation, so a later page has its own entity tag.
     let etag = if page == 1 {
         format!("\"{tag}\"")
@@ -1415,12 +1418,28 @@ fn sanitize_slug(slug: Option<&str>) -> Option<String> {
 /// User-managed links by relation.
 type Links = std::collections::BTreeMap<String, Vec<String>>;
 
-/// A relation's key: an extension relation (a URI) as it is, a registered one lower-cased.
+/// A relation as it is stored: an extension relation (a URI) as it was first spelled, a registered
+/// one lower-cased. Relations are compared by [`relation_key`], so a second spelling of a stored
+/// relation joins it (see [`Spellings`]).
 fn rel_key(r: &str) -> String {
     if r.contains(':') {
         r.to_string()
     } else {
         r.to_ascii_lowercase()
+    }
+}
+
+/// The spelling each relation is stored under, by its [`relation_key`]: the first one met.
+#[derive(Default)]
+struct Spellings(std::collections::HashMap<String, String>);
+
+impl Spellings {
+    /// The key `r` is stored under: the spelling of the first relation compared equal to it.
+    fn of(&mut self, r: &str) -> String {
+        self.0
+            .entry(relation_key(r))
+            .or_insert_with(|| rel_key(r))
+            .clone()
     }
 }
 
@@ -1435,6 +1454,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
     let mut targets = 0usize;
+    let mut spellings = Spellings::default();
     for link in parse_links(&req.header_all(header::LINK)) {
         let Some(rel) = link.param("rel") else {
             continue;
@@ -1457,7 +1477,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
             ));
         }
         for r in rel.split_whitespace() {
-            let key = rel_key(r);
+            let key = spellings.of(r);
             if key == "type" {
                 if !target.starts_with(LWS_NS)
                     && is_uri(&target)
@@ -1465,7 +1485,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
                 {
                     types.push(target.clone());
                 }
-            } else if !STRUCTURAL_RELATIONS.contains(&key.as_str())
+            } else if !STRUCTURAL_RELATIONS.contains(&relation_key(&key).as_str())
                 && seen.insert((key.clone(), resolved.clone()))
             {
                 // Held to the caps a linkset PATCH holds its result to, so the linkset these
@@ -3979,7 +3999,9 @@ fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
         .filter_map(|mut e| {
             if anchored_at(&e, uri) {
                 let o = e.as_object_mut()?;
-                o.retain(|k, _| k == "anchor" || !SERVER_MANAGED.contains(&rel_key(k).as_str()));
+                o.retain(|k, _| {
+                    k == "anchor" || !SERVER_MANAGED.contains(&relation_key(k).as_str())
+                });
                 // An entry left with nothing but its anchor says nothing.
                 if o.len() <= 1 {
                     return None;
@@ -3988,7 +4010,56 @@ fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
             Some(e)
         })
         .collect();
-    Resolved(json!({"linkset": kept}))
+    Resolved(json!({"linkset": joined_relations(kept)}))
+}
+
+/// `entries` with each relation of an anchor under one spelling, the first met: relations are
+/// compared by [`relation_key`], so two spellings of one relation are one relation, stored and
+/// served as one. Within an entry their targets are joined (each target once, attributes and
+/// all, in the order met); across entries, a later one is renamed to the first spelling.
+fn joined_relations(entries: Vec<Value>) -> Vec<Value> {
+    let mut spellings: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, String>,
+    > = Default::default();
+    entries
+        .into_iter()
+        .map(|e| {
+            let Value::Object(fields) = e else {
+                return e;
+            };
+            let anchor = fields
+                .get("anchor")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let spellings = spellings.entry(anchor).or_default();
+            let mut out = Map::new();
+            for (k, v) in fields {
+                if k == "anchor" {
+                    out.insert(k, v);
+                    continue;
+                }
+                let key = spellings
+                    .entry(relation_key(&k))
+                    .or_insert_with(|| k.clone())
+                    .clone();
+                match (out.get_mut(&key), v) {
+                    (Some(Value::Array(have)), Value::Array(more)) => {
+                        for t in more {
+                            if !have.contains(&t) {
+                                have.push(t);
+                            }
+                        }
+                    }
+                    (_, v) => {
+                        out.insert(key, v);
+                    }
+                }
+            }
+            Value::Object(out)
+        })
+        .collect()
 }
 
 /// The user-managed links a linkset document holds about `uri`, by relation: what the type
@@ -4000,6 +4071,7 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
     let mut links = Links::new();
     let mut seen: std::collections::HashMap<String, std::collections::HashSet<&str>> =
         Default::default();
+    let mut spellings = Spellings::default();
     for entry in doc
         .0
         .get("linkset")
@@ -4009,10 +4081,10 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
         .filter(|e| anchored_at(e, uri))
     {
         for (rel, targets) in entry.as_object().into_iter().flatten() {
-            let key = rel_key(rel);
-            if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&key.as_str()) {
+            if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&relation_key(rel).as_str()) {
                 continue;
             }
+            let key = spellings.of(rel);
             let seen = seen.entry(key.clone()).or_default();
             let out = links.entry(key).or_default();
             for href in targets
@@ -4036,7 +4108,9 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
 struct Representation<'a> {
     format: &'a str,
     size: String,
-    modified: String,
+    /// `None` when the store keeps no time for it: the linkset then states none, rather than a
+    /// made-up one.
+    modified: Option<String>,
 }
 
 impl<'a> Representation<'a> {
@@ -4049,7 +4123,7 @@ impl<'a> Representation<'a> {
         Self {
             format,
             size: u64::MAX.to_string(),
-            modified: format_rfc3339(to_secs(u64::MAX) as i64),
+            modified: Some(format_rfc3339(to_secs(u64::MAX) as i64)),
         }
     }
 }
@@ -4070,11 +4144,12 @@ async fn linkset_document<S: Store + 'static>(
     let representation = match &stored {
         Some(stored) => {
             let size = state.store.read_at(uri, stored).await?.len();
-            let modified = stored.last_modified.map(epoch_ms).unwrap_or_default();
             Some(Representation {
                 format: &stored.content_type,
                 size: size.to_string(),
-                modified: format_rfc3339(to_secs(modified) as i64),
+                modified: stored
+                    .last_modified
+                    .map(|t| format_rfc3339(to_secs(epoch_ms(t)) as i64)),
             })
         }
         None => None,
@@ -4109,15 +4184,11 @@ fn served_linkset(
     types.extend(meta.types.iter().map(|t| json!({"href": t})));
     server.insert("type".into(), Value::Array(types));
     if let Some(r) = representation {
-        server.insert(
-            "self".into(),
-            json!([{
-                "href": uri,
-                "format": [r.format],
-                "size": [r.size],
-                "modified": [r.modified],
-            }]),
-        );
+        let mut entry = json!({"href": uri, "format": [r.format], "size": [r.size]});
+        if let Some(modified) = r.modified {
+            entry["modified"] = json!([modified]);
+        }
+        server.insert("self".into(), json!([entry]));
     }
     let user = meta
         .linkset
@@ -4690,6 +4761,27 @@ mod tests {
 
     /// Review finding (#6839): an extension relation is kept as it was spelled, as the type
     /// index's search keys it (`index::relation_key`), so a search by that spelling finds it.
+    /// Issue #6863: a linkset naming one extension relation in two spellings keys one relation,
+    /// under the first spelling, and a structural relation in any case is not user-managed.
+    #[test]
+    fn a_linkset_keys_a_relation_once_in_any_case() {
+        let uri = "https://s/r";
+        let doc = Resolved(json!({"linkset": [
+            {"anchor": uri, "https://E.example/Rel": [{"href": "https://t/x"}]},
+            {"anchor": uri, "https://e.example/REL": [{"href": "https://t/y"}, {"href": "https://t/x"}],
+             "UP": [{"href": "https://s/"}], "Author": [{"href": "https://a/me"}]},
+        ]}));
+        let links = links_of(&doc, uri);
+        assert_eq!(
+            links.keys().collect::<Vec<_>>(),
+            ["author", "https://E.example/Rel"]
+        );
+        assert_eq!(
+            links["https://E.example/Rel"],
+            ["https://t/x", "https://t/y"]
+        );
+    }
+
     #[tokio::test]
     async fn an_extension_relation_is_kept_as_spelled() {
         let st = state().await;
@@ -5325,6 +5417,81 @@ mod tests {
             vec!["https://ex.org/schema".to_string()]
         );
         assert!(m.types.is_empty());
+    }
+
+    /// Review of #6899: a linkset PATCH naming one relation in two spellings joined them only in
+    /// the links the index matches; the stored linkset kept both, and was served split. It is
+    /// stored and served as one relation, under the first spelling, its targets whole.
+    #[tokio::test]
+    async fn linkset_patch_joins_spellings_of_a_relation() {
+        let st = state().await;
+        let uri = post(&st, "j.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let patch = json!({"linkset": [
+            {"anchor": uri, "https://e.example/REL": [{"href": "https://t.example/y", "title": "Y"}],
+             "https://E.example/Rel": [{"href": "https://t.example/x"}]},
+            {"anchor": uri, "HTTPS://E.EXAMPLE/REL": [{"href": "https://t.example/z"}, {"href": "https://t.example/x"}]},
+        ]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&patch),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let stored = st.resource_meta(&uri).await.unwrap();
+        for doc in [&doc, stored.linkset.as_ref().unwrap()] {
+            let mut targets = Vec::new();
+            for e in doc["linkset"].as_array().unwrap() {
+                if e["anchor"] != uri.as_str() {
+                    continue;
+                }
+                for (k, v) in e.as_object().unwrap() {
+                    if relation_key(k) == "https://e.example/rel" {
+                        assert_eq!(k, "https://E.example/Rel", "{doc}");
+                        targets.extend(v.as_array().unwrap().iter().cloned());
+                    }
+                }
+            }
+            assert_eq!(
+                targets,
+                [
+                    json!({"href": "https://t.example/x"}),
+                    json!({"href": "https://t.example/y", "title": "Y"}),
+                    json!({"href": "https://t.example/z"}),
+                    json!({"href": "https://t.example/x"}),
+                ],
+                "{doc}"
+            );
+        }
+        assert_eq!(
+            stored.links.keys().collect::<Vec<_>>(),
+            ["https://E.example/Rel"]
+        );
+        assert_eq!(
+            stored.links["https://E.example/Rel"],
+            [
+                "https://t.example/x",
+                "https://t.example/y",
+                "https://t.example/z"
+            ]
+        );
+        // A linkset stored split before spellings were joined is served joined.
+        let mut split = stored.clone();
+        split.linkset = Some(json!({"linkset": [{"anchor": uri,
+            "https://e.example/REL": [{"href": "https://t.example/y"}],
+            "https://E.example/Rel": [{"href": "https://t.example/x"}]}]}));
+        st.put_resource_meta(&uri, &split).await.unwrap();
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let e = &doc["linkset"][0];
+        assert_eq!(
+            e["https://E.example/Rel"],
+            json!([{"href": "https://t.example/x"}, {"href": "https://t.example/y"}])
+        );
+        assert!(e.get("https://e.example/REL").is_none(), "{doc}");
     }
 
     #[test]
@@ -7632,6 +7799,129 @@ mod tests {
             assert_eq!((now.etag, now.last_modified), (was.etag, was.last_modified));
             assert!(st.store.exists(&meta_key(node)).await.unwrap());
         }
+    }
+
+    /// Issue #6768: a plain write or a create commits before its container is touched, and the
+    /// marker that suppresses the container's date until then is in memory only. A stop between
+    /// the two leaves the stored date from before the change; the listing's Last-Modified is the
+    /// latest of the container's and every listed member's own, so an If-Modified-Since from
+    /// before the change still never meets a 304. The store changes are made here directly, as
+    /// a process that stopped before its touch left them, on a server that never saw them.
+    #[tokio::test]
+    async fn a_change_whose_touch_was_lost_still_moves_the_listing_date() {
+        use super::super::test_store::{body_json, request as req, state};
+        let (st, store) = state(100).await;
+        let anyone = Agent::anonymous();
+        let root = st.cfg.storage();
+        let listing = [("accept", "application/lws+json")];
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            ),
+            &anyone,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let since = |r: &Response| {
+            r.headers()[header::LAST_MODIFIED]
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+        let was = since(&handle(&st, &req(Method::GET, "/", &listing, ""), &anyone).await);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // A create committed, its touch lost.
+        st.store
+            .create_in_container(&root, &format!("{root}b"), "y".into(), "text/plain")
+            .await
+            .unwrap();
+        assert!(!st.is_untouched(&root) && !st.in_flight(&root));
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", was.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let now = since(&r);
+        assert_ne!(now, was);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // A plain write committed, its touch lost.
+        st.store
+            .write(&format!("{root}a"), "longer".into(), "text/plain")
+            .await
+            .unwrap();
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", now.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_ne!(since(&r), now);
+        // Review of #6919: a member whose time is not known could have changed at any time, so
+        // the listing then has no date (and lists no time for it, rather than the epoch).
+        *store.timeless.lock().unwrap() = Some(format!("{root}b"));
+        let r = handle(&st, &req(Method::GET, "/", &listing, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        let doc = body_json(r).await;
+        let b = doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == format!("{root}b"))
+            .unwrap();
+        assert!(b.get("modified").is_none(), "{b}");
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    /// A time the store does not keep is not stated as the epoch: a container whose own time is
+    /// unknown has no listing date (an epoch date would make any If-Modified-Since a 304), and a
+    /// data resource whose time is unknown has no `modified` in its linkset.
+    #[tokio::test]
+    async fn an_unknown_time_is_not_dated_the_epoch() {
+        use super::super::test_store::{body_json, request as req, state};
+        let (st, store) = state(100).await;
+        let anyone = Agent::anonymous();
+        let root = st.cfg.storage();
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            ),
+            &anyone,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", "Sun, 01 Jan 2023 00:00:00 GMT"),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+        let mut root_meta = st.resource_meta(&root).await.unwrap();
+        root_meta.modified_ms = None;
+        st.put_resource_meta(&root, &root_meta).await.unwrap();
+        *store.timeless.lock().unwrap() = Some(root.clone());
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+
+        let linkset = format!("/a{META_SUFFIX}");
+        let doc = body_json(handle(&st, &req(Method::GET, &linkset, &[], ""), &anyone).await).await;
+        assert!(doc["linkset"][0]["self"][0]["modified"][0].is_string());
+        *store.timeless.lock().unwrap() = Some(format!("{root}a"));
+        let doc = body_json(handle(&st, &req(Method::GET, &linkset, &[], ""), &anyone).await).await;
+        let entry = &doc["linkset"][0]["self"][0];
+        assert_eq!(entry["size"][0], "1");
+        assert!(entry.get("modified").is_none(), "{entry}");
     }
 
     /// Review finding: a container whose own time could not be moved on after a member was

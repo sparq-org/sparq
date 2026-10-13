@@ -23,9 +23,9 @@ use serde_json::{json, Value};
 
 use super::access::Action;
 use super::{
-    add_page_links, is_uri, jose, json_response, method_not_allowed, problem, requested_page, set,
-    Agent, LwsRequest, LwsState, ResourceMeta, LD_JSON, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
-    TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
+    add_page_links, is_uri, jose, json_response, method_not_allowed, problem, relation_key,
+    requested_page, set, Agent, LwsRequest, LwsState, ResourceMeta, LD_JSON, LWS_CONTEXT, LWS_JSON,
+    LWS_NS, META_SUFFIX, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::store::Store;
 
@@ -150,15 +150,6 @@ fn groups(value: &Value, room: usize) -> Result<Groups, FilterError> {
         }
     }
     Ok(out)
-}
-
-/// A relation as it is compared: lower-cased when it is a registered (non-URI) relation.
-fn relation_key(rel: &str) -> String {
-    if rel.contains(':') {
-        rel.to_string()
-    } else {
-        rel.to_ascii_lowercase()
-    }
 }
 
 /// Resolve `target` against `base`, leaving it as it is when it cannot be resolved.
@@ -1496,6 +1487,15 @@ mod tests {
         assert_eq!(
             x.into_iter().collect::<Vec<_>>(),
             vec!["https://a/one", "https://s/two"]
+        );
+        // An extension relation is compared case-insensitively, however it was stored: a
+        // spelling kept before relations were compared so is found by any other.
+        meta.links
+            .insert("https://X/Rel".into(), vec!["https://a/three".into()]);
+        let x = relation_targets(uri, &meta, "HTTPS://x/REL");
+        assert_eq!(
+            x.into_iter().collect::<Vec<_>>(),
+            vec!["https://a/one", "https://a/three", "https://s/two"]
         );
         meta.links.insert("up".into(), vec!["https://s/".into()]);
         assert!(relation_targets(uri, &meta, "up").is_empty());

@@ -7,11 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
+  16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
+  outside the crate. Start from the default and set fields:
+  `let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`. A forward N3 closure
+  whose rules would build a term past the limit (a string or list that doubles each round)
+  now returns `Err("n3: forward closure limit exceeded …")` instead of aborting on a failed
+  allocation. (#6771)
+
 ## [0.1.6] - 2026-10-13
 
 First release with the `sparq-rdf` PyPI wheels (the v0.1.5 wheel builds failed; npm 0.1.5
 packages were published). Publication is not implied by this entry; verify the tagged run
 and every registry and release artifact.
+
+The entries for #6869 and #6897 were added after the v0.1.6 release commit (`66bebdb3`).
+Both changes are in that commit, but its copy of this file does not list them.
 
 ### Added
 
@@ -102,6 +115,12 @@ and every registry and release artifact.
   refused instead of overflowing the stack. (#6835)
 - **sparq-reason:** base-graph blank nodes stay distinct from blank labels the N3 parser
   allocates. (#6779)
+- **sparq-reason:** the N3 evaluator bounds its stack use on untrusted input. Under the default
+  policy, terms built past 128 levels are dropped as cuts, nested closures and proof steps
+  share one stack allowance per run, and a run with cuts refuses a later negation or
+  aggregation instead of reading missing facts. (#6869)
+- **sparq-fedclient:** the ASK reachability probe keeps an endpoint's existing query string
+  and replaces only its `query` parameter. (#6897)
 - **LWS:** a type-search filter too long to page is refused as too complex (422). (#6889)
 - **sparq-shacl:** `LATERAL` blocks are covered by the SHACL-SPARQL pre-binding checks and the
   `VALUES` push-down. (#6846)

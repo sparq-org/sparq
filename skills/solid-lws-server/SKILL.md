@@ -424,7 +424,8 @@ What the server exposes, all discoverable from the storage description
   Each delivery attempt, retries included, first checks that its subscription still exists and
   has not expired, and that the subscriber may still read the resource, reading the resource under
   its shared lock, as a GET does. A Delete is checked against
-  the resource as it was before removal. A delivery that fails a check is dropped. A subscription
+  the resource as it was before removal; when that could not be read, only the owner (and
+  everyone in open mode) hears of the Delete. A delivery that fails a check is dropped. A subscription
   to a resource's linkset (`{resource}.meta`) hears of each change to the resource as of the
   linkset, and is authorized as the resource when it is created. A delivery never waits on a
   resource that is set aside, even one set aside while it waits, and checks its subscription
@@ -500,7 +501,11 @@ What the server exposes, all discoverable from the storage description
   change is over (`503` if its members keep changing); removing a member holds its container
   exclusively. A container whose modification time has not yet been, or could not be, moved on
   after a change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
-  on a stale date. Every change to the store (a request's own steps, a touch, a rollback or a
+  on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
+  every member's, so a change whose touch a stop lost still moves it on; a member whose time the
+  backend does not record is listed without `modified`, and the listing then has no
+  `Last-Modified`; so has one whose container's own time is not recorded. An unknown time is never
+  stated as the epoch: a linkset's `self` entry then omits `modified`. Every change to the store (a request's own steps, a touch, a rollback or a
   retried undo) goes through one tracked path, and a listing made while a change to the
   container or a member is in flight has no `Last-Modified`; one that overlapped a change is
   made again. A PUT with `Content-Range`
@@ -512,6 +517,10 @@ What the server exposes, all discoverable from the storage description
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
   relations change only with `Prefer: set-linkset`.
+- Link relations, registered and extension (URI) alike, compare case-insensitively (RFC 8288
+  section 2.1.2) wherever they are keyed, matched or searched: two spellings of one relation in
+  a request's Link headers or a linkset are one relation, stored and served under the first
+  spelling met with the targets of both, and a type search names it in any case.
 - Every write and delete runs its store calls in a task that holds the resource's locks until
   the store answers, so a client that disconnects cannot release them early.
 - A grant or subscription `DELETE` takes effect once its stored record is gone, even if cleaning

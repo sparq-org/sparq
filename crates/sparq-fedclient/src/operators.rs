@@ -46,7 +46,7 @@
 
 use crate::planner::{lower_leaf, lower_leaf_fragment, pattern_vars, SourceResolver};
 use crate::source::{FedError, FederatedSource, FragBinding, FragPattern, FragTerm, SourceType};
-use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple, Variable};
+use oxrdf::{BlankNode, Literal, NamedNode, Term, Variable};
 use sparq_fedplan::{JoinNode, JoinTree, PatternSources, TriplePattern};
 use std::collections::HashMap;
 // [OPUS-4.8] sq-vtba (Phase 5): the streaming-operator surface reuses the planner's proven

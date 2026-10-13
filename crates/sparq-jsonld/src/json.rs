@@ -62,6 +62,24 @@ impl Json {
         }
     }
 
+    /// Mutably borrows the value of member `key`, or `None` if this is not an object or the
+    /// key is absent.
+    pub(crate) fn get_mut(&mut self, key: &str) -> Option<&mut Json> {
+        match self {
+            Json::Obj(members) => members.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
+    /// This value as a slice of items: an array's items, or any other value as a
+    /// one-element slice.
+    pub(crate) fn items(&self) -> &[Json] {
+        match self {
+            Json::Arr(items) => items,
+            other => std::slice::from_ref(other),
+        }
+    }
+
     /// Borrows the inner string of a [`Json::Str`], or `None` for any other variant.
     pub fn as_str(&self) -> Option<&str> {
         match self {

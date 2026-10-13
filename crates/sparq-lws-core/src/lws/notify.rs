@@ -690,11 +690,16 @@ impl Notifier {
             ..Prepared::default()
         };
         // A Delete is prepared while the resource is still there; its deliveries, made once it
-        // is gone, are authorized against what it was.
+        // is gone, are authorized against what it was. When that cannot be read, only the owner
+        // (and everyone in open mode) hears of it: no one else's access can be decided.
+        let mut unreadable = false;
         let snapshot = if event.kind == "Delete" && !candidates.is_empty() && service.is_none() {
             match access::Snapshot::take(state, &event.uri).await {
                 Ok(s) => Some(Arc::new(s)),
-                Err(_) => return out,
+                Err(_) => {
+                    unreadable = true;
+                    Some(Arc::new(access::Snapshot::unreadable()))
+                }
             }
         } else {
             None
@@ -716,6 +721,7 @@ impl Notifier {
             let allowed = match &service {
                 Some(author) => reads_service_record(state, &agent, author),
                 None if state.cfg.open || access::is_owner(state, &agent) => true,
+                None if unreadable => false,
                 None => {
                     if resource.is_none() {
                         resource = Some(
@@ -3117,12 +3123,12 @@ mod tests {
     /// the agents a read decides may read it, one subscription per agent, after `setup` has
     /// written the grants, the metadata and the failures of the case. For a Delete, a read is
     /// decided as its deliveries are checked: against the snapshot of the resource taken while
-    /// it was there (`None` when that could not be taken).
+    /// it was there, or [`access::Snapshot::unreadable`] when that could not be taken.
     async fn prepared_and_reads(
         kind: &'static str,
         grants: &[(&str, Value)],
         setup: impl FnOnce(&mut super::super::ResourceMeta, &test_store::FlakyStore),
-    ) -> (Vec<String>, Option<Vec<String>>) {
+    ) -> (Vec<String>, Vec<String>) {
         let mut cfg = LwsConfig::new("http://localhost:3000");
         cfg.owner = Some("https://owner.example/#me".into());
         let store = test_store::FlakyStore::new();
@@ -3180,7 +3186,11 @@ mod tests {
             relation: None,
         };
         let snapshot = if kind == "Delete" {
-            access::Snapshot::take(&state, &r).await.ok()
+            Some(
+                access::Snapshot::take(&state, &r)
+                    .await
+                    .unwrap_or_else(|_| access::Snapshot::unreadable()),
+            )
         } else {
             None
         };
@@ -3193,9 +3203,6 @@ mod tests {
             .map(|p| p.watch.subscription.clone())
             .collect();
         prepared.sort();
-        if kind == "Delete" && snapshot.is_none() {
-            return (prepared, None);
-        }
         let mut reads = Vec::new();
         for (id, subject, client) in agents {
             let agent = Agent {
@@ -3211,15 +3218,16 @@ mod tests {
             }
         }
         reads.sort();
-        (prepared, Some(reads))
+        (prepared, reads)
     }
 
     /// Issue #6874: preparation decides from one snapshot of the resource's access
     /// ([`access::ResourceAccess`]); it agrees with a read for every kind of grant and
     /// constraint, the creator, pending metadata and a backend that fails to read. A Delete's
     /// deliveries are checked against a second snapshot ([`access::Snapshot`]), taken in the
-    /// same preparation: the two agree too, and where that one cannot be taken nothing is
-    /// prepared, so a subscriber never hears of a change one of them would refuse it.
+    /// same preparation: the two agree too, and where that one cannot be taken only the owner
+    /// is prepared for and allowed (#6903), so a subscriber never hears of a change one of them
+    /// would refuse it.
     #[tokio::test]
     async fn preparation_decides_as_a_read_does_for_every_kind_of_access() {
         let read = |who: &str, constraint: Value| {
@@ -3346,17 +3354,12 @@ mod tests {
         ];
         for (case, grants, setup, want) in cases {
             let (prepared, reads) = prepared_and_reads("Update", grants, setup).await;
-            assert_eq!(Some(&prepared), reads.as_ref(), "{case}");
+            assert_eq!(prepared, reads, "{case}");
             assert_eq!(prepared, want, "{case}");
             let (prepared, reads) = prepared_and_reads("Delete", grants, setup).await;
-            match reads {
-                Some(reads) => {
-                    assert_eq!(prepared, reads, "{case}: delete");
-                    assert_eq!(prepared, want, "{case}: delete");
-                }
-                // The resource's state could not be read: nothing is announced, to anyone.
-                None => assert!(prepared.is_empty(), "{case}: delete {prepared:?}"),
-            }
+            // Where the resource's state could not be read, only the owner hears of it (#6903).
+            assert_eq!(prepared, reads, "{case}: delete");
+            assert_eq!(prepared, want, "{case}: delete");
         }
     }
 

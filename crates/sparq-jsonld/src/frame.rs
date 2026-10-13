@@ -456,7 +456,7 @@ impl FState<'_> {
             if let Some(g) = maps.graphs.get(&self.graph) {
                 self.emit(g.len() * 8)?;
                 for (sid, node) in g.iter() {
-                    for v in node.get(property).map(as_slice).unwrap_or_default() {
+                    for v in node.get(property).map(Json::items).unwrap_or_default() {
                         if let Some(target) = v.get("@id").and_then(Json::as_str) {
                             let list = index.entry(target.to_string()).or_default();
                             if list.last() != Some(sid) {
@@ -491,7 +491,7 @@ use output::{Budget, Out};
 /// constructors and mutators here, and each one charges the [`Budget`] before it
 /// allocates: keys, copied values, nodes, lists, defaults and the arrays that hold them.
 mod output {
-    use super::{as_slice, json_bytes, output_member_mut, Json, JsonLdError, E, NODE_BYTES};
+    use super::{json_bytes, Json, JsonLdError, E, NODE_BYTES};
 
     /// What a framing call may still allocate. Charges fail with `context overflow` once
     /// it is spent, so the output (and the compaction and rendering that are linear in
@@ -554,7 +554,7 @@ mod output {
         pub(super) fn default_fill(budget: &mut Budget, default: Option<&Json>, direct: bool) -> Result<Out, JsonLdError> {
             budget.charge(default.map_or(16, json_bytes) + 3 * NODE_BYTES + "@preserve".len() + 8)?;
             let values = match default {
-                Some(d) => Json::Arr(as_slice(d).to_vec()),
+                Some(d) => Json::Arr(d.items().to_vec()),
                 None => Json::Arr(vec![Json::Str("@null".to_string())]),
             };
             Ok(Out(if direct {
@@ -591,7 +591,7 @@ mod output {
                         self.0.set(key, Json::Arr(Vec::new()));
                     }
                     budget.charge(8)?;
-                    if let Some(Json::Arr(items)) = output_member_mut(&mut self.0, key) {
+                    if let Some(Json::Arr(items)) = self.0.get_mut(key) {
                         items.push(value.0);
                     }
                 }
@@ -606,7 +606,7 @@ mod output {
                 budget.charge("@reverse".len() + 8 + NODE_BYTES)?;
                 self.0.set("@reverse", Json::obj());
             }
-            if let Some(rev) = output_member_mut(&mut self.0, "@reverse") {
+            if let Some(rev) = self.0.get_mut("@reverse") {
                 let mut map = Out(std::mem::take(rev));
                 let added = map.append(budget, Some(property), item);
                 *rev = map.0;
@@ -720,7 +720,7 @@ fn graph_maps_from_rdf(from_rdf: Json, frame_default: bool) -> GraphMaps {
                 if key.starts_with('@') {
                     continue;
                 }
-                for value in as_slice(values) {
+                for value in values.items() {
                     references(value, &mut |rid| {
                         if !graph.contains_key(rid) {
                             referenced.push(rid.to_string());
@@ -782,7 +782,7 @@ fn references<'a>(value: &'a Json, found: &mut impl FnMut(&'a str)) {
     let mut stack = vec![value];
     while let Some(v) = stack.pop() {
         if let Some(items) = v.get("@list") {
-            stack.extend(as_slice(items).iter().rev());
+            stack.extend(items.items().iter().rev());
         } else if let Some(rid) = subject_reference_id(v) {
             found(rid);
         }
@@ -822,7 +822,7 @@ fn merge_graphs(graphs: &BTreeMap<String, Rc<Subjects>>) -> Subjects {
                         entry.set(prop, value.clone());
                     }
                 } else {
-                    add_all_unique(entry, prop, as_slice(value));
+                    add_all_unique(entry, prop, value.items());
                 }
             }
         }
@@ -836,7 +836,9 @@ fn add_all_unique(obj: &mut Json, prop: &str, values: &[Json]) {
     if obj.get(prop).is_none() {
         obj.set(prop, Json::Arr(Vec::new()));
     }
-    let Some(Json::Arr(items)) = output_member_mut(obj, prop) else { return };
+    let Some(Json::Arr(items)) = obj.get_mut(prop) else {
+        return;
+    };
     let key = |v: &Json| {
         let mut s = String::new();
         v.write(&mut s);
@@ -1004,7 +1006,7 @@ fn match_frame(
                 let copied = Out::copy(&mut st.budget, objects)?;
                 output.set(&mut st.budget, prop, copied)?;
                 if prop == "@type" {
-                    for t in as_slice(objects) {
+                    for t in objects.items() {
                         if let Some(s) = t.as_str() {
                             if s.starts_with("_:") {
                                 *st.bnode_counts.entry(s.to_string()).or_insert(0) += 1;
@@ -1019,7 +1021,7 @@ fn match_frame(
             if flags.explicit && frame_prop.is_none() {
                 continue;
             }
-            for o in as_slice(objects) {
+            for o in objects.items() {
                 if is_list_object(o) {
                     // @list re-emit: node entries recurse with the list sub-frame,
                     // value entries copy verbatim.
@@ -1032,7 +1034,7 @@ fn match_frame(
                         }
                     };
                     let mut list = Out::list(&mut st.budget)?;
-                    for oo in o.get("@list").map(as_slice).unwrap_or_default() {
+                    for oo in o.get("@list").map(Json::items).unwrap_or_default() {
                         if let Some(oid) = subject_reference_id(oo) {
                             match_frame(
                                 maps,
@@ -1185,7 +1187,7 @@ fn validate_frame(frame: &Json) -> Result<Cow<'_, Json>, JsonLdError> {
         }
     };
     if let Some(ids) = obj.get("@id") {
-        for v in as_slice(ids) {
+        for v in ids.items() {
             match v {
                 Json::Obj(m) if m.is_empty() => {}
                 Json::Str(s) if !s.starts_with("_:") && s.contains(':') => {}
@@ -1199,7 +1201,7 @@ fn validate_frame(frame: &Json) -> Result<Cow<'_, Json>, JsonLdError> {
         }
     }
     if let Some(types) = obj.get("@type") {
-        for v in as_slice(types) {
+        for v in types.items() {
             match v {
                 // Wildcard {} and the default-object form {"@default": …}.
                 Json::Obj(m) if m.is_empty() || m.iter().any(|(k, _)| k == "@default") => {}
@@ -1333,8 +1335,8 @@ fn filter_subject(
     let mut wildcard = true;
     let mut matches_some = false;
     for (key, value) in frame_members {
-        let node_values = node.get(key).map(as_slice).unwrap_or_default();
-        let frame_values = as_slice(value);
+        let node_values = node.get(key).map(Json::items).unwrap_or_default();
+        let frame_values = value.items();
         let is_empty = frame_values.is_empty();
         let match_this;
 
@@ -1400,12 +1402,12 @@ fn filter_subject(
                     match_this = true;
                 }
                 Some(tf) if is_list_object(tf) => {
-                    let list_pattern = tf.get("@list").map(as_slice).unwrap_or_default();
+                    let list_pattern = tf.get("@list").map(Json::items).unwrap_or_default();
                     let node_list = node_values
                         .first()
                         .filter(|nv| is_list_object(nv))
                         .and_then(|nv| nv.get("@list"))
-                        .map(as_slice)
+                        .map(Json::items)
                         .unwrap_or_default();
                     match_this = match list_pattern.first() {
                         Some(lp) if is_value_object(lp) => {
@@ -1514,9 +1516,12 @@ fn value_match(pattern: &Json, value: &Json) -> bool {
     let t1 = value.get("@type").and_then(Json::as_str);
     let l1 = value.get("@language").and_then(Json::as_str);
 
-    let v2 = pattern.get("@value").map(as_slice).unwrap_or_default();
-    let t2 = pattern.get("@type").map(as_slice).unwrap_or_default();
-    let l2 = pattern.get("@language").map(as_slice).unwrap_or_default();
+    let v2 = pattern.get("@value").map(Json::items).unwrap_or_default();
+    let t2 = pattern.get("@type").map(Json::items).unwrap_or_default();
+    let l2 = pattern
+        .get("@language")
+        .map(Json::items)
+        .unwrap_or_default();
 
     if v2.is_empty() && t2.is_empty() && l2.is_empty() {
         return true;
@@ -1550,17 +1555,6 @@ fn value_match(pattern: &Json, value: &Json) -> bool {
 // ---------------------------------------------------------------------------
 // Output assembly + post-processing
 // ---------------------------------------------------------------------------
-
-/// Mutable access to an object member (companion to [`Json::get`]).
-fn output_member_mut<'a>(obj: &'a mut Json, key: &str) -> Option<&'a mut Json> {
-    match obj {
-        Json::Obj(members) => members
-            .iter_mut()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| v),
-        _ => None,
-    }
-}
 
 /// `@embed: @last` post-pass: demote every embed of `id` except the LAST (in the
 /// depth-first document order framing emitted them) to a bare node reference. This is
@@ -1784,15 +1778,6 @@ fn graph_alias(ctx_value: &Json) -> String {
 // ---------------------------------------------------------------------------
 // Small shape helpers
 // ---------------------------------------------------------------------------
-
-/// View a value as a slice of items (an array borrows its items; a scalar/object is a
-/// one-element view).
-fn as_slice(v: &Json) -> &[Json] {
-    match v {
-        Json::Arr(items) => items,
-        other => std::slice::from_ref(other),
-    }
-}
 
 /// The first element of an array value (or the value itself when not an array).
 fn first_of(v: &Json) -> Option<&Json> {
@@ -2142,7 +2127,7 @@ mod tests {
         let ids = |frame: &str| -> Vec<String> {
             let out = frame_match(&input, &parse(frame), &JsonLdOptions::default(), &FrameOptions::default(), &NoopLoader)
                 .expect("frame ok");
-            as_slice(&out).iter().filter_map(|n| n.get("@id").and_then(Json::as_str).map(str::to_string)).collect()
+            out.items().iter().filter_map(|n| n.get("@id").and_then(Json::as_str).map(str::to_string)).collect()
         };
         assert_eq!(ids(r#"{"@id":"http://ex/a"}"#), ["http://ex/a"]);
         assert_eq!(ids(r#"{"@id":["http://ex/b"]}"#), ["http://ex/b"]);
@@ -2154,7 +2139,7 @@ mod tests {
         let typed = parse(r#"[{"@id":"http://ex/a","@type":"http://ex/T"},{"@id":"http://ex/b","@type":"http://ex/T"}]"#);
         let typed_ids = |frame: &str| -> Vec<String> {
             let out = frame_with(&typed, frame).expect("frame ok");
-            as_slice(&out).iter().filter_map(|n| n.get("@id").and_then(Json::as_str).map(str::to_string)).collect()
+            out.items().iter().filter_map(|n| n.get("@id").and_then(Json::as_str).map(str::to_string)).collect()
         };
         for all in ["false", "true"] {
             for frame in [
