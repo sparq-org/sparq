@@ -2596,8 +2596,9 @@ impl MaterializedN3Graph {
     ///
     /// # Errors
     ///
-    /// On a rules-document parse failure, a document the batch engine refuses to
-    /// stratify, or a closure past its [`ClosureLimits`](crate::n3::ClosureLimits) (see
+    /// On a rules-document parse failure, unsupported `@forAll` quantifiers in a rule
+    /// premise or scoped body pattern, a document the batch engine refuses to stratify,
+    /// or a closure past its [`ClosureLimits`](crate::n3::ClosureLimits) (see
     /// [`with_limits`](Self::with_limits)).
     pub fn new(rules_src: &str, base_facts: &[[N3Term; 3]]) -> Result<Self, String> {
         Self::with_limits(rules_src, base_facts, crate::n3::ClosureLimits::default())
@@ -2642,6 +2643,7 @@ impl MaterializedN3Graph {
     ) -> Result<Self, String> {
         let cuts = bounded::Truncation::top_level_with(limits);
         let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
+        crate::n3::validate_rule_quantifiers(&parsed)?;
         let base_ns = crate::n3::fresh_base_blank_prefix(&parsed);
         let runtime_docs = crate::n3::RuntimeDocs::for_sources(&[&parsed]);
         let (compiled, disqualified) = match n3_compile(&parsed) {

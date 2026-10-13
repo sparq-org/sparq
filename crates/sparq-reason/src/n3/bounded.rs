@@ -1026,7 +1026,8 @@ pub(crate) fn charge_parse(left: usize, bytes: usize) -> Result<usize, LimitErro
 
 /// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`) under
 /// the run's [`ClosureLimits::max_term_bytes`]: the parser charges every byte it keeps
-/// before allocating it (each string, term node and copy; `parse_charged_checked`), so a
+/// before allocating it (each string, term node and copy; `parse_quoted_charged_checked`,
+/// which reads the document's own `@forAll` as the formula's), so a
 /// small source whose prefixes, base or shared formulas expand into a huge formula is
 /// refused while it is parsed. On that refusal the run is refused
 /// (a cut, and an error every closure of the run fails with). `None` for that and for any
@@ -1037,9 +1038,9 @@ pub(crate) fn parse_n3_term(
     run: &Truncation,
     cuts: &impl Sink,
 ) -> Option<super::parser::Parsed> {
-    use super::parser::{parse_charged_checked, ParseFailure};
+    use super::parser::{parse_quoted_charged_checked, ParseFailure};
     let allowance = Some(run.limits.max_term_bytes);
-    match parse_charged_checked(src, base, std::iter::empty(), allowance) {
+    match parse_quoted_charged_checked(src, base, allowance) {
         Ok(p) => Some(p),
         Err(ParseFailure::Syntax(_)) => None,
         Err(ParseFailure::Resource(e)) => {
