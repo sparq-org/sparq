@@ -6,6 +6,7 @@
 pub mod civil;
 pub mod compress;
 pub mod dict;
+pub mod hex;
 #[cfg(feature = "dict-spill")]
 pub mod dictspill;
 // [SONNET-4.6] sq-96hp1 (survey §A2 / research/data-structures.md §B1): the OPT-IN Elias-Fano
