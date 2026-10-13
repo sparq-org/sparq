@@ -1548,11 +1548,14 @@ async fn subscribe<S: Store + 'static>(
         let _guard = match state.locks.try_read(resource) {
             Some(guard) => guard,
             None => {
-                let aside = !state.visible(resource);
+                // A topic being changed is decided as a set-aside one is, on what it was before
+                // the change began.
+                let hidden = !state.visible(resource);
+                let aside = hidden || state.locks.changing(resource);
                 if !readable(resource, aside).await {
                     return cannot_read();
                 }
-                if aside {
+                if hidden {
                     return super::resources::set_aside_meanwhile();
                 }
                 // Waited for a bounded time, as every lock a request to a service container
@@ -2282,7 +2285,7 @@ mod tests {
             async move { watch.stands(&state).await }
         });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let left = super::super::Unsettled(vec![super::super::Undo::Remove {
+        let left = super::super::Unsettled::new(vec![super::super::Undo::Remove {
             iri: file.clone(),
             parent: state.cfg.storage(),
         }]);
@@ -3770,6 +3773,61 @@ mod tests {
         );
         let ok = subscribe(&b, &reader).await.expect("answered");
         assert_eq!(ok.0, StatusCode::CREATED);
+    }
+
+    /// Issue #6883: a topic a journaled change is in flight to (its lock held) is decided on
+    /// what it was before the change began, as a request to it is: what is stored may be the
+    /// change part way, or being put back. A subscriber that only the stored state lets read it
+    /// is refused at once rather than left to wait on the lock.
+    #[tokio::test]
+    async fn a_topic_being_changed_is_decided_by_what_it_was_before() {
+        use test_store::{agent, closed_state, data, grant_read};
+        let (state, _store) = closed_state(100).await;
+        let b = data(&state, "b").await;
+        let reader = agent("https://reader.example/#me");
+        grant_read(&state, "https://reader.example/#me", &[&b]).await;
+        let subscribe = || {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [b.clone()],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let (state, who) = (state.clone(), reader.clone());
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                tokio::time::timeout(
+                    Duration::from_millis(500),
+                    test_store::route_as(&state, req, &who),
+                )
+                .await
+                .ok()
+                .map(|r| r.status())
+            }
+        };
+        // A change holds b's lock, and before it began b's metadata could not be read (so every
+        // grant fails closed on it): the reader is refused at once.
+        let held = state.locks.lock(&b).await.unwrap();
+        let before = super::super::Prior {
+            meta: Some(super::super::ResourceMeta {
+                pending: true,
+                ..super::super::ResourceMeta::default()
+            }),
+            ..Default::default()
+        };
+        state
+            .locks
+            .changing_from([(b.clone(), before)].into_iter().collect());
+        assert_eq!(subscribe().await, Some(StatusCode::FORBIDDEN));
+        state.locks.landed(std::slice::from_ref(&b));
+        assert_eq!(subscribe().await, None, "the reader waits on the change");
+        drop(held);
+        assert_eq!(subscribe().await, Some(StatusCode::CREATED));
     }
 
     /// Issue #6814: the service routes answered `503` for a set-aside record before they

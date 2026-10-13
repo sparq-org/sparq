@@ -722,7 +722,7 @@ mod tests {
             clear(&st.store, journal.intent.as_ref().unwrap())
                 .await
                 .unwrap();
-            let restores = super::super::Unsettled(std::mem::take(&mut journal.undo));
+            let restores = super::super::Unsettled::new(std::mem::take(&mut journal.undo));
             std::mem::forget(journal);
             // A kept change owing `/c/` a touch, as a start leaves it.
             let record = mint(&st.cfg.storage());
@@ -735,7 +735,7 @@ mod tests {
             // Many changes quick to put back, each touching what is owed once it is, and last the
             // one restoring `/c/`: a start that set each aside in turn would touch `/c/` first.
             let quick = |i: usize| {
-                super::super::Unsettled(vec![Undo::Forget {
+                super::super::Unsettled::new(vec![Undo::Forget {
                     record: format!("{}q{i}", container(&st.cfg.storage())),
                     iris: vec![st.cfg.absolute(&format!("/q{i}"))],
                 }])

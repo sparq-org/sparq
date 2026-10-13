@@ -473,11 +473,12 @@ What the server exposes, all discoverable from the storage description
   staged them before its first step), never on what the change wrote meanwhile: access the
   change would newly grant is not met, and access it would remove still is. When that cannot
   be read, only the owner hears of the state. A new subscription is told its container is set
-  aside only once every topic is authorized. One window is not covered: while a failed change is
-  still being put back under its locks (its first few tries, before it is set aside), a request
-  is authorized on what is stored at that moment, which may be the change's own new metadata. A
-  caller only that metadata authorizes then waits on the lock, and is answered `503` if the change
-  is set aside meanwhile (once it is set aside, the same caller gets `403`). A write's container is touched by the task that runs its store
+  aside only once every topic is authorized. The same holds from a journaled change's first step
+  until it is done or set aside (while it is part way, or being put back under its locks): a
+  request, or a subscription's topic, that comes without the lock is decided on what the resource
+  was before the change began, so a caller only the change's own new metadata would authorize is
+  refused at once, and only one the earlier state authorizes waits on the lock (the check that
+  counts is made again under it). A write's container is touched by the task that runs its store
   calls, so a client that goes away mid-write cannot leave the container's date behind. A
   create whose store reply was lost is removed whole the same way. A write that changes
   metadata and a recursive delete first store a durable intent: what each resource it will
