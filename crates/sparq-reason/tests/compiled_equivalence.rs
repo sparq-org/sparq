@@ -535,8 +535,8 @@ fn not_includes_scope_forms_agree_or_are_refused() {
 
 // ---------------------------------------------------------------------------------------
 // GH #6855: the compiled evaluator runs under the text engine's `ClosureLimits` (rounds,
-// facts, term size) and refuses with the same error; at every limit the two engines
-// either both refuse or both return the same closure.
+// facts, term size) and refuses with the same error. Their fixpoint schedules differ,
+// so this checks agreement at the swept limits on these fixtures, not at every limit.
 // ---------------------------------------------------------------------------------------
 
 /// The GH #6771 repro: each round concatenates the literal with itself.
@@ -588,7 +588,8 @@ fn assert_limit_error(what: &str, e: &str) {
     assert!(e.contains("forward closure limit exceeded"), "{what}: {e}");
 }
 
-/// Both engines refuse, or both return the same closure. Returns whether they refused.
+/// At this limit both engines refuse, or both return the same closure. Returns whether
+/// they refused.
 fn assert_agree(what: &str, doc: &str, limits: ClosureLimits) -> bool {
     match (text_with(doc, limits), compiled_with(doc, limits)) {
         (Ok(t), Ok(c)) => {
@@ -624,7 +625,7 @@ fn string_doubling_is_refused_by_both_engines() {
 }
 
 /// The term-size limit, swept byte by byte across the sizes the last doublings reach:
-/// both engines refuse at the same limits and return the same closure below them.
+/// the engines agree at the swept limits (both refuse, or both return the same closure).
 #[test]
 fn term_size_limit_agrees_at_the_boundary() {
     let doc = bounded_doubling(10); // the largest string is 1024 bytes
@@ -645,8 +646,8 @@ fn term_size_limit_agrees_at_the_boundary() {
 /// The round allowance. The text engine may run one closing naive round per stratum that
 /// the compiled evaluator does not (always in a debug build; in a release build for a
 /// stratum a later scoped read depends on), so its boundary is the compiled one or one
-/// round later; below the compiled boundary both refuse, and from the text boundary on
-/// both return the same closure.
+/// round later; the engines agree at the swept limits below the compiled boundary (both
+/// refuse) and from the text boundary on (both return the same closure).
 #[test]
 fn round_limit_agrees_at_the_boundary() {
     let doc = walk(12);
@@ -674,7 +675,7 @@ fn round_limit_agrees_at_the_boundary() {
     }
 }
 
-/// The fact allowance: both engines refuse at the same `max_facts`.
+/// The fact allowance: the engines agree at the swept `max_facts`.
 #[test]
 fn fact_limit_agrees_at_the_boundary() {
     let doc = walk(12);
@@ -703,7 +704,7 @@ fn a_non_terminating_rule_set_stops_at_the_round_limit() {
 }
 
 /// `string:encodeForUri` (at most triples its input) and `log:uri` (copies it) over a
-/// growing chain: the term-size limit agrees byte by byte in both engines too.
+/// growing chain: the engines agree at the swept term-size limits too.
 #[test]
 fn encode_and_uri_term_size_limit_agree() {
     let mut doc = String::from(

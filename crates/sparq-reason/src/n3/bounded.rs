@@ -342,11 +342,13 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///   fallback is bounded), which has no round and fact allowance either.
 ///
 /// The opt-in `compiled-rules` evaluator (`n3::compiled`, GH #6855) takes the same
-/// allowance (`eval_with_limits`; `eval` uses the default): its rounds and facts are
-/// counted as the text engine counts them (it runs no closing naive check round, so it
-/// may need one round per stratum fewer), and each builtin result, and each argument
-/// list a builtin is evaluated over, is sized the way the text engine sizes it before it
-/// is built. Its conclusions build no new term (they copy ids the premise bound).
+/// allowance (`eval_with_limits`; `eval` uses the default) and refuses with the same
+/// error: each builtin result, and each argument list a builtin is evaluated over, is
+/// sized the way the text engine sizes it before it is built, and its conclusions build
+/// no new term (they copy ids the premise bound). Its fixpoint schedule differs (no
+/// closing naive check round, no transitivity fast path, no quoted-triple substitution
+/// checkpoints), so under equal limits the two engines can accept or refuse differently
+/// near a boundary.
 ///
 /// One over-refusal is deliberate: a builtin's argument list is a term it builds, so
 /// `log:conjunction` over many copies of one large formula is refused when the copies

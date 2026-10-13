@@ -79,14 +79,19 @@
 //!
 //! Evaluation runs under the text engine's [`ClosureLimits`] (GH #6855):
 //! [`BoundRuleSet::eval_with_limits`] / [`eval_with_limits`] take them, [`eval`] uses
-//! [`ClosureLimits::default`]. The round and fact allowance is counted as the text engine
-//! counts it: one round per semi-naive iteration of each stratum, and the facts held at
-//! the start of each round (the text engine's closing naive check round, which this
-//! evaluator does not run, can make the text engine need one round per stratum more).
-//! Each term a builtin builds (its result, and the argument list a `( … )` subject would
-//! be in the text engine) is sized with the text engine's helpers BEFORE it is built. Past any allowance evaluation stops with the text
-//! engine's `"forward closure limit exceeded"` error, never a truncated closure.
-//! Conclusions copy ids the premise bound, so they build no new term.
+//! [`ClosureLimits::default`]. A round is one semi-naive iteration of a stratum, and the
+//! fact allowance is checked against the facts held at the start of each round. Each
+//! term a builtin builds (its result, and the argument list a `( … )` subject would be
+//! in the text engine) is sized with the text engine's helpers BEFORE it is built.
+//! Conclusions copy ids the premise bound, so they build no new term. Past any
+//! allowance evaluation stops with the text engine's `"forward closure limit exceeded"`
+//! error, never a truncated closure.
+//!
+//! It is bounded by the same limits as the text engine and refuses with the same error,
+//! but it does not run the same fixpoint schedule: the text engine's closing naive check
+//! round and its transitivity fast path, and its substitution checkpoints for quoted
+//! triples (which have no compiled counterpart), mean that under equal limits the two
+//! engines can accept or refuse differently near a boundary.
 //!
 //! The result-equivalence oracle is `tests/compiled_equivalence.rs`: on the WAC/ACP/
 //! ODRL-spike corpus the compiled closure equals the [`crate::reason_n3`] closure **as a
@@ -1091,7 +1096,10 @@ impl BoundRuleSet<'_> {
     }
 
     /// [`BoundRuleSet::eval`] under `limits`: the round, fact and term-size allowance of
-    /// the text engine's forward closure (see the module docs, "Limits").
+    /// the text engine's forward closure (see the module docs, "Limits"). The closure is
+    /// bounded by the same limits as the text engine's and refused with the same error;
+    /// near a boundary the two engines can accept or refuse differently, since their
+    /// fixpoint schedules differ.
     ///
     /// # Errors
     ///
@@ -1126,7 +1134,7 @@ impl BoundRuleSet<'_> {
         // GH #6201): a single-stratum set runs exactly one loop; at each later stratum
         // boundary the whole store is the delta and round-0 handling restarts.
         let cs = self.compiled;
-        // The closure's round and fact allowance, counted as the text engine counts it.
+        // The closure's round and fact allowance (the text engine's `ClosureRounds`).
         let mut allowance = bounded::ClosureRounds::forward(&run);
         for stratum in 0..strata.n_strata {
             if stratum > 0 {
