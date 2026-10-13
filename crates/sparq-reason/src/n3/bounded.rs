@@ -315,10 +315,11 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// bindings (a conclusion, a premise pattern, a scope or collection template, a
 /// backward-rule projection), the list `log:collectAllIn` collects, and the formula
 /// `log:conclusion` returns. The formula `log:parsedAsN3` / `log:semantics` parses is
-/// sized once the parse returns it. Numeric results are not covered (below). The size is
-/// approximate: string bytes plus a fixed cost per node.
-/// Binding a variable to a term that already exists (premise matching, `log:includes`)
-/// copies that term; it builds nothing new and is not sized again.
+/// charged by its parser before each allocation it keeps (every string, term node and
+/// copy, directives included), and sized again once the parse returns it. Numeric results are not covered (below). The
+/// size is approximate: string bytes plus a fixed cost per node. Binding a variable to a
+/// term that already exists (premise matching, `log:includes`) copies that term; it builds
+/// nothing new and is not sized again.
 ///
 /// Substitution is sized because the raw substitution functions are private to this
 /// module; the guard test `substitution_goes_through_the_bounded_module` is a lexical
@@ -327,10 +328,11 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// What it does not bound:
 /// * the closure's total memory: many distinct terms just under the limit are bounded
 ///   only by `max_facts`;
-/// * the parser input size: a parse (the document's own, or a `log:parsedAsN3` /
-///   `log:semantics` one) allocates the terms it builds before its result is sized, so
-///   its memory is bounded by its input text, and a short prefix used many times
-///   expands before the formula is refused;
+/// * the document's own parse, which is not charged: its memory is bounded by its input
+///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
+///   holds only a scratch copy of one token, or an error message quoting one, at a time
+///   (each bounded by the length of the source token), the spare capacity of its strings,
+///   vectors and maps, its fixed-size state, and the text it parses;
 /// * numeric results, as on main (GH #6901): the forward and reverse results of the
 ///   arithmetic and other numeric builtins, and the canonical numeric pieces
 ///   `string:concatenation` renders. Their size entries are fixed estimates that do not
@@ -857,6 +859,49 @@ pub(crate) fn parse_n3_with_extra(
         Err(ParseFailure::Resource(e)) => Bounded::cut(Err(e.message), e.why),
     };
     settle(cuts, parsed)
+}
+
+/// Why a builtin's parse was stopped by [`ClosureLimits::max_term_bytes`].
+const PARSE_TERM_CUT: &str = "forward closure limit exceeded (a parsed formula)";
+
+/// Charge `bytes` to a charged parse's allowance with `left` bytes left: what is left
+/// after it, or the limit error once the parse would pass it.
+pub(crate) fn charge_parse(left: usize, bytes: usize) -> Result<usize, LimitError> {
+    left.checked_sub(bytes).ok_or_else(|| LimitError {
+        why: PARSE_TERM_CUT,
+        message: format!(
+            "n3: {CLOSURE_CUT}: a parsed formula would take more than max_term_bytes \
+             (raise ClosureLimits::max_term_bytes to allow more)"
+        ),
+    })
+}
+
+/// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`) under
+/// the run's [`ClosureLimits::max_term_bytes`]: the parser charges every byte it keeps
+/// before allocating it (each string, term node and copy; `parse_charged_checked`), so a
+/// small source whose prefixes, base or shared formulas expand into a huge formula is
+/// refused while it is parsed. On that refusal the run is refused
+/// (a cut, and an error every closure of the run fails with). `None` for that and for any
+/// other failure: a syntax error, or the nesting limit (itself recorded as a cut).
+pub(crate) fn parse_n3_term(
+    src: &str,
+    base: &str,
+    run: &Truncation,
+    cuts: &impl Sink,
+) -> Option<super::parser::Parsed> {
+    use super::parser::{parse_charged_checked, ParseFailure};
+    let allowance = Some(run.limits.max_term_bytes);
+    match parse_charged_checked(src, base, std::iter::empty(), allowance) {
+        Ok(p) => Some(p),
+        Err(ParseFailure::Syntax(_)) => None,
+        Err(ParseFailure::Resource(e)) => {
+            cuts.record(e.why);
+            if e.why == PARSE_TERM_CUT {
+                run.refuse(|| e.message);
+            }
+            None
+        }
+    }
 }
 
 /// A document a builtin asked the resolver for (`log:semantics`, `log:content`). No

@@ -838,8 +838,20 @@ fn runtime_document(
     pending: &bounded::Pending,
     caller_ns: Option<&str>,
 ) -> Option<Vec<[Term; 3]>> {
+    // a walk, not a set of the labels: the parsed document was charged against the run's
+    // term-size limit, and nothing else is allocated before it is sized
     let spells_caller = caller_ns.is_some_and(|ns| {
-        document_blank_labels(&parsed).iter().any(|l| l.starts_with(ns))
+        let rule_terms = parsed
+            .rules
+            .iter()
+            .chain(&parsed.backward_rules)
+            .flat_map(|r| r.premise.iter().chain(&r.conclusion));
+        parsed
+            .facts
+            .iter()
+            .chain(rule_terms)
+            .flatten()
+            .any(|t| any_blank_label(t, &|l| l.starts_with(ns)))
     });
     if spells_caller {
         return settle(
@@ -867,6 +879,18 @@ fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
         }
         Term::Triple(tr) => tr.iter().for_each(|m| term_blank_labels(m, out)),
         _ => {}
+    }
+}
+
+/// Does a blank label reachable in `t` (as [`term_blank_labels`] reaches them) satisfy
+/// `hit`?
+fn any_blank_label(t: &Term, hit: &impl Fn(&str) -> bool) -> bool {
+    match t {
+        Term::Blank(l) => hit(l),
+        Term::List(ms) => ms.iter().any(|m| any_blank_label(m, hit)),
+        Term::Formula(ts) => ts.iter().flatten().any(|m| any_blank_label(m, hit)),
+        Term::Triple(tr) => tr.iter().any(|m| any_blank_label(m, hit)),
+        _ => false,
     }
 }
 
@@ -3291,23 +3315,24 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
 /// A parsed document's statements with rules re-encoded into their surface
 /// triple form (log:semantics / log:parsedAsN3 result formulae).
 fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
-    let quote = |ts: &[[Term; 3]]| -> Term {
+    // the rules' formulas MOVE back into statements: no copy of a parsed formula
+    let quote = |ts: Vec<[Term; 3]>| -> Term {
         if ts.is_empty() {
             // the empty formula IS the literal true
             Term::Lit("true".into(), parser::XSD_BOOLEAN.into(), None)
         } else {
-            Term::Formula(ts.to_vec())
+            Term::Formula(ts)
         }
     };
     let mut ts = parsed.facts;
-    for r in &parsed.rules {
-        ts.push([quote(&r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(&r.conclusion)]);
+    for r in parsed.rules {
+        ts.push([quote(r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(r.conclusion)]);
     }
-    for r in &parsed.backward_rules {
+    for r in parsed.backward_rules {
         ts.push([
-            quote(&r.conclusion),
+            quote(r.conclusion),
             Term::Iri(parser::LOG_IMPLIED_BY.into()),
-            quote(&r.premise),
+            quote(r.premise),
         ]);
     }
     ts
@@ -4015,8 +4040,9 @@ const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langSt
 /// The formula a builtin parses N3 text into (`log:parsedAsN3`, `log:semantics`), sized
 /// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
 /// cut) or when the formula is past the run's term-size limit (a cut, and the run
-/// refused). The parse itself is not charged as it runs: it allocates in proportion to
-/// its expanded input before the formula is sized (GH #6771 follow-up).
+/// refused). The parser charges what it keeps against the limit before allocating it
+/// ([`bounded::parse_n3_term`]), so an expanding parse stops early; the formula is sized
+/// again here once [`runtime_document`] has re-encoded it.
 fn parsed_formula(
     f: Func,
     src: &str,
@@ -4024,8 +4050,9 @@ fn parsed_formula(
     bw: &BwCtx,
     pending: &bounded::Pending,
 ) -> Option<Term> {
-    // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-    let parsed = bounded::parse_n3(src, base, pending).ok()?;
+    // no-match: ill-typed (not N3 text; `parse_n3_term` already recorded a parser limit
+    // or the term-size refusal as a cut)
+    let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
     let statements = runtime_document(parsed, pending, bw.caller_ns.as_deref())?;
     let bytes = statements
         .iter()
