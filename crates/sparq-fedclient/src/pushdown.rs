@@ -72,7 +72,7 @@
 // bind-join block primitive. Phase 4 owns this module; Phase 5 owns operators.rs/stream.rs.
 // Flagged for Fable re-review when available.
 
-use crate::planner::{pattern_vars, render_pattern_clause};
+use crate::planner::{is_varname, pattern_vars, render_pattern_clause, render_term, RenderError};
 use crate::source::{BindJoin, Capability, FilterClass, Interface, SubQuery};
 use sparq_fedplan::{Bgp, PatternSources, Term, TriplePattern};
 
@@ -109,25 +109,28 @@ pub fn bind_block_size(cap: &Capability) -> usize {
 /// syntax accepted inside a group graph pattern — the cross-group bind-join primitive.
 ///
 /// Single-variable blocks use the short `VALUES ?v { v1 v2 }` form; multi-variable blocks
-/// use the parenthesised `VALUES (?a ?b) { (a1 b1) (a2 b2) }` form. Each term is the
-/// caller's already-rendered SPARQL term string (an IRI in `<>` or a quoted literal — the
-/// only kinds a join key carries). This mirrors `sparq-engine`'s
-/// `service.rs::render_values_block` byte-for-byte so a pushed block reads identically to the
-/// engine's SERVICE `VALUES` pushdown; the engine's function is `pub(crate)`, hence the
-/// re-declaration. `vars` empty or `tuples` empty yields an empty string (no block to push).
+/// use the parenthesised `VALUES (?a ?b) { (a1 b1) (a2 b2) }` form, the same shape as
+/// `sparq-engine`'s `service.rs::render_values_block`. Every variable must be a SPARQL
+/// `VARNAME`, every row must hold exactly one bound term (an IRI or a literal) per variable,
+/// and each term is written by the same strict renderer as a pattern position, so the block
+/// is exactly one `VALUES` clause whatever the inputs hold; anything else is a
+/// [`RenderError`]. `vars` empty or `tuples` empty yields an empty string (no block to push).
 /// [OPUS-4.8] sq-7byx.
-pub fn render_values_block(vars: &[String], tuples: &[Vec<String>]) -> String {
+pub fn render_values_block(vars: &[String], tuples: &[Vec<Term>]) -> Result<String, RenderError> {
     use std::fmt::Write as _;
     if vars.is_empty() || tuples.is_empty() {
-        return String::new();
+        return Ok(String::new());
     }
+    if let Some(v) = vars.iter().find(|v| !is_varname(v)) {
+        return Err(RenderError::Var(v.clone()));
+    }
+    let cell = |t: &Term| match t {
+        Term::Var(v) => Err(RenderError::Values(format!("variable ?{} in place of a term", v.0))),
+        _ => render_term(t),
+    };
     let mut s = String::new();
     if vars.len() == 1 {
         let _ = write!(s, "VALUES ?{} {{", vars[0]);
-        for t in tuples {
-            let _ = write!(s, " {}", t[0]);
-        }
-        s.push_str(" }");
     } else {
         s.push_str("VALUES (");
         for (i, v) in vars.iter().enumerate() {
@@ -137,19 +140,60 @@ pub fn render_values_block(vars: &[String], tuples: &[Vec<String>]) -> String {
             let _ = write!(s, "?{}", v);
         }
         s.push_str(") {");
-        for tuple in tuples {
+    }
+    for tuple in tuples {
+        if tuple.len() != vars.len() {
+            return Err(RenderError::Values(format!(
+                "{} terms for {} variables",
+                tuple.len(),
+                vars.len()
+            )));
+        }
+        if vars.len() == 1 {
+            let _ = write!(s, " {}", cell(&tuple[0])?);
+        } else {
             s.push_str(" (");
             for (i, t) in tuple.iter().enumerate() {
                 if i > 0 {
                     s.push(' ');
                 }
-                s.push_str(t);
+                s.push_str(&cell(t)?);
             }
             s.push(')');
         }
-        s.push_str(" }");
     }
-    s
+    s.push_str(" }");
+    Ok(s)
+}
+
+/// One `ORDER BY` key pushed to a source: a variable, ascending or descending.
+/// [OPUS-4.8] sq-7byx.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderKey {
+    /// The variable name, without the leading `?`. Must be a SPARQL `VARNAME`.
+    pub var: String,
+    /// `true` for `DESC(?var)`, `false` for ascending `?var`.
+    pub descending: bool,
+}
+
+impl OrderKey {
+    /// An ascending key on `var`.
+    pub fn asc(var: impl Into<String>) -> OrderKey {
+        OrderKey { var: var.into(), descending: false }
+    }
+
+    /// A descending key on `var`.
+    pub fn desc(var: impl Into<String>) -> OrderKey {
+        OrderKey { var: var.into(), descending: true }
+    }
+
+    /// The key as SPARQL, or `None` when `var` is not a SPARQL `VARNAME`.
+    fn render(&self) -> Option<String> {
+        if !is_varname(&self.var) {
+            return None;
+        }
+        Some(if self.descending { format!("DESC(?{})", self.var) } else { format!("?{}", self.var) })
+    }
 }
 
 // ─── A light FILTER-conjunct model (the seam Phase 5 wires the parsed algebra into) ─────
@@ -168,8 +212,10 @@ pub struct Filter {
     /// The variable names this conjunct references (without the leading `?`). All must be
     /// bound by the group for the conjunct to be pushable (the common-variable check).
     pub vars: Vec<String>,
-    /// The rendered SPARQL expression, e.g. `?age > 18` or `?x = <http://ex/a>` — emitted
-    /// verbatim inside the pushed `FILTER(…)`.
+    /// The SPARQL expression, e.g. `?age > 18` or `?x = <http://ex/a>`. It is pushed inside
+    /// `FILTER(…)` only when it parses as exactly one expression that references no variable
+    /// outside [`Filter::vars`] and contains no `EXISTS` (see [`push_group`]); otherwise the
+    /// conjunct stays local.
     pub expr: String,
     /// The [`FilterClass`] the source must support to evaluate this conjunct remotely. A
     /// simple equality / `IN` needs [`FilterClass::Equality`]; anything richer needs
@@ -185,6 +231,67 @@ impl Filter {
             expr: expr.into(),
             needs,
         }
+    }
+}
+
+impl Filter {
+    /// Whether `expr` can be written into a pushed `FILTER(…)` unchanged: the SPARQL parser
+    /// reads `FILTER(<expr>)` as exactly one filter over one expression, every variable that
+    /// expression references is in [`Filter::vars`] (so the common-variable check sees all of
+    /// them), and it has no `EXISTS` (whose graph pattern could reference others).
+    fn expr_is_pushable(&self) -> bool {
+        use spargebra::algebra::GraphPattern;
+        let parse = |sparql: String| match spargebra::SparqlParser::new().parse_query(&sparql) {
+            Ok(spargebra::Query::Select { pattern: GraphPattern::Project { inner, .. }, .. }) => Some(*inner),
+            _ => None,
+        };
+        let empty = |p: &GraphPattern| matches!(p, GraphPattern::Bgp { patterns } if patterns.is_empty());
+        // The parser folds consecutive FILTERs into one conjunction, so the text is also parsed
+        // as a BIND operand: only a single expression parses to the same tree in both places.
+        let Some(GraphPattern::Filter { expr, inner }) =
+            parse(format!("SELECT * WHERE {{ FILTER({}) }}", self.expr))
+        else {
+            return false;
+        };
+        let Some(GraphPattern::Extend { inner: bound_inner, expression, .. }) =
+            parse(format!("SELECT * WHERE {{ BIND(({}) AS ?__sparq_pushed) }}", self.expr))
+        else {
+            return false;
+        };
+        if !empty(&inner) || !empty(&bound_inner) || expr != expression {
+            return false;
+        }
+        let mut vars = Vec::new();
+        expression_vars(&expr, &mut vars) && vars.iter().all(|v| self.vars.iter().any(|d| d == v))
+    }
+}
+
+/// Collect the variable names `e` references into `out`; `false` when `e` contains `EXISTS`.
+fn expression_vars(e: &spargebra::algebra::Expression, out: &mut Vec<String>) -> bool {
+    use spargebra::algebra::Expression as E;
+    match e {
+        E::NamedNode(_) | E::Literal(_) => true,
+        E::Variable(v) | E::Bound(v) => {
+            out.push(v.as_str().to_owned());
+            true
+        }
+        E::Or(a, b)
+        | E::And(a, b)
+        | E::Equal(a, b)
+        | E::SameTerm(a, b)
+        | E::Greater(a, b)
+        | E::GreaterOrEqual(a, b)
+        | E::Less(a, b)
+        | E::LessOrEqual(a, b)
+        | E::Add(a, b)
+        | E::Subtract(a, b)
+        | E::Multiply(a, b)
+        | E::Divide(a, b) => expression_vars(a, out) && expression_vars(b, out),
+        E::UnaryPlus(a) | E::UnaryMinus(a) | E::Not(a) => expression_vars(a, out),
+        E::In(a, list) => expression_vars(a, out) && list.iter().all(|x| expression_vars(x, out)),
+        E::If(a, b, c) => expression_vars(a, out) && expression_vars(b, out) && expression_vars(c, out),
+        E::Coalesce(list) | E::FunctionCall(_, list) => list.iter().all(|x| expression_vars(x, out)),
+        E::Exists(_) => false,
     }
 }
 
@@ -356,8 +463,9 @@ pub struct PushedGroup {
 /// group and need not come back. `filters` are the query's FILTER conjuncts; each is pushed
 /// **iff** the source's [`Capability::pushable_filters`] class covers it AND it passes
 /// [`common_variable_check`] — otherwise it is recorded in `local_filters` for the residual.
-/// `order_keys` (rendered SPARQL sort keys) and `limit` are pushed only when the capability's
-/// `order_limit` is set.
+/// A conjunct whose expression is not exactly one SPARQL expression over its declared
+/// variables (see [`Filter::expr`]) is kept local too.
+/// `order_keys` and `limit` are pushed only when the capability's `order_limit` is set.
 ///
 /// The pushed shape depends on the interface:
 /// * [`Interface::Endpoint`] / [`Interface::LocalEngine`] → a **multi-pattern** `SELECT
@@ -372,16 +480,17 @@ pub struct PushedGroup {
 ///   fragment path uses minimally — honest, not an overclaim that a fragment server answers a
 ///   multi-pattern BGP.)
 ///
-/// Returns `None` when the group is empty, names a pattern index out of range for the BGP, or
+/// Returns `None` when the group is empty, names a pattern index out of range for the BGP,
 /// has a pattern position that cannot be written as one SPARQL term (see
-/// [`crate::planner::RenderError`]): fail closed rather than emit a partial or altered query. [OPUS-4.8] sq-7byx.
+/// [`crate::planner::RenderError`]), or has an order key whose variable is not a SPARQL
+/// `VARNAME`: fail closed rather than emit a partial or altered query. [OPUS-4.8] sq-7byx.
 pub fn push_group(
     group: &ExclusiveGroup,
     bgp: &Bgp,
     cap: &Capability,
     output_vars: &[String],
     filters: &[Filter],
-    order_keys: &[String],
+    order_keys: &[OrderKey],
     limit: Option<u64>,
 ) -> Option<PushedGroup> {
     if group.patterns.is_empty() {
@@ -420,7 +529,8 @@ pub fn push_group(
     for (i, f) in filters.iter().enumerate() {
         let pushable = !fragment
             && class_covers(cap.pushable_filters, f.needs)
-            && common_variable_check(f, &gvars);
+            && common_variable_check(f, &gvars)
+            && f.expr_is_pushable();
         if pushable {
             pushed_filters.push(i);
         } else {
@@ -468,7 +578,8 @@ pub fn push_group(
     // --- ORDER BY / LIMIT only when the capability covers them (never for a fragment source).
     if !fragment && cap.order_limit {
         if !order_keys.is_empty() {
-            sparql.push_str(&format!(" ORDER BY {}", order_keys.join(" ")));
+            let keys = order_keys.iter().map(OrderKey::render).collect::<Option<Vec<_>>>()?;
+            sparql.push_str(&format!(" ORDER BY {}", keys.join(" ")));
         }
         if let Some(n) = limit {
             sparql.push_str(&format!(" LIMIT {}", n));
@@ -698,7 +809,7 @@ mod tests {
             &cap,
             &["s".to_string(), "o".to_string()],
             &[],
-            &["?o".to_string()],
+            &[OrderKey::asc("o")],
             Some(10),
         )
         .unwrap();
@@ -723,7 +834,7 @@ mod tests {
             &cap,
             &["s".to_string(), "o".to_string()],
             &[],
-            &["?o".to_string()],
+            &[OrderKey::asc("o")],
             Some(10),
         )
         .unwrap();
@@ -903,24 +1014,24 @@ mod tests {
         // Single var → short form.
         let single = render_values_block(
             &["j".to_string()],
-            &[vec!["<http://ex/a>".to_string()], vec!["<http://ex/b>".to_string()]],
+            &[vec![iri("http://ex/a")], vec![iri("http://ex/b")]],
         );
-        assert_eq!(single, "VALUES ?j { <http://ex/a> <http://ex/b> }");
+        assert_eq!(single.unwrap(), "VALUES ?j { <http://ex/a> <http://ex/b> }");
         // Multi var → parenthesised form.
         let multi = render_values_block(
             &["a".to_string(), "b".to_string()],
             &[
-                vec!["<http://ex/a1>".to_string(), "<http://ex/b1>".to_string()],
-                vec!["<http://ex/a2>".to_string(), "<http://ex/b2>".to_string()],
+                vec![iri("http://ex/a1"), iri("http://ex/b1")],
+                vec![iri("http://ex/a2"), iri("http://ex/b2")],
             ],
         );
         assert_eq!(
-            multi,
+            multi.unwrap(),
             "VALUES (?a ?b) { (<http://ex/a1> <http://ex/b1>) (<http://ex/a2> <http://ex/b2>) }"
         );
         // Empty inputs → empty block (nothing to push).
-        assert_eq!(render_values_block(&[], &[]), "");
-        assert_eq!(render_values_block(&["j".to_string()], &[]), "");
+        assert_eq!(render_values_block(&[], &[]).unwrap(), "");
+        assert_eq!(render_values_block(&["j".to_string()], &[]).unwrap(), "");
     }
 
     // [OPUS-4.8] sq-qcnn.22: Additional direct unit tests for coverage ratchet
@@ -1020,14 +1131,85 @@ mod tests {
         let block = render_values_block(
             &["x".to_string(), "y".to_string(), "z".to_string()],
             &[
-                vec!["<http://ex/a>".to_string(), "<http://ex/b>".to_string(), "<http://ex/c>".to_string()],
-                vec!["<http://ex/d>".to_string(), "<http://ex/e>".to_string(), "<http://ex/f>".to_string()],
+                vec![iri("http://ex/a"), iri("http://ex/b"), iri("http://ex/c")],
+                vec![iri("http://ex/d"), iri("http://ex/e"), iri("http://ex/f")],
             ],
         );
         assert_eq!(
-            block,
+            block.unwrap(),
             "VALUES (?x ?y ?z) { (<http://ex/a> <http://ex/b> <http://ex/c>) (<http://ex/d> <http://ex/e> <http://ex/f>) }"
         );
+    }
+
+    /// The pushed text parses as one query.
+    fn parses(sparql: &str) -> bool {
+        spargebra::SparqlParser::new().parse_query(sparql).is_ok()
+    }
+
+    #[test]
+    fn values_cells_are_rendered_as_terms_or_refused() {
+        let lit = |s: &str| Term::Literal(s.to_string());
+        // Literals are re-serialised strictly; the block parses and keeps one row per tuple.
+        let block = render_values_block(
+            &["a".to_string(), "b".to_string()],
+            &[vec![iri("http://ex/a"), lit("x } ; y")], vec![iri("http://ex/b"), lit("\"z\"@en")]],
+        )
+        .unwrap();
+        assert_eq!(block, r#"VALUES (?a ?b) { (<http://ex/a> "x } ; y") (<http://ex/b> "z"@en) }"#);
+        assert!(parses(&format!("SELECT * WHERE {{ {block} }}")));
+        // Anything that is not one bound term per variable is refused.
+        let one = |cells: Vec<Term>| render_values_block(&["a".to_string()], &[cells]);
+        assert!(matches!(one(vec![iri("http://ex/a> } ; <x")]), Err(RenderError::Iri(_))));
+        assert!(matches!(one(vec![lit("\"a\" } ; \"b\"")]), Err(RenderError::Literal(_))));
+        assert!(matches!(one(vec![var("x")]), Err(RenderError::Values(_))));
+        assert!(matches!(one(vec![]), Err(RenderError::Values(_))));
+        assert!(matches!(one(vec![iri("http://ex/a"), iri("http://ex/b")]), Err(RenderError::Values(_))));
+        assert!(matches!(
+            render_values_block(&["a }".to_string()], &[vec![iri("http://ex/a")]]),
+            Err(RenderError::Var(_))
+        ));
+    }
+
+    #[test]
+    fn order_keys_are_variables_with_a_direction() {
+        let bgp = Bgp::new(vec![tp(var("s"), iri("http://ex/p"), var("o"))]);
+        let group = ExclusiveGroup { source: 0, patterns: vec![0] };
+        let cap = Capability::endpoint();
+        let out = ["s".to_string()];
+        let pushed =
+            push_group(&group, &bgp, &cap, &out, &[], &[OrderKey::desc("o"), OrderKey::asc("s")], Some(3))
+                .unwrap();
+        assert_eq!(pushed.sub.sparql, "SELECT ?s WHERE { ?s <http://ex/p> ?o } ORDER BY DESC(?o) ?s LIMIT 3");
+        assert!(parses(&pushed.sub.sparql));
+        // A key that is not a variable name fails closed.
+        assert!(push_group(&group, &bgp, &cap, &out, &[], &[OrderKey::asc("o } LIMIT 1")], None).is_none());
+    }
+
+    #[test]
+    fn filters_push_only_as_one_expression_over_their_declared_variables() {
+        let bgp = Bgp::new(vec![tp(var("s"), iri("http://ex/p"), var("o"))]);
+        let group = ExclusiveGroup { source: 0, patterns: vec![0] };
+        let f = |vars: &[&str], expr: &str| {
+            Filter::new(vars.iter().map(|v| v.to_string()).collect(), expr, FilterClass::Full)
+        };
+        let filters = [
+            f(&["o"], "?o > 1"),
+            // Not exactly one expression.
+            f(&["o"], "?o > 1) FILTER(true"),
+            f(&["o"], "?o > 1) } SELECT * WHERE { ?a ?b ?c"),
+            f(&["o"], "?o >"),
+            f(&["o"], "?o > 1) AS ?y) FILTER(true) BIND((1"),
+            // A variable the conjunct does not declare.
+            f(&["o"], "?o = ?s"),
+            // EXISTS.
+            f(&["o"], "?o > 1 || EXISTS { ?a ?b ?c }"),
+        ];
+        let pushed =
+            push_group(&group, &bgp, &Capability::endpoint(), &["s".to_string()], &filters, &[], None).unwrap();
+        assert_eq!(pushed.pushed_filters, vec![0]);
+        assert_eq!(pushed.local_filters, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(pushed.sub.sparql, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o > 1) }");
+        assert!(parses(&pushed.sub.sparql));
     }
 
     #[test]

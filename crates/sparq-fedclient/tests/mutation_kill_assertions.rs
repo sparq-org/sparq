@@ -45,7 +45,7 @@
 
 use oxrdf::{Literal, Term as RdfTerm};
 use sparq_fedclient::{
-    bind_block_size, is_forbidden_ip, lower_leaf, parse_srj, push_group, BindJoin, Capability,
+    bind_block_size, is_forbidden_ip, lower_leaf, parse_srj, push_group, BindJoin, Capability, OrderKey,
     EgressGuard, ExclusiveGroup, FedError, Filter, FilterClass, InterpError, ResolveError,
     SourceResolver, WireError,
 };
@@ -230,7 +230,7 @@ fn push_group_renders_bare_literal_escapes_filter_order_limit_exactly() {
         &Capability::endpoint(),
         &["s".to_string()],
         &filters,
-        &["?s".to_string()],
+        &[OrderKey::asc("s")],
         Some(5),
     )
     .expect("a well-formed group pushes");
@@ -347,7 +347,7 @@ fn push_group_without_order_limit_capability_pushes_neither() {
         &cap,
         &["s".to_string()],
         &[],
-        &["?s".to_string()],
+        &[OrderKey::asc("s")],
         Some(9),
     )
     .expect("a well-formed group pushes");

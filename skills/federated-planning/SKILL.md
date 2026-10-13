@@ -396,13 +396,18 @@ since:
   member — exactly-one-source, same-source, share-a-variable, via union-find); a cross-source
   or zero-source pattern is excluded. `push_group(...)` builds the **maximal sub-algebra** per
   group: projection trimmed to the join + output vars, the FILTER conjuncts the source's
-  `FilterClass` covers AND that pass the common-variable check, `ORDER`/`LIMIT` when the
-  capability allows — a full endpoint gets the whole group as one multi-pattern `SELECT`, a
+  `FilterClass` covers AND that pass the common-variable check AND whose `Filter::expr` text
+  parses as exactly one SPARQL expression over only the conjunct's declared `vars` with no
+  `EXISTS` (anything else stays a local filter), `ORDER`/`LIMIT` when the capability allows
+  (`ORDER BY` keys are typed `OrderKey { var, descending }` — `OrderKey::asc`/`desc` — and a key
+  whose name is not a `VARNAME` makes `push_group` return `None`) — a full endpoint gets the whole group as one multi-pattern `SELECT`, a
   fragment source answers one pattern only (no collapse, no filter pushed — honest about a
   fragment server's access unit). `common_variable_check(filter, group_vars)` is the **exact**
   check Comunica omits (#834/#609): push a conjunct only when *every* variable it references is
-  bound by the group. `render_values_block` / `bind_block_size` are the cross-group bind-join
-  block primitive (VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
+  bound by the group. `render_values_block(vars, &[Vec<Term>])` / `bind_block_size` are the
+  cross-group bind-join block primitive (each cell goes through the same strict term renderer;
+  a variable cell, a row whose length differs from `vars`, or a bad variable name is a
+  `RenderError`; VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
   plain TPF), mirroring `sparq-engine`'s `pub(crate)` `service.rs` helpers. Pushdown only ever
   **narrows** a source's result, so it is correctness-preserving; the FILTER model is light
   (the parsed-query FILTER algebra wiring is Phase 5).

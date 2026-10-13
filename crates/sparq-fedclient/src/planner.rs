@@ -345,6 +345,9 @@ pub enum RenderError {
     Iri(String),
     /// A literal that starts with `"` but is not exactly one SPARQL literal.
     Literal(String),
+    /// A `VALUES` row that is not one bound term per variable: a row of the wrong length,
+    /// or a variable where a term is required.
+    Values(String),
 }
 
 impl std::fmt::Display for RenderError {
@@ -353,6 +356,7 @@ impl std::fmt::Display for RenderError {
             RenderError::Var(v) => write!(f, "not a SPARQL variable name: {v:?}"),
             RenderError::Iri(i) => write!(f, "IRI has a character SPARQL forbids: {i:?}"),
             RenderError::Literal(l) => write!(f, "not exactly one SPARQL literal: {l:?}"),
+            RenderError::Values(v) => write!(f, "not a VALUES row of bound terms: {v}"),
         }
     }
 }
@@ -424,7 +428,7 @@ fn is_iriref_body(iri: &str) -> bool {
 
 /// SPARQL `VARNAME`: `( PN_CHARS_U | [0-9] ) ( PN_CHARS_U | [0-9] | #xB7 | [#x300-#x36F] |
 /// [#x203F-#x2040] )*`.
-fn is_varname(name: &str) -> bool {
+pub(crate) fn is_varname(name: &str) -> bool {
     fn pn_chars_u_or_digit(c: char) -> bool {
         c == '_'
             || c.is_ascii_alphanumeric()
