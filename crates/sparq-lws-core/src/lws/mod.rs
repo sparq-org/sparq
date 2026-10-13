@@ -2507,6 +2507,8 @@ pub(crate) mod test_store {
         pub lose_nth_write_of: Arc<std::sync::Mutex<Option<(String, usize)>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
+        /// `meta` of this IRI reports no modification time, as a backend that keeps none does.
+        pub timeless: Arc<std::sync::Mutex<Option<String>>>,
         /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
         /// before the rest fail.
         pub exists_answers: Arc<std::sync::atomic::AtomicUsize>,
@@ -2593,6 +2595,7 @@ pub(crate) mod test_store {
                 lose_nth_write_of: Default::default(),
                 fail_list: Default::default(),
                 fail_meta: Default::default(),
+                timeless: Default::default(),
                 exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
                 fail_after_create: Default::default(),
@@ -2720,7 +2723,13 @@ pub(crate) mod test_store {
             if self.fail_meta.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.meta(iri).await
+            let mut meta = self.inner.meta(iri).await?;
+            if self.timeless.lock().unwrap().as_deref() == Some(iri) {
+                if let Some(m) = meta.as_mut() {
+                    m.last_modified = None;
+                }
+            }
+            Ok(meta)
         }
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
             if self.fail_exists.load(Ordering::SeqCst)
