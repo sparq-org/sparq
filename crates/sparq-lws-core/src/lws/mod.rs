@@ -757,9 +757,10 @@ impl<S: Store + 'static> LwsState<S> {
 
     /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
     /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). Every
-    /// route checks it before anything else, and every lock is taken only while it holds
-    /// ([`resources::IriLocks::lock`]), so one that is not visible is answered `503` at once, or
-    /// skipped by a walk over many, and never waited on.
+    /// route to a resource or record checks it once it has authorized the request (so only a
+    /// caller that may act on it learns it is set aside; see [`access::aside`]), and every lock
+    /// is taken only while it holds ([`resources::IriLocks::lock`]), so one that is not visible
+    /// is answered `503` at once, or fails a walk over many, and is never waited on.
     pub(crate) fn visible(&self, uri: &str) -> bool {
         self.locks.visible(uri)
     }
@@ -825,7 +826,7 @@ impl<S: Store + 'static> LwsState<S> {
         let bytes = left.bytes();
         self.set_aside_bytes
             .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
-        self.locks.hide(&iris);
+        self.locks.hide(&iris, left.priors());
         (iris, bytes)
     }
 
@@ -1197,6 +1198,13 @@ impl Unsettled {
     fn iris(&self) -> Vec<String> {
         iris_of(&self.0)
     }
+
+    /// What each resource it is to was before the change (see [`Prior`]).
+    fn priors(&self) -> std::collections::HashMap<String, Prior> {
+        let mut out = std::collections::HashMap::new();
+        priors_of(&self.0, &mut out);
+        out
+    }
 }
 
 /// About how many bytes `undo` holds to put back: each body, and each record at its limit.
@@ -1213,6 +1221,104 @@ fn bytes_of(undo: &[Undo]) -> usize {
             _ => MAX_META_BYTES,
         })
         .fold(0, usize::saturating_add)
+}
+
+/// What a resource that a stuck change is to was before the change began, as far as deciding
+/// who may act on it goes: taken from what the change's journal staged before its first step
+/// (and so before any of its writes landed), never from what is stored while it is part way.
+/// A field the change left nothing to put back of (it did not touch it, or it is put back
+/// already) is `None`: what is stored for it now is what it was.
+///
+/// It decides only who may learn the resource is set aside ([`access::aside`]); nothing is
+/// served or changed on it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Prior {
+    /// Whether the resource was there.
+    pub existed: Option<bool>,
+    /// Its metadata: the default when it had none, and, when what it had does not parse, one
+    /// marked `pending` (which refuses every grant).
+    pub meta: Option<ResourceMeta>,
+    /// Its format (a container's is its listing's).
+    pub format: Option<Option<String>>,
+}
+
+impl Prior {
+    /// Fill what this does not say yet from `other`.
+    pub(crate) fn or(&mut self, other: Prior) {
+        self.existed = self.existed.or(other.existed);
+        if self.meta.is_none() {
+            self.meta = other.meta;
+        }
+        if self.format.is_none() {
+            self.format = other.format;
+        }
+    }
+}
+
+/// What each resource `undo` (newest step first, as it is put back) puts back was before its
+/// change (see [`Prior`]).
+fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) {
+    let format = |iri: &str, meta: &StoredMeta| {
+        Some(if iri.ends_with('/') {
+            LWS_JSON.to_string()
+        } else {
+            meta.content_type.clone()
+        })
+    };
+    // Put back newest first: a key written twice (metadata marked `pending`, then the new
+    // metadata) has two steps, the later one holding the intermediate state. The oldest
+    // step's prior, the state from before the change, is the one kept.
+    for step in undo.iter().rev() {
+        let (iri, prior) = match step {
+            Undo::Restore { key, prior } => match key.strip_suffix(META_SUFFIX) {
+                Some(iri) => {
+                    let meta = match prior {
+                        Some((body, _)) => parse_meta(iri, body).unwrap_or(ResourceMeta {
+                            pending: true,
+                            ..ResourceMeta::default()
+                        }),
+                        None => ResourceMeta::default(),
+                    };
+                    (
+                        iri.to_string(),
+                        Prior {
+                            meta: Some(meta),
+                            ..Prior::default()
+                        },
+                    )
+                }
+                None => (
+                    key.clone(),
+                    Prior {
+                        existed: Some(prior.is_some()),
+                        format: Some(prior.as_ref().and_then(|(_, m)| format(key, m))),
+                        ..Prior::default()
+                    },
+                ),
+            },
+            Undo::Recreate { iri, meta, .. } => (
+                iri.clone(),
+                Prior {
+                    existed: Some(true),
+                    format: Some(format(iri, meta)),
+                    ..Prior::default()
+                },
+            ),
+            Undo::Remove { iri, .. } => (
+                iri.clone(),
+                Prior {
+                    existed: Some(false),
+                    ..Prior::default()
+                },
+            ),
+            Undo::Resolve { undo, .. } => {
+                priors_of(undo, out);
+                continue;
+            }
+            Undo::Locked { .. } | Undo::Forget { .. } => continue,
+        };
+        out.entry(iri).or_default().or(prior);
+    }
 }
 
 /// The resources `undo` is to, each once.
@@ -1825,18 +1931,12 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Err(error) => return state.challenge(Some(error)),
     };
     if path.starts_with(SUBSCRIPTIONS_PATH) {
-        if let Some(unavailable) = resources::unavailable(state, &req) {
-            return unavailable;
-        }
         return notify::handle(state, &req, &agent).await;
     }
     if path == TYPE_INDEX_PATH || path == TYPE_SEARCH_PATH {
         return index::handle(state, &req, &agent).await;
     }
     if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
-        if let Some(unavailable) = resources::unavailable(state, &req) {
-            return unavailable;
-        }
         return access::handle(state, &req, &agent).await;
     }
     if path.starts_with("/.lws/") || path == "/.lws" {
@@ -2227,6 +2327,9 @@ pub(crate) mod test_store {
         /// commits, then reports a backend failure, as when a remote store's reply is lost after
         /// the update landed.
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// As `fail_after_write_of`, for the `n`th write (from 1) of the IRI named from now on
+        /// alone: `(iri, n)`.
+        pub lose_nth_write_of: Arc<std::sync::Mutex<Option<(String, usize)>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
         /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
@@ -2286,6 +2389,7 @@ pub(crate) mod test_store {
                 fail_list_of: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
+                lose_nth_write_of: Default::default(),
                 fail_list: Default::default(),
                 fail_meta: Default::default(),
                 exists_answers: Default::default(),
@@ -2435,7 +2539,18 @@ pub(crate) mod test_store {
                 if lost {
                     *slot = None;
                 }
-                lost
+                let mut nth = self.lose_nth_write_of.lock().unwrap();
+                let lost_nth = match nth.as_mut() {
+                    Some((of, n)) if of == iri => {
+                        *n -= 1;
+                        *n == 0
+                    }
+                    _ => false,
+                };
+                if lost_nth {
+                    *nth = None;
+                }
+                lost || lost_nth
             };
             if lost {
                 written?;
@@ -2732,6 +2847,129 @@ pub(crate) mod test_store {
         cfg.page_size = page_size;
         let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
         (state, store)
+    }
+
+    /// The owner of a [`closed_state`]'s storage.
+    pub const OWNER: &str = "https://owner.example/#me";
+
+    /// An authenticated agent.
+    pub fn agent(subject: &str) -> super::Agent {
+        super::Agent {
+            subject: Some(subject.into()),
+            ..super::Agent::anonymous()
+        }
+    }
+
+    /// A state over a [`FlakyStore`] that is not open: only its owner ([`OWNER`]), a resource's
+    /// creator and the grants decide who may do what.
+    pub async fn closed_state(page_size: usize) -> (super::LwsState<FlakyStore>, FlakyStore) {
+        let store = FlakyStore::new();
+        let mut cfg = super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some(OWNER.into());
+        cfg.allow_insecure_fetch = true;
+        cfg.page_size = page_size;
+        let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
+        (state, store)
+    }
+
+    /// Store a data resource `name` in the root; its IRI.
+    pub async fn data(state: &super::LwsState<FlakyStore>, name: &str) -> String {
+        let root = state.cfg.storage();
+        let iri = format!("{root}{name}");
+        state
+            .store
+            .create_in_container(&root, &iri, Bytes::from("x"), "text/plain")
+            .await
+            .unwrap();
+        iri
+    }
+
+    /// As the owner, grant `assignee` read access to `targets`, and nothing else; the grant's
+    /// IRI.
+    pub async fn grant_read(
+        state: &super::LwsState<FlakyStore>,
+        assignee: &str,
+        targets: &[&str],
+    ) -> String {
+        let grant = serde_json::json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": assignee,
+                "target": {"type": "StorageResource", "value": targets}}],
+        });
+        let r = super::access::handle(
+            state,
+            &request(
+                axum::http::Method::POST,
+                super::GRANTS_PATH,
+                &[("content-type", super::LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &agent(OWNER),
+        )
+        .await;
+        assert_eq!(r.status(), axum::http::StatusCode::CREATED);
+        r.headers()[axum::http::header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// `req` routed as the server routes it, sent with an access token for `agent`'s subject
+    /// (none for an anonymous one).
+    pub async fn route_as(
+        state: &super::LwsState<FlakyStore>,
+        mut req: super::LwsRequest,
+        agent: &super::Agent,
+    ) -> axum::response::Response {
+        if let Some(subject) = &agent.subject {
+            let token = super::tokens::mint(
+                &state.cfg,
+                subject,
+                "https://client.example/id",
+                &state.cfg.realm(),
+            );
+            req.headers.insert(
+                axum::http::header::AUTHORIZATION,
+                axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+            );
+        }
+        super::route(state, req).await
+    }
+
+    /// Set `iri` aside, as a stuck write of its content is: putting back what it holds now
+    /// (removing it, when it holds nothing: a stuck create) keeps failing until [`unstick`].
+    pub async fn stick(state: &super::LwsState<FlakyStore>, store: &FlakyStore, iri: &str) {
+        let prior = state.store.read(iri).await.ok().map(|r| (r.body, r.meta));
+        if prior.is_some() {
+            *store.fail_restore_of.lock().unwrap() = Some(iri.to_string());
+        } else {
+            *store.fail_delete_of.lock().unwrap() = Some(iri.to_string());
+        }
+        let left = super::Unsettled(vec![super::Undo::Restore {
+            key: iri.to_string(),
+            prior,
+        }]);
+        state.set_aside(left, ());
+        assert!(!state.visible(iri));
+    }
+
+    /// Let what [`stick`] set aside be put back.
+    pub fn unstick(store: &FlakyStore) {
+        *store.fail_restore_of.lock().unwrap() = None;
+        *store.fail_delete_of.lock().unwrap() = None;
+    }
+
+    /// Wait (a few seconds at most) until `iri` is no longer set aside.
+    pub async fn put_back(state: &super::LwsState<FlakyStore>, iri: &str) {
+        for _ in 0..300 {
+            if state.visible(iri) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("{iri} was never put back");
     }
 
     /// The `Link` targets of `resp` with relation `rel`.
