@@ -337,6 +337,8 @@ mod tests {
     /// so one that expired during a slow fetch still got an access token. A controlled identifier
     /// token valid (within the skew) when the exchange begins, whose document takes longer to
     /// arrive than it has left, is refused; the same token with a prompt document is not.
+    /// Deterministic under load: the prompt token has a minute left, and the slow document is
+    /// served only once its token's time is up, however long the exchange took to reach it.
     #[cfg(feature = "authn-ssi")]
     #[tokio::test]
     async fn a_token_that_expires_during_its_fetch_is_refused() {
@@ -351,6 +353,9 @@ mod tests {
                 "publicKeyJwk": jose::public_jwk_of(&key.public_key())}]})
         };
         let (prompt, slow) = (doc(&format!("{base}/prompt")), doc(&format!("{base}/slow")));
+        // When the slow token's time is up: set as it is minted.
+        let slow_until = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(i64::MAX));
+        let until = slow_until.clone();
         let app = axum::Router::new()
             .route(
                 "/prompt",
@@ -359,7 +364,9 @@ mod tests {
             .route(
                 "/slow",
                 axum::routing::get(move || async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    while jose::now_secs() < until.load(std::sync::atomic::Ordering::SeqCst) {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
                     axum::Json(slow)
                 }),
             );
@@ -371,13 +378,17 @@ mod tests {
             .unwrap();
         let resource =
             url::form_urlencoded::byte_serialize(state.cfg.realm().as_bytes()).collect::<String>();
-        let exchange = |path: &str| {
+        // A token valid (within the skew) for `left` more seconds: expired, but not by more than
+        // the skew allows, until then.
+        let exchange = |path: &str, left: i64| {
             let subject = format!("{base}{path}");
             let now = jose::now_secs();
-            // One second short of the skew past its expiry.
+            if path == "/slow" {
+                slow_until.store(now + left, std::sync::atomic::Ordering::SeqCst);
+            }
             let claims = json!({"sub": subject, "iss": subject, "client_id": subject,
                 "aud": [state.cfg.issuer()], "iat": now - 120,
-                "exp": now - sparq_lws_authn::SKEW_SECS + 1});
+                "exp": now - sparq_lws_authn::SKEW_SECS + left});
             let header = json!({"alg": "ES256", "typ": "JWT", "kid": "k"});
             let input = format!(
                 "{}.{}",
@@ -397,9 +408,10 @@ mod tests {
                 ),
             )
         };
-        let ok = handle(&state, &exchange("/prompt")).await;
+        let ok = handle(&state, &exchange("/prompt", 60)).await;
         assert_eq!(ok.status(), StatusCode::OK);
-        let late = handle(&state, &exchange("/slow")).await;
+        // Long enough for the exchange to begin and check it; the document then waits it out.
+        let late = handle(&state, &exchange("/slow", 5)).await;
         assert_eq!(late.status(), StatusCode::BAD_REQUEST);
         let body = test_store::body_json(late).await;
         assert!(
