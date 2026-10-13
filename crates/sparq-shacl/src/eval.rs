@@ -3103,17 +3103,7 @@ fn days_in_month(y: i64, m: u32) -> u32 {
     }
 }
 
-/// Days since 1970-01-01 of a proleptic-Gregorian civil date (Howard Hinnant's
-/// `days_from_civil`).
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = y - i64::from(m <= 2);
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = i64::from(if m > 2 { m - 3 } else { m + 9 });
-    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
+use sparq_core::civil::days_from_civil;
 
 /// Is the literal's lexical form in the lexical space of its (known XSD)
 /// datatype? Unknown datatypes are accepted (no lexical check possible).

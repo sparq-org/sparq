@@ -10,7 +10,7 @@
 //! `storage`.
 //!
 //! The access grant service and the access request service are LWS containers at
-//! [`GRANTS_PATH`](super::GRANTS_PATH) and [`REQUESTS_PATH`](super::REQUESTS_PATH). Only the owner
+//! [`GRANTS_PATH`] and [`REQUESTS_PATH`]. Only the owner
 //! may grant access or list grants; any authenticated agent may ask for access, and may read and
 //! withdraw what it asked. Both are stored through the [`Store`], so they survive a restart on a
 //! durable backend, and kept in memory for authorization.
@@ -563,7 +563,21 @@ impl AccessStore {
                 me.map(grants).write().expect("lock").insert(id, record);
             }
         }
+        // Grants have no quota on their number: only the owner makes them.
+        if let Some(past) = me.requests_past_quota() {
+            super::report_past_quota("access requests", &cfg.absolute(REQUESTS_PATH), &past);
+        }
         Ok(me)
+    }
+
+    /// What of the access requests in force is past their quota, counted as a new request is
+    /// admitted; `None` when nothing is.
+    pub(crate) fn requests_past_quota(&self) -> Option<String> {
+        let requests = self.requests.read().expect("lock");
+        self.request_quota.past(
+            requests.len(),
+            requests.values().map(|r| r.author.as_deref()),
+        )
     }
 
     /// Take what `loaded` holds in place of what this holds.
@@ -590,6 +604,18 @@ impl AccessStore {
         })
         .write()
         .expect("lock") = new_etag();
+    }
+
+    /// The policies of every grant that cover `uri` for `action`, whoever they are assigned to.
+    pub(crate) fn policies_covering(&self, action: Action, uri: &str) -> Vec<Policy> {
+        self.grants
+            .read()
+            .expect("lock")
+            .values()
+            .flat_map(|r| r.policies.iter())
+            .filter(|p| p.actions.contains(&action) && p.covers(uri))
+            .cloned()
+            .collect()
     }
 
     /// Every policy of every grant, for an authorization decision.
@@ -626,6 +652,55 @@ pub async fn allowed<S: Store + 'static>(
     }
     let meta = state.resource_meta(uri).await?;
     decide(state, action, uri, agent, &meta, None).await
+}
+
+/// Whether `agent` may learn that the set-aside resource at `uri` is set aside: never whether it
+/// may be served or changed, which waits until it is put back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Aside {
+    /// It may act on it.
+    Allowed,
+    /// It may not.
+    Denied,
+    /// The resource was not there before the stuck change (to anyone but the owner).
+    Missing,
+}
+
+/// [`Aside`] for `agent` and `action` on the set-aside resource at `uri`, decided as
+/// [`allowed`] decided before the stuck change to it began: on what it was then (whether it was
+/// there, its metadata and its format, see [`Prior`](super::Prior)), with the grants in force
+/// now. What the change may have written meanwhile (new content, new types, a `pending` mark)
+/// is never read for it: a grant the change would newly satisfy is not met, and one it would
+/// stop meeting still is. What the change left untouched is read as stored. An error when that
+/// cannot be read.
+pub async fn aside<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<Aside, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(Aside::Allowed);
+    }
+    let prior = state.locks.prior(uri);
+    let existed = match prior.existed {
+        Some(existed) => existed,
+        None => state.store.exists(uri).await?,
+    };
+    if !existed {
+        return Ok(Aside::Missing);
+    }
+    let meta = match prior.meta {
+        Some(meta) => meta,
+        None => state.resource_meta(uri).await?,
+    };
+    Ok(
+        if decide(state, action, uri, agent, &meta, prior.format).await? {
+            Aside::Allowed
+        } else {
+            Aside::Denied
+        },
+    )
 }
 
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
@@ -718,11 +793,29 @@ async fn decide<S: Store + 'static>(
     if candidates.is_empty() {
         return Ok(false);
     }
-    let is_container = uri.ends_with('/');
     let format = match format {
         Some(f) => f,
         None => format_of(state, uri).await?,
     };
+    Ok(grants_allow(
+        candidates.iter(),
+        agent,
+        uri,
+        format.as_deref(),
+        meta,
+    ))
+}
+
+/// Whether one of `candidates` (grant policies that apply to `agent` for the action on `uri`)
+/// has every constraint satisfied, against the resource's `format` and `meta`.
+fn grants_allow<'p>(
+    mut candidates: impl Iterator<Item = &'p Policy>,
+    agent: &Agent,
+    uri: &str,
+    format: Option<&str>,
+    meta: &ResourceMeta,
+) -> bool {
+    let is_container = uri.ends_with('/');
     let mut types = vec![format!(
         "{LWS_NS}{}",
         if is_container {
@@ -734,12 +827,79 @@ async fn decide<S: Store + 'static>(
     types.extend(meta.types.iter().cloned());
     let ctx = ConstraintContext {
         client: agent.client.as_deref(),
-        format: format.as_deref(),
+        format,
         types: &types,
     };
-    Ok(candidates
-        .iter()
-        .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx))))
+    candidates.any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx)))
+}
+
+/// One resource's access for one action, read once and decided for many agents as [`allowed`]
+/// decides for one: a change's deliveries are each authorized against it, so the resource's
+/// metadata is read, and the grants scanned, once per change rather than once per subscriber.
+/// The grants are those in force when it is taken.
+pub(crate) struct ResourceAccess {
+    uri: String,
+    /// `None` when the metadata could not be read: past the owner, everyone is refused.
+    meta: Option<ResourceMeta>,
+    /// The grant policies covering `uri` for the action, whoever they are assigned to.
+    policies: Vec<Policy>,
+    /// The resource's format, looked up only when a policy may apply; `Err` when it could not be.
+    format: Result<Option<String>, ()>,
+}
+
+impl ResourceAccess {
+    /// `uri`'s access for `action` as it stands now.
+    pub(crate) async fn take<S: Store + 'static>(
+        state: &LwsState<S>,
+        action: Action,
+        uri: &str,
+    ) -> Self {
+        let meta = state.resource_meta(uri).await.ok();
+        let policies = match &meta {
+            Some(m) if !m.pending => state.access.policies_covering(action, uri),
+            _ => Vec::new(),
+        };
+        let format = if policies.is_empty() {
+            Ok(None)
+        } else {
+            format_of(state, uri).await.map_err(|_| ())
+        };
+        Self {
+            uri: uri.to_string(),
+            meta,
+            policies,
+            format,
+        }
+    }
+
+    /// Whether `agent` may take the action on the resource, as [`allowed`] decides.
+    pub(crate) fn allows<S: Store + 'static>(&self, state: &LwsState<S>, agent: &Agent) -> bool {
+        if state.cfg.open || is_owner(state, agent) {
+            return true;
+        }
+        let Some(meta) = &self.meta else {
+            return false;
+        };
+        let subject = agent.subject.as_deref();
+        if subject.is_some() && subject == meta.creator.as_deref() {
+            return true;
+        }
+        if meta.pending {
+            return false;
+        }
+        let mut candidates = self
+            .policies
+            .iter()
+            .filter(|p| p.assignee == FOAF_AGENT || Some(p.assignee.as_str()) == subject)
+            .peekable();
+        if candidates.peek().is_none() {
+            return false;
+        }
+        let Ok(format) = &self.format else {
+            return false;
+        };
+        grants_allow(candidates, agent, &self.uri, format.as_deref(), meta)
+    }
 }
 
 /// Whether a constraint's right operand is one its operator can be evaluated against: `isAnyOf` a
@@ -895,6 +1055,14 @@ pub async fn handle<S: Store + 'static>(
         id = &id[..id.len() - META_SUFFIX.len()];
     }
     let owner = state.cfg.open || (agent.subject.is_some() && agent.subject == state.cfg.owner);
+    // Whether what the request is to is set aside is said only to a caller that may act on it:
+    // the owner, who may act on every record, at once; anyone else once authorized below.
+    let unavailable = || super::resources::unavailable(state, req);
+    if owner {
+        if let Some(refused) = unavailable() {
+            return refused;
+        }
+    }
     if id.is_empty() {
         if linkset {
             return if owner {
@@ -913,6 +1081,9 @@ pub async fn handle<S: Store + 'static>(
             Method::POST => {
                 if !state.cfg.open && (agent.subject.is_none() || (grants && !owner)) {
                     return state.deny(agent);
+                }
+                if let Some(refused) = unavailable() {
+                    return refused;
                 }
                 // A conditional create is evaluated against the listing.
                 let held =
@@ -946,6 +1117,9 @@ pub async fn handle<S: Store + 'static>(
     let mine = owner || (agent.subject.is_some() && agent.subject == record.author);
     if !mine {
         return state.deny(agent);
+    }
+    if let Some(refused) = unavailable() {
+        return refused;
     }
     // A quarantined record (unreadable at the start) is never served; the owner deletes it.
     if record.quarantined && matches!(req.method, Method::GET | Method::HEAD) {
@@ -2385,6 +2559,79 @@ mod tests {
             .filter(|r| r.status() == StatusCode::CREATED)
             .count();
         assert_eq!(created, MAX_REQUESTS_PER_AUTHOR);
+    }
+
+    /// Review finding (#6810): stored access requests can exceed their quota (stored before it
+    /// was lowered, or written to the store directly). The start loads them all, removes none,
+    /// reports what is past the quota, and admits no new request from an author past its share.
+    #[tokio::test]
+    async fn requests_stored_past_their_quota_are_kept_reported_and_admit_no_more() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let container = state.cfg.absolute(REQUESTS_PATH);
+        let asker = "https://asker.example/#me";
+        let document = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessRequest"],
+            "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        });
+        for i in 0..=MAX_REQUESTS_PER_AUTHOR {
+            let stored = json!({"document": document, "author": asker});
+            store
+                .create_in_container(
+                    &container,
+                    &format!("{container}r{i:04}"),
+                    Bytes::from(stored.to_string()),
+                    LWS_JSON,
+                )
+                .await
+                .unwrap();
+        }
+        let state = LwsState::new(store.clone(), state.cfg.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            state.access.requests.read().unwrap().len(),
+            MAX_REQUESTS_PER_AUTHOR + 1,
+            "all loaded"
+        );
+        let past = state.access.requests_past_quota().unwrap();
+        assert!(
+            past.contains(&format!(
+                "1 author(s) holding more than {MAX_REQUESTS_PER_AUTHOR} each (at most {})",
+                MAX_REQUESTS_PER_AUTHOR + 1
+            )),
+            "{past}"
+        );
+        let post = super::super::test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &document.to_string(),
+        );
+        let agent = |who: &str| Agent {
+            subject: Some(who.into()),
+            ..Agent::anonymous()
+        };
+        let r = handle(&state, &post, &agent(asker)).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        let r = handle(&state, &post, &agent("https://other.example/#me")).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // Withdrawing two brings the asker under its share.
+        for i in 0..2 {
+            let delete = super::super::test_store::request(
+                Method::DELETE,
+                &format!("{REQUESTS_PATH}r{i:04}"),
+                &[],
+                "",
+            );
+            let r = handle(&state, &delete, &agent(asker)).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        }
+        assert!(state.access.requests_past_quota().is_none());
+        let r = handle(&state, &post, &agent(asker)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert!(store.exists(&format!("{container}r0002")).await.unwrap());
     }
 
     #[test]

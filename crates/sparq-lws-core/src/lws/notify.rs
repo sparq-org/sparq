@@ -1,7 +1,7 @@
 //! Notifications (LWS 1.0 core section 10) and the webhook subscription type
 //! (lws10-notifications-webhook).
 //!
-//! The NotificationService lives at [`SUBSCRIPTIONS_PATH`](super::SUBSCRIPTIONS_PATH) and offers
+//! The NotificationService lives at [`SUBSCRIPTIONS_PATH`] and offers
 //! one subscription type, `WebhookSubscription`. An authenticated agent subscribes with an
 //! `application/lws+json` request naming a `topic` (an array of resource URIs, each of which it
 //! must be able to read now) and an `inbox`; a topic covers itself and, for a container,
@@ -109,6 +109,41 @@ pub struct Pending {
     inbox: String,
     activity: Value,
     watch: Watch,
+}
+
+/// The notifications one change makes, addressed but not yet sent ([`Notifier::prepare`]), and
+/// what preparing them left out. What was left out is counted ([`Notifier::dropped`],
+/// [`Notifier::unprepared`]) only when they are [`Notifier::send`]t: a change that does not
+/// happen (a delete that fails) sends nothing and counts nothing.
+#[derive(Debug, Default)]
+#[must_use = "prepared notifications go out, and are counted, only through Notifier::send"]
+pub struct Prepared {
+    pending: Vec<Pending>,
+    /// The resource the change is to.
+    uri: String,
+    /// The bound the deliveries were prepared to.
+    limit: usize,
+    /// Authorized deliveries past the bound: owed, and dropped.
+    dropped: usize,
+    /// Subscriptions past the bound: neither authorized nor notified.
+    unprepared: usize,
+}
+
+impl Prepared {
+    /// The notifications prepared.
+    pub fn pending(&self) -> &[Pending] {
+        &self.pending
+    }
+
+    /// How many notifications were prepared.
+    pub fn len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Whether none was.
+    pub fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+    }
 }
 
 /// What a delivery for a subscription is checked against before every attempt: the subscription
@@ -258,8 +293,15 @@ pub struct Notifier {
     limits: DeliveryLimits,
     /// Deliveries admitted and not yet finished.
     admitted: Arc<AtomicUsize>,
-    /// Deliveries dropped because the queue was full.
+    /// Notifications dropped for want of queue room, each one known to be owed: authorized for
+    /// its subscriber, or belonging to no subscription.
     dropped: AtomicU64,
+    /// Subscriptions that heard of a change once its deliveries were already at their bound:
+    /// neither authorized nor notified, so whether each was owed a notification is not known.
+    unprepared: AtomicU64,
+    /// Preparations that had a subscription to weigh, for tests to see whether one ran.
+    #[cfg(test)]
+    pub(crate) prepared_for: AtomicUsize,
     /// The worker pool: one permit per delivery in flight.
     workers: Arc<tokio::sync::Semaphore>,
     /// Per inbox origin, its own limit (dropped once no delivery holds it).
@@ -332,6 +374,9 @@ impl Notifier {
             limits: cfg.delivery,
             admitted: Arc::new(AtomicUsize::new(0)),
             dropped: AtomicU64::new(0),
+            unprepared: AtomicU64::new(0),
+            #[cfg(test)]
+            prepared_for: AtomicUsize::new(0),
             workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
             inboxes: Mutex::new(HashMap::new()),
             quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER),
@@ -421,7 +466,40 @@ impl Notifier {
         self.held_back.store(held_back, Ordering::SeqCst);
         *self.quarantined.write().expect("lock") = quarantined;
         *self.etag.write().expect("lock") = new_etag();
+        if let Some(past) = self.past_quota(cfg.owner.as_deref()) {
+            super::report_past_quota("subscriptions", &container, &past);
+        }
         Ok(())
+    }
+
+    /// What of the subscriptions in force is past their quotas, counted as a new subscription
+    /// is admitted: each share holds its own subscriptions and those held back or quarantined at
+    /// the start (which may be anyone's), and a subscriber's share its unexpired ones. `None`
+    /// when nothing is.
+    pub(crate) fn past_quota(&self, owner: Option<&str>) -> Option<String> {
+        let now = jose::now_secs();
+        let subs = self.subs.read().expect("lock");
+        let unloaded =
+            self.held_back.load(Ordering::SeqCst) + self.quarantined.read().expect("lock").len();
+        let is_owner = |s: &&Subscription| owner.is_some() && s.subscriber.as_deref() == owner;
+        let share = |owners: bool| {
+            let mine = || subs.values().filter(move |s| is_owner(s) == owners);
+            let held = mine().count() + unloaded;
+            let authors = mine()
+                .filter(|s| !s.expired(now))
+                .map(|s| s.subscriber.as_deref());
+            let quota = if owners {
+                &self.owner_quota
+            } else {
+                &self.quota
+            };
+            quota.past(held, authors)
+        };
+        let past: Vec<String> = [(false, "others'"), (true, "the owner's")]
+            .into_iter()
+            .filter_map(|(owners, whose)| share(owners).map(|p| format!("{whose} share: {p}")))
+            .collect();
+        (!past.is_empty()).then(|| past.join("; "))
     }
 
     fn get(&self, id: &str) -> Option<Subscription> {
@@ -527,7 +605,7 @@ impl Notifier {
         &self,
         state: &LwsState<S>,
         event: &Event,
-    ) -> Vec<Pending> {
+    ) -> Prepared {
         self.prepare_at_most(state, event, self.limits.queue).await
     }
 
@@ -538,7 +616,7 @@ impl Notifier {
         state: &LwsState<S>,
         event: &Event,
         limit: usize,
-    ) -> Vec<Pending> {
+    ) -> Prepared {
         self.prepare_for(state, event, limit, None).await
     }
 
@@ -565,7 +643,7 @@ impl Notifier {
         event: &Event,
         limit: usize,
         service: Option<Option<String>>,
-    ) -> Vec<Pending> {
+    ) -> Prepared {
         let now = jose::now_secs();
         // A resource's linkset changes with it, and is read under its authorization: a
         // subscription to the linkset itself hears of it as of the resource.
@@ -583,8 +661,18 @@ impl Notifier {
         };
         // Every matching subscription is a candidate: the bound is on the deliveries prepared,
         // which only an authorized one makes, so one that may not read the resource never takes
-        // the place of one that may. What is copied out is bounded by the subscriptions in force,
-        // which the quotas bound.
+        // the place of one that may. For the same reason the authorization done here has no
+        // budget of its own: a budget spent on the candidates in turn could be used up by one
+        // party's subscriptions that may not read the resource before an authorized one is
+        // reached. The work is bounded instead by the subscriptions in force, which the quotas
+        // bound: at most MAX_SUBSCRIPTIONS held by subscribers other than the owner and as many
+        // by the owner, so one authorization each for at most 2 * MAX_SUBSCRIPTIONS candidates,
+        // and none past the `limit`-th delivery prepared. That is a ceiling on the number of
+        // checks, not on their work: each takes the resource's access from one snapshot taken
+        // for the change ([`access::ResourceAccess`]), so the resource's metadata is read and the
+        // grants (which have no quota) are scanned once per change, not once per check. Stored
+        // subscriptions loaded past a quota are reported at the start, and admit no new one to
+        // that share until it is under it.
         let candidates: Vec<Subscription> = {
             let subs = self.subs.read().expect("lock");
             subs.values()
@@ -592,7 +680,15 @@ impl Notifier {
                 .cloned()
                 .collect()
         };
-        let mut out = Vec::new();
+        #[cfg(test)]
+        if !candidates.is_empty() {
+            self.prepared_for.fetch_add(1, Ordering::SeqCst);
+        }
+        let mut out = Prepared {
+            uri: event.uri.clone(),
+            limit,
+            ..Prepared::default()
+        };
         // A Delete is prepared while the resource is still there; its deliveries, made once it
         // is gone, are authorized against what it was.
         let snapshot = if event.kind == "Delete" && !candidates.is_empty() && service.is_none() {
@@ -604,18 +700,30 @@ impl Notifier {
             None
         };
         let total = candidates.len();
+        // The resource's access, taken at the first check that needs it.
+        let mut resource: Option<access::ResourceAccess> = None;
         for (i, sub) in candidates.into_iter().enumerate() {
-            // Once the bound is reached the rest are dropped as a full queue drops them, and
-            // counted so, without being authorized.
+            // Once the bound is reached the rest are not authorized (that work is what the bound
+            // saves), so whether each was owed a notification is not known: they are counted
+            // apart from the dropped ones, each of which was.
             if out.len() == limit {
-                self.note_dropped(total - i, &event.uri);
+                out.unprepared = total - i;
                 break;
             }
             // Delivery-time authorization (section 10.3.3): a subscriber that may not read the
             // resource now hears nothing about it.
+            let agent = sub.agent();
             let allowed = match &service {
-                Some(author) => reads_service_record(state, &sub.agent(), author),
-                None => state.allowed(Action::Read, &event.uri, &sub.agent()).await,
+                Some(author) => reads_service_record(state, &agent, author),
+                None if state.cfg.open || access::is_owner(state, &agent) => true,
+                None => {
+                    if resource.is_none() {
+                        resource = Some(
+                            access::ResourceAccess::take(state, Action::Read, &event.uri).await,
+                        );
+                    }
+                    resource.as_ref().is_some_and(|r| r.allows(state, &agent))
+                }
             };
             if !allowed {
                 continue;
@@ -641,10 +749,10 @@ impl Notifier {
             // linkset brings two, and what is past the bound is dropped and counted so.
             for activity in activities {
                 if out.len() == limit {
-                    self.note_dropped(1, &event.uri);
+                    out.dropped += 1;
                     continue;
                 }
-                out.push(Pending {
+                out.pending.push(Pending {
                     inbox: sub.inbox.clone(),
                     activity,
                     // Checked as the resource the linkset describes: its lock and who may
@@ -662,9 +770,16 @@ impl Notifier {
         out
     }
 
-    /// Deliver notifications [`Notifier::prepare`]d earlier.
-    pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, pending: Vec<Pending>) {
-        for p in pending {
+    /// Deliver notifications [`Notifier::prepare`]d earlier, and count what preparing them left
+    /// out.
+    pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, prepared: Prepared) {
+        if prepared.dropped > 0 {
+            self.note_dropped(prepared.dropped, &prepared.uri);
+        }
+        if prepared.unprepared > 0 {
+            self.note_unprepared(prepared.unprepared, prepared.limit, &prepared.uri);
+        }
+        for p in prepared.pending {
             self.deliver(state, &p.inbox, p.activity, Some(p.watch));
         }
     }
@@ -730,6 +845,20 @@ impl Notifier {
                 "lws: webhook delivery queue full ({} waiting or in flight); dropped {n} \
                  notification(s) for {target} ({after} dropped so far)",
                 self.limits.queue
+            );
+        }
+    }
+
+    /// Count `n` subscriptions that heard of a change to `uri` past the bound of `limit`
+    /// deliveries, and so were neither authorized nor notified. Logged as drops are.
+    fn note_unprepared(&self, n: usize, limit: usize, uri: &str) {
+        let before = self.unprepared.fetch_add(n as u64, Ordering::SeqCst);
+        let after = before + n as u64;
+        if before == 0 || before.ilog2() != after.ilog2() {
+            eprintln!(
+                "lws: {limit} webhook notification(s) prepared for {uri}, the most one change \
+                 may have; {n} more subscription(s) to it were neither checked nor notified \
+                 ({after} so far)"
             );
         }
     }
@@ -826,9 +955,19 @@ impl Notifier {
         s
     }
 
-    /// Deliveries dropped because the queue was full.
+    /// Notifications dropped because the queue was full (or a change's deliveries were at their
+    /// bound), each one known to be owed: authorized for its subscriber when it was prepared, or
+    /// belonging to no subscription. Counted in memory since this notifier was made (each start
+    /// begins at zero), and for a change only once it happened.
     pub fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::SeqCst)
+    }
+
+    /// Subscriptions that heard of a change once its deliveries were at their bound: neither
+    /// authorized nor notified, so some may not have been owed a notification at all. Counted as
+    /// [`Notifier::dropped`] is: since this notifier was made, for changes that happened.
+    pub fn unprepared(&self) -> u64 {
+        self.unprepared.load(Ordering::SeqCst)
     }
 }
 
@@ -1038,31 +1177,36 @@ pub async fn handle<S: Store + 'static>(
         id = &id[..id.len() - META_SUFFIX.len()];
     }
     let owner = state.cfg.open || (agent.subject.is_some() && agent.subject == state.cfg.owner);
+    // Whether what the request is to is set aside is said only to a caller that may act on it:
+    // the owner, who may act on every subscription, at once; anyone else once authorized below.
+    let unavailable = || super::resources::unavailable(state, req);
+    if owner {
+        if let Some(refused) = unavailable() {
+            return refused;
+        }
+    }
     if id.is_empty() {
+        if !linkset && !matches!(req.method, Method::GET | Method::HEAD | Method::POST) {
+            return method_not_allowed("GET, HEAD, POST");
+        }
+        if state.needs_auth(agent) {
+            return state.challenge(None);
+        }
+        // A new subscription is authorized by its topics: whether the container is set aside
+        // is said once they are checked (see [`subscribe`]).
+        if req.method != Method::POST || linkset {
+            if let Some(refused) = unavailable() {
+                return refused;
+            }
+        }
         if linkset {
-            return if state.needs_auth(agent) {
-                state.challenge(None)
-            } else {
-                service_linkset(&state.cfg, req, &state.cfg.absolute(SUBSCRIPTIONS_PATH))
-            };
+            return service_linkset(&state.cfg, req, &state.cfg.absolute(SUBSCRIPTIONS_PATH));
         }
         return match req.method {
-            Method::GET | Method::HEAD => {
-                if state.needs_auth(agent) {
-                    return state.challenge(None);
-                }
-                listing(state, req, agent, owner)
-            }
-            Method::POST => {
-                if state.needs_auth(agent) {
-                    return state.challenge(None);
-                }
-                // Expired subscriptions still hold their place in the store until they are
-                // removed: a few go now, before the listing a conditional create is evaluated
-                // against is held, and before this one is counted.
-                purge_expired(state, req.admission.clone()).await;
-                subscribe(state, req, agent, owner).await
-            }
+            Method::GET | Method::HEAD => listing(state, req, agent, owner),
+            // Expired subscriptions still hold their place in the store until they are removed:
+            // a few go once the request is authorized (see [`subscribe`]).
+            Method::POST => subscribe(state, req, agent, owner).await,
             _ => method_not_allowed("GET, HEAD, POST"),
         };
     }
@@ -1081,6 +1225,9 @@ pub async fn handle<S: Store + 'static>(
             problem(StatusCode::NOT_FOUND, None)
         };
     };
+    if let Some(refused) = unavailable() {
+        return refused;
+    }
     if linkset {
         let iri = state.cfg.absolute(&format!("{SUBSCRIPTIONS_PATH}{id}"));
         return service_linkset(&state.cfg, req, &iri);
@@ -1352,30 +1499,77 @@ async fn subscribe<S: Store + 'static>(
     // or naming nothing, is refused the same way. A resource's linkset is read under the
     // resource's authorization (as a GET of it is), so a topic naming one is checked as the
     // resource, under the resource's shared lock; the topic itself is kept as named.
+    //
+    // The subscriber is checked before any wait for the lock, and only a topic it may read is
+    // waited on, or said to be set aside: one it may not read is refused the same whatever its
+    // state, so neither a stuck change to it nor a write holding its lock shows through. A
+    // set-aside topic is decided as a request to it is (see [`access::aside`]): on what it was
+    // before the stuck change began, failing closed when that cannot be read. The check that
+    // counts is made again under the lock.
     let storage = state.cfg.storage();
+    let cannot_read = || {
+        if agent.is_authenticated() || state.cfg.open {
+            problem(
+                StatusCode::FORBIDDEN,
+                Some("the subscriber cannot read every topic"),
+            )
+        } else {
+            state.challenge(None)
+        }
+    };
+    let storage = storage.as_str();
+    let readable = |resource: &str, aside: bool| {
+        let resource = resource.to_string();
+        async move {
+            if !resource.starts_with(storage) {
+                return false;
+            }
+            if aside {
+                return matches!(
+                    access::aside(state, Action::Read, &resource, agent).await,
+                    Ok(access::Aside::Allowed)
+                );
+            }
+            state.store.exists(&resource).await.unwrap_or(false)
+                && state.allowed(Action::Read, &resource, agent).await
+        }
+    };
     for topic in &topics {
         let resource = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
-        if let Some(unavailable) = super::resources::set_aside(state, resource, &Method::GET) {
-            return unavailable;
-        }
-        // Waited for a bounded time, as every lock a request to a service container takes.
-        let _guard = match super::records::within_wait(state.locks.read(resource)).await {
-            Ok(guard) => guard,
-            Err(refused) => return refused,
+        // The lock of a visible topic that nobody is changing is taken at once, without a wait:
+        // then the one check under it says nothing of its state. Otherwise the topic is checked
+        // first, without it.
+        let _guard = match state.locks.try_read(resource) {
+            Some(guard) => guard,
+            None => {
+                let aside = !state.visible(resource);
+                if !readable(resource, aside).await {
+                    return cannot_read();
+                }
+                if aside {
+                    return super::resources::set_aside_meanwhile();
+                }
+                // Waited for a bounded time, as every lock a request to a service container
+                // takes.
+                match super::records::within_wait(state.locks.read(resource)).await {
+                    Ok(guard) => guard,
+                    Err(refused) => return refused,
+                }
+            }
         };
-        let exists =
-            resource.starts_with(&storage) && state.store.exists(resource).await.unwrap_or(false);
-        if !exists || !state.allowed(Action::Read, resource, agent).await {
-            return if agent.is_authenticated() || state.cfg.open {
-                problem(
-                    StatusCode::FORBIDDEN,
-                    Some("the subscriber cannot read every topic"),
-                )
-            } else {
-                state.challenge(None)
-            };
+        if !readable(resource, false).await {
+            return cannot_read();
         }
     }
+    // Only now, with every topic authorized, does the subscriber learn whether the
+    // subscriptions container is set aside (or new changes wait on set-aside ones), and do
+    // expired subscriptions, which may be anyone's, have a few removed (waiting on their
+    // locks): before the listing a conditional create is evaluated against is held, and before
+    // this one is counted.
+    if let Some(refused) = super::resources::unavailable(state, req) {
+        return refused;
+    }
+    purge_expired(state, req.admission.clone()).await;
     // A conditional create is evaluated against the listing, held exclusively from here until
     // the subscription is registered. Taken only once every topic has been checked (and its
     // lock released): a topic naming the subscriptions container itself, or its linkset, would
@@ -2008,6 +2202,7 @@ mod tests {
                 .notify
                 .prepare(&state, &event)
                 .await
+                .pending
                 .into_iter()
                 .map(|p| {
                     (
@@ -2073,7 +2268,7 @@ mod tests {
         };
         let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
         assert_eq!(prepared.len(), 1);
-        let watch = prepared.into_iter().next().unwrap().watch;
+        let watch = prepared.pending.into_iter().next().unwrap().watch;
         // A write holds the resource; the delivery waits for it, and the write's rollback is
         // then set aside with the lock.
         let held = state.locks.lock(&file).await.unwrap();
@@ -2743,7 +2938,352 @@ mod tests {
         };
         let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
         assert_eq!(prepared.len(), 1);
-        assert_eq!(prepared[0].watch.subscription, "b");
+        assert_eq!(prepared.pending[0].watch.subscription, "b");
+    }
+
+    /// Review finding (#6810): once a change's deliveries reached their bound, the subscriptions
+    /// left were counted as dropped deliveries without being authorized, so the count took in
+    /// ones that were owed nothing. Only deliveries known to be owed are counted dropped; the
+    /// subscriptions past the bound are counted apart, as neither checked nor notified.
+    #[tokio::test]
+    async fn only_owed_deliveries_are_counted_dropped() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let root = state.cfg.storage();
+        let linkset = format!("{root}{META_SUFFIX}");
+        for (id, who, topics) in [
+            ("a", "https://bob.example/#me", vec![root.clone()]),
+            ("b", "https://owner.example/#me", vec![root.clone()]),
+            ("c", "https://bob.example/#me", vec![root.clone()]),
+            ("d", "https://owner.example/#me", vec![root.clone()]),
+            (
+                "e",
+                "https://owner.example/#me",
+                vec![root.clone(), linkset],
+            ),
+        ] {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: Some(who.into()),
+                client: None,
+                topics,
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        let event = Event {
+            kind: "Update",
+            is_container: true,
+            uri: root.clone(),
+            relation: None,
+        };
+        // What preparing left out is counted once the notifications are sent (here, none).
+        let send = |mut prepared: Prepared| {
+            prepared.pending.clear();
+            state.notify.send(&state, prepared);
+        };
+        // Bob may not read the root, the owner may: `a` is passed over, `b` fills the bound, and
+        // `c`, `d` and `e` are neither checked nor notified, whoever they belong to.
+        let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
+        assert_eq!(prepared.len(), 1);
+        assert_eq!(prepared.pending[0].watch.subscription, "b");
+        assert_eq!((prepared.dropped, prepared.unprepared), (0, 3));
+        assert_eq!(state.notify.unprepared(), 0, "counted only once sent");
+        send(prepared);
+        assert_eq!(state.notify.dropped(), 0);
+        assert_eq!(state.notify.unprepared(), 3);
+        // With room for all three of the owner's, `e` brings two (the root and its linkset),
+        // the second past the bound: authorized, so owed, and counted dropped.
+        let prepared = state.notify.prepare_at_most(&state, &event, 3).await;
+        assert_eq!(prepared.len(), 3);
+        send(prepared);
+        assert_eq!(state.notify.dropped(), 1);
+        assert_eq!(state.notify.unprepared(), 3);
+        // A shared bound already spent (a recursive delete's) checks nothing at all.
+        let prepared = state.notify.prepare_at_most(&state, &event, 0).await;
+        assert!(prepared.is_empty());
+        send(prepared);
+        assert_eq!(state.notify.unprepared(), 8);
+        assert_eq!(state.notify.dropped(), 1);
+    }
+
+    /// Codex review of #6841: each check scanned every grant (and read the resource's metadata)
+    /// again. One snapshot of the resource's access serves a change's checks; it decides as a
+    /// read does, grant by grant and constraint by constraint.
+    #[tokio::test]
+    async fn preparation_decides_as_a_read_does() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let root = state.cfg.storage();
+        let r = state.cfg.absolute("/r");
+        state
+            .store
+            .write(&r, Bytes::from("r"), "text/plain")
+            .await
+            .unwrap();
+        let grant = |access: Value| access::policies(&access, &root).unwrap();
+        state.access.put_grant_for_test(
+            "read",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://bob.example/#me"}])),
+        );
+        state.access.put_grant_for_test(
+            "modify",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["modify"],
+                "assignee": "https://dave.example/#me"}])),
+        );
+        state.access.put_grant_for_test(
+            "client",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://erin.example/#me",
+                "constraint": [{"leftOperand": "client", "operator": "eq", "rightOperand": "https://app.example/"}]}])),
+        );
+        state.access.put_grant_for_test(
+            "elsewhere",
+            grant(json!([{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://frank.example/#me",
+                "target": {"type": "DataResource", "value": [format!("{root}other")]}}])),
+        );
+        let agents = [
+            ("bob", Some("https://bob.example/#me"), None),
+            ("carol", Some("https://carol.example/#me"), None),
+            ("dave", Some("https://dave.example/#me"), None),
+            (
+                "erin-app",
+                Some("https://erin.example/#me"),
+                Some("https://app.example/"),
+            ),
+            (
+                "erin-other",
+                Some("https://erin.example/#me"),
+                Some("https://other.example/"),
+            ),
+            ("frank", Some("https://frank.example/#me"), None),
+            ("owner", Some("https://owner.example/#me"), None),
+            ("anonymous", None, None),
+        ];
+        for (id, subject, client) in agents {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: subject.map(str::to_string),
+                client: client.map(str::to_string),
+                topics: vec![root.clone()],
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        let event = Event {
+            kind: "Update",
+            uri: r.clone(),
+            is_container: false,
+            relation: None,
+        };
+        let mut prepared: Vec<String> = state
+            .notify
+            .prepare(&state, &event)
+            .await
+            .pending
+            .iter()
+            .map(|p| p.watch.subscription.clone())
+            .collect();
+        prepared.sort();
+        let mut reads = Vec::new();
+        for (id, subject, client) in agents {
+            let agent = Agent {
+                subject: subject.map(str::to_string),
+                client: client.map(str::to_string),
+            };
+            if state.allowed(Action::Read, &r, &agent).await {
+                reads.push(id.to_string());
+            }
+        }
+        reads.sort();
+        assert_eq!(prepared, reads);
+        assert_eq!(prepared, ["bob", "erin-app", "owner"]);
+    }
+
+    /// Codex review of #6841: a delete prepares its notifications before the removal is tried,
+    /// and preparing counted what it left out at once, so a delete that failed (nothing removed,
+    /// nothing announced) still moved both counters. They move only for a delete that happened.
+    #[tokio::test]
+    async fn a_failed_delete_counts_nothing() {
+        use std::sync::atomic::Ordering;
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.delivery = DeliveryLimits {
+            queue: 1,
+            workers: 1,
+            per_inbox: 1,
+        };
+        let store = test_store::FlakyStore::new();
+        let state = LwsState::new(store.clone(), cfg).await.unwrap();
+        let root = state.cfg.storage();
+        let created = super::super::route(
+            &state,
+            test_store::request(
+                Method::POST,
+                "/",
+                &[("slug", "f"), ("content-type", "text/plain")],
+                "x",
+            ),
+        )
+        .await;
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let f = format!("{root}f");
+        // `a` hears of `f` and of its linkset, `b` of everything: with room for one delivery,
+        // a Delete of `f` prepares `a`'s first, drops `a`'s second (owed) and leaves `b` out.
+        for (id, topics) in [
+            ("a", vec![f.clone(), format!("{f}{META_SUFFIX}")]),
+            ("b", vec![root.clone()]),
+        ] {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: None,
+                client: None,
+                topics,
+                inbox: "http://127.0.0.1:9/inbox".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        let delete =
+            || super::super::route(&state, test_store::request(Method::DELETE, "/f", &[], ""));
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let r = delete().await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        store.fail_delete.store(false, Ordering::SeqCst);
+        for _ in 0..250 {
+            if state.visible(&f) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(state.store.exists(&f).await.unwrap());
+        assert_eq!(
+            state.notify.prepared_for.load(Ordering::SeqCst),
+            1,
+            "prepared"
+        );
+        assert_eq!(state.notify.dropped(), 0);
+        assert_eq!(state.notify.unprepared(), 0);
+        let r = delete().await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(state.notify.dropped(), 1);
+        assert_eq!(state.notify.unprepared(), 1);
+    }
+
+    /// Review finding (#6810): stored subscriptions can exceed their quotas (stored before a
+    /// quota was lowered, or written to the store directly). The start loads them all, removes
+    /// none, reports what is past which quota, and admits no new subscription to a share until
+    /// it is under its quota again.
+    #[tokio::test]
+    async fn subscriptions_stored_past_their_quota_are_kept_reported_and_admit_no_more() {
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let reader = "https://reader.example/#me";
+        // The reader holds one more than its share, and with one subscription each of others,
+        // the share of everyone but the owner holds one more than its quota.
+        let others = MAX_SUBSCRIPTIONS + 1 - (MAX_SUBSCRIPTIONS_PER_SUBSCRIBER + 1);
+        let subscribers = (0..=MAX_SUBSCRIPTIONS_PER_SUBSCRIBER)
+            .map(|_| reader.to_string())
+            .chain((0..others).map(|i| format!("https://p{i}.example/#me")));
+        for (i, who) in subscribers.enumerate() {
+            let sub = Subscription {
+                id: String::new(),
+                subscriber: Some(who),
+                client: None,
+                topics: vec![state.cfg.storage()],
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
+            store
+                .create_in_container(&container, &format!("{container}s{i:04}"), body, LWS_JSON)
+                .await
+                .unwrap();
+        }
+        let state = LwsState::new(store.clone(), state.cfg.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            state.notify.subs.read().unwrap().len(),
+            MAX_SUBSCRIPTIONS + 1,
+            "all loaded"
+        );
+        let past = state.notify.past_quota(state.cfg.owner.as_deref()).unwrap();
+        assert!(
+            past.contains(&format!("{} held", MAX_SUBSCRIPTIONS + 1)),
+            "{past}"
+        );
+        assert!(past.contains("1 author(s)"), "{past}");
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let agent = |who: &str| Agent {
+            subject: Some(who.into()),
+            ..Agent::anonymous()
+        };
+        let newcomer = agent("https://new.example/#me");
+        let r = handle(&state, &post, &agent(reader)).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        let r = handle(&state, &post, &newcomer).await;
+        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        // The reader cancels two of its own: its share is under its quota, and so is everyone's.
+        for i in 0..2 {
+            let delete = test_store::request(
+                Method::DELETE,
+                &format!("{SUBSCRIPTIONS_PATH}s{i:04}"),
+                &[],
+                "",
+            );
+            let r = handle(&state, &delete, &agent(reader)).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            if i == 0 {
+                // At its quota, not under it: still refused.
+                let r = handle(&state, &post, &agent(reader)).await;
+                assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+                let r = handle(&state, &post, &newcomer).await;
+                assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+            }
+        }
+        assert!(state
+            .notify
+            .past_quota(state.cfg.owner.as_deref())
+            .is_none());
+        let r = handle(&state, &post, &newcomer).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = handle(&state, &post, &agent(reader)).await;
+        assert_eq!(
+            r.status(),
+            StatusCode::INSUFFICIENT_STORAGE,
+            "the share is full again"
+        );
     }
 
     /// Review findings: a topic's lock was waited for without bound, so a write stalled on a
@@ -2906,5 +3446,260 @@ mod tests {
             .starts_with("urn:uuid:"));
         assert!(parse_rfc3339(e["activity"]["published"].as_str().unwrap()).is_some());
         assert!(e["activity"].get("actor").is_none());
+    }
+
+    /// Issue #6814: a webhook subscription took each topic's lock (waiting while a write held
+    /// it) and answered `503` on a set-aside one, before it checked the subscriber may read the
+    /// topic: a subscriber that may not read it could tell a stuck change to it, or a write in
+    /// progress, from a resource it may not read. Whoever may not read a topic is refused at
+    /// once, the same whatever its state; only whoever may is told to retry, or waits.
+    #[tokio::test]
+    async fn a_topic_is_authorized_before_its_lock_or_state_shows() {
+        use test_store::{agent, closed_state, data, grant_read, stick, OWNER};
+        let (state, store) = closed_state(100).await;
+        let (a, b) = (data(&state, "a").await, data(&state, "b").await);
+        let reader = agent("https://reader.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        grant_read(&state, "https://reader.example/#me", &[&a, &b]).await;
+        let subscribe = |topic: &str, who: &Agent| {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [topic],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let (state, who) = (state.clone(), who.clone());
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                let r = tokio::time::timeout(
+                    Duration::from_millis(500),
+                    test_store::route_as(&state, req, &who),
+                )
+                .await
+                .ok()?;
+                let retry = r.headers().contains_key(header::RETRY_AFTER);
+                let status = r.status();
+                let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                Some((status, retry, body))
+            }
+        };
+        let refused = subscribe(&b, &stranger).await.expect("answered at once");
+        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+        // A write holds b's lock: the stranger is refused at once, as before; the reader waits.
+        let held = state.locks.lock(&b).await.unwrap();
+        assert_eq!(subscribe(&b, &stranger).await.as_ref(), Some(&refused));
+        assert_eq!(
+            subscribe(&b, &reader).await,
+            None,
+            "the reader waits on the write"
+        );
+        drop(held);
+        // a is set aside: the stranger is refused as for b; the reader is told to retry.
+        stick(&state, &store, &a).await;
+        assert_eq!(subscribe(&a, &stranger).await.as_ref(), Some(&refused));
+        let got = subscribe(&a, &reader).await.expect("answered at once");
+        assert_eq!(got.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert!(got.1);
+        assert_eq!(
+            subscribe(&a, &agent(OWNER)).await.expect("answered").0,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // Anonymous, the challenge, whatever the state.
+        assert_eq!(
+            subscribe(&a, &Agent::anonymous())
+                .await
+                .expect("answered")
+                .0,
+            StatusCode::UNAUTHORIZED
+        );
+        let ok = subscribe(&b, &reader).await.expect("answered");
+        assert_eq!(ok.0, StatusCode::CREATED);
+    }
+
+    /// Issue #6814: the service routes answered `503` for a set-aside record before they
+    /// checked the caller may see it. A subscription (or a grant) is said to be set aside only
+    /// to its subscriber (its author) and the owner; to anyone else it is as any record they
+    /// may not see.
+    #[tokio::test]
+    async fn a_set_aside_record_shows_only_to_who_may_see_it() {
+        use test_store::{agent, closed_state, stick, OWNER};
+        let (state, store) = closed_state(100).await;
+        let reader = agent("https://reader.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let owner = agent(OWNER);
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let r = handle(&state, &post, &owner).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let iri = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        let path = iri
+            .strip_prefix(state.cfg.storage().trim_end_matches('/'))
+            .unwrap()
+            .to_string();
+        let ask = |path: &str, m: Method, who: &Agent| {
+            let (state, who) = (state.clone(), who.clone());
+            let req = test_store::request(m, path, &[], "");
+            async move { test_store::route_as(&state, req, &who).await.status() }
+        };
+        stick(&state, &store, &iri).await;
+        let unknown = format!("{SUBSCRIPTIONS_PATH}unknown");
+        for m in [Method::GET, Method::DELETE] {
+            for who in [&reader, &stranger] {
+                assert_eq!(
+                    ask(&path, m.clone(), who).await,
+                    StatusCode::NOT_FOUND,
+                    "{m}"
+                );
+                assert_eq!(ask(&unknown, m.clone(), who).await, StatusCode::NOT_FOUND);
+            }
+            assert_eq!(
+                ask(&path, m.clone(), &Agent::anonymous()).await,
+                StatusCode::UNAUTHORIZED
+            );
+            assert_eq!(
+                ask(&path, m.clone(), &owner).await,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{m}"
+            );
+        }
+        // The container lists it, so it is set aside too: any subscriber may act on it.
+        let container = SUBSCRIPTIONS_PATH;
+        assert_eq!(
+            ask(container, Method::GET, &Agent::anonymous()).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            ask(container, Method::GET, &reader).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // A grant record, likewise: only its author and the owner hear it is set aside.
+        test_store::unstick(&store);
+        test_store::put_back(&state, &iri).await;
+        let grant = test_store::grant_read(
+            &state,
+            "https://reader.example/#me",
+            &[&state.cfg.storage()],
+        )
+        .await;
+        let grant_path = grant
+            .strip_prefix(state.cfg.storage().trim_end_matches('/'))
+            .unwrap()
+            .to_string();
+        stick(&state, &store, &grant).await;
+        let ask_grant = |who: &Agent| {
+            let (state, who) = (state.clone(), who.clone());
+            let req = test_store::request(Method::GET, &grant_path, &[], "");
+            async move { test_store::route_as(&state, req, &who).await.status() }
+        };
+        assert_eq!(ask_grant(&reader).await, StatusCode::FORBIDDEN);
+        assert_eq!(ask_grant(&stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(ask_grant(&owner).await, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Issue #6814 (review): a subscription POST said the subscriptions container was set
+    /// aside, or that new changes waited on set-aside ones, and removed expired subscriptions
+    /// (waiting on their locks), before it checked the subscriber may read its topics. A topic
+    /// it may not read is refused first, at once, whatever the container's state.
+    #[tokio::test]
+    async fn a_subscription_is_authorized_by_its_topics_before_anything_else() {
+        use test_store::{agent, closed_state, data, grant_read, route_as, stick, OWNER};
+        let (state, store) = closed_state(100).await;
+        let (a, b) = (data(&state, "a").await, data(&state, "b").await);
+        let reader = agent("https://reader.example/#me");
+        grant_read(&state, "https://reader.example/#me", &[&a]).await;
+        let post = |topic: &str, who: &Agent| {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [topic],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let (state, who) = (state.clone(), who.clone());
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                let r =
+                    tokio::time::timeout(Duration::from_millis(500), route_as(&state, req, &who))
+                        .await
+                        .expect("answered at once");
+                let retry = r.headers().contains_key(header::RETRY_AFTER);
+                (r.status(), retry)
+            }
+        };
+        let refused = (StatusCode::FORBIDDEN, false);
+        assert_eq!(post(&b, &reader).await, refused);
+        // An expired subscription, its record held by a removal in progress: a request that
+        // removed it first would wait on it.
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let old = format!("{container}old");
+        let sub = Subscription {
+            id: "old".into(),
+            subscriber: Some(OWNER.into()),
+            client: None,
+            topics: vec![state.cfg.storage()],
+            inbox: "https://inbox.example/".into(),
+            expires: None,
+            expires_at: Some(1),
+            failures: 0,
+        };
+        state
+            .store
+            .create_in_container(
+                &container,
+                &old,
+                Bytes::from(serde_json::to_vec(&sub).unwrap()),
+                LWS_JSON,
+            )
+            .await
+            .unwrap();
+        state.notify.subs.write().unwrap().insert("old".into(), sub);
+        let held = state.locks.lock(&old).await.unwrap();
+        assert_eq!(post(&b, &reader).await, refused);
+        drop(held);
+        // The container is set aside (a stuck change to a subscription in it).
+        stick(&state, &store, &format!("{container}stuck")).await;
+        assert!(!state.visible(&container));
+        assert_eq!(post(&b, &reader).await, refused);
+        assert_eq!(
+            post(&a, &reader).await,
+            (StatusCode::SERVICE_UNAVAILABLE, true)
+        );
+        test_store::unstick(&store);
+        test_store::put_back(&state, &container).await;
+        // New changes wait while set-aside ones hold as much as they may.
+        state.set_aside_bytes.store(
+            super::super::MAX_SET_ASIDE_BYTES,
+            std::sync::atomic::Ordering::Release,
+        );
+        assert_eq!(post(&b, &reader).await, refused);
+        assert_eq!(
+            post(&a, &reader).await,
+            (StatusCode::SERVICE_UNAVAILABLE, true)
+        );
+        state
+            .set_aside_bytes
+            .store(0, std::sync::atomic::Ordering::Release);
+        assert_eq!(post(&a, &reader).await.0, StatusCode::CREATED);
     }
 }

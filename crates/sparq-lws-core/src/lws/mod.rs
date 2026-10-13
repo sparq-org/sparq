@@ -757,9 +757,10 @@ impl<S: Store + 'static> LwsState<S> {
 
     /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
     /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). Every
-    /// route checks it before anything else, and every lock is taken only while it holds
-    /// ([`resources::IriLocks::lock`]), so one that is not visible is answered `503` at once, or
-    /// skipped by a walk over many, and never waited on.
+    /// route to a resource or record checks it once it has authorized the request (so only a
+    /// caller that may act on it learns it is set aside; see [`access::aside`]), and every lock
+    /// is taken only while it holds ([`resources::IriLocks::lock`]), so one that is not visible
+    /// is answered `503` at once, or fails a walk over many, and is never waited on.
     pub(crate) fn visible(&self, uri: &str) -> bool {
         self.locks.visible(uri)
     }
@@ -825,7 +826,7 @@ impl<S: Store + 'static> LwsState<S> {
         let bytes = left.bytes();
         self.set_aside_bytes
             .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
-        self.locks.hide(&iris);
+        self.locks.hide(&iris, left.priors());
         (iris, bytes)
     }
 
@@ -933,7 +934,7 @@ impl<S: Store + 'static> LwsState<S> {
     }
 
     /// Store `meta` beside `iri`. What is written is checked to read back first (see
-    /// [`encode_meta`]), so metadata that could not be read again is never stored.
+    /// `encode_meta`), so metadata that could not be read again is never stored.
     pub async fn put_resource_meta(
         &self,
         iri: &str,
@@ -1197,6 +1198,13 @@ impl Unsettled {
     fn iris(&self) -> Vec<String> {
         iris_of(&self.0)
     }
+
+    /// What each resource it is to was before the change (see [`Prior`]).
+    fn priors(&self) -> std::collections::HashMap<String, Prior> {
+        let mut out = std::collections::HashMap::new();
+        priors_of(&self.0, &mut out);
+        out
+    }
 }
 
 /// About how many bytes `undo` holds to put back: each body, and each record at its limit.
@@ -1213,6 +1221,104 @@ fn bytes_of(undo: &[Undo]) -> usize {
             _ => MAX_META_BYTES,
         })
         .fold(0, usize::saturating_add)
+}
+
+/// What a resource that a stuck change is to was before the change began, as far as deciding
+/// who may act on it goes: taken from what the change's journal staged before its first step
+/// (and so before any of its writes landed), never from what is stored while it is part way.
+/// A field the change left nothing to put back of (it did not touch it, or it is put back
+/// already) is `None`: what is stored for it now is what it was.
+///
+/// It decides only who may learn the resource is set aside ([`access::aside`]); nothing is
+/// served or changed on it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Prior {
+    /// Whether the resource was there.
+    pub existed: Option<bool>,
+    /// Its metadata: the default when it had none, and, when what it had does not parse, one
+    /// marked `pending` (which refuses every grant).
+    pub meta: Option<ResourceMeta>,
+    /// Its format (a container's is its listing's).
+    pub format: Option<Option<String>>,
+}
+
+impl Prior {
+    /// Fill what this does not say yet from `other`.
+    pub(crate) fn or(&mut self, other: Prior) {
+        self.existed = self.existed.or(other.existed);
+        if self.meta.is_none() {
+            self.meta = other.meta;
+        }
+        if self.format.is_none() {
+            self.format = other.format;
+        }
+    }
+}
+
+/// What each resource `undo` (newest step first, as it is put back) puts back was before its
+/// change (see [`Prior`]).
+fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) {
+    let format = |iri: &str, meta: &StoredMeta| {
+        Some(if iri.ends_with('/') {
+            LWS_JSON.to_string()
+        } else {
+            meta.content_type.clone()
+        })
+    };
+    // Put back newest first: a key written twice (metadata marked `pending`, then the new
+    // metadata) has two steps, the later one holding the intermediate state. The oldest
+    // step's prior, the state from before the change, is the one kept.
+    for step in undo.iter().rev() {
+        let (iri, prior) = match step {
+            Undo::Restore { key, prior } => match key.strip_suffix(META_SUFFIX) {
+                Some(iri) => {
+                    let meta = match prior {
+                        Some((body, _)) => parse_meta(iri, body).unwrap_or(ResourceMeta {
+                            pending: true,
+                            ..ResourceMeta::default()
+                        }),
+                        None => ResourceMeta::default(),
+                    };
+                    (
+                        iri.to_string(),
+                        Prior {
+                            meta: Some(meta),
+                            ..Prior::default()
+                        },
+                    )
+                }
+                None => (
+                    key.clone(),
+                    Prior {
+                        existed: Some(prior.is_some()),
+                        format: Some(prior.as_ref().and_then(|(_, m)| format(key, m))),
+                        ..Prior::default()
+                    },
+                ),
+            },
+            Undo::Recreate { iri, meta, .. } => (
+                iri.clone(),
+                Prior {
+                    existed: Some(true),
+                    format: Some(format(iri, meta)),
+                    ..Prior::default()
+                },
+            ),
+            Undo::Remove { iri, .. } => (
+                iri.clone(),
+                Prior {
+                    existed: Some(false),
+                    ..Prior::default()
+                },
+            ),
+            Undo::Resolve { undo, .. } => {
+                priors_of(undo, out);
+                continue;
+            }
+            Undo::Locked { .. } | Undo::Forget { .. } => continue,
+        };
+        out.entry(iri).or_default().or(prior);
+    }
 }
 
 /// The resources `undo` is to, each once.
@@ -1673,6 +1779,47 @@ impl Quota {
             author,
         })
     }
+
+    /// What of the records in force is past this quota, for the start's log: `held` records
+    /// counted against it overall, and the author of each one counted against its author's
+    /// share. `None` when nothing is. Records past a quota (stored before it was lowered, or
+    /// written to the store directly) are kept; [`Quota::reserve`] refuses a new one to a share
+    /// until that share is under its quota again.
+    pub(crate) fn past<'a>(
+        &self,
+        held: usize,
+        authors: impl IntoIterator<Item = Option<&'a str>>,
+    ) -> Option<String> {
+        let mut by_author = std::collections::HashMap::<Option<&str>, usize>::new();
+        for a in authors {
+            *by_author.entry(a).or_default() += 1;
+        }
+        let over: Vec<usize> = by_author
+            .into_values()
+            .filter(|n| *n > self.per_author)
+            .collect();
+        let mut past = Vec::new();
+        if held > self.total {
+            past.push(format!("{held} held, of at most {}", self.total));
+        }
+        if let Some(most) = over.iter().max() {
+            past.push(format!(
+                "{} author(s) holding more than {} each (at most {most})",
+                over.len(),
+                self.per_author
+            ));
+        }
+        (!past.is_empty()).then(|| past.join("; "))
+    }
+}
+
+/// Log, at the start, that the records of `what` stored in `container` are past their quota
+/// (`past`, from [`Quota::past`]). None is removed: each is a user's record.
+pub(crate) fn report_past_quota(what: &str, container: &str, past: &str) {
+    eprintln!(
+        "lws: the {what} stored in {container} are past their quota: {past}; none is removed, \
+         and no new one is admitted to a share until it is under its quota"
+    );
 }
 
 pub(crate) use sparq_lws_authn::{expansion_budget, triple_bytes};
@@ -1825,18 +1972,12 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Err(error) => return state.challenge(Some(error)),
     };
     if path.starts_with(SUBSCRIPTIONS_PATH) {
-        if let Some(unavailable) = resources::unavailable(state, &req) {
-            return unavailable;
-        }
         return notify::handle(state, &req, &agent).await;
     }
     if path == TYPE_INDEX_PATH || path == TYPE_SEARCH_PATH {
         return index::handle(state, &req, &agent).await;
     }
     if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
-        if let Some(unavailable) = resources::unavailable(state, &req) {
-            return unavailable;
-        }
         return access::handle(state, &req, &agent).await;
     }
     if path.starts_with("/.lws/") || path == "/.lws" {
@@ -2079,7 +2220,7 @@ pub const MAX_DECLARED_LINK_BYTES: usize = 64 * 1024;
 pub const MAX_HEADER_MEMBERS: usize = 64;
 
 /// Largest metadata a resource may have, as stored: its types, links and linkset together. Every
-/// metadata write goes through [`encode_meta`], which refuses more, and a write of content and
+/// metadata write goes through `encode_meta`, which refuses more, and a write of content and
 /// metadata checks the metadata before writing either, so no sequence of writes grows a
 /// resource's metadata past it.
 pub const MAX_META_BYTES: usize = 256 * 1024;
@@ -2105,12 +2246,12 @@ pub(crate) fn check_headers(headers: &HeaderMap) -> Result<(), Response> {
             .join(", ")
     };
     let (mut count, mut bytes) = (0usize, 0usize);
-    for (target, params) in parse_links(&all(header::LINK)) {
-        let rels = params
-            .get("rel")
+    for link in parse_links(&all(header::LINK)) {
+        let rels = link
+            .param("rel")
             .map_or(0, |r| r.split_whitespace().count());
         count = count.saturating_add(rels.max(1));
-        bytes = bytes.saturating_add(rels.max(1).saturating_mul(target.len()));
+        bytes = bytes.saturating_add(rels.max(1).saturating_mul(link.target.len()));
         if count > MAX_DECLARED_LINKS || bytes > MAX_DECLARED_LINK_BYTES {
             return Err(too_large("the Link header"));
         }
@@ -2128,41 +2269,133 @@ pub(crate) fn check_headers(headers: &HeaderMap) -> Result<(), Response> {
     Ok(())
 }
 
-/// Parse a Link header value into `(target, params)` pairs, params lower-cased by name.
-pub fn parse_links(value: &str) -> Vec<(String, BTreeMap<String, String>)> {
-    let mut out = Vec::new();
-    let mut rest = value;
-    while let Some(start) = rest.find('<') {
-        let Some(end) = rest[start..].find('>') else {
-            break;
-        };
-        let target = rest[start + 1..start + end].trim().to_string();
-        rest = &rest[start + end + 1..];
-        let mut params = BTreeMap::new();
-        // Parameters run until the next comma outside quotes.
-        let mut i = 0;
-        let bytes = rest.as_bytes();
-        let mut in_quotes = false;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'"' => in_quotes = !in_quotes,
-                b',' if !in_quotes => break,
-                _ => {}
+/// One link of a Link header value (RFC 8288 section 3): its target and its parameters, both
+/// borrowed from the value.
+#[derive(Clone, Copy, Debug)]
+pub struct Link<'a> {
+    /// The target, between `<` and `>`, trimmed.
+    pub target: &'a str,
+    /// The parameters' text, every one a `link-param` ([`link_param`]).
+    params: &'a str,
+}
+
+impl<'a> Link<'a> {
+    /// The value of the parameter `name` (matched case-insensitively, RFC 8288 section 3), a
+    /// quoted string unquoted with its escapes undone; the first when it repeats ("occurrences
+    /// after the first MUST be ignored"). A parameter without a value has the empty one.
+    pub fn param(&self, name: &str) -> Option<std::borrow::Cow<'a, str>> {
+        let mut rest = self.params;
+        while let Some((key, value, next)) = link_param(rest) {
+            if key.eq_ignore_ascii_case(name) {
+                return Some(unescape(value));
             }
-            i += 1;
+            rest = next;
         }
-        for p in rest[..i].split(';') {
-            if let Some((k, v)) = p.split_once('=') {
-                params.insert(
-                    k.trim().to_ascii_lowercase(),
-                    v.trim().trim_matches('"').to_string(),
-                );
-            }
-        }
-        rest = &rest[i.min(rest.len())..];
-        out.push((target, params));
+        None
     }
-    out
+}
+
+/// Whether `b` is a `tchar` (RFC 9110 section 5.6.2), of which a `token` is made.
+fn is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
+}
+
+/// `s` past its leading spaces and tabs (`OWS`, `BWS`).
+fn skip_ows(s: &str) -> &str {
+    s.trim_start_matches([' ', '\t'])
+}
+
+/// A `token` at the start of `s`, and what follows it; `None` when there is none.
+fn token(s: &str) -> Option<(&str, &str)> {
+    let n = s.bytes().take_while(|b| is_tchar(*b)).count();
+    (n > 0).then(|| s.split_at(n))
+}
+
+/// A `quoted-string` at the start of `s` (RFC 9110 section 5.6.4): its text between the quotes,
+/// `quoted-pair`s still escaped, and what follows it; `None` when `s` does not start with one
+/// or it is never closed.
+fn quoted_string(s: &str) -> Option<(&str, &str)> {
+    let inner = s.strip_prefix('"')?;
+    let bytes = inner.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            // A quoted-pair: the backslash and the octet it escapes, whatever that is.
+            b'\\' => i += 2,
+            b'"' => return Some((&inner[..i], &inner[i + 1..])),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// The text of a quoted string with its `quoted-pair`s undone; borrowed when it has none.
+fn unescape(raw: &str) -> std::borrow::Cow<'_, str> {
+    if !raw.contains('\\') {
+        return std::borrow::Cow::Borrowed(raw);
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.extend(chars.next()),
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
+}
+
+/// One `OWS ";" OWS link-param` at the start of `s` (RFC 8288 section 3): its name, its value
+/// (`token` or `quoted-string`, still escaped; empty when it has none) and what follows.
+/// `None` when `s` does not start with `;`, or what follows is not a `link-param`.
+fn link_param(s: &str) -> Option<(&str, &str, &str)> {
+    let s = skip_ows(s).strip_prefix(';')?;
+    let (name, s) = token(skip_ows(s))?;
+    let s = skip_ows(s);
+    let Some(v) = s.strip_prefix('=') else {
+        return Some((name, "", s));
+    };
+    let v = skip_ows(v);
+    if v.starts_with('"') {
+        quoted_string(v).map(|(value, rest)| (name, value, rest))
+    } else {
+        token(v).map(|(value, rest)| (name, value, rest))
+    }
+}
+
+/// The links of a Link header value (RFC 8288 section 3), read as they are needed: a caller that
+/// stops at a bound (see [`check_headers`]) has spent nothing on what lies past it, and nothing
+/// is allocated. Reading stops at the first part that is not a `link-value`: a target without its
+/// `>` or with a `<` in it, or parameters that are not `link-param`s (a quoted string never
+/// closed among them); nothing after it is read as a link.
+pub fn parse_links(value: &str) -> impl Iterator<Item = Link<'_>> {
+    let mut rest = value;
+    std::iter::from_fn(move || {
+        // Empty list elements and the whitespace around them are skipped (RFC 9110 5.6.1).
+        let after = rest.trim_start_matches([' ', '\t', ',']).strip_prefix('<');
+        rest = "";
+        let after = after?;
+        let end = after.find('>')?;
+        let target = &after[..end];
+        if target.contains('<') {
+            return None;
+        }
+        let params = &after[end + 1..];
+        let mut cursor = params;
+        while let Some((_, _, next)) = link_param(cursor) {
+            cursor = next;
+        }
+        // The link ends at the end of the value or at the `,` before the next one.
+        let tail = skip_ows(cursor);
+        if !(tail.is_empty() || tail.starts_with(',')) {
+            return None;
+        }
+        rest = tail;
+        Some(Link {
+            target: target.trim(),
+            params: &params[..params.len() - cursor.len()],
+        })
+    })
 }
 
 /// A store for unit tests: the in-memory store, with deletes that fail on demand.
@@ -2227,6 +2460,9 @@ pub(crate) mod test_store {
         /// commits, then reports a backend failure, as when a remote store's reply is lost after
         /// the update landed.
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// As `fail_after_write_of`, for the `n`th write (from 1) of the IRI named from now on
+        /// alone: `(iri, n)`.
+        pub lose_nth_write_of: Arc<std::sync::Mutex<Option<(String, usize)>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
         /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
@@ -2263,10 +2499,15 @@ pub(crate) mod test_store {
 
     impl FlakyStore {
         pub fn new() -> Self {
+            Self::with_limits(crate::store::InMemoryStoreLimits::default())
+        }
+
+        /// Holding at most what `limits` allow.
+        pub fn with_limits(limits: crate::store::InMemoryStoreLimits) -> Self {
             Self {
                 inner: Arc::new(CompositeStore::new(
-                    InMemorySparqClient::default(),
-                    InMemoryBlobStore::default(),
+                    InMemorySparqClient::with_limits(limits),
+                    InMemoryBlobStore::with_limits(limits),
                 )),
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
@@ -2286,6 +2527,7 @@ pub(crate) mod test_store {
                 fail_list_of: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
+                lose_nth_write_of: Default::default(),
                 fail_list: Default::default(),
                 fail_meta: Default::default(),
                 exists_answers: Default::default(),
@@ -2435,7 +2677,18 @@ pub(crate) mod test_store {
                 if lost {
                     *slot = None;
                 }
-                lost
+                let mut nth = self.lose_nth_write_of.lock().unwrap();
+                let lost_nth = match nth.as_mut() {
+                    Some((of, n)) if of == iri => {
+                        *n -= 1;
+                        *n == 0
+                    }
+                    _ => false,
+                };
+                if lost_nth {
+                    *nth = None;
+                }
+                lost || lost_nth
             };
             if lost {
                 written?;
@@ -2734,6 +2987,129 @@ pub(crate) mod test_store {
         (state, store)
     }
 
+    /// The owner of a [`closed_state`]'s storage.
+    pub const OWNER: &str = "https://owner.example/#me";
+
+    /// An authenticated agent.
+    pub fn agent(subject: &str) -> super::Agent {
+        super::Agent {
+            subject: Some(subject.into()),
+            ..super::Agent::anonymous()
+        }
+    }
+
+    /// A state over a [`FlakyStore`] that is not open: only its owner ([`OWNER`]), a resource's
+    /// creator and the grants decide who may do what.
+    pub async fn closed_state(page_size: usize) -> (super::LwsState<FlakyStore>, FlakyStore) {
+        let store = FlakyStore::new();
+        let mut cfg = super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some(OWNER.into());
+        cfg.allow_insecure_fetch = true;
+        cfg.page_size = page_size;
+        let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
+        (state, store)
+    }
+
+    /// Store a data resource `name` in the root; its IRI.
+    pub async fn data(state: &super::LwsState<FlakyStore>, name: &str) -> String {
+        let root = state.cfg.storage();
+        let iri = format!("{root}{name}");
+        state
+            .store
+            .create_in_container(&root, &iri, Bytes::from("x"), "text/plain")
+            .await
+            .unwrap();
+        iri
+    }
+
+    /// As the owner, grant `assignee` read access to `targets`, and nothing else; the grant's
+    /// IRI.
+    pub async fn grant_read(
+        state: &super::LwsState<FlakyStore>,
+        assignee: &str,
+        targets: &[&str],
+    ) -> String {
+        let grant = serde_json::json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": assignee,
+                "target": {"type": "StorageResource", "value": targets}}],
+        });
+        let r = super::access::handle(
+            state,
+            &request(
+                axum::http::Method::POST,
+                super::GRANTS_PATH,
+                &[("content-type", super::LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &agent(OWNER),
+        )
+        .await;
+        assert_eq!(r.status(), axum::http::StatusCode::CREATED);
+        r.headers()[axum::http::header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// `req` routed as the server routes it, sent with an access token for `agent`'s subject
+    /// (none for an anonymous one).
+    pub async fn route_as(
+        state: &super::LwsState<FlakyStore>,
+        mut req: super::LwsRequest,
+        agent: &super::Agent,
+    ) -> axum::response::Response {
+        if let Some(subject) = &agent.subject {
+            let token = super::tokens::mint(
+                &state.cfg,
+                subject,
+                "https://client.example/id",
+                &state.cfg.realm(),
+            );
+            req.headers.insert(
+                axum::http::header::AUTHORIZATION,
+                axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+            );
+        }
+        super::route(state, req).await
+    }
+
+    /// Set `iri` aside, as a stuck write of its content is: putting back what it holds now
+    /// (removing it, when it holds nothing: a stuck create) keeps failing until [`unstick`].
+    pub async fn stick(state: &super::LwsState<FlakyStore>, store: &FlakyStore, iri: &str) {
+        let prior = state.store.read(iri).await.ok().map(|r| (r.body, r.meta));
+        if prior.is_some() {
+            *store.fail_restore_of.lock().unwrap() = Some(iri.to_string());
+        } else {
+            *store.fail_delete_of.lock().unwrap() = Some(iri.to_string());
+        }
+        let left = super::Unsettled(vec![super::Undo::Restore {
+            key: iri.to_string(),
+            prior,
+        }]);
+        state.set_aside(left, ());
+        assert!(!state.visible(iri));
+    }
+
+    /// Let what [`stick`] set aside be put back.
+    pub fn unstick(store: &FlakyStore) {
+        *store.fail_restore_of.lock().unwrap() = None;
+        *store.fail_delete_of.lock().unwrap() = None;
+    }
+
+    /// Wait (a few seconds at most) until `iri` is no longer set aside.
+    pub async fn put_back(state: &super::LwsState<FlakyStore>, iri: &str) {
+        for _ in 0..300 {
+            if state.visible(iri) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("{iri} was never put back");
+    }
+
     /// The `Link` targets of `resp` with relation `rel`.
     pub fn links(resp: &axum::response::Response, rel: &str) -> Vec<String> {
         resp.headers()
@@ -2741,8 +3117,8 @@ pub(crate) mod test_store {
             .iter()
             .filter_map(|v| v.to_str().ok())
             .flat_map(super::parse_links)
-            .filter(|(_, p)| p.get("rel").map(String::as_str) == Some(rel))
-            .map(|(t, _)| t)
+            .filter(|l| l.param("rel").as_deref() == Some(rel))
+            .map(|l| l.target.to_string())
             .collect()
     }
 
@@ -3323,13 +3699,89 @@ mod tests {
 
     #[test]
     fn links_parse_with_quoted_commas() {
-        let l = parse_links(r#"<https://a/x>; rel="type", <b>; rel="up next"; title="a, b", <c>"#);
+        let l: Vec<_> =
+            parse_links(r#"<https://a/x>; rel="type", <b>; rel="up next"; title="a, b", <c>"#)
+                .collect();
         assert_eq!(l.len(), 3);
-        assert_eq!(l[0].0, "https://a/x");
-        assert_eq!(l[0].1["rel"], "type");
-        assert_eq!(l[1].1["rel"], "up next");
-        assert_eq!(l[1].1["title"], "a, b");
-        assert_eq!(l[2].0, "c");
+        assert_eq!(l[0].target, "https://a/x");
+        assert_eq!(l[0].param("rel").as_deref(), Some("type"));
+        assert_eq!(l[1].param("rel").as_deref(), Some("up next"));
+        assert_eq!(l[1].param("title").as_deref(), Some("a, b"));
+        assert_eq!(l[2].target, "c");
+        assert_eq!(l[2].param("rel"), None);
+    }
+
+    /// RFC 8288 section 3: occurrences of `rel` after the first are ignored. Parameter names
+    /// are case-insensitive.
+    #[test]
+    fn a_link_takes_its_first_rel() {
+        let l = parse_links(r#"<a>; REL=type; rel="next""#).next().unwrap();
+        assert_eq!(l.param("rel").as_deref(), Some("type"));
+    }
+
+    /// Review finding: parameters were split at every `;`, inside quoted strings too, so a
+    /// `title` holding `; rel=type` declared a relation the link does not have.
+    #[test]
+    fn a_semicolon_in_a_quoted_string_is_text() {
+        let l = parse_links(
+            r#"<https://www.w3.org/ns/lws#Container>; title="note; rel=type"; rel=describedby"#,
+        )
+        .next()
+        .unwrap();
+        assert_eq!(l.param("rel").as_deref(), Some("describedby"));
+        assert_eq!(l.param("title").as_deref(), Some("note; rel=type"));
+    }
+
+    /// Quoted pairs (RFC 9110 section 5.6.4) are undone, and an escaped quote does not close
+    /// the string.
+    #[test]
+    fn quoted_pairs_are_undone() {
+        let l: Vec<_> =
+            parse_links(r#"<a>; title="say \"hi\", \\ok"; rel=next, <b>; rel=up"#).collect();
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].param("title").as_deref(), Some(r#"say "hi", \ok"#));
+        assert_eq!(l[0].param("rel").as_deref(), Some("next"));
+        assert_eq!(l[1].param("rel").as_deref(), Some("up"));
+    }
+
+    /// What is not a `link-value` ends the reading there: a quoted string never closed does not
+    /// swallow the links after it into its text, a target without its `>` does not take a later
+    /// link's, and nothing after either is read as a link.
+    #[test]
+    fn a_malformed_link_ends_the_reading() {
+        let unclosed: Vec<_> =
+            parse_links(r#"<a>; rel=next, <b>; title="open; rel=type, <c>; rel=up"#).collect();
+        assert_eq!(unclosed.len(), 1);
+        assert_eq!(unclosed[0].target, "a");
+        let unbracketed: Vec<_> = parse_links("<a; rel=type, <b>; rel=up").collect();
+        assert!(unbracketed.is_empty());
+        let junk: Vec<_> = parse_links("<a>; rel=next junk, <b>; rel=up").collect();
+        assert!(junk.is_empty());
+        // Empty list elements and parameters without a value are fine.
+        let l: Vec<_> = parse_links(" , <a>;rel=next ;  anchor ,, <b>").collect();
+        assert_eq!(l.len(), 2);
+        assert_eq!(l[0].param("anchor").as_deref(), Some(""));
+    }
+
+    /// Review finding (#6808): every link was parsed, each with its own map of owned strings,
+    /// before the caps on declared links applied, so what parsing allocated was bounded only by
+    /// the server's header limit. Links are now read one at a time, borrowing the header, and
+    /// the check stops at its cap: a header far past the cap is refused, and parsing it takes
+    /// only the links up to the cap.
+    #[test]
+    fn links_past_the_cap_are_not_parsed() {
+        let header = vec!["<https://e/t>; rel=\"next\""; 1 << 16].join(", ");
+        let mut read = 0;
+        let refused = parse_links(&header)
+            .inspect(|_| read += 1)
+            .try_fold(0usize, |n, _| (n < MAX_DECLARED_LINKS).then_some(n + 1))
+            .is_none();
+        assert!(refused);
+        assert_eq!(read, MAX_DECLARED_LINKS + 1);
+        let mut headers = HeaderMap::new();
+        headers.insert(header::LINK, header.parse().unwrap());
+        let resp = check_headers(&headers).unwrap_err();
+        assert_eq!(resp.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
     }
 
     /// Review finding: the check took any scheme and a few excluded characters, so malformed

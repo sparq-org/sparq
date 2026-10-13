@@ -1457,7 +1457,7 @@ mod resolve_iri_tests {
 // Drive the `parse` / `parse_with_base` / `parse_turtle_with_base` API and assert on the
 // produced facts/rules and on the error path, exercising the lowest-covered parser branches.
 #[cfg(test)]
-mod parse_surface_tests {
+pub(super) mod parse_surface_tests {
     use super::*;
 
     fn iri(s: &str) -> Term {
@@ -1587,6 +1587,88 @@ mod parse_surface_tests {
             "<http://ex/s> <http://ex/p> \"v\"@1bad .",      // invalid language tag (digit-led)
         ] {
             assert!(parse(bad).is_err(), "expected a parse error for: {bad:?}");
+        }
+    }
+
+    /// `n` levels of one recursive production around `:z`, each level one parser nesting
+    /// level (#6732).
+    pub(in crate::n3) fn nested(production: &str, n: usize) -> String {
+        let mut t = String::from(":z");
+        for _ in 0..n {
+            t = match production {
+                "list" => format!("({t})"),
+                "formula" => format!("{{ :a :b {t} }}"),
+                "formula subject" => format!("{{ {t} :b :c }}"),
+                "blank node object" => format!("[ :p {t} ]"),
+                "blank node predicate" => format!("[ {t} :o ]"),
+                "is of" => format!("[ is {t} of :o ]"),
+                "inverse predicate" => format!("[ <- {t} :o ]"),
+                "quoted triple" => format!("<< {t} :p :o >>"),
+                "triple term" => format!("<<( :s :p {t} )>>"),
+                "path forward" => format!(":x!({t})"),
+                "path backward" => format!(":x^[ :p {t} ]"),
+                _ => unreachable!("{production}"),
+            };
+        }
+        format!("@prefix : <http://ex/> .\n:s :p {t} .\n")
+    }
+
+    /// The recursive productions [`nested`] builds; the first two are also Turtle.
+    pub(in crate::n3) const PRODUCTIONS: [&str; 11] = [
+        "list",
+        "blank node object",
+        "blank node predicate",
+        "formula",
+        "formula subject",
+        "is of",
+        "inverse predicate",
+        "quoted triple",
+        "triple term",
+        "path forward",
+        "path backward",
+    ];
+
+    /// Run `f` on a thread with the smallest stack the parser supports.
+    pub(in crate::n3) fn on_small_stack<T: Send + 'static>(
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(f)
+            .expect("spawn")
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e))
+    }
+
+    /// #6732: every recursive production nested to the parser's limit parses on a 2 MiB
+    /// stack, and one level more is the nesting-limit error, never a stack overflow.
+    #[test]
+    fn nesting_to_the_limit_fits_a_small_stack_for_every_production() {
+        let limit = super::super::bounded::parse_depth();
+        let past = format!("nesting deeper than {limit}");
+        for production in PRODUCTIONS {
+            let past = past.clone();
+            let (at, over, turtle) = on_small_stack(move || {
+                let turtle = matches!(production, "list" | "blank node object").then(|| {
+                    let turtle = |n| parse_turtle_with_base(&nested(production, n), "").map(drop);
+                    (turtle(limit), turtle(limit + 1))
+                });
+                (
+                    parse(&nested(production, limit)).map(drop),
+                    parse(&nested(production, limit + 1)).map(drop),
+                    turtle,
+                )
+            });
+            assert_eq!(at, Ok(()), "{production} at the limit");
+            assert_eq!(over, Err(past.clone()), "{production} past the limit");
+            if let Some((at, over)) = turtle {
+                assert_eq!(at, Ok(()), "{production} at the limit, Turtle");
+                assert_eq!(
+                    over,
+                    Err(past.clone()),
+                    "{production} past the limit, Turtle"
+                );
+            }
         }
     }
 }
