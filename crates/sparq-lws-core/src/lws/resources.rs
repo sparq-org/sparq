@@ -1142,14 +1142,15 @@ async fn members<S: Store + 'static>(
         if child.ends_with('/') {
             item.insert("type".into(), Value::String("Container".into()));
             let cmeta = state.resource_meta(&child).await?;
-            let modified = cmeta
-                .modified_ms
-                .or(meta.last_modified.map(epoch_ms))
-                .unwrap_or_default();
-            item.insert(
-                "modified".into(),
-                Value::String(format_rfc3339(to_secs(modified) as i64)),
-            );
+            // A time that is not known is not listed (it SHOULD be present, not must), rather
+            // than listed as the epoch: the listing's own date rests on its members' (see
+            // [`listing`]).
+            if let Some(modified) = cmeta.modified_ms.or(meta.last_modified.map(epoch_ms)) {
+                item.insert(
+                    "modified".into(),
+                    Value::String(format_rfc3339(to_secs(modified) as i64)),
+                );
+            }
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         } else {
             item.insert("type".into(), Value::String("DataResource".into()));
@@ -1157,11 +1158,12 @@ async fn members<S: Store + 'static>(
             // and modified SHOULD be. The size is measured only for the members a page shows
             // (see [`with_sizes`]): every member's content is not read to serve one page.
             item.insert("format".into(), Value::String(meta.content_type.clone()));
-            let modified = meta.last_modified.map(epoch_ms).unwrap_or_default();
-            item.insert(
-                "modified".into(),
-                Value::String(format_rfc3339(to_secs(modified) as i64)),
-            );
+            if let Some(modified) = meta.last_modified.map(epoch_ms) {
+                item.insert(
+                    "modified".into(),
+                    Value::String(format_rfc3339(to_secs(modified) as i64)),
+                );
+            }
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         }
         out.push((Value::Object(item), meta));
@@ -1255,20 +1257,27 @@ async fn listing<S: Store + 'static>(
     // The listing changed no earlier than any member it lists did, so its Last-Modified is the
     // latest of the container's own and every listed member's: an If-Modified-Since never meets a
     // 304 for a listing whose members moved on since. A container whose own time could not be
-    // moved on after a change to it has none, until it is.
-    let modified = (!untouched).then(|| {
-        all.iter()
-            .filter_map(|(m, _)| m["modified"].as_str().and_then(parse_rfc3339))
-            .filter_map(|t| u64::try_from(t).ok())
-            .fold(
-                to_secs(
-                    cmeta
-                        .modified_ms
-                        .or(meta.last_modified.map(epoch_ms))
-                        .unwrap_or_default(),
-                ),
-                u64::max,
-            )
+    // moved on after a change to it has none, until it is; nor has one with a member whose time
+    // is not known, which could have changed at any time.
+    let times: Option<Vec<u64>> = all
+        .iter()
+        .map(|(m, _)| {
+            m["modified"]
+                .as_str()
+                .and_then(parse_rfc3339)
+                .and_then(|t| u64::try_from(t).ok())
+        })
+        .collect();
+    let modified = (!untouched).then_some(()).zip(times).map(|((), times)| {
+        times.into_iter().fold(
+            to_secs(
+                cmeta
+                    .modified_ms
+                    .or(meta.last_modified.map(epoch_ms))
+                    .unwrap_or_default(),
+            ),
+            u64::max,
+        )
     });
     // Each page is its own representation, so a later page has its own entity tag.
     let etag = if page == 1 {
@@ -7807,8 +7816,8 @@ mod tests {
     /// a process that stopped before its touch left them, on a server that never saw them.
     #[tokio::test]
     async fn a_change_whose_touch_was_lost_still_moves_the_listing_date() {
-        use super::super::test_store::{request as req, state};
-        let (st, _store) = state(100).await;
+        use super::super::test_store::{body_json, request as req, state};
+        let (st, store) = state(100).await;
         let anyone = Agent::anonymous();
         let root = st.cfg.storage();
         let listing = [("accept", "application/lws+json")];
@@ -7859,6 +7868,22 @@ mod tests {
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
         assert_eq!(r.status(), StatusCode::OK);
         assert_ne!(since(&r), now);
+        // Review of #6919: a member whose time is not known could have changed at any time, so
+        // the listing then has no date (and lists no time for it, rather than the epoch).
+        *store.timeless.lock().unwrap() = Some(format!("{root}b"));
+        let r = handle(&st, &req(Method::GET, "/", &listing, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        let doc = body_json(r).await;
+        let b = doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == format!("{root}b"))
+            .unwrap();
+        assert!(b.get("modified").is_none(), "{b}");
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
     }
 
     /// Review finding: a container whose own time could not be moved on after a member was
