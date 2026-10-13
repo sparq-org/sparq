@@ -106,6 +106,15 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
+// A log:includes / log:notIncludes / log:supports PATTERN bound through a variable
+// (`:cfg :pat ?f. ?s log:includes ?f`) is the formula it is bound to, matched exactly as if
+// written in place; a non-formula object fails the premise (GH #6936). Store-scoped, the
+// stratification counts it as EVERY predicate: under notIncludes negatively, so the rule is
+// a negation cycle with its own conclusion (refused by default; FailClosed drops it,
+// SinglePass runs it); under includes/supports positively, and a bound pattern that itself
+// holds a store-scoped notIncludes / collectAllIn / forAllIn fails the run. Write the
+// pattern in the rule to have it stratified. The compiled and incremental counting paths
+// do not take a variable pattern (compile error / batch fallback).
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares

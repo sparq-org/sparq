@@ -51,7 +51,9 @@
 //! quantifiers_limited matrix); virtual list access works inside containment;
 //! an UNBOUND/non-formula subject falls back to store-scoped negation as
 //! failure (this engine's documented idiom). `log:supports` first closes the
-//! scope under its own `=>` rules.
+//! scope under its own `=>` rules. The pattern (object) is a `{ … }` formula,
+//! written in place or bound to a variable (matched the same way); any other
+//! object fails the premise.
 //!
 //! Backward rules (`<=`, log:isImpliedBy) are GOAL-DIRECTED, matching EYE:
 //! they never fire forward; a forward-rule premise atom resolves against
@@ -2224,25 +2226,30 @@ fn match_premise_admitted(
         // `log:includes` may BIND free variables of the object pattern (one
         // binding per match, like EYE); `log:notIncludes` holds iff no match.
         if let Some(op) = scope_op(&pat[1]) {
-            let inner: &[[Term; 3]] = match &pat[2] {
-                Term::Formula(t) => t,
-                _ => &[],
-            };
             let is_not = matches!(op, ScopeOp::NotIncludes);
             let mut next = Vec::new();
             for b in bindings {
-                // A pattern reached through a variable was not visible to
-                // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
-                // the same way, failing the run. (Only a pattern written as a formula is
-                // matched; any other object matches as the empty pattern.)
-                if !matches!(&pat[2], Term::Formula(_)) {
-                    if let Term::Var(v) = &pat[2] {
-                        if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
+                // The pattern: a formula written in place, or the formula a variable is
+                // bound to, matched exactly as if it were written in place (GH #6936). Any
+                // other object is no pattern, and fails the premise for this binding.
+                let inner: &[[Term; 3]] = match &pat[2] {
+                    Term::Formula(t) => t,
+                    Term::Var(v) => match b.get(v) {
+                        // A pattern reached through a variable was not visible to
+                        // [`validate_rule_quantifiers`]: a quantified formula bound to it is
+                        // refused the same way, failing the run.
+                        Some(val @ Term::Formula(_)) if quantified_clause(val) => {
                             bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                             continue;
                         }
-                    }
-                }
+                        Some(Term::Formula(t)) => t,
+                        // `{}` parses as the literal true: the empty pattern.
+                        Some(Term::Lit(v, _, _)) if v == "true" => NO_STATEMENTS,
+                        _ => continue,
+                    },
+                    Term::Lit(v, _, _) if v == "true" => NO_STATEMENTS,
+                    _ => continue,
+                };
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
                 };
@@ -2257,6 +2264,18 @@ fn match_premise_admitted(
                     Term::Lit(v, _, _) if v == "true" => formula_containment(NO_STATEMENTS, inner, &b, bw),
                     // The store as the scope: the clause recurses into premise matching,
                     // holding a unit of the run's stack allowance (`_frames`).
+                    // A pattern bound through a variable was not visible to the
+                    // stratification, which reads it as every predicate, and positively
+                    // under `log:includes` / `log:supports` ([`strata`]): one that runs a
+                    // store-scoped negation or aggregation of its own is refused, failing
+                    // the run, rather than evaluated in no stratified order.
+                    _ if !is_not
+                        && !matches!(&pat[2], Term::Formula(_))
+                        && strata::has_store_negation(inner) =>
+                    {
+                        bw.nested_error.borrow_mut().get_or_insert_with(|| BOUND_STORE_NEGATION.into());
+                        continue;
+                    }
                     _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
                         Some(_frames) => match_premise_seeded(inner, facts, &b, None, bw, depth),
                         None => Vec::new(),
@@ -2877,6 +2896,12 @@ fn frees_quoted_universal(t: &Term) -> bool {
 
 /// The refusal for a rule antecedent no engine can match soundly (GH #6754; support is
 /// tracked in GH #6882).
+/// A store-scoped `log:includes` / `log:supports` pattern bound through a variable that
+/// itself negates over the store: an operator the stratification could not order.
+const BOUND_STORE_NEGATION: &str = "N3: a store-scoped log:includes / log:supports pattern \
+    bound through a variable holds a store-scoped log:notIncludes / log:collectAllIn / \
+    log:forAllIn, which the stratification cannot see; write the pattern in the rule";
+
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 
 /// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the

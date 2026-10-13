@@ -117,6 +117,14 @@ Both changes are in that commit, but its copy of this file does not list them.
 
 ### Fixed
 
+- **sparq-reason (N3):** a `log:includes` / `log:notIncludes` / `log:supports` pattern
+  bound through a variable is matched as the bound formula, as when written inline; it was
+  matched as the empty pattern, so `log:includes` held vacuously and `log:notIncludes`
+  never fired. A non-formula object now fails the premise. With the store as the scope,
+  the automatic stratification counts a variable pattern as every predicate: a
+  `log:notIncludes` over one is a negation cycle (refused by default, evaluated under the
+  `NegationCycles` opt-ins), and a `log:includes` / `log:supports` whose bound pattern
+  itself negates over the store fails the run. (#6936)
 - **Release pipeline:** release files are staged in an empty `release-assets/` directory.
   v0.1.5 published the repository's `assets/logo.svg` as an extra asset with no provenance;
   every other v0.1.5 asset is covered by the isolated-builder bundles. (#6812)
