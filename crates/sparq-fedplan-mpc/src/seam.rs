@@ -227,17 +227,18 @@ impl LeakageEnvelope {
 
 /// The outcome of the dual-ratification gate ([`ratify_envelope`](crate::ratify_envelope)). It
 /// enumerates, honestly, whether the plan was cleared for execution and — when not — *which*
-/// ratification failed and *why*, so an over-disclosing or over-leaking plan is reported, never
-/// silently dropped. `#[non_exhaustive]` so a later phase can add an outcome without a breaking
+/// ratification failed and *why*, so a declared over-disclosure or over-leak is reported, never
+/// silently dropped. It reflects a check of the envelope's declared operand labels only. `#[non_exhaustive]` so a later phase can add an outcome without a breaking
 /// change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RatificationOutcome {
     /// Both ratifications passed — every holder accepted and the verifier's acceptance policy
-    /// cleared the envelope. The plan is cleared for execution.
+    /// cleared the envelope. The plan is cleared for execution only if the envelope was built
+    /// from the operators that will run.
     Ratified,
-    /// A **holder** fail-closed-rejected the plan (constraint C-B): it discloses a predicate the
-    /// holder marked private (or the holder presented an ambiguous duplicate policy). The plan is
+    /// A **holder** fail-closed-rejected the plan (constraint C-B): its envelope declares a
+    /// disclosure of a predicate the holder marked private (or the holder presented an ambiguous duplicate policy). The plan is
     /// NOT honoured. The data owner's veto is primary.
     HolderRejected {
         /// The holder (source id) that rejected the plan.
@@ -245,6 +246,17 @@ pub enum RatificationOutcome {
         /// The predicate the plan tried to disclose that this holder marks private (empty for an
         /// ambiguous-duplicate-policy rejection).
         predicate: String,
+        /// A short human-readable explanation.
+        detail: &'static str,
+    },
+    /// The supplied holder policies do not cover the envelope's participation set exactly: a
+    /// participating source has no policy, a policy names a non-participating source, or the
+    /// envelope discloses an operand while declaring no participant at all. The plan is NOT
+    /// honoured — a missing policy fails closed rather than being skipped.
+    ParticipationMismatch {
+        /// The participating source with no policy, or the non-participating source a policy
+        /// names (empty when the envelope declares no participant).
+        source_id: String,
         /// A short human-readable explanation.
         detail: &'static str,
     },

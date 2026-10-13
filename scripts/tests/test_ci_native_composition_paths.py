@@ -43,7 +43,8 @@ class NativeSelectionTests(unittest.TestCase):
                  "scripts/tests/test_ci_native_composition_paths.py", "scripts/tests/test_ci_summary_gate.py",
                  "bench/zk-bindings/corpus.py", "bench/zk-bindings/run.py", "bench/zk-bindings/protocol.json",
                  "bench/zk-bindings/native_ci.py", "bench/zk-bindings/test_native_ci.py",
-                 "bench/zk-bindings/inventory.json", "bench/zk-bindings/test_harness.py"]
+                 "bench/zk-bindings/inventory.json", "bench/zk-bindings/test_harness.py",
+                 "supply-chain/config.toml"]
         for path in paths:
             with self.subTest(path=path):
                 self.assertTrue(selector.relevant_path(path))

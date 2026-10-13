@@ -27,7 +27,10 @@ pub(crate) async fn delete_record<S: Store>(
 }
 
 /// Whether the record `iri` is stored as a start would load it: listed in `container` and there
-/// to read. An error when that cannot be told.
+/// to read. An error when that cannot be told. This is only an answer because a [`Store`] reads
+/// its own completed writes (see the trait): a listing that lagged a committed write would say
+/// `false` for a record the next start loads. A write that timed out may still commit after this
+/// reads `false` (#6836).
 pub(crate) async fn still_listed<S: Store>(
     store: &S,
     iri: &str,
@@ -84,6 +87,9 @@ pub(crate) async fn within_wait<T>(
 ///   quota place it holds) is dropped and the create fails; not known, the create answers that,
 ///   and a task holding the record's lock and the quota place settles it from the listing once
 ///   the store answers, registering it under the container's lock, shared. A start loads whatever the listing holds.
+///   "Not stored" is final only when the failed write had completed (see [`Store`]): an HTTP
+///   update that timed out can still commit after the listing was read, leaving a record that
+///   was answered `500`, whose quota place was released, and that the next start loads (#6836).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,

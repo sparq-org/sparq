@@ -72,8 +72,14 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
+- `sparq_core::percent::{decode, encode}` are the shared percent-encoding helpers: lenient
+  `decode(s, plus_as_space)` (malformed escapes kept verbatim, UTF-8 read lossily) and `encode`
+  (everything outside the RFC 3986 unreserved set becomes uppercase `%XX`).
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
+- `sparq_core::civil::{days_from_civil, civil_from_days, format_utc}` convert proleptic-Gregorian
+  dates to and from days since 1970-01-01 and format epoch seconds as a UTC `xsd:dateTime`
+  (`YYYY-MM-DDTHH:MM:SSZ`), dependency-free.
 - `pub struct QueryResult { pub vars: Vec<oxrdf::Variable>, pub rows: Vec<Vec<Option<oxrdf::Term>>> }`
   — `len()` / `is_empty()` count solution rows. The layout is **columnar** (the `vars` header is
   stored once, not per cell); index a cell as `result.rows[row][col]` where `col` is the position of
@@ -177,6 +183,10 @@ Update (data lives in the default + named graphs):
   replay it onto a second (e.g. durable mirror) graph WITHOUT re-executing the text. Use this when
   mirroring a sequence of updates so non-deterministic functions (`NOW()`/`RAND()`/`UUID()`/`BNODE()`)
   and `LOAD <remote>` are not re-rolled on the second graph (the server's `--persist` path uses it).
+- `where_update_effects(&Graph, &spargebra::Update, reads, &QueryBudget) -> Result<Option<Vec<UpdateEffect>>, String>`
+  — the effects of a request that is exactly one `DELETE`/`INSERT … WHERE`, computed read-only (the
+  WHERE evaluated once, nothing applied), so a caller can authorize them and then `apply_effects`
+  them with no fork. `Ok(None)` for any other request.
 
 Prepared (parse/plan once, execute many):
 
@@ -737,7 +747,9 @@ SPARQL Update `USING` identity behavior.
   When enabled, outbound `SERVICE` fetches go through a **default-deny SSRF egress filter**:
   an endpoint that resolves to a loopback / RFC1918 / link-local (incl. the `169.254.169.254`
   cloud-metadata IP) / unique-local / unspecified address is refused (checked on the *resolved* IP,
-  so DNS rebinding can't bypass it). To federate to a trusted internal endpoint, allowlist its host
+  so DNS rebinding can't bypass it; `sparq_engine::is_forbidden_ip(ip)` is that classifier;
+  it refuses every non-global range, incl. multicast, documentation, CGNAT and NAT64, and judges
+  IPv4-mapped and 6to4 addresses by their embedded IPv4). To federate to a trusted internal endpoint, allowlist its host
   for the scope: `with_service_egress_allow([host.to_string()], || query(&g, q))`. Public endpoints
   need no opt-in. An allowlist entry may be **host-level** (`127.0.0.1` — every port) or
   **port-scoped** (`127.0.0.1:8053`, `[::1]:8053`, `.example.org:443` — that host on THAT port ONLY,

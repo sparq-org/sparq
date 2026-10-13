@@ -175,7 +175,7 @@ pub struct Suite {
 ///   directly and compares the result to the expected document via `json_ld_equal`
 ///   — a document-level JSON comparator measuring JSON-LD data-model (semantic)
 ///   equivalence, NOT structural identity: object key order insignificant, array
-///   order significant only inside `@list`, integers compared exactly (i64/u64),
+///   order significant only inside `@list` and a `@json` payload, integers compared exactly (i64/u64),
 ///   non-integral numbers as f64.  ~18 of 240 passes are semantically-equal-but-
 ///   reordered vs. the W3C reference (strict-ordered count 222).  OLD floor was
 ///   247 under the RDF-equivalence oracle (sq-oy1f); the rebase reveals a net 7
@@ -539,7 +539,7 @@ pub const SUITES: &[Suite] = &[
     // sparq_jsonld::expand() directly and compares the result to the suite's expected
     // document via json_ld_equal (document-level JSON comparator measuring JSON-LD
     // data-model (semantic) equivalence, NOT structural identity; object key order
-    // insignificant; array order significant only inside @list; integers compared exactly
+    // insignificant; array order significant only inside @list and a @json payload; integers compared exactly
     // via i64/u64, non-integral numbers as f64).  ~18 of 240 passes are semantically-
     // equal-but-reordered vs. the W3C reference (strict-ordered count 222).
     // The old floor was 247 under the RDF-equivalence oracle (sq-oy1f); the rebase
