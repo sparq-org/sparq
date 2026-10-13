@@ -209,7 +209,7 @@ pub(crate) use run_shared::RuntimeDocs;
 /// table that was not made fresh against its sources.
 mod run_shared {
     use super::{
-        any_blank_label, bounded, document_blank_labels, fresh_blank_prefix, parser, Term,
+        bounded, document_blank_labels, formula_bytes, fresh_blank_prefix, parser, Term,
         VisitedDocs,
     };
     use rustc_hash::{FxHashMap, FxHashSet};
@@ -309,17 +309,29 @@ mod run_shared {
         }
 
         /// The statements of the document parsed from `text` under `base` (by `parse`),
-        /// with its blanks standardized apart; `Ok(None)` when `parse` fails, `Err` when
-        /// the table refuses the document.
+        /// with its blanks standardized apart; `Ok(None)` when `parse` fails or `admit`
+        /// refuses the standardized formula's size, `Err` when the table refuses the
+        /// document. `admit` gets that size ([`formula_bytes`] of the statements once
+        /// every blank label carries its prefix) computed from the parsed statements,
+        /// before any label is rewritten and before the table takes the document.
         fn formula(
             &self,
             text: &str,
             base: &str,
             parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
         ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
             let Some(mut ts) = parse() else { return Ok(None) };
+            // Each blank label grows by the label prefix, the same length for every
+            // document of the table.
+            let blanks = ts.iter().map(blank_occurrences).fold(0, usize::saturating_add);
+            let grown = blanks.saturating_mul(self.0.borrow().label_prefix_len());
+            let bytes = formula_bytes(ts.iter()).saturating_add(grown);
+            if !admit(bytes) {
+                return Ok(None);
+            }
             // A document with no blank has nothing to standardize apart (and needs no key).
-            if !ts.iter().flatten().any(|t| any_blank_label(t, &|_| true)) {
+            if blanks == 0 {
                 return Ok(Some(ts));
             }
             let mut t = self.0.borrow_mut();
@@ -335,11 +347,37 @@ mod run_shared {
                 }
             }
             ts.iter_mut().flatten().for_each(|t| go(t, prefix));
+            debug_assert_eq!(formula_bytes(ts.iter()), bytes, "the admitted size is the size");
             Ok(Some(ts))
         }
     }
 
+    /// The blank-label occurrences in `t`, through nested lists, formulas and quoted
+    /// triples (walked with an explicit stack, as [`bounded::term_bytes`] walks).
+    fn blank_occurrences(t: &[Term; 3]) -> usize {
+        let mut n = 0usize;
+        let mut stack: Vec<&Term> = t.iter().collect();
+        while let Some(t) = stack.pop() {
+            match t {
+                Term::Blank(_) => n += 1,
+                Term::List(ms) => stack.extend(ms),
+                Term::Formula(rs) => stack.extend(rs.iter().flatten()),
+                Term::Triple(tr) => stack.extend(tr.iter()),
+                _ => {}
+            }
+        }
+        n
+    }
+
+    /// The hex digits of a scope key in a label prefix.
+    const KEY_HEX: usize = 16;
+
     impl DocTable {
+        /// The length of every label prefix `{prefix}{key}_` of this table.
+        fn label_prefix_len(&self) -> usize {
+            self.prefix.len() + KEY_HEX + 1
+        }
+
         /// The label prefix for the blanks of the document parsed from `text` under
         /// `base`; `Err` when another document has its key or the table is full (the
         /// table is then unchanged).
@@ -356,10 +394,11 @@ mod run_shared {
                     if self.entries.len() >= self.room {
                         return Err(Refusal::Full);
                     }
-                    let mut prefix = String::with_capacity(self.prefix.len() + 17);
+                    let mut prefix = String::with_capacity(self.label_prefix_len());
                     prefix.push_str(&self.prefix);
                     sparq_core::hex::encode_into(&digest[..8], false, &mut prefix);
                     prefix.push('_');
+                    debug_assert_eq!(prefix.len(), self.label_prefix_len());
                     // An index; `room` keeps the table far below u32::MAX entries.
                     let at = u32::try_from(self.entries.len()).map_err(|_| Refusal::Full)?;
                     self.entries.push(DocEntry { digest, prefix });
@@ -444,8 +483,9 @@ mod run_shared {
             text: &str,
             base: &str,
             parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+            admit: impl FnOnce(usize) -> bool,
         ) -> Result<Option<Vec<[Term; 3]>>, Refusal> {
-            self.runtime.formula(text, base, parse)
+            self.runtime.formula(text, base, parse, admit)
         }
     }
 
@@ -464,9 +504,9 @@ mod run_shared {
         fn a_scope_key_collision_is_refused_and_a_known_document_is_kept() {
             SAME_KEY.with(|c| c.set(true));
             let t = RuntimeDocs::with_room("__rp0_".into(), 10);
-            let a = t.formula("a", "", doc);
-            let b = t.formula("b", "", doc);
-            let again = t.formula("a", "", doc);
+            let a = t.formula("a", "", doc, |_| true);
+            let b = t.formula("b", "", doc, |_| true);
+            let again = t.formula("a", "", doc, |_| true);
             SAME_KEY.with(|c| c.set(false));
             assert!(matches!(b, Err(Refusal::Collision)));
             assert_eq!(a.ok().flatten(), again.ok().flatten());
@@ -485,12 +525,29 @@ mod run_shared {
         #[test]
         fn a_full_table_refuses_without_inserting() {
             let t = RuntimeDocs::with_room("__rp0_".into(), 2);
-            let a = t.formula("a", "", doc).ok().flatten().expect("a");
-            assert!(t.formula("b", "", doc).is_ok());
-            assert!(matches!(t.formula("c", "", doc), Err(Refusal::Full)));
+            let a = t.formula("a", "", doc, |_| true).ok().flatten().expect("a");
+            assert!(t.formula("b", "", doc, |_| true).is_ok());
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
             assert_eq!(t.0.borrow().entries.len(), 2);
-            assert_eq!(t.formula("a", "", doc).ok().flatten(), Some(a));
-            assert!(matches!(t.formula("c", "", doc), Err(Refusal::Full)));
+            assert_eq!(t.formula("a", "", doc, |_| true).ok().flatten(), Some(a));
+            assert!(matches!(t.formula("c", "", doc, |_| true), Err(Refusal::Full)));
+        }
+
+        /// `admit` gets the size the formula has once standardized apart, and a refusal
+        /// leaves the table without the document (nothing was prefixed).
+        #[test]
+        fn admit_sees_the_standardized_size_before_the_table_takes_the_document() {
+            let t = RuntimeDocs::with_room("__rp0_".into(), 10);
+            let mut seen = 0;
+            let refused = t.formula("a", "", doc, |n| {
+                seen = n;
+                false
+            });
+            assert!(matches!(refused, Ok(None)));
+            assert!(t.0.borrow().entries.is_empty());
+            let kept = t.formula("a", "", doc, |_| true).ok().flatten().expect("kept");
+            assert_eq!(super::formula_bytes(kept.iter()), seen);
+            assert_eq!(t.0.borrow().entries.len(), 1);
         }
 
         /// The table keeps the same number of bytes for a one-byte text as for a
@@ -500,7 +557,7 @@ mod run_shared {
             let t = RuntimeDocs::with_room("__rp0_".into(), 10);
             let big = "y".repeat(1 << 20);
             for (text, base) in [("a", ""), (big.as_str(), ""), ("a", big.as_str())] {
-                assert!(t.formula(text, base, doc).is_ok());
+                assert!(t.formula(text, base, doc, |_| true).is_ok());
             }
             let sizes = t.0.borrow().bytes_per_entry();
             assert_eq!(sizes.len(), 3);
@@ -542,16 +599,19 @@ impl BwCtx<'_> {
     /// The statements `parse` makes of the document parsed at run time from `text` (under
     /// `base`), with its blanks standardized apart through the run's table
     /// ([`run_shared::RunShared::parsed_formula`]). `None` when the text does not parse,
-    /// or when the table refuses the document (the refusal fails the run).
+    /// when `admit` refuses the size the standardized formula will have (checked before
+    /// any label is rewritten), or when the table refuses the document (the refusal
+    /// fails the run).
     fn runtime_formula(
         &self,
         text: &str,
         base: &str,
         parse: impl FnOnce() -> Option<Vec<[Term; 3]>>,
+        admit: impl FnOnce(usize) -> bool,
         pending: &bounded::Pending,
     ) -> Option<Vec<[Term; 3]>> {
         let visited = self.visited.clone();
-        let made = visited.borrow().parsed_formula(text, base, parse);
+        let made = visited.borrow().parsed_formula(text, base, parse, admit);
         let e = match made {
             Ok(ts) => return ts,
             Err(run_shared::Refusal::Collision) => "n3: two documents parsed at run time share a \
@@ -1177,18 +1237,6 @@ fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
         }
         Term::Triple(tr) => tr.iter().for_each(|m| term_blank_labels(m, out)),
         _ => {}
-    }
-}
-
-/// Does a blank label reachable in `t` (as [`term_blank_labels`] reaches them) satisfy
-/// `hit`?
-fn any_blank_label(t: &Term, hit: &impl Fn(&str) -> bool) -> bool {
-    match t {
-        Term::Blank(l) => hit(l),
-        Term::List(ms) => ms.iter().any(|m| any_blank_label(m, hit)),
-        Term::Formula(ts) => ts.iter().flatten().any(|m| any_blank_label(m, hit)),
-        Term::Triple(tr) => tr.iter().any(|m| any_blank_label(m, hit)),
-        _ => false,
     }
 }
 
@@ -4346,9 +4394,10 @@ const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langSt
 /// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
 /// cut) or when the formula is past the run's term-size limit (a cut, and the run
 /// refused). The parser charges what it keeps against the limit before allocating it
-/// ([`bounded::parse_n3_term`]), so an expanding parse stops early; the formula is sized
-/// again here once it is re-encoded and its blanks are standardized apart through the
-/// run's runtime-document table ([`BwCtx::runtime_formula`]).
+/// ([`bounded::parse_n3_term`]), so an expanding parse stops early. Once re-encoded, the
+/// formula is sized again at the size it will have with its blanks standardized apart
+/// (the parsed statements plus the growth of every blank label), before the run's
+/// runtime-document table ([`BwCtx::runtime_formula`]) rewrites any label.
 fn parsed_formula(
     f: Func,
     src: &str,
@@ -4362,15 +4411,8 @@ fn parsed_formula(
         let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
         Some(reencode_statements(parsed))
     };
-    let statements = bw.runtime_formula(src, base, parse, pending)?;
-    let bytes = statements
-        .iter()
-        .flatten()
-        .map(bounded::term_bytes)
-        .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
-    if refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes) {
-        return None;
-    }
+    let admit = |bytes| !refused_term(&bw.truncated, pending, Derived::Result(f), bytes, || bytes);
+    let statements = bw.runtime_formula(src, base, parse, admit, pending)?;
     Some(Term::Formula(statements))
 }
 
@@ -8342,5 +8384,47 @@ mod runtime_docs_table {
         assert_eq!(run(2).expect("closes").derived.len(), 2);
         let Err(e) = run(1) else { panic!("a second document was taken by a table of one") };
         assert!(e.contains("runtime-document limit exceeded"), "{e}");
+    }
+
+    /// Standardizing a runtime document's blanks apart lengthens each label, and that
+    /// growth is charged before any label is rewritten: a document that fits
+    /// `max_term_bytes` as parsed but not once prefixed is refused, and one whose
+    /// standardized formula is exactly the limit is kept.
+    #[test]
+    fn the_growth_of_standardized_blank_labels_is_charged_before_the_rewrite() {
+        let text: String = (0..64).map(|i| format!("_:a{i} <http://ex/p> _:b{i} . ")).collect();
+        let src = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             <http://ex/a> <http://ex/t> \"{text}\" .\n\
+             {{ <http://ex/a> <http://ex/t> ?t . ?t log:parsedAsN3 ?f }} => \
+             {{ <http://ex/a> <http://ex/out> ?f }} ."
+        );
+        let run = |max_term_bytes: usize| {
+            let limits = super::ClosureLimits { max_term_bytes, ..Default::default() };
+            super::reason_n3_terms_with_limits(&src, None, None, Default::default(), limits)
+        };
+        let closure = run(super::ClosureLimits::default().max_term_bytes).expect("closes");
+        let [d] = closure.derived.as_slice() else { panic!("{:?}", closure.derived) };
+        let super::Term::Formula(ts) = &d[2] else { panic!("{d:?}") };
+        let standardized = super::bounded::term_bytes(&d[2]);
+        let labels: Vec<&str> = ts
+            .iter()
+            .flatten()
+            .filter_map(|t| match t {
+                super::Term::Blank(l) => Some(l.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels.len(), 128);
+        let prefix = labels[0].len() - "a0".len();
+        assert!(labels[0].starts_with("__rp") && labels[0].ends_with("_a0"), "{}", labels[0]);
+        let parsed = standardized - labels.len() * prefix;
+        // Fits as parsed, not once standardized: refused, naming the builtin.
+        let Err(e) = run(standardized - 1) else { panic!("kept a formula past the limit") };
+        assert!(e.contains("max_term_bytes") && e.contains("ParsedAsN3"), "{e}");
+        assert!(parsed < standardized);
+        // Exactly the standardized size: kept, the same formula.
+        let at = run(standardized).expect("a formula at the limit is kept");
+        assert_eq!(at.derived, closure.derived);
     }
 }
