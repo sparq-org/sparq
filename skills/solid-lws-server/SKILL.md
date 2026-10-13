@@ -64,7 +64,14 @@ Set `PSS_SPARQ_BACKEND` to one of:
   `SOLID_SERVER_SPARQ_DIR` for a directory-backed graph; without it the graph is
   ephemeral.
 - `http`: a remote SPARQ service. Build with `--features http-sparq` and set
-  `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL.
+  `SOLID_SERVER_SPARQ_ENDPOINT` to that service's `/sparql` URL. The service must
+  read its own writes: a query sent after an update has completed must see what the
+  update committed (one `sparq-server` does). An eventually consistent or replicated
+  endpoint that can lag is not supported, because the LWS server decides what a failed
+  write left behind by reading the store straight after it. An update that times out
+  can still commit on the service afterwards; until #6836 is fixed, a grant, request
+  or subscription whose create timed out this way can be answered `500` and still be
+  loaded at the next start.
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -382,7 +389,8 @@ What the server exposes, all discoverable from the storage description
   revoked; `500` "still stored" when the record is still listed (the grant back in force); `500` "not known" when it
   cannot be read again, with the grant left in force. A record holds its place in the request
   quota until the store confirms it is gone: while its create's outcome is not known and while
-  its withdrawal runs. Nothing a start puts back in the background begins until every step of
+  its withdrawal runs. (Over the `http` backend, a create whose update timed out can be
+  confirmed gone and still commit afterwards; see #6836.) Nothing a start puts back in the background begins until every step of
   the start that can fail has succeeded. A stored grant or request that cannot be read stops
   the start (a later start reads it again); one listed but gone is skipped; one whose stored
   body is not a record is quarantined at every start until the owner deletes it: it grants
@@ -411,8 +419,10 @@ What the server exposes, all discoverable from the storage description
   whose stored body is not a subscription is quarantined as access records are: listed to the
   owner, counted against both shares, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
-  Each topic of a new subscription is checked under its lock, waited for at most two seconds
-  (then `503`). The bound on deliveries prepared for one change counts only authorized ones: a
+  Each topic of a new subscription is checked before its lock is taken: one the subscriber may
+  not read is refused (`403`, or `401` anonymous) at once, whatever its state. One it may read
+  is checked again under its lock, waited for at most two seconds (then `503`), or answered `503`
+  at once while set aside. The bound on deliveries prepared for one change counts only authorized ones: a
   subscriber that may not read the resource takes no place from one that may.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
@@ -420,13 +430,25 @@ What the server exposes, all discoverable from the storage description
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
   anything is removed. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
-  (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once while a background task, holding their
+  (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
   the half-done state in between; a recursive delete sets aside everything under it it had not
   reached too. A request already waiting on a lock when its resource is set aside is answered
   `503` then, not left waiting. A resource stays set aside until every stuck change to it is
   put back. While set-aside changes hold 256 MiB or more to put back, new writes are answered
-  `503` too (reads go on). A write's container is touched by the task that runs its store
+  `503` too (reads go on). Every route but the type index and search authorizes a request
+  before it says anything of this:
+  a caller that may not act on the resource (or record) gets the same `401`/`403`/`404` it gets
+  when nothing is set aside. Whether it may is decided on what the resource was before the stuck
+  change began (whether it was there, its metadata and its format, as the change's journal
+  staged them before its first step), never on what the change wrote meanwhile: access the
+  change would newly grant is not met, and access it would remove still is. When that cannot
+  be read, only the owner hears of the state. A new subscription is told its container is set
+  aside only once every topic is authorized. One window is not covered: while a failed change is
+  still being put back under its locks (its first few tries, before it is set aside), a request
+  is authorized on what is stored at that moment, which may be the change's own new metadata. A
+  caller only that metadata authorizes then waits on the lock, and is answered `503` if the change
+  is set aside meanwhile (once it is set aside, the same caller gets `403`). A write's container is touched by the task that runs its store
   calls, so a client that goes away mid-write cannot leave the container's date behind. A
   create whose store reply was lost is removed whole the same way. A write that changes
   metadata and a recursive delete first store a durable intent: what each resource it will

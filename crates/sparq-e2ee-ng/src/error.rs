@@ -44,6 +44,10 @@ pub enum Error {
     Integrity(&'static str),
     /// A cryptographic key or point encoding was invalid.
     BadKey(&'static str),
+    /// A grant was exercised outside the epochs it authorizes: before the epoch
+    /// it is scoped to, or after its admin-signed `max_epoch` ceiling (see
+    /// [`crate::capability::PublicGrant::check_epoch`]).
+    EpochOutOfRange(&'static str),
 }
 
 impl fmt::Display for Error {
@@ -60,6 +64,7 @@ impl fmt::Display for Error {
             Error::BadSignature => write!(f, "signature did not verify"),
             Error::Integrity(w) => write!(f, "authenticated link mismatch: {w}"),
             Error::BadKey(w) => write!(f, "invalid key material: {w}"),
+            Error::EpochOutOfRange(w) => write!(f, "grant not valid in this epoch: {w}"),
         }
     }
 }

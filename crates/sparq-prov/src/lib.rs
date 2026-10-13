@@ -70,7 +70,6 @@ use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sparq_core::Graph;
 use sparq_engine::QueryBudget;
 
-mod datetime;
 // [OPUS-4.8] sq-xwdd: SPARQL UPDATE lineage — capture PROV-O for the data an
 // `INSERT … WHERE` / `INSERT DATA` / `DELETE …` operation changes in a store. Like
 // the CONSTRUCT path it depends only on sparq-core/sparq-engine (no extra feature).
@@ -399,7 +398,7 @@ fn datetime_literal(t: SystemTime) -> Literal {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    Literal::new_typed_literal(datetime::format_utc(secs), xsd::DATE_TIME)
+    Literal::new_typed_literal(sparq_core::civil::format_utc(secs), xsd::DATE_TIME)
 }
 
 #[cfg(test)]

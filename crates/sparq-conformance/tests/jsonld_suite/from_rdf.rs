@@ -9,7 +9,7 @@
 //!    `sparq_jsonld::from_rdf` with the case's manifest options (`useNativeTypes`,
 //!    `useRdfType`, `rdfDirection`), and deep-compared against the suite's
 //!    normative expected expanded document via `json_ld_equal` (key order
-//!    insignificant; array order significant only inside `@list`).
+//!    insignificant; array order significant only inside `@list` and a `@json` payload).
 //! 2. **Round-trip isomorphism (kept, scoped to where §8.1 is lossless).** The
 //!    produced document is re-parsed through `oxjsonld` and required to
 //!    reconstruct the input dataset (blank-node-blind canonical comparison).

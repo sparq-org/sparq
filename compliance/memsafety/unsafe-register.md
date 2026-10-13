@@ -49,11 +49,12 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**93 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
+**97 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
-with its 8 sites confined to two **example benchmark harnesses'** counting allocators, which
+with its 12 sites confined to the counting allocators of two **example benchmark harnesses** and
+one **integration test**, which
 a custom `#[global_allocator]` unavoidably requires; **`sparq-lws-wasm`** (sq-wubkf) is the one
 crate whose 4 allocator sites are **SHIPPING** — a `#[global_allocator]` is the only way to bound
 wasm32 linear memory, so that crate's root is `deny(unsafe_code)` with a single

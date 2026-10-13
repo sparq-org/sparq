@@ -15,8 +15,9 @@
 //! affirmatively established is hidden. An operand is disclosable when:
 //!
 //! * it is a **global IRI** ([`Operand::GlobalIri`]) — public by convention #6 — **and** the
-//!   policy is [`RoutingPolicy::Default`] (the strict policy can still hide a global IRI when a
-//!   contributing source marks the predicate it binds private), or
+//!   policy is [`RoutingPolicy::Default`] (the strict policy drops this shortcut and treats a
+//!   global IRI like a predicate: disclosed only when every contributing source marks the
+//!   predicate it binds public), or
 //! * it is a **predicate** ([`Operand::Predicate`]) that **every** contributing source has
 //!   *explicitly* marked [`crate::Disclosability::Public`] via
 //!   [`SourcePrivacyDescriptor::may_disclose`]. A predicate that *any* contributing source
@@ -24,9 +25,15 @@
 //!   single private holder forces the whole operator into the hidden route.
 //!
 //! [`RoutingPolicy::Strict`] honours the design record's §5 "hide even a public term" knob: a
-//! source may mark a predicate that *would* be public-by-convention as private, and the strict
-//! policy then routes the operator hidden even though a global-IRI operand would otherwise
-//! disclose. This is the documented cost-vs-privacy knob (§5); the default policy is the cheap,
+//! global-IRI operand needs the same affirmative per-source public mark as a predicate, so a
+//! source that leaves the bound predicate private (the default) routes the operator hidden even
+//! though the default policy would disclose it. An empty contributing set never counts as
+//! consent.
+//!
+//! **Policy coverage (fail-closed).** When a Phase-2 selection is supplied, every participating
+//! source must have exactly one [`SourcePrivacyDescriptor`]; a missing or duplicated descriptor
+//! is refused before any operator is classified. This is a plan-time policy check over the
+//! supplied descriptors, not a cryptographic enforcement. This is the documented cost-vs-privacy knob (§5); the default policy is the cheap,
 //! demo-matching route.
 //!
 //! When an operator is routed `Hidden`, the [`sparq_mpc::backend::OperatorClass`] it carries is
@@ -52,7 +59,8 @@
 //! later evaluation, not in this typed plan). The disclose decision is the design record's
 //! constraint C-B (§2.2): the planner here only *proposes* the partition; a later phase (Phase 4)
 //! has each source **re-enforce** its own policy fail-closed and the verifier ratify the declared
-//! leakage envelope, so a lying planner that over-discloses is rejected, not honoured. This pass
+//! leakage envelope assembled from these operators, so a declared over-disclosure is rejected,
+//! not honoured (a check of the declaration only; see [`crate::ratify_envelope`]). This pass
 //! does **not** perform that ratification — it computes the proposed partition only. See the
 //! crate `README.md` and `research/mpc-untrusted-planner-routing-design.md` §2.2 / §4.4 / §6.
 //!
@@ -79,9 +87,9 @@ pub enum RoutingPolicy {
     #[default]
     Default,
     /// **Strict** — honour each source's "hide even a public term" mark: a global-IRI operand is
-    /// disclosed only when *no* contributing source has marked the predicate it binds private,
-    /// and a predicate is disclosed only when every contributing source marks it public (same as
-    /// default for predicates, but the global-IRI shortcut no longer overrides a private mark).
+    /// disclosed only when there is at least one contributing source and every contributing
+    /// source marks the predicate it binds public — the same rule as for a predicate operand. An
+    /// anonymous global IRI (empty predicate) is therefore always hidden under this policy.
     /// The most-private route — the §5 knob that hides a public-by-convention term on request.
     Strict,
 }
@@ -99,7 +107,7 @@ pub enum Operand {
     /// `ex:flat` membership key). `predicate` is the predicate whose object/subject this IRI
     /// binds, so the strict policy can still consult a source's "hide even this public term"
     /// mark for it. Disclosable in the [`RoutingPolicy::Default`] policy unconditionally; in
-    /// [`RoutingPolicy::Strict`] only when no contributing source marks `predicate` private.
+    /// [`RoutingPolicy::Strict`] only when every contributing source marks `predicate` public.
     GlobalIri {
         /// The predicate this global-IRI operand binds (for the strict-policy private-mark check
         /// and for diagnostics). Empty string when the operand binds no specific predicate.
@@ -176,15 +184,24 @@ impl QueryOperator {
 /// An operand is disclosable when (a) it is a [`Operand::GlobalIri`] under
 /// [`RoutingPolicy::Default`] (public by convention #6), or (b) **every** contributing source
 /// marks its predicate [`crate::Disclosability::Public`]. Under [`RoutingPolicy::Strict`] the
-/// global-IRI shortcut is suppressed when any contributing source marks the bound predicate
-/// private (the §5 "hide even a public term" knob). An operator is disclosed iff **all** its
+/// global-IRI shortcut is off: a global IRI needs that same affirmative mark on the predicate it
+/// binds (the §5 "hide even a public term" knob), and no contributing source means no consent. An operator is disclosed iff **all** its
 /// operands are — the most-private operand wins.
 ///
 /// # Errors
 ///
-/// Returns [`SeamError::DescriptorMismatch`] if the same [`SourceId`] appears more than once in
-/// `privacy` (an ambiguous policy — the pass refuses to guess which one binds, the same
-/// fail-closed posture as Phase 2). It never panics and performs **no** MPC.
+/// Returns [`SeamError::DescriptorMismatch`] (phase [`SeamPhase::Routing`]), before any operator
+/// is classified, if:
+///
+/// * the same [`SourceId`] appears more than once in `privacy` (an ambiguous policy — the pass
+///   refuses to guess which one binds, the same fail-closed posture as Phase 2);
+/// * `selected` is non-empty and one of its participating sources has no descriptor in `privacy`
+///   (a missing policy is refused, never skipped); descriptors for sources outside the
+///   participation set are ignored; or
+/// * an operand's predicate id is empty (for [`Operand::Predicate`]) or the reserved
+///   [`ANONYMOUS_GLOBAL_IRI`] label.
+///
+/// It never panics and performs **no** MPC.
 ///
 /// This function makes **no** soundness/privacy claim and computes only the *proposed* partition;
 /// the per-source fail-closed re-enforcement + verifier ratification of the leakage envelope is
@@ -209,17 +226,31 @@ pub fn route_operators(
         }
     }
 
+    validate_operands(operators, SeamPhase::Routing)?;
+
     // The set of sources whose descriptor gates a predicate's disclosability. When the Phase-2
     // selection is non-empty, restrict to the participating sources it retained (only they
-    // contribute operands); otherwise fall back to every supplied descriptor.
+    // contribute operands); otherwise fall back to every supplied descriptor. Every participating
+    // source must have exactly one descriptor: a missing one is refused before any operator is
+    // classified, because dropping it would let the remaining sources' public marks disclose
+    // data the unlisted source holds. Descriptors for non-participating sources are ignored.
     let contributing: Vec<&SourcePrivacyDescriptor> = if selected.is_empty() {
         privacy.iter().collect()
     } else {
         selected
             .participating_sources()
             .into_iter()
-            .filter_map(|id| by_id.get(id).copied())
-            .collect()
+            .map(|id| {
+                by_id
+                    .get(id)
+                    .copied()
+                    .ok_or_else(|| SeamError::DescriptorMismatch {
+                        phase: SeamPhase::Routing,
+                        source_id: id.0.clone(),
+                        detail: "no SourcePrivacyDescriptor for this participating source (a missing policy fails closed)",
+                    })
+            })
+            .collect::<Result<_, _>>()?
     };
 
     let routing = operators
@@ -257,23 +288,53 @@ fn operand_disclosable(
     let predicate = operand.predicate();
     let all_sources_disclose =
         !contributing.is_empty() && contributing.iter().all(|d| d.may_disclose(predicate));
-    // A source that marks this predicate private at all (the default for any predicate it has
-    // not opted in) — used by the strict policy to suppress the global-IRI shortcut.
-    let any_source_private = contributing.iter().any(|d| !d.may_disclose(predicate));
 
     match operand {
         Operand::GlobalIri { .. } => match policy {
             // Default: a global IRI is public by convention #6, disclosed unconditionally.
             RoutingPolicy::Default => true,
-            // Strict: honour the §5 "hide even a public term" knob — disclose the global IRI
-            // only when no contributing source marks its predicate private. With NO contributing
-            // source (no descriptor opted it in or out), the convention still holds, so disclose.
-            RoutingPolicy::Strict => !any_source_private,
+            // Strict: the convention shortcut is off, so a global IRI needs the same affirmative
+            // per-source mark as a predicate. An empty contributing set is not consent, and an
+            // anonymous global IRI (empty predicate) has no predicate a source can mark public,
+            // so both stay hidden.
+            RoutingPolicy::Strict => !predicate.is_empty() && all_sources_disclose,
         },
         // A predicate operand is disclosable only by the affirmative per-source public mark,
         // identically under both policies (default-deny — no convention shortcut for a predicate).
         Operand::Predicate(_) => all_sources_disclose,
     }
+}
+
+/// The envelope label recorded for a disclosed [`Operand::GlobalIri`] that binds no predicate
+/// (an anonymous global IRI). [`ratify_envelope`](crate::ratify_envelope) treats it like any
+/// other disclosed operand: each participating holder must mark this label public to consent.
+/// No real operand may carry it as a predicate id: [`route_operators`] and
+/// [`assemble_leakage_envelope`](crate::assemble_leakage_envelope) refuse one that does.
+pub const ANONYMOUS_GLOBAL_IRI: &str = "<global-iri>";
+
+/// Refuse operands whose predicate id would be ambiguous in the leakage envelope: a
+/// [`Operand::Predicate`] with an empty id, or any operand whose predicate id is the
+/// [`ANONYMOUS_GLOBAL_IRI`] label. Either would let a predicate disclosure be recorded as, or
+/// confused with, an anonymous global IRI.
+pub(crate) fn validate_operands(
+    operators: &[QueryOperator],
+    phase: SeamPhase,
+) -> Result<(), SeamError> {
+    for op in operators {
+        for operand in &op.operands {
+            let reserved = operand.predicate() == ANONYMOUS_GLOBAL_IRI;
+            let empty_predicate = matches!(operand, Operand::Predicate(p) if p.is_empty());
+            if reserved || empty_predicate {
+                return Err(SeamError::DescriptorMismatch {
+                    phase,
+                    source_id: String::new(),
+                    detail:
+                        "operand predicate id is empty or the reserved anonymous-global-IRI label",
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -341,6 +402,38 @@ mod tests {
                 vec![Operand::Predicate(SALARY.to_string())],
             ),
         ]
+    }
+
+    // The membership join keyed on a global IRI bound by memberOf.
+    fn membership_global_iri_join() -> QueryOperator {
+        QueryOperator::new(
+            "membership-join",
+            OperatorClass::EqualityJoin,
+            vec![Operand::GlobalIri {
+                predicate: MEMBER_OF.to_string(),
+            }],
+        )
+    }
+
+    // A real Phase-2 selection over a memberOf pattern in which every source in `ids` participates.
+    fn membership_selection(
+        ids: &[&str],
+        privacy: &[SourcePrivacyDescriptor],
+    ) -> SelectedPrivateSources {
+        let sources: Vec<SourceDescriptor> = ids.iter().map(|id| source(id)).collect();
+        let bgp = Bgp::new(vec![TriplePattern::new(
+            Term::Var(Var::new("h")),
+            Term::Iri(MEMBER_OF.to_string()),
+            Term::Iri(FLAT_IRI.to_string()),
+        )]);
+        let selected = select_private_sources(&bgp, &sources, privacy).unwrap();
+        let got: Vec<&str> = selected
+            .participating_sources()
+            .into_iter()
+            .map(|id| id.0.as_str())
+            .collect();
+        assert_eq!(got, ids);
+        selected
     }
 
     // ── Tests ───────────────────────────────────────────────────────────────────────────
@@ -530,17 +623,11 @@ mod tests {
         );
     }
 
-    /// Strict policy with NO source opting the predicate in or out still discloses a global IRI
-    /// (the convention holds when no one has expressed a contrary preference).
+    /// Strict policy with NO contributing source hides a global IRI: an empty contributing set
+    /// is not consent, so the convention shortcut the default policy uses does not apply.
     #[test]
-    fn strict_policy_discloses_a_global_iri_when_no_source_objects() {
-        let ops = vec![QueryOperator::new(
-            "membership-join",
-            OperatorClass::EqualityJoin,
-            vec![Operand::GlobalIri {
-                predicate: MEMBER_OF.to_string(),
-            }],
-        )];
+    fn strict_policy_hides_a_global_iri_when_no_source_contributes() {
+        let ops = vec![membership_global_iri_join()];
         let out = route_operators(
             &SelectedPrivateSources::default(),
             &[],
@@ -548,7 +635,218 @@ mod tests {
             RoutingPolicy::Strict,
         )
         .unwrap();
+        assert_eq!(
+            out.routing[0].routing,
+            Routing::Hidden(OperatorClass::EqualityJoin)
+        );
+    }
+
+    /// Strict policy discloses a global IRI once every contributing source explicitly marks the
+    /// bound predicate public — the valid, explicitly permitted case.
+    #[test]
+    fn strict_policy_discloses_a_global_iri_every_source_marks_public() {
+        let privacy = vec![flatmate_privacy("http://a/"), flatmate_privacy("http://b/")];
+        let selected = membership_selection(&["http://a/", "http://b/"], &privacy);
+        let out = route_operators(
+            &selected,
+            &privacy,
+            &[membership_global_iri_join()],
+            RoutingPolicy::Strict,
+        )
+        .unwrap();
         assert_eq!(out.routing[0].routing, Routing::Disclosed);
+    }
+
+    /// An anonymous global IRI (no bound predicate) has nothing a source can mark public, so the
+    /// strict policy hides it even when every source has a descriptor.
+    #[test]
+    fn strict_policy_hides_an_anonymous_global_iri() {
+        let privacy = vec![flatmate_privacy("http://a/")];
+        let selected = membership_selection(&["http://a/"], &privacy);
+        let ops = vec![QueryOperator::new(
+            "anonymous-iri-join",
+            OperatorClass::EqualityJoin,
+            vec![Operand::GlobalIri {
+                predicate: String::new(),
+            }],
+        )];
+        let strict = route_operators(&selected, &privacy, &ops, RoutingPolicy::Strict).unwrap();
+        assert_eq!(
+            strict.routing[0].routing,
+            Routing::Hidden(OperatorClass::EqualityJoin)
+        );
+    }
+
+    /// A descriptor that marks the empty predicate public does not make an anonymous global IRI
+    /// disclosable under the strict policy: the empty predicate is never consent.
+    #[test]
+    fn strict_policy_ignores_a_public_mark_on_the_empty_predicate() {
+        let privacy = vec![SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(MEMBER_OF)
+            .public_predicate("")
+            .build()];
+        let selected = membership_selection(&["http://a/"], &privacy);
+        let ops = vec![QueryOperator::new(
+            "anonymous-iri-join",
+            OperatorClass::EqualityJoin,
+            vec![Operand::GlobalIri {
+                predicate: String::new(),
+            }],
+        )];
+        let out = route_operators(&selected, &privacy, &ops, RoutingPolicy::Strict).unwrap();
+        assert_eq!(
+            out.routing[0].routing,
+            Routing::Hidden(OperatorClass::EqualityJoin)
+        );
+    }
+
+    /// A selected participant with NO privacy descriptor is refused before any operator is
+    /// classified, under both policies and for both operand kinds. Without this check the empty
+    /// contributing set made a strict global IRI disclosable.
+    #[test]
+    fn missing_descriptor_for_a_participant_is_refused() {
+        let privacy = vec![flatmate_privacy("http://a/")];
+        let selected = membership_selection(&["http://a/"], &privacy);
+        let operand_cases = [
+            vec![membership_global_iri_join()],
+            vec![QueryOperator::new(
+                "membership-join",
+                OperatorClass::EqualityJoin,
+                vec![Operand::Predicate(MEMBER_OF.to_string())],
+            )],
+        ];
+        for ops in &operand_cases {
+            for policy in [RoutingPolicy::Default, RoutingPolicy::Strict] {
+                let err = route_operators(&selected, &[], ops, policy).unwrap_err();
+                assert_eq!(
+                    err,
+                    SeamError::DescriptorMismatch {
+                        phase: SeamPhase::Routing,
+                        source_id: "http://a/".to_string(),
+                        detail: "no SourcePrivacyDescriptor for this participating source (a missing policy fails closed)",
+                    }
+                );
+            }
+        }
+    }
+
+    /// Partial omission: one participant's descriptor is missing while the remaining one marks the
+    /// predicate public. The missing source must not be dropped from the gating set — the pass
+    /// refuses and names it, for both operand kinds and both policies.
+    #[test]
+    fn partially_missing_descriptors_are_refused() {
+        let a_public = SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(MEMBER_OF)
+            .build();
+        let b_private = SourcePrivacyDescriptor::deny_all(SourceId::new("http://b/"));
+        let selected =
+            membership_selection(&["http://a/", "http://b/"], &[a_public.clone(), b_private]);
+        let operand_cases = [
+            vec![membership_global_iri_join()],
+            vec![QueryOperator::new(
+                "membership-join",
+                OperatorClass::EqualityJoin,
+                vec![Operand::Predicate(MEMBER_OF.to_string())],
+            )],
+        ];
+        for ops in &operand_cases {
+            for policy in [RoutingPolicy::Default, RoutingPolicy::Strict] {
+                let err = route_operators(&selected, std::slice::from_ref(&a_public), ops, policy)
+                    .unwrap_err();
+                assert!(
+                    matches!(&err, SeamError::DescriptorMismatch { phase: SeamPhase::Routing, source_id, .. } if source_id == "http://b/"),
+                    "expected a refusal naming http://b/, got {err:?}"
+                );
+            }
+        }
+    }
+
+    /// A descriptor for a source outside the participation set is ignored: it neither gates nor
+    /// authorises anything. A non-participating deny-all source does not hide a predicate every
+    /// participant marks public.
+    #[test]
+    fn descriptors_for_non_participants_are_ignored() {
+        let a_public = SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(MEMBER_OF)
+            .build();
+        let selected = membership_selection(&["http://a/"], std::slice::from_ref(&a_public));
+        let privacy = vec![
+            a_public,
+            SourcePrivacyDescriptor::deny_all(SourceId::new("http://c/")),
+        ];
+        let ops = vec![QueryOperator::new(
+            "membership-join",
+            OperatorClass::EqualityJoin,
+            vec![Operand::Predicate(MEMBER_OF.to_string())],
+        )];
+        let out = route_operators(&selected, &privacy, &ops, RoutingPolicy::Strict).unwrap();
+        assert_eq!(out.routing[0].routing, Routing::Disclosed);
+    }
+
+    /// `validate_operands` accepts ordinary and anonymous global-IRI operands and refuses the
+    /// reserved label or an empty predicate, naming the phase it was called for.
+    #[test]
+    fn validate_operands_refuses_only_ambiguous_predicate_ids() {
+        let ok = vec![QueryOperator::new(
+            "ok",
+            OperatorClass::EqualityJoin,
+            vec![
+                Operand::Predicate(MEMBER_OF.to_string()),
+                Operand::GlobalIri {
+                    predicate: String::new(),
+                },
+            ],
+        )];
+        assert_eq!(validate_operands(&ok, SeamPhase::Routing), Ok(()));
+        let bad = vec![QueryOperator::new(
+            "bad",
+            OperatorClass::EqualityJoin,
+            vec![Operand::Predicate(String::new())],
+        )];
+        assert!(matches!(
+            validate_operands(&bad, SeamPhase::LeakageEnvelope),
+            Err(SeamError::DescriptorMismatch {
+                phase: SeamPhase::LeakageEnvelope,
+                ..
+            })
+        ));
+    }
+
+    /// An operand whose predicate id is empty or the reserved anonymous-global-IRI label is
+    /// refused, so a predicate disclosure cannot be recorded as the anonymous-global-IRI label.
+    #[test]
+    fn reserved_or_empty_operand_predicate_is_refused() {
+        let privacy = vec![SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(ANONYMOUS_GLOBAL_IRI)
+            .public_predicate("")
+            .build()];
+        for operand in [
+            Operand::Predicate(ANONYMOUS_GLOBAL_IRI.to_string()),
+            Operand::Predicate(String::new()),
+            Operand::GlobalIri {
+                predicate: ANONYMOUS_GLOBAL_IRI.to_string(),
+            },
+        ] {
+            let ops = vec![QueryOperator::new(
+                "reserved",
+                OperatorClass::EqualityJoin,
+                vec![operand],
+            )];
+            let err = route_operators(
+                &SelectedPrivateSources::default(),
+                &privacy,
+                &ops,
+                RoutingPolicy::Default,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                SeamError::DescriptorMismatch {
+                    phase: SeamPhase::Routing,
+                    ..
+                }
+            ));
+        }
     }
 
     /// An operator with a MIX of operands is disclosed only when ALL are disclosable: a disclosed
