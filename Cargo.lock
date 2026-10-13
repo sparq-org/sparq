@@ -5267,6 +5267,7 @@ dependencies = [
  "reqwest",
  "serde_json",
  "sha2 0.10.9",
+ "sparq-core",
  "tokio",
  "url",
 ]
@@ -5525,6 +5526,7 @@ dependencies = [
  "rayon",
  "regex",
  "rustc-hash 2.1.3",
+ "sha2 0.10.9",
  "smallvec",
  "sparq-core",
  "sparq-engine",

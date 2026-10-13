@@ -565,7 +565,7 @@
       }
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 462049,
+      "circuit_size": 107640,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -582,7 +582,7 @@
       }
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 462597,
+      "circuit_size": 108188,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -599,7 +599,7 @@
       }
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 462832,
+      "circuit_size": 108423,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -684,7 +684,7 @@
       }
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 488858,
+      "circuit_size": 134452,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -701,7 +701,7 @@
       }
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 489954,
+      "circuit_size": 135548,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -718,7 +718,7 @@
       }
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 490424,
+      "circuit_size": 136018,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -820,7 +820,7 @@
       }
     },
     "result_v3_k1_n16_p3_r4_f2_s64_d10": {
-      "circuit_size": 436341,
+      "circuit_size": 108014,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -837,7 +837,7 @@
       }
     },
     "result_v3_k1_n16_p3_r4_f2_s64_d17": {
-      "circuit_size": 436889,
+      "circuit_size": 108562,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -854,7 +854,7 @@
       }
     },
     "result_v3_k1_n16_p3_r4_f2_s64_d20": {
-      "circuit_size": 437124,
+      "circuit_size": 108797,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -922,7 +922,7 @@
       }
     },
     "result_v3_k2_n16_p3_r4_f2_s64_d10": {
-      "circuit_size": 463150,
+      "circuit_size": 134826,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -939,7 +939,7 @@
       }
     },
     "result_v3_k2_n16_p3_r4_f2_s64_d17": {
-      "circuit_size": 464246,
+      "circuit_size": 135922,
       "lane": "string",
       "configs": {
         "string-canonical": {
@@ -956,7 +956,7 @@
       }
     },
     "result_v3_k2_n16_p3_r4_f2_s64_d20": {
-      "circuit_size": 464716,
+      "circuit_size": 136392,
       "lane": "string",
       "configs": {
         "string-canonical": {

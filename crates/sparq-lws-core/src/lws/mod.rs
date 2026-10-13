@@ -1098,6 +1098,8 @@ pub(crate) struct Journal<'a, S: Store + 'static> {
     persisted: usize,
     /// The stored intent, once there is one.
     intent: Option<String>,
+    /// The resources staged so far, published as in flight from before the first step.
+    in_flight: Option<InFlight>,
 }
 
 type StoredMeta = crate::store::ResourceMeta;
@@ -1214,13 +1216,36 @@ impl Undo {
 
 /// What is left to put back of a change that could not be put back after a few tries, the next
 /// to apply first.
-pub(crate) struct Unsettled(Vec<Undo>);
+pub(crate) struct Unsettled(Vec<Undo>, Option<InFlight>);
+
+/// A journaled change's resources published as in flight ([`IriLocks::changing`]), with what
+/// each was before the change began, until this is dropped: from before the change's first
+/// step, through any putting back while its request waits, to the moment it is either done or
+/// set aside (what is left of it, [`Unsettled`], carries this until it is put back, by which
+/// time it is set aside). A check made without the lock meanwhile is decided on that earlier
+/// state ([`access::aside`]), never on a write the change may yet put back.
+///
+/// [`IriLocks::changing`]: resources::IriLocks::changing
+pub(crate) struct InFlight {
+    locks: Arc<resources::IriLocks>,
+    iris: Vec<String>,
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.locks.landed(&self.iris);
+    }
+}
 
 /// Changes set aside and hidden ([`LwsState::hide_all`]), not yet being put back.
 #[must_use = "hidden changes are put back only by LwsState::settle_hidden"]
 pub(crate) struct Hidden(Vec<(Unsettled, (Vec<String>, usize))>);
 
 impl Unsettled {
+    pub(crate) fn new(undo: Vec<Undo>) -> Self {
+        Self(undo, None)
+    }
+
     /// About how many bytes it holds to put back: each body, and each record at its limit.
     fn bytes(&self) -> usize {
         bytes_of(&self.0)
@@ -1261,8 +1286,8 @@ fn bytes_of(undo: &[Undo]) -> usize {
 /// A field the change left nothing to put back of (it did not touch it, or it is put back
 /// already) is `None`: what is stored for it now is what it was.
 ///
-/// It decides only who may learn the resource is set aside ([`access::aside`]); nothing is
-/// served or changed on it.
+/// It decides only who may learn the resource is set aside, or wait for the lock of one a change
+/// is in flight to ([`access::aside`]); nothing is served or changed on it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Prior {
     /// Whether the resource was there.
@@ -1387,7 +1412,7 @@ pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unset
             }
         }
         if !done {
-            return Some(Unsettled(std::iter::once(step).chain(steps).collect()));
+            return Some(Unsettled::new(std::iter::once(step).chain(steps).collect()));
         }
     }
     None
@@ -1429,6 +1454,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             planned_keys: Default::default(),
             persisted: 0,
             intent: None,
+            in_flight: None,
         }
     }
 
@@ -1504,6 +1530,17 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             .intent
             .get_or_insert_with(|| intents::mint(&self.state.cfg.storage()))
             .clone();
+        // Published first: a check without the lock from now on is made on what was staged,
+        // whatever this change writes or puts back.
+        let mut priors = std::collections::HashMap::new();
+        priors_of(&self.planned[self.persisted..], &mut priors);
+        let iris: Vec<String> = priors.keys().cloned().collect();
+        self.state.locks.changing_from(priors);
+        let in_flight = self.in_flight.get_or_insert_with(|| InFlight {
+            locks: self.state.locks.clone(),
+            iris: Vec::new(),
+        });
+        in_flight.iris.extend(iris);
         let undo: Vec<&Undo> = self.planned.iter().rev().collect();
         intents::store(self.state, &record, existing, &undo, &[]).await?;
         self.persisted = self.planned.len();
@@ -1674,7 +1711,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         };
         Err((
             crate::error::ServerError::Storage("the change could not be recorded as kept".into()),
-            Some(Unsettled(vec![resolve])),
+            Some(Unsettled(vec![resolve], self.in_flight)),
         ))
     }
 
@@ -1698,6 +1735,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             None => settle(store, forget.into_iter().collect()).await,
             Some(mut left) => {
                 left.0.extend(forget);
+                left.1 = self.in_flight;
                 Some(left)
             }
         }
@@ -3249,7 +3287,7 @@ pub(crate) mod test_store {
         } else {
             *store.fail_delete_of.lock().unwrap() = Some(iri.to_string());
         }
-        let left = super::Unsettled(vec![super::Undo::Restore {
+        let left = super::Unsettled::new(vec![super::Undo::Restore {
             key: iri.to_string(),
             prior,
         }]);
