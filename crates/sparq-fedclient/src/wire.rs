@@ -372,19 +372,6 @@ pub fn decode_bindings(buf: &[u8]) -> Result<Vec<FragBinding>, WireError> {
 
 // ─── public API: text-wire writer (the server's existing line format) ──────────────────
 
-/// Render `term` in the **N-Triples lexical form** the server's text wire expects: an IRI is
-/// `<…>`-wrapped, a blank node is `_:…`, and a literal carries its `"…"`/`@lang`/`^^<dt>`
-/// decoration verbatim (the `FragTerm::Literal` model already stores that decoration). This is
-/// the SAME grammar the server's `subject`/`predicate`/`object` parameters and its
-/// `parse_bindings` read, so a term written here parses back to the identical term server-side.
-fn term_to_ntriples(term: &FragTerm) -> String {
-    match term {
-        FragTerm::Iri(s) => format!("<{s}>"),
-        FragTerm::Blank(s) => format!("_:{s}"),
-        FragTerm::Literal(s) => s.clone(),
-    }
-}
-
 /// Serialise a brTPF binding block to the **line-oriented text wire** the sparq server parses
 /// (`sq-dxhb`'s `parse_bindings`): one mapping per line; within a line, space-separated
 /// `position=term` pairs, where `position` is the short `s`/`p`/`o` and `term` is the N-Triples
@@ -404,7 +391,7 @@ pub fn encode_bindings_text(bindings: &[FragBinding]) -> String {
         for want in ["s", "p", "o"] {
             for (name, term) in b {
                 if position_key(name) == Some(want) {
-                    pairs.push(format!("{want}={}", term_to_ntriples(term)));
+                    pairs.push(format!("{want}={}", term.to_ntriples()));
                 }
             }
         }
