@@ -126,7 +126,8 @@ pub enum NegationCycles { Reject /* default */, FailClosed /* skip them + warnin
                           SinglePass /* legacy, may fail open + warning */ }
 pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>; // n3:: only
 // Every forward closure has a round, fact and derived-term-size allowance (see Gotchas).
-// These two take the caller's; every other N3 entry point uses ClosureLimits::default().
+// These two take the caller's, as do MaterializedN3Graph::with_limits and compiled::eval_with_limits;
+// every other N3 entry point uses ClosureLimits::default().
 #[non_exhaustive] // build from Default, then set fields: `let mut l = ClosureLimits::default(); l.max_term_bytes = …;`
 pub struct ClosureLimits { pub max_rounds: usize /* 1_000_000 */, pub max_facts: usize /* 50_000_000 */,
                            pub max_term_bytes: usize /* 16 MiB per derived term */ }
@@ -200,6 +201,8 @@ pub enum OwlMode { CountingMono, CountingFixpoint, Fallback }
 
 pub struct MaterializedN3Graph; // user N3 rules; operates on n3::Term facts
 impl MaterializedN3Graph { pub fn new(rules_src: &str, base_facts: &[[Term;3]]) -> Result<Self, String>;
+    pub fn with_limits(rules_src: &str, base_facts: &[[Term;3]], limits: ClosureLimits)
+        -> Result<Self, String>;   // new uses ClosureLimits::default() (GH #6854)
     pub fn insert(&mut self, facts: &[[Term;3]]) -> usize;     // ground facts only
     pub fn delete(&mut self, facts: &[[Term;3]]) -> usize;
     pub fn mode(&self) -> N3Mode;          // Counting (incremental) | Fallback (re-runs engine)
@@ -809,9 +812,9 @@ the profile.
   **Not covered:**
   - the document's own parse, which is not charged: its memory is bounded by its input text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it holds only a scratch copy of one token, or an error message quoting one, at a time (each bounded by the length of the source token), the spare capacity of its strings, vectors and maps, its fixed-size state, and the text it parses;
   - the text a resolver supplies (`log:content`, `log:semantics`), which the caller allocates before it is sized (the literal or formula built from it is refused);
-  - the incremental counting engine behind `MaterializedN3Graph` ([GH #6854](https://github.com/sparq-org/sparq/issues/6854)); its batch fallback is covered. It has no round and fact allowance either.
-
   The opt-in `compiled-rules` evaluator is covered ([GH #6855](https://github.com/sparq-org/sparq/issues/6855)): see "Compiled-rules limits" above.
+
+  **The incremental counting engine behind `MaterializedN3Graph` is covered ([GH #6854](https://github.com/sparq-org/sparq/issues/6854)).** `MaterializedN3Graph::with_limits` takes the graph's `ClosureLimits` for its whole life (`new` uses the default). On the counting path each whitelisted builtin substitutes its subject and object through `bounded::substitute` (so a `( … )` argument list is sized before it is built) and sizes its result with the text engine's own checkpoint (`output_bytes` for `string:concatenation` / `scrape` / `encodeForUri`, the shared `log:uri` sizing both ways); conclusions are variables, IRIs and literals and build no new term. Each propagation (a construction or rebuild, one `insert`, one `delete`) is charged one round per wave, and per round of a recursive layer's local fixpoint, against `max_rounds`, with the closure's facts checked against `max_facts`. Past any limit the graph rebuilds through the batch engine under the same limits: when that refuses, the graph fails closed (`new` / `with_limits` return the `Err`; after a mutation the closure is the base alone, `stratification_warning()` holds the error and `fallback_reason()` names the limit) until a mutation brings it back within them. The counting path's rounds are propagation waves, not the batch engine's fixpoint schedule, so under equal round or fact limits the graph can hold a closure that a from-scratch batch run near the boundary refuses. `tests/incremental_n3_closure_limits.rs` checks that the graph and the batch engine agree at every `max_term_bytes` it sweeps, through construction, insert and delete, on its fixtures.
 
   **Deliberate over-refusal:** a builtin's argument list is itself a term it builds. So `log:conjunction` over many copies of one large formula is refused when the copies together pass the limit, even if the merged result would fit.
 - **A formula-level `@forAll` is treated as document-scoped (known limitation, GH #6754).** Every `@forAll` of one IRI — at document level or inside any formula — is the SAME variable, `?__ua.<iri>`. Which mentions become that variable is still lexical (the declaring scope and its inner formulae, after the declaration), but separate declarations in a rule's premise and conclusion, sibling formulae, or nested shadowing all share it, unlike N3's per-scope semantics. Two different IRIs with one local name (`@forAll a:x, b:x`) are two variables. The `.` in the name keeps it outside the quickvar lexical space, so no `?…` can collide with it.
