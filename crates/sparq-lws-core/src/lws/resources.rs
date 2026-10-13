@@ -1257,8 +1257,8 @@ async fn listing<S: Store + 'static>(
     // The listing changed no earlier than any member it lists did, so its Last-Modified is the
     // latest of the container's own and every listed member's: an If-Modified-Since never meets a
     // 304 for a listing whose members moved on since. A container whose own time could not be
-    // moved on after a change to it has none, until it is; nor has one with a member whose time
-    // is not known, which could have changed at any time.
+    // moved on after a change to it has none, until it is; nor has one whose own time, or a
+    // member's, is not known, since either could have changed at any time.
     let times: Option<Vec<u64>> = all
         .iter()
         .map(|(m, _)| {
@@ -1268,17 +1268,11 @@ async fn listing<S: Store + 'static>(
                 .and_then(|t| u64::try_from(t).ok())
         })
         .collect();
-    let modified = (!untouched).then_some(()).zip(times).map(|((), times)| {
-        times.into_iter().fold(
-            to_secs(
-                cmeta
-                    .modified_ms
-                    .or(meta.last_modified.map(epoch_ms))
-                    .unwrap_or_default(),
-            ),
-            u64::max,
-        )
-    });
+    let own = cmeta.modified_ms.or(meta.last_modified.map(epoch_ms));
+    let modified = (!untouched)
+        .then_some(())
+        .zip(own.zip(times))
+        .map(|((), (own, times))| times.into_iter().fold(to_secs(own), u64::max));
     // Each page is its own representation, so a later page has its own entity tag.
     let etag = if page == 1 {
         format!("\"{tag}\"")
@@ -4114,7 +4108,9 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
 struct Representation<'a> {
     format: &'a str,
     size: String,
-    modified: String,
+    /// `None` when the store keeps no time for it: the linkset then states none, rather than a
+    /// made-up one.
+    modified: Option<String>,
 }
 
 impl<'a> Representation<'a> {
@@ -4127,7 +4123,7 @@ impl<'a> Representation<'a> {
         Self {
             format,
             size: u64::MAX.to_string(),
-            modified: format_rfc3339(to_secs(u64::MAX) as i64),
+            modified: Some(format_rfc3339(to_secs(u64::MAX) as i64)),
         }
     }
 }
@@ -4148,11 +4144,12 @@ async fn linkset_document<S: Store + 'static>(
     let representation = match &stored {
         Some(stored) => {
             let size = state.store.read_at(uri, stored).await?.len();
-            let modified = stored.last_modified.map(epoch_ms).unwrap_or_default();
             Some(Representation {
                 format: &stored.content_type,
                 size: size.to_string(),
-                modified: format_rfc3339(to_secs(modified) as i64),
+                modified: stored
+                    .last_modified
+                    .map(|t| format_rfc3339(to_secs(epoch_ms(t)) as i64)),
             })
         }
         None => None,
@@ -4187,15 +4184,11 @@ fn served_linkset(
     types.extend(meta.types.iter().map(|t| json!({"href": t})));
     server.insert("type".into(), Value::Array(types));
     if let Some(r) = representation {
-        server.insert(
-            "self".into(),
-            json!([{
-                "href": uri,
-                "format": [r.format],
-                "size": [r.size],
-                "modified": [r.modified],
-            }]),
-        );
+        let mut entry = json!({"href": uri, "format": [r.format], "size": [r.size]});
+        if let Some(modified) = r.modified {
+            entry["modified"] = json!([modified]);
+        }
+        server.insert("self".into(), json!([entry]));
     }
     let user = meta
         .linkset
@@ -7884,6 +7877,51 @@ mod tests {
         assert!(b.get("modified").is_none(), "{b}");
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
         assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    /// A time the store does not keep is not stated as the epoch: a container whose own time is
+    /// unknown has no listing date (an epoch date would make any If-Modified-Since a 304), and a
+    /// data resource whose time is unknown has no `modified` in its linkset.
+    #[tokio::test]
+    async fn an_unknown_time_is_not_dated_the_epoch() {
+        use super::super::test_store::{body_json, request as req, state};
+        let (st, store) = state(100).await;
+        let anyone = Agent::anonymous();
+        let root = st.cfg.storage();
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            ),
+            &anyone,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", "Sun, 01 Jan 2023 00:00:00 GMT"),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+        let mut root_meta = st.resource_meta(&root).await.unwrap();
+        root_meta.modified_ms = None;
+        st.put_resource_meta(&root, &root_meta).await.unwrap();
+        *store.timeless.lock().unwrap() = Some(root.clone());
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+
+        let linkset = format!("/a{META_SUFFIX}");
+        let doc = body_json(handle(&st, &req(Method::GET, &linkset, &[], ""), &anyone).await).await;
+        assert!(doc["linkset"][0]["self"][0]["modified"][0].is_string());
+        *store.timeless.lock().unwrap() = Some(format!("{root}a"));
+        let doc = body_json(handle(&st, &req(Method::GET, &linkset, &[], ""), &anyone).await).await;
+        let entry = &doc["linkset"][0]["self"][0];
+        assert_eq!(entry["size"][0], "1");
+        assert!(entry.get("modified").is_none(), "{entry}");
     }
 
     /// Review finding: a container whose own time could not be moved on after a member was

@@ -504,7 +504,8 @@ What the server exposes, all discoverable from the storage description
   on a stale date. A listing's `Last-Modified` is the latest of the container's own time and
   every member's, so a change whose touch a stop lost still moves it on; a member whose time the
   backend does not record is listed without `modified`, and the listing then has no
-  `Last-Modified`. Every change to the store (a request's own steps, a touch, a rollback or a
+  `Last-Modified`; so has one whose container's own time is not recorded. An unknown time is never
+  stated as the epoch: a linkset's `self` entry then omits `modified`. Every change to the store (a request's own steps, a touch, a rollback or a
   retried undo) goes through one tracked path, and a listing made while a change to the
   container or a member is in flight has no `Last-Modified`; one that overlapped a change is
   made again. A PUT with `Content-Range`
