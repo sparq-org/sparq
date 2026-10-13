@@ -335,13 +335,19 @@ let out = store.materialize_odrl_policy(&policy, &req);
 
 ### `materialize_odrl_permission_conditional` stores the one-shot grant only
 
-`materialize_odrl_permission_conditional` used to persist recipient, assignee and `dateTime` constraints as re-checked `auth:ConditionalGrant` heads (agent matchers, `noneOf` exceptions, live-clock windows). A head re-checks identity and clock but not the rest of the decision, so it could grant a session `decide` denies: a prohibition on another party or a later time, or an assignee and a recipient that must both hold. It now stores exactly what `materialize_odrl_permission` stores: the one `party auth:<mode> target` triple from the `Permit` that `decide` issued for that request, and only when the permit is `lasting()` (an unconstrained grant to the named party, in a policy with no prohibitions). Constrained grants, and grants under any prohibition, are tracked in [#6743](https://github.com/sparq-org/sparq/issues/6743) (per-request evaluation through `decide`).
+`materialize_odrl_permission_conditional` used to persist recipient, assignee and `dateTime` constraints as re-checked `auth:ConditionalGrant` heads (agent matchers, `noneOf` exceptions, live-clock windows). A head re-checks identity and clock but not the rest of the decision, so it could grant a session `decide` denies: a prohibition on another party or a later time, or an assignee and a recipient that must both hold. It now stores exactly what `materialize_odrl_permission` stores: the one `party auth:<mode> target` triple from the `Permit` that `decide` issued for that request, and only when the permit is `lasting()` (an unconstrained grant to the named party, in a policy with no prohibitions). Constrained grants, and grants under any prohibition, come from an attached policy instead (below), which evaluates each request through `decide`.
 
-### Request-time prohibitions (`PodStore::attach_odrl_policy`) — #6743
+### Request-time policies (`PodStore::attach_odrl_policy`) — #6743
 
-`PodStore::attach_odrl_policy(policy)` keeps a `ValidatedPolicy` on the store and checks its prohibitions with `matched_prohibition` for the **accessing session** on every authorizing call. Nothing is materialized, so a party-scoped prohibition denies only the parties it applies to, and an asset needs no materialization to be covered.
+`PodStore::attach_odrl_policy(policy)` keeps a `ValidatedPolicy` on the store and evaluates it for the **accessing session** on every authorizing call: its permissions through `decide`, its prohibitions through `matched_prohibition`. Nothing is materialized, so a party-scoped rule applies only to the parties it names, a time window follows the session's clock, and an asset needs no materialization to be covered.
 
-- **Deny-only.** The layer removes modes the static WAC/ACP decision grants and never adds one, so it composes with ACP denies, origin restrictions and `Control` as an intersection. Attached permissions grant nothing here; a lasting grant still goes through `materialize_odrl_*`.
+- **Grants.** A mode is added when some attached policy's `decide` permits every ODRL action the mode needs, under every party membership the agent could have:
+  - `Read` needs `odrl:read`;
+  - `Write` needs both `odrl:modify` and `odrl:delete`, from the same policy, since a write can do either (`odrl:use` covers both; `odrl:write` alone does not);
+  - `Append` needs `odrl:append`, or a `Write` grant.
+
+  A grant applies only where the static decision is authoritative (a governing ACL exists and the auth view is loaded), and never over an explicit deny of the auth view (an ACP `acp:deny`), so a graph no access-control document governs is never granted. A group document an `.acl` references (an input of the auth view, like the `.acl` itself) can be granted `Read` but never a change, so a grantee cannot add itself to a group the ACL grants `Control` to. `decide_create` grants on the container only, never over the control-document name refusal. Count constraints are not evaluated per request, so a counted permission does not grant here.
+- **Denies.** A mode is removed when an attached prohibition applies, after any grant, so prohibitions beat every allow.
 - **One gate.** Every entry point goes through it:
   - the reads behind the cached session set: `accessible`, `accessible_set`, the views and queries, `wac_allow` and `scoped_dataset`;
   - point decisions: `decide`, `decide_batch` and `decide_create`;
@@ -355,9 +361,11 @@ let out = store.materialize_odrl_policy(&policy, &req);
 - **Never touched:** `Control`, `.acl`/`.acr` documents and the reserved `urn:sparq:` graphs, so a policy cannot lock an owner out of their own rules.
 - **Refused at attach time:** a policy whose `odrl:conflict` strategy `decide` cannot honour.
 - **Tests.** `tests/odrl_request_decide.rs` runs every session and clock across the generated policy space:
-  - the result equals the static verdict narrowed by `matched_prohibition`;
+  - the result equals the static verdict widened by a `decide` permit and narrowed by `matched_prohibition`, through `accessible`, `query_as` and the point `decide`;
   - it never denies a session that the materialized conditional deny lets through.
-- **Not cached yet:** each call re-evaluates the attached prohibitions for each candidate graph.
+
+  `tests/odrl_decision_entry_points.rs` checks that no undecidable shape grants through the attached layer, for the materialising session or another one.
+- **Not cached yet:** each call re-evaluates the attached policies for each candidate graph. With permissions attached, every stored graph the static set lacks is a candidate.
 
 ### Constraint-conditional DENY (`materialize_odrl_prohibition_conditional`) — sq-4r70
 

@@ -591,6 +591,30 @@ impl AuthIndex {
             && self.matcher_issuers == other.matcher_issuers
     }
 
+    /// Whether the auth view explicitly denies `mode` on `graph` to this session: a deny
+    /// triple naming one of its principals, or an applicable conditional deny. Fails
+    /// closed: a session value inside the reserved principal encoding counts as denied.
+    #[cfg(feature = "odrl-bridge")]
+    pub(crate) fn denies(&self, s: &Session, mode: Mode, graph: &str) -> bool {
+        let invalid = |v: Option<&str>| v.is_some_and(|x| !crate::loader::session_value_allowed(x));
+        if invalid(s.agent) || invalid(s.client) || invalid(s.issuer) {
+            return true;
+        }
+        let origin = crate::loader::iri_origin(graph);
+        let named = |gs: &Vec<NamedNode>| gs.iter().any(|g| g.as_str() == graph);
+        Self::principals(s).iter().any(|p| {
+            self.deny
+                .get(&(p.clone(), mode))
+                .and_then(|by_o| by_o.get(origin))
+                .is_some_and(named)
+        }) || self.cond.get(origin).into_iter().flatten().any(|c| {
+            !c.allow
+                && c.mode == Some(mode)
+                && c.graph.as_ref().is_some_and(|g| g.as_str() == graph)
+                && self.cond_applies(c, s)
+        })
+    }
+
     /// The shared accessible walk. `only == Some(o)` restricts every lookup to origin `o`'s
     /// bucket (a per-origin decision); `only == None` unions all buckets — byte-for-byte
     /// the pre-partition audited result. [OPUS-4.8] sq-b7k7u.

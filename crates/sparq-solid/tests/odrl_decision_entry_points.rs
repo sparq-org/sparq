@@ -1,8 +1,9 @@
 //! Every grant goes through one decision: sparq-policy's `decide`. This runs each
 //! undecidable constraint shape, on both rule kinds and under every wrapper, through each
 //! entry point that can put an allow into the auth view: the evaluator, the one-shot,
-//! policy and conditional ACP materialisers, the N3 materialiser, and a ledger replay of
-//! a grant that was live before the policy changed. None may grant.
+//! policy and conditional ACP materialisers, the N3 materialiser, a ledger replay of a
+//! grant that was live before the policy changed, and the request-time layer of an
+//! attached policy, for the deciding session and for others. None may grant.
 //!
 //! Gated by the `odrl-bridge` feature (the whole test file no-ops without it).
 #![cfg(feature = "odrl-bridge")]
@@ -13,6 +14,8 @@ use sparq_solid::odrl_bridge::materialize_odrl_n3;
 use sparq_solid::{BridgeKind, Mode, PodStore, Session};
 
 const ALICE: &str = "https://alice.ex/card#me";
+const BOB: &str = "https://bob.ex/card#me";
+const CAROL: &str = "https://carol.ex/card#me";
 const N1: &str = "https://pod.ex/notes/n1";
 const NOW: &str = "2026-06-01T00:00:00Z";
 
@@ -84,16 +87,45 @@ fn pod() -> Graph {
 }
 
 fn alice_reads(store: &PodStore) -> bool {
-    let alice = Session {
-        agent: Some(ALICE),
+    reads_as(store, ALICE)
+}
+
+fn reads_as(store: &PodStore, agent: &str) -> bool {
+    let s = Session {
+        agent: Some(agent),
         client: None,
         issuer: None,
         now: Some(NOW),
     };
     store
-        .accessible(&alice, Mode::Read)
+        .accessible(&s, Mode::Read)
         .iter()
         .any(|g| g.as_str() == N1)
+        || store.decide(&s, N1, Mode::Read).allow
+}
+
+/// [`pod`] with an ACL on n1 that grants only carol, so decisions on n1 are
+/// authoritative and an attached policy can grant there.
+fn governed_pod() -> PodStore {
+    let acl = "https://pod.ex/notes/n1.acl";
+    let a = "https://pod.ex/notes/n1.acl#a";
+    let nq = format!(
+        "<{a}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{acl}> .\n\
+         <{a}> <http://www.w3.org/ns/auth/acl#accessTo> <{N1}> <{acl}> .\n\
+         <{a}> <http://www.w3.org/ns/auth/acl#agent> <{CAROL}> <{acl}> .\n\
+         <{a}> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <{acl}> .\n"
+    );
+    let pod = format!("<https://pod.ex/notes/n1#it> <https://ex.dev/ns#title> \"hello\" <{N1}> .\n{nq}");
+    let mut store = PodStore::new(Graph::load_dataset(&pod, "nquads").expect("pod loads"));
+    store.materialize_wac().expect("wac");
+    store
+}
+
+/// The request-time layer of an attached policy, for alice and for bob.
+fn attached_grants(policy: &ValidatedPolicy) -> [bool; 2] {
+    let mut store = governed_pod();
+    store.attach_odrl_policy(policy.clone()).expect("attach");
+    [reads_as(&store, ALICE), reads_as(&store, BOB)]
 }
 
 /// The constraint object for `shape` under each wrapper.
@@ -148,6 +180,7 @@ fn no_entry_point_grants(ttl: &str, req: &Request, what: &str) {
         return; // refused at the boundary: nothing downstream can see it
     };
     assert!(!evaluate(&policy, req).allow, "evaluate granted: {what}");
+    assert_eq!(attached_grants(&policy), [false, false], "request-time layer granted: {what}");
 
     let mut store = PodStore::new(pod());
     store.materialize_odrl_permission(&policy, req);
@@ -258,4 +291,5 @@ fn a_decidable_grant_still_reaches_every_entry_point() {
     let mut store = PodStore::new(pod());
     store.materialize_odrl_permission_conditional(&granting(), &request());
     assert!(alice_reads(&store));
+    assert_eq!(attached_grants(&granting()), [true, false], "only alice is the assignee");
 }
