@@ -413,3 +413,61 @@ fn batch_runtime_parse_of_a_bs_label_is_not_refused() {
         closure.facts
     );
 }
+
+/// Review round 7: `why_document_with` keeps the graph's caller-namespace guard. A runtime
+/// text spelling the graph's caller prefix (`_:__bs0_x`) cannot name the caller's `x`,
+/// so the join the guarded graph refuses to derive has no proof in the document view.
+#[cfg(feature = "explain")]
+#[test]
+fn why_document_with_keeps_the_caller_namespace_guard() {
+    let rules = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+         { \"_:__bs0_x <http://ex/r> <http://ex/o9> .\" log:parsedAsN3 ?f . \
+            ?f log:includes { ?s <http://ex/r> <http://ex/o9> } } \
+         => { ?s <http://ex/fromtext> <http://ex/o9> } .\n\
+         { ?s <http://ex/fromtext> ?o . ?s <http://ex/r> ?o } => { ?s <http://ex/both> ?o } .";
+    let mine = [blank("x"), iri("r"), iri("o9")];
+    let g = MaterializedN3Graph::new(rules, std::slice::from_ref(&mine)).expect("parse");
+    // The caller's `x` in the document view is the graph's internal `__bs0_x`.
+    let opts = sparq_reason::ExplainOpts::default();
+    let asserted = g
+        .why_document_with(&[blank("__bs0_x"), iri("r"), iri("o9")], opts)
+        .expect("caller fact explains");
+    assert_eq!(asserted.nodes()[0].rule, "asserted");
+    for p in ["fromtext", "both"] {
+        let f = [blank("__bs0_x"), iri(p), iri("o9")];
+        assert!(!g.contains(&[blank("x"), iri(p), iri("o9")]));
+        assert!(
+            g.why_document_with(&f, opts).is_none(),
+            "{p}: runtime text named the caller's blank"
+        );
+    }
+}
+
+/// Review round 7: `why_n3_document` explains nothing, asserted facts included, for a
+/// document whose batch evaluation (`reason_n3`) fails, here an unstratifiable
+/// negation cycle.
+#[cfg(feature = "explain")]
+#[test]
+fn why_n3_document_refuses_asserted_facts_of_a_rejected_document() {
+    let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+               <urn:s> <urn:p> <urn:o> .\n\
+               { ?scope log:notIncludes { <urn:s> <urn:q> true } } => { <urn:s> <urn:q> true } .";
+    assert!(
+        sparq_reason::reason_n3_terms(src, None).is_err(),
+        "the batch evaluation rejects the document"
+    );
+    let fact = [
+        Term::Iri("urn:s".into()),
+        Term::Iri("urn:p".into()),
+        Term::Iri("urn:o".into()),
+    ];
+    let proof = sparq_reason::why_n3_document(src, &fact, sparq_reason::ExplainOpts::default())
+        .expect("parses");
+    assert!(proof.is_none(), "asserted fact explained: {proof:?}");
+    // A stratifiable document still explains its asserted fact.
+    let ok = "<urn:s> <urn:p> <urn:o> .";
+    let proof = sparq_reason::why_n3_document(ok, &fact, sparq_reason::ExplainOpts::default())
+        .expect("parses")
+        .expect("asserted fact explains");
+    assert_eq!(proof.nodes()[0].rule, "asserted");
+}

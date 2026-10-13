@@ -1135,24 +1135,43 @@ impl MaterializedN3Graph {
     /// `_b<n>`, with no [`N3_GRAPH_BLANK`](crate::N3_GRAPH_BLANK) prefix. A caller's blank
     /// node, if any, is shown in the graph's internal caller namespace.
     ///
-    /// The proof is a BATCH evaluation of the rules over the base, on a cut record of its
-    /// own and with no caller namespace, and `fact` is explained when that batch closure
-    /// holds it, whatever the graph's own closure says. For a standalone document (no
-    /// graph, no caller) use [`why_n3_document`].
+    /// Like [`why_with`](Self::why_with), this explains the GRAPH's closure, evaluated as
+    /// the graph evaluates it (with its caller namespace, so a document parsed at run time
+    /// cannot name a caller's blank node): only the labels differ. For a standalone
+    /// document (no graph, no caller) use [`why_n3_document`].
     pub fn why_document_with(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
-        let batch = crate::n3::bounded::Truncation::top_level();
-        prove_n3(&self.rules_src, &self.base, fact, opts, &|f| f.clone(), &batch, None)
+        self.why_shown(fact, opts, &|f| f.clone())
     }
 
     /// The proof of `fact`, given in the graph's own labels, shown in the caller's.
     fn why_in(&self, fact: &[N3Term; 3], opts: ExplainOpts) -> Option<ProofTree> {
+        self.why_shown(fact, opts, &|f| self.outward(f))
+    }
+
+    /// The proof of `fact`, given in the graph's own labels, each fact shown through `show`.
+    fn why_shown(
+        &self,
+        fact: &[N3Term; 3],
+        opts: ExplainOpts,
+        show: &dyn Fn(&[N3Term; 3]) -> [N3Term; 3],
+    ) -> Option<ProofTree> {
         // A graph explanation is of the graph's closure, evaluated as the graph evaluates
-        // (with its caller namespace).
+        // (with its caller namespace). The graph's construction already rejected an
+        // evaluation that fails, so a fact in its closure that is asserted is explained as
+        // asserted without re-running it.
         if !self.holds(fact) {
             return None;
         }
-        let show = |f: &[N3Term; 3]| self.outward(f);
-        prove_n3(&self.rules_src, &self.base, fact, opts, &show, &self.cuts, Some(&self.base_ns))
+        prove_n3(
+            &self.rules_src,
+            &self.base,
+            fact,
+            opts,
+            show,
+            &self.cuts,
+            Some(&self.base_ns),
+            true,
+        )
     }
 }
 
@@ -1172,13 +1191,18 @@ pub fn why_n3_document(
     let parsed = crate::n3::bounded::parse_n3(src, "", &cuts)?;
     let base: FxHashSet<[N3Term; 3]> = parsed.facts.into_iter().collect();
     let batch = crate::n3::bounded::Truncation::top_level();
-    Ok(prove_n3(src, &base, fact, opts, &|f| f.clone(), &batch, None))
+    // No shortcut for an asserted fact: the batch evaluation must succeed first, as
+    // `reason_n3` requires (an unstratifiable document explains nothing).
+    Ok(prove_n3(src, &base, fact, opts, &|f| f.clone(), &batch, None, false))
 }
 
 /// The proof of `fact` (in the evaluation's own labels) under the rules `rules_src` over
-/// the asserted `base`, each fact shown through `show`. A fact in `base` is asserted;
-/// otherwise the base is re-derived as a batch run recording into `cuts`, with the caller
-/// namespace `caller_ns` if a graph's run is being explained.
+/// the asserted `base`, each fact shown through `show`. The base is re-derived as a batch
+/// run recording into `cuts`, with the caller namespace `caller_ns` if a graph's run is
+/// being explained, and `None` if that run fails or does not hold `fact`. A fact in
+/// `base` is asserted; with `validated` (the caller has checked `fact` against a closure
+/// whose evaluation succeeded) it is answered without the run.
+#[allow(clippy::too_many_arguments)]
 fn prove_n3(
     rules_src: &str,
     base: &FxHashSet<[N3Term; 3]>,
@@ -1187,9 +1211,10 @@ fn prove_n3(
     show: &dyn Fn(&[N3Term; 3]) -> [N3Term; 3],
     cuts: &crate::n3::bounded::Truncation,
     caller_ns: Option<&str>,
+    validated: bool,
 ) -> Option<ProofTree> {
     let mut b = ProofBuilder::new(opts);
-    if base.contains(fact) {
+    if validated && base.contains(fact) {
         let shown = show(fact);
         let root = b.push_keyed(
             crate::n3::serialize::statement_display_lossy(&shown),
