@@ -1102,11 +1102,14 @@ impl PodStore {
             mode,
         );
         // The child-name refusal above stays first and is never granted over. A permission
-        // on the container can grant the create; a prohibition on the container or on the
-        // child it would mint can only narrow what is left.
-        let benign = decide::create_name_is_benign(container, child_name);
-        let d = self.apply_odrl_with(d, session, container, mode, benign);
-        self.apply_odrl_with(d, session, &format!("{container}{child_name}"), mode, false)
+        // on the container can grant the create, unless the child is a group document an
+        // ACL references (an auth-view input no permission may change); a prohibition on
+        // the container or on the child it would mint can only narrow what is left.
+        let child = format!("{container}{child_name}");
+        let grant = decide::create_name_is_benign(container, child_name)
+            && !self.group_docs().contains(&child);
+        let d = self.apply_odrl_with(d, session, container, mode, grant);
+        self.apply_odrl_with(d, session, &child, mode, false)
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a

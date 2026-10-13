@@ -536,6 +536,27 @@ fn referenced_group_documents_are_not_granted_changes() {
     );
     assert!(s.update_as(&bob, &join).is_err());
     assert!(!s.decide(&bob, acl, Mode::Control).allow);
+
+    // A referenced group document that does not exist yet cannot be created either.
+    let absent = "https://pod.ex/groups/owners";
+    let extra = format!(
+        "<{acl}#owners> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{acl}> .\n\
+         <{acl}#owners> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <{acl}> .\n\
+         <{acl}#owners> <http://www.w3.org/ns/auth/acl#agentGroup> <{absent}#it> <{acl}> .\n\
+         <{acl}#owners> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <{acl}> .\n"
+    );
+    let mut s = bare_store_with(&extra);
+    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
+        .expect("attach");
+    let groups = "https://pod.ex/groups/";
+    assert!(s.decide_create(&bob, groups, "other", Mode::Append).allow, "ordinary child");
+    for mode in [Mode::Append, Mode::Write] {
+        assert!(!s.decide_create(&bob, groups, "owners", mode).allow, "{mode:?}");
+    }
+    let create = format!(
+        "INSERT DATA {{ GRAPH <{absent}> {{ <{absent}#it> <http://www.w3.org/2006/vcard/ns#hasMember> <{BOB}> }} }}"
+    );
+    assert!(s.update_as(&bob, &create).is_err());
 }
 
 /// A prohibition never touches `Control`, access-control documents or reserved graphs,
