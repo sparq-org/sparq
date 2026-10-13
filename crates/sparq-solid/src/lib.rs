@@ -961,10 +961,14 @@ impl PodStore {
     /// an attached permission can add the mode, an attached prohibition removes it.
     fn odrl_gate(&self, session: &Session, mode: Mode, target: &str, granted: bool) -> bool {
         let granted = granted
-            || (self.odrl_grants(session, mode, target)
-                && decide::decide_one(self.acl_index(), &self.auth, session, target, mode).status
-                    == AclStatus::Resolved);
+            || (self.odrl_grants(session, mode, target) && self.resolved(session, mode, target));
         granted && !self.odrl_denies(session, mode, target)
+    }
+
+    /// Whether the static decision for `target` is authoritative.
+    fn resolved(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        decide::decide_one(self.acl_index(), &self.auth, session, target, mode).status
+            == AclStatus::Resolved
     }
 
     /// Whether an attached ODRL permission grants `mode` on `target` for `session`: the
@@ -975,9 +979,15 @@ impl PodStore {
     /// authoritative.
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
-        self.odrl.grants(session, mode, target)
-            && self.statically_covered.contains(target)
+        self.odrl_grants_present(session, mode, target)
             && self.graph.named.iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
+    }
+
+    /// [`PodStore::odrl_grants`] for a `target` the caller knows exists now.
+    #[cfg(feature = "odrl-bridge")]
+    fn odrl_grants_present(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        self.statically_covered.contains(target)
+            && self.odrl.grants(session, mode, target)
             && !self.auth.denies(session, mode, target)
     }
 
@@ -1215,9 +1225,14 @@ impl PodStore {
             let mut set = sets.sorted.to_vec();
             if mode == Mode::Read && self.odrl.has_permissions() {
                 let have: FxHashSet<&str> = sets.sorted.iter().map(NamedNode::as_str).collect();
+                // Each graph here exists, so the existence half of `odrl_grants` holds.
                 for (name, _) in self.graph.named.iter() {
                     let Term::NamedNode(g) = name else { continue };
-                    if !have.contains(g.as_str()) && self.odrl_gate(s, mode, g.as_str(), false) {
+                    let g_str = g.as_str();
+                    if !have.contains(g_str)
+                        && self.odrl_grants_present(s, mode, g_str)
+                        && self.resolved(s, mode, g_str)
+                    {
                         set.push(g.clone());
                     }
                 }

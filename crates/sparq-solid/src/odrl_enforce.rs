@@ -207,7 +207,7 @@ impl OdrlEnforcement {
     pub(crate) fn grants(&self, s: &Session, mode: Mode, target: &str) -> bool {
         mode == Mode::Read
             && Self::governs(target)
-            && self.has_permissions()
+            && self.may_grant(target)
             && self
                 .policies
                 .iter()
@@ -219,6 +219,26 @@ impl OdrlEnforcement {
     /// [`grants`]: OdrlEnforcement::grants
     pub(crate) fn has_permissions(&self) -> bool {
         self.policies.iter().any(|p| !p.permissions.is_empty())
+    }
+
+    /// Whether some attached permission could match a request on `target`: one with no
+    /// target, one targeting it, or one targeting a collection it is recorded as part of.
+    /// A request carries only its own target's membership edges, so no other permission
+    /// can match it. A cheap pre-filter for [`grants`].
+    ///
+    /// [`grants`]: OdrlEnforcement::grants
+    pub(crate) fn may_grant(&self, target: &str) -> bool {
+        let covers = |t: &str| {
+            t == target
+                || self
+                    .asset_memberships
+                    .get(target)
+                    .is_some_and(|of| of.iter().any(|c| c == t))
+        };
+        self.policies
+            .iter()
+            .flat_map(|p| p.permissions.iter())
+            .any(|r| r.target.as_deref().is_none_or(covers))
     }
 
     /// The static accessible set `base` minus the graphs [`OdrlEnforcement::denies`]
