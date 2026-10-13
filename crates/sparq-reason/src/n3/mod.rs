@@ -2231,6 +2231,18 @@ fn match_premise_admitted(
             let is_not = matches!(op, ScopeOp::NotIncludes);
             let mut next = Vec::new();
             for b in bindings {
+                // A pattern reached through a variable was not visible to
+                // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
+                // the same way, failing the run. (Only a pattern written as a formula is
+                // matched; any other object matches as the empty pattern.)
+                if !matches!(&pat[2], Term::Formula(_)) {
+                    if let Term::Var(v) = &pat[2] {
+                        if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
+                            bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
+                            continue;
+                        }
+                    }
+                }
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
                 };

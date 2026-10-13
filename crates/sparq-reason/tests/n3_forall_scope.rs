@@ -322,3 +322,40 @@ fn a_quantified_template_or_bound_value_is_collected() {
     );
     assert!(quoted(&facts, "got", "saw"), "{facts:?}");
 }
+
+/// A `log:includes` / `log:notIncludes` pattern reached through a variable: a quantified
+/// formula bound to it is refused when the builtin is evaluated, as a written one is.
+fn bound_pattern_cases(pattern: &str) -> Vec<String> {
+    ["includes", "notIncludes"]
+        .iter()
+        .flat_map(|op| {
+            [
+                format!("{{ :cfg :pat ?f. {{ :a :p :b }} log:{op} ?f }} => {{ :hit :by :rule }}."),
+                // The store as the scope.
+                format!("{{ :cfg :pat ?f. ?scope log:{op} ?f }} => {{ :hit :by :rule }}."),
+            ]
+        })
+        .map(|rule| format!("@prefix : <{EX}>. :a :p :b. :cfg :pat {pattern}. {rule}"))
+        .collect()
+}
+
+#[test]
+fn a_bound_quantified_containment_pattern_is_rejected() {
+    for src in bound_pattern_cases("{ @forAll :x. :x :p :b }") {
+        assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), QUANTIFIER_ERROR, "{src}");
+        let base = parser::parse(&src).expect("parses").facts;
+        let err = sparq_reason::MaterializedN3Graph::new(&src, &base).err().expect("rejected");
+        assert!(err.starts_with(QUANTIFIER_ERROR), "{src}: {err}");
+    }
+}
+
+/// A bound pattern without a formula-level universal is not refused.
+#[test]
+fn a_bound_unquantified_containment_pattern_is_not_refused() {
+    for src in bound_pattern_cases("{ :c :p :b }") {
+        assert!(reason_n3_terms(&src, None).is_ok(), "{src}");
+        let base = parser::parse(&src).expect("parses").facts;
+        let g = sparq_reason::MaterializedN3Graph::new(&src, &base).expect("accepted");
+        assert_eq!(g.stratification_warning(), None, "{src}");
+    }
+}
