@@ -19,7 +19,7 @@
 use crate::dataset::{build, decode_triples, TripleSet, TripleTerms};
 use oxrdf::{BlankNode, NamedOrBlankNode, Term, Variable};
 use rustc_hash::FxHashMap;
-use sparq_core::Graph;
+use sparq_core::{Graph, TxnRecord};
 use spargebra::algebra::{GraphTarget, QueryDataset};
 use spargebra::term::{
     GraphName, GraphNamePattern, GroundQuad, GroundQuadPattern, GroundTerm, GroundTermPattern,
@@ -1065,14 +1065,37 @@ fn apply_update_in_place(
 /// 4. [`Graph::clear_txn`] empties the journal so the next body starts fresh.
 ///
 /// For an IN-MEMORY graph (no journal/WAL) steps 2 & 4 are no-ops, so its behaviour is byte-for-byte
-/// unchanged. `DROP`'s manifest/sub-dir removal stays a materialisation concern (already crash-safe
-/// via `recover_named_drop`); the journal only carries the DATA retraction needed for atomicity.
+/// unchanged. The journal carries named-graph creation and removal as records of their own, so a
+/// redo reproduces which graphs exist as well as their contents.
+///
+/// # Errors
+///
+/// `Err` if the commit fails (nothing is applied), or if a step after the commit point fails: the
+/// graph then refuses durable writes until it is reopened (see [`Graph::needs_recovery`]).
 pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), String> {
     // [OPUS-4.8] (sq-ycle) (1) RESOLVE + (2) COMMIT: the single durable commit point for the body.
     let records = resolve_effect_records(graph, effects);
     graph.commit_txn(&records)?;
-    // (3) MATERIALISE: the per-effect loop (unchanged from the pre-journal `apply_effects`).
-    for effect in effects {
+    // (3) MATERIALISE. A failure from here on leaves the in-memory state part-way through a body
+    // the journal has committed: the graph refuses further durable writes until a reopen redoes
+    // the frame (see `Graph::abandon_txn`), so no later commit can clear the journal over it.
+    if let Err(e) = materialise_effects(graph, effects) {
+        graph.abandon_txn();
+        return Err(e);
+    }
+    // [OPUS-4.8] (sq-ycle) (4) The body is fully materialised into the per-graph state — clear the
+    // redo journal so the next body starts fresh and a clean reopen is a no-op (no-op in-memory).
+    graph.clear_txn()
+}
+
+/// Step (3) of [`apply_effects`]: apply each effect to the per-graph state, in capture order.
+#[cfg_attr(not(test), allow(clippy::unused_enumerate_index))]
+fn materialise_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), String> {
+    for (_i, effect) in effects.iter().enumerate() {
+        #[cfg(test)]
+        if tests::FAIL_BEFORE_EFFECT.with(std::cell::Cell::get) == Some(_i) {
+            return Err("injected materialisation failure".to_owned());
+        }
         match effect {
             UpdateEffect::Delta { slot, inserts, deletes } => {
                 // Deletes first, then inserts — the same per-slot order the in-memory side used.
@@ -1111,106 +1134,86 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
             }
         }
     }
-    // [OPUS-4.8] (sq-ycle) (4) The body is fully materialised into the per-graph state — clear the
-    // redo journal so the next body starts fresh and a clean reopen is a no-op (no-op in-memory).
-    graph.clear_txn()?;
     Ok(())
 }
 
-/// [OPUS-4.8] (sq-ycle) RESOLVE a captured `&[UpdateEffect]` into the flat, ORDERED quad-delta
+/// [OPUS-4.8] (sq-ycle) RESOLVE a captured `&[UpdateEffect]` into the flat, ORDERED record list
 /// that the atomic redo journal commits in ONE fsync — computed against the CURRENT `graph` state
 /// so structural ops are concrete:
-///   * `Delta { slot, inserts, deletes }` -> the deletes (false) then the inserts (true), the same
-///     per-slot order [`apply_effects`] materialises them in.
-///   * `Clear`/`Drop` -> scan the affected slot(s) NOW and emit a delete record (false) for every
-///     triple PRESENT (default graph: scan `graph`; a NamedNode: scan that named sub-graph if it
-///     exists; NamedGraphs: every named slot; AllGraphs: every named slot PLUS the default). The
-///     data retraction is all the journal needs for atomicity — `Drop`'s manifest/sub-dir removal
-///     stays a materialisation concern (already crash-safe via `recover_named_drop`).
-///   * `Create(_)` -> nothing (an empty graph carries no triples).
+///   * `Delta { slot, inserts, deletes }` -> the deletes then the inserts, the same per-slot order
+///     [`apply_effects`] materialises them in.
+///   * `Clear` -> a delete for every triple PRESENT in the affected slot(s) when it runs (default
+///     graph, a NamedNode, every named slot, or every named slot PLUS the default).
+///   * `Drop` -> a [`TxnRecord::DropGraph`] for each named graph present when it runs (and, for
+///     the default graph, the deletes a `Clear` would give).
+///   * `Create(name)` -> a [`TxnRecord::CreateGraph`] when the graph is absent.
 ///
-/// The result is the per-slot quad-delta whose single-frame commit makes the WHOLE body atomic.
-fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool, GraphSlot, TripleTerms)> {
-    let mut records: Vec<(bool, GraphSlot, TripleTerms)> = Vec::new();
+/// The result is the record list whose single-frame commit makes the WHOLE body atomic.
+fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<TxnRecord> {
+    let mut records: Vec<TxnRecord> = Vec::new();
 
-    // [OPUS-4.8] (sq-aalh) A CLEAR/DROP retracts the triples PRESENT WHEN IT RUNS — i.e. the state
-    // of its target slot AFTER every prior op in THIS body, not the pre-body state. Resolving it
-    // against the pre-body `graph` (as the old code did) missed the retraction of triples inserted
-    // EARLIER in the same body (e.g. `INSERT DATA { GRAPH X { … } } ; CLEAR GRAPH X`): the journal
-    // recorded the insert with no matching delete, so a crash-recovery redo of the frame would
-    // resurrect the inserted-then-cleared quads — the durable journal diverged from the (correct)
-    // final in-memory state. PSS happens to order DROP before INSERT so it never hit this, but it
-    // is a latent durability-correctness bug in general. Fix: walk the effects maintaining a RUNNING
-    // per-slot view (seeded from the current `graph`), and resolve each CLEAR/DROP against THAT view.
-    //
-    // Set semantics: the redo journal replays records in append order via set-semantic `apply_delta`
-    // (re-inserting a present triple / deleting an absent one is a no-op), so the running view need
-    // only track membership. We model each slot as a `TripleSet` and emit retractions for exactly
-    // the members present at the point the CLEAR/DROP runs. Slot insertion order is preserved so a
-    // CLEAR NAMED / DROP ALL visits slots in a stable order.
-    //
-    // [OPUS-4.8] (sq-aalh, review #189) PERF: the running view is decoded LAZILY, per slot, ONLY when
-    // an op actually touches that slot — `decode_triples` is the expensive part (a full scan of the
-    // slot's store), and the common path is delta-only updates that never CLEAR/DROP. The previous
-    // version eagerly decoded the default slot AND every named slot up-front, forcing a full-dataset
-    // scan on every multi-op body even when no slot's pre-body contents are ever read. With lazy
-    // seeding a delta-only body decodes nothing (a Delta seeds its slot then never reads pre-body
-    // members back out for journalling); only CLEAR/DROP/Delta of a slot pays for that slot's decode.
-    // CLEAR/DROP NAMED ALL still visits EVERY existing named graph (via `graph.named`) plus any slot
-    // created intra-body — the same retraction set as before — but each is decoded on demand.
-    let mut running: Vec<(GraphSlot, TripleSet)> = Vec::new();
+    // [OPUS-4.8] (sq-aalh) A CLEAR/DROP acts on the state PRESENT WHEN IT RUNS — after every prior
+    // op in THIS body, not the pre-body state — so the effects are walked with a RUNNING per-slot
+    // view (seeded lazily from the current `graph`), and each CLEAR/DROP resolves against it. The
+    // view tracks triple membership and, for a named slot, whether the graph exists. Seeding decodes
+    // a slot's store, so it happens at most once per slot, the first time an op touches it; a
+    // delta-only body never reads pre-body members back out.
+    struct Slot {
+        name: GraphSlot,
+        triples: TripleSet,
+        present: bool,
+    }
+    let mut running: Vec<Slot> = Vec::new();
 
-    // Find the running view of a slot, SEEDING it on first access from the slot's CURRENT (pre-body)
-    // decoded contents so a later CLEAR/DROP retracts pre-body triples too — not just intra-body
-    // inserts. Decoding happens at most once per slot, the first time it is touched.
-    fn slot_mut<'a>(
-        graph: &Graph,
-        running: &'a mut Vec<(GraphSlot, TripleSet)>,
-        slot: &GraphSlot,
-    ) -> &'a mut TripleSet {
-        match running.iter().position(|(s, _)| s == slot) {
-            Some(i) => &mut running[i].1,
+    fn slot_mut<'a>(graph: &Graph, running: &'a mut Vec<Slot>, slot: &GraphSlot) -> &'a mut Slot {
+        let i = match running.iter().position(|s| s.name == *slot) {
+            Some(i) => i,
             None => {
-                let seed = match slot {
-                    None => decode_triples(graph),
-                    Some(name) => graph
-                        .named
-                        .iter()
-                        .find(|(n, _)| n == name)
-                        .map(|(_, sub)| decode_triples(sub))
-                        .unwrap_or_default(),
+                let (triples, present) = match slot {
+                    None => (decode_triples(graph), true),
+                    Some(name) => match graph.named.iter().find(|(n, _)| n == name) {
+                        Some((_, sub)) => (decode_triples(sub), true),
+                        None => (TripleSet::default(), false),
+                    },
                 };
-                running.push((slot.clone(), seed));
-                let i = running.len() - 1;
-                &mut running[i].1
+                running.push(Slot { name: slot.clone(), triples, present });
+                running.len() - 1
             }
-        }
+        };
+        &mut running[i]
     }
 
     // Retract every triple currently in the running view of `slot`, then empty it — so a later op
     // in the same body sees the emptied slot.
-    fn clear_slot(
-        graph: &Graph,
-        records: &mut Vec<(bool, GraphSlot, TripleTerms)>,
-        running: &mut Vec<(GraphSlot, TripleSet)>,
-        slot: &GraphSlot,
-    ) {
+    fn clear_slot(graph: &Graph, records: &mut Vec<TxnRecord>, running: &mut Vec<Slot>, slot: &GraphSlot) {
         let view = slot_mut(graph, running, slot);
-        for t in view.drain() {
-            records.push((false, slot.clone(), t));
+        for t in view.triples.drain() {
+            records.push(TxnRecord::Delete(slot.clone(), t));
         }
     }
 
-    // Every NAMED slot a `NamedGraphs`/`AllGraphs` CLEAR/DROP must retract: every named graph that
-    // exists pre-body, UNION every named slot already created/touched intra-body, in a stable order
-    // (pre-body graphs first, then any new intra-body slots in touch order). Decoding stays lazy —
-    // this only collects the slot NAMES; `clear_slot` decodes each as it visits it.
-    fn named_slots(graph: &Graph, running: &[(GraphSlot, TripleSet)]) -> Vec<GraphSlot> {
-        let mut names: Vec<GraphSlot> =
-            graph.named.iter().map(|(n, _)| Some(n.clone())).collect();
-        for (slot, _) in running {
-            if slot.is_some() && !names.contains(slot) {
-                names.push(slot.clone());
+    // Remove a named graph that exists at this point in the body.
+    fn drop_slot(graph: &Graph, records: &mut Vec<TxnRecord>, running: &mut Vec<Slot>, name: &Term) {
+        let view = slot_mut(graph, running, &Some(name.clone()));
+        if view.present {
+            view.triples.clear();
+            view.present = false;
+            records.push(TxnRecord::DropGraph(name.clone()));
+        }
+    }
+
+    // Every named graph present at this point: those that exist pre-body and have not been dropped,
+    // then those created intra-body, in a stable order. Decoding stays lazy — this only collects
+    // the names.
+    fn named_present(graph: &Graph, running: &[Slot]) -> Vec<Term> {
+        let state = |n: &Term| running.iter().find(|s| s.name.as_ref() == Some(n)).map(|s| s.present);
+        let mut names: Vec<Term> =
+            graph.named.iter().map(|(n, _)| n.clone()).filter(|n| state(n) != Some(false)).collect();
+        for s in running {
+            if let Some(n) = &s.name {
+                if s.present && !names.contains(n) {
+                    names.push(n.clone());
+                }
             }
         }
         names
@@ -1221,39 +1224,56 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
             UpdateEffect::Delta { slot, inserts, deletes } => {
                 let view = slot_mut(graph, &mut running, slot);
                 for t in deletes {
-                    records.push((false, slot.clone(), t.clone()));
-                    view.remove(t);
+                    records.push(TxnRecord::Delete(slot.clone(), t.clone()));
+                    view.triples.remove(t);
                 }
                 for t in inserts {
-                    records.push((true, slot.clone(), t.clone()));
-                    view.insert(t.clone());
+                    records.push(TxnRecord::Insert(slot.clone(), t.clone()));
+                    view.triples.insert(t.clone());
                 }
+                // An insert creates an absent named graph (`apply_slot_delta`).
+                view.present |= !inserts.is_empty();
             }
-            // CLEAR and DROP retract the SAME data set (every triple present in the target WHEN the
-            // op runs); they differ only in DROP also removing the slot, which is a manifest/sub-dir
-            // concern, not a journalled DATA change. So both resolve to the present-triple retractions
-            // — computed against the RUNNING view so intra-body inserts are correctly retracted.
-            UpdateEffect::Clear(target) | UpdateEffect::Drop(target) => match target {
+            UpdateEffect::Clear(target) => match target {
                 GraphTarget::DefaultGraph => clear_slot(graph, &mut records, &mut running, &None),
                 GraphTarget::NamedNode(n) => {
                     clear_slot(graph, &mut records, &mut running, &Some(Term::NamedNode(n.clone())))
                 }
                 GraphTarget::NamedGraphs => {
-                    for name in named_slots(graph, &running) {
-                        clear_slot(graph, &mut records, &mut running, &name);
+                    for name in named_present(graph, &running) {
+                        clear_slot(graph, &mut records, &mut running, &Some(name));
                     }
                 }
                 GraphTarget::AllGraphs => {
                     clear_slot(graph, &mut records, &mut running, &None);
-                    for name in named_slots(graph, &running) {
-                        clear_slot(graph, &mut records, &mut running, &name);
+                    for name in named_present(graph, &running) {
+                        clear_slot(graph, &mut records, &mut running, &Some(name));
                     }
                 }
             },
-            // CREATE adds an empty graph — no triples to journal — but it makes the slot exist so a
-            // later CLEAR NAMED / DROP ALL in the same body sees it (as an empty, no-op target).
+            UpdateEffect::Drop(target) => match target {
+                GraphTarget::DefaultGraph => clear_slot(graph, &mut records, &mut running, &None),
+                GraphTarget::NamedNode(n) => {
+                    drop_slot(graph, &mut records, &mut running, &Term::NamedNode(n.clone()))
+                }
+                GraphTarget::NamedGraphs => {
+                    for name in named_present(graph, &running) {
+                        drop_slot(graph, &mut records, &mut running, &name);
+                    }
+                }
+                GraphTarget::AllGraphs => {
+                    clear_slot(graph, &mut records, &mut running, &None);
+                    for name in named_present(graph, &running) {
+                        drop_slot(graph, &mut records, &mut running, &name);
+                    }
+                }
+            },
             UpdateEffect::Create(name) => {
-                slot_mut(graph, &mut running, &Some(name.clone()));
+                let view = slot_mut(graph, &mut running, &Some(name.clone()));
+                if !view.present {
+                    view.present = true;
+                    records.push(TxnRecord::CreateGraph(name.clone()));
+                }
             }
         }
     }
@@ -1294,6 +1314,11 @@ fn drop_all_named_durable(graph: &mut Graph) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    thread_local! {
+        /// Makes `materialise_effects` fail before the effect at this index.
+        pub(super) static FAIL_BEFORE_EFFECT: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
     use crate::dataset::empty_graph; // [OPUS-4.8] (sq-glw2) test-only now (see top-of-file note)
     use sparq_core::store::Pattern as IdPattern;
 
@@ -1348,16 +1373,19 @@ mod tests {
 
     /// The net per-slot membership a journal frame yields after a set-semantic redo (insert adds,
     /// delete removes, in append order) — i.e. exactly what `open` reconstructs from the frame.
-    fn journal_net(records: &[(bool, GraphSlot, TripleTerms)]) -> Vec<(GraphSlot, TripleTerms)> {
+    fn journal_net(records: &[TxnRecord]) -> Vec<(GraphSlot, TripleTerms)> {
         let mut set: Vec<(GraphSlot, TripleTerms)> = Vec::new();
-        for (insert, slot, t) in records {
-            let key = (slot.clone(), t.clone());
-            if *insert {
-                if !set.contains(&key) {
-                    set.push(key);
+        for record in records {
+            match record {
+                TxnRecord::Insert(slot, t) => {
+                    let key = (slot.clone(), t.clone());
+                    if !set.contains(&key) {
+                        set.push(key);
+                    }
                 }
-            } else {
-                set.retain(|k| k != &key);
+                TxnRecord::Delete(slot, t) => set.retain(|k| k != &(slot.clone(), t.clone())),
+                TxnRecord::DropGraph(name) => set.retain(|(slot, _)| slot.as_ref() != Some(name)),
+                TxnRecord::CreateGraph(_) => {}
             }
         }
         set
@@ -1464,6 +1492,59 @@ mod tests {
             x_rows, 0,
             "after crash-recovery redo, X must be empty (pre-body AND intra-body quads retracted)"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Graph membership survives a crash after the commit point: a graph the body inserted into
+    /// and then dropped stays absent, and a graph it created exists, after the redo.
+    #[cfg(feature = "parallel")] // mmap comes from the sparq-core dev-dep
+    #[test]
+    fn crash_recovery_restores_graph_membership() {
+        let dir = std::env::temp_dir().join(format!("sparq_txn_membership_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        let ds = "<http://ex/old> <http://ex/p> <http://ex/o> <http://ex/w> .";
+        Graph::load_dataset(ds, "nquads").unwrap().save(&dir).unwrap();
+        let sparql = "PREFIX : <http://ex/> INSERT DATA { GRAPH :x { :a :b :c } } ; DROP GRAPH :x ; \
+                      DROP GRAPH :w ; CREATE GRAPH :y";
+        {
+            let mut durable = Graph::open(&dir).unwrap();
+            let effects = captured(ds, sparql);
+            durable.commit_txn(&resolve_effect_records(&durable, &effects)).unwrap();
+        }
+        let g = Graph::open(&dir).unwrap();
+        let names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        assert_eq!(names, vec!["<http://ex/y>".to_owned()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A failure after the commit point leaves the graph refusing writes, and a reopen applies the
+    /// whole committed body: never a prefix of it, and never a later body on top of the gap.
+    #[cfg(feature = "parallel")] // mmap comes from the sparq-core dev-dep
+    #[test]
+    fn failure_after_commit_point_recovers_on_reopen() {
+        let dir = std::env::temp_dir().join(format!("sparq_txn_abandon_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("", "nquads").unwrap().save(&dir).unwrap();
+        let sparql = "PREFIX : <http://ex/> INSERT DATA { GRAPH :x { :a :b :c } } ; \
+                      INSERT DATA { GRAPH :y { :d :e :f } } ; CREATE GRAPH :z";
+        {
+            let mut durable = Graph::open(&dir).unwrap();
+            let effects = captured("", sparql);
+            FAIL_BEFORE_EFFECT.with(|f| f.set(Some(1)));
+            let res = apply_effects(&mut durable, &effects);
+            FAIL_BEFORE_EFFECT.with(|f| f.set(None));
+            assert!(res.is_err());
+            assert!(durable.needs_recovery());
+            let later = captured("", "INSERT DATA { GRAPH <http://ex/q> { <http://ex/s> <http://ex/p> 1 } }");
+            assert!(apply_effects(&mut durable, &later).is_err(), "no later body commits over the gap");
+        }
+        let g = Graph::open(&dir).unwrap();
+        assert!(!g.needs_recovery());
+        let mut names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        names.sort();
+        assert_eq!(names, ["<http://ex/x>", "<http://ex/y>", "<http://ex/z>"]);
+        let rows: usize = g.named.iter().map(|(_, sub)| count(sub)).sum();
+        assert_eq!(rows, 2);
         std::fs::remove_dir_all(&dir).ok();
     }
 

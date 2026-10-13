@@ -2066,8 +2066,8 @@ impl Graph {
         // state durable across any number of restarts; a re-crash between WAL-redo and truncation
         // simply redoes the (idempotent) frame again on the next open.
         let txn_records = TxnJournal::replay(dir)?;
-        for (insert, slot, t) in txn_records {
-            g.redo_txn_record(insert, slot, t).map_err(std::io::Error::other)?;
+        for record in txn_records {
+            g.redo_txn_record(record).map_err(std::io::Error::other)?;
         }
         // Every committed record is now durably in a per-graph WAL (fsync'd by `apply_delta`); only
         // NOW is it safe to truncate the journal that was the sole durable home of those records.
@@ -2093,33 +2093,23 @@ impl Graph {
     /// replays with set semantics (re-inserting a present triple / deleting an absent one is a
     /// no-op), so a re-crash mid-redo simply redoes the (idempotent) frame again.
     #[cfg(feature = "mmap")]
-    fn redo_txn_record(&mut self, insert: bool, slot: Option<Term>, t: [Term; 3]) -> Result<(), String> {
-        match slot {
-            None => {
-                if insert {
-                    self.apply_delta(&[t], &[])?;
-                } else {
-                    self.apply_delta(&[], &[t])?;
-                }
+    fn redo_txn_record(&mut self, record: TxnRecord) -> Result<(), String> {
+        match record {
+            TxnRecord::Insert(None, t) => self.apply_delta(&[t], &[]),
+            TxnRecord::Delete(None, t) => self.apply_delta(&[], &[t]),
+            // An insert into an absent named graph must materialise the graph (find-or-create).
+            TxnRecord::Insert(Some(name), t) => {
+                let i = self.ensure_named(&name)?;
+                self.named[i].1.apply_delta(&[t], &[])
             }
-            Some(name) => {
-                // An insert into an absent named graph must materialise the graph (find-or-create);
-                // a delete from an absent one is a no-op (nothing to retract).
-                let idx = if insert {
-                    Some(self.ensure_named(&name)?)
-                } else {
-                    self.named.iter().position(|(n, _)| *n == name)
-                };
-                if let Some(i) = idx {
-                    if insert {
-                        self.named[i].1.apply_delta(&[t], &[])?;
-                    } else {
-                        self.named[i].1.apply_delta(&[], &[t])?;
-                    }
-                }
-            }
+            // A delete from an absent one is a no-op (nothing to retract).
+            TxnRecord::Delete(Some(name), t) => match self.named.iter().position(|(n, _)| *n == name) {
+                Some(i) => self.named[i].1.apply_delta(&[], &[t]),
+                None => Ok(()),
+            },
+            TxnRecord::CreateGraph(name) => self.ensure_named(&name).map(drop),
+            TxnRecord::DropGraph(name) => self.drop_named_durable(&name).map(drop),
         }
-        Ok(())
     }
 
     /// EXTERNAL-MEMORY build: streams an RDF document and writes the on-disk permutation
@@ -3103,6 +3093,7 @@ impl Graph {
         if inserts.is_empty() && deletes.is_empty() {
             return Ok(());
         }
+        self.refuse_if_abandoned()?;
         #[cfg(feature = "mmap")]
         if let Some(w) = &mut self.wal {
             w.append_batch(inserts, deletes).map_err(|e| format!("WAL append failed: {e}"))?;
@@ -3152,18 +3143,31 @@ impl Graph {
         self.apply_delta(&[], &[triple])
     }
 
-    /// [OPUS-4.8] (sq-ycle) Commit a whole multi-operation UPDATE body's resolved per-slot
-    /// quad-delta as ONE atomic, all-or-nothing durable frame — the SINGLE commit point for
-    /// `sparq_engine::apply_effects`. `records` is `(is_insert, slot, triple)` quads computed
-    /// against the CURRENT graph state (so CLEAR/DROP have already been expanded to concrete
-    /// retraction records by the caller). One `write_all` + one `sync_data()` makes the body
-    /// durable as a unit BEFORE it is materialised across the per-graph WALs; if a crash interrupts
-    /// materialisation, `open` redoes this frame idempotently. A NO-OP (returns `Ok`)
-    /// for an IN-MEMORY graph (no journal) and for an empty record set, so the in-memory live
-    /// update path is byte-for-byte unchanged.
-    pub fn commit_txn(&mut self, records: &[(bool, Option<Term>, [Term; 3])]) -> Result<(), String> {
+    /// [OPUS-4.8] (sq-ycle) Commit a whole multi-operation UPDATE body's resolved records as ONE
+    /// atomic, all-or-nothing durable frame — the SINGLE commit point for
+    /// `sparq_engine::apply_effects`. `records` are computed against the CURRENT graph state (so
+    /// CLEAR/DROP have already been expanded by the caller) and carry named-graph creation and
+    /// removal as well as triple changes, so a redo reproduces graph membership too. One
+    /// `write_all` + one `sync_data()` makes the body durable as a unit BEFORE it is materialised
+    /// across the per-graph WALs; if a crash interrupts materialisation, `open` redoes this frame
+    /// idempotently. A NO-OP (returns `Ok`) for an IN-MEMORY graph (no journal) and for an empty
+    /// record set, so the in-memory live update path is byte-for-byte unchanged.
+    ///
+    /// # Errors
+    ///
+    /// `Err` if the journal cannot be written, or if an earlier frame is still committed but not
+    /// cleared (its body was not fully materialised): appending after it and then clearing would
+    /// lose the records only the journal holds, so that frame is abandoned (see
+    /// [`abandon_txn`](Self::abandon_txn)) and the graph must be reopened to recover first.
+    pub fn commit_txn(&mut self, records: &[TxnRecord]) -> Result<(), String> {
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
+            // A frame still pending here was never cleared, so its body was not fully
+            // materialised: treat it as abandoned.
+            if j.pending {
+                j.abandoned = true;
+                return Err(NEEDS_RECOVERY.to_owned());
+            }
             return j.append(records).map_err(|e| format!("txn journal commit failed: {e}"));
         }
         #[cfg(not(feature = "mmap"))]
@@ -3174,11 +3178,44 @@ impl Graph {
     /// [OPUS-4.8] (sq-ycle) Clear the redo journal after its frame has been fully materialised into
     /// the per-graph state (the second half of `sparq_engine::apply_effects`'s journal-first
     /// protocol), so the next body starts from an empty journal and a clean reopen is a no-op. A
-    /// NO-OP for an in-memory graph (no journal).
+    /// NO-OP for an in-memory graph (no journal). Refused once the frame is abandoned (see
+    /// [`abandon_txn`](Self::abandon_txn)): the reopen needs it.
     pub fn clear_txn(&mut self) -> Result<(), String> {
+        self.refuse_if_abandoned()?;
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
             return j.truncate().map_err(|e| format!("txn journal clear failed: {e}"));
+        }
+        Ok(())
+    }
+
+    /// Give up on materialising the committed journal frame after a failure part-way through
+    /// (`sparq_engine::apply_effects` calls this when a step after [`commit_txn`](Self::commit_txn)
+    /// fails). The in-memory state may then hold only part of the committed body, and the frame
+    /// is the only durable record of the rest, so from here every durable write to this graph is
+    /// refused until it is reopened, which redoes the frame. A no-op for an in-memory graph or
+    /// when no frame is pending.
+    pub fn abandon_txn(&mut self) {
+        #[cfg(feature = "mmap")]
+        if let Some(j) = &mut self.txn {
+            j.abandoned = j.pending;
+        }
+    }
+
+    /// Whether this graph holds a committed update that was not fully applied in memory (see
+    /// [`abandon_txn`](Self::abandon_txn)): its state may be partial, and durable writes are
+    /// refused, until the graph is reopened. Always `false` for an in-memory graph.
+    pub fn needs_recovery(&self) -> bool {
+        #[cfg(feature = "mmap")]
+        if let Some(j) = &self.txn {
+            return j.abandoned;
+        }
+        false
+    }
+
+    fn refuse_if_abandoned(&self) -> Result<(), String> {
+        if self.needs_recovery() {
+            return Err(NEEDS_RECOVERY.to_owned());
         }
         Ok(())
     }
@@ -3229,6 +3266,7 @@ impl Graph {
     /// every build — the durability only kicks in for a directory-backed sub-graph (the in-memory
     /// path of [`clear_default_durable`](Self::clear_default_durable) is a plain store clear).
     pub fn clear_named_durable(&mut self, name: &Term) -> Result<bool, String> {
+        self.refuse_if_abandoned()?;
         match self.named.iter().position(|(n, _)| n == name) {
             Some(i) => {
                 self.named[i].1.clear_default_durable()?;
@@ -3263,6 +3301,7 @@ impl Graph {
         let Some(idx) = self.named.iter().position(|(n, _)| n == name) else {
             return Ok(false);
         };
+        self.refuse_if_abandoned()?;
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
@@ -3306,6 +3345,7 @@ impl Graph {
         if self.named.is_empty() {
             return Ok(());
         }
+        self.refuse_if_abandoned()?;
         // Release every sub-graph's mmap/WAL handles before any directory is touched (Issue 1/2:
         // no live map may point into `named/<i>/` across the removal — correct on every platform,
         // required on Windows where a mapped file blocks `remove_dir_all`/`rename`).
@@ -3512,6 +3552,7 @@ impl Graph {
         if let Some(i) = self.named.iter().position(|(n, _)| n == name) {
             return Ok(i);
         }
+        self.refuse_if_abandoned()?;
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
             let g = self.create_durable_named(&dir, name)?;
@@ -4207,11 +4248,26 @@ impl Wal {
     }
 }
 
-/// [OPUS-4.8] (sq-ycle) One resolved redo-journal record: `(is_insert, slot, triple)` — an
-/// insert/delete flag, the graph slot (`None` = default graph, `Some` = that named graph) and the
-/// term-triple. The unit the parent-level [`TxnJournal`] commits and [`Graph::commit_txn`] takes.
-#[cfg(feature = "mmap")]
-type TxnRecord = (bool, Option<Term>, [Term; 3]);
+/// One resolved redo-journal record: the unit the parent-level `TxnJournal` commits and
+/// [`Graph::commit_txn`] takes. A triple change names its graph slot (`None` = the default
+/// graph, `Some` = that named graph); creating or removing a named graph is a record of its own,
+/// so a redo reproduces which graphs exist as well as what they hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TxnRecord {
+    /// Insert the triple into the slot, creating the named graph if it is absent.
+    Insert(Option<Term>, [Term; 3]),
+    /// Delete the triple from the slot (a no-op if the named graph is absent).
+    Delete(Option<Term>, [Term; 3]),
+    /// Create the (empty) named graph if it is absent.
+    CreateGraph(Term),
+    /// Remove the named graph and its triples if it is present.
+    DropGraph(Term),
+}
+
+/// The refusal [`Graph::commit_txn`] and every durable write return once a committed journal
+/// frame could not be fully materialised (see [`Graph::abandon_txn`]).
+const NEEDS_RECOVERY: &str = "an earlier committed update was not fully applied; reopen the graph \
+     to recover it before writing again";
 
 /// [OPUS-4.8] (sq-ycle) Serialise a journal SLOT — the graph a record targets — into `buf`.
 /// A named slot reuses the manifest's [`encode_graph_name`] (kind 0 NamedNode / 1 BlankNode);
@@ -4282,12 +4338,19 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
+    /// A committed frame is on disk and not yet cleared: set by a non-empty `append`, reset by
+    /// `truncate`.
+    pending: bool,
+    /// Materialising the pending frame failed part-way (see [`Graph::abandon_txn`]).
+    abandoned: bool,
 }
 
 #[cfg(feature = "mmap")]
 impl TxnJournal {
     const INSERT: u8 = 0;
     const DELETE: u8 = 1;
+    const CREATE_GRAPH: u8 = 2;
+    const DROP_GRAPH: u8 = 3;
     /// Frame magic ("WTX1" little-endian) — distinct from `Wal::BATCH_MAGIC` so a `txn.log` frame
     /// can never be mistaken for a `wal.log` batch (and vice versa) on a misdirected read.
     const TXN_MAGIC: u32 = 0x31_58_54_57;
@@ -4298,7 +4361,7 @@ impl TxnJournal {
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
         let file = std::fs::OpenOptions::new().create(true).append(true).open(Self::path(dir))?;
-        Ok(TxnJournal { file })
+        Ok(TxnJournal { file, pending: false, abandoned: false })
     }
 
     /// Frames `records` (each `(is_insert, slot, triple)`) into ONE checksummed frame and fsyncs —
@@ -4311,16 +4374,23 @@ impl TxnJournal {
             return Ok(());
         }
         let mut body = Vec::new();
-        for (insert, slot, t) in records {
-            let op = if *insert { Self::INSERT } else { Self::DELETE };
+        for record in records {
+            let (op, slot, triple) = match record {
+                TxnRecord::Insert(slot, t) => (Self::INSERT, slot.clone(), Some(t)),
+                TxnRecord::Delete(slot, t) => (Self::DELETE, slot.clone(), Some(t)),
+                TxnRecord::CreateGraph(name) => (Self::CREATE_GRAPH, Some(name.clone()), None),
+                TxnRecord::DropGraph(name) => (Self::DROP_GRAPH, Some(name.clone()), None),
+            };
             body.push(op);
-            encode_slot(&mut body, slot);
+            encode_slot(&mut body, &slot);
             // The triple as N-Triples + u32 length — byte-identical to `Wal::push_record`'s line
             // form (minus the op byte, which we wrote before the slot above), so the same
-            // `parse_nt_record` decodes it on replay.
-            let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
-            body.extend_from_slice(&(line.len() as u32).to_le_bytes());
-            body.extend_from_slice(line.as_bytes());
+            // `parse_nt_record` decodes it on replay. A graph record carries no triple.
+            if let Some(t) = triple {
+                let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
+                body.extend_from_slice(&(line.len() as u32).to_le_bytes());
+                body.extend_from_slice(line.as_bytes());
+            }
         }
         let mut buf = Vec::with_capacity(body.len() + 24);
         buf.extend_from_slice(&Self::TXN_MAGIC.to_le_bytes());
@@ -4333,13 +4403,18 @@ impl TxnJournal {
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
         self.file.write_all(&buf)?;
-        self.file.sync_data()
+        self.file.sync_data()?;
+        self.pending = true;
+        Ok(())
     }
 
     /// Empties the journal (after its frame has been materialised into the per-graph state).
     fn truncate(&mut self) -> std::io::Result<()> {
         self.file.set_len(0)?;
-        self.file.sync_data()
+        self.file.sync_data()?;
+        self.pending = false;
+        self.abandoned = false;
+        Ok(())
     }
 
     /// Reads `dir`'s journal into `(is_insert, slot, triple)` records in append order, frame by
@@ -4395,6 +4470,20 @@ impl TxnJournal {
                     break 'frames;
                 };
                 pos = after_slot;
+                if op == Self::CREATE_GRAPH || op == Self::DROP_GRAPH {
+                    let Some(name) = slot else {
+                        break 'frames; // a graph record must name a graph
+                    };
+                    frame_ops.push(if op == Self::CREATE_GRAPH {
+                        TxnRecord::CreateGraph(name)
+                    } else {
+                        TxnRecord::DropGraph(name)
+                    });
+                    continue;
+                }
+                if op != Self::INSERT && op != Self::DELETE {
+                    break 'frames;
+                }
                 if pos + 4 > body_end {
                     break 'frames;
                 }
@@ -4406,7 +4495,11 @@ impl TxnJournal {
                 let Some(t) = parse_nt_record(&bytes[start..end]) else {
                     break 'frames;
                 };
-                frame_ops.push((op == Self::INSERT, slot, t));
+                frame_ops.push(if op == Self::INSERT {
+                    TxnRecord::Insert(slot, t)
+                } else {
+                    TxnRecord::Delete(slot, t)
+                });
                 pos = end;
             }
             if frame_ops.len() != n_records {
@@ -10451,9 +10544,9 @@ mod tests {
         let base = dump_terms(&Graph::open(&dir).unwrap());
 
         // Write ONE valid frame with a default-slot insert AND a named-slot insert.
-        let records: Vec<(bool, Option<Term>, [Term; 3])> = vec![
-            (true, None, [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]),
-            (true, Some(named("g")), [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")]),
+        let records: Vec<TxnRecord> = vec![
+            TxnRecord::Insert(None, [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]),
+            TxnRecord::Insert(Some(named("g")), [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")]),
         ];
         {
             let mut j = TxnJournal::open(&dir).unwrap();
@@ -10504,9 +10597,9 @@ mod tests {
             Term::NamedNode(NamedNode::new_unchecked("http://www.w3.org/ns/ldp#contains")),
             r.clone(),
         ];
-        let records: Vec<(bool, Option<Term>, [Term; 3])> = vec![
-            (true, Some(r.clone()), child.clone()),
-            (true, Some(parent.clone()), contains.clone()),
+        let records: Vec<TxnRecord> = vec![
+            TxnRecord::Insert(Some(r.clone()), child.clone()),
+            TxnRecord::Insert(Some(parent.clone()), contains.clone()),
         ];
         {
             let mut g = Graph::open(&dir).unwrap();
@@ -10552,7 +10645,7 @@ mod tests {
         // — simulating a crash right after the single commit fsync, before any per-graph WAL write.
         let a = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
         let b = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
-        let records: Vec<(bool, Option<Term>, [Term; 3])> = vec![(true, None, a.clone()), (true, None, b.clone())];
+        let records: Vec<TxnRecord> = vec![TxnRecord::Insert(None, a.clone()), TxnRecord::Insert(None, b.clone())];
         {
             let mut g = Graph::open(&dir).unwrap();
             g.commit_txn(&records).unwrap(); // THE commit point — NO materialisation follows.
@@ -10608,8 +10701,8 @@ mod tests {
             Term::NamedNode(NamedNode::new_unchecked("http://www.w3.org/ns/ldp#contains")),
             r.clone(),
         ];
-        let records: Vec<(bool, Option<Term>, [Term; 3])> =
-            vec![(true, Some(r.clone()), child.clone()), (true, Some(parent.clone()), contains.clone())];
+        let records: Vec<TxnRecord> =
+            vec![TxnRecord::Insert(Some(r.clone()), child.clone()), TxnRecord::Insert(Some(parent.clone()), contains.clone())];
         {
             let mut g = Graph::open(&dir).unwrap();
             g.commit_txn(&records).unwrap(); // THE commit point — NO materialisation follows.
@@ -10658,8 +10751,8 @@ mod tests {
 
         // A valid frame, then strip JUST the commit trailer (the last 12 bytes) — header + body
         // present, no commit marker → an uncommitted frame.
-        let records: Vec<(bool, Option<Term>, [Term; 3])> =
-            vec![(true, None, [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")])];
+        let records: Vec<TxnRecord> =
+            vec![TxnRecord::Insert(None, [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")])];
         {
             let mut j = TxnJournal::open(&dir).unwrap();
             j.append(&records).unwrap();
@@ -10694,8 +10787,8 @@ mod tests {
 
         let g_default = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
         let g_named = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
-        let records: Vec<(bool, Option<Term>, [Term; 3])> =
-            vec![(true, None, g_default.clone()), (true, Some(named("g")), g_named.clone())];
+        let records: Vec<TxnRecord> =
+            vec![TxnRecord::Insert(None, g_default.clone()), TxnRecord::Insert(Some(named("g")), g_named.clone())];
         {
             let mut g = Graph::open(&dir).unwrap();
             // Commit the frame AND materialise the SAME records into the per-graph WALs (the
@@ -10718,6 +10811,70 @@ mod tests {
         });
         assert_eq!(nsub.map(|v| v.len()), Some(1), "the named record is present exactly once");
         assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap().len(), 0, "journal truncated after idempotent redo");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A committed frame redoes which named graphs exist, not just their triples: a graph
+    /// inserted into and then dropped in the same body is absent after recovery, and an empty
+    /// graph the body created is present, across a second reopen too.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn journal_redo_restores_graph_membership() {
+        let dir = txn_tmp_dir("membership");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let t = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        let records = vec![
+            TxnRecord::Insert(Some(named("x")), t.clone()),
+            TxnRecord::DropGraph(named("x")),
+            TxnRecord::DropGraph(named("g")),
+            TxnRecord::CreateGraph(named("y")),
+        ];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn(&records).unwrap(); // the commit point; no materialisation follows
+        }
+        for _ in 0..2 {
+            let g = Graph::open(&dir).unwrap();
+            let names: Vec<&Term> = g.named.iter().map(|(n, _)| n).collect();
+            assert_eq!(names, vec![&named("y")], "only the created graph exists after the redo");
+            assert!(dump_terms(&g.named[0].1).is_empty(), "the created graph is empty");
+            assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap().len(), 0, "journal truncated");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A frame left pending blocks the next commit, and once abandoned every durable write is
+    /// refused, so nothing can clear the journal over records only it holds. A reopen redoes the
+    /// frame and accepts writes again.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn abandoned_frame_refuses_writes_until_reopen() {
+        let dir = txn_tmp_dir("abandoned");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_str("", "ntriples").unwrap().save(&dir).unwrap();
+        let a = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        let b = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn(&[TxnRecord::Insert(Some(named("x")), a.clone())]).unwrap();
+            assert!(!g.needs_recovery());
+            assert!(g.commit_txn(&[TxnRecord::Insert(None, b.clone())]).is_err(), "pending frame blocks a commit");
+            assert!(g.needs_recovery(), "and is abandoned");
+            assert!(g.apply_delta(std::slice::from_ref(&b), &[]).is_err());
+            assert!(g.ensure_named(&named("z")).is_err());
+            assert!(g.commit_txn(&[TxnRecord::Insert(None, b.clone())]).is_err());
+            assert!(g.clear_txn().is_err(), "the journal is kept for the redo");
+        }
+        let mut g = Graph::open(&dir).unwrap();
+        assert!(!g.needs_recovery());
+        let x = g.named.iter().find(|(n, _)| *n == named("x")).map(|(_, sub)| dump_terms(sub));
+        assert_eq!(x.map(|v| v.len()), Some(1), "the committed record was redone");
+        assert!(dump_terms(&g).is_empty(), "the refused write left no trace");
+        g.apply_delta(std::slice::from_ref(&b), &[]).unwrap();
         std::fs::remove_dir_all(&dir).ok();
     }
 

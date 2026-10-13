@@ -198,14 +198,16 @@ Materialize the authorization view from the access-control documents, then enfor
   default-graph pattern with no `USING`/`WITH` is refused. A conditional write needs read
   access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none. The WHERE is
   evaluated once: a `GRAPH ?var` write target is authorized against the graphs that
-  evaluation instantiates, before anything is written. Such an operation must be sent on its
-  own: a multi-operation request that includes one is refused. Every update entry point
+  evaluation instantiates, before anything is written, in a multi-operation request as
+  well as alone. Every update entry point
   takes one path: the update runs on a fork, what it actually wrote is authorized against
   the view in force (so a later operation cannot reach a graph an earlier one named), rules
   it leaves are materialized on the fork first (rules that cannot be **refuse the update**),
   and only then is it committed to the store itself (journaled and durable for a
   directory-backed graph) and the view rebuilt; a refused update leaves the store
-  untouched. A `put_acl`/`delete_acl` that cannot put its prior rules back in force
+  untouched. Should applying a committed update fail part-way, the store denies every
+  request and refuses every update and `materialize_*` until it is reopened, which completes
+  the update (`store.graph.needs_recovery()` reports this state). A `put_acl`/`delete_acl` that cannot put its prior rules back in force
   **drops** the view: every request is denied (retryably, as an un-materialized store), and
   no ODRL bridge refresh, bridged grant or trust grant rebuilds it, until a `materialize_*`,
   `put_acl` or `delete_acl` succeeds; the error says so.
@@ -223,10 +225,8 @@ Materialize the authorization view from the access-control documents, then enfor
   unless an allowlisted base is installed via `sparq_engine::with_load_base`). A caller
   wanting a hard ceiling on those must add it itself. A budget can only add a failure mode,
   never widen authorization; an unlimited budget is byte-for-byte `update_as`. Failure
-  semantics are `update_as`'s, including its engine-inherited **non-atomicity on error**
-  across a `;`-separated multi-operation request (a single operation's WHERE is fully
-  evaluated before any of its delta lands, so the common over-budget case mutates
-  nothing).
+  semantics are `update_as`'s: a whole `;`-separated request is all-or-nothing, so a budget
+  that trips part-way through changes nothing.
 - `store.put_acl(acl_iri, content, format) -> AclWriteOutcome` /
   `store.delete_acl(acl_iri)` (+ `…_acp` variants) — **authoritative ACL write-through**
   (issue #992 FR-3, sq-snopa.5): the LDP `PUT`/`DELETE /resource.acl` STORAGE

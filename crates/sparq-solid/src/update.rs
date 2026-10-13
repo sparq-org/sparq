@@ -31,8 +31,8 @@
 //!   to [`authorize_writes`] before applying that operation. There is no second
 //!   evaluation, so the graphs authorized are exactly the graphs written. A destination
 //!   that is not a writable named graph denies the update before it writes anything.
-//!   Such an operation must be the whole request: a request with several operations
-//!   that includes one is refused;
+//!   The whole request runs on a fork and is committed only once every operation has
+//!   been authorized, so a denial in any operation leaves the store untouched;
 //! - a target whose graph name cannot be determined statically — a `CLEAR`/`DROP` of
 //!   `ALL`/`NAMED` graphs — is treated *conservatively*: the actor must be able to write
 //!   **every** named graph currently in the store, or the whole update is denied.
@@ -455,16 +455,6 @@ pub(crate) fn check(
     veto: &Veto<'_>,
 ) -> Result<Permit, String> {
     let mut reqs = analyze(upd);
-
-    // A `GRAPH ?var` target is authorized while its operation is applied, so a denial can
-    // only be all-or-nothing when that operation is the whole request.
-    if reqs.var_graphs && upd.operations.len() > 1 {
-        return Err(
-            "update denied: a DELETE/INSERT … WHERE with a variable GRAPH target must be sent \
-             as a request of its own"
-                .to_owned(),
-        );
-    }
 
     if reqs.touches_default {
         return Err(
