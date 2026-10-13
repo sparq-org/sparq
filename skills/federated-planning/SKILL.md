@@ -398,7 +398,9 @@ since:
   group: projection trimmed to the join + output vars, the FILTER conjuncts the source's
   `FilterClass` covers AND that pass the common-variable check AND whose `Filter::expr` text
   parses as exactly one SPARQL expression over only the conjunct's declared `vars` with no
-  `EXISTS` (anything else stays a local filter), `ORDER`/`LIMIT` when the capability allows
+  `EXISTS` or `\u`/`\U` code-point escape (anything else stays a local filter, whose
+  variables the group then keeps projected), `ORDER`/`LIMIT` when the capability allows (`LIMIT`
+  only when no conjunct stays local)
   (`ORDER BY` keys are typed `OrderKey { var, descending }` — `OrderKey::asc`/`desc` — and a key
   whose name is not a `VARNAME` makes `push_group` return `None`) — a full endpoint gets the whole group as one multi-pattern `SELECT`, a
   fragment source answers one pattern only (no collapse, no filter pushed — honest about a

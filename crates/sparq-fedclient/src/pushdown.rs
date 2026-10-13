@@ -241,6 +241,10 @@ impl Filter {
     /// them), and it has no `EXISTS` (whose graph pattern could reference others).
     fn expr_is_pushable(&self) -> bool {
         use spargebra::algebra::GraphPattern;
+        // An endpoint applies `\u`/`\U` escapes before parsing; this parser does not.
+        if self.expr.contains("\\u") || self.expr.contains("\\U") {
+            return false;
+        }
         let parse = |sparql: String| match spargebra::SparqlParser::new().parse_query(&sparql) {
             Ok(spargebra::Query::Select { pattern: GraphPattern::Project { inner, .. }, .. }) => Some(*inner),
             _ => None,
@@ -508,20 +512,6 @@ pub fn push_group(
     // no filter/order/limit (a fragment server evaluates none of them).
     let fragment = matches!(cap.interface, Interface::BrTpf | Interface::Tpf);
 
-    // --- Projection: keep exactly the group vars the whole query needs out of this group.
-    // For a fragment source the sub-query is the FIRST pattern only, so project that
-    // pattern's vars that are needed (a fragment SELECT still narrows columns).
-    let projectable: Vec<String> = if fragment {
-        pattern_vars(pats[0])
-    } else {
-        gvars.clone()
-    };
-    let project: Vec<String> = projectable
-        .iter()
-        .filter(|v| output_vars.iter().any(|o| o == *v))
-        .cloned()
-        .collect();
-
     // --- Filters: push a conjunct iff the source's class covers it AND it passes the exact
     // common-variable check. Fragment sources push none.
     let mut pushed_filters: Vec<usize> = Vec::new();
@@ -537,6 +527,22 @@ pub fn push_group(
             local_filters.push(i);
         }
     }
+
+    // --- Projection: keep exactly the group vars the whole query needs out of this group.
+    // For a fragment source the sub-query is the FIRST pattern only, so project that
+    // pattern's vars that are needed (a fragment SELECT still narrows columns).
+    let projectable: Vec<String> = if fragment {
+        pattern_vars(pats[0])
+    } else {
+        gvars.clone()
+    };
+    // A conjunct evaluated locally needs the group's bindings of its variables too.
+    let local_needs = |v: &String| local_filters.iter().any(|&i| filters[i].vars.contains(v));
+    let project: Vec<String> = projectable
+        .iter()
+        .filter(|v| output_vars.iter().any(|o| o == *v) || local_needs(v))
+        .cloned()
+        .collect();
 
     // --- Render the pattern block (one pattern for a fragment source, all for an endpoint).
     let body = if fragment {
@@ -581,7 +587,8 @@ pub fn push_group(
             let keys = order_keys.iter().map(OrderKey::render).collect::<Option<Vec<_>>>()?;
             sparql.push_str(&format!(" ORDER BY {}", keys.join(" ")));
         }
-        if let Some(n) = limit {
+        // A conjunct evaluated locally can drop rows, so the limit is only pushed without one.
+        if let (Some(n), true) = (limit, local_filters.is_empty()) {
             sparql.push_str(&format!(" LIMIT {}", n));
         }
     }
@@ -1203,13 +1210,33 @@ mod tests {
             f(&["o"], "?o = ?s"),
             // EXISTS.
             f(&["o"], "?o > 1 || EXISTS { ?a ?b ?c }"),
+            // A code-point escape an endpoint would expand before parsing.
+            f(&["o"], "?o != \"\\u0022) FILTER(true) #\""),
         ];
         let pushed =
             push_group(&group, &bgp, &Capability::endpoint(), &["s".to_string()], &filters, &[], None).unwrap();
         assert_eq!(pushed.pushed_filters, vec![0]);
-        assert_eq!(pushed.local_filters, vec![1, 2, 3, 4, 5, 6]);
-        assert_eq!(pushed.sub.sparql, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o > 1) }");
+        assert_eq!(pushed.local_filters, vec![1, 2, 3, 4, 5, 6, 7]);
+        // The local conjuncts need `?o`, so it stays projected.
+        assert_eq!(pushed.sub.sparql, "SELECT ?s ?o WHERE { ?s <http://ex/p> ?o FILTER(?o > 1) }");
         assert!(parses(&pushed.sub.sparql));
+    }
+
+    #[test]
+    fn a_local_filter_keeps_its_variables_and_the_limit_local() {
+        let bgp = Bgp::new(vec![tp(var("s"), iri("http://ex/p"), var("o"))]);
+        let group = ExclusiveGroup { source: 0, patterns: vec![0] };
+        let out = ["s".to_string()];
+        let keys = [OrderKey::asc("o")];
+        let local = [Filter::new(vec!["o".to_string()], "?o > 1 && EXISTS { ?o ?p ?q }", FilterClass::Full)];
+        let pushed = push_group(&group, &bgp, &Capability::endpoint(), &out, &local, &keys, Some(1)).unwrap();
+        assert_eq!(pushed.local_filters, vec![0]);
+        assert_eq!(pushed.sub.sparql, "SELECT ?s ?o WHERE { ?s <http://ex/p> ?o } ORDER BY ?o");
+        assert_eq!(pushed.sub.project, vec!["s".to_string(), "o".to_string()]);
+        // With every conjunct pushed, the projection stays narrow and the limit is pushed.
+        let remote = [Filter::new(vec!["o".to_string()], "?o > 1", FilterClass::Full)];
+        let pushed = push_group(&group, &bgp, &Capability::endpoint(), &out, &remote, &keys, Some(1)).unwrap();
+        assert_eq!(pushed.sub.sparql, "SELECT ?s WHERE { ?s <http://ex/p> ?o FILTER(?o > 1) } ORDER BY ?o LIMIT 1");
     }
 
     #[test]
