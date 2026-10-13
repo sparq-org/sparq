@@ -1875,7 +1875,7 @@ pub fn materialize_odrl_n3(
     let mut dict = Dict::new();
     let mut closure = intern_facts(&mut dict, &format!("{}\n{}", policy_facts, req_n3))?;
     for stratum in rules {
-        closure = eval(&mut dict, &closure, stratum);
+        closure = eval(&mut dict, &closure, stratum)?;
     }
 
     // Extract auth:* triples from the final closure. A derived deny is kept (fail-closed);

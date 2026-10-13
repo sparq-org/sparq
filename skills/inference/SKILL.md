@@ -231,17 +231,23 @@ pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_wit
 // (the rule IR pre-interns its constants into the caller's Dict; the fixpoint joins run
 // on the shared sparq-substrate kernels over [Id;3] facts).
 pub fn compile(src: &str) -> Result<CompiledRuleSet, String>;   // parse + lower ONCE
-pub fn eval(dict: &mut Dict, facts: &[[Id;3]], rules: &CompiledRuleSet) -> Vec<[Id;3]>;
+pub fn eval(dict: &mut Dict, facts: &[[Id;3]], rules: &CompiledRuleSet) -> Result<Vec<[Id;3]>, String>;
+pub fn eval_with_limits(dict: &mut Dict, facts: &[[Id;3]], rules: &CompiledRuleSet, limits: ClosureLimits)
+    -> Result<Vec<[Id;3]>, String>;   // eval uses ClosureLimits::default() (GH #6855)
 pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>; // test/harness fact loader
 impl CompiledRuleSet { pub fn bind(&self, dict: &mut Dict) -> BoundRuleSet<'_>; // intern the symbol table
                        pub fn n_rules(&self) -> usize; pub fn n_facts(&self) -> usize;
                        pub fn n_strata(&self) -> usize; } // automatic stratification, as reason_n3;
                        // compile() errors on a negation cycle
 pub fn compile_with_cycles(src: &str, cycles: NegationCycles) -> Result<CompiledRuleSet, String>;
-impl BoundRuleSet<'_> { pub fn eval(&self, dict: &mut Dict, facts: &[[Id;3]]) -> Vec<[Id;3]>; }
+impl BoundRuleSet<'_> { pub fn eval(&self, dict: &mut Dict, facts: &[[Id;3]]) -> Result<Vec<[Id;3]>, String>;
+                        pub fn eval_with_limits(&self, dict: &mut Dict, facts: &[[Id;3]], limits: ClosureLimits)
+                            -> Result<Vec<[Id;3]>, String>; }
 ```
 
 Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (store-scoped `log:notIncludes`, stratified automatically like `reason_n3`, whose subject must be an IRI, a non-`true` literal, or a variable used only as a `log:notIncludes` subject — `{}` (the empty formula) or a bindable subject is a `compile` error, `log:uri`, `log:(not)equalTo`, `string:` concatenation / encodeForUri / scrape (a regex that cannot compile is a `compile` error) / notGreaterThan) **plus RDF 1.2 triple terms in premises** (`sq-6d43t`); anything else is a loud `compile` error — full N3 stays with `reason_n3`. Closure set-equality vs `reason_n3` is pinned by `crates/sparq-reason/tests/compiled_equivalence.rs`.
+
+**Compiled-rules limits (GH #6855).** `eval` runs under the text engine's `ClosureLimits` (`eval_with_limits` takes them; `eval` uses the default) and returns the text engine's `Err("n3: forward closure limit exceeded …")`, never a truncated closure. Each term a builtin builds is sized before it is built, with the text engine's helpers: the `( … )` argument list `string:concatenation` / `string:scrape` would substitute, then the result (concatenation, including its numeric pieces, `string:encodeForUri`, `string:scrape`, `log:uri` both ways). Conclusions copy ids the premise bound and build no new term. Both engines are bounded by the same limits and refuse with the same error, but their fixpoint schedules differ (the text engine's closing naive check round and transitivity fast path, and its quoted-triple substitution checkpoints, which have no compiled counterpart), so under equal `ClosureLimits` they can accept or refuse differently near a boundary. `compiled_equivalence.rs` checks that they agree at the limits it sweeps (`max_term_bytes`, `max_rounds`, `max_facts`) on its fixtures.
 
 **Compiled-rules triple terms (`sq-6d43t`).** A GROUND `<< s p o >>` is an ordinary symbol-table constant anywhere (fact, pattern position, builtin argument, conclusion): `bind` interns it through the Dict's content-addressed RDF 1.2 triple-term path, so it resolves to the SAME id a store-loaded `<<( s p o )>>` carries. A quotation that still contains VARIABLES is admitted in PREMISE positions and compiles to a component-indexed unpack step — the enclosing join binds the candidate's triple-term id, then the unpack reads its three component ids straight out of the dictionary record (no term reconstruction, no allocation) and binds first occurrences / filters already-bound variables and constants, left to right, nesting through the OBJECT. Three shapes are deliberately loud `compile` errors instead: a quotation with variables inside a `log:notIncludes` body (the anti-join runs a flat list of plain patterns), a quotation with variables in a CONCLUSION (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which `eval` has no channel to report), and a nested quotation in SUBJECT position (no dictionary triple term can have a triple-term subject, so such a pattern could only ever fire zero times). Each falls back to `reason_n3`, which handles all three.
 
@@ -803,10 +809,9 @@ the profile.
   **Not covered:**
   - the document's own parse, which is not charged: its memory is bounded by its input text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it holds only a scratch copy of one token, or an error message quoting one, at a time (each bounded by the length of the source token), the spare capacity of its strings, vectors and maps, its fixed-size state, and the text it parses;
   - the text a resolver supplies (`log:content`, `log:semantics`), which the caller allocates before it is sized (the literal or formula built from it is refused);
-  - the incremental counting engine behind `MaterializedN3Graph` ([GH #6854](https://github.com/sparq-org/sparq/issues/6854)); its batch fallback is covered;
-  - the opt-in `compiled-rules` evaluator ([GH #6855](https://github.com/sparq-org/sparq/issues/6855)).
+  - the incremental counting engine behind `MaterializedN3Graph` ([GH #6854](https://github.com/sparq-org/sparq/issues/6854)); its batch fallback is covered. It has no round and fact allowance either.
 
-  Neither of the last two has the round and fact allowance either.
+  The opt-in `compiled-rules` evaluator is covered ([GH #6855](https://github.com/sparq-org/sparq/issues/6855)): see "Compiled-rules limits" above.
 
   **Deliberate over-refusal:** a builtin's argument list is itself a term it builds. So `log:conjunction` over many copies of one large formula is refused when the copies together pass the limit, even if the merged result would fit.
 - **A formula-level `@forAll` is treated as document-scoped (known limitation, GH #6754).** Every `@forAll` of one IRI — at document level or inside any formula — is the SAME variable, `?__ua.<iri>`. Which mentions become that variable is still lexical (the declaring scope and its inner formulae, after the declaration), but separate declarations in a rule's premise and conclusion, sibling formulae, or nested shadowing all share it, unlike N3's per-scope semantics. Two different IRIs with one local name (`@forAll a:x, b:x`) are two variables. The `.` in the name keeps it outside the quickvar lexical space, so no `?…` can collide with it.

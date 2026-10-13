@@ -4736,14 +4736,8 @@ fn output_bytes(
     match f {
         Func::Concat if exact => string_term_bytes(sum(&mut args.iter().map(|a| concat_piece_len(a).unwrap_or(0)))),
         Func::Concat => string_term_bytes(sum(&mut args.iter().map(|a| match a {
-            Term::Lit(v, dt, _)
-                if dt
-                    .strip_prefix("http://www.w3.org/2001/XMLSchema#")
-                    .is_some_and(|local| local != "string") =>
-            {
-                v.len().saturating_add(NUMERAL_TEXT_BYTES)
-            }
-            Term::Lit(v, _, _) | Term::Iri(v) => v.len(),
+            Term::Lit(v, dt, _) => concat_piece_bound(v, Some(dt)),
+            Term::Iri(v) => concat_piece_bound(v, None),
             _ => 0,
         }))),
         Func::Format if exact => {
@@ -4787,9 +4781,7 @@ fn output_bytes(
         Func::UpperCase => {
             string_term_bytes(sum(&mut lex0().chars().flat_map(char::to_uppercase).map(char::len_utf8)))
         }
-        Func::EncodeForUri => string_term_bytes(sum(&mut lex0().bytes().map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_' | b'~') { 1 } else { 3 }
-        }))),
+        Func::EncodeForUri => string_term_bytes(encode_for_uri_len(lex0())),
         Func::EncodeForUriCwm | Func::EncodeForFragId => {
             let keep_extra = cwm_uri_keeps(f);
             string_term_bytes(sum(&mut lex0().bytes().map(|c| {
@@ -5032,6 +5024,24 @@ fn concat_piece(a: &Term) -> Option<std::borrow::Cow<'_, str>> {
         },
         Term::Iri(i) => Cow::Borrowed(i),
         _ => return None,
+    })
+}
+
+/// A cheap upper bound on the length of [`concat_piece`]'s text for a member with lexical
+/// form `lex` and datatype `dt` (`None` for an IRI): a typed literal other than
+/// `xsd:string` may print as its canonical value, up to [`NUMERAL_TEXT_BYTES`] past its
+/// lexical form. Shared by the text engine and the compiled evaluator.
+fn concat_piece_bound(lex: &str, dt: Option<&str>) -> usize {
+    match dt.and_then(|dt| dt.strip_prefix("http://www.w3.org/2001/XMLSchema#")) {
+        Some(local) if local != "string" => lex.len().saturating_add(NUMERAL_TEXT_BYTES),
+        _ => lex.len(),
+    }
+}
+
+/// The length of [`encode_for_uri`]'s result for `s`, computed without building it.
+fn encode_for_uri_len(s: &str) -> usize {
+    s.bytes().fold(0usize, |n, c| {
+        n.saturating_add(if c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_' | b'~') { 1 } else { 3 })
     })
 }
 

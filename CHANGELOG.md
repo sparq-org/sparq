@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (sparq-reason, `compiled-rules` feature):** `n3::compiled::eval` and
+  `BoundRuleSet::eval` now return `Result<Vec<[Id; 3]>, String>` and run under the default
+  `ClosureLimits`; new `n3::compiled::eval_with_limits` and `BoundRuleSet::eval_with_limits`
+  take a `ClosureLimits`. A compiled closure past its round, fact or term-size allowance
+  returns `Err("n3: forward closure limit exceeded …")` instead of running until memory
+  runs out. (#6855)
 - **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
   16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
   outside the crate. Start from the default and set fields:
