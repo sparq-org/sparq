@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-07-25T05:33:20Z",
+  "timestamp": "2026-10-12T20:14:10Z",
   "tool": "bb gates -s ultra_honk",
   "bb_version": "5.0.0-nightly.20260324",
   "nargo_version": "nargo version = 1.0.0-beta.21",
@@ -134,13 +134,13 @@
       "circuit_size": 33071
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 462049
+      "circuit_size": 107640
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 462597
+      "circuit_size": 108188
     },
     "result_v2_k1_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 462832
+      "circuit_size": 108423
     },
     "result_v2_k1_n16_p3_r4_f2_i8_d17": {
       "circuit_size": 69619
@@ -155,13 +155,13 @@
       "circuit_size": 60667
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d10": {
-      "circuit_size": 488858
+      "circuit_size": 134452
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d17": {
-      "circuit_size": 489954
+      "circuit_size": 135548
     },
     "result_v2_k2_n16_p3_r4_f2_i64_d20": {
-      "circuit_size": 490424
+      "circuit_size": 136018
     },
     "result_v2_k2_n16_p3_r4_f2_i8_d17": {
       "circuit_size": 96979
@@ -179,13 +179,13 @@
       "circuit_size": 33071
     },
     "result_v3_k1_n16_p3_r4_f2_s64_d10": {
-      "circuit_size": 436341
+      "circuit_size": 108014
     },
     "result_v3_k1_n16_p3_r4_f2_s64_d17": {
-      "circuit_size": 436889
+      "circuit_size": 108562
     },
     "result_v3_k1_n16_p3_r4_f2_s64_d20": {
-      "circuit_size": 437124
+      "circuit_size": 108797
     },
     "result_v3_k2_n16_p3_r4_f0_s0_d10": {
       "circuit_size": 59101
@@ -197,13 +197,13 @@
       "circuit_size": 60667
     },
     "result_v3_k2_n16_p3_r4_f2_s64_d10": {
-      "circuit_size": 463150
+      "circuit_size": 134826
     },
     "result_v3_k2_n16_p3_r4_f2_s64_d17": {
-      "circuit_size": 464246
+      "circuit_size": 135922
     },
     "result_v3_k2_n16_p3_r4_f2_s64_d20": {
-      "circuit_size": 464716
+      "circuit_size": 136392
     },
     "result_v4_k1_n16_p3_r4_f0_d10": {
       "circuit_size": 31209

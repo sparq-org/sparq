@@ -31,9 +31,11 @@ compiled `circuits/spliced` program, which checks `h2(2, hs) == operand` and
 the comparison verdict, and it solves and checks its own witnesses.
 
 `circuits/noir_var` writes the same variable-length algorithm in Noir with
-u32 shifts, OR and `wrapping_add`. `circuits/noir_tuned` writes it in Noir
-with the rotations and additions as the field constraints the generator
-emits (a hinted split checked by one linear equation and range checks).
+u32 shifts, OR, `wrapping_add` and per-length conditional writes.
+`circuits/noir_tuned` writes it in Noir the way the generator does: the
+rotations and additions as a hinted split checked by one linear equation and
+range checks, and the token's message words as selector-weighted sums of the
+digits. `zk/compose` uses this version for its result circuits.
 Together they separate the gain from the algorithm, from how the arithmetic
 is written, and from writing ACIR by hand. `circuits/baseline` calls `full_u64_check`. Each circuit opens
 `leaf::N` values.

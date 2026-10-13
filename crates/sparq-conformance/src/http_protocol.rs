@@ -825,20 +825,9 @@ fn status_ok(got: u16, want: u16) -> bool {
     }
 }
 
-/// Percent-encode a string for inclusion in a URL query value (the subset this lane needs:
-/// it escapes everything that is not an unreserved character, so SPARQL queries embed safely).
-pub fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for &b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
+/// Percent-encode a string for inclusion in a URL query value: everything that is not an
+/// RFC 3986 unreserved character is escaped, so SPARQL queries embed safely.
+pub use sparq_core::percent::encode as url_encode;
 
 #[cfg(test)]
 mod tests {

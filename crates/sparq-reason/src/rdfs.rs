@@ -636,21 +636,27 @@ pub(crate) fn closure_derived(
     emit_dr_closure: bool,
     mono: &MonoOwl,
 ) -> Vec<[Id; 3]> {
-    let first = closure_round(original, None, v, emit_dr_closure, mono);
-    if !first.meta || first.derived.is_empty() {
-        return first.derived;
-    }
-    // Plain RDFS (no OWL axioms, no scm-dom/rng output): the semi-naive fixpoint, which is
-    // linear in the joins it performs. The round loop below stays for the OWL caller, whose
-    // monotone axioms (equivalence, inverse, symmetric) it alone understands.
-    if !emit_dr_closure && mono.is_empty() {
+    // Plain RDFS (no OWL axioms, no scm-dom/rng output) on a meta schema: the semi-naive
+    // fixpoint, which is linear in the joins it performs. Deciding "meta" needs only the
+    // subPropertyOf closure and the raw domains/ranges, so no single-pass round runs first.
+    // The round loop below stays for the OWL caller, whose monotone axioms (equivalence,
+    // inverse, symmetric) it alone understands.
+    let plain = !emit_dr_closure && mono.is_empty();
+    if plain && plain_schema_is_meta(original, v) {
         let mut d: Vec<[Id; 3]> = meta::MetaClosure::build(original, v)
             .facts
             .into_iter()
             .filter(|t| !original.contains(t))
             .collect();
+        #[cfg(feature = "parallel")]
+        rayon::slice::ParallelSliceMut::par_sort_unstable(&mut d[..]);
+        #[cfg(not(feature = "parallel"))]
         d.sort_unstable();
         return d;
+    }
+    let first = closure_round(original, None, v, emit_dr_closure, mono);
+    if !first.meta || first.derived.is_empty() {
+        return first.derived;
     }
     // Later rounds saturate the schema from its RAW edges only — the asserted schema triples
     // plus the schema triples a rule derived by sweeping (rdfs7 / the OWL property rewrite).
@@ -678,6 +684,19 @@ pub(crate) fn closure_derived(
         .collect();
     d.sort_unstable();
     d
+}
+
+/// [`schema_is_meta`] of `original`'s own schema, with no monotone-OWL axioms, read from the
+/// raw triples: a property is in the subPropertyOf closure exactly when it is an endpoint of a
+/// raw subPropertyOf triple, so no closure is built (the ordinary path builds it once, in
+/// [`closure_round`]).
+fn plain_schema_is_meta(original: &FxHashSet<[Id; 3]>, v: &Vocab) -> bool {
+    let schema_props = [v.ty, v.sub_class, v.sub_prop, v.domain, v.range];
+    let is_schema = |x: Id| schema_props.contains(&x);
+    original.iter().any(|&[s, p, o]| {
+        (p == v.sub_prop && (is_schema(s) || is_schema(o)))
+            || ((p == v.domain || p == v.range) && is_schema(s))
+    })
 }
 
 /// Whether the schema is "meta" (see [`ClosureRound::meta`]): some RDFS schema property is in

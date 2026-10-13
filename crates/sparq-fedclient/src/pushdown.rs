@@ -72,6 +72,7 @@
 // bind-join block primitive. Phase 4 owns this module; Phase 5 owns operators.rs/stream.rs.
 // Flagged for Fable re-review when available.
 
+use crate::planner::{pattern_vars, render_pattern_clause};
 use crate::source::{BindJoin, Capability, FilterClass, Interface, SubQuery};
 use sparq_fedplan::{Bgp, PatternSources, Term, TriplePattern};
 
@@ -427,19 +428,11 @@ pub fn push_group(
     }
 
     // --- Render the pattern block (one pattern for a fragment source, all for an endpoint).
-    let render_pat = |tp: &TriplePattern| -> String {
-        format!(
-            "{} {} {}",
-            render_term(&tp.subject),
-            render_term(&tp.predicate),
-            render_term(&tp.object)
-        )
-    };
     let body = if fragment {
-        render_pat(pats[0])
+        render_pattern_clause(pats[0])
     } else {
         pats.iter()
-            .map(|tp| render_pat(tp))
+            .map(|tp| render_pattern_clause(tp))
             .collect::<Vec<_>>()
             .join(" . ")
     };
@@ -493,54 +486,6 @@ pub fn push_group(
         pushed_filters,
         local_filters,
     })
-}
-
-/// The variables a pattern produces, de-duplicated in subject→predicate→object position
-/// order. (Local copy so pushdown does not reach into the planner module's helper; the
-/// shapes are identical.) [OPUS-4.8] sq-7byx.
-fn pattern_vars(tp: &TriplePattern) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for t in [&tp.subject, &tp.predicate, &tp.object] {
-        if let Term::Var(v) = t {
-            if !out.iter().any(|n| n == &v.0) {
-                out.push(v.0.clone());
-            }
-        }
-    }
-    out
-}
-
-/// Render a light `sparq-fedplan` [`Term`] as a SPARQL term string: a variable as `?name`,
-/// an IRI in `<>`, a literal verbatim if it already carries SPARQL literal syntax (a leading
-/// `"`) else quoted + escaped. Same convention as `planner::render_term`. [OPUS-4.8] sq-7byx.
-fn render_term(t: &Term) -> String {
-    match t {
-        Term::Var(v) => format!("?{}", v.0),
-        Term::Iri(iri) => format!("<{}>", iri),
-        Term::Literal(lit) => {
-            if lit.starts_with('"') {
-                lit.clone()
-            } else {
-                format!("\"{}\"", escape_literal(lit))
-            }
-        }
-    }
-}
-
-/// Minimal SPARQL string-literal escaping for a bare lexical value. [OPUS-4.8] sq-7byx.
-fn escape_literal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            _ => out.push(c),
-        }
-    }
-    out
 }
 
 #[cfg(test)]

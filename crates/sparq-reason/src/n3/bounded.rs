@@ -564,8 +564,16 @@ impl ClosureRounds {
     }
 }
 
-/// Bracket nesting the N3 parser accepts (its recursive descent recurses per level).
-const PARSE_DEPTH: usize = 4096;
+/// Bracket nesting the N3 parser accepts: `{ }` formulae, `( )` lists, `[ ]` blank-node
+/// property lists and `<< >>` quoted triples, counted together. The recursive descent
+/// recurses once per level, so this is sized for the smallest stack the parser supports:
+/// an ordinary 2 MiB thread in a debug build, where each level costs the most. It
+/// leaves room for the caller's own frames, including a reasoning run that parses a
+/// document with `log:parsedAsN3` / `log:semantics`, and every walker over the parsed
+/// terms (matching, instantiation, interning, serialization) recurses less per level
+/// than the parser. Pinned on a 2 MiB thread for every production, parsing and
+/// reasoning, by the `parse_surface_tests` and `n3::tests` small-stack tests (#6732).
+const PARSE_DEPTH: usize = 64;
 
 /// A limit was hit. Only this module can make one (its fields are private), and the
 /// only way to use it during evaluation is [`parse_n3`], which records it as a cut.
@@ -580,6 +588,12 @@ impl LimitError {
     pub(crate) fn message(&self) -> &str {
         &self.message
     }
+}
+
+/// The deepest nesting the parser accepts.
+#[cfg(test)]
+pub(crate) const fn parse_depth() -> usize {
+    PARSE_DEPTH
 }
 
 /// The parser entering nesting level `depth`: an error past [`PARSE_DEPTH`].
@@ -1136,7 +1150,7 @@ mod tests {
 
         assert!(enter_nesting(PARSE_DEPTH).is_ok());
         let e = enter_nesting(PARSE_DEPTH + 1).expect_err("past the limit");
-        assert_eq!(e.message(), "nesting deeper than 4096");
+        assert_eq!(e.message(), format!("nesting deeper than {PARSE_DEPTH}"));
         let sink = Cell::new(false);
         assert!(parse_n3(":a :b :c .", "", &sink).is_ok());
         assert!(parse_n3(":a :b", "", &sink).is_err());
@@ -1147,7 +1161,7 @@ mod tests {
             ")".repeat(PARSE_DEPTH + 1)
         );
         let deep = std::thread::Builder::new()
-            .stack_size(256 << 20)
+            .stack_size(2 << 20)
             .spawn(move || {
                 let sink = Cell::new(false);
                 let doc = parse_n3(&deep, "", &sink);
@@ -1157,7 +1171,7 @@ mod tests {
             .join()
             .expect("join");
         let deep = (
-            deep.0.as_deref() == Some("nesting deeper than 4096"),
+            deep.0 == Some(format!("nesting deeper than {PARSE_DEPTH}")),
             deep.1,
         );
         assert_eq!(deep, (true, true), "the nesting limit is a cut");

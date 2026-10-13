@@ -7,15 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Breaking
+### Changed
 
-- **sparq-reason (N3):** `ClosureLimits` has a new field, `max_term_bytes` (default 16 MiB),
-  and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal outside
-  the crate. Start from the default and set fields:
-  `let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`. A forward closure
+- **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
+  16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
+  outside the crate. Start from the default and set fields:
+  `let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`. A forward N3 closure
   whose rules would build a term past the limit (a string or list that doubles each round)
   now returns `Err("n3: forward closure limit exceeded …")` instead of aborting on a failed
   allocation. (#6771)
+
+### Fixed
+
+- **sparq-solid / sparq-prov (date stamps):** epoch seconds before 0000-03-01 now format to the
+  correct proleptic-Gregorian date. The previous conversion was one day late there (and could
+  emit 29 February in a non-leap year); the only dates it already got right were
+  29 February of years divisible by 400. For such instants a trust-graph grant's
+  `auth:notAfter` and its deterministic grant IRI change (for example `-62167219200` now formats
+  as `0000-01-01`, not `0000-01-02`), and years -1 to -999 are now written with four digits
+  after the sign (`-0001`, not `-001`), as XSD requires. Instants from 0000-03-01 onwards are
+  unchanged; signature inputs and PROV IRIs are unaffected. (#6864)
 
 ## [0.1.5] - 2026-10-10
 

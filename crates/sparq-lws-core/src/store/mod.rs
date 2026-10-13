@@ -125,6 +125,27 @@ impl ValidatedChildIri {
 /// writes. Container delete is supported for EMPTY containers — the handler refuses a non-empty one
 /// with 409 (the conservative spec choice); an opt-in recursive/cascade delete is intentionally not
 /// offered yet.
+///
+/// # Consistency: read your writes
+///
+/// Once a mutating call (`write`, `create_in_container`, `restore`, `delete`,
+/// `delete_container_if_empty`) has completed, every later read of current state
+/// ([`read`](Store::read), [`meta`](Store::meta), [`exists`](Store::exists),
+/// [`list_children`](Store::list_children)) must see what it committed. ([`read_at`](Store::read_at)
+/// is not a read of current state: it serves the version earlier metadata names.) A call has
+/// completed when it returns successfully, or returns an error after which nothing it started
+/// can still commit. An error does not always mean that: an HTTP update that times out can keep
+/// running on the server and commit later. After such an error the write's outcome is unknown,
+/// and a read that does not see it is not final.
+///
+/// The LWS service containers (access grants and requests, subscriptions) rely on this: when a
+/// create reports a failure, the server reads the container listing to tell whether the record
+/// was stored anyway, answering `201` if it is listed and `500` (releasing the client's quota) if
+/// it is not. That answer is exact only when the failed create had completed; one that timed out
+/// over HTTP is #6836. The in-memory and embedded backends read their own writes, as does one
+/// `sparq-server` behind the `http-sparq` client. A backend that cannot (an eventually
+/// consistent or replicated remote store, whose listing can lag a completed write) must not be
+/// used for an LWS server.
 #[async_trait]
 pub trait Store: Send + Sync {
     /// Read a resource by IRI: its authoritative metadata (SPARQ) + its bytes (blob store).
@@ -217,6 +238,10 @@ pub trait Store: Send + Sync {
     /// (atomically, with no filtering), so a malformed edge still keeps the container non-empty and it
     /// is NOT deleted. Do NOT introduce an emptiness check over this filtered list — use the atomic
     /// path.
+    ///
+    /// The listing must reflect every write that has completed (see the trait's "read your
+    /// writes" section): the LWS service containers read it to settle a create that reported a
+    /// failure.
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>>;
 
     /// [`list_children`](Store::list_children) while it fits (see
