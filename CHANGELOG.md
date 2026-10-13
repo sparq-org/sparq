@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument list and result before building it and charges a round and fact allowance; past
   a limit the graph rebuilds through the batch engine, which refuses with
   `"n3: forward closure limit exceeded …"`, so the graph fails closed instead of growing a
-  term until memory runs out. (#6854)
+  term every round. `ClosureLimits` bounds derived term size, rounds and distinct facts; it
+  does not bound intermediate join work within a round (binding rows, how many times rules
+  fire) on any engine (#6938). (#6854)
 
 ### Changed
 

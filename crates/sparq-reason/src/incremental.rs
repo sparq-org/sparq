@@ -2612,10 +2612,8 @@ impl MaterializedN3Graph {
     /// propagation one round per wave against the round allowance. Each new distinct fact
     /// is checked against the fact allowance as it is collected, and the closure after each
     /// wave (the last included), so a closure of exactly `max_facts` facts is accepted and
-    /// none larger is published. The per-wave binding rows and the multiset of rule
-    /// firings are not charged: they are bounded by the firings of one wave, not by the
-    /// fact allowance. When the
-    /// counting path passes a limit, the graph rebuilds through the checked batch engine
+    /// none larger is published. When the counting path passes a limit, the graph
+    /// rebuilds through the checked batch engine
     /// under the same limits, so it ends in the state a batch run over the current facts
     /// gives. When that run refuses the closure, the graph fails closed: its closure is
     /// the base alone and [`stratification_warning`](Self::stratification_warning) holds
@@ -2628,6 +2626,11 @@ impl MaterializedN3Graph {
     /// delta, and a recursive layer's local fixpoint charges the same allowance), so
     /// under equal round or fact limits the graph can hold a closure that a from-scratch
     /// batch run near the boundary would refuse.
+    ///
+    /// [`ClosureLimits`](crate::n3::ClosureLimits) bounds derived term size, rounds and
+    /// distinct facts. It does not bound the intermediate join work within a round (the
+    /// binding rows of a premise join, or how many times rules fire) on any engine, batch
+    /// or incremental, so memory is not bounded overall (GH #6938).
     ///
     /// # Errors
     ///

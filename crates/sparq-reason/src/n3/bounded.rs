@@ -333,6 +333,9 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// What it does not bound:
 /// * the closure's total memory: many distinct terms just under the limit are bounded
 ///   only by `max_facts`;
+/// * the intermediate join work within a round (the binding rows of a premise join, or
+///   how many times rules fire), on any engine: the text engine, the compiled evaluator
+///   and the incremental counting engine alike (GH #6938);
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time
@@ -349,8 +352,7 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// one round per wave (and per round of a recursive layer's local fixpoint) against the
 /// round allowance; each new distinct fact is checked against the fact allowance as it is
 /// collected, and the closure after each wave, so no published closure holds more than
-/// `max_facts` facts (the binding rows and rule firings of one wave are not charged).
-/// Past any limit the graph rebuilds through the batch engine
+/// `max_facts` facts. Past any limit the graph rebuilds through the batch engine
 /// under the same limits, so it holds the batch engine's closure or fails closed with its
 /// error. Its rounds are not the batch engine's schedule, so under equal round or fact
 /// limits it can hold a closure a from-scratch batch run near the boundary refuses.
