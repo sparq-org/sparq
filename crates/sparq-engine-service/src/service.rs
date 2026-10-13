@@ -1313,14 +1313,10 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                         *slot = text(&a);
                     }
                 }
-                // An `its` prefix that is never declared is still read as ITS, as
-                // endpoints that omit the declaration are common.
+                // Like any prefix, `its` must be declared: an undeclared `its:dir` is
+                // not in the ITS namespace and is ignored.
                 let dir = dirs.iter().find_map(|(prefix, a)| {
-                    let its = match scopes.lookup(prefix) {
-                        Some(ns) => ns == SrxNs::Its,
-                        None => *prefix == b"its",
-                    };
-                    its.then(|| text(a)).flatten()
+                    (scopes.lookup(prefix) == Some(SrxNs::Its)).then(|| text(a)).flatten()
                 });
                 let ours = scopes.ours(e.name());
                 let value = |kind| SrxValue {
@@ -2438,7 +2434,7 @@ mod tests {
             ("rtl", oxrdf::BaseDirection::Rtl),
         ] {
             let body = format!(
-                r#"<sparql xmlns="{SRX_NS}">
+                r#"<sparql xmlns="{SRX_NS}" xmlns:its="http://www.w3.org/2005/11/its">
                   <head><variable name="g"/></head>
                   <results><result>
                     <binding name="g"><literal xml:lang="ar" its:dir="{dir}">مرحبا</literal></binding>
@@ -2623,6 +2619,39 @@ mod tests {
         .unwrap();
         let b = Literal::new_simple_literal("u");
         assert_eq!(rel.rows, [[Some(Term::Literal(a)), Some(Term::Literal(b))]]);
+    }
+
+    /// An `its:dir` whose `its` prefix is never declared is not in the ITS namespace, so
+    /// the literal keeps its language and no direction.
+    #[test]
+    fn srx_undeclared_its_dir_is_ignored() {
+        let body = format!(
+            r#"<sparql xmlns="{SRX_NS}"><head><variable name="g"/></head><results><result>
+              <binding name="g"><literal xml:lang="ar" its:dir="rtl">t</literal></binding>
+            </result></results></sparql>"#
+        );
+        let rel = parse_srx_both(&body);
+        let want = Literal::new_language_tagged_literal("t", "ar").unwrap();
+        assert_eq!(rel.rows, [[Some(Term::Literal(want))]]);
+    }
+
+    /// A namespace declaration is compared once its references are replaced, named ones
+    /// included, and one whose references cannot be replaced is an error from both readers.
+    #[test]
+    fn srx_namespace_declarations_are_decoded_or_refused() {
+        // `&amp;` decodes to a namespace that is not the results one, so nothing is read.
+        let foreign = r#"<sparql xmlns="http://ex/a&amp;b"><head><variable name="a"/></head>
+            <results><result><binding name="a"><uri>http://ex/a</uri></binding></result>
+            </results></sparql>"#;
+        let rel = parse_srx_both(foreign);
+        assert!(rel.vars.is_empty() && rel.rows.is_empty());
+        let raw = foreign.replace("&amp;", "&");
+        let bad = raw.replace("http://ex/a&b", "http://ex/a&bogus;");
+        let err = parse_srx(&bad).unwrap_err();
+        assert!(err.contains("namespace declaration"), "{err}");
+        let err = parse_srx_into_read(std::io::BufReader::new(bad.as_bytes()), &mut |_r| Ok(()))
+            .unwrap_err();
+        assert!(err.contains("namespace declaration"), "{err}");
     }
 
     /// The core bead requirement: an endpoint that ignores `Accept` and returns XML must
