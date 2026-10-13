@@ -1550,19 +1550,17 @@ async fn subscribe<S: Store + 'static>(
             None => {
                 // A topic being changed is decided as a set-aside one is, on what it was before
                 // the change began.
-                let mut hidden = !state.visible(resource);
-                let aside = hidden || state.locks.changing(resource);
-                let mut may = readable(resource, aside).await;
-                // One that began while what is stored was read is decided as if it began first.
-                if !aside {
-                    hidden = !state.visible(resource);
-                    if hidden || state.locks.changing(resource) {
-                        may = readable(resource, true).await;
-                    }
-                }
-                if !may {
+                // Made again while changes to it begin or end during it (what was read may be
+                // one part way, see `resources::stably`); refused when that never settles.
+                let decided = super::resources::stably(state, resource, || async {
+                    let hidden = !state.visible(resource);
+                    let aside = hidden || state.locks.changing(resource);
+                    (readable(resource, aside).await, hidden)
+                })
+                .await;
+                let Some((true, hidden)) = decided else {
                     return cannot_read();
-                }
+                };
                 if hidden {
                     return super::resources::set_aside_meanwhile();
                 }
@@ -3895,6 +3893,64 @@ mod tests {
         assert_eq!(subscribing.await.unwrap(), Some(StatusCode::FORBIDDEN));
         state.locks.landed(std::slice::from_ref(&b));
         drop(held);
+    }
+
+    /// Review of #6925: the topic check can read a change's state part way and have the reply
+    /// come back once the change is over; it is made again, and a subscriber the topic allows
+    /// before and after subscribes.
+    #[tokio::test]
+    async fn a_change_over_by_the_end_of_a_topic_check_has_it_made_again() {
+        use test_store::{agent, closed_state, data, grant_read};
+        let (state, store) = closed_state(100).await;
+        let b = data(&state, "b").await;
+        grant_read(&state, "https://reader.example/#me", &[&b]).await;
+        let before = state.resource_meta(&b).await.unwrap();
+        let mut part_way = before.clone();
+        part_way.pending = true;
+        state.put_resource_meta(&b, &part_way).await.unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() =
+            Some((super::super::meta_key(&b), gate.clone()));
+        let held = state.locks.lock(&b).await.unwrap();
+        let subscribing = {
+            let body = json!({
+                "type": WEBHOOK,
+                "topic": [b.clone()],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let (state, who) = (state.clone(), agent("https://reader.example/#me"));
+            tokio::spawn(async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                tokio::time::timeout(
+                    Duration::from_millis(500),
+                    test_store::route_as(&state, req, &who),
+                )
+                .await
+                .ok()
+                .map(|r| r.status())
+            })
+        };
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let prior = super::super::Prior {
+            meta: Some(before.clone()),
+            ..Default::default()
+        };
+        state
+            .locks
+            .changing_from([(b.clone(), prior)].into_iter().collect());
+        state.put_resource_meta(&b, &before).await.unwrap();
+        state.locks.landed(std::slice::from_ref(&b));
+        drop(held);
+        gate.add_permits(1);
+        assert_eq!(subscribing.await.unwrap(), Some(StatusCode::CREATED));
     }
 
     /// Issue #6814: the service routes answered `503` for a set-aside record before they

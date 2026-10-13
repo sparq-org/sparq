@@ -200,28 +200,50 @@ async fn authorize_unlocked<S: Store + 'static>(
     agent: &Agent,
     method: &Method,
 ) -> Option<Response> {
-    if !state.visible(uri) {
-        return Some(authorized_aside(state, action, uri, agent).await);
+    stably(state, uri, || async {
+        if !state.visible(uri) {
+            return Some(authorized_aside(state, action, uri, agent).await);
+        }
+        if state.locks.changing(uri) {
+            return in_flight(state, action, uri, agent, method).await;
+        }
+        match state.store.exists(uri).await {
+            Ok(true) => recheck(state, action, uri, agent)
+                .await
+                .err()
+                .or_else(|| full(state, method)),
+            Ok(false) if state.needs_auth(agent) => Some(state.challenge(None)),
+            Ok(false) => Some(problem(StatusCode::NOT_FOUND, None)),
+            Err(e) => Some(store_error(e)),
+        }
+    })
+    .await
+    .unwrap_or_else(|| Some(state.deny(agent)))
+}
+
+/// How many times a check without the lock is made again while changes to its resource keep
+/// beginning or ending during it, before it refuses.
+const STABLE_ATTEMPTS: usize = 8;
+
+/// Run `check`, a decision about `uri` made without its lock, until no change to `uri` began or
+/// ended, and it was not set aside or shown again, while it ran ([`IriLocks::generation`]): what
+/// it read may otherwise be a change part way, or being put back, even one over by the time it
+/// is done (a reply that came back late). `None` when that never held in [`STABLE_ATTEMPTS`]
+/// tries; the caller then refuses, revealing nothing.
+pub(crate) async fn stably<S, T, F, Fut>(state: &LwsState<S>, uri: &str, mut check: F) -> Option<T>
+where
+    S: Store + 'static,
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    for _ in 0..STABLE_ATTEMPTS {
+        let before = state.locks.generation(uri);
+        let decided = check().await;
+        if state.locks.generation(uri) == before {
+            return Some(decided);
+        }
     }
-    if state.locks.changing(uri) {
-        return in_flight(state, action, uri, agent, method).await;
-    }
-    let decided = match state.store.exists(uri).await {
-        Ok(true) => recheck(state, action, uri, agent).await.err(),
-        Ok(false) if state.needs_auth(agent) => Some(state.challenge(None)),
-        Ok(false) => Some(problem(StatusCode::NOT_FOUND, None)),
-        Err(e) => Some(store_error(e)),
-    };
-    // A change may have begun while what is stored was read (it is published before its first
-    // write, so what was read may be its own): then the stored state decides nothing, and the
-    // caller is decided as it would have been had the change begun first.
-    if !state.visible(uri) {
-        return Some(authorized_aside(state, action, uri, agent).await);
-    }
-    if state.locks.changing(uri) {
-        return in_flight(state, action, uri, agent, method).await;
-    }
-    decided.or_else(|| full(state, method))
+    None
 }
 
 /// [`authorize_unlocked`] for a resource a journaled change is in flight to: what is stored may
@@ -1943,6 +1965,10 @@ pub struct IriLocks {
     /// The IRIs a journaled change is to while it is in flight ([`InFlight`](super::InFlight)),
     /// each with how many such changes are to it and what it was before the first began.
     in_flight: std::sync::Mutex<std::collections::HashMap<String, (usize, super::Prior)>>,
+    /// Moved on for an IRI whenever a change to it is published or lands, or it is set aside or
+    /// shown again ([`IriLocks::generation`]), in a fixed number of stripes (an IRI shares its
+    /// stripe with others, which only costs a check made again).
+    generations: [std::sync::atomic::AtomicU64; GENERATION_STRIPES],
     /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
     hid: tokio::sync::Notify,
     /// How many times anything was set aside: a walk over many resources reads it before and
@@ -1958,8 +1984,19 @@ struct LockMap {
     sweep_at: usize,
 }
 
+/// How many stripes [`IriLocks::generation`] keeps.
+const GENERATION_STRIPES: usize = 32;
+
 /// The size of [`LockMap`] below which it is never swept.
 const LOCK_SWEEP_FLOOR: usize = 1024;
+
+/// The stripe of [`IriLocks::generation`] `iri` is counted in.
+fn stripe(iri: &str) -> usize {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    iri.hash(&mut h);
+    (h.finish() as usize) % GENERATION_STRIPES
+}
 
 impl IriLocks {
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
@@ -2035,6 +2072,18 @@ impl IriLocks {
         prior
     }
 
+    /// A count that has moved on since an earlier reading for `iri` if, in between, a change to
+    /// it was published or landed, or it was set aside or shown again: a check made without the
+    /// lock reads it before and after what it reads, and the same count both times means that
+    /// what it read was neither a change part way nor one being put back.
+    pub(crate) fn generation(&self, iri: &str) -> u64 {
+        self.generations[stripe(iri)].load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn moved(&self, iri: &str) {
+        self.generations[stripe(iri)].fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// Whether a journaled change to `iri` is in flight (see [`InFlight`](super::InFlight)):
     /// what is stored for it may be part of the change, or of putting it back.
     pub(crate) fn changing(&self, iri: &str) -> bool {
@@ -2049,6 +2098,7 @@ impl IriLocks {
     pub(crate) fn changing_from(&self, priors: std::collections::HashMap<String, super::Prior>) {
         let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
         for (iri, prior) in priors {
+            self.moved(&iri);
             let entry = in_flight.entry(iri).or_default();
             entry.0 += 1;
             entry.1.or(prior);
@@ -2059,6 +2109,7 @@ impl IriLocks {
     pub(crate) fn landed(&self, iris: &[String]) {
         let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
         for iri in iris {
+            self.moved(iri);
             if let std::collections::hash_map::Entry::Occupied(mut e) = in_flight.entry(iri.clone())
             {
                 e.get_mut().0 -= 1;
@@ -2081,6 +2132,7 @@ impl IriLocks {
             let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
             let mut kept = self.priors.lock().unwrap_or_else(|e| e.into_inner());
             for iri in iris {
+                self.moved(iri);
                 *hidden.entry(iri.clone()).or_default() += 1;
                 // What an earlier change left untouched, a later one found as it was.
                 if let Some(prior) = priors.remove(iri) {
@@ -2098,6 +2150,7 @@ impl IriLocks {
     pub(crate) fn show(&self, iris: &[String]) {
         let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
         for iri in iris {
+            self.moved(iri);
             if let std::collections::hash_map::Entry::Occupied(mut e) = hidden.entry(iri.clone()) {
                 *e.get_mut() -= 1;
                 if *e.get() == 0 {
@@ -10562,6 +10615,49 @@ mod tests {
         assert_eq!(get.await.unwrap(), Some(StatusCode::FORBIDDEN));
         st.locks.landed(std::slice::from_ref(&a));
         drop(held);
+    }
+
+    /// Review of #6925: a lock-free check can read a change's state part way (here its
+    /// `pending` metadata, which refuses every grant) and have the reply come back only once the
+    /// change is over and nothing is in flight. The check is made again whenever a change began
+    /// or ended while it ran, so a caller the resource allows before and after is let through.
+    #[tokio::test]
+    async fn a_change_over_by_the_end_of_a_check_has_it_made_again() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, data, grant_read, request as req};
+        let (st, store) = closed_state(100).await;
+        let a = data(&st, "a").await;
+        grant_read(&st, "https://reader.example/#me", &[&a]).await;
+        let before = st.resource_meta(&a).await.unwrap();
+        let mut part_way = before.clone();
+        part_way.pending = true;
+        st.put_resource_meta(&a, &part_way).await.unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() = Some((meta_key(&a), gate.clone()));
+        let get = {
+            let (st, who) = (st.clone(), agent("https://reader.example/#me"));
+            tokio::spawn(async move {
+                let r = req(Method::GET, "/a", &[], "");
+                tokio::time::timeout(Duration::from_millis(500), handle(&st, &r, &who))
+                    .await
+                    .ok()
+                    .map(|r| r.status())
+            })
+        };
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // The change, published, puts the metadata back and lands, all before the reply.
+        let prior = super::super::Prior {
+            meta: Some(before.clone()),
+            ..Default::default()
+        };
+        st.locks
+            .changing_from([(a.clone(), prior)].into_iter().collect());
+        st.put_resource_meta(&a, &before).await.unwrap();
+        st.locks.landed(std::slice::from_ref(&a));
+        gate.add_permits(1);
+        assert_eq!(get.await.unwrap(), Some(StatusCode::OK));
     }
 
     /// Issue #6814: a set-aside resource that was not there before the stuck change (a create

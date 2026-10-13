@@ -478,7 +478,9 @@ What the server exposes, all discoverable from the storage description
   request, or a subscription's topic, that comes without the lock is decided on what the resource
   was before the change began, so a caller only the change's own new metadata would authorize is
   refused at once, and only one the earlier state authorizes waits on the lock (the check that
-  counts is made again under it). A write's container is touched by the task that runs its store
+  counts is made again under it). A check without the lock is made again whenever a change to its
+  resource began or ended while it read (a reply can come back after the change is over), and
+  refuses if that keeps happening. A write's container is touched by the task that runs its store
   calls, so a client that goes away mid-write cannot leave the container's date behind. A
   create whose store reply was lost is removed whole the same way. A write that changes
   metadata and a recursive delete first store a durable intent: what each resource it will
