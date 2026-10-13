@@ -626,16 +626,20 @@ fn check_pre_binding(
         | GraphPattern::Graph { inner, .. } => check_pre_binding(inner, in_scope),
         // Both children share the outer scope (a UNION branch / JOIN sibling / the
         // optional side of an OPTIONAL each keeps the pre-bound names in scope).
+        // (#4291) A LATERAL's right side is evaluated per left solution with the
+        // left's bindings substituted, so the pre-bound names are in scope on both
+        // sides, exactly as for a JOIN.
         GraphPattern::Join { left, right }
         | GraphPattern::Union { left, right }
-        | GraphPattern::LeftJoin { left, right, .. } => {
+        | GraphPattern::LeftJoin { left, right, .. }
+        | GraphPattern::Lateral { left, right } => {
             check_pre_binding(left, in_scope)?;
             check_pre_binding(right, in_scope)
         }
-        // Leaves carry no pre-binding-affecting construct.
+        // Leaves carry no pre-binding-affecting construct. No catch-all: the match
+        // is exhaustive, so a new algebra variant is a compile error here rather
+        // than a silent pass of the soundness check.
         GraphPattern::Bgp { .. } | GraphPattern::Path { .. } => Ok(()),
-        #[allow(unreachable_patterns)]
-        _ => Ok(()),
     }
 }
 
@@ -869,6 +873,18 @@ fn push_values_down(pattern: &GraphPattern, values: &GraphPattern) -> GraphPatte
             left: Box::new(push_values_down(left, values)),
             right: Box::new(push_values_down(right, values)),
         },
+        // (#4291) LATERAL: the right side is a REQUIRED part evaluated once per
+        // left solution (an inner join, not an optional/excluded side), so push
+        // into BOTH, as for JOIN. Pushing into the right is sound: SHACL
+        // pre-binding substitutes every occurrence of the variable, and a VALUES
+        // join inside the right only drops right-rows whose pre-bound variable
+        // disagrees with the focus row the left already carries. Without the
+        // right-side push a pre-bound variable used only inside the LATERAL block
+        // would be unbound there.
+        GraphPattern::Lateral { left, right } => GraphPattern::Lateral {
+            left: Box::new(push_values_down(left, values)),
+            right: Box::new(push_values_down(right, values)),
+        },
         // [OPUS-4.8] (sq-mue75) sub-SELECT projection: a pre-bound variable stays
         // in scope inside the sub-select ONLY if it is explicitly projected, so
         // descend through the Project (and keep it projected) in that case; else
@@ -887,10 +903,15 @@ fn push_values_down(pattern: &GraphPattern, values: &GraphPattern) -> GraphPatte
                 variables: projected,
             }
         }
-        // A leaf (BGP / Path / Values / a sub-SELECT that re-scopes a pre-bound
-        // variable / …): join the VALUES table here so its bindings flow up into
-        // every parent.
-        other => GraphPattern::Join {
+        // A leaf (BGP / Path / Values / Service / a sub-SELECT that re-scopes a
+        // pre-bound variable): join the VALUES table here so its bindings flow up
+        // into every parent. Listed exhaustively (no catch-all) so a new algebra
+        // variant must be classified here rather than silently treated as a leaf.
+        other @ (GraphPattern::Bgp { .. }
+        | GraphPattern::Path { .. }
+        | GraphPattern::Values { .. }
+        | GraphPattern::Service { .. }
+        | GraphPattern::Project { .. }) => GraphPattern::Join {
             left: Box::new(values.clone()),
             right: Box::new(other.clone()),
         },
@@ -1612,6 +1633,66 @@ mod tests {
                 inner
             ),
             other => panic!("expected Graph, got {:?}", other),
+        }
+    }
+
+    /// The WHERE of `q` (a top-level SELECT), unwrapped from its result Project.
+    fn where_of(q: &str) -> GraphPattern {
+        match select_pattern(q) {
+            GraphPattern::Project { inner, .. } => *inner,
+            other => other,
+        }
+    }
+
+    #[test]
+    fn push_values_down_into_both_lateral_sides() {
+        // (#4291) LATERAL { L } { R }: R is evaluated once per L-solution, as an
+        // inner (required) join. Pushing the pre-binding into L is the Join case;
+        // pushing it into R is sound because SHACL pre-binding is substitution of
+        // every occurrence, and R is required, so a VALUES join inside R only
+        // drops R-rows whose `?this` disagrees with the focus (which the outer
+        // join on `?this` would drop anyway). Without the R push, a `$this` used
+        // only inside the LATERAL block is UNBOUND there.
+        let inner = where_of(
+            "SELECT $this WHERE { ?s <http://x/p> ?o LATERAL { FILTER(?this = <http://x/n>) } }",
+        );
+        assert!(matches!(inner, GraphPattern::Lateral { .. }), "{:?}", inner);
+        let out = push_values_down(&inner, &values_this());
+        match &out {
+            GraphPattern::Lateral { left, right } => {
+                assert!(
+                    values_join_here(left),
+                    "LATERAL left side not pre-bound: {:?}",
+                    left
+                );
+                assert!(
+                    filter_over_values_join(right),
+                    "LATERAL right-side FILTER not pre-bound: {:?}",
+                    right
+                );
+            }
+            other => panic!("expected Lateral preserved on top, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn push_values_down_lateral_right_subselect_keeps_rescope_rule() {
+        // The R-side push goes through the ordinary descent, so a `SELECT *`
+        // sub-select inside LATERAL is still bound ABOVE (not inside) — the same
+        // re-scoping rule as anywhere else.
+        let inner = where_of(
+            "SELECT $this WHERE { ?s <http://x/p> ?o LATERAL { SELECT * WHERE { FILTER(?this = <http://x/n>) } } }",
+        );
+        let out = push_values_down(&inner, &values_this());
+        match &out {
+            GraphPattern::Lateral { right, .. } => assert!(
+                matches!(&**right, GraphPattern::Join { left, right }
+                    if matches!(**left, GraphPattern::Values { .. })
+                        && matches!(**right, GraphPattern::Project { .. })),
+                "SELECT * sub-select in LATERAL must be bound ABOVE, got {:?}",
+                right
+            ),
+            other => panic!("expected Lateral, got {:?}", other),
         }
     }
 
@@ -2442,6 +2523,52 @@ mod tests {
                 "SELECT $this WHERE { $this ?x ?any . SERVICE <http://e/> { ?a ?b ?c } }"
             ),
             Err(PreBindingViolation::Service)
+        );
+    }
+
+    #[test]
+    fn pre_binding_rejects_violations_inside_lateral() {
+        // (#4291) A LATERAL block keeps the pre-bound names in scope on both sides,
+        // so a MINUS / VALUES / SERVICE / re-bind inside it is rejected exactly as
+        // it is outside one (previously the LATERAL fell through to a catch-all).
+        assert_eq!(
+            check_select(
+                "SELECT $this WHERE { $this ?x ?y LATERAL { $this ?x ?any MINUS { $this ?x \"V\" } } }"
+            ),
+            Err(PreBindingViolation::Minus)
+        );
+        assert_eq!(
+            check_select("SELECT $this WHERE { $this ?x ?y LATERAL { VALUES ?any { true } } }"),
+            Err(PreBindingViolation::Values)
+        );
+        assert_eq!(
+            check_select(
+                "SELECT $this WHERE { $this ?x ?y LATERAL { SERVICE <http://e/> { ?a ?b ?c } } }"
+            ),
+            Err(PreBindingViolation::Service)
+        );
+        assert_eq!(
+            check_select("SELECT $this WHERE { ?s ?x ?y LATERAL { BIND (true AS $this) } }"),
+            Err(PreBindingViolation::RebindsPreBound("this".into()))
+        );
+        // A sub-SELECT inside the LATERAL that drops $this re-scopes it.
+        assert_eq!(
+            check_select(
+                "SELECT $this WHERE { $this ?x ?y LATERAL { SELECT ?a WHERE { ?a ?b ?c } } }"
+            ),
+            Err(PreBindingViolation::SubSelectDropsPreBound("this".into()))
+        );
+        // The LEFT side of a LATERAL is checked too (a re-bind before the block).
+        assert_eq!(
+            check_select("SELECT $this WHERE { BIND (true AS $this) LATERAL { ?a ?b ?c } }"),
+            Err(PreBindingViolation::RebindsPreBound("this".into()))
+        );
+        // A clean LATERAL is accepted (no over-rejection).
+        assert_eq!(
+            check_select(
+                "SELECT $this WHERE { $this ?x ?y LATERAL { ?y ?p ?o FILTER(?o != $this) } }"
+            ),
+            Ok(())
         );
     }
 

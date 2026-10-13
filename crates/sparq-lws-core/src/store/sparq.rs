@@ -89,6 +89,48 @@ pub enum SparqError {
     QuotaExceeded,
     #[error("sparq backend error: {0}")]
     Backend(String),
+    /// A write failed in a way after which it may still commit (an HTTP update that timed out),
+    /// and it could not be fenced yet: whether it committed is not known, and may change, until
+    /// [`SparqClient::fence`] with `fence` has succeeded. After that, a read tells.
+    #[error("sparq backend error: {detail}; whether the write committed is not known yet")]
+    Unsettled {
+        /// What failed.
+        detail: String,
+        /// What settles it.
+        fence: Fence,
+    },
+}
+
+/// What settles a write whose outcome is not known ([`SparqError::Unsettled`],
+/// [`ServerError::Unsettled`](crate::error::ServerError::Unsettled)): once
+/// [`SparqClient::fence`] (or [`Store::fence`](super::Store::fence)) has succeeded with it, the
+/// write has either committed or never will, so a read tells which and that no longer changes.
+/// Opaque: only the client that failed the write can use it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fence {
+    nonce: String,
+    touches: Vec<String>,
+}
+
+impl Fence {
+    /// The fence of the write tagged `nonce`, which changes the resources `touches` (a create's
+    /// container and child; a delete's resource and parent).
+    pub fn new(nonce: impl Into<String>, touches: Vec<String>) -> Self {
+        Self {
+            nonce: nonce.into(),
+            touches,
+        }
+    }
+
+    /// The nonce of the write it fences.
+    pub fn nonce(&self) -> &str {
+        &self.nonce
+    }
+
+    /// The resources the write it fences changes, if it lands.
+    pub fn touches(&self) -> &[String] {
+        &self.touches
+    }
 }
 
 /// A query-build failure (an IRIREF-invalid untrusted IRI) is a FATAL backend error — fail-closed,
@@ -192,10 +234,23 @@ pub trait SparqClient: Send + Sync {
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError>;
 
     /// List the IRIs of `container`'s direct children (its `ldp:contains` members).
+    /// Make the outcome of a write that failed with [`SparqError::Unsettled`] final: once this
+    /// succeeds, that write has committed or never will. Idempotent; may be retried until it
+    /// succeeds.
+    ///
+    /// The default refuses: a client whose failed writes are always settled (one in process, or
+    /// one that waits for its writes) never reports one unsettled.
+    async fn fence(&self, fence: &Fence) -> Result<(), SparqError> {
+        let _ = fence;
+        Err(SparqError::Backend(
+            "this index has no unsettled writes to fence".into(),
+        ))
+    }
+
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError>;
 
     /// [`list_children`](SparqClient::list_children) while it fits: at most
-    /// [`max_rows`]`(container, max_bytes)` members whose IRIs come to at most `max_bytes`;
+    /// `max_rows``(container, max_bytes)` members whose IRIs come to at most `max_bytes`;
     /// `None` past either. A backend reads no more of the listing than that, and establishes
     /// that nothing was left out (an exact count, or one row past the bound asked for), so a
     /// listing too large to keep is refused without being held whole. A backend that cannot

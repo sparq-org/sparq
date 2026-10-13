@@ -74,6 +74,20 @@ pub enum ServerError {
     #[error("storage error: {0}")]
     Storage(String),
 
+    /// A store write failed in a way after which it may still commit (an HTTP update that timed
+    /// out, whose worker may still be running on the server), and fencing it failed too: whether
+    /// it committed is not known, and may still change, until
+    /// [`Store::fence`](crate::store::Store::fence) with `fence` has succeeded. Until then, a read
+    /// that does not see the write does not show that it failed. Otherwise as
+    /// [`Storage`](Self::Storage) (`500`).
+    #[error("storage error: {detail}; whether the write committed is not known yet")]
+    Unsettled {
+        /// What failed.
+        detail: String,
+        /// What settles it.
+        fence: crate::store::Fence,
+    },
+
     /// A write would exceed a configured in-memory storage limit.
     #[error("insufficient storage")]
     InsufficientStorage,
@@ -104,7 +118,9 @@ impl ServerError {
             ServerError::NotAcceptable => StatusCode::NOT_ACCEPTABLE,
             ServerError::UnprocessablePatch(_) => StatusCode::UNPROCESSABLE_ENTITY,
             ServerError::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            ServerError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ServerError::Storage(_) | ServerError::Unsettled { .. } => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
             ServerError::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
             ServerError::ResourceChanged => StatusCode::SERVICE_UNAVAILABLE,
         }

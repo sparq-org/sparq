@@ -245,6 +245,7 @@ pub fn to_turtle(&self) -> String;          // W3C report vocabulary (valid, rou
 pub fn to_ntriples(&self) -> String;        // same report graph, one N-Triples statement per line
 pub fn to_text(&self) -> String;            // human-readable summary
 pub fn to_json(&self) -> String;            // deterministic JSON; fixed keys and result order
+pub fn to_js_json(&self) -> String;         // compact JSON the wasm bindings return (focusNode/path/value/…/message; null when absent)
 ```
 
 `ValidationResult` (`sparq_shacl::ValidationResult`) — all fields public:
@@ -261,6 +262,7 @@ pub messages: Vec<oxrdf::Term>;             // sh:message literals
 pub default_message: String;
 pub details: Vec<ValidationResult>;         // nested sh:detail sub-results (see below); empty for most components
 pub fn effective_messages(&self) -> Vec<oxrdf::Term>;   // messages, or a generated default
+pub fn message_text(&self) -> &str;                     // first sh:message's text, or the generated default
 ```
 
 `details` carries non-normative `sh:detail` sub-results that explain WHY a result

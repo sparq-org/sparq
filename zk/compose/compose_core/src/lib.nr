@@ -15,6 +15,8 @@
 pub mod hashes;
 pub mod scan;
 pub mod filter_int;
+// Variable-length BLAKE3 opening of integer literals for the result profiles.
+pub mod blake3_literal;
 pub mod filter_float;
 // [OPUS-4.8] sq-1q9h: signed xsd:integer + xsd:decimal FILTER coverage.
 pub mod filter_signed;

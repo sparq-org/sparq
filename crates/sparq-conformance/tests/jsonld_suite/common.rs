@@ -37,7 +37,8 @@ use std::path::{Path, PathBuf};
 // module references it; the `bench_jsonld` example still imports it from the lib
 // directly. It stays defined LIB-SIDE for that bench consumer.
 pub use sparq_conformance::jsonld_bench::{
-    json_ld_equal, jsonld_to_canonical_dataset, nquads_to_canonical_dataset, sparq_json_to_serde,
+    json_ld_equal, json_ld_output_equal, jsonld_to_canonical_dataset, nquads_to_canonical_dataset,
+    sparq_json_to_serde,
 };
 
 // [FABLE-5] sq-oy1f.40 — the six ratchet floors, re-exported from the LIB-SIDE
