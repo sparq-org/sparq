@@ -23,8 +23,8 @@
 //!   its `{ … }` object; inside `notIncludes` they are NEGATIVE. A scope that is not a
 //!   formula literal counts as the store, even when a variable may turn out to hold a
 //!   formula;
-//! * an object given through a variable is the formula it is bound to at run time
-//!   (GH #6936), which the analysis cannot see: UNKNOWN. Under `notIncludes` it is
+//! * an object given through a variable is matched as the ground formula it is bound to at
+//!   run time (GH #6936), which the analysis cannot see: UNKNOWN. Under `notIncludes` it is
 //!   negative, so the rule negates over its own conclusions too, a negation cycle (refused
 //!   by default; the [`NegationCycles`] opt-ins evaluate it as any other). Under
 //!   `includes` / `supports` it is positive, and the evaluator refuses, failing the run, a
@@ -179,7 +179,7 @@ fn premise_deps<'a>(atoms: &'a [[Term; 3]], neg: bool, out: &mut Vec<Dep<'a>>) {
                     Term::Formula(inner) => premise_deps(inner, neg, out),
                     // Bound at run time: an unknown pattern.
                     Term::Var(_) | Term::Blank(_) => out.push((Pred::Unknown, neg)),
-                    // `{}` has no atoms; any other value fails the premise.
+                    // `{}` has no atoms; any other value is the empty pattern.
                     _ => {}
                 }
             }

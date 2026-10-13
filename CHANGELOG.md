@@ -46,6 +46,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now returns `Err("n3: forward closure limit exceeded …")` instead of aborting on a failed
   allocation. (#6771)
 
+### Fixed
+
+- **sparq-reason (N3):** a `log:includes` / `log:notIncludes` / `log:supports` pattern
+  bound through a variable to a GROUND formula (no variable at any depth once the rule's
+  bindings are applied; blank nodes allowed) is matched as that formula, the same as the
+  formula written in the rule. It was matched as the empty pattern, so `log:includes` held
+  whatever the scope held and `log:notIncludes` never fired. Any other bound value, a
+  formula that still holds a variable included, still matches as the empty pattern
+  (#6943). A cyclic binding chain fails the run. Each containment matches its pattern's
+  blank nodes afresh: a witness found by one `log:includes` no longer constrains the next
+  one in the premise. With the store as the scope, the automatic stratification counts a
+  variable pattern as every predicate: a `log:notIncludes` over one is a negation cycle
+  (refused by default; `FailClosed` drops the rule, `SinglePass` runs it), and a
+  `log:includes` / `log:supports` whose bound pattern itself holds a store-scoped
+  `log:notIncludes` / `log:collectAllIn` / `log:forAllIn` fails the run. (refs #6936,
+  #6943)
+
 ## [0.1.6] - 2026-10-13
 
 First release with the `sparq-rdf` PyPI wheels (the v0.1.5 wheel builds failed; npm 0.1.5
@@ -117,30 +134,6 @@ Both changes are in that commit, but its copy of this file does not list them.
 
 ### Fixed
 
-- **sparq-reason (N3):** a `log:includes` / `log:notIncludes` / `log:supports` pattern
-  bound through a variable is matched as the bound formula, against the bindings in place;
-  it was matched as the empty pattern, so `log:includes` held vacuously and
-  `log:notIncludes` never fired. A bound formula cannot introduce new bindings: such an
-  operator runs after the rest of the premise, and a bound `log:includes` /
-  `log:supports` pattern, or a variable-given `log:collectAllIn` subject's result list,
-  that still holds a free variable fails the run with
-  `N3: a formula bound through a variable may not bind new variables …` (#6943). A rule in
-  which no premise can bind the pattern is refused with
-  `N3: no evaluation order binds every required input …`; an unbound scope variable means
-  the store. A `log:forAllIn` clause that is not a formula fails the premise instead of
-  holding vacuously.
-  Inside a backward (`<=`) rule a
-  pattern, or a `log:collectAllIn` / `log:forAllIn` clause or subject, reached through a
-  variable is unsupported and fails the run with
-  `N3: a formula bound through a variable is unsupported inside a backward rule …`, as does
-  one anywhere that holds a backward rule's renamed variable (`?__bw<n>_…`, a source
-  variable spelled that way included); written in the rule it works as before (#6943). An
-  unbound or non-formula object (including a string spelled `"true"`; only `{}` is the
-  empty pattern) now fails the premise. With the store as the scope,
-  the automatic stratification counts a variable pattern as every predicate: a
-  `log:notIncludes` over one is a negation cycle (refused by default, evaluated under the
-  `NegationCycles` opt-ins), and a `log:includes` / `log:supports` whose bound pattern
-  itself negates over the store fails the run. (#6936, refs #6943)
 - **Release pipeline:** release files are staged in an empty `release-assets/` directory.
   v0.1.5 published the repository's `assets/logo.svg` as an extra asset with no provenance;
   every other v0.1.5 asset is covered by the isolated-builder bundles. (#6812)

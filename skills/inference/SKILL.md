@@ -106,33 +106,18 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
-// A log:includes / log:notIncludes / log:supports PATTERN bound through a variable
-// (`:cfg :pat ?f. ?s log:includes ?f`) is the formula it is bound to, matched against the
-// bindings in place: it CANNOT introduce new bindings. Such an operator (and a collectAllIn
-// / forAllIn given a clause or subject through a variable) runs after every other premise
-// atom, in written order; an includes / supports pattern, or a collectAllIn subject's
-// result list, that still holds a free variable then fails the run ("N3: a formula bound
-// through a variable may not bind new variables …"; binding through bound formulas is
-// tracked in https://github.com/sparq-org/sparq/issues/6943). notIncludes patterns and
-// forAllIn clauses keep their internal variables (they bind nothing outward); a forAllIn
-// clause that is not a formula when it runs fails the premise. An unbound SCOPE variable
-// means the store and is not waited for; when no order binds a variable-given pattern /
-// clause / subject the rule is refused ("N3: no evaluation order binds every required
-// input …"). UNSUPPORTED inside a backward (`<=`)
-// rule: a pattern, or a collectAllIn / forAllIn clause or subject, reached through a
-// variable there fails the run ("N3: a formula bound through a variable is unsupported
-// inside a backward rule …"; write it in the rule; full support:
-// https://github.com/sparq-org/sparq/issues/6943), and so does a bound one anywhere that
-// holds a backward rule's renamed variable (`?__bw<n>_…`, so a source variable spelled
-// that way is refused too, fail-closed). An unbound or non-formula
-// object (a "true" string included; only `{}` is the empty pattern) fails the premise
-// (GH #6936). Store-scoped, the
-// stratification counts it as EVERY predicate: under notIncludes negatively, so the rule is
-// a negation cycle with its own conclusion (refused by default; FailClosed drops it,
+// A log:includes / log:notIncludes / log:supports PATTERN reached through a variable is
+// matched as the bound formula only when that formula is GROUND under the rule's bindings
+// (no variable at any depth; blank nodes are its existentials), exactly as if written in
+// the rule (GH #6936). Any other bound value, a formula still holding a variable included,
+// matches as the EMPTY pattern (includes holds, notIncludes fails) — full matching is
+// https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. A
+// cyclic binding chain fails the run. Each containment matches its blanks afresh (no
+// witness carries over to the next containment). Store-scoped, the stratification counts
+// a variable pattern as EVERY predicate: under notIncludes negatively, so the rule is a
+// negation cycle with its own conclusion (refused by default; FailClosed drops it,
 // SinglePass runs it); under includes/supports positively, and a bound pattern that itself
-// holds a store-scoped notIncludes / collectAllIn / forAllIn fails the run. Write the
-// pattern in the rule to have it stratified. The compiled and incremental counting paths
-// do not take a variable pattern (compile error / batch fallback).
+// holds a store-scoped notIncludes / collectAllIn / forAllIn fails the run.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares

@@ -51,9 +51,7 @@
 //! quantifiers_limited matrix); virtual list access works inside containment;
 //! an UNBOUND/non-formula subject falls back to store-scoped negation as
 //! failure (this engine's documented idiom). `log:supports` first closes the
-//! scope under its own `=>` rules. The pattern (object) is a `{ … }` formula,
-//! written in place or bound to a variable (matched the same way); any other
-//! object fails the premise.
+//! scope under its own `=>` rules.
 //!
 //! Backward rules (`<=`, log:isImpliedBy) are GOAL-DIRECTED, matching EYE:
 //! they never fire forward; a forward-rule premise atom resolves against
@@ -951,7 +949,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let mut backward: Vec<Rule> =
         data_parsed.backward_rules.iter().chain(&query_parsed.backward_rules).cloned().collect();
     for r in &mut backward {
-        r.premise = order_premise(&r.premise)?;
+        r.premise = order_premise(&r.premise);
     }
     // Stratification check over the rule set this call actually evaluates, before any
     // matching: the data document's forward rules, the backward rules of BOTH documents,
@@ -990,7 +988,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
     let mut sk_counter = 0usize;
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
-        let premise = order_premise(&rule.premise)?;
+        let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
         let mut fired: FxHashSet<String> = FxHashSet::default();
         for b in match_premise(&premise, &facts, &bw) {
@@ -1590,7 +1588,7 @@ fn run_closure(
     // (cwm evaluates builtins "when ready"; concat.n3 test13f writes the
     // producer AFTER the consumer).
     for r in rules.iter_mut().chain(backward_rules.iter_mut()) {
-        r.premise = order_premise(&r.premise)?;
+        r.premise = order_premise(&r.premise);
     }
     // STRATA (GH #6201, #5756): a rule that store-scope negates / aggregates over a
     // predicate this document derives runs in a later stratum than every rule deriving it.
@@ -2226,39 +2224,39 @@ fn match_premise_admitted(
         // `log:includes` may BIND free variables of the object pattern (one
         // binding per match, like EYE); `log:notIncludes` holds iff no match.
         if let Some(op) = scope_op(&pat[1]) {
+            let written: &[[Term; 3]] = match &pat[2] {
+                Term::Formula(t) => t,
+                _ => &[],
+            };
             let is_not = matches!(op, ScopeOp::NotIncludes);
             let mut next = Vec::new();
             for b in bindings {
-                // The pattern: a formula written in place, or the formula a variable is
-                // bound to, matched exactly as if it were written in place (GH #6936). Any
-                // other object is no pattern, and fails the premise for this binding.
-                let inner: &[[Term; 3]] = match &pat[2] {
-                    Term::Formula(t) => t,
-                    Term::Var(_) => match resolved(&pat[2], &b) {
-                        // A pattern reached through a variable was not visible to
-                        // [`validate_rule_quantifiers`]: a quantified formula bound to it is
-                        // refused the same way, failing the run.
-                        val @ Term::Formula(_) if quantified_clause(val) => {
+                // A pattern reached through a variable was not visible to
+                // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
+                // the same way, failing the run.
+                if !matches!(&pat[2], Term::Formula(_)) {
+                    if let Term::Var(v) = &pat[2] {
+                        if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
                             bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                             continue;
                         }
-                        val if is_formula(val) && backward_bound(&pat[2], val) => {
-                            bw.nested_error.borrow_mut().get_or_insert_with(|| BACKWARD_BOUND_FORMULA.into());
-                            continue;
-                        }
-                        // It is matched against the bindings in place: a positive operator
-                        // may not bind a new variable through it ([`BOUND_FORMULA_BINDS`]).
-                        val @ Term::Formula(_) if !is_not && free_variable(val, &b) => {
-                            bw.nested_error.borrow_mut().get_or_insert_with(|| BOUND_FORMULA_BINDS.into());
-                            continue;
-                        }
-                        Term::Formula(t) => t,
-                        val if empty_formula(val) => NO_STATEMENTS,
-                        // Unbound, or no formula: no pattern.
-                        _ => continue,
-                    },
-                    val if empty_formula(val) => NO_STATEMENTS,
-                    _ => continue,
+                    }
+                }
+                // The pattern: a formula written in place, or (GH #6936) a formula a variable
+                // is bound to when it is ground under the binding (blank nodes are its
+                // existentials). Any other object, a non-ground bound formula included,
+                // still matches as the empty pattern (GH #6943).
+                let mut bound_pattern = false;
+                let inner: &[[Term; 3]] = match bound_formula(&pat[2], &b) {
+                    Ok(Some(ts)) => {
+                        bound_pattern = true;
+                        ts
+                    }
+                    Ok(None) => written,
+                    Err(Cyclic) => {
+                        bw.nested_error.borrow_mut().get_or_insert_with(|| CYCLIC_BINDING.into());
+                        continue;
+                    }
                 };
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
@@ -2274,15 +2272,12 @@ fn match_premise_admitted(
                     Term::Lit(v, _, _) if v == "true" => formula_containment(NO_STATEMENTS, inner, &b, bw),
                     // The store as the scope: the clause recurses into premise matching,
                     // holding a unit of the run's stack allowance (`_frames`).
-                    // A pattern bound through a variable was not visible to the
-                    // stratification, which reads it as every predicate, and positively
-                    // under `log:includes` / `log:supports` ([`strata`]): one that runs a
-                    // store-scoped negation or aggregation of its own is refused, failing
-                    // the run, rather than evaluated in no stratified order.
-                    _ if !is_not
-                        && !matches!(&pat[2], Term::Formula(_))
-                        && strata::has_store_negation(inner) =>
-                    {
+                    // A bound pattern was not visible to the stratification, which reads it as
+                    // every predicate, and positively under `log:includes` / `log:supports`
+                    // ([`strata`]): one that runs a store-scoped negation or aggregation of
+                    // its own is refused, failing the run, rather than evaluated in no
+                    // stratified order.
+                    _ if bound_pattern && !is_not && strata::has_store_negation(inner) => {
                         bw.nested_error.borrow_mut().get_or_insert_with(|| BOUND_STORE_NEGATION.into());
                         continue;
                     }
@@ -2291,6 +2286,12 @@ fn match_premise_admitted(
                         None => Vec::new(),
                     },
                 };
+                // A containment's existential witnesses (`__w.` bindings of the pattern's
+                // blank nodes) stay inside it: each test gets fresh ones.
+                let mut matches = matches;
+                for nb in &mut matches {
+                    nb.retain(|k, _| !k.starts_with(PATTERN_WILDCARD));
+                }
                 // Every negation passes the gate, whatever it found.
                 if is_not {
                     if negation_gate(bw) && matches.is_empty() {
@@ -2369,29 +2370,6 @@ fn match_premise_admitted(
                     bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                     continue;
                 }
-                // A subject or clause reached through a variable of a backward rule, or
-                // holding one, is refused ([`backward_bound`]).
-                let written = aggregation_clauses(op, &pat[0]);
-                if (matches!(&pat[0], Term::Var(_)) && backward_bound(&pat[0], &subj))
-                    || aggregation_clauses(op, &subj).iter().enumerate().any(|(i, c)| match written.get(i) {
-                        Some(Term::Formula(_) | Term::Lit(..)) => false,
-                        Some(reaching) => is_formula(c) && backward_bound(reaching, c),
-                        // the whole subject was reached through a variable: checked above
-                        None => false,
-                    })
-                {
-                    bw.nested_error.borrow_mut().get_or_insert_with(|| BACKWARD_BOUND_FORMULA.into());
-                    continue;
-                }
-                // A subject given through a variable is matched against the bindings in
-                // place: its result list may not bind a new variable ([`BOUND_FORMULA_BINDS`]).
-                if matches!(op, CollectOp::CollectAll)
-                    && matches!(&pat[0], Term::Var(_))
-                    && members.get(2).is_some_and(|l| free_variable(l, &b))
-                {
-                    bw.nested_error.borrow_mut().get_or_insert_with(|| BOUND_FORMULA_BINDS.into());
-                    continue;
-                }
                 match op {
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
@@ -2422,11 +2400,6 @@ fn match_premise_admitted(
                     }
                     CollectOp::ForAll => {
                         let [ca, cb] = &members[..] else { continue };
-                        // Both clauses must be formulas, or the premise fails: an unbound
-                        // second clause must not hold vacuously.
-                        if !(is_formula(ca) && is_formula(cb)) {
-                            continue;
-                        }
                         let Some(sols_a) = solve(ca, &b) else { continue };
                         let holds = sols_a
                             .iter()
@@ -2612,30 +2585,11 @@ fn reads_outside_joins(p: &[Term; 3]) -> bool {
 }
 
 /// Stable-reorder a premise so each builtin atom comes after the atoms that
-/// can produce its input variables. Join atoms are always ready and keep
-/// their relative order; an atom whose inputs are not yet available is
-/// deferred.
-///
-/// An input is REQUIRED (a builtin's operands, a containment pattern or aggregation
-/// clause given through a variable) or DEFAULTED: an unbound scope variable of a scoped
-/// operator (`log:includes` / `notIncludes` / `supports`, `log:collectAllIn` /
-/// `forAllIn`) means the current store. Each step takes, in written order, the first atom
-/// of the best available tier: every input bound; else required inputs bound and each
-/// defaulted one unbound with no other remaining atom that could bind it (one that
-/// mentions it only as its own defaulted scope cannot), so it can only ever mean the
-/// store (aggregations, which read the store's complete answer, always take this tier).
-/// A defaulted input another remaining atom could bind is waited for. When no
-/// atom is ready the first remaining one runs (the legacy order, deterministic); a builtin
-/// it runs with an input unbound fails its premise as before.
-///
-/// A containment or aggregation whose pattern, clause or subject is given through a
-/// variable runs after every other atom, in written order, each once its own inputs are
-/// bound: its formula may mention any variable of the rule, and it is matched against the
-/// bindings in place when it runs. It binds no new variable through that formula (refused
-/// at run time, [`BOUND_FORMULA_BINDS`]), so nothing waits for it. When none of those left
-/// can have its inputs bound, no order binds them and the rule is refused
-/// ([`NO_EVALUATION_ORDER`]).
-fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
+/// can produce its input variables. Join atoms are always "ready" and keep
+/// their relative order; a builtin whose inputs are not yet available is
+/// deferred. If nothing is ready (e.g. the unbound-scope negation idiom) the
+/// first remaining atom runs, preserving the legacy order.
+fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
     fn term_vars(t: &Term, out: &mut FxHashSet<String>) {
         match t {
             Term::Var(v) => {
@@ -2654,135 +2608,46 @@ fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
         term_vars(t, &mut s);
         s
     };
-    // An operator whose pattern, clause or subject is given through a variable.
-    let var_given = |i: usize| {
-        let atom = &premise[i];
-        if scope_op(&atom[1]).is_some() {
-            return matches!(&atom[2], Term::Var(_));
-        }
-        collect_op(&atom[1]).is_some_and(|op| {
-            matches!(&atom[0], Term::Var(_))
-                || aggregation_clauses(op, &atom[0]).iter().any(|c| matches!(c, Term::Var(_)))
-        })
-    };
     let mut remaining: Vec<usize> = (0..premise.len()).collect();
     let mut produced: FxHashSet<String> = FxHashSet::default();
     let mut out: Vec<[Term; 3]> = Vec::new();
     while !remaining.is_empty() {
-        let ordinary_left = remaining.iter().any(|&j| !var_given(j));
-        let bound = |t: &Term| match t {
-            Term::Var(v) => produced.contains(v),
-            _ => true,
-        };
-        // Whether atom `j` could bind `v`: it mentions `v` other than as its own defaulted
-        // scope (a scope variable is never bound by its operator; unbound, it means the
-        // store).
-        let could_bind = |j: usize, v: &str| {
-            let atom = &premise[j];
-            let scope_at = if scope_op(&atom[1]).is_some() {
-                Some(0)
-            } else if collect_op(&atom[1]).is_some() {
-                Some(2)
-            } else {
-                None
-            };
-            atom.iter().enumerate().any(|(k, t)| {
-                !(Some(k) == scope_at && matches!(t, Term::Var(_))) && vars_of(t).contains(v)
-            })
-        };
-        // A defaulted scope: bound (tier 0), or unbound with no other remaining atom that
-        // could bind it (tier 1). One another atom could still bind waits for it, as does a
-        // compound scope with unbound variables.
-        let scope_tier = |i: usize, scope: &Term| -> Option<usize> {
-            match scope {
-                _ if vars_of(scope).is_subset(&produced) => Some(0),
-                Term::Var(v) if !remaining.iter().any(|&j| j != i && could_bind(j, v)) => Some(1),
-                _ => None,
-            }
-        };
-        // The tier of atom `i` (lower runs first), `None` while a required input is unbound.
-        let tier = |i: usize| -> Option<usize> {
+        let ready = |i: usize| -> bool {
             let pat = &premise[i];
-            if var_given(i) {
-                return None; // runs after every ordinary atom (below)
-            }
             if is_join_atom(pat) {
-                return Some(0);
+                return true;
             }
             let subj_ready = vars_of(&pat[0]).is_subset(&produced);
             let obj_ready = vars_of(&pat[2]).is_subset(&produced);
-            let ready = |r: bool| r.then_some(0);
             if builtin(&pat[1]).is_some() {
-                return ready(subj_ready && obj_ready); // comparison: both are inputs
+                return subj_ready && obj_ready; // comparison: both are inputs
             }
             if let Some(gen) = list_generator(&pat[1]) {
-                return ready(match gen {
+                return match gen {
                     ListGen::Member | ListGen::Iterate => subj_ready,
                     ListGen::In => obj_ready,
-                });
+                };
             }
-            // A scope op needs a pattern given through a variable (GH #6936); the
-            // variables of a pattern written in place are its outputs. Its scope is
-            // defaulted.
-            if scope_op(&pat[1]).is_some() {
-                return if bound(&pat[2]) { scope_tier(i, &pat[0]) } else { None };
-            }
-            // An aggregation needs its subject list and every clause given through a
-            // variable; the template, the list and a written clause's variables are its
-            // own. It reads the store's complete answer, so it runs after every atom that
-            // binds all its inputs. Its scope is defaulted.
-            if let Some(op) = collect_op(&pat[1]) {
-                let required = bound(&pat[0]) && aggregation_clauses(op, &pat[0]).iter().all(bound);
-                return if required { scope_tier(i, &pat[2]).map(|t| t.max(1)) } else { None };
-            }
-            // functional / binder op: bidirectional ops accept either side; the rest need
-            // the subject.
+            // functional / binder / scope op: bidirectional ops accept either
+            // side; the rest need the subject.
             let bidi = matches!(
                 functional_builtin(&pat[1]),
                 Some(Func::Dtlit | Func::Negation | Func::InSeconds)
             ) || binder_builtin(&pat[1]).is_some();
-            ready(if bidi { subj_ready || obj_ready } else { subj_ready })
-        };
-        // A containment or aggregation whose pattern, clause or subject is given through a
-        // variable nothing has bound yet: it can never run with that input unbound.
-        let unbound_formula = |i: usize| {
-            let pat = &premise[i];
-            if scope_op(&pat[1]).is_some() {
-                return !bound(&pat[2]);
-            }
-            match collect_op(&pat[1]) {
-                Some(op) => !bound(&pat[0]) || !aggregation_clauses(op, &pat[0]).iter().all(bound),
-                None => false,
+            if bidi {
+                subj_ready || obj_ready
+            } else {
+                subj_ready
             }
         };
-        // Only operators given their formula through a variable remain: they bind nothing
-        // through it, so they run in written order, each once its own inputs are bound.
-        if !ordinary_left {
-            let Some(pos) = remaining.iter().position(|&i| !unbound_formula(i)) else {
-                return Err(NO_EVALUATION_ORDER.into());
-            };
-            let i = remaining.remove(pos);
-            for t in &premise[i] {
-                term_vars(t, &mut produced);
-            }
-            out.push(premise[i].clone());
-            continue;
-        }
-        let tiers: Vec<Option<usize>> = remaining.iter().map(|&i| tier(i)).collect();
-        let best = tiers.iter().flatten().min().copied();
-        let pos = match best.and_then(|b| tiers.iter().position(|&t| t == Some(b))) {
-            Some(pos) => pos,
-            // Nothing is ready: the first remaining ordinary atom runs (a stuck builtin may
-            // yet bind an input). One remains: `ordinary_left`.
-            None => remaining.iter().position(|&i| !var_given(i)).unwrap_or(0),
-        };
+        let pos = remaining.iter().position(|&i| ready(i)).unwrap_or(0);
         let i = remaining.remove(pos);
         for t in &premise[i] {
             term_vars(t, &mut produced); // its outputs are now available
         }
         out.push(premise[i].clone());
     }
-    Ok(out)
+    out
 }
 
 /// Whether a premise pattern is a JOIN atom (matched against stored facts), by its
@@ -2877,18 +2742,13 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
     out
 }
 
-/// The name rule variable `v` takes in the standardize-apart space of application `n`.
-fn application_var(n: usize, v: &str) -> String {
-    format!("__bw{n}_{v}")
-}
-
 /// `t` with every variable renamed into the standardize-apart space of rule application `n`
 /// (recursing into quoted formulae).
 fn rename_vars(t: &Term, n: usize) -> Term {
     match t {
         // A quoted formula's own universal is not a rule variable (GH #6754).
         Term::Var(v) if quoted_universal(v) => t.clone(),
-        Term::Var(v) => Term::Var(application_var(n, v)),
+        Term::Var(v) => Term::Var(format!("__bw{n}_{v}")),
         Term::Formula(ts) => Term::Formula(
             ts.iter().map(|tr| [rename_vars(&tr[0], n), rename_vars(&tr[1], n), rename_vars(&tr[2], n)]).collect(),
         ),
@@ -2900,76 +2760,6 @@ fn rename_vars(t: &Term, n: usize) -> Term {
         ])),
         _ => t.clone(),
     }
-}
-
-/// Whether `v` is in the standardize-apart namespace of backward-rule applications
-/// ([`application_var`]: `__bw<n>_…`). A source variable spelled that way is too.
-fn application_form(v: &str) -> bool {
-    v.strip_prefix("__bw")
-        .and_then(|r| r.split_once('_'))
-        .is_some_and(|(n, _)| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
-}
-
-/// Whether a formula (a containment pattern, an aggregation clause or subject) bound at run
-/// time cannot be evaluated soundly: it was reached through a variable of a backward
-/// rule's renamed premise, or it holds such a variable (one that escaped a backward
-/// proof's projection). Its variables would not share the backward application's
-/// bindings the way a formula written in the rule does, so it is refused
-/// ([`BACKWARD_BOUND_FORMULA`]) rather than matched with them unbound.
-fn backward_bound(reaching: &Term, value: &Term) -> bool {
-    fn mentions(t: &Term) -> bool {
-        match t {
-            Term::Var(v) => application_form(v),
-            Term::Formula(ts) => ts.iter().flatten().any(mentions),
-            Term::List(ms) => ms.iter().any(mentions),
-            Term::Triple(tr) => tr.iter().any(mentions),
-            _ => false,
-        }
-    }
-    matches!(reaching, Term::Var(v) if application_form(v)) || mentions(value)
-}
-
-/// `t` resolved through any chain of variable bindings in `b`, borrowed (bounded against
-/// cycles); an unbound variable resolves to itself.
-fn resolved<'t>(t: &'t Term, b: &'t Binding) -> &'t Term {
-    let mut cur = t;
-    for _ in 0..b.len() + 1 {
-        match cur {
-            Term::Var(v) => match b.get(v) {
-                Some(next) => cur = next,
-                None => break,
-            },
-            _ => break,
-        }
-    }
-    cur
-}
-
-/// Whether `t`, under `b`, holds a variable nothing binds yet (a formula's own `__uf.`
-/// universals, and blank nodes, are not variables of the rule).
-fn free_variable(t: &Term, b: &Binding) -> bool {
-    match t {
-        Term::Var(v) if quoted_universal(v) => false,
-        Term::Var(_) => match resolved(t, b) {
-            Term::Var(_) => true,
-            value => free_variable(value, b),
-        },
-        Term::Formula(ts) => ts.iter().flatten().any(|m| free_variable(m, b)),
-        Term::List(ms) => ms.iter().any(|m| free_variable(m, b)),
-        Term::Triple(tr) => tr.iter().any(|m| free_variable(m, b)),
-        _ => false,
-    }
-}
-
-/// Whether `t` is a formula: a `{ … }` term, or the empty formula ([`empty_formula`]).
-fn is_formula(t: &Term) -> bool {
-    matches!(t, Term::Formula(_)) || empty_formula(t)
-}
-
-/// Whether `t` is the empty formula `{}`, which the parser reads as the boolean `true`
-/// (no other literal spelled "true" is).
-fn empty_formula(t: &Term) -> bool {
-    matches!(t, Term::Lit(v, dt, None) if v == "true" && dt == parser::XSD_BOOLEAN)
 }
 
 /// Resolve `t` through any chain of variable bindings in `s` (bounded against cycles).
@@ -3123,28 +2913,10 @@ const BOUND_STORE_NEGATION: &str = "N3: a store-scoped log:includes / log:suppor
     bound through a variable holds a store-scoped log:notIncludes / log:collectAllIn / \
     log:forAllIn, which the stratification cannot see; write the pattern in the rule";
 
-/// A formula bound through a variable inside a backward rule ([`backward_bound`]); full
-/// support is tracked in <https://github.com/sparq-org/sparq/issues/6943>.
-const BACKWARD_BOUND_FORMULA: &str = "N3: a formula bound through a variable is unsupported \
-    inside a backward rule (a log:includes / log:notIncludes / log:supports pattern, or a \
-    log:collectAllIn / log:forAllIn clause or subject, given through a variable of a <= rule \
-    or holding one; write it in the rule, see GH #6943)";
-
-/// A formula given through a variable that would bind a new variable: a `log:includes` /
-/// `log:supports` pattern, or the result list of a `log:collectAllIn` subject, given
-/// through a variable that still holds a free variable once the bindings in place are
-/// applied. Tracked in
-/// <https://github.com/sparq-org/sparq/issues/6943>.
-const BOUND_FORMULA_BINDS: &str = "N3: a formula bound through a variable may not bind new \
-    variables (a log:includes / log:supports pattern, or a log:collectAllIn subject's result \
-    list, given through a variable still holds a free variable once the bindings in place \
-    are applied; write it in the rule, see GH #6943)";
-
-/// A premise whose containment or aggregation formula, given through a variable, no
-/// evaluation order binds ([`order_premise`]).
-const NO_EVALUATION_ORDER: &str = "N3: no evaluation order binds every required input (a \
-    log:includes / log:notIncludes / log:supports pattern, or a log:collectAllIn / \
-    log:forAllIn clause or subject, given through a variable no other premise binds)";
+/// A variable binding that refers back to itself, met while deciding whether a bound
+/// containment pattern is ground ([`bound_formula`]).
+const CYCLIC_BINDING: &str = "N3: a containment pattern bound through a variable has a cyclic \
+    binding (a variable bound, through other bindings, to a term holding itself)";
 
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 
@@ -3248,6 +3020,70 @@ impl QuantifierWalk {
 /// reached through a variable) would need quantified matching ([`QuantifierWalk`]).
 fn quantified_clause(clause: &Term) -> bool {
     QuantifierWalk::bound_clause(clause)
+}
+
+/// A binding chain that reaches a variable it is already resolving ([`bound_formula`]).
+struct Cyclic;
+
+/// The statements of the formula `object` (a containment's object) is bound to under `b`,
+/// when `object` is a variable bound, possibly through other variables, to a `{ … }`
+/// formula that is GROUND under `b`: no variable at any depth (nested formulas included)
+/// that `b` does not bind, through its whole binding chain, to a ground term. Blank nodes
+/// are allowed (the pattern's existentials). `Ok(None)` for any other object: one written
+/// in place, unbound, not a formula, or not ground. `Err` when a binding chain is cyclic.
+fn bound_formula<'t>(object: &'t Term, b: &'t Binding) -> Result<Option<&'t [[Term; 3]]>, Cyclic> {
+    /// Whether `t` is ground under `b`; `resolving` holds the variables whose bindings
+    /// are being followed.
+    fn ground<'a>(t: &'a Term, b: &'a Binding, resolving: &mut Vec<&'a str>) -> Result<bool, Cyclic> {
+        match t {
+            Term::Var(v) => {
+                if resolving.contains(&v.as_str()) {
+                    return Err(Cyclic);
+                }
+                let Some(val) = b.get(v) else { return Ok(false) };
+                resolving.push(v);
+                let g = ground(val, b, resolving);
+                resolving.pop();
+                g
+            }
+            Term::Formula(ts) => all_ground(ts.iter().flatten(), b, resolving),
+            Term::List(ms) => all_ground(ms.iter(), b, resolving),
+            Term::Triple(tr) => all_ground(tr.iter(), b, resolving),
+            _ => Ok(true),
+        }
+    }
+    /// Every term ground; a cycle anywhere is reported even after an open term.
+    fn all_ground<'a>(
+        ts: impl Iterator<Item = &'a Term>,
+        b: &'a Binding,
+        resolving: &mut Vec<&'a str>,
+    ) -> Result<bool, Cyclic> {
+        let mut all = true;
+        for t in ts {
+            all &= ground(t, b, resolving)?;
+        }
+        Ok(all)
+    }
+    let Term::Var(v) = object else { return Ok(None) };
+    let mut resolving = vec![v.as_str()];
+    let mut cur = match b.get(v) {
+        Some(val) => val,
+        None => return Ok(None),
+    };
+    // Follow a chain of variables to the bound value.
+    while let Term::Var(w) = cur {
+        if resolving.contains(&w.as_str()) {
+            return Err(Cyclic);
+        }
+        resolving.push(w);
+        match b.get(w) {
+            Some(val) => cur = val,
+            None => return Ok(None),
+        }
+    }
+    let Term::Formula(ts) = cur else { return Ok(None) };
+    let is_ground = ground(cur, b, &mut resolving)?;
+    Ok(is_ground.then_some(ts.as_slice()))
 }
 
 /// Reject antecedent quantifiers that the rule matchers cannot soundly evaluate. This
@@ -6775,6 +6611,34 @@ mod runtime_doc_key_golden {
 
 #[cfg(test)]
 mod tests {
+    /// GH #6936: a containment pattern reached through a variable is matched only when it
+    /// is a ground formula under the binding; a cyclic binding chain is reported, not
+    /// followed forever.
+    #[test]
+    fn bound_patterns_are_ground_formulas_or_cycles() {
+        use super::{bound_formula, Binding, Term};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let var = |s: &str| Term::Var(s.into());
+        let f = |o: Term| Term::Formula(vec![[iri("a"), iri("p"), o]]);
+        let bind = |pairs: Vec<(&str, Term)>| -> Binding { pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect() };
+        // Ground, through a chain, with a blank node and a bound nested variable.
+        let b = bind(vec![("f", var("g")), ("g", f(Term::Formula(vec![[Term::Blank("x".into()), iri("q"), var("o")]]))), ("o", iri("b"))]);
+        assert!(matches!(bound_formula(&var("f"), &b), Ok(Some(ts)) if ts.len() == 1));
+        // Not ground (an unbound nested variable), not a formula, unbound, written in place.
+        let b = bind(vec![("f", f(var("o"))), ("l", iri("b"))]);
+        assert!(matches!(bound_formula(&var("f"), &b), Ok(None)));
+        assert!(matches!(bound_formula(&var("l"), &b), Ok(None)));
+        assert!(matches!(bound_formula(&var("u"), &b), Ok(None)));
+        assert!(matches!(bound_formula(&f(iri("b")), &b), Ok(None)));
+        // Cycles: in the chain, and through the formula's own variable.
+        let b = bind(vec![("f", var("g")), ("g", var("f"))]);
+        assert!(bound_formula(&var("f"), &b).is_err());
+        let b = bind(vec![("f", f(var("f")))]);
+        assert!(bound_formula(&var("f"), &b).is_err());
+        let b = bind(vec![("f", f(var("o"))), ("o", Term::List(vec![var("o")]))]);
+        assert!(bound_formula(&var("f"), &b).is_err());
+    }
+
     /// GH #6901: the length of a numeral's lexical form, computed from its value, equals
     /// the length of the literal it renders, for every rendering (integer, decimal at any
     /// scale, whole and fractional `f64`, `xsd:double` e-notation, non-finite values), and

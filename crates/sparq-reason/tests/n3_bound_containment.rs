@@ -1,15 +1,16 @@
-//! GH #6936: a `log:includes` / `log:notIncludes` pattern bound through a variable is the
-//! bound formula, exactly as if it were written inline.
+//! GH #6936: a `log:includes` / `log:notIncludes` / `log:supports` pattern bound through a
+//! variable is matched as the formula it is bound to when that formula is GROUND under the
+//! binding (blank nodes are its existentials), exactly as the same formula written in the
+//! rule. Any other bound value, a non-ground formula included, still matches as the empty
+//! pattern, as before (GH #6943).
 //!
-//! A formula scope matches it syntactically. A store scope runs it as a premise over the
-//! closure; the automatic stratification cannot see what a variable pattern reads, so it
-//! counts a store-scoped `log:notIncludes ?f` as a negation over every predicate (a
-//! negation cycle, refused by default), and a store-scoped `log:includes ?f` as a
-//! positive read of every predicate whose bound pattern may not itself negate over the
-//! store (the run is refused when it does).
+//! With the store as the scope, the automatic stratification cannot see what a variable
+//! pattern reads: a `log:notIncludes ?f` counts as a negation over every predicate (a
+//! negation cycle, refused by default), and a ground bound `log:includes` pattern that
+//! itself negates over the store is refused at run time.
 
 use sparq_reason::n3::{parser, Term};
-use sparq_reason::{reason_n3_terms, reason_n3_terms_with_cycles, MaterializedN3Graph, NegationCycles};
+use sparq_reason::{reason_n3_terms_with_cycles, MaterializedN3Graph, NegationCycles};
 
 const EX: &str = "http://ex/";
 const DATA: &str = ":a :p :b. :cfg :hit { :a :p :b }. :cfg :miss { :c :p :b }.";
@@ -52,374 +53,104 @@ fn incremental(src: &str) -> Result<Vec<[Term; 3]>, String> {
     MaterializedN3Graph::new(src, &base).map(|g| results(&g.closure()))
 }
 
-fn fired(op: &str, key: &str) -> [Term; 3] {
-    [iri("r"), iri(op), iri(key)]
+fn fired(op: &str, key: &str) -> Vec<[Term; 3]> {
+    vec![[iri("r"), iri(op), iri(key)]]
 }
 
-/// The truth table every engine must reproduce: `{ :a :p :b }` (and the store) includes
-/// the `:hit` pattern and not the `:miss` one.
-fn expected(op: &str, key: &str) -> bool {
-    (op == "includes") == (key == "hit")
+fn none() -> Vec<[Term; 3]> {
+    Vec::new()
 }
 
-/// The issue's reproduction, for a formula scope: the bound pattern is matched.
-#[test]
-fn a_bound_pattern_is_matched_against_a_formula_scope() {
-    for op in ["includes", "notIncludes"] {
-        for key in ["hit", "miss"] {
-            let bound = doc(&rule(op, key, "{ :a :p :b }", true));
-            let inline = doc(&rule(op, key, "{ :a :p :b }", false));
-            let want: Vec<_> = expected(op, key).then(|| fired(op, key)).into_iter().collect();
-            assert_eq!(text(&bound, NegationCycles::Reject).expect("text"), want, "{bound}");
-            assert_eq!(text(&inline, NegationCycles::Reject).expect("text"), want, "{inline}");
-            assert_eq!(incremental(&bound).expect("incremental"), want, "{bound}");
-            assert_eq!(incremental(&inline).expect("incremental"), want, "{inline}");
-        }
+/// The truth table: `{ :a :p :b }` (and the store) include the `:hit` pattern and not the
+/// `:miss` one; `log:supports` agrees with `log:includes` (no rules in the scope).
+fn want(op: &str, key: &str) -> Vec<[Term; 3]> {
+    if (op == "notIncludes") == (key == "hit") {
+        none()
+    } else {
+        fired(op, key)
     }
 }
 
-/// A store-scoped `log:includes` of a bound pattern reads the closure like the inline one.
+/// The issue's reproduction for every operator, with a formula and a store scope: the
+/// ground bound pattern is matched, as the inline one is, on the text engine and the
+/// incremental graph (which routes these rules to the batch engine).
 #[test]
-fn a_bound_pattern_is_matched_against_the_store() {
-    for key in ["hit", "miss"] {
-        let bound = doc(&rule("includes", key, "?scope", true));
-        let inline = doc(&rule("includes", key, "?scope", false));
-        let want: Vec<_> = expected("includes", key).then(|| fired("includes", key)).into_iter().collect();
-        assert_eq!(text(&bound, NegationCycles::Reject).expect("text"), want, "{bound}");
-        assert_eq!(text(&inline, NegationCycles::Reject).expect("text"), want, "{inline}");
-        assert_eq!(incremental(&bound).expect("incremental"), want, "{bound}");
-        assert_eq!(incremental(&inline).expect("incremental"), want, "{inline}");
-    }
-}
-
-/// A store-scoped `log:notIncludes` of a bound pattern negates over every predicate the
-/// pattern could mention, its own rule's conclusion included: the default refuses it as
-/// a negation cycle; the opt-ins evaluate it as they do any such cycle.
-#[test]
-fn a_bound_store_scoped_negation_is_a_negation_cycle() {
-    for key in ["hit", "miss"] {
-        let bound = doc(&rule("notIncludes", key, "?scope", true));
-        let err = text(&bound, NegationCycles::Reject).expect_err("refused");
-        assert!(err.contains("stratification"), "{err}");
-        let err = incremental(&bound).expect_err("refused");
-        assert!(err.contains("stratification"), "{err}");
-        // FailClosed derives nothing from the refused rule.
-        assert_eq!(text(&bound, NegationCycles::FailClosed).expect("fail-closed"), none());
-        // SinglePass matches the bound pattern, as the inline-written one.
-        let want: Vec<_> = expected("notIncludes", key).then(|| fired("notIncludes", key)).into_iter().collect();
-        assert_eq!(text(&bound, NegationCycles::SinglePass).expect("single pass"), want, "{bound}");
-        let inline = doc(&rule("notIncludes", key, "?scope", false));
-        assert_eq!(text(&inline, NegationCycles::Reject).expect("text"), want, "{inline}");
-    }
-}
-
-/// The stratification hazard itself: the bound pattern names a predicate another rule
-/// derives. Written inline, the negation waits for the derivation; bound through a
-/// variable, the analysis cannot see the predicate, so it does not run the rule early.
-#[test]
-fn a_bound_negation_over_a_derived_predicate_is_not_evaluated_early() {
-    let rules = "{ :a :p :b } => { :x :q :y }.
-        { :cfg :late ?f. ?scope log:notIncludes ?f } => { :r :notIncludes :late }.";
-    let src = format!("{} :cfg :late {{ :x :q :y }}.", doc(rules));
-    let inline = src.replace("log:notIncludes ?f", "log:notIncludes { :x :q :y }");
-    assert_eq!(text(&inline, NegationCycles::Reject).expect("stratified"), none());
-    let err = text(&src, NegationCycles::Reject).expect_err("refused");
-    assert!(err.contains("stratification"), "{err}");
-    let closed = reason_n3_terms_with_cycles(&src, None, None, NegationCycles::FailClosed).expect("fail-closed");
-    assert_eq!(results(&closed.facts), none());
-    assert!(closed.facts.contains(&[iri("x"), iri("q"), iri("y")]));
-}
-
-/// A store-scoped `log:includes` whose bound pattern itself negates over the store would
-/// run a negation the stratification never saw: the run is refused.
-#[test]
-fn a_bound_store_pattern_that_negates_is_refused() {
-    for inner in [
-        ":s log:notIncludes { :x :q :y }",
-        "( :t { :x :q :y } () ) log:collectAllIn :s",
-    ] {
-        let src = format!(
-            "{} :cfg :neg {{ {inner} }}.",
-            doc("{ :cfg :neg ?f. ?scope log:includes ?f } => { :r :includes :neg }.")
-        );
-        let err = reason_n3_terms(&src, None).err().expect("refused");
-        assert!(err.contains("bound through a variable"), "{src}: {err}");
-        // A formula scope matches the same pattern syntactically: nothing to stratify.
-        let local = src.replace("?scope log:includes ?f", "{ :a :p :b } log:includes ?f");
-        assert_eq!(text(&local, NegationCycles::Reject).expect("formula scope"), none(), "{local}");
-    }
-}
-
-/// A non-formula object is no pattern: the premise fails for both operators (it used to
-/// match as the empty pattern, so `log:includes` held vacuously).
-#[test]
-fn a_non_formula_pattern_fails_the_premise() {
-    for op in ["includes", "notIncludes"] {
-        let src = format!(
-            "{} :cfg :atom :b.",
-            doc(&format!("{{ :cfg :atom ?f. {{ :a :p :b }} log:{op} ?f }} => {{ :r :{op} :atom }}."))
-        );
-        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), none(), "{src}");
-    }
-}
-
-/// The pattern variable is an input of the operator: a rule may bind it after the
-/// containment atom, for every operator and scope (the subject `:s` is the store).
-#[test]
-fn a_pattern_bound_by_a_later_premise_is_matched() {
+fn a_ground_bound_pattern_is_matched_as_written_inline() {
     for op in ["includes", "notIncludes", "supports"] {
-        for scope in ["{ :a :p :b }", ":s"] {
+        for scope in ["{ :a :p :b }", "?scope"] {
+            // A store-scoped notIncludes of a bound pattern is a negation cycle (below).
+            if op == "notIncludes" && scope == "?scope" {
+                continue;
+            }
             for key in ["hit", "miss"] {
-                let src = doc(&format!("{{ {scope} log:{op} ?f. :cfg :{key} ?f }} => {{ :r :{op} :{key} }}."));
-                let truth = if op == "notIncludes" { "notIncludes" } else { "includes" };
-                let want: Vec<_> = expected(truth, key).then(|| fired(op, key)).into_iter().collect();
-                // The store-scoped notIncludes is a negation cycle (see above): opt in.
-                assert_eq!(text(&src, NegationCycles::SinglePass).expect("text"), want, "{src}");
-                if !(op == "notIncludes" && scope == ":s") {
-                    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-                    assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+                for bound in [true, false] {
+                    let src = doc(&rule(op, key, scope, bound));
+                    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want(op, key), "{src}");
+                    assert_eq!(incremental(&src).expect("incremental"), want(op, key), "{src}");
                 }
             }
         }
     }
 }
 
-/// A pattern variable nothing in the premise can bind leaves no evaluation order: the rule
-/// is refused, not matched as the empty pattern.
+/// A store-scoped `log:notIncludes` of a bound pattern negates over every predicate the
+/// pattern could mention, its own rule's conclusion included: the default refuses it as a
+/// negation cycle, FailClosed drops the rule, SinglePass matches the bound pattern.
 #[test]
-fn an_unbound_pattern_is_refused() {
-    for op in ["includes", "notIncludes", "supports"] {
-        let src = doc(&format!("{{ {{ :a :p :b }} log:{op} ?f }} => {{ :r :{op} :unbound }}."));
-        let err = text(&src, NegationCycles::Reject).expect_err("refused");
-        assert!(err.starts_with("N3: no evaluation order binds every required input"), "{src}: {err}");
+fn a_bound_store_scoped_negation_is_stratified_conservatively() {
+    for key in ["hit", "miss"] {
+        let bound = doc(&rule("notIncludes", key, "?scope", true));
+        let err = text(&bound, NegationCycles::Reject).expect_err("refused");
+        assert!(err.contains("stratification"), "{err}");
+        let err = incremental(&bound).expect_err("refused");
+        assert!(err.contains("stratification"), "{err}");
+        assert_eq!(text(&bound, NegationCycles::FailClosed).expect("fail-closed"), none());
+        assert_eq!(text(&bound, NegationCycles::SinglePass).expect("single pass"), want("notIncludes", key));
+        let inline = doc(&rule("notIncludes", key, "?scope", false));
+        assert_eq!(text(&inline, NegationCycles::Reject).expect("inline"), want("notIncludes", key));
     }
 }
 
-/// Only the parser's empty formula (`{}`, the boolean `true`) is the empty pattern; a
-/// string spelled "true" is no formula.
+/// A store-scoped `log:includes` whose ground bound pattern itself negates over the store
+/// would run a negation the stratification never saw: the run is refused.
 #[test]
-fn only_the_empty_formula_is_the_empty_pattern() {
-    for (key, value, holds) in [("empty", "{}", true), ("plain", "\"true\"", false), ("lang", "\"true\"@en", false)] {
-        for bound in [true, false] {
-            let pat = if bound { "?f" } else { value };
-            let src = format!(
-                "{} :cfg :{key} {value}.",
-                doc(&format!(
-                    "{{ :cfg :{key} ?f. {{ :a :p :b }} log:includes {pat} }} => {{ :r :includes :{key} }}.
-                     {{ :cfg :{key} ?f. {{ :a :p :b }} log:notIncludes {pat} }} => {{ :r :notIncludes :{key} }}."
-                ))
-            );
-            // The empty pattern is included everywhere; a non-formula fails both premises.
-            let want: Vec<_> = holds.then(|| fired("includes", key)).into_iter().collect();
-            assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-        }
-    }
-}
-
-/// A backward rule's document with `@forAll :x`, the premise `premise` proving
-/// `?x :hit :yes`, and forward rules reporting which of `:a` / `:c` was proved.
-fn backward_doc(facts: &str, premise: &str) -> String {
-    format!(
-        "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
-         @prefix list: <http://www.w3.org/2000/10/swap/list#>.
-         @forAll :x.
-         {facts}
-         {{ :x :hit :yes }} <= {{ {premise} }}.
-         {{ :c :hit :yes }} => {{ :r :fired :c }}.
-         {{ :a :hit :yes }} => {{ :r :fired :a }}."
-    )
-}
-
-const BACKWARD_REFUSED: &str = "N3: a formula bound through a variable is unsupported inside a backward rule";
-
-fn refused(src: &str) {
-    let err = text(src, NegationCycles::Reject).expect_err("refused");
-    assert!(err.starts_with(BACKWARD_REFUSED), "{src}: {err}");
-}
-
-/// Inside a backward rule a pattern or clause reached through a variable is refused (its
-/// variables would not share the rule application's bindings; GH #6943). The same
-/// formula written in the rule works as before.
-#[test]
-fn a_formula_bound_inside_a_backward_rule_is_refused() {
-    let want = vec![[iri("r"), iri("fired"), iri("a")]];
-    let stored = ":cfg :pat { :x :p :b }.";
-    for (bound, inline) in [
-        (":cfg :pat ?f. { :a :p :b } log:includes ?f", "{ :a :p :b } log:includes { :x :p :b }"),
-        // A formula from the application's own term, through list:member.
-        ("( { :x :p :b } ) list:member ?f. { :a :p :b } log:includes ?f", "{ :a :p :b } log:includes { :x :p :b }"),
-        (":cfg :pat ?f. ( {} ?f ) log:forAllIn { :a :p :b }", "( {} { :x :p :b } ) log:forAllIn { :a :p :b }"),
-        (":cfg :pat ?f. ( :t ?f ( :t ) ) log:collectAllIn { :a :p :b }", "( :t { :x :p :b } ( :t ) ) log:collectAllIn { :a :p :b }"),
-    ] {
-        refused(&backward_doc(stored, bound));
-        let src = backward_doc(stored, inline);
-        assert_eq!(text(&src, NegationCycles::Reject).expect("inline"), want, "{src}");
-    }
-    // A bound aggregation SUBJECT (template, clause and result pattern together).
-    for (fact, premise) in [
-        (":cfg :agg ( {} { :x :p :b } ).", ":cfg :agg ?s. ?s log:forAllIn { :a :p :b }"),
-        (":cfg :agg ( :t { :x :p :b } ( :t ) ).", ":cfg :agg ?s. ?s log:collectAllIn { :a :p :b }"),
-    ] {
-        refused(&backward_doc(fact, premise));
-    }
-}
-
-/// A formula that escapes a backward proof holds that application's variables, which a
-/// later premise would rebind freely: a forward rule refuses it as a bound pattern. A
-/// source variable spelled in that namespace is refused the same way (fail-closed).
-#[test]
-fn a_formula_holding_a_backward_variable_is_refused() {
-    let escaped = format!(
-        "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
-         @prefix list: <http://www.w3.org/2000/10/swap/list#>.
-         {{ ?x :pattern ?f }} <= {{ ( {{ ?x :p :b }} ) list:member ?f }}.
-         {{ :c :pattern ?f. {{ :a :p :b }} log:includes ?f }} => {{ :r :fired :c }}."
+fn a_bound_store_pattern_that_negates_is_refused() {
+    let src = format!(
+        "{} :cfg :neg {{ :s log:notIncludes {{ :x :q :y }} }}.",
+        doc("{ :cfg :neg ?f. ?scope log:includes ?f } => { :r :includes :neg }.")
     );
-    refused(&escaped);
-    let spelled = doc(":cfg :odd { ?__bw0_x :p :b }. { :cfg :odd ?f. { :a :p :b } log:includes ?f } => { :r :fired :odd }.");
-    refused(&spelled);
+    let err = text(&src, NegationCycles::Reject).expect_err("refused");
+    assert!(err.contains("bound through a variable holds a store-scoped"), "{err}");
 }
 
-/// Forward rules keep bound patterns, clauses and aggregation subjects, sharing the rule's
-/// variables through the binding.
+/// Each containment tests its pattern's blank nodes afresh: a witness found by one test is
+/// not carried into the next (on main the first witness leaked into the binding).
 #[test]
-fn a_bound_formula_in_a_forward_rule_shares_the_rules_variables() {
-    let forward = |pat: &str| {
-        format!(
-            "@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
-             @forAll :x.
-             :cfg :pat {{ :x :p :b }}. :a :q :yes. :c :q :yes.
-             {{ :x :q :yes. :cfg :pat ?f. {{ :a :p :b }} log:includes {pat} }} => {{ :r :fired :x }}."
+fn existential_witnesses_do_not_leak_between_containments() {
+    for pat in ["?f", "{ _:x :p :b }"] {
+        let src = format!(
+            "{} :cfg :blank {{ _:x :p :b }}.",
+            doc(&format!(
+                "{{ :cfg :blank ?f. {{ :a :p :b }} log:includes {pat}. {{ :c :p :b }} log:includes {pat} }} => {{ :r :includes :both }}.
+                 {{ :cfg :blank ?f. {{ :a :p :b }} log:includes {pat}. {{ :c :p :b }} log:notIncludes {pat} }} => {{ :r :notIncludes :second }}."
+            ))
+        );
+        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), fired("includes", "both"), "{src}");
+    }
+}
+
+/// A bound formula that is not ground keeps main's behaviour: it matches as the empty
+/// pattern, so `log:includes` holds and `log:notIncludes` fails whatever the scope holds.
+/// (Main derives exactly `:r :includes :open` here; matching such patterns is GH #6943.)
+#[test]
+fn a_non_ground_bound_pattern_behaves_as_on_main() {
+    let src = format!(
+        "{} :cfg :open {{ ?x :q :b }}.",
+        doc(
+            "{ :cfg :open ?f. { :a :p :b } log:includes ?f } => { :r :includes :open }.
+             { :cfg :open ?f. { :a :p :b } log:notIncludes ?f } => { :r :notIncludes :open }."
         )
-    };
-    let want = vec![[iri("r"), iri("fired"), iri("a")]];
-    for pat in ["?f", "{ :x :p :b }"] {
-        let src = forward(pat);
-        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-    }
-    let src = doc(
-        ":cfg :all ( {} { :a :p :b } ). :cfg :one { :a :p :b }.
-         { :cfg :all ?s. ?s log:forAllIn { :a :p :b } } => { :r :fired :subject }.
-         { :cfg :one ?f. ( :t ?f ( :t ) ) log:collectAllIn { :a :p :b } } => { :r :fired :clause }.",
     );
-    let mut want = vec![[iri("r"), iri("fired"), iri("clause")], [iri("r"), iri("fired"), iri("subject")]];
-    want.sort_by_key(|t| format!("{t:?}"));
-    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-}
-
-/// An unbound scope variable means the store, so it is no input to wait for: an operator
-/// whose only unbound input is such a scope runs, and can bind the pattern another
-/// operator needs, in either written order.
-#[test]
-fn a_store_scoped_operator_can_bind_another_operators_pattern() {
-    let consumer = "{ :a :p :b } log:includes ?f";
-    let producer = "?scope log:includes { :cfg :hit ?f }";
-    for premise in [format!("{consumer}. {producer}"), format!("{producer}. {consumer}")] {
-        let src = doc(&format!("{{ {premise} }} => {{ :r :includes :hit }}."));
-        let want = vec![fired("includes", "hit")];
-        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-        assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
-    }
-}
-
-/// A scope variable shared by two store-scoped operators binds in neither: each means the
-/// store, so the producer of the other's pattern runs first, in either written order.
-#[test]
-fn a_shared_store_scope_does_not_block_the_pattern_producer() {
-    let consumer = "?scope log:includes ?f";
-    let producer = "?scope log:includes { :cfg :hit ?f }";
-    for premise in [format!("{consumer}. {producer}"), format!("{producer}. {consumer}")] {
-        let src = doc(&format!("{{ {premise} }} => {{ :r :includes :hit }}."));
-        let want = vec![fired("includes", "hit")];
-        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-        assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
-    }
-}
-
-const BINDS_REFUSED: &str = "N3: a formula bound through a variable may not bind new variables";
-
-#[track_caller]
-fn binds_refused(src: &str) {
-    let err = text(src, NegationCycles::Reject).expect_err("refused");
-    assert!(err.starts_with(BINDS_REFUSED), "{src}: {err}");
-}
-
-/// A pattern given through a variable is matched against the bindings in place and may
-/// not bind a new variable (GH #6943): one that would is refused, never matched with that
-/// variable left for a later premise to read as unbound. Written in the rule, the same
-/// pattern binds as usual.
-#[test]
-fn a_bound_pattern_may_not_bind_new_variables() {
-    let facts = ":cfg :outer { :cfg :inner ?f }. :cfg :inner { :a :p :b }.
-         :cfg :wrap { :cfg :scope ?s }. :cfg :scope { :c :p :b }.";
-    let with = |rule: &str| format!("{} {facts}", doc(rule));
-    // A pattern bound only by executing another bound pattern: nothing the rule writes binds
-    // `?f`, so the rule is refused before it runs.
-    let src = with(
-        "{ :cfg :outer ?outer. ?store log:includes ?outer. { :a :p :b } log:includes ?f } => { :r :includes :hit }.",
-    );
-    let err = text(&src, NegationCycles::Reject).expect_err("refused");
-    assert!(err.starts_with("N3: no evaluation order binds every required input"), "{src}: {err}");
-    // A consumer of the scope a bound pattern would bind: the bound pattern cannot bind
-    // `?s`, so the consumer reads the store (which lacks `:c :p :b`) and nothing is derived;
-    // were it to get that far, the bound pattern itself would be refused. The inline
-    // spelling binds `?s` first and matches the formula it names.
-    let src = with("{ ?s log:includes { :c :p :b }. :cfg :wrap ?o. ?store log:includes ?o } => { :r :includes :scope }.");
-    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), none(), "{src}");
-    binds_refused(&with("{ :cfg :wrap ?o. ?store log:includes ?o. ?s log:includes { :a :p :b } } => { :r :includes :scope }."));
-    let inline = with(
-        "{ ?s log:includes { :c :p :b }. :cfg :wrap ?o. ?store log:includes { :cfg :scope ?s } } => { :r :includes :scope }.",
-    );
-    assert_eq!(text(&inline, NegationCycles::Reject).expect("inline"), vec![fired("includes", "scope")], "{inline}");
-    // (Round findings) a negation of what a bound pattern would bind is never decided
-    // against the store first ...
-    binds_refused(&with(
-        "{ :cfg :wrap ?o. ?store log:includes ?o. ?s log:notIncludes { :c :p :b } } => { :r :notIncludes :scope }.",
-    ));
-    // ... and two consumers of a hidden binding are refused for the producer, not for
-    // their order.
-    binds_refused(&with(
-        "{ :cfg :outer ?outer. ?store log:includes ?outer. { :a :p :b } log:includes ?f. \
-           ?f log:includes { :a :p :b } } => { :r :includes :both }.",
-    ));
-    // The result list of a collectAllIn subject given through a variable binds nothing new.
-    binds_refused(&format!(
-        "{} :cfg :agg ( :t {{ :a :p :b }} ?l ).",
-        doc("{ :cfg :agg ?s. ?s log:collectAllIn { :a :p :b } } => { :r :collected :yes }.")
-    ));
-}
-
-/// A `log:forAllIn` clause given through a variable must be a formula when it runs: an
-/// unbound one fails the premise (it is never vacuously satisfied), and one no premise
-/// can bind leaves no evaluation order.
-#[test]
-fn an_unbound_aggregation_clause_is_never_vacuously_true() {
-    let src = doc("{ ( { :a :p :b } ?missing ) log:forAllIn {} } => { :r :forAll :vacuous }.");
-    let err = text(&src, NegationCycles::Reject).expect_err("refused");
-    assert!(err.starts_with("N3: no evaluation order binds every required input"), "{src}: {err}");
-    // Mentioned (not bound) by an earlier negation, the clause is still unbound when it runs.
-    let src = doc(
-        "{ ?scope log:notIncludes { :x :y ?missing }. ( { :a :p :b } ?missing ) log:forAllIn {} } \
-         => { :r :forAll :vacuous }.",
-    );
-    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), none(), "{src}");
-}
-
-/// The compiled evaluator has no variable pattern: it refuses the rule, so its callers
-/// route the document to the batch engine instead of diverging from it.
-#[cfg(feature = "compiled-rules")]
-#[test]
-fn the_compiled_evaluator_refuses_a_bound_pattern() {
-    for op in ["includes", "notIncludes"] {
-        let src = doc(&rule(op, "miss", "?scope", true));
-        assert!(sparq_reason::n3::compiled::compile(&src).is_err(), "{src}");
-    }
-    // The same negation written inline over a plain pattern is in the compiled subset.
-    let inline = format!("@prefix : <{EX}>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
-        {{ :a :p ?o. ?scope log:notIncludes {{ :c :p ?o }} }} => {{ :r :notIncludes :miss }}.");
-    assert!(sparq_reason::n3::compiled::compile(&inline).is_ok(), "{inline}");
-}
-
-fn none() -> Vec<[Term; 3]> {
-    Vec::new()
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), fired("includes", "open"), "{src}");
+    assert_eq!(incremental(&src).expect("incremental"), fired("includes", "open"), "{src}");
 }
