@@ -889,7 +889,7 @@ mod tests {
         );
         // The write's rollback keeps failing, and is set aside with the lock.
         *store.fail_delete_of.lock().unwrap() = Some(b.clone());
-        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+        let left = super::super::Unsettled::new(vec![super::super::Undo::Restore {
             key: b.clone(),
             prior: None,
         }]);
@@ -923,7 +923,7 @@ mod tests {
         assert_eq!(search_all(&state).await.status(), StatusCode::OK);
         // A stuck change to z sets aside z and the container listing it, not the root.
         *store.fail_delete_of.lock().unwrap() = Some(z.clone());
-        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+        let left = super::super::Unsettled::new(vec![super::super::Undo::Restore {
             key: z.clone(),
             prior: None,
         }]);
@@ -963,7 +963,7 @@ mod tests {
         // Meanwhile a stuck change to a sets aside a and the root, both already behind the
         // walk (or a ahead of it); b is let go untouched.
         *store.fail_delete_of.lock().unwrap() = Some(a.clone());
-        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+        let left = super::super::Unsettled::new(vec![super::super::Undo::Restore {
             key: a.clone(),
             prior: None,
         }]);
