@@ -20,16 +20,9 @@
 //!   builtin reads that predicate (whatever its namespace); a variable or other non-IRI
 //!   predicate is UNKNOWN;
 //! * a store-scoped `log:includes` / `log:supports` / `log:notIncludes` reads the atoms of
-//!   its `{ … }` object; inside `notIncludes` they are NEGATIVE. A scope that is not a
-//!   formula literal counts as the store, even when a variable may turn out to hold a
-//!   formula;
-//! * an object given through a variable is matched as the ground formula it is bound to at
-//!   run time (GH #6936), which the analysis cannot see: UNKNOWN. Under `notIncludes` it is
-//!   negative, so the rule negates over its own conclusions too, a negation cycle (refused
-//!   by default; the [`NegationCycles`] opt-ins evaluate it as any other). Under
-//!   `includes` / `supports` it is positive, and the evaluator refuses, failing the run, a
-//!   bound pattern that itself holds a store-scoped negation or aggregation
-//!   ([`has_store_negation`]), which this analysis never saw;
+//!   its `{ … }` object (the evaluator reads only a literal formula object); inside
+//!   `notIncludes` they are NEGATIVE. A scope that is not a formula literal counts as the
+//!   store, even when a variable may turn out to hold a formula;
 //! * a store-scoped `log:collectAllIn` / `log:forAllIn` reads its literal clause formulas
 //!   NEGATIVELY; a clause or subject given through a variable is UNKNOWN and negative;
 //! * every other premise relation reads what its registry entry declares
@@ -152,7 +145,7 @@ fn local_scope(t: &Term) -> bool {
 
 /// Cheap syntactic pre-check: does a premise hold a store-scoped non-monotonic operator?
 /// (A store-scoped `log:includes` is followed into its formula, which may nest one.)
-pub(crate) fn has_store_negation(atoms: &[[Term; 3]]) -> bool {
+fn has_store_negation(atoms: &[[Term; 3]]) -> bool {
     atoms.iter().any(|a| {
         if let Some(op) = scope_op(&a[1]) {
             if local_scope(&a[0]) {
@@ -174,13 +167,8 @@ fn premise_deps<'a>(atoms: &'a [[Term; 3]], neg: bool, out: &mut Vec<Dep<'a>>) {
                 out.push((Pred::Unknown, neg));
             }
             if !local_scope(&atom[0]) {
-                let neg = neg || matches!(op, ScopeOp::NotIncludes);
-                match &atom[2] {
-                    Term::Formula(inner) => premise_deps(inner, neg, out),
-                    // Bound at run time: an unknown pattern.
-                    Term::Var(_) | Term::Blank(_) => out.push((Pred::Unknown, neg)),
-                    // `{}` has no atoms; any other value is the empty pattern.
-                    _ => {}
+                if let Term::Formula(inner) = &atom[2] {
+                    premise_deps(inner, neg || matches!(op, ScopeOp::NotIncludes), out);
                 }
             }
             continue;
@@ -391,7 +379,7 @@ pub(crate) fn stratify(
         });
         let via = if via_unknown {
             " (the cycle runs through a dependency the analysis cannot pin to one predicate: \
-             a variable predicate, a variable clause or pattern, or a nested closure, which counts as \
+             a variable predicate, a variable clause, or a nested closure, which counts as \
              every predicate)"
         } else {
             ""

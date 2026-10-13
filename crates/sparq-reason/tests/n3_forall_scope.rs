@@ -7,7 +7,7 @@
 //! universal belongs to its quoted formula, matches only itself and is never substituted. Document-level `@forAll` is unchanged.
 
 use sparq_reason::n3::{parser, Term};
-use sparq_reason::{reason_n3_pass_all, reason_n3_terms, reason_n3_terms_with_cycles, NegationCycles, RuleVars};
+use sparq_reason::{reason_n3_pass_all, reason_n3_terms, RuleVars};
 
 const EX: &str = "http://ex/";
 
@@ -350,28 +350,13 @@ fn bound_pattern_cases(pattern: &str) -> Vec<String> {
         .collect()
 }
 
-/// A store-scoped `log:notIncludes` of a bound pattern is a negation cycle with its own
-/// conclusion (GH #6936): the default refuses it before it runs, so these cases opt in to
-/// `SinglePass` to reach the builtin.
-fn store_negation(src: &str) -> bool {
-    src.contains("?scope log:notIncludes")
-}
-
 #[test]
 fn a_bound_quantified_containment_pattern_is_rejected() {
     for src in bound_pattern_cases("{ @forAll :x. :x :p :b }") {
-        let base = parser::parse(&src).expect("parses").facts;
-        let graph = sparq_reason::MaterializedN3Graph::new(&src, &base).err().expect("rejected");
-        if store_negation(&src) {
-            let err = reason_n3_terms(&src, None).err().expect("rejected");
-            assert!(err.contains("stratification"), "{src}: {err}");
-            let err = reason_n3_terms_with_cycles(&src, None, None, NegationCycles::SinglePass).err().expect("rejected");
-            assert_eq!(err, QUANTIFIER_ERROR, "{src}");
-            assert!(graph.contains("stratification"), "{src}: {graph}");
-            continue;
-        }
         assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), QUANTIFIER_ERROR, "{src}");
-        assert!(graph.starts_with(QUANTIFIER_ERROR), "{src}: {graph}");
+        let base = parser::parse(&src).expect("parses").facts;
+        let err = sparq_reason::MaterializedN3Graph::new(&src, &base).err().expect("rejected");
+        assert!(err.starts_with(QUANTIFIER_ERROR), "{src}: {err}");
     }
 }
 
@@ -379,12 +364,8 @@ fn a_bound_quantified_containment_pattern_is_rejected() {
 #[test]
 fn a_bound_unquantified_containment_pattern_is_not_refused() {
     for src in bound_pattern_cases("{ :c :p :b }") {
-        let base = parser::parse(&src).expect("parses").facts;
-        if store_negation(&src) {
-            assert!(reason_n3_terms_with_cycles(&src, None, None, NegationCycles::SinglePass).is_ok(), "{src}");
-            continue;
-        }
         assert!(reason_n3_terms(&src, None).is_ok(), "{src}");
+        let base = parser::parse(&src).expect("parses").facts;
         let g = sparq_reason::MaterializedN3Graph::new(&src, &base).expect("accepted");
         assert_eq!(g.stratification_warning(), None, "{src}");
     }

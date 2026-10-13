@@ -1,13 +1,10 @@
-//! GH #6936: a `log:includes` / `log:notIncludes` / `log:supports` pattern bound through a
-//! variable is matched as the formula it is bound to when that formula is GROUND under the
-//! binding (blank nodes are its existentials), exactly as the same formula written in the
-//! rule. Any other bound value, a non-ground formula included, still matches as the empty
-//! pattern, as before (GH #6943).
-//!
-//! With the store as the scope, the automatic stratification cannot see what a variable
-//! pattern reads: a `log:notIncludes ?f` counts as a negation over every predicate (a
-//! negation cycle, refused by default), and a ground bound `log:includes` pattern that
-//! itself negates over the store is refused at run time.
+//! GH #6936: with a FORMULA as the scope, a `log:includes` / `log:notIncludes` /
+//! `log:supports` pattern bound through a variable is matched as the formula it is bound
+//! to, fully substituted, when that formula is GROUND under the binding (blank nodes are
+//! its existentials), exactly as the same formula written in the rule. Every other bound
+//! value (a non-ground formula included), and every bound pattern with the STORE as the
+//! scope, still matches as the empty pattern, as before (GH #6943): the stratification
+//! does not read a pattern given through a variable.
 
 use sparq_reason::n3::{parser, Term};
 use sparq_reason::{reason_n3_terms_with_cycles, MaterializedN3Graph, NegationCycles};
@@ -71,56 +68,87 @@ fn want(op: &str, key: &str) -> Vec<[Term; 3]> {
     }
 }
 
-/// The issue's reproduction for every operator, with a formula and a store scope: the
-/// ground bound pattern is matched, as the inline one is, on the text engine and the
-/// incremental graph (which routes these rules to the batch engine).
+/// The issue's reproduction for every operator with a formula scope: the ground bound
+/// pattern is matched as the inline one is, on the text engine and the incremental graph
+/// (which routes these rules to the batch engine).
 #[test]
 fn a_ground_bound_pattern_is_matched_as_written_inline() {
     for op in ["includes", "notIncludes", "supports"] {
-        for scope in ["{ :a :p :b }", "?scope"] {
-            // A store-scoped notIncludes of a bound pattern is a negation cycle (below).
-            if op == "notIncludes" && scope == "?scope" {
-                continue;
-            }
-            for key in ["hit", "miss"] {
-                for bound in [true, false] {
-                    let src = doc(&rule(op, key, scope, bound));
-                    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want(op, key), "{src}");
-                    assert_eq!(incremental(&src).expect("incremental"), want(op, key), "{src}");
-                }
+        for key in ["hit", "miss"] {
+            for bound in [true, false] {
+                let src = doc(&rule(op, key, "{ :a :p :b }", bound));
+                assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want(op, key), "{src}");
+                assert_eq!(incremental(&src).expect("incremental"), want(op, key), "{src}");
             }
         }
     }
 }
 
-/// A store-scoped `log:notIncludes` of a bound pattern negates over every predicate the
-/// pattern could mention, its own rule's conclusion included: the default refuses it as a
-/// negation cycle, FailClosed drops the rule, SinglePass matches the bound pattern.
+/// With the store as the scope a bound pattern keeps the empty-pattern match, under every
+/// negation-cycle mode: `log:includes` / `log:supports` hold and `log:notIncludes` fails,
+/// whatever the pattern (GH #6943). The inline pattern is matched.
 #[test]
-fn a_bound_store_scoped_negation_is_stratified_conservatively() {
-    for key in ["hit", "miss"] {
-        let bound = doc(&rule("notIncludes", key, "?scope", true));
-        let err = text(&bound, NegationCycles::Reject).expect_err("refused");
-        assert!(err.contains("stratification"), "{err}");
-        let err = incremental(&bound).expect_err("refused");
-        assert!(err.contains("stratification"), "{err}");
-        assert_eq!(text(&bound, NegationCycles::FailClosed).expect("fail-closed"), none());
-        assert_eq!(text(&bound, NegationCycles::SinglePass).expect("single pass"), want("notIncludes", key));
-        let inline = doc(&rule("notIncludes", key, "?scope", false));
-        assert_eq!(text(&inline, NegationCycles::Reject).expect("inline"), want("notIncludes", key));
+fn a_bound_store_scoped_pattern_matches_as_the_empty_pattern() {
+    for op in ["includes", "notIncludes", "supports"] {
+        for key in ["hit", "miss"] {
+            let src = doc(&rule(op, key, "?scope", true));
+            let empty = if op == "notIncludes" { none() } else { fired(op, key) };
+            for cycles in [NegationCycles::Reject, NegationCycles::FailClosed, NegationCycles::SinglePass] {
+                assert_eq!(text(&src, cycles).expect("text"), empty, "{src}");
+            }
+            assert_eq!(incremental(&src).expect("incremental"), empty, "{src}");
+            let inline = doc(&rule(op, key, "?scope", false));
+            assert_eq!(text(&inline, NegationCycles::Reject).expect("inline"), want(op, key), "{inline}");
+        }
     }
 }
 
-/// A store-scoped `log:includes` whose ground bound pattern itself negates over the store
-/// would run a negation the stratification never saw: the run is refused.
+/// Why the store scope keeps the empty pattern: the stratification does not read a bound
+/// pattern, so the rule below runs in the first stratum, before the later one derives the
+/// pattern's fact. Matching the pattern there would miss a conclusion the empty-pattern
+/// match derives, and the final store supports.
 #[test]
-fn a_bound_store_pattern_that_negates_is_refused() {
+fn a_bound_store_scoped_pattern_derived_in_a_later_stratum_still_holds() {
     let src = format!(
-        "{} :cfg :neg {{ :s log:notIncludes {{ :x :q :y }} }}.",
-        doc("{ :cfg :neg ?f. ?scope log:includes ?f } => { :r :includes :neg }.")
+        "{} :cfg :late {{ :z :w :v }}.",
+        doc(
+            "{ :a :p :b } => { :m :n :o }.
+             { ?s log:notIncludes { :m :n :o2 } } => { :z :w :v }.
+             { :cfg :late ?f. ?scope log:includes ?f } => { :r :includes :late }."
+        )
+    );
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), fired("includes", "late"), "{src}");
+}
+
+/// A pattern whose nested formulas are bound through further variables is matched fully
+/// substituted, not with the nested values compared as written: `?f = { :a :p ?o }`,
+/// `?o = { :b :q ?x }`, `?x = :c` is the pattern `{ :a :p { :b :q :c } }`.
+#[test]
+fn a_bound_pattern_is_matched_fully_substituted() {
+    let src = format!(
+        "{} :cfg :f {{ :a :p ?o }}. :cfg :o {{ :b :q ?x }}. :cfg :x :c. :cfg :y :d.",
+        doc(
+            "{ :cfg :f ?f. :cfg :o ?o. :cfg :x ?x. { :a :p { :b :q :c } } log:includes ?f } => { :r :includes :nested }.
+             { :cfg :f ?f. :cfg :o ?o. :cfg :x ?x. { :a :p { :b :q :c } } log:notIncludes ?f } => { :r :notIncludes :nested }.
+             { :cfg :f ?f. :cfg :o ?o. :cfg :y ?x. { :a :p { :b :q :c } } log:notIncludes ?f } => { :r :notIncludes :other }."
+        )
+    );
+    let mut want = fired("includes", "nested");
+    want.extend(fired("notIncludes", "other"));
+    want.sort_by_key(|t| format!("{t:?}"));
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+    assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+}
+
+/// A bound pattern whose binding refers back to itself fails the run.
+#[test]
+fn a_cyclic_bound_pattern_fails_the_run() {
+    let src = format!(
+        "{} :cfg :cyc {{ :a :p ?f }}.",
+        doc("{ :cfg :cyc ?f. { :a :p :b } log:includes ?f } => { :r :includes :cycle }.")
     );
     let err = text(&src, NegationCycles::Reject).expect_err("refused");
-    assert!(err.contains("bound through a variable holds a store-scoped"), "{err}");
+    assert!(err.contains("cyclic binding"), "{err}");
 }
 
 /// Each containment tests its pattern's blank nodes afresh: a witness found by one test is

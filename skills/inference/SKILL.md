@@ -107,17 +107,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
 // A log:includes / log:notIncludes / log:supports PATTERN reached through a variable is
-// matched as the bound formula only when that formula is GROUND under the rule's bindings
-// (no variable at any depth; blank nodes are its existentials), exactly as if written in
-// the rule (GH #6936). Any other bound value, a formula still holding a variable included,
-// matches as the EMPTY pattern (includes holds, notIncludes fails) — full matching is
-// https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. A
-// cyclic binding chain fails the run. Each containment matches its blanks afresh (no
-// witness carries over to the next containment). Store-scoped, the stratification counts
-// a variable pattern as EVERY predicate: under notIncludes negatively, so the rule is a
-// negation cycle with its own conclusion (refused by default; FailClosed drops it,
-// SinglePass runs it); under includes/supports positively, and a bound pattern that itself
-// holds a store-scoped notIncludes / collectAllIn / forAllIn fails the run.
+// matched, with a { … } formula (or {}) as the scope, as the bound formula fully
+// substituted, only when that formula is GROUND under the rule's bindings (no variable at
+// any depth; blank nodes are its existentials), exactly as if written in the rule (GH
+// #6936). Any other bound value (a formula still holding a variable included), and EVERY
+// bound pattern with the STORE as the scope, matches as the EMPTY pattern (includes holds,
+// notIncludes fails) — the stratification does not read a variable pattern; full matching
+// is https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. A
+// cyclic binding chain fails the run; a substituted pattern past max_term_bytes or the
+// term-depth limit is a cut. Each containment matches its blanks afresh (no witness
+// carries over to the next containment).
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares

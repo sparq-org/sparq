@@ -650,6 +650,193 @@ fn apply_deep(t: &Term, b: &super::Binding) -> Term {
     }
 }
 
+/// What [`resolve_bound_formula`] found for a containment's object.
+pub(crate) enum BoundFormula {
+    /// Not a variable bound (possibly through other variables) to a `{ … }` formula that is
+    /// ground under the binding: the object is matched as before.
+    Open,
+    /// The bound formula, every variable at any depth substituted through its whole
+    /// binding chain. Blank nodes are kept (the pattern's existentials).
+    Ground(Vec<[Term; 3]>),
+    /// A binding chain reaches a variable it is already resolving.
+    Cyclic,
+    /// The substituted formula would pass the run's term-size or term-depth allowance: a
+    /// cut (past the size limit, also the run's refusal), and nothing was built.
+    Refused,
+}
+
+/// What a bound-pattern refusal names.
+struct BoundPattern;
+
+impl std::fmt::Display for BoundPattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a containment pattern bound through a variable")
+    }
+}
+
+/// The formula a containment's `object` is bound to under `b`, fully substituted, when
+/// `object` is a variable bound, possibly through other variables, to a `{ … }` formula
+/// that is GROUND under `b`: every variable in it, at any depth (nested formulas
+/// included), is bound, through its whole binding chain, to a ground term. One walk
+/// decides groundness and builds the formula the containment matches, so the two cannot
+/// disagree (GH #6936).
+///
+/// Nothing here recurses. The variables reachable from `object` are classified first by
+/// a depth-first search over an explicit stack, which visits each binding once (so it is
+/// linear in the binding): a variable met again while its own value is being resolved is
+/// [`BoundFormula::Cyclic`] (reported even when another part is open), an unbound one
+/// makes the formula [`BoundFormula::Open`]. Only a ground, acyclic formula is then built,
+/// again over an explicit stack, charging every node to the run's
+/// [`ClosureLimits::max_term_bytes`] ([`derived_term`]) and every level to its term-depth
+/// allowance ([`generated`]); past either it stops, as a cut, with
+/// [`BoundFormula::Refused`]. Sharing in the binding (a variable named twice) is charged
+/// each time it is copied, so the budget bounds the work as well as the result.
+pub(crate) fn resolve_bound_formula(object: &Term, b: &super::Binding, run: &Truncation) -> Bounded<BoundFormula> {
+    let Term::Var(root) = object else {
+        return Bounded::complete(BoundFormula::Open);
+    };
+    // Follow a chain of variables to the bound value.
+    let mut chain: Vec<&str> = vec![root.as_str()];
+    let mut cur = match b.get(root) {
+        Some(val) => val,
+        None => return Bounded::complete(BoundFormula::Open),
+    };
+    while let Term::Var(w) = cur {
+        if chain.contains(&w.as_str()) {
+            return Bounded::complete(BoundFormula::Cyclic);
+        }
+        chain.push(w);
+        match b.get(w) {
+            Some(val) => cur = val,
+            None => return Bounded::complete(BoundFormula::Open),
+        }
+    }
+    if !matches!(cur, Term::Formula(_)) {
+        return Bounded::complete(BoundFormula::Open);
+    }
+
+    // Classify: a cycle anywhere, or an unbound variable. `true` = being resolved (its
+    // value's variables are still on the stack), `false` = done.
+    enum Visit<'a> {
+        Enter(&'a str),
+        Leave(&'a str),
+    }
+    let mut state: HashMap<&str, bool> = HashMap::new();
+    let mut open = false;
+    let mut todo: Vec<Visit<'_>> = vec![Visit::Enter(root.as_str())];
+    let mut terms: Vec<&Term> = Vec::new();
+    while let Some(step) = todo.pop() {
+        let v = match step {
+            Visit::Leave(v) => {
+                state.insert(v, false);
+                continue;
+            }
+            Visit::Enter(v) => v,
+        };
+        match state.get(v) {
+            Some(true) => return Bounded::complete(BoundFormula::Cyclic),
+            Some(false) => continue,
+            None => {}
+        }
+        let Some(val) = b.get(v) else {
+            open = true;
+            state.insert(v, false);
+            continue;
+        };
+        state.insert(v, true);
+        todo.push(Visit::Leave(v));
+        terms.push(val);
+        while let Some(t) = terms.pop() {
+            match t {
+                Term::Var(w) => todo.push(Visit::Enter(w.as_str())),
+                Term::List(ms) => terms.extend(ms),
+                Term::Formula(ts) => terms.extend(ts.iter().flatten()),
+                Term::Triple(tr) => terms.extend(tr.iter()),
+                Term::Iri(_) | Term::Lit(..) | Term::Blank(_) => {}
+            }
+        }
+    }
+    if open {
+        return Bounded::complete(BoundFormula::Open);
+    }
+
+    // Build it: every variable is bound and no chain is cyclic, so this ends. Each task
+    // either visits a term `d` containers deep or assembles a container from the last
+    // `n` built terms.
+    enum Task<'a> {
+        Visit(&'a Term, usize),
+        List(usize),
+        Formula(usize),
+        Triple,
+    }
+    let limit = run.limits.max_term_bytes;
+    let room = run.term_depth.get();
+    let mut bytes = 0usize;
+    let mut built: Vec<Term> = Vec::new();
+    let mut tasks: Vec<Task<'_>> = vec![Task::Visit(cur, 0)];
+    while let Some(task) = tasks.pop() {
+        match task {
+            Task::Visit(mut t, d) => {
+                while let Term::Var(v) = t {
+                    match b.get(v) {
+                        Some(val) => t = val,
+                        None => break,
+                    }
+                }
+                let inside = d + 1;
+                match t {
+                    Term::List(_) | Term::Formula(_) | Term::Triple(_) if inside > room => {
+                        return Bounded::cut(BoundFormula::Refused, TERM_DEPTH_CUT);
+                    }
+                    Term::List(ms) => {
+                        bytes = bytes.saturating_add(TERM_NODE_BYTES);
+                        tasks.push(Task::List(ms.len()));
+                        tasks.extend(ms.iter().rev().map(|m| Task::Visit(m, inside)));
+                    }
+                    Term::Formula(ts) => {
+                        bytes = bytes.saturating_add(TERM_NODE_BYTES);
+                        tasks.push(Task::Formula(ts.len()));
+                        tasks.extend(ts.iter().flatten().rev().map(|m| Task::Visit(m, inside)));
+                    }
+                    Term::Triple(tr) => {
+                        bytes = bytes.saturating_add(TERM_NODE_BYTES);
+                        tasks.push(Task::Triple);
+                        tasks.extend(tr.iter().rev().map(|m| Task::Visit(m, inside)));
+                    }
+                    atom => {
+                        bytes = bytes.saturating_add(term_bytes(atom));
+                        built.push(atom.clone());
+                    }
+                }
+                if bytes > limit {
+                    return derived_term(run, &BoundPattern, bytes, || bytes).map(|_| BoundFormula::Refused);
+                }
+            }
+            Task::List(n) => {
+                let ms = built.split_off(built.len() - n);
+                built.push(Term::List(ms));
+            }
+            Task::Formula(n) => {
+                let mut ms = built.split_off(built.len() - 3 * n).into_iter();
+                let ts: Vec<[Term; 3]> = (0..n)
+                    .filter_map(|_| Some([ms.next()?, ms.next()?, ms.next()?]))
+                    .collect();
+                built.push(Term::Formula(ts));
+            }
+            Task::Triple => {
+                let mut ms = built.split_off(built.len() - 3).into_iter();
+                if let (Some(s), Some(p), Some(o)) = (ms.next(), ms.next(), ms.next()) {
+                    built.push(Term::Triple(Box::new([s, p, o])));
+                }
+            }
+        }
+    }
+    match built.pop() {
+        Some(Term::Formula(ts)) => Bounded::complete(BoundFormula::Ground(ts)),
+        _ => Bounded::complete(BoundFormula::Open),
+    }
+}
+
 /// The round and fact allowance of one forward closure (`run_closure`).
 pub(crate) struct ClosureRounds {
     /// Rounds the closure may still run.
@@ -1189,6 +1376,79 @@ mod tests {
         let sink = Cell::new(false);
         let v = settle(&sink, b);
         (v, sink.get())
+    }
+
+    /// GH #6936: a containment pattern reached through a variable resolves to its bound
+    /// formula, fully substituted, only when that formula is ground; a cyclic binding is
+    /// reported; past the run's term-size or term-depth allowance it is a cut, and the
+    /// walk takes no stack per binding or per level.
+    #[test]
+    fn bound_patterns_resolve_ground_formulas_within_the_run_limits() {
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let var = |s: &str| Term::Var(s.into());
+        let f = |o: Term| Term::Formula(vec![[iri("a"), iri("p"), o]]);
+        let bind = |pairs: Vec<(&str, Term)>| -> crate::n3::Binding {
+            pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+        };
+        let run = Truncation::top_level();
+        let resolve = |o: &Term, b: &crate::n3::Binding, run: &Truncation| {
+            let r = resolve_bound_formula(o, b, run);
+            let cut = r.cut.is_some();
+            (r.value, cut)
+        };
+        // Ground through a chain, with a blank node and nested bound variables, built
+        // fully substituted.
+        let b = bind(vec![
+            ("f", var("g")),
+            ("g", f(Term::Formula(vec![[Term::Blank("x".into()), iri("q"), var("o")]]))),
+            ("o", f(var("c"))),
+            ("c", iri("c")),
+        ]);
+        let want = vec![[iri("a"), iri("p"), Term::Formula(vec![[Term::Blank("x".into()), iri("q"), f(iri("c"))]])]];
+        assert!(matches!(resolve(&var("f"), &b, &run), (BoundFormula::Ground(ts), false) if ts == want));
+        // Open: a non-ground formula, not a formula, unbound, written in place.
+        let b = bind(vec![("f", f(var("o"))), ("l", iri("b"))]);
+        for o in [var("f"), var("l"), var("u"), f(iri("b"))] {
+            assert!(matches!(resolve(&o, &b, &run), (BoundFormula::Open, false)));
+        }
+        // Cycles: in the chain, through the formula, through a list, and after an open part.
+        for b in [
+            bind(vec![("f", var("g")), ("g", var("f"))]),
+            bind(vec![("f", f(var("f")))]),
+            bind(vec![("f", f(var("o"))), ("o", Term::List(vec![var("o")]))]),
+            bind(vec![("f", Term::Formula(vec![[var("u"), iri("p"), var("o")]])), ("o", var("f"))]),
+        ] {
+            assert!(matches!(resolve(&var("f"), &b, &run), (BoundFormula::Cyclic, false)));
+        }
+        // A long chain of variables takes no stack.
+        let n = 100_000;
+        let mut pairs = vec![("f".to_string(), f(var("v0")))];
+        pairs.extend((0..n).map(|i| (format!("v{i}"), var(&format!("v{}", i + 1)))));
+        pairs.push((format!("v{n}"), iri("c")));
+        let b: crate::n3::Binding = pairs.into_iter().collect();
+        assert!(matches!(resolve(&var("f"), &b, &run), (BoundFormula::Ground(ts), false) if ts == vec![[iri("a"), iri("p"), iri("c")]]));
+        // Past the term-depth allowance: each variable wraps the next in a list.
+        let deep = TERM_DEPTH + 10;
+        let mut pairs = vec![("f".to_string(), f(var("l0")))];
+        pairs.extend((0..deep).map(|i| (format!("l{i}"), Term::List(vec![var(&format!("l{}", i + 1))]))));
+        pairs.push((format!("l{deep}"), iri("c")));
+        let b: crate::n3::Binding = pairs.into_iter().collect();
+        assert!(matches!(resolve(&var("f"), &b, &run), (BoundFormula::Refused, true)));
+        assert_eq!(run.refusal(), None);
+        // Past the term-size allowance: sharing doubles the size at every level.
+        let run = Truncation::top_level_with(ClosureLimits {
+            max_term_bytes: 1 << 16,
+            ..ClosureLimits::default()
+        });
+        let mut pairs = vec![("f".to_string(), f(var("d0")))];
+        pairs.extend((0..64).map(|i| {
+            let next = var(&format!("d{}", i + 1));
+            (format!("d{i}"), Term::List(vec![next.clone(), next]))
+        }));
+        pairs.push(("d64".to_string(), iri("c")));
+        let b: crate::n3::Binding = pairs.into_iter().collect();
+        assert!(matches!(resolve(&var("f"), &b, &run), (BoundFormula::Refused, true)));
+        assert!(run.refusal().is_some_and(|e| e.contains("max_term_bytes")));
     }
 
     /// The GH #6757 programs: a backward rule concludes a formula holding a variable (or

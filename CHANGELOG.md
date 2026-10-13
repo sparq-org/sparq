@@ -48,20 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **sparq-reason (N3):** a `log:includes` / `log:notIncludes` / `log:supports` pattern
-  bound through a variable to a GROUND formula (no variable at any depth once the rule's
-  bindings are applied; blank nodes allowed) is matched as that formula, the same as the
-  formula written in the rule. It was matched as the empty pattern, so `log:includes` held
-  whatever the scope held and `log:notIncludes` never fired. Any other bound value, a
-  formula that still holds a variable included, still matches as the empty pattern
-  (#6943). A cyclic binding chain fails the run. Each containment matches its pattern's
-  blank nodes afresh: a witness found by one `log:includes` no longer constrains the next
-  one in the premise. With the store as the scope, the automatic stratification counts a
-  variable pattern as every predicate: a `log:notIncludes` over one is a negation cycle
-  (refused by default; `FailClosed` drops the rule, `SinglePass` runs it), and a
-  `log:includes` / `log:supports` whose bound pattern itself holds a store-scoped
-  `log:notIncludes` / `log:collectAllIn` / `log:forAllIn` fails the run. (refs #6936,
-  #6943)
+- **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
+  / `log:notIncludes` / `log:supports` pattern bound through a variable to a GROUND
+  formula (no variable at any depth once the rule's bindings are applied, through their
+  whole chain; blank nodes allowed) is matched as that formula, fully substituted, the
+  same as the formula written in the rule. It was matched as the empty pattern, so
+  `log:includes` held whatever the formula held and `log:notIncludes` never fired. Any
+  other bound value, a formula that still holds a variable included, and every bound
+  pattern with the store as the scope, still match as the empty pattern (#6943). A cyclic
+  binding chain fails the run; a substituted pattern past the run's term-size or
+  term-depth allowance is a cut. Each containment matches its pattern's blank nodes
+  afresh: a witness found by one `log:includes` no longer constrains the next one in the
+  premise. (refs #6936, #6943)
 
 ## [0.1.6] - 2026-10-13
 

@@ -2242,24 +2242,38 @@ fn match_premise_admitted(
                         }
                     }
                 }
-                // The pattern: a formula written in place, or (GH #6936) a formula a variable
-                // is bound to when it is ground under the binding (blank nodes are its
-                // existentials). Any other object, a non-ground bound formula included,
-                // still matches as the empty pattern (GH #6943).
-                let mut bound_pattern = false;
-                let inner: &[[Term; 3]] = match bound_formula(&pat[2], &b) {
-                    Ok(Some(ts)) => {
-                        bound_pattern = true;
-                        ts
-                    }
-                    Ok(None) => written,
-                    Err(Cyclic) => {
-                        bw.nested_error.borrow_mut().get_or_insert_with(|| CYCLIC_BINDING.into());
-                        continue;
-                    }
-                };
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
+                };
+                // The pattern: the formula written in place, or (GH #6936), with a FORMULA
+                // as the scope, the formula a variable is bound to when it is ground under
+                // the binding (blank nodes are its existentials), fully substituted
+                // ([`bounded::resolve_bound_formula`]). Any other object, a non-ground
+                // bound formula included, and every object with the store as the scope,
+                // still matches as the empty pattern: the stratification does not read a
+                // pattern given through a variable (GH #6943).
+                let resolved: Vec<[Term; 3]>;
+                let formula_scope = match &scope_term {
+                    Term::Formula(_) => true,
+                    Term::Lit(v, _, _) => v == "true",
+                    _ => false,
+                };
+                let inner: &[[Term; 3]] = if formula_scope {
+                    match bw.settle(bounded::resolve_bound_formula(&pat[2], &b, &bw.truncated)) {
+                        bounded::BoundFormula::Ground(ts) => {
+                            resolved = ts;
+                            &resolved
+                        }
+                        bounded::BoundFormula::Open => written,
+                        bounded::BoundFormula::Cyclic => {
+                            bw.nested_error.borrow_mut().get_or_insert_with(|| CYCLIC_BINDING.into());
+                            continue;
+                        }
+                        // A cut, recorded by `settle` (past the size limit, the run's refusal).
+                        bounded::BoundFormula::Refused => continue,
+                    }
+                } else {
+                    written
                 };
                 let matches: Vec<Binding> = match scope_term {
                     // log:supports searches the closure in place: no term is built.
@@ -2272,15 +2286,6 @@ fn match_premise_admitted(
                     Term::Lit(v, _, _) if v == "true" => formula_containment(NO_STATEMENTS, inner, &b, bw),
                     // The store as the scope: the clause recurses into premise matching,
                     // holding a unit of the run's stack allowance (`_frames`).
-                    // A bound pattern was not visible to the stratification, which reads it as
-                    // every predicate, and positively under `log:includes` / `log:supports`
-                    // ([`strata`]): one that runs a store-scoped negation or aggregation of
-                    // its own is refused, failing the run, rather than evaluated in no
-                    // stratified order.
-                    _ if bound_pattern && !is_not && strata::has_store_negation(inner) => {
-                        bw.nested_error.borrow_mut().get_or_insert_with(|| BOUND_STORE_NEGATION.into());
-                        continue;
-                    }
                     _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
                         Some(_frames) => match_premise_seeded(inner, facts, &b, None, bw, depth),
                         None => Vec::new(),
@@ -2905,19 +2910,13 @@ fn frees_quoted_universal(t: &Term) -> bool {
     go(t, 0)
 }
 
-/// The refusal for a rule antecedent no engine can match soundly (GH #6754; support is
-/// tracked in GH #6882).
-/// A store-scoped `log:includes` / `log:supports` pattern bound through a variable that
-/// itself negates over the store: an operator the stratification could not order.
-const BOUND_STORE_NEGATION: &str = "N3: a store-scoped log:includes / log:supports pattern \
-    bound through a variable holds a store-scoped log:notIncludes / log:collectAllIn / \
-    log:forAllIn, which the stratification cannot see; write the pattern in the rule";
-
-/// A variable binding that refers back to itself, met while deciding whether a bound
-/// containment pattern is ground ([`bound_formula`]).
+/// A variable binding that refers back to itself, met while resolving a containment
+/// pattern bound through a variable ([`bounded::resolve_bound_formula`]).
 const CYCLIC_BINDING: &str = "N3: a containment pattern bound through a variable has a cyclic \
     binding (a variable bound, through other bindings, to a term holding itself)";
 
+/// The refusal for a rule antecedent no engine can match soundly (GH #6754; support is
+/// tracked in GH #6882).
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 
 /// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the
@@ -3020,70 +3019,6 @@ impl QuantifierWalk {
 /// reached through a variable) would need quantified matching ([`QuantifierWalk`]).
 fn quantified_clause(clause: &Term) -> bool {
     QuantifierWalk::bound_clause(clause)
-}
-
-/// A binding chain that reaches a variable it is already resolving ([`bound_formula`]).
-struct Cyclic;
-
-/// The statements of the formula `object` (a containment's object) is bound to under `b`,
-/// when `object` is a variable bound, possibly through other variables, to a `{ … }`
-/// formula that is GROUND under `b`: no variable at any depth (nested formulas included)
-/// that `b` does not bind, through its whole binding chain, to a ground term. Blank nodes
-/// are allowed (the pattern's existentials). `Ok(None)` for any other object: one written
-/// in place, unbound, not a formula, or not ground. `Err` when a binding chain is cyclic.
-fn bound_formula<'t>(object: &'t Term, b: &'t Binding) -> Result<Option<&'t [[Term; 3]]>, Cyclic> {
-    /// Whether `t` is ground under `b`; `resolving` holds the variables whose bindings
-    /// are being followed.
-    fn ground<'a>(t: &'a Term, b: &'a Binding, resolving: &mut Vec<&'a str>) -> Result<bool, Cyclic> {
-        match t {
-            Term::Var(v) => {
-                if resolving.contains(&v.as_str()) {
-                    return Err(Cyclic);
-                }
-                let Some(val) = b.get(v) else { return Ok(false) };
-                resolving.push(v);
-                let g = ground(val, b, resolving);
-                resolving.pop();
-                g
-            }
-            Term::Formula(ts) => all_ground(ts.iter().flatten(), b, resolving),
-            Term::List(ms) => all_ground(ms.iter(), b, resolving),
-            Term::Triple(tr) => all_ground(tr.iter(), b, resolving),
-            _ => Ok(true),
-        }
-    }
-    /// Every term ground; a cycle anywhere is reported even after an open term.
-    fn all_ground<'a>(
-        ts: impl Iterator<Item = &'a Term>,
-        b: &'a Binding,
-        resolving: &mut Vec<&'a str>,
-    ) -> Result<bool, Cyclic> {
-        let mut all = true;
-        for t in ts {
-            all &= ground(t, b, resolving)?;
-        }
-        Ok(all)
-    }
-    let Term::Var(v) = object else { return Ok(None) };
-    let mut resolving = vec![v.as_str()];
-    let mut cur = match b.get(v) {
-        Some(val) => val,
-        None => return Ok(None),
-    };
-    // Follow a chain of variables to the bound value.
-    while let Term::Var(w) = cur {
-        if resolving.contains(&w.as_str()) {
-            return Err(Cyclic);
-        }
-        resolving.push(w);
-        match b.get(w) {
-            Some(val) => cur = val,
-            None => return Ok(None),
-        }
-    }
-    let Term::Formula(ts) = cur else { return Ok(None) };
-    let is_ground = ground(cur, b, &mut resolving)?;
-    Ok(is_ground.then_some(ts.as_slice()))
 }
 
 /// Reject antecedent quantifiers that the rule matchers cannot soundly evaluate. This
@@ -6611,34 +6546,6 @@ mod runtime_doc_key_golden {
 
 #[cfg(test)]
 mod tests {
-    /// GH #6936: a containment pattern reached through a variable is matched only when it
-    /// is a ground formula under the binding; a cyclic binding chain is reported, not
-    /// followed forever.
-    #[test]
-    fn bound_patterns_are_ground_formulas_or_cycles() {
-        use super::{bound_formula, Binding, Term};
-        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
-        let var = |s: &str| Term::Var(s.into());
-        let f = |o: Term| Term::Formula(vec![[iri("a"), iri("p"), o]]);
-        let bind = |pairs: Vec<(&str, Term)>| -> Binding { pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect() };
-        // Ground, through a chain, with a blank node and a bound nested variable.
-        let b = bind(vec![("f", var("g")), ("g", f(Term::Formula(vec![[Term::Blank("x".into()), iri("q"), var("o")]]))), ("o", iri("b"))]);
-        assert!(matches!(bound_formula(&var("f"), &b), Ok(Some(ts)) if ts.len() == 1));
-        // Not ground (an unbound nested variable), not a formula, unbound, written in place.
-        let b = bind(vec![("f", f(var("o"))), ("l", iri("b"))]);
-        assert!(matches!(bound_formula(&var("f"), &b), Ok(None)));
-        assert!(matches!(bound_formula(&var("l"), &b), Ok(None)));
-        assert!(matches!(bound_formula(&var("u"), &b), Ok(None)));
-        assert!(matches!(bound_formula(&f(iri("b")), &b), Ok(None)));
-        // Cycles: in the chain, and through the formula's own variable.
-        let b = bind(vec![("f", var("g")), ("g", var("f"))]);
-        assert!(bound_formula(&var("f"), &b).is_err());
-        let b = bind(vec![("f", f(var("f")))]);
-        assert!(bound_formula(&var("f"), &b).is_err());
-        let b = bind(vec![("f", f(var("o"))), ("o", Term::List(vec![var("o")]))]);
-        assert!(bound_formula(&var("f"), &b).is_err());
-    }
-
     /// GH #6901: the length of a numeral's lexical form, computed from its value, equals
     /// the length of the literal it renders, for every rendering (integer, decimal at any
     /// scale, whole and fractional `f64`, `xsd:double` e-notation, non-finite values), and
