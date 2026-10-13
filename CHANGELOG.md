@@ -121,7 +121,9 @@ Both changes are in that commit, but its copy of this file does not list them.
   bound through a variable is matched as the bound formula, as when written inline; it was
   matched as the empty pattern, so `log:includes` held vacuously and `log:notIncludes`
   never fired. The operator waits for the premise that binds the pattern (an unbound
-  scope variable means the store and is not waited for). Inside a backward (`<=`) rule a
+  scope variable means the store and is not waited for; a rule in which no premise can
+  bind the pattern is refused with `N3: no evaluation order binds every required input …`).
+  Inside a backward (`<=`) rule a
   pattern, or a `log:collectAllIn` / `log:forAllIn` clause or subject, reached through a
   variable is unsupported and fails the run with
   `N3: a formula bound through a variable is unsupported inside a backward rule …`, as does

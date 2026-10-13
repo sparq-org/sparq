@@ -951,7 +951,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let mut backward: Vec<Rule> =
         data_parsed.backward_rules.iter().chain(&query_parsed.backward_rules).cloned().collect();
     for r in &mut backward {
-        r.premise = order_premise(&r.premise);
+        r.premise = order_premise(&r.premise)?;
     }
     // Stratification check over the rule set this call actually evaluates, before any
     // matching: the data document's forward rules, the backward rules of BOTH documents,
@@ -990,7 +990,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
     let mut sk_counter = 0usize;
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
-        let premise = order_premise(&rule.premise);
+        let premise = order_premise(&rule.premise)?;
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
         let mut fired: FxHashSet<String> = FxHashSet::default();
         for b in match_premise(&premise, &facts, &bw) {
@@ -1590,7 +1590,7 @@ fn run_closure(
     // (cwm evaluates builtins "when ready"; concat.n3 test13f writes the
     // producer AFTER the consumer).
     for r in rules.iter_mut().chain(backward_rules.iter_mut()) {
-        r.premise = order_premise(&r.premise);
+        r.premise = order_premise(&r.premise)?;
     }
     // STRATA (GH #6201, #5756): a rule that store-scope negates / aggregates over a
     // predicate this document derives runs in a later stratum than every rule deriving it.
@@ -2601,12 +2601,15 @@ fn reads_outside_joins(p: &[Term; 3]) -> bool {
 /// operator (`log:includes` / `notIncludes` / `supports`, `log:collectAllIn` /
 /// `forAllIn`) means the current store. Each step takes, in written order, the first atom
 /// of the best available tier: every input bound; else required inputs bound and each
-/// defaulted one unbound with no other remaining atom mentioning it, so it can only ever
-/// mean the store (aggregations, which read the store's complete answer, always take
-/// this tier). A defaulted input another remaining atom mentions is waited for. When no
-/// atom is ready the first remaining one runs (the legacy order, deterministic); an
-/// operator it leaves with an unbound required input fails its premise (fail-closed).
-fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
+/// defaulted one unbound with no other remaining atom that could bind it (one that
+/// mentions it only as its own defaulted scope cannot), so it can only ever mean the store (aggregations, which read the store's complete answer, always take
+/// this tier). A defaulted input another remaining atom could bind is waited for. When no
+/// atom is ready the first remaining one runs (the legacy order, deterministic), passing
+/// over a containment or aggregation whose pattern, clause or subject is given through a
+/// still-unbound variable; when only such operators remain, no order binds their inputs
+/// and the rule is refused ([`NO_EVALUATION_ORDER`]). A builtin the fallback runs with an
+/// input unbound fails its premise as before.
+fn order_premise(premise: &[[Term; 3]]) -> Result<Vec<[Term; 3]>, String> {
     fn term_vars(t: &Term, out: &mut FxHashSet<String>) {
         match t {
             Term::Var(v) => {
@@ -2633,19 +2636,29 @@ fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
             Term::Var(v) => produced.contains(v),
             _ => true,
         };
+        // Whether atom `j` could bind `v`: it mentions `v` other than as its own defaulted
+        // scope (a scope variable is never bound by its operator; unbound, it means the
+        // store).
+        let could_bind = |j: usize, v: &str| {
+            let atom = &premise[j];
+            let scope_at = if scope_op(&atom[1]).is_some() {
+                Some(0)
+            } else if collect_op(&atom[1]).is_some() {
+                Some(2)
+            } else {
+                None
+            };
+            atom.iter().enumerate().any(|(k, t)| {
+                !(Some(k) == scope_at && matches!(t, Term::Var(_))) && vars_of(t).contains(v)
+            })
+        };
         // A defaulted scope: bound (tier 0), or unbound with no other remaining atom that
-        // mentions it (tier 1). One another atom may still bind waits for it, as does a
+        // could bind it (tier 1). One another atom could still bind waits for it, as does a
         // compound scope with unbound variables.
         let scope_tier = |i: usize, scope: &Term| -> Option<usize> {
             match scope {
                 _ if vars_of(scope).is_subset(&produced) => Some(0),
-                Term::Var(v)
-                    if !remaining
-                        .iter()
-                        .any(|&j| j != i && premise[j].iter().any(|t| vars_of(t).contains(v))) =>
-                {
-                    Some(1)
-                }
+                Term::Var(v) if !remaining.iter().any(|&j| j != i && could_bind(j, v)) => Some(1),
                 _ => None,
             }
         };
@@ -2689,16 +2702,37 @@ fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
             ) || binder_builtin(&pat[1]).is_some();
             ready(if bidi { subj_ready || obj_ready } else { subj_ready })
         };
+        // A containment or aggregation whose pattern, clause or subject is given through a
+        // variable nothing has bound yet: it can never run with that input unbound.
+        let unbound_formula = |i: usize| {
+            let pat = &premise[i];
+            if scope_op(&pat[1]).is_some() {
+                return !bound(&pat[2]);
+            }
+            match collect_op(&pat[1]) {
+                Some(op) => !bound(&pat[0]) || !aggregation_clauses(op, &pat[0]).iter().all(bound),
+                None => false,
+            }
+        };
         let tiers: Vec<Option<usize>> = remaining.iter().map(|&i| tier(i)).collect();
         let best = tiers.iter().flatten().min().copied();
-        let pos = best.and_then(|b| tiers.iter().position(|&t| t == Some(b))).unwrap_or(0);
+        let pos = match best.and_then(|b| tiers.iter().position(|&t| t == Some(b))) {
+            Some(pos) => pos,
+            // Nothing is ready: the first remaining atom runs, skipping operators whose
+            // formula input is unbound (a stuck builtin may yet bind it). When only those
+            // remain, no order binds their inputs.
+            None => match remaining.iter().position(|&i| !unbound_formula(i)) {
+                Some(pos) => pos,
+                None => return Err(NO_EVALUATION_ORDER.into()),
+            },
+        };
         let i = remaining.remove(pos);
         for t in &premise[i] {
             term_vars(t, &mut produced); // its outputs are now available
         }
         out.push(premise[i].clone());
     }
-    out
+    Ok(out)
 }
 
 /// Whether a premise pattern is a JOIN atom (matched against stored facts), by its
@@ -3029,6 +3063,12 @@ const BACKWARD_BOUND_FORMULA: &str = "N3: a formula bound through a variable is 
     inside a backward rule (a log:includes / log:notIncludes / log:supports pattern, or a \
     log:collectAllIn / log:forAllIn clause or subject, given through a variable of a <= rule \
     or holding one; write it in the rule, see GH #6943)";
+
+/// A premise whose containment or aggregation formula, given through a variable, no
+/// evaluation order binds ([`order_premise`]).
+const NO_EVALUATION_ORDER: &str = "N3: no evaluation order binds every required input (a \
+    log:includes / log:notIncludes / log:supports pattern, or a log:collectAllIn / \
+    log:forAllIn clause or subject, given through a variable no other premise binds)";
 
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 

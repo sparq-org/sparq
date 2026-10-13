@@ -184,14 +184,21 @@ fn a_pattern_bound_by_a_later_premise_is_matched() {
     }
 }
 
-/// A pattern variable nothing binds is no pattern: the premise fails (it is not matched as
-/// the empty pattern).
+/// A pattern variable nothing in the premise can bind leaves no evaluation order: the rule
+/// is refused, not matched as the empty pattern.
 #[test]
-fn an_unbound_pattern_fails_the_premise() {
+fn an_unbound_pattern_is_refused() {
     for op in ["includes", "notIncludes", "supports"] {
         let src = doc(&format!("{{ {{ :a :p :b }} log:{op} ?f }} => {{ :r :{op} :unbound }}."));
-        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), none(), "{src}");
+        let err = text(&src, NegationCycles::Reject).expect_err("refused");
+        assert!(err.starts_with("N3: no evaluation order binds every required input"), "{src}: {err}");
     }
+    // A builtin the fallback runs first may still bind the pattern.
+    let src = doc(
+        "{ ?g log:includes ?g. { :a :p :b. { ?x :p ?y } => { ?x :q ?y } } log:conclusion ?g. \
+           ?g log:includes { :a :q :b } } => { :r :includes :concluded }.",
+    );
+    assert_eq!(text(&src, NegationCycles::Reject).expect("ordered"), vec![fired("includes", "concluded")], "{src}");
 }
 
 /// Only the parser's empty formula (`{}`, the boolean `true`) is the empty pattern; a
@@ -312,6 +319,20 @@ fn a_bound_formula_in_a_forward_rule_shares_the_rules_variables() {
 #[test]
 fn a_store_scoped_operator_can_bind_another_operators_pattern() {
     let consumer = "{ :a :p :b } log:includes ?f";
+    let producer = "?scope log:includes { :cfg :hit ?f }";
+    for premise in [format!("{consumer}. {producer}"), format!("{producer}. {consumer}")] {
+        let src = doc(&format!("{{ {premise} }} => {{ :r :includes :hit }}."));
+        let want = vec![fired("includes", "hit")];
+        assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+        assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+    }
+}
+
+/// A scope variable shared by two store-scoped operators binds in neither: each means the
+/// store, so the producer of the other's pattern runs first, in either written order.
+#[test]
+fn a_shared_store_scope_does_not_block_the_pattern_producer() {
+    let consumer = "?scope log:includes ?f";
     let producer = "?scope log:includes { :cfg :hit ?f }";
     for premise in [format!("{consumer}. {producer}"), format!("{producer}. {consumer}")] {
         let src = doc(&format!("{{ {premise} }} => {{ :r :includes :hit }}."));

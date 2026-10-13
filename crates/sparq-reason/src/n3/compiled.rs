@@ -744,7 +744,7 @@ impl Compiler {
     fn lower_rule(&mut self, rule: &super::model::Rule) -> Result<(), String> {
         // The engine's OWN premise ordering (builtins after their producers), so the
         // compiled evaluation order matches the text engine's exactly.
-        let premise = super::order_premise(&rule.premise);
+        let premise = super::order_premise(&rule.premise)?;
         let mut ctx = RuleCtx::default();
         let mut steps: Vec<Step> = Vec::new();
         let mut join_steps: Vec<usize> = Vec::new();
