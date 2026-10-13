@@ -1118,6 +1118,12 @@ impl<R: std::io::BufRead> SrxEvents for (quick_xml::Reader<R>, Vec<u8>) {
     }
 }
 
+/// The deepest triple-term nesting an SRX document may carry. A nested term is built and later
+/// dropped recursively, so its depth must be bounded; this is the depth the SRJ reader admits,
+/// whose bound comes from `serde_json`'s nesting limit (pinned by a test on both readers).
+#[cfg(feature = "service")]
+const MAX_SRX_TRIPLE_DEPTH: usize = 61;
+
 #[cfg(feature = "service")]
 fn parse_srx_events<E: SrxEvents, F: RowSink>(
     events: &mut E,
@@ -1216,7 +1222,15 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                             ..value("literal")
                         })
                     }
-                    b"triple" => triple_stack.push((0, [None, None, None])),
+                    b"triple" => {
+                        if triple_stack.len() == MAX_SRX_TRIPLE_DEPTH {
+                            return Err(format!(
+                                "SERVICE: results XML nests triple terms more than \
+                                 {MAX_SRX_TRIPLE_DEPTH} deep"
+                            ));
+                        }
+                        triple_stack.push((0, [None, None, None]))
+                    }
                     b"subject" => set_slot(&mut triple_stack, 0),
                     b"predicate" => set_slot(&mut triple_stack, 1),
                     b"object" => set_slot(&mut triple_stack, 2),
@@ -2325,6 +2339,41 @@ mod tests {
         assert_eq!(rel.rows[0], vec![iri("http://ex/2"), None, None]);
         let x = Some(Term::Literal(Literal::new_simple_literal("x")));
         assert_eq!(rel.rows[1], vec![None, x, None]);
+    }
+
+    #[test]
+    fn srj_and_srx_admit_the_same_triple_term_depth() {
+        let iri = |s: &str| format!(r#"{{"type":"uri","value":"http://ex/{s}"}}"#);
+        let srj = |depth: usize| {
+            let mut t = iri("o");
+            for _ in 0..depth {
+                t = format!(
+                    r#"{{"type":"triple","value":{{"subject":{},"predicate":{},"object":{t}}}}}"#,
+                    iri("s"),
+                    iri("p")
+                );
+            }
+            format!(r#"{{"head":{{"vars":["x"]}},"results":{{"bindings":[{{"x":{t}}}]}}}}"#)
+        };
+        let srx = |depth: usize| {
+            let mut t = "<uri>http://ex/o</uri>".to_string();
+            for _ in 0..depth {
+                t = format!(
+                    "<triple><subject><uri>http://ex/s</uri></subject>\
+                     <predicate><uri>http://ex/p</uri></predicate><object>{t}</object></triple>"
+                );
+            }
+            format!(
+                r#"<sparql xmlns="{SRX_NS}"><head><variable name="x"/></head><results>
+                   <result><binding name="x">{t}</binding></result></results></sparql>"#
+            )
+        };
+        let max = MAX_SRX_TRIPLE_DEPTH;
+        assert!(parse_srj(&srj(max)).is_ok());
+        assert!(parse_srj(&srj(max + 1)).is_err());
+        assert!(parse_srx(&srx(max)).is_ok());
+        let err = parse_srx(&srx(max + 1)).unwrap_err();
+        assert!(err.contains("nests triple terms"), "{err}");
     }
 
     #[test]
