@@ -1091,10 +1091,11 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
     graph.clear_txn()
 }
 
-/// Refuse to change a graph that holds a committed update it could not finish applying
-/// ([`Graph::needs_recovery`]): only a reopen may change it, by completing that update.
+/// Refuse an update to a graph that holds a committed journal frame not yet cleared
+/// ([`Graph::has_unresolved_txn`]): a reopen would redo that frame after this update's own
+/// writes. Only [`apply_effects`] writes while its own frame is pending.
 fn refuse_if_recovering(graph: &Graph) -> Result<(), String> {
-    if graph.needs_recovery() {
+    if graph.has_unresolved_txn() {
         return Err("the graph holds a committed update that was not fully applied; reopen it to \
                     complete the update"
             .to_owned());
@@ -1555,13 +1556,19 @@ mod tests {
             assert!(update_in_place_atomic(&mut durable, "INSERT DATA { <http://ex/s> <http://ex/p> 3 }").is_err());
             assert!(durable.needs_recovery(), "nothing replaced the graph");
         }
+        // A frame committed and not yet cleared also refuses an independent update.
+        {
+            let mut durable = Graph::open(&dir).unwrap();
+            durable.commit_txn(&[TxnRecord::CreateGraph(oxrdf::NamedNode::new_unchecked("http://ex/w").into())]).unwrap();
+            assert!(update_in_place(&mut durable, "INSERT DATA { <http://ex/s> <http://ex/p> 4 }").is_err());
+        }
         let g = Graph::open(&dir).unwrap();
         assert!(!g.needs_recovery());
         let mut names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
         names.sort();
-        assert_eq!(names, ["<http://ex/x>", "<http://ex/y>", "<http://ex/z>"]);
+        assert_eq!(names, ["<http://ex/w>", "<http://ex/x>", "<http://ex/y>", "<http://ex/z>"], "both frames redone, the refused write absent");
         let rows: usize = g.named.iter().map(|(_, sub)| count(sub)).sum();
-        assert_eq!(rows, 2);
+        assert_eq!(rows, 2, "the refused default-graph insert left no trace");
         std::fs::remove_dir_all(&dir).ok();
     }
 

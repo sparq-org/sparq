@@ -1826,7 +1826,7 @@ impl Graph {
     /// and NO `named.bin`, so its on-disk layout is byte-identical to before this change.
     #[cfg(feature = "mmap")]
     pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        self.refuse_if_abandoned().map_err(std::io::Error::other)?;
+        self.refuse_if_txn_open().map_err(std::io::Error::other)?;
         std::fs::create_dir_all(dir)?;
         self.store.save(dir)?; // folds any delta-overlay into the persisted permutations
         self.dict.save_mmap(dir)?; // includes appended (delta-overlay) terms
@@ -1847,7 +1847,7 @@ impl Graph {
     /// after open to trade RAM for exactly-raw query speed instead.
     #[cfg(feature = "mmap")]
     pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        self.refuse_if_abandoned().map_err(std::io::Error::other)?;
+        self.refuse_if_txn_open().map_err(std::io::Error::other)?;
         std::fs::create_dir_all(dir)?;
         self.store.save_compressed(dir)?; // folds any delta-overlay, like `save`
         self.dict.save_mmap(dir)?;
@@ -3245,6 +3245,16 @@ impl Graph {
         false
     }
 
+    /// Removing a named graph rewrites the named sub-tree, the survivors' journals included:
+    /// refused while any of them is unresolved. This graph's own pending frame is allowed, as
+    /// the removal may be part of materialising it.
+    fn refuse_if_named_txn_open(&self) -> Result<(), String> {
+        if self.named.iter().any(|(_, sub)| sub.has_unresolved_txn()) {
+            return Err(NEEDS_RECOVERY.to_owned());
+        }
+        Ok(())
+    }
+
     fn refuse_if_abandoned(&self) -> Result<(), String> {
         if self.needs_recovery() {
             return Err(NEEDS_RECOVERY.to_owned());
@@ -3252,13 +3262,23 @@ impl Graph {
         Ok(())
     }
 
-    /// Refuse while any journal frame is committed and not cleared: rewriting the directory
-    /// (compaction, vacuum) would persist a state that may lack part of the frame and drop
+    /// Whether this graph or any named graph under it holds a journal frame that is committed
+    /// and not cleared, or abandoned. While one does, the in-memory state may lack part of a
+    /// committed update, and the frame's journal is the only durable record of it.
+    pub fn has_unresolved_txn(&self) -> bool {
+        #[cfg(feature = "mmap")]
+        if self.txn.as_ref().is_some_and(|j| j.pending || j.is_abandoned()) {
+            return true;
+        }
+        self.named.iter().any(|(_, sub)| sub.has_unresolved_txn())
+    }
+
+    /// The one guard for every rewrite of the backing directory (compaction, vacuum, save,
+    /// named-graph removal): refused while [`has_unresolved_txn`](Self::has_unresolved_txn),
+    /// since the rewrite would persist a state that may lack part of a committed frame and drop
     /// the journal that holds it.
     fn refuse_if_txn_open(&self) -> Result<(), String> {
-        self.refuse_if_abandoned()?;
-        #[cfg(feature = "mmap")]
-        if self.txn.as_ref().is_some_and(|j| j.pending) {
+        if self.has_unresolved_txn() {
             return Err(NEEDS_RECOVERY.to_owned());
         }
         Ok(())
@@ -3346,6 +3366,7 @@ impl Graph {
             return Ok(false);
         };
         self.refuse_if_abandoned()?;
+        self.refuse_if_named_txn_open()?;
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
@@ -3390,6 +3411,7 @@ impl Graph {
             return Ok(());
         }
         self.refuse_if_abandoned()?;
+        self.refuse_if_named_txn_open()?;
         // Release every sub-graph's mmap/WAL handles before any directory is touched (Issue 1/2:
         // no live map may point into `named/<i>/` across the removal — correct on every platform,
         // required on Windows where a mapped file blocks `remove_dir_all`/`rename`).
@@ -3764,6 +3786,11 @@ impl Graph {
         dir: &std::path::Path,
         fresh: Graph,
     ) -> std::io::Result<Graph> {
+        // Replacing `dir` drops its journals: refused while any holds a committed frame that a
+        // reopen has not redone yet. `fresh.save` refuses an unresolved `fresh` in turn.
+        if journal_frames_on_disk(dir)? {
+            return Err(std::io::Error::other(NEEDS_RECOVERY));
+        }
         swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))
     }
 
@@ -3886,6 +3913,29 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }
+}
+
+/// Whether `dir`, or any named-graph directory under it, holds a non-empty redo journal.
+#[cfg(feature = "mmap")]
+fn journal_frames_on_disk(dir: &std::path::Path) -> std::io::Result<bool> {
+    match std::fs::metadata(TxnJournal::path(dir)) {
+        Ok(m) if m.len() > 0 => return Ok(true),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    let named = match std::fs::read_dir(dir.join("named")) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    for entry in named {
+        let path = entry?.path();
+        if path.is_dir() && journal_frames_on_disk(&path)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// [OPUS-4.8] (sq-ft7u) The ONE crash-safe directory-base swap, factored out of
@@ -11038,6 +11088,44 @@ mod tests {
         let g = Graph::open(&dir).unwrap();
         assert!(!g.needs_recovery() && !g.named[0].1.needs_recovery());
         assert!(dump_terms(&g).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Every rewrite of a directory refuses while a frame anywhere under it is unresolved: a
+    /// pending frame on a named graph blocks the parent's compaction, vacuum, save and
+    /// named-graph removal, and a directory holding an unredone journal refuses a restore.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn rewrites_refuse_an_unresolved_frame_anywhere_in_the_tree() {
+        let dir = txn_tmp_dir("rewrites");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/h> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let t = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            // A frame committed on a named graph directly, not yet materialised or cleared.
+            g.named[0].1.commit_txn(&[TxnRecord::Insert(None, t.clone())]).unwrap();
+            assert!(g.has_unresolved_txn() && !g.needs_recovery());
+            assert!(g.compact().is_err());
+            assert!(g.vacuum().is_err());
+            assert!(g.save(&dir).is_err());
+            assert!(g.save_compressed(&dir.join("copy")).is_err());
+            assert!(g.drop_named_durable(&named("h")).is_err());
+            assert!(g.drop_all_named_durable().is_err());
+            let fresh = Graph::load_str("", "ntriples").unwrap();
+            assert!(Graph::restore_into_durable(&dir, fresh).is_err(), "the journal is on disk");
+        }
+        let g = Graph::open(&dir).unwrap();
+        assert!(!g.has_unresolved_txn());
+        assert_eq!(dump_terms(&g.named[0].1).len(), 2, "the named graph's frame was redone");
+        assert_eq!(g.named.len(), 2, "nothing was removed");
         std::fs::remove_dir_all(&dir).ok();
     }
 
