@@ -715,6 +715,11 @@ pub struct ProofStep {
 /// list walk cap, a nested closure left unclosed by the import-cycle guard): the run
 /// fails rather than read missing facts as absent. Only
 /// [`NegationCycles::SinglePass`] accepts that incomplete result.
+///
+/// # Errors
+///
+/// Returns an error for `@forAll` in a rule's own premise or a scoped body pattern,
+/// as well as parse failures, negation cycles and incomplete negation reads.
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     reason_n3_in(dict, src, NegationCycles::Reject, &Truncation::top_level())
 }
@@ -868,8 +873,8 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     )?
     .top_level();
     // Universals are written as their own IRIs under `@forAll` declarations, so the output
-    // re-parses to the very same `__ua.<iri>` terms — the identity a `log:parsedAsN3`
-    // literal or a second reasoning pass produces too (GH #5391, GH #6701 review).
+    // re-parses to the very same `__ua.<iri>` terms — the identity a second reasoning pass
+    // produces too (GH #5391, GH #6701 review).
     let facts: Vec<&[Term; 3]> = facts.all.iter().collect();
     let echoed: Vec<(&Rule, RuleKind)> = rules
         .iter()
@@ -911,7 +916,8 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
 /// forward premises. A negation cycle in it, including one a query-supplied backward rule
 /// closes, is an error.
 ///
-/// Errors when either document fails to parse, or when the query document has no forward rule
+/// Errors for unsupported antecedent quantifiers, when either document fails to parse,
+/// or when the query document has no forward rule
 /// (a fact-only or backward-only query document has nothing to project — fail loudly rather
 /// than return an empty answer that reads like "the query matched nothing").
 pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, String> {
@@ -922,6 +928,7 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
 fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term; 3]>, String> {
     let data_parsed = bounded::parse_n3(data, "", &cuts)?;
     let query_parsed = bounded::parse_n3(query, "", &cuts)?;
+    validate_rule_quantifiers(&query_parsed)?;
     if query_parsed.rules.is_empty() {
         return Err("n3 query filter: the query document contains no `{ … } => { … }` forward \
                     rule; only forward-rule (SELECT/CONSTRUCT-style) query documents project an \
@@ -1547,6 +1554,7 @@ fn run_closure(
     // with `inherit`, whose run state already carries its table.
     runtime: Option<&RuntimeDocs>,
 ) -> Result<Closure, String> {
+    validate_rule_quantifiers(&parsed)?;
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
     // from being captured by a minted conclusion blank. Labels ingested later
@@ -2223,6 +2231,18 @@ fn match_premise_admitted(
             let is_not = matches!(op, ScopeOp::NotIncludes);
             let mut next = Vec::new();
             for b in bindings {
+                // A pattern reached through a variable was not visible to
+                // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
+                // the same way, failing the run. (Only a pattern written as a formula is
+                // matched; any other object matches as the empty pattern.)
+                if !matches!(&pat[2], Term::Formula(_)) {
+                    if let Term::Var(v) = &pat[2] {
+                        if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
+                            bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
+                            continue;
+                        }
+                    }
+                }
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
                 };
@@ -2308,6 +2328,18 @@ fn match_premise_admitted(
                 };
                 let Some(subj) = bounded::substitute(&pat[0], &b, &bw.truncated) else { continue };
                 let Term::List(members) = &subj else { continue };
+                // A clause reached through a variable (the subject, or a list member) was
+                // not visible to [`validate_rule_quantifiers`]; its bound value is checked
+                // here and refused the same way, failing the run. A clause written as a
+                // formula was checked there: a value bound into it is an ordinary term,
+                // matched by identity.
+                if aggregation_clauses(op, &subj).iter().enumerate().any(|(i, c)| {
+                    let written = aggregation_clauses(op, &pat[0]).get(i);
+                    !matches!(written, Some(Term::Formula(_) | Term::Lit(..))) && quantified_clause(c)
+                }) {
+                    bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
+                    continue;
+                }
                 match op {
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
@@ -2684,6 +2716,8 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
 /// (recursing into quoted formulae).
 fn rename_vars(t: &Term, n: usize) -> Term {
     match t {
+        // A quoted formula's own universal is not a rule variable (GH #6754).
+        Term::Var(v) if quoted_universal(v) => t.clone(),
         Term::Var(v) => Term::Var(format!("__bw{n}_{v}")),
         Term::Formula(ts) => Term::Formula(
             ts.iter().map(|tr| [rename_vars(&tr[0], n), rename_vars(&tr[1], n), rename_vars(&tr[2], n)]).collect(),
@@ -2723,11 +2757,17 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
         return true;
     }
     match (&aw, &cw) {
-        (Term::Var(v), _) => {
+        (Term::Var(v), _) if !unbindable_var(v) => {
+            if frees_quoted_universal(&cw) {
+                return false;
+            }
             s.insert(v.clone(), cw.clone());
             true
         }
-        (_, Term::Var(v)) => {
+        (_, Term::Var(v)) if !unbindable_var(v) => {
+            if frees_quoted_universal(&aw) {
+                return false;
+            }
             s.insert(v.clone(), aw.clone());
             true
         }
@@ -2801,11 +2841,168 @@ fn unify(pat: &[Term; 3], f: &[Term; 3], b: &Binding) -> Option<Binding> {
     Some(nb)
 }
 
+/// Is `v` a quoted formula's own `@forAll` universal (GH #6754)? Such a variable is bound
+/// inside its formula, so matching treats it as a constant (copies of one closed formula
+/// carry the same name) and no rule substitution ever reaches it.
+fn quoted_universal(v: &str) -> bool {
+    v.starts_with(serialize::FORMULA_UNIVERSAL)
+}
+
+/// A variable no matcher may bind: a quoted formula's universal, or a rule premise's own
+/// universal (`__up.`), which [`validate_rule_quantifiers`] rejects before any matching.
+/// Should one reach a matcher anyway, it matches only itself instead of binding as an
+/// ordinary variable (and a debug build stops).
+fn unbindable_var(v: &str) -> bool {
+    if v.starts_with(serialize::PREMISE_UNIVERSAL) {
+        debug_assert!(false, "premise universal {v} reached a matcher past validate_rule_quantifiers");
+        return true;
+    }
+    quoted_universal(v)
+}
+
+/// Would binding a rule variable to `t` take a quoted formula's universal out of the formula
+/// that binds it — does `t` mention one whose declaring formula is not inside `t`?
+fn frees_quoted_universal(t: &Term) -> bool {
+    fn go(t: &Term, depth: usize) -> bool {
+        match t {
+            Term::Var(v) => serialize::formula_universal(v).is_some_and(|(n, _)| n >= depth),
+            Term::Formula(ts) => ts.iter().flatten().any(|m| go(m, depth + 1)),
+            Term::List(ms) => ms.iter().any(|m| go(m, depth)),
+            Term::Triple(tr) => tr.iter().any(|m| go(m, depth)),
+            _ => false,
+        }
+    }
+    go(t, 0)
+}
+
+/// The refusal for a rule antecedent no engine can match soundly (GH #6754; support is
+/// tracked in GH #6882).
+const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
+
+/// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the
+/// clause of `( template clause list )`, both clauses of `( clause-a clause-b )`. The
+/// template and the result list are values, not clauses. A subject of another shape
+/// yields none (its evaluation fails the premise anyway).
+fn aggregation_clauses(op: CollectOp, subject: &Term) -> &[Term] {
+    match (op, subject) {
+        (CollectOp::CollectAll, Term::List(ms)) if ms.len() == 3 => &ms[1..2],
+        (CollectOp::ForAll, Term::List(ms)) if ms.len() == 2 => &ms[..],
+        _ => &[],
+    }
+}
+
+/// The one walk behind every antecedent-quantifier check (GH #6754): does an EXECUTABLE
+/// formula — a rule premise, an aggregation clause, a containment pattern, at any nesting
+/// depth — bind a universal that occurs anywhere below it? Matching such a formula would
+/// need quantified (wildcard) matching, which no engine does soundly.
+///
+/// `levels` holds the formula levels from the walk's root to the current one, innermost
+/// last: whether each is executed (`true`) or a value. A position is executable only
+/// where the matcher runs it: the object pattern of `log:includes` / `notIncludes` /
+/// `supports`, the clause of `( template clause list ) log:collectAllIn`, and both clauses
+/// of `log:forAllIn` — each inside an executable conjunction. Everything else (an
+/// aggregation template, a scope, an ordinary quoted formula term, and every atom of a
+/// value) is a value, matched by identity, so its own universals are allowed while those
+/// of an enclosing executable formula are not. A universal whose binder lies past the
+/// root, or a malformed one, counts as quantified (fail-closed).
+struct QuantifierWalk {
+    levels: Vec<bool>,
+}
+
+impl QuantifierWalk {
+    /// The premise `atoms` of a rule (an executable root; its own universals are the
+    /// rule's `__up.` markers).
+    fn premise(atoms: &[[Term; 3]]) -> bool {
+        QuantifierWalk { levels: vec![true] }.conjunction(atoms)
+    }
+
+    /// A term bound into an executable position at run time: a formula there is a clause.
+    fn bound_clause(t: &Term) -> bool {
+        QuantifierWalk { levels: Vec::new() }.term(t, true)
+    }
+
+    /// An executable conjunction at the current level.
+    fn conjunction(&mut self, atoms: &[[Term; 3]]) -> bool {
+        atoms.iter().any(|[s, p, o]| {
+            if scope_op(p).is_some() {
+                self.term(s, false) || self.term(p, false) || self.term(o, true)
+            } else if let Some(op) = collect_op(p) {
+                let subject = match s {
+                    Term::List(ms) => {
+                        let clauses = aggregation_clauses(op, s);
+                        ms.iter().any(|m| self.term(m, clauses.iter().any(|c| std::ptr::eq(c, m))))
+                    }
+                    other => self.term(other, false),
+                };
+                subject || self.term(p, false) || self.term(o, false)
+            } else {
+                [s, p, o].into_iter().any(|t| self.term(t, false))
+            }
+        })
+    }
+
+    /// `t` at the current level: a formula in an executable position is a clause.
+    fn term(&mut self, t: &Term, executable: bool) -> bool {
+        match t {
+            Term::Var(v) => self.bound_by_executable(v),
+            Term::Formula(ts) => {
+                self.levels.push(executable);
+                let found = if executable {
+                    self.conjunction(ts)
+                } else {
+                    ts.iter().flatten().any(|m| self.term(m, false))
+                };
+                self.levels.pop();
+                found
+            }
+            Term::List(ms) => ms.iter().any(|m| self.term(m, false)),
+            Term::Triple(tr) => tr.iter().any(|m| self.term(m, false)),
+            _ => false,
+        }
+    }
+
+    /// Whether the universal `v` names is bound by an executable level.
+    fn bound_by_executable(&self, v: &str) -> bool {
+        if v.starts_with(serialize::PREMISE_UNIVERSAL) {
+            // only a rule premise binds one, and it is executable
+            return true;
+        }
+        if !v.starts_with(serialize::FORMULA_UNIVERSAL) {
+            return false;
+        }
+        let Some((n, _)) = serialize::formula_universal(v) else { return true };
+        self.levels.len().checked_sub(n + 1).is_none_or(|binder| self.levels[binder])
+    }
+}
+
+/// Whether a clause bound at run time (an aggregation clause or a containment pattern
+/// reached through a variable) would need quantified matching ([`QuantifierWalk`]).
+fn quantified_clause(clause: &Term) -> bool {
+    QuantifierWalk::bound_clause(clause)
+}
+
+/// Reject antecedent quantifiers that the rule matchers cannot soundly evaluate. This
+/// sees the clauses as written, at every nesting depth; a clause reached through a variable
+/// is checked again on its bound value when it is evaluated ([`match_premise_seeded`]),
+/// by the same walk.
+pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), String> {
+    for rule in parsed.rules.iter().chain(&parsed.backward_rules) {
+        if QuantifierWalk::premise(&rule.premise) {
+            return Err(QUANTIFIED_ANTECEDENT.into());
+        }
+    }
+    Ok(())
+}
+
 fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
     match (pat, val) {
+        (Term::Var(v), _) if unbindable_var(v) => pat == val,
         (Term::Var(v), _) => match b.get(v) {
             Some(existing) => existing == val,
             None => {
+                if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
+                    return false;
+                }
                 b.insert(v.clone(), val.clone());
                 true
             }
@@ -2902,15 +3099,57 @@ fn ground_triple(t: &[Term; 3], b: &Binding, run: &Truncation) -> Option<[Term; 
             _ => true,
         }
     }
-    let g = [
+    let mut g = [
         bounded::substitute_deep(&t[0], b, run)?,
         bounded::substitute_deep(&t[1], b, run)?,
         bounded::substitute_deep(&t[2], b, run)?,
     ];
+    // The conclusion's own `@forAll` universals, now asserted, are document-level ones
+    // (GH #6754). After substitution, so no binding can reach them.
+    g.iter_mut().for_each(assert_conclusion_universals);
     if g.iter().all(instantiated) {
         Some(g)
     } else {
         None
+    }
+}
+
+/// Every variable of `stmts` named `from + rest` renamed to `to + rest`, at any depth.
+fn rename_var_prefix(stmts: &mut [[Term; 3]], from: &str, to: &str) {
+    fn go(t: &mut Term, from: &str, to: &str) {
+        match t {
+            Term::Var(v) => {
+                if let Some(rest) = v.strip_prefix(from) {
+                    *t = Term::Var(format!("{to}{rest}"));
+                }
+            }
+            Term::Formula(ts) => ts.iter_mut().flatten().for_each(|m| go(m, from, to)),
+            Term::List(ms) => ms.iter_mut().for_each(|m| go(m, from, to)),
+            Term::Triple(tr) => tr.iter_mut().for_each(|m| go(m, from, to)),
+            _ => {}
+        }
+    }
+    stmts.iter_mut().flatten().for_each(|t| go(t, from, to));
+}
+
+/// Rename a conclusion's own universals (`__uc.<iri>`, [`parser::scope_rule`]) to the
+/// document-level `__ua.<iri>` — inside a [`formula_closure`] run (`__uk.<k>.<iri>`), to
+/// that run's document level, `__ul.<k>.<iri>`, so the result formula gets them back as its
+/// own: asserting `∀x. S(x)` beside a document under `∀x` is the
+/// same as conjoining `S(x)` under it, since `x` does not occur in what is already there.
+fn assert_conclusion_universals(t: &mut Term) {
+    match t {
+        Term::Var(v) => {
+            if let Some(iri) = v.strip_prefix(serialize::CONCLUSION_UNIVERSAL) {
+                *t = Term::Var(format!("{}{iri}", serialize::UNIVERSAL_VAR));
+            } else if let Some(rest) = v.strip_prefix(CLOSURE_CONCLUSION_UNIVERSAL) {
+                *t = Term::Var(format!("{LIFTED_UNIVERSAL}{rest}"));
+            }
+        }
+        Term::Formula(ts) => ts.iter_mut().flatten().for_each(assert_conclusion_universals),
+        Term::List(ms) => ms.iter_mut().for_each(assert_conclusion_universals),
+        Term::Triple(tr) => tr.iter_mut().for_each(assert_conclusion_universals),
+        _ => {}
     }
 }
 
@@ -3454,6 +3693,11 @@ fn collect_op(p: &Term) -> Option<CollectOp> {
 }
 
 
+/// The prefix of a `log:includes` pattern blank turned wildcard ([`formula_containment`]).
+/// Unforgeable (no source variable contains a `.`), and the one variable that may match a
+/// scope's own `@forAll` universal: its binding never leaves the containment test.
+const PATTERN_WILDCARD: &str = "__w.";
+
 /// SYNTACTIC containment of `pattern` in `scope` (log:includes): every
 /// pattern triple must match a scope triple (or be virtual list structure),
 /// with pattern blanks as wildcards, pattern variables binding, and scope
@@ -3480,7 +3724,7 @@ fn formula_containment<S: std::borrow::Borrow<[Term; 3]>>(
         .iter()
         .map(|r| {
             let w = |t: &Term| match t {
-                Term::Blank(l) => Term::Var(format!("__w_{l}")),
+                Term::Blank(l) => Term::Var(format!("{PATTERN_WILDCARD}{l}")),
                 other => other.clone(),
             };
             [w(&r[0]), w(&r[1]), w(&r[2])]
@@ -3665,7 +3909,9 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
 }
 
 /// A parsed document's statements with rules re-encoded into their surface
-/// triple form (log:semantics / log:parsedAsN3 result formulae).
+/// triple form (log:semantics / log:parsedAsN3 result formulae). The document's universals
+/// are already the result formula's own: [`bounded::parse_n3_term`] parses its top level as
+/// a formula scope, and [`parser::unscope_rule`] gives each rule side back its own.
 fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
     // the rules' formulas MOVE back into statements: no copy of a parsed formula
     let quote = |ts: Vec<[Term; 3]>| -> Term {
@@ -3677,10 +3923,10 @@ fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
         }
     };
     let mut ts = parsed.facts;
-    for r in parsed.rules {
+    for r in parsed.rules.iter().map(parser::unscope_rule) {
         ts.push([quote(r.premise), Term::Iri(parser::LOG_IMPLIES.into()), quote(r.conclusion)]);
     }
-    for r in parsed.backward_rules {
+    for r in parsed.backward_rules.iter().map(parser::unscope_rule) {
         ts.push([
             quote(r.conclusion),
             Term::Iri(parser::LOG_IMPLIED_BY.into()),
@@ -3689,6 +3935,16 @@ fn reencode_statements(parsed: parser::Parsed) -> Vec<[Term; 3]> {
     }
     ts
 }
+
+/// A closed formula's own universal while its statements are reasoned over as a document
+/// ([`formula_closure`]): `__ul.<k>.<iri>`, unforgeable like every engine-internal name,
+/// with `k` the number of closures in progress (this one included), so a nested closure
+/// never takes an enclosing closure's universals for its own.
+const LIFTED_UNIVERSAL: &str = "__ul.";
+
+/// A forward rule's own conclusion universal inside the [`formula_closure`] run `k`:
+/// `__uk.<k>.<iri>`, asserted as that run's `__ul.<k>.<iri>`.
+const CLOSURE_CONCLUSION_UNIVERSAL: &str = "__uk.";
 
 /// The forward closure of a quoted formula under its own `=>` rules
 /// (log:supports / log:conclusion): the original triples plus everything a
@@ -3744,15 +4000,28 @@ fn with_formula_closure<R>(
     let mut facts: Vec<[Term; 3]> = Vec::new();
     let mut rules: Vec<Rule> = Vec::new();
     let mut backward: Vec<Rule> = Vec::new();
-    for row in ts {
+    // The formula's own `@forAll` universals quantify its statements, rules included, so
+    // the run reads them as that document's universals (GH #6754); the derivations get
+    // them back named for their place in the result formula.
+    let depth = bw.visited.borrow().docs.len();
+    let lift = format!("{LIFTED_UNIVERSAL}{depth}.");
+    let asserted = format!("{CLOSURE_CONCLUSION_UNIVERSAL}{depth}.");
+    let mut lifted = ts.to_vec();
+    parser::own_universals_to(&mut lifted, &lift);
+    for row in lifted {
         match (&row[0], &row[1], &row[2]) {
             (Term::Formula(p), Term::Iri(i), Term::Formula(c)) if i == parser::LOG_IMPLIES => {
-                rules.push(Rule { premise: p.clone(), conclusion: c.clone() });
+                let mut r = Rule { premise: p.clone(), conclusion: c.clone() };
+                parser::scope_rule(&mut r);
+                rename_var_prefix(&mut r.conclusion, serialize::CONCLUSION_UNIVERSAL, &asserted);
+                rules.push(r);
             }
             (Term::Formula(c), Term::Iri(i), Term::Formula(p)) if i == parser::LOG_IMPLIED_BY => {
-                backward.push(Rule { premise: p.clone(), conclusion: c.clone() });
+                let mut r = Rule { premise: p.clone(), conclusion: c.clone() };
+                parser::scope_rule(&mut r);
+                backward.push(r);
             }
-            _ => facts.push(row.clone()),
+            _ => facts.push(row),
         }
     }
     let parsed =
@@ -3787,11 +4056,14 @@ fn with_formula_closure<R>(
         }
     };
     // Original statements (including the rule statements, which cwm keeps in
-    // log:conclusion output) plus the derivations, each once.
+    // log:conclusion output) plus the derivations, each once. The derivations name the
+    // formula's own universals for their place in the result formula again.
     bw.visited.borrow_mut().docs.remove(&key);
+    let mut derived: Vec<[Term; 3]> = closed.all.into_iter().collect();
+    parser::own_universals_from(&mut derived, &lift);
     let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
     let mut all: Vec<&[Term; 3]> = ts.iter().collect();
-    all.extend(closed.all.iter().filter(|f| seen.insert(f)));
+    all.extend(derived.iter().filter(|f| seen.insert(f)));
     f(&all)
 }
 

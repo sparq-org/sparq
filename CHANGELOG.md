@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-reason (N3):** formula-level `@forAll` declarations keep their own scope,
+  including nested and sibling quoted formulas. Naive, compiled and incremental engines
+  reject `@forAll` in a rule's own premise or a scoped body pattern with a specific error;
+  a `log:forAllIn` / `log:collectAllIn` clause or a `log:includes` / `log:notIncludes`
+  pattern bound through a variable is checked when it is evaluated and fails the run the
+  same way. Templates and other quoted values keep their own universals at any nesting
+  depth. A document parsed by `log:parsedAsN3` / `log:semantics` declares its top-level
+  `@forAll` in the resulting formula, the same term as the inline `{ @forAll … }`.
+  Quoted formula terms retain identity matching, conclusion universals keep their own
+  scope, and closure-introduced universals are restored in the result formula.
+  Document-level `@forAll` is unchanged. Exact writers place each formula-level
+  declaration inside its formula. (#6754)
 - **Breaking (sparq-reason, `compiled-rules` feature):** `n3::compiled::eval` and
   `BoundRuleSet::eval` now return `Result<Vec<[Id; 3]>, String>` and run under the default
   `ClosureLimits`; new `n3::compiled::eval_with_limits` and `BoundRuleSet::eval_with_limits`
