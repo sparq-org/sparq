@@ -23,6 +23,7 @@ pub mod extsort;
 // N-Triples / N-Quads loader validates each IRI through it (fast path, oxiri-equivalent).
 #[cfg(feature = "iri-fast")]
 pub mod iri;
+pub mod json;
 mod nt;
 pub mod percent;
 // [OPUS-4.8] sq-jocpn: the opt-in native byte-level Turtle parser. OFF by default (it names
