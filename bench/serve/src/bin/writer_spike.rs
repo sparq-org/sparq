@@ -217,7 +217,7 @@ enum Mode {
 
 enum FeederHandle {
     A1(std::thread::JoinHandle<()>),
-    A2(Arc<Writer<String>>, Vec<std::thread::JoinHandle<()>>),
+    A2(Arc<Writer<String, Graph>>, Vec<std::thread::JoinHandle<()>>),
 }
 impl FeederHandle {
     fn join(self) {
