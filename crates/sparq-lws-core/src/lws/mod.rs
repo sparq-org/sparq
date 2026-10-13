@@ -3410,6 +3410,31 @@ mod tests {
                 "{method} {path}"
             );
         }
+        // A type search read to its limit is answered as a search: a well-formed filter that
+        // long is too complex to page.
+        let search = |len: usize| {
+            let app = app.clone();
+            async move {
+                let head = "{\"type\": [\"https://e.example/T\"], \"@padding\": \"";
+                let filter = format!("{head}{}\"}}", "x".repeat(len - head.len() - 2));
+                assert_eq!(filter.len(), len);
+                let req = Request::builder()
+                    .method("QUERY")
+                    .uri(TYPE_SEARCH_PATH)
+                    .header("content-type", index::LWS_QUERY)
+                    .body(Body::from(filter))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            }
+        };
+        assert_eq!(
+            search(index::MAX_FILTER_READ).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            search(index::MAX_FILTER_READ + 1).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
         assert_eq!(body_limit("/", 10), 10);
         assert_eq!(body_limit(REQUESTS_PATH, 10), 10);
     }

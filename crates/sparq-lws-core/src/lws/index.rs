@@ -43,9 +43,9 @@ pub const MAX_FILTER_IRIS: usize = 256;
 /// (a third larger), so a filter is held to a size whose links fit well inside a request head.
 pub const MAX_FILTER_BYTES: usize = 8 * 1024;
 
-/// Most of a QUERY body read before it is refused unread (`413`). A filter past
-/// [`MAX_FILTER_BYTES`] but within this is read and refused as too complex to page (`422`, section
-/// 7.2), so whether a search is answered or refused as too complex does not turn on how long the
+/// Most of a QUERY body collected: past this it is refused as it is read (`413`). A well-formed
+/// filter past [`MAX_FILTER_BYTES`] but within this is refused as too complex to page (`422`,
+/// section 7.2), so whether a search is answered or refused as too complex does not turn on how long the
 /// storage's origin is: the same filter is longer by every IRI's share of a longer origin.
 pub const MAX_FILTER_READ: usize = 4 * MAX_FILTER_BYTES;
 
@@ -483,15 +483,6 @@ async fn handle_within<S: Store + 'static>(
                 Some(_) => filter_bytes = req.body.clone(),
             }
         }
-        if filter_bytes.len() > MAX_FILTER_BYTES {
-            // Too long to carry on its page links: a search too complex to answer (section
-            // 7.2), as one with too many groups is. A page link longer than any this server
-            // makes was refused above, unread.
-            return problem(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
-            );
-        }
         filter = match parse_filter(&filter_bytes) {
             Ok(f) => f,
             Err(FilterError::Malformed) => {
@@ -509,6 +500,22 @@ async fn handle_within<S: Store + 'static>(
                 )
             }
         };
+        if filter_bytes.len() > MAX_FILTER_BYTES {
+            // A well-formed filter too long to carry on its page links is a search too complex
+            // to answer (section 7.2), as one with too many groups is. A page link carrying one
+            // is longer than any this server makes: too large, as one refused above before decoding is.
+            return if page_link {
+                problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+                )
+            } else {
+                problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+                )
+            };
+        }
     }
     // lws+json or ld+json, negotiated by quality and specificity (lws+json on a tie, or without
     // Accept); a range with q=0 refuses its type. The response varies on Accept (section 7.2).
@@ -731,7 +738,7 @@ mod tests {
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
-    /// Issue #6881: a QUERY filter past its size was refused unread (`413`), so a search naming
+    /// Issue #6881: a QUERY filter past its size was refused as too large (`413`), so a search naming
     /// many types was answered on a short origin and refused on a long one, its IRIs being
     /// longer there. Past its size, within what is read, it is too complex to page (`422`).
     #[tokio::test]
@@ -769,6 +776,21 @@ mod tests {
             search(types(99, "https://e.example")).await,
             StatusCode::PAYLOAD_TOO_LARGE
         );
+        // At the limit, and one byte past it.
+        let padded = |len: usize| {
+            let head = "{\"type\": [\"https://e.example/T\"], \"@padding\": \"";
+            format!("{head}{}\"}}", "x".repeat(len - head.len() - 2))
+        };
+        assert_eq!(padded(MAX_FILTER_BYTES).len(), MAX_FILTER_BYTES);
+        assert_eq!(search(padded(MAX_FILTER_BYTES)).await, StatusCode::OK);
+        assert_eq!(
+            search(padded(MAX_FILTER_BYTES + 1)).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // A long filter that is not one is malformed, whatever its length.
+        let mut broken = padded(MAX_FILTER_BYTES + 1);
+        broken.pop();
+        assert_eq!(search(broken).await, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
