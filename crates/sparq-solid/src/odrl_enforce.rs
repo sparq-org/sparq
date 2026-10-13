@@ -7,20 +7,13 @@
 //! agent is the party (and default recipient), its clock is the request time, and the
 //! recorded asset memberships are the collection evidence.
 //!
-//! A mode is **granted** when some attached policy's [`decide`] permits every ODRL
-//! action the mode needs:
-//!
-//! - [`Mode::Read`] needs `odrl:read`;
-//! - [`Mode::Write`] needs both `odrl:modify` and `odrl:delete`, since a write can do
-//!   either;
-//! - [`Mode::Append`] needs `odrl:append`, or a `Write` grant.
-//!
-//! The store applies a grant only where the static WAC/ACP decision is authoritative,
-//! to a graph the last materialization covered, and where the auth view does not
-//! explicitly deny the mode, so an ACP deny still wins and a graph no access-control
-//! document governs, or one created since, is never granted. `Append` and `Write` are
-//! never granted on a container or on a referenced group document, so creating a
-//! resource stays with the static decision.
+//! [`Mode::Read`] is **granted** when some attached policy's [`decide`] permits
+//! `odrl:read`. The store applies a grant only to an eligible target: a graph that
+//! exists now, that the last static WAC/ACP materialization covered (so every deny that
+//! applies to it is in the view), whose static decision is authoritative, and on which
+//! the auth view does not explicitly deny `Read`. So an ACP deny still wins, and a graph
+//! no access-control document governs, or one created since, is never granted. No other
+//! mode is granted: creating and changing resources stay with the static decision.
 //!
 //! A mode is **removed** when some attached prohibition applies (True or Unknown) to a
 //! request for any ODRL action that maps to it, after any grant:
@@ -207,29 +200,18 @@ impl OdrlEnforcement {
         })
     }
 
-    /// Whether an attached permission grants `mode` on `target` to `session`: some
-    /// attached policy's [`decide`] permits every ODRL action the mode needs. `Read`
-    /// needs `odrl:read`; `Write` needs both `odrl:modify` and `odrl:delete`, since a
-    /// write can do either; `Append` needs `odrl:append`, or a `Write` grant. `Control`,
-    /// access-control documents and reserved graphs are never granted. The caller still
-    /// applies the static view's explicit denies and [`OdrlEnforcement::denies`].
+    /// Whether an attached permission grants `mode` on `target` to `session`: only
+    /// [`Mode::Read`], when some attached policy's [`decide`] permits `odrl:read`.
+    /// Access-control documents and reserved graphs are never granted. The caller still
+    /// checks the target's eligibility and applies [`OdrlEnforcement::denies`].
     pub(crate) fn grants(&self, s: &Session, mode: Mode, target: &str) -> bool {
-        if !Self::governs(target) || !self.has_permissions() {
-            return false;
-        }
-        let permits = |actions: &[&str]| {
-            self.policies.iter().any(|p| {
-                actions
-                    .iter()
-                    .all(|a| permitted(p, &self.request(a, target, s), s.agent))
-            })
-        };
-        match mode {
-            Mode::Read => permits(&["read"]),
-            Mode::Write => permits(&["modify", "delete"]),
-            Mode::Append => permits(&["append"]) || permits(&["modify", "delete"]),
-            Mode::Control => false,
-        }
+        mode == Mode::Read
+            && Self::governs(target)
+            && self.has_permissions()
+            && self
+                .policies
+                .iter()
+                .any(|p| permitted(p, &self.request("read", target, s), s.agent))
     }
 
     /// Whether any attached policy has a permission (only then can [`grants`] hold).

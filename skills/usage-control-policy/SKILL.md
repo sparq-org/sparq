@@ -341,12 +341,13 @@ let out = store.materialize_odrl_policy(&policy, &req);
 
 `PodStore::attach_odrl_policy(policy)` keeps a `ValidatedPolicy` on the store and evaluates it for the **accessing session** on every authorizing call: its permissions through `decide`, its prohibitions through `matched_prohibition`. Nothing is materialized, so a party-scoped rule applies only to the parties it names, a time window follows the session's clock, and an asset needs no materialization to be covered.
 
-- **Grants.** A mode is added when some attached policy's `decide` permits every ODRL action the mode needs, under every party membership the agent could have:
-  - `Read` needs `odrl:read`;
-  - `Write` needs both `odrl:modify` and `odrl:delete`, from the same policy, since a write can do either (`odrl:use` covers both; `odrl:write` alone does not);
-  - `Append` needs `odrl:append`, or a `Write` grant.
+- **Grants.** `Read` is added when some attached policy's `decide` permits `odrl:read` under every party membership the agent could have, on an eligible graph:
+  - it exists now, and the last static WAC/ACP materialization covered it, so every deny that applies to it is in the view (a graph created or dropped since is not granted until the next materialization);
+  - its static decision is authoritative (a governing ACL exists and the auth view is loaded), so a graph no access-control document governs is never granted;
+  - the auth view does not explicitly deny it (an ACP `acp:deny` wins);
+  - it is not an `.acl`/`.acr` document or a reserved graph.
 
-  A grant applies only where the static decision is authoritative (a governing ACL exists and the auth view is loaded), only to a graph the last materialization covered (so every deny that applies to it is known; a graph created since, or one that does not exist, is never granted), and never over an explicit deny of the auth view (an ACP `acp:deny`), so a graph no access-control document governs is never granted. `Append`/`Write` are never granted on a container or on a group document an `.acl` references (an input of the auth view, like the `.acl` itself), and `decide_create` never grants, so creating a resource stays with the static WAC/ACP decision. Count constraints are not evaluated per request, so a counted permission does not grant here.
+  No other mode is granted: creating and changing resources stay with the static decision. Count constraints are not evaluated per request, so a counted permission does not grant here.
 - **Denies.** A mode is removed when an attached prohibition applies, after any grant, so prohibitions beat every allow.
 - **One gate.** Every entry point goes through it:
   - the reads behind the cached session set: `accessible`, `accessible_set`, the views and queries, `wac_allow` and `scoped_dataset`;

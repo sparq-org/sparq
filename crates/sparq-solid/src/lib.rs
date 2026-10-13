@@ -289,6 +289,11 @@ pub struct PodStore {
     /// cached static view, so attaching or detaching needs no cache invalidation.
     #[cfg(feature = "odrl-bridge")]
     odrl: odrl_enforce::OdrlEnforcement,
+    /// The graphs the last successful static WAC/ACP materialization covered: every deny
+    /// that applies to one of them is in the auth view. Emptied when the view is dropped.
+    /// Only these can be granted by an attached ODRL permission.
+    #[cfg(feature = "odrl-bridge")]
+    statically_covered: Arc<FxHashSet<String>>,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -454,6 +459,8 @@ impl PodStore {
             view_dropped: false,
             #[cfg(feature = "odrl-bridge")]
             odrl: odrl_enforce::OdrlEnforcement::default(),
+            #[cfg(feature = "odrl-bridge")]
+            statically_covered: Arc::default(),
         }
     }
 
@@ -481,6 +488,7 @@ impl PodStore {
     /// [OPUS-4.8] sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
         let stats = materialize_wac(&mut self.graph)?;
+        self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
@@ -644,6 +652,7 @@ impl PodStore {
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
         let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
@@ -958,24 +967,41 @@ impl PodStore {
         granted && !self.odrl_denies(session, mode, target)
     }
 
-    /// Whether an attached ODRL permission grants `mode` on `target` for `session` and
-    /// the auth view does not explicitly deny it. The caller checks that the target's
-    /// decision is authoritative. A grant needs:
-    ///
-    /// - a target the last materialization covered, so every deny that applies to it is
-    ///   known (a graph created since, or one that does not exist, is never granted);
-    /// - for `Append`/`Write`, a target that is not a container, so creating a resource
-    ///   stays with the static WAC/ACP decision, and not a group document an
-    ///   access-control document references (an input of the auth view, like the
-    ///   `.acl`/`.acr` itself).
+    /// Whether an attached ODRL permission grants `mode` on `target` for `session`: the
+    /// one grant-eligibility predicate every path uses. Only `Read` is granted, and only
+    /// on a graph that exists now and that the last static WAC/ACP materialization
+    /// covered (so every deny that applies to it is in the view), when the auth view
+    /// does not explicitly deny it. The caller checks that the target's decision is
+    /// authoritative.
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
-        let changes = mode != Mode::Read;
         self.odrl.grants(session, mode, target)
-            && self.auth.covers(target)
-            && !(changes && (target.ends_with('/') || self.group_docs().contains(target)))
+            && self.statically_covered.contains(target)
+            && self.graph.named.iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
             && !self.auth.denies(session, mode, target)
     }
+
+    /// Record the graphs a static WAC/ACP materialization just covered: every named graph
+    /// outside the reserved space, each of which the loader seeded as a resource.
+    #[cfg(feature = "odrl-bridge")]
+    fn record_static_coverage(&mut self) {
+        let covered = self
+            .graph
+            .named
+            .iter()
+            .filter_map(|(n, _)| match n {
+                Term::NamedNode(g) if !g.as_str().starts_with(loader::RESERVED_PREFIX) => {
+                    Some(g.as_str().to_owned())
+                }
+                _ => None,
+            })
+            .collect();
+        self.statically_covered = Arc::new(covered);
+    }
+
+    /// Feature-off twin: nothing is ever granted, so nothing is recorded.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn record_static_coverage(&mut self) {}
 
     /// Whether any ODRL policy is attached.
     #[cfg(feature = "odrl-bridge")]
@@ -1108,9 +1134,9 @@ impl PodStore {
             child_name,
             mode,
         );
-        // The child-name refusal above stays first. A permission never grants a create
-        // (it grants no change to a container); a prohibition on the container or on the
-        // child it would mint can only narrow what is left.
+        // The child-name refusal above stays first. A permission never grants a create (it
+        // grants only `Read`); a prohibition on the container or on the child it would mint
+        // can only narrow what is left.
         let d = self.apply_odrl_with(d, session, container, mode, false);
         self.apply_odrl_with(d, session, &format!("{container}{child_name}"), mode, false)
     }
@@ -1187,7 +1213,7 @@ impl PodStore {
         #[cfg(feature = "odrl-bridge")]
         if !self.odrl.is_empty() {
             let mut set = sets.sorted.to_vec();
-            if self.odrl.has_permissions() {
+            if mode == Mode::Read && self.odrl.has_permissions() {
                 let have: FxHashSet<&str> = sets.sorted.iter().map(NamedNode::as_str).collect();
                 for (name, _) in self.graph.named.iter() {
                     let Term::NamedNode(g) = name else { continue };
@@ -1625,6 +1651,10 @@ impl PodStore {
         // No other grant source (the ODRL bridge, the trust graph) rebuilds it either, until a
         // static materialization succeeds (see [`PodStore::may_install_grants`]).
         self.view_dropped = true;
+        #[cfg(feature = "odrl-bridge")]
+        {
+            self.statically_covered = Arc::default();
+        }
         self.reindex_with(ReindexScope::Full);
     }
 
@@ -1991,10 +2021,10 @@ impl PodStore {
     /// (issue #6743), with the session's agent as party and its clock as request time.
     /// Every authorizing entry point (the reads, views and queries,
     /// [`PodStore::wac_allow`], [`PodStore::decide`], [`PodStore::decide_batch`],
-    /// [`PodStore::decide_create`] and every update) then grants a mode an attached
-    /// permission permits through `decide`, on a graph the last materialization covered
-    /// where the static decision is authoritative and does not explicitly deny it (never a
-    /// change to a container, so never a create), and refuses a mode some attached
+    /// [`PodStore::decide_create`] and every update) then grants `Read` where an attached
+    /// permission permits `odrl:read` through `decide`, on a graph that exists and that
+    /// the last static materialization covered, where the static decision is
+    /// authoritative and does not explicitly deny it, and refuses a mode some attached
     /// prohibition applies to. See [`odrl_enforce`] for the action-to-mode mapping and the graphs it
     /// never touches.
     ///

@@ -374,87 +374,62 @@ fn too_many_party_collections_are_refused() {
 
 const BOB: &str = "https://bob.ex/card#me";
 
-/// An attached permission grants the modes `decide` permits, through every entry point,
-/// but never `Control`, an access-control document or a reserved graph.
+/// An attached permission grants `Read` where `decide` permits it, through every entry
+/// point, and nothing else: no other mode, no access-control document, no reserved graph.
 #[test]
-fn permissions_grant_through_every_entry_point() {
+fn permissions_grant_read_through_every_entry_point() {
     let mut s = store();
     s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
         .expect("attach");
     let bob = session(Some(BOB), None);
     let before = bare_store();
     assert!(!before.decide(&bob, N2, Mode::Read).allow, "no static grant");
-    for mode in [Mode::Read, Mode::Write, Mode::Append] {
-        let d = s.decide(&bob, N2, mode);
-        assert!(d.allow, "{mode:?}");
-        assert!(d.granted_modes.contains(&mode), "{mode:?}");
-        assert!(
-            s.accessible(&bob, mode).iter().any(|g| g.as_str() == N2),
-            "{mode:?}"
-        );
-    }
-    assert_eq!(
-        s.accessible(&bob, Mode::Control),
-        before.accessible(&bob, Mode::Control)
-    );
-    for graph in [N2, "https://pod.ex/notes/n1.acl", "https://pod.ex/.acl", "urn:sparq:auth"] {
-        assert!(!s.decide(&bob, graph, Mode::Control).allow, "{graph}");
-    }
-    for graph in ["https://pod.ex/notes/n1.acl", "https://pod.ex/.acl", "urn:sparq:auth"] {
-        for mode in [Mode::Read, Mode::Write, Mode::Append] {
-            assert!(!s.decide(&bob, graph, mode).allow, "{graph} {mode:?}");
-        }
-    }
+    let d = s.decide(&bob, N2, Mode::Read);
+    assert!(d.allow && d.granted_modes == vec![Mode::Read]);
+    assert!(reads(&s, &bob, N2));
     let rows = s
         .query_as(&bob, Mode::Read, "SELECT ?t WHERE { GRAPH <https://pod.ex/notes/n2> { ?s ?p ?t } }")
         .expect("query")
         .rows
         .len();
     assert_eq!(rows, 1);
-    let ins = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } }";
-    s.update_as(&bob, ins).expect("granted write");
-    let acl = "INSERT DATA { GRAPH <https://pod.ex/.acl> { <urn:x> <urn:y> 1 } }";
-    assert!(s.update_as(&bob, acl).is_err(), "rules stay the owner's");
-    // Creating stays with the static decision: no change to a container, no create, and
-    // nothing on a graph the last materialization did not cover.
-    for mode in [Mode::Write, Mode::Append] {
-        assert!(!s.decide(&bob, NOTES, mode).allow, "{mode:?}");
+    for mode in [Mode::Write, Mode::Append, Mode::Control] {
+        assert_eq!(s.accessible(&bob, mode), before.accessible(&bob, mode), "{mode:?}");
+        assert!(!s.decide(&bob, N2, mode).allow, "{mode:?}");
         assert!(!s.decide_create(&bob, NOTES, "n3", mode).allow, "{mode:?}");
     }
-    assert!(s.decide(&bob, NOTES, Mode::Read).allow, "reading the container is granted");
-    let fresh = "https://pod.ex/notes/n9";
-    assert!(!s.decide(&bob, fresh, Mode::Read).allow);
-    let create = format!("INSERT DATA {{ GRAPH <{fresh}> {{ <urn:x> <urn:y> 1 }} }}");
-    assert!(s.update_as(&bob, &create).is_err());
+    for graph in ["https://pod.ex/notes/n1.acl", "https://pod.ex/.acl", "urn:sparq:auth"] {
+        assert!(!s.decide(&bob, graph, Mode::Read).allow, "{graph}");
+    }
+    let ins = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } }";
+    assert!(s.update_as(&bob, ins).is_err());
 }
 
-/// `Write` needs both `odrl:modify` and `odrl:delete`; `Append` needs `odrl:append` or
-/// a `Write` grant.
+/// A grant needs a graph that exists now and that the last static materialization
+/// covered: one created since, or one dropped since, is not granted.
 #[test]
-fn write_needs_modify_and_delete() {
-    let bob = session(Some(BOB), None);
-    let modes = |actions: &[&str]| {
-        let mut s = store();
-        for a in actions {
-            s.attach_odrl_policy(policy("permission", a, "", None, Some(N2)).expect("policy"))
-                .expect("attach");
-        }
-        let d = s.decide(&bob, N2, Mode::Read);
-        (d.granted_modes.contains(&Mode::Write), d.granted_modes.contains(&Mode::Append))
-    };
-    assert_eq!(modes(&["modify"]), (false, false));
-    assert_eq!(modes(&["delete"]), (false, false));
-    assert_eq!(modes(&["modify", "delete"]), (false, false), "two policies do not combine");
-    assert_eq!(modes(&["append"]), (false, true));
-    assert_eq!(modes(&["write"]), (false, false), "odrl:write does not include delete");
-    assert_eq!(modes(&["use"]), (true, true));
-    let ttl = format!(
-        "@prefix odrl: <{ODRL}> .\n<urn:pol/p> a odrl:Set ; odrl:permission \
-         [ odrl:action odrl:modify ; odrl:target <{N2}> ] , [ odrl:action odrl:delete ; odrl:target <{N2}> ] .\n"
-    );
+fn grants_need_a_current_covered_graph() {
     let mut s = store();
-    s.attach_odrl_policy(parse_policy_str(&ttl, "turtle").expect("policy")).expect("attach");
-    assert!(s.decide(&bob, N2, Mode::Write).allow, "one policy permitting both");
+    s.attach_odrl_policy(policy("permission", "read", "", None, None).expect("policy"))
+        .expect("attach");
+    let alice = session(Some(ALICE), None);
+    let bob = session(Some(BOB), None);
+    let fresh = "https://pod.ex/notes/n9";
+    assert!(!s.decide(&bob, fresh, Mode::Read).allow, "does not exist");
+    // A graph added to the dataset without re-materializing.
+    let added = Graph::load_dataset(
+        &format!("<urn:x> <urn:y> \"1\" <{fresh}> ."),
+        "nquads",
+    )
+    .expect("loads");
+    s.graph.named.extend(added.named);
+    assert!(!s.decide(&bob, fresh, Mode::Read).allow, "created since the materialization");
+    assert!(!reads(&s, &bob, fresh));
+    s.materialize_wac().expect("wac");
+    assert!(s.decide(&bob, fresh, Mode::Read).allow, "covered once materialized");
+    assert!(reads(&s, &bob, N2));
+    s.update_as(&alice, "DROP GRAPH <https://pod.ex/notes/n2>").expect("alice drops");
+    assert!(!s.decide(&bob, N2, Mode::Read).allow, "dropped since");
 }
 
 /// Time-windowed and recipient-scoped permissions follow the accessing session.
@@ -516,55 +491,6 @@ fn explicit_denies_and_ungoverned_graphs_win() {
         .expect("attach");
     assert!(!reads(&open, &carol, N2), "no ACL governs n2");
     assert!(!open.decide(&carol, N2, Mode::Read).allow);
-}
-
-/// A permission never grants a change to, or the creation of, a group document an ACL
-/// references: those documents are inputs of the auth view, like the ACL itself.
-#[test]
-fn referenced_group_documents_are_not_granted_changes() {
-    let group = "https://pod.ex/groups/admins";
-    let acl = "https://pod.ex/.acl";
-    let extra = format!(
-        "<{acl}#admins> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{acl}> .\n\
-         <{acl}#admins> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <{acl}> .\n\
-         <{acl}#admins> <http://www.w3.org/ns/auth/acl#agentGroup> <{group}#it> <{acl}> .\n\
-         <{acl}#admins> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <{acl}> .\n\
-         <{group}#it> <http://www.w3.org/2006/vcard/ns#hasMember> <{ALICE}> <{group}> .\n"
-    );
-    let mut s = bare_store_with(&extra);
-    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
-        .expect("attach");
-    let bob = session(Some(BOB), None);
-    assert!(s.decide(&bob, N2, Mode::Write).allow, "ordinary graphs are granted");
-    assert!(s.decide(&bob, group, Mode::Read).allow, "reading the group is granted");
-    for mode in [Mode::Write, Mode::Append] {
-        assert!(!s.decide(&bob, group, mode).allow, "{mode:?}");
-    }
-    let join = format!(
-        "INSERT DATA {{ GRAPH <{group}> {{ <{group}#it> <http://www.w3.org/2006/vcard/ns#hasMember> <{BOB}> }} }}"
-    );
-    assert!(s.update_as(&bob, &join).is_err());
-    assert!(!s.decide(&bob, acl, Mode::Control).allow);
-
-    // A referenced group document that does not exist yet cannot be created either.
-    let absent = "https://pod.ex/groups/owners";
-    let extra = format!(
-        "<{acl}#owners> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{acl}> .\n\
-         <{acl}#owners> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <{acl}> .\n\
-         <{acl}#owners> <http://www.w3.org/ns/auth/acl#agentGroup> <{absent}#it> <{acl}> .\n\
-         <{acl}#owners> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <{acl}> .\n"
-    );
-    let mut s = bare_store_with(&extra);
-    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
-        .expect("attach");
-    let groups = "https://pod.ex/groups/";
-    for mode in [Mode::Append, Mode::Write] {
-        assert!(!s.decide_create(&bob, groups, "owners", mode).allow, "{mode:?}");
-    }
-    let create = format!(
-        "INSERT DATA {{ GRAPH <{absent}> {{ <{absent}#it> <http://www.w3.org/2006/vcard/ns#hasMember> <{BOB}> }} }}"
-    );
-    assert!(s.update_as(&bob, &create).is_err());
 }
 
 /// A prohibition never touches `Control`, access-control documents or reserved graphs,

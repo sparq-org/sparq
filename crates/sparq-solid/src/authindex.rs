@@ -294,10 +294,6 @@ pub struct AuthIndex {
     matcher_clients: FxHashMap<String, FxHashSet<String>>,
     /// [OPUS-4.8] sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
     matcher_issuers: FxHashMap<String, FxHashSet<String>>,
-    /// Every graph some allow, deny or conditional entry names: the resources the last
-    /// materialization covered, whose denies are therefore all present.
-    #[cfg(feature = "odrl-bridge")]
-    covered: FxHashSet<String>,
 }
 
 impl AuthIndex {
@@ -322,8 +318,6 @@ impl AuthIndex {
             };
             if let Some((mode, is_allow)) = Mode::from_pred(p.as_str()) {
                 if let Term::NamedNode(g) = &t[2] {
-                    #[cfg(feature = "odrl-bridge")]
-                    ix.covered.insert(g.as_str().to_owned());
                     let map = if is_allow { &mut ix.allow } else { &mut ix.deny };
                     // [OPUS-4.8] sq-b7k7u: bucket the grant under its graph's origin.
                     let origin = crate::loader::iri_origin(g.as_str()).to_owned();
@@ -374,10 +368,6 @@ impl AuthIndex {
         // [OPUS-4.8] sq-b7k7u: bucket each conditional grant under its target graph's
         // origin (empty-origin key when it has no target graph — such a grant is inert).
         for g in cond.into_values() {
-            #[cfg(feature = "odrl-bridge")]
-            if let Some(n) = &g.graph {
-                ix.covered.insert(n.as_str().to_owned());
-            }
             let origin = g.graph.as_ref().map(|n| crate::loader::iri_origin(n.as_str()).to_owned()).unwrap_or_default();
             ix.cond.entry(origin).or_default().push(g);
         }
@@ -599,13 +589,6 @@ impl AuthIndex {
         self.matcher_agents == other.matcher_agents
             && self.matcher_clients == other.matcher_clients
             && self.matcher_issuers == other.matcher_issuers
-    }
-
-    /// Whether the last materialization covered `graph` (some entry names it), so every
-    /// deny that applies to it is in this index.
-    #[cfg(feature = "odrl-bridge")]
-    pub(crate) fn covers(&self, graph: &str) -> bool {
-        self.covered.contains(graph)
     }
 
     /// Whether the auth view explicitly denies `mode` on `graph` to this session: a deny
