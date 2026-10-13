@@ -353,6 +353,23 @@ fn cases() -> Vec<Case> {
             K * SMALL,
             SUBSTITUTION,
         ),
+        // The parser behind `log:parsedAsN3` charges the terms it builds: an 8 KiB
+        // namespace used in 64 three-IRI triples is 1.5 MiB of formula from a source
+        // under 9 KiB, and the parse stops near the limit instead of expanding it all.
+        case(
+            "log:parsedAsN3",
+            {
+                let mut src = format!("@prefix q: <http://ex/{}#>. ", "a".repeat(SMALL));
+                for i in 0..64 {
+                    src.push_str(&format!("q:s{i} q:p q:o . "));
+                }
+                format!(":a :src \"\"\"{src}\"\"\".\n")
+            },
+            "{ :a :src ?s. ?s log:parsedAsN3 ?f } => { :a :out ?f }.",
+            "{ :a :src ?s. ?s string:length ?n } => { :a :ok ?n }.",
+            64 * 3 * SMALL,
+            "a parsed formula",
+        ),
     ]
 }
 

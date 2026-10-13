@@ -790,14 +790,14 @@ the profile.
   - **Substitution under bindings** goes through one primitive, `bounded::substitute` / `substitute_deep`. The raw `apply` is private to `n3/bounded.rs`; that privacy is the guarantee, and the guard test `substitution_goes_through_the_bounded_module` is only a lexical tripwire for a crate-internal copy. This covers premise patterns, conclusions, scope and collection templates, list generators, backward-rule projection and builtin arguments.
   - **A functional builtin's data-list arguments and its result.** Every builtin has a size entry in `output_bytes`. A loose bound over the limit is refined to the exact size without building anything.
   - **The list `log:collectAllIn` collects** and **the formula `log:conclusion` returns.**
-  - **The formula `log:parsedAsN3` / `log:semantics` returns**, sized once the parse returns it (not while it parses: see below).
+  - **The formula `log:parsedAsN3` / `log:semantics` returns.** The parser charges every term node as it builds it and each kept statement once, so an expanding parse stops near the limit; the formula is sized again once the parse returns (see the gaps below).
 
   `tests/n3_builtin_alloc.rs` counts heap bytes with a counting global allocator. For each builtin result, substitution and `log:collectAllIn` list it checks that an oversized term is refused, and that the heap peak during evaluation stays within half the term's size of a control run that derives nothing large, so the term was not built first. Results at most three times an input the evaluation already holds (URI encoding, `string:lowerCase`) are checked for the refusal only.
 
   Past the limit, the call returns `Err("n3: forward closure limit exceeded: … max_term_bytes …")` and the cut is recorded. Every closure of the run fails, rather than aborting on a failed allocation. The size is approximate: string bytes plus a fixed cost per node. It bounds each derived term, not total memory: many distinct terms just under the limit are bounded only by `max_facts`.
 
   **Not covered:**
-  - parser input size: a parse (the document's own, or a `log:parsedAsN3` / `log:semantics` one) allocates its terms before its result is sized, so its memory is bounded by its input text, and a short prefix used many times expands before the formula is refused;
+  - parser input size: the document's own parse is not charged. A `log:parsedAsN3` / `log:semantics` parse is, but it allocates a literal or IRI before charging it, and charges a quoted formula copied into each statement of a `;` / `,` list as one node, so it can allocate past the limit before it is refused;
   - `log:content` text, which the caller's resolver supplies;
   - the incremental counting engine behind `MaterializedN3Graph` ([GH #6854](https://github.com/sparq-org/sparq/issues/6854)); its batch fallback is covered;
   - the opt-in `compiled-rules` evaluator ([GH #6855](https://github.com/sparq-org/sparq/issues/6855)).

@@ -3688,8 +3688,10 @@ const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langSt
 /// The formula a builtin parses N3 text into (`log:parsedAsN3`, `log:semantics`), sized
 /// before it is kept: `None` when the text is not N3 (a no-match; a parser limit is a
 /// cut) or when the formula is past the run's term-size limit (a cut, and the run
-/// refused). The parse itself is not charged as it runs: it allocates in proportion to
-/// its expanded input before the formula is sized (GH #6771 follow-up).
+/// refused). The parser also charges the terms it builds against the limit as it runs
+/// ([`bounded::parse_n3_term`]), so an expanding parse stops early; that charge is not
+/// yet complete (leaf literals and IRIs are allocated before they are charged), so the
+/// returned formula is sized again here.
 fn parsed_formula(
     f: Func,
     src: &str,
@@ -3697,8 +3699,9 @@ fn parsed_formula(
     bw: &BwCtx,
     pending: &bounded::Pending,
 ) -> Option<Term> {
-    // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
-    let parsed = bounded::parse_n3(src, base, pending).ok()?;
+    // no-match: ill-typed (not N3 text; `parse_n3_term` already recorded a parser limit
+    // or the term-size refusal as a cut)
+    let parsed = bounded::parse_n3_term(src, base, &bw.truncated, pending)?;
     let statements = reencode_statements(parsed);
     let bytes = statements
         .iter()
