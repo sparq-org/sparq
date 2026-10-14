@@ -893,15 +893,15 @@ async fn serve_read_once<S: Store>(
     //   none selectable there is no 304). An Accept merely naming no producible type instead falls
     //   back to text/turtle, the Solid default (see `content::negotiate_accept_with_profile`).
     let (rendered, etag): (Option<(Bytes, String)>, String) = if target.is_container {
-        let (body, content_type) = render_container(
+        let (body, content_type, etag) = render_container(
             state,
             &target.iri,
             &resource.body,
             &resource.meta.content_type,
+            &resource.meta.etag,
             accept,
         )
         .await?;
-        let etag = representation_etag(&content_type, &body);
         (Some((body, content_type)), etag)
     } else {
         let etag = negotiated_validator(&resource.meta.etag, &resource.meta.content_type, accept)?;
@@ -1179,12 +1179,18 @@ pub async fn put_handler<S: Store>(
     // `negotiate_body`). The stored media type is the (sanitised) declared one.
     let stored_type = validate_writable(&content_type, &body, &target.iri)?;
 
-    // Conditional write: evaluate preconditions against the CURRENT representation's ETag.
-    let current_etag = current.as_ref().map(|m| m.etag.as_str());
+    // Conditional write: evaluate preconditions against the CURRENT state's tag.
+    let current_etag = write_validator(
+        &state,
+        &target,
+        &headers,
+        current.as_ref().map(|m| m.etag.as_str()),
+    )
+    .await?;
     conditional::require(eval_preconditions(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
-        current_etag,
+        current_etag.as_deref(),
     ))?;
 
     let parent = parent_container(&target);
@@ -1256,7 +1262,7 @@ pub async fn put_handler<S: Store>(
     // `invalidate_acl_if_acl`).
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target.iri))
+    Ok(write_response(existed, &meta, &target))
 }
 
 /// `POST /{path}` — create a child resource inside a container.
@@ -1413,7 +1419,13 @@ pub async fn post_handler<S: Store>(
         .await;
 
     let mut out = HeaderMap::new();
-    set_str(&mut out, header::ETAG, &meta.etag);
+    // A new container is empty, so its validator is the empty-listing state tag.
+    let etag = if child_iri.ends_with('/') {
+        container_state_etag(&meta.etag, &[])
+    } else {
+        meta.etag.clone()
+    };
+    set_str(&mut out, header::ETAG, &etag);
     set_str(&mut out, header::LOCATION, &child_iri);
     Ok((StatusCode::CREATED, out).into_response())
 }
@@ -1498,10 +1510,12 @@ pub async fn delete_handler<S: Store>(
     };
 
     // Conditional delete: honour If-Match / If-None-Match against the current ETag.
+    let current_etag =
+        write_validator(&state, &target, &headers, Some(current.etag.as_str())).await?;
     conditional::require(eval_preconditions(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
-        Some(current.etag.as_str()),
+        current_etag.as_deref(),
     ))?;
 
     // An AUXILIARY `.acl` resource is NOT a contained child (it is created via `store.write`, never via
@@ -1673,7 +1687,13 @@ pub async fn patch_handler<S: Store>(
     };
 
     // Apply preconditions against the current ETag.
-    let current_etag = current.as_ref().map(|r| r.meta.etag.clone());
+    let current_etag = write_validator(
+        &state,
+        &target,
+        &headers,
+        current.as_ref().map(|r| r.meta.etag.as_str()),
+    )
+    .await?;
     conditional::require(eval_preconditions(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
@@ -1788,7 +1808,7 @@ pub async fn patch_handler<S: Store>(
     // read resolves against the patched ACL immediately.
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target.iri))
+    Ok(write_response(existed, &meta, &target))
 }
 
 /// `OPTIONS /{path}` — advertise the methods + write media types for a target (RFC 9110 §9.3.7 +
@@ -1897,8 +1917,9 @@ async fn render_container<S: Store>(
     container_iri: &str,
     stored_body: &Bytes,
     stored_content_type: &str,
+    stored_etag: &str,
     accept: Option<&str>,
-) -> Result<(Bytes, String), ServerError> {
+) -> Result<(Bytes, String, String), ServerError> {
     // The container's stored bytes default to a Turtle representation; if the stored type is RDF, use
     // it as the conneg default (most faithful) and parse the stored body for its own triples.
     let stored_format = classify(Some(stored_content_type)).ok();
@@ -1938,8 +1959,12 @@ async fn render_container<S: Store>(
     // preserve that — and only that — with a membership check against ONLY the stored set, which is
     // empty for the overwhelmingly common empty/typing-free container body, so the hot path does zero
     // membership work. Insertion order + which triples appear are unchanged, so the serialiser emits
-    // the same bytes and `representation_etag` is preserved byte-for-byte.
+    // the same bytes are preserved byte-for-byte.
     let children = state.store.list_children(container_iri).await?;
+    let etag = conditional::variant_etag(
+        &container_state_etag(stored_etag, &children),
+        negotiated.variant_suffix(),
+    );
     let stored_len = stored_triples.len();
 
     // Suppress ONLY a GENERATED triple that duplicates a STORED one. There are exactly `3 + N`
@@ -1953,7 +1978,7 @@ async fn render_container<S: Store>(
     //     of `stored_triples` ONCE (no clones — references into the still-owned Vec) and probe it O(1),
     //     capping the worst case at O(stored_len + (3 + N)) as the old whole-graph HashSet did.
     // All three branches suppress EXACTLY the same triples (a generated triple present in the stored
-    // set), so the output bytes + `representation_etag` are identical regardless of which path runs.
+    // set), so the output bytes are identical regardless of which path runs.
     //
     // The generated triples are collected into their own Vec FIRST (so the membership probe can borrow
     // the still-owned `stored_triples`); the final `triples` is then `stored ++ generated`, preserving
@@ -2016,38 +2041,63 @@ async fn render_container<S: Store>(
     triples.extend(generated);
 
     // Serialise into the negotiated format AND JSON-LD document form; the `Content-Type` echoes
-    // any honoured profile. The representation ETag the caller derives from these bytes is
-    // profile-variant-specific exactly when the bytes differ (compacted output differs; expanded
-    // output is byte-identical to the default serialisation).
+    // any honoured profile. The validator's variant suffix is profile-specific exactly when the
+    // bytes differ (compacted output differs; expanded output is byte-identical to the default
+    // serialisation).
     let bytes = serialize_triples_negotiated(negotiated, &triples)?;
-    Ok((Bytes::from(bytes), negotiated.content_type()))
+    Ok((Bytes::from(bytes), negotiated.content_type(), etag))
 }
 
-/// A STRONG ETag computed from a rendered representation's media type and BYTES — `"<len>-<hash>"`.
+/// A container's STATE tag: a strong validator for everything its representations are rendered
+/// from, namely its stored record (by that record's own tag) and its membership.
 ///
-/// Used for a container response, whose body is generated from live membership (not stored bytes), so
-/// the validator must track the actual representation: it changes whenever the serialised body changes
-/// (a child added/removed) or the negotiated `Content-Type` differs. The media type is hashed too
-/// because two formats can render identical bytes (N-Triples and default-graph N-Quads always do, and
-/// a one-triple Turtle body can match them), and a validator must never 304 a request for one of them
-/// with the other's tag. The same body computed for GET and HEAD yields the same validator, so the two
-/// methods agree. This is a non-cryptographic content hash (FNV-1a), sufficient for a cache validator
-/// — collisions across distinct representations are vanishingly unlikely and the length prefix
-/// further disambiguates.
-fn representation_etag(content_type: &str, body: &[u8]) -> String {
-    // FNV-1a 64-bit over the media type, a 0xFF separator (never part of a header value), and the
-    // serialised representation.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    let bytes = content_type
-        .as_bytes()
-        .iter()
-        .chain(std::iter::once(&0xFF))
-        .chain(body);
-    for &b in bytes {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+/// Every representation of a container is generated, so none of them carries the stored tag. A
+/// read serves `"<state>+<variant>"` ([`conditional::variant_etag`] with the negotiated format), and
+/// a write's `If-Match` / `If-None-Match` compares against this state tag ([`write_validator`]), so
+/// a client can round-trip `GET` (any `Accept`) → conditional `PUT`/`PATCH`/`DELETE` with the tag it
+/// received, while a child added or removed since makes that tag stale for both reads and writes.
+///
+/// FNV-1a over the stored tag, combined with an order-independent sum of each child IRI's FNV-1a
+/// hash (the listing is a set), prefixed with the child count. Never contains `+`, so the variant
+/// suffix stays unambiguous. A non-cryptographic hash, sufficient for a cache validator.
+fn container_state_etag(stored_etag: &str, children: &[crate::store::ValidatedChildIri]) -> String {
+    fn fnv1a(bytes: &[u8]) -> u64 {
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for &b in bytes {
+            hash ^= b as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash
     }
-    format!("\"{}-{:x}\"", body.len(), hash)
+    let members = children.iter().fold(0u64, |acc, c| {
+        acc.wrapping_add(fnv1a(c.as_str().as_bytes()))
+    });
+    let hash = fnv1a(stored_etag.as_bytes()) ^ members.rotate_left(17);
+    format!("\"{}-{:x}\"", children.len(), hash)
+}
+
+/// The tag a write's `If-Match` / `If-None-Match` is evaluated against: the stored tag for a plain
+/// resource (whose read validators are that tag or a `+<variant>` of it), and the
+/// [`container_state_etag`] for a container (whose read validators are variants of THAT). The
+/// container's listing is read only when a precondition names a concrete tag; `*` needs existence
+/// alone, and an unconditional write needs nothing.
+async fn write_validator<S: Store>(
+    state: &Arc<LdpState<S>>,
+    target: &crate::ldp::target::LdpTarget,
+    headers: &HeaderMap,
+    stored: Option<&str>,
+) -> Result<Option<String>, ServerError> {
+    let Some(stored) = stored else {
+        return Ok(None);
+    };
+    let names_a_tag = [header::IF_MATCH, header::IF_NONE_MATCH]
+        .into_iter()
+        .any(|h| header_str(headers, h).is_some_and(|v| !conditional::is_wildcard(v)));
+    if !target.is_container || !names_a_tag {
+        return Ok(Some(stored.to_string()));
+    }
+    let children = state.store.list_children(&target.iri).await?;
+    Ok(Some(container_state_etag(stored, &children)))
 }
 
 /// Ensure every ANCESTOR container of `iri` exists, creating any that are missing and wiring each into
@@ -2146,16 +2196,33 @@ async fn reject_slash_semantics_conflict<S: Store>(
 }
 
 /// The shared 201/204 + ETag (+ Location on create) response for PUT / PATCH writes.
-fn write_response(existed: bool, meta: &ResourceMeta, iri: &str) -> Response {
+///
+/// A container's validators are [`container_state_etag`]s, so a newly created (hence empty)
+/// container gets the empty-listing state tag. A replaced container gets no `ETag`: its current tag
+/// depends on a listing the writer may not be allowed to read, and its stored tag is not a
+/// validator for any of its representations.
+fn write_response(
+    existed: bool,
+    meta: &ResourceMeta,
+    target: &crate::ldp::target::LdpTarget,
+) -> Response {
     let status = if existed {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::CREATED
     };
     let mut out = HeaderMap::new();
-    set_str(&mut out, header::ETAG, &meta.etag);
+    if !target.is_container {
+        set_str(&mut out, header::ETAG, &meta.etag);
+    } else if !existed {
+        set_str(
+            &mut out,
+            header::ETAG,
+            &container_state_etag(&meta.etag, &[]),
+        );
+    }
     if !existed {
-        set_str(&mut out, header::LOCATION, iri);
+        set_str(&mut out, header::LOCATION, &target.iri);
     }
     (status, out).into_response()
 }
@@ -3690,11 +3757,12 @@ mod tests {
         }
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
 
-        let (body, ct) = render_container(
+        let (body, ct, _etag) = render_container(
             &state,
             container,
             &AxBytes::new(),
             "text/turtle",
+            "\"0-0\"",
             Some("text/turtle"),
         )
         .await
@@ -3738,11 +3806,12 @@ mod tests {
             .expect("mint container with stored body");
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
 
-        let (body, _ct) = render_container(
+        let (body, _ct, _etag) = render_container(
             &state,
             container,
             &stored_body,
             "text/turtle",
+            "\"0-0\"",
             Some("text/turtle"),
         )
         .await
@@ -3794,11 +3863,12 @@ mod tests {
         }
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
 
-        let (body_out, _ct) = render_container(
+        let (body_out, _ct, _etag) = render_container(
             &state,
             container,
             &stored_body,
             "text/turtle",
+            "\"0-0\"",
             Some("text/turtle"),
         )
         .await
@@ -5109,6 +5179,175 @@ mod tests {
         let not_mod = get_with(&state, owner_token(), "/alice/c/", cond).await;
         assert_eq!(not_mod.status(), StatusCode::NOT_MODIFIED);
         assert_eq!(etag_of(&not_mod), etag, "container 304 ETag == 200 ETag");
+    }
+
+    /// A conditional write by the owner: `verb` on `path` with one precondition header naming `tag`.
+    async fn owner_conditional_write(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        precondition: HeaderName,
+        tag: &str,
+    ) -> Response {
+        let uri: axum::http::Uri = path.parse().unwrap();
+        let (s, t) = (State(state.clone()), Extension(owner_token()));
+        let mut headers = match verb {
+            "PATCH" => n3_patch_headers(),
+            _ => turtle_write_headers(),
+        };
+        headers.insert(precondition, HeaderValue::from_str(tag).unwrap());
+        let patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+                     _:p solid:inserts { <#it> <http://p> \"v\" . }.\n";
+        match verb {
+            "PUT" => put_handler(s, t, uri, headers, AxBytes::new()).await,
+            "PATCH" => patch_handler(s, t, uri, headers, AxBytes::from(patch)).await,
+            _ => delete_handler(s, t, uri, headers).await,
+        }
+        .unwrap_or_else(|e| e.into_response())
+    }
+
+    #[tokio::test]
+    async fn container_read_validators_round_trip_into_write_preconditions() {
+        // A container's representations are generated from its stored record and its membership,
+        // so its read tags are variants of one state tag over both. A conditional write compares
+        // that state: a tag read in any format is current for PUT, PATCH and DELETE until the
+        // container or its membership changes, and stale for reads and writes alike after that.
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        let seed = |path: &'static str| {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::new(),
+            )
+        };
+        seed("/alice/c/a").await.expect("seed child");
+        let read_tag = |media: &'static str| {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let state = state.clone();
+            async move { etag_of(&get_with(&state, owner_token(), "/alice/c/", accept).await) }
+        };
+
+        // Every format's tag is current for every verb: If-None-Match fails without writing.
+        let ttl = read_tag("text/turtle").await;
+        let jsonld = read_tag("application/ld+json").await;
+        assert_ne!(
+            ttl, jsonld,
+            "each representation keeps its own read validator"
+        );
+        for tag in [&ttl, &jsonld] {
+            for verb in ["PUT", "PATCH", "DELETE"] {
+                let resp =
+                    owner_conditional_write(&state, verb, "/alice/c/", header::IF_NONE_MATCH, tag)
+                        .await;
+                assert_eq!(
+                    resp.status(),
+                    StatusCode::PRECONDITION_FAILED,
+                    "{verb} {tag}"
+                );
+            }
+        }
+        // …and If-Match with any of them proceeds. A replaced container's response carries no
+        // ETag, since its stored tag validates none of its representations.
+        let resp =
+            owner_conditional_write(&state, "PATCH", "/alice/c/", header::IF_MATCH, &jsonld).await;
+        assert!(resp.status().is_success(), "{}", resp.status());
+        assert!(resp.headers().get(header::ETAG).is_none());
+        let after_patch = read_tag("text/turtle").await;
+        assert_ne!(
+            after_patch, ttl,
+            "the container's own record is part of its state"
+        );
+        let resp =
+            owner_conditional_write(&state, "PUT", "/alice/c/", header::IF_MATCH, &after_patch)
+                .await;
+        assert!(resp.status().is_success(), "{}", resp.status());
+
+        // A membership change makes the held tag stale: DELETE fails its precondition (412, before
+        // the non-empty 409), and a conditional read gets a fresh 200.
+        let held = read_tag("text/turtle").await;
+        seed("/alice/c/b").await.expect("add child");
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            let resp =
+                owner_conditional_write(&state, verb, "/alice/c/", header::IF_MATCH, &held).await;
+            assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED, "{verb}");
+        }
+        let mut cond = HeaderMap::new();
+        cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&held).unwrap());
+        cond.insert(header::ACCEPT, HeaderValue::from_static("text/turtle"));
+        assert_eq!(
+            get_with(&state, owner_token(), "/alice/c/", cond)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn a_new_containers_write_etag_is_a_current_validator() {
+        // A container created by POST or PUT is empty, and the ETag its creation returns is current
+        // for a conditional write: an If-Match DELETE with it removes the container.
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/seed".parse().unwrap(),
+            turtle_write_headers(),
+            AxBytes::new(),
+        )
+        .await
+        .expect("seed /alice/");
+        let mut headers = post_turtle_headers_with_slug("box");
+        headers.insert(
+            header::LINK,
+            HeaderValue::from_static(LINK_TYPE_LDP_BASIC_CONTAINER),
+        );
+        let created = post_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/".parse().unwrap(),
+            headers,
+            AxBytes::new(),
+        )
+        .await
+        .expect("POST a container");
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let posted = created
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let posted_path = posted
+            .strip_prefix("https://pod.example")
+            .unwrap()
+            .to_string();
+        let posted_tag = etag_of(&created);
+
+        let put = put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/made/".parse().unwrap(),
+            turtle_write_headers(),
+            AxBytes::new(),
+        )
+        .await
+        .expect("PUT a container");
+        assert_eq!(put.status(), StatusCode::CREATED);
+        let put_tag = etag_of(&put);
+
+        for (path, tag) in [
+            (posted_path.as_str(), posted_tag),
+            ("/alice/made/", put_tag),
+        ] {
+            let resp =
+                owner_conditional_write(&state, "DELETE", path, header::IF_MATCH, &tag).await;
+            assert!(resp.status().is_success(), "{path}: {}", resp.status());
+        }
     }
 
     #[tokio::test]

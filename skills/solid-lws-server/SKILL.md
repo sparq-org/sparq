@@ -178,7 +178,10 @@ curl -i -X POST \
 collision-resistant child IRI below a container, `PATCH` accepts supported
 Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
 container. Use `If-Match` and `If-None-Match` for conditional mutations.
-Container reads include generated `ldp:contains` triples.
+Container reads include generated `ldp:contains` triples. A container's `ETag`
+covers its own record and its membership: a tag read in any format is a valid
+`If-Match` for the container until it or its membership changes. Creating a
+container returns its current tag; replacing one returns no `ETag`.
 
 Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and
