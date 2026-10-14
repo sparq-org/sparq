@@ -702,6 +702,32 @@ named reason and unlock path in the deferral ledger: `sparq-conformance/tests/dl
 (`DOCUMENTED_DIVERGENCES`, `DL_DIRECT_ABSTAINED`, `DL_PROFILE_ABSTAINED`) and the design
 record `research/owl2-direct-semantics-scoping.md`.
 
+**Full OWL 2 DL front end (`sparq_reason_dl::owl2dl`, issue #7031, in progress).** The
+ALCH layers above are being extended to OWL 2 DL (SROIQ(D)) by a hypertableau reasoner.
+Its first layer is built: `owl2dl::extract(&dict, &triples)` reads the whole OWL 2 RDF
+mapping (inverses, cardinalities, nominals, `hasSelf`, chains, keys, datatypes and facets,
+`sameAs`/`differentFrom`, negative assertions, n-ary disjointness) into a typed
+`owl2dl::Ontology`, every axiom carrying the input triple indices it came from. It stays
+fail-closed: a triple it cannot place gives an `ExtractError` naming that triple.
+Annotations are kept too (annotation axioms, plus ontology and reified axiom annotations in
+`Ontology::annotations`), outside the logical axioms.
+`owl2dl::check_dl(&dict, &onto)` runs the OWL 2 DL global restrictions (declarations and
+typing, punning, reserved vocabulary, simple roles, property-hierarchy regularity,
+anonymous-individual forests, operand sets, ill-typed literals, facets, datatype
+definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
+`Some(false)` on a violation, `Some(true)` only when every restriction was checked, and
+`None` when one was not (listed in `unchecked`: `xsd:pattern` syntax, `rdf:XMLLiteral`
+content, an unloaded imports closure, anonymous individuals outside an anonymous forest,
+literal values beyond the represented range such as a year past `i64` or a language tag
+that is not well-formed BCP 47, and the facet space of a bound outside the restricted
+datatype's value space, and whether operands with cardinality restrictions are distinct). Cardinalities must be valid non-negative `xsd:nonNegativeInteger` or
+`xsd:integer` literals; others are refused as unsupported. Lexical forms get no
+whitespace normalisation (RDF applies no `whiteSpace` facet), and with unloaded imports
+the violations an import could repair (undeclared entities, unknown datatypes) are
+unchecked rather than definite.
+`blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
+`Ontology::imports`, never dereferenced.
+
 ## Common recipes
 
 **1. OWL 2 RL closure + inconsistency report.** OWL includes RDFS; run the clash check on the materialized result.
