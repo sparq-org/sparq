@@ -703,8 +703,9 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
-/// [`allowed`] as for a URI where nothing is (no metadata, no format): what a caller other than the
-/// owner is told about a resource it was not there for before a change in flight began.
+/// [`allowed`] as for a URI where nothing is (no metadata, and only a container's format, which is
+/// its listing's): what a caller other than the owner is told about a resource that was not there
+/// before a change in flight began.
 pub async fn allowed_absent<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
@@ -714,13 +715,15 @@ pub async fn allowed_absent<S: Store + 'static>(
     if state.cfg.open || is_owner(state, agent) {
         return Ok(true);
     }
+    // A container's format is its listing's, whatever is stored; nothing else has one.
+    let format = uri.ends_with('/').then(|| LWS_JSON.to_string());
     decide(
         state,
         action,
         uri,
         agent,
         &ResourceMeta::default(),
-        Some(None),
+        Some(format),
     )
     .await
 }
