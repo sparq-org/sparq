@@ -1800,6 +1800,94 @@ fn an_uppercase_or_short_operand_enc_is_refused_everywhere() {
     }
 }
 
+/// The checked entry takes no TOML, so a `Prover.toml` outside the renderers'
+/// flat form cannot be HANDED to it; the remaining route for such text is a
+/// field value. Each spelling below is valid TOML (or close to it) that a parser
+/// could read a different `datatype_const` from; placed in any `FieldHex` field
+/// the checked entry renders from, every one is refused as non-canonical before
+/// any subprocess — and the honest proof renders exactly the flat bytes the
+/// in-circuit vectors are solved from.
+#[test]
+fn every_prover_toml_spelling_outside_the_flat_form_is_refused_as_field_text() {
+    let prover = CircuitProver::from_crate_root();
+    let out = unique_out_dir("flat_form");
+    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
+        .expect("the V2 boolean builder accepts a canonical literal");
+    let p = unpack(&built.inputs);
+    let honest = raw_value_lane_toml(
+        &challenge_one(),
+        p.operand_enc,
+        p.op.code(),
+        p.bound,
+        p.datatype_const,
+        p.expected,
+        &built.value_hook,
+        &built.lexical_component,
+    );
+    let proof = built.lane_proof().unwrap();
+    assert_eq!(
+        proof
+            .checked_prover_toml(CommitmentMethod::DualLeafV2, MethodUse::NewIssuance, &challenge_one())
+            .unwrap(),
+        honest,
+        "the checked entry renders the flat form"
+    );
+    let v2 = &p.datatype_const.0;
+    let v1 = &boolean_datatype_const().0;
+    let line = format!("datatype_const = \"{}\"", v2);
+    let without = honest.replace(&format!("{}\n", line), "");
+    assert_ne!(without, honest, "the honest rendering carries the line");
+    let cases: Vec<(&str, String)> = vec![
+        ("comment line", format!("# note\n{}", honest)),
+        ("blank line", format!("\n{}", honest)),
+        ("CRLF", honest.replace('\n', "\r\n")),
+        ("byte-order mark", format!("\u{feff}{}", honest)),
+        ("quoted key", format!("{}\"datatype_const\" = \"{}\"\n", without, v2)),
+        ("dotted key", format!("{}a.datatype_const = \"{}\"\n", without, v2)),
+        ("literal string", format!("{}datatype_const = '{}'\n", without, v2)),
+        ("escape in string", format!("{}datatype_const = \"{}\\u0030\"\n", without, v2)),
+        ("multi-line string", format!("{}datatype_const = \"\"\"{}\"\"\"\n", without, v2)),
+        ("inline table", format!("{}t = {{ datatype_const = \"{}\" }}\n{}\n", without, v1, line)),
+        ("array of tables after", format!("{}[[t]]\ndatatype_const = \"{}\"\n", honest, v1)),
+        ("extra spaces", format!("{}datatype_const  =  \"{}\"\n", without, v2)),
+        ("trailing comment", format!("{}{} # x\n", without, line)),
+        ("duplicate key", format!("{}{}\n", honest, line)),
+        ("no key", without.clone()),
+    ];
+    let ValueLaneProof::Boolean(base) = proof else { panic!("boolean lane") };
+    for (label, toml) in cases {
+        let text = FieldHex(toml);
+        let mut in_operand = base.clone();
+        in_operand.operand_enc = text.clone();
+        let mut in_lexical = base.clone();
+        in_lexical.witness.lexical_component = text.clone();
+        for (field, challenge, proof) in [
+            ("challenge", text.clone(), ValueLaneProof::Boolean(base.clone())),
+            ("operand_enc", challenge_one(), ValueLaneProof::Boolean(in_operand)),
+            ("lexical_component", challenge_one(), ValueLaneProof::Boolean(in_lexical)),
+        ] {
+            let err = prover
+                .prove_value_lane(
+                    CommitmentMethod::DualLeafV2,
+                    MethodUse::NewIssuance,
+                    &challenge,
+                    &proof,
+                    &out,
+                    "flatform",
+                )
+                .expect_err(label);
+            assert!(
+                matches!(&err, DriverError::Dispatch(DispatchError::NonCanonicalFieldHex { field: f, .. }) if f == field),
+                "{} in {}: {:?}",
+                label,
+                field,
+                err
+            );
+        }
+    }
+    assert!(!out.exists(), "every refusal must precede any scratch directory");
+}
+
 // =========================================================================
 // 9. The lane↔member ALLOW-LIST, over every (constant, member) cell
 // =========================================================================
