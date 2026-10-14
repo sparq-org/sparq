@@ -31,9 +31,12 @@ base URL unless configured otherwise. The default Cargo features are:
 
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
 - `sparql-endpoint`, which mounts the query-only `/sparql` route.
+- `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
+  authentication suites (§ *Run the LWS 1.0 protocol* below). `authn-saml` is off.
 
 Use `--no-default-features` for the engine-free Solid core tier; that tier keeps
-LDP and WAC but does not expose `/sparql`.
+LDP and WAC but does not expose `/sparql`, and it compiles in no authentication
+suite, so LWS mode offers none.
 
 For a deployed instance, set at least:
 

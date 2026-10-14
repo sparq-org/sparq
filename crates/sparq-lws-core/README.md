@@ -97,8 +97,8 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   - `http3` (off, sq-oprna.2) — with the TLS PEM variables configured, also serve
     the same hardened LDP router over HTTP/3 on UDP at the resolved `SOLID_SERVER_BIND`
     address+port; TCP stays HTTP/2 + HTTP/1.1 (and WS).
-  - `redis-replay` (off) — a shared Redis-backed DPoP `jti` replay store for
-    horizontally-scaled deployments.
+  - `redis-replay` (off) — a shared Redis-backed DPoP `jti` replay store for horizontally-scaled deployments.
+  - `authn-ssi` + `authn-openid` (**default-on**) and `authn-saml` (off) — the LWS 1.0 authorization server's authentication suites, each its own `sparq-lws-authn-*` crate implementing `sparq_lws_authn::Suite`; `SOLID_SERVER_LWS_AUTHN` picks among those compiled in.
   - `odrl-authz` (off, sq-elg47) — the native ODRL policy gate seam on the
     read/query path (`authz::odrl`, via `LdpState::set_odrl_gate`; deny-overrides /
     permit-extends over the WAC decision, fail-closed).
