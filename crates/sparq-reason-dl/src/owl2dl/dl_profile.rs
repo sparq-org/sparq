@@ -135,18 +135,40 @@ pub fn check_dl(dict: &Dict, onto: &Ontology) -> DlProfileReport {
     c.anonymous_individuals();
     c.datatypes();
     c.operand_sets();
-    if !onto.imports.is_empty() {
-        c.unchecked(
-            "the imports closure (owl:imports targets are not loaded)",
-            &[],
-        );
-    }
     for note in &onto.notes {
         c.out.push(Violation {
             kind: ViolationKind::ExtractionNote,
             message: note.message.clone(),
             source: note.source.clone(),
         });
+    }
+    for note in &onto.unrepresented {
+        c.unchecked(
+            "parts of the graph the model cannot represent",
+            &note.source,
+        );
+    }
+    if !onto.imports.is_empty() {
+        c.unchecked(
+            "the imports closure (owl:imports targets are not loaded)",
+            &[],
+        );
+        // An unloaded import may declare the entities, define the datatypes and settle the
+        // property kinds these violations are about, so they are not definite.
+        let (open, kept): (Vec<Violation>, Vec<Violation>) =
+            std::mem::take(&mut c.out).into_iter().partition(|v| {
+                matches!(
+                    v.kind,
+                    ViolationKind::Undeclared
+                        | ViolationKind::UnknownDatatype
+                        | ViolationKind::InvalidDatatypeDefinition
+                        | ViolationKind::ExtractionNote
+                )
+            });
+        c.out = kept;
+        for v in open {
+            c.unchecked("declarations an unloaded import may supply", &v.source);
+        }
     }
     c.out.sort_by(|a, b| {
         a.source
@@ -403,8 +425,22 @@ impl<'a> Checker<'a> {
                 Some(_) => 1,
             }
         }
+        let mut unsure = Vec::new();
         for rec in &self.onto.axioms {
             let n = match &rec.axiom {
+                // The model writes an unqualified cardinality with its default filler, so
+                // `ObjectMinCardinality(1 P)` and `ObjectMinCardinality(1 P owl:Thing)` look
+                // alike although they are structurally distinct: equal operands that contain
+                // a cardinality are not decided.
+                Axiom::EquivalentClasses(cs)
+                | Axiom::DisjointClasses(cs)
+                | Axiom::DisjointUnion(_, cs)
+                    if distinct(&cs.iter().map(canonical_class).collect::<Vec<_>>()) < 2
+                        && cs.iter().any(has_cardinality) =>
+                {
+                    unsure.push(rec.source.clone());
+                    continue;
+                }
                 // Operands are compared as structures, where the order inside a set-valued
                 // constructor (`UnionOf(A B)` vs `UnionOf(B A)`) does not count.
                 Axiom::EquivalentClasses(cs) | Axiom::DisjointClasses(cs) => {
@@ -429,6 +465,9 @@ impl<'a> Checker<'a> {
                     source: rec.source.clone(),
                 });
             }
+        }
+        for src in unsure {
+            self.unchecked("distinctness of cardinality operands", &src);
         }
     }
 
@@ -1100,6 +1139,22 @@ fn canonical_class(c: &ClassExpression) -> ClassExpression {
         C::DataMaxCardinality(n, p, r) => C::DataMaxCardinality(*n, *p, canonical_range(r)),
         C::DataExactCardinality(n, p, r) => C::DataExactCardinality(*n, *p, canonical_range(r)),
         other => other.clone(),
+    }
+}
+
+/// `true` when `c` contains a cardinality restriction anywhere.
+fn has_cardinality(c: &ClassExpression) -> bool {
+    use ClassExpression as C;
+    match c {
+        C::MinCardinality(..)
+        | C::MaxCardinality(..)
+        | C::ExactCardinality(..)
+        | C::DataMinCardinality(..)
+        | C::DataMaxCardinality(..)
+        | C::DataExactCardinality(..) => true,
+        C::IntersectionOf(xs) | C::UnionOf(xs) => xs.iter().any(has_cardinality),
+        C::ComplementOf(x) | C::SomeValuesFrom(_, x) | C::AllValuesFrom(_, x) => has_cardinality(x),
+        _ => false,
     }
 }
 

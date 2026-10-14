@@ -960,10 +960,13 @@ fn only_three_characteristics_declare_an_object_property() {
         let v = violations(&format!("{base} :p a owl:{ch} ."));
         assert!(v.contains(&ViolationKind::Undeclared), "{ch}: {v:?}");
     }
-    for ty in ["rdfs:Class", "owl:DeprecatedClass"] {
-        let v = violations(&format!(":A a {ty} . :x a owl:NamedIndividual , :A ."));
-        assert!(v.contains(&ViolationKind::Undeclared), "{ty}: {v:?}");
-    }
+    let v = violations(":A a owl:DeprecatedClass . :x a owl:NamedIndividual , :A .");
+    assert!(v.contains(&ViolationKind::Undeclared), "{v:?}");
+    // rdfs:Class alone is not an OWL 2 typing at all.
+    assert_eq!(
+        err(":A a rdfs:Class . :x a owl:NamedIndividual , :A .").kind,
+        ExtractErrorKind::Unparsed
+    );
 }
 
 #[test]
@@ -1124,7 +1127,14 @@ fn rejects_cardinalities_not_written_as_non_negative_integers() {
         )));
         assert_eq!(e.kind, ExtractErrorKind::Unsupported, "{c}");
     }
-    for c in ["2", "\" 2 \"^^xsd:nonNegativeInteger"] {
+    assert_eq!(
+        err(&with_decls(
+            ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:maxCardinality \" 2 \"^^xsd:nonNegativeInteger ] ."
+        ))
+        .kind,
+        ExtractErrorKind::Unsupported
+    );
+    for c in ["2", "\"2\"^^xsd:nonNegativeInteger"] {
         ok(&with_decls(&format!(
             ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:maxCardinality {c} ] ."
         )));
@@ -1201,9 +1211,14 @@ fn deprecated_typings_are_deprecated_annotations() {
         })
         .collect();
     assert_eq!(deprecated.len(), 3, "{deprecated:?}");
-    // Without owl:deprecated in the dictionary the typing is kept as a note.
-    let (_, _, o) = ok(":A a owl:Class, owl:DeprecatedClass .");
-    assert!(o.notes.iter().any(|n| n.message.contains("deprecated")));
+    // Without owl:deprecated in the dictionary the annotation is not represented: the
+    // profile check leaves the verdict open rather than reporting a violation.
+    let (d, _, o) = ok(":A a owl:Class, owl:DeprecatedClass .");
+    assert!(o.notes.is_empty());
+    assert_eq!(o.unrepresented.len(), 1);
+    let report = check_dl(&d, &o);
+    assert!(report.violations.is_empty(), "{:?}", report.violations);
+    assert_eq!(report.verdict(), None);
 }
 
 #[test]
@@ -1291,4 +1306,125 @@ fn literal_lexical_forms_are_strict() {
         let body = with_decls(&format!(":a :d \"x@{tag}\"^^rdf:PlainLiteral ."));
         assert_eq!(verdict(&body), None, "{tag}");
     }
+}
+
+#[test]
+fn binary_types_take_only_length_facets() {
+    for dt in ["hexBinary", "base64Binary"] {
+        let v = violations(&with_decls(&format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:{dt} ; owl:withRestrictions ( [ xsd:pattern \"[0-9]*\" ] ) ] ."
+        )));
+        assert_eq!(v, vec![ViolationKind::InvalidFacet], "{dt}");
+        let v = violations(&with_decls(&format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:{dt} ; owl:withRestrictions ( [ xsd:maxLength 4 ] ) ] ."
+        )));
+        assert!(v.is_empty(), "{dt}: {v:?}");
+    }
+}
+
+#[test]
+fn follow_ups_to_the_third_review_round() {
+    // Unqualified and owl:Thing-qualified cardinalities are distinct operands the model
+    // cannot tell apart: undecided, not a violation.
+    let body = with_decls(
+        "[ a owl:Restriction ; owl:onProperty :p ; owl:minCardinality 1 ] owl:equivalentClass [ a owl:Restriction ; owl:onProperty :p ; owl:minQualifiedCardinality \"1\"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] .",
+    );
+    assert_eq!(verdict(&body), None);
+    // A repeated member does not make a data union of two.
+    let e = err(&with_decls(
+        ":d rdfs:range [ a rdfs:Datatype ; owl:unionOf ( xsd:integer xsd:integer ) ] .",
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    // owl:rational: no whitespace at all, and a zero denominator is ill-typed whatever the
+    // numerator.
+    for lit in [
+        "\"1/3 \"^^owl:rational",
+        "\" 1/3\"^^owl:rational",
+        "\"999999999999999999999999999999999999999999/0\"^^owl:rational",
+    ] {
+        let v = violations(&with_decls(&format!(":a :d {lit} .")));
+        assert_eq!(v, vec![ViolationKind::IllTypedLiteral], "{lit}");
+    }
+}
+
+// ===================== fourth review round =====================
+
+#[test]
+fn compatibility_typings_need_their_companions() {
+    for body in [
+        ":x a rdf:Property .",
+        ":a a rdf:List .",
+        "_:z a owl:Class .",
+        ":A a rdfs:Class .",
+    ] {
+        assert_eq!(err(body).kind, ExtractErrorKind::Unparsed, "{body}");
+    }
+    ok(":x a rdf:Property, owl:ObjectProperty .");
+    ok(":A a rdfs:Class, owl:Class .");
+    ok(&with_decls(
+        ":A owl:equivalentClass [ a owl:Class ; owl:unionOf _:l ] . _:l a rdf:List ; rdf:first :B ; rdf:rest ( :C ) .",
+    ));
+}
+
+#[test]
+fn lexical_forms_get_no_whitespace_normalisation() {
+    for lit in [
+        "\"a\\nb\"^^xsd:normalizedString",
+        "\" a \"^^xsd:token",
+        "\" 42\"^^xsd:integer",
+        "\"true \"^^xsd:boolean",
+    ] {
+        let v = violations(&with_decls(&format!(":a :d {lit} .")));
+        assert_eq!(v, vec![ViolationKind::IllTypedLiteral], "{lit}");
+    }
+    assert!(violations(&with_decls(":a :d \" a \"^^xsd:string .")).is_empty());
+}
+
+#[test]
+fn reification_nodes_are_blank_and_isolated() {
+    let e = err(&with_decls(
+        r#"
+        :A rdfs:subClassOf :B .
+        :r a owl:Axiom ; owl:annotatedSource :A ; owl:annotatedProperty rdfs:subClassOf ;
+           owl:annotatedTarget :B ; rdfs:comment "x" .
+    "#,
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    let e = err(&with_decls(
+        r#"
+        :A rdfs:subClassOf :B .
+        _:r a owl:Axiom ; owl:annotatedSource :A ; owl:annotatedProperty rdfs:subClassOf ;
+           owl:annotatedTarget :B ; rdfs:comment "x" .
+        :a a owl:NamedIndividual ; :p _:r .
+    "#,
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    // A nested annotation may name the reification node as its source.
+    ok(&with_decls(
+        r#"
+        :A rdfs:subClassOf :B .
+        _:r a owl:Axiom ; owl:annotatedSource :A ; owl:annotatedProperty rdfs:subClassOf ;
+           owl:annotatedTarget :B ; rdfs:comment "x" .
+        [] a owl:Annotation ; owl:annotatedSource _:r ; owl:annotatedProperty rdfs:comment ;
+           owl:annotatedTarget "x" ; rdfs:label "y" .
+    "#,
+    ));
+}
+
+#[test]
+fn unloaded_imports_leave_declarations_open() {
+    let body = "<http://ex/o> a owl:Ontology ; owl:imports <http://ex/other> .
+        :A a owl:Class . :A rdfs:subClassOf :B .";
+    let (d, _, o) = ok(body);
+    let report = check_dl(&d, &o);
+    assert!(report.violations.is_empty(), "{:?}", report.violations);
+    assert_eq!(report.verdict(), None);
+    // Without the import the same graph is a definite violation.
+    let v = violations(":A a owl:Class . :A rdfs:subClassOf :B .");
+    assert!(v.contains(&ViolationKind::Undeclared), "{v:?}");
+    // Violations no import can repair stay definite.
+    let (d, _, o) = ok(
+        "<http://ex/o> a owl:Ontology ; owl:imports <http://ex/other> . :C a owl:Class, rdfs:Datatype .",
+    );
+    assert_eq!(check_dl(&d, &o).verdict(), Some(false));
 }

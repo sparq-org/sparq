@@ -254,6 +254,8 @@ impl Builtin {
             Facet::MaxLength,
             Facet::Pattern,
         ];
+        // OWL 2 §4.5: the binary types take the length facets only.
+        const BINARY: &[Facet] = &[Facet::Length, Facet::MinLength, Facet::MaxLength];
         const PLAIN: &[Facet] = &[
             Facet::Length,
             Facet::MinLength,
@@ -266,8 +268,10 @@ impl Builtin {
             | PositiveInteger | NegativeInteger | Long | Int | Short | Byte | UnsignedLong
             | UnsignedInt | UnsignedShort | UnsignedByte | Double | Float | DateTime
             | DateTimeStamp => ORDER,
-            String | NormalizedString | Token | Language | Name | NcName | NmToken | HexBinary
-            | Base64Binary | AnyUri => LENGTH,
+            String | NormalizedString | Token | Language | Name | NcName | NmToken | AnyUri => {
+                LENGTH
+            }
+            HexBinary | Base64Binary => BINARY,
             PlainLiteral => PLAIN,
             RdfsLiteral | LangString | Boolean | XmlLiteral => &[],
         }
@@ -980,22 +984,39 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
     if !lex.chars().all(is_xml_char) {
         return Err(ValueError::IllTyped);
     }
+    // RDF does not apply the `whiteSpace` facet: the lexical form itself must be in the
+    // lexical space, so whitespace that `replace` or `collapse` would remove is ill-typed.
+    let ws = |c: char| matches!(c, '\t' | '\n' | '\r');
+    let well_spaced = match b {
+        String | PlainLiteral | LangString | XmlLiteral | RdfsLiteral | OwlReal | AnyUri => true,
+        NormalizedString => !lex.contains(ws),
+        // base64Binary allows single spaces between characters (XSD 1.1 §3.3.16).
+        Base64Binary => {
+            !lex.contains(ws) && !lex.starts_with(' ') && !lex.ends_with(' ') && !lex.contains("  ")
+        }
+        _ => collapse(lex) == lex,
+    };
+    if !well_spaced {
+        return Err(ValueError::IllTyped);
+    }
     Ok(match b {
         // rdfs:Literal and owl:real have no lexical space of their own (OWL 2 §4.1).
         RdfsLiteral | OwlReal => return Err(ValueError::IllTyped),
         OwlRational => {
-            // OWL 2 §4.1: `numerator '/' denominator`, the denominator an unsigned positive
-            // integer, with no whitespace inside the collapsed form.
-            let s = collapse(lex);
-            let (n, d) = s.split_once('/').ok_or(ValueError::IllTyped)?;
-            if s.contains(' ') || d.is_empty() || !d.bytes().all(|b| b.is_ascii_digit()) {
+            // OWL 2 §4.1: `numerator '/' denominator` with no whitespace anywhere, the
+            // numerator an integer and the denominator an unsigned positive integer. The form
+            // is validated in full before any value is computed, so an ill-typed literal is
+            // never reported as merely unsupported.
+            let (n, d) = lex.split_once('/').ok_or(ValueError::IllTyped)?;
+            let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+            if !digits(n.strip_prefix(['+', '-']).unwrap_or(n))
+                || !digits(d)
+                || d.bytes().all(|b| b == b'0')
+            {
                 return Err(ValueError::IllTyped);
             }
             let n = integer_value(n)?;
             let d = integer_value(d)?;
-            if d <= 0 {
-                return Err(ValueError::IllTyped);
-            }
             Value::Real(RationalKey(
                 Rational::new(n, d).ok_or(ValueError::Unsupported)?,
             ))
@@ -1130,7 +1151,9 @@ mod tests {
         );
         assert_eq!(val("-1", "nonNegativeInteger"), Err(ValueError::IllTyped));
         assert_eq!(val("300", "byte"), Err(ValueError::IllTyped));
-        assert!(val(" 42 ", "int").is_ok());
+        // RDF applies no whiteSpace facet: the lexical form itself must be in the space.
+        assert_eq!(val(" 42 ", "int"), Err(ValueError::IllTyped));
+        assert!(val("42", "int").is_ok());
         assert_eq!(val("1/3", "decimal"), Err(ValueError::IllTyped));
         assert!(parse_value("1/3", &format!("{OWL}rational"), None).is_ok());
         assert_eq!(
@@ -1165,7 +1188,14 @@ mod tests {
 
     #[test]
     fn strings_booleans_binaries() {
-        assert_eq!(val("  a  b ", "token"), Ok(Value::String("a b".into())));
+        assert_eq!(val("  a  b ", "token"), Err(ValueError::IllTyped));
+        assert_eq!(val("a b", "token"), Ok(Value::String("a b".into())));
+        assert_eq!(val("a\nb", "normalizedString"), Err(ValueError::IllTyped));
+        assert_eq!(
+            val("aGk =", "base64Binary"),
+            Ok(Value::Base64Binary(b"hi".to_vec()))
+        );
+        assert_eq!(val("aGk=\n", "base64Binary"), Err(ValueError::IllTyped));
         assert_eq!(val("1", "boolean"), val("true", "boolean"));
         assert_eq!(val("yes", "boolean"), Err(ValueError::IllTyped));
         assert_eq!(
