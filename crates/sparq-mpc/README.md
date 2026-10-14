@@ -17,6 +17,9 @@ deferred malicious-security seams live in [`PLAN.md`](./PLAN.md).
 > pending), and the collaborative ZK proof is a stub (`NotYetImplemented`). Nothing
 > here is a production security claim.
 
+Per-protocol trust-model annotations (opt-in `secprop-annotations`):
+[`ontologies/secprop-mpc-methods.ttl`](./ontologies/secprop-mpc-methods.ttl).
+
 Plan: [`PLAN.md`](./PLAN.md).
 How-to: [`skills/mpc/SKILL.md`](../../skills/mpc/SKILL.md).
 Design: [`research/mpc-zkp-research-and-architecture.md`](../../research/mpc-zkp-research-and-architecture.md).

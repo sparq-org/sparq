@@ -5551,11 +5551,20 @@ fn filter_edge_true(
 /// under the EXTERNAL trusted `K`). On any mismatch / required-but-absent binding
 /// / identity key it fails closed (`HolderKeyMismatch` / `HolderBindingMissing`).
 ///
-/// # Scope (B2 deferred)
+/// # Scope (B1 and the additional B2 gate)
 /// This is the CLEAR-KEY tier: the presented holder key is disclosed and the
-/// verifier recomputes its digest host-side. The in-circuit HIDDEN-key PoK (B2,
-/// sq-i1dt), where only the digest is public, is a separate deliverable — NOT
-/// enforced here. See `research/zk-holder-pop-design.md` §2.B / §3.3.
+/// verifier recomputes its digest host-side. B2 is implemented by
+/// `zk/compose/holder_pok/src/main.nr` and checked separately by `bind_holder_pok`
+/// in the `verify_manifest` path: it verifies each supplied PoK against the
+/// verifier's nonce, the covering issuer-attested holder digest, and the canonical
+/// verification key. [`HolderBindingPolicy::require_in_circuit_pok`] additionally
+/// rejects a `HolderPop` presentation if any holder-bound, scan-referenced
+/// credential lacks a verified PoK; this requirement is opt-in (default off).
+/// The B2 circuit keeps the holder key and secret private, with only the nonce
+/// and digest public, but this clear-key B1 gate still runs: B2 does not hide the
+/// key in the overall `HolderPop` presentation. The composition verifier remains
+/// NOT-yet-sound, pending external cryptographer sign-off (sq-qhy4); no soundness
+/// or privacy guarantee is claimed. See `research/zk-holder-pop-design.md` §2.B / §3.3.
 // [OPUS-4.8] sq-cwq: holder PoP implemented (challenge-bound Schnorr) + fail-closed.
 // [OPUS-4.8] sq-z8s7 (HolderPoP T3 / B1): + issuer-attested credential↔holder binding.
 fn bind_holder_pop(

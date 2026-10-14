@@ -428,7 +428,7 @@ fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
 /// of the DEGENERATE `value_component` a term with no numeric handle folds:
 /// `h3(VALUE_NONE, DATATYPE_CONST, LANG_CONST)`.
 ///
-/// **Distinctness does NOT rest on this tag's numeric value** (Q1, resolved
+/// **Distinctness in this build does NOT rest on this tag's numeric value** (Q1, resolved
 /// proceed-and-document under epic-owner sq-1s2.1). A `VALUE_HOOK` is an
 /// arbitrary field element — for `xsd:integer` it is the integer itself — so no
 /// small reserved tag can be globally disjoint from every real hook. What keeps
@@ -447,6 +447,15 @@ fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
 /// not-yet-routed lanes use (see [`is_hookable_datatype`]'s seam note), and
 /// distinct from a real `VALUE_HOOK = 0`, so `literal_shapes_are_distinguished`
 /// (`encode.rs`) stays true without leaning on the lexical lane alone.
+///
+/// This routing argument does NOT discharge the reserved-tag obligation in
+/// `research/zk-field-native-encoding.md` §14.1: `VALUE_NONE` must be a
+/// domain-separated `blake3_field` constant asserted outside the reachable handle
+/// band `[0, 2^64) ∪ (p − 2^64, p)` (where `p` is the circuit field modulus), with
+/// a host test and a Noir compile-time check. The routing argument stops holding
+/// if any lane degrades instead of rejecting. The shipped `VALUE_NONE = 2` lies
+/// inside that band, so this invariant remains an OPEN external-audit obligation
+/// (§14.3, CR-G8 / sq-qhy4), not an established soundness or privacy guarantee.
 pub const VALUE_NONE: u64 = 2;
 
 /// The §3.2 table's **flat slot-0 `NO_VALUE` sentinel** for IRI and blank-node

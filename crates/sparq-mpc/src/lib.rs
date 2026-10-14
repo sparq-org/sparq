@@ -228,6 +228,17 @@ pub mod proof;
 // SCOPING + LAYOUT ONLY: still hard-gated on the ZK foundation (§5.1), and
 // `proof.rs` stays an honest `NotYetImplemented`.
 pub mod federated_binding;
+// #3275 / #6186: the per-protocol security-properties annotation graph. Each
+// protocol's trust model as `secx:property`/`secx:level` claims on the ordered
+// `secx:AdversaryModel` / `secx:CorruptionThreshold` dimensions, so a preference
+// requiring malicious / dishonest-majority security is discharged by the SHARED N3
+// admissibility reasoner (`sparq_trust::admissible`) rather than resting on the
+// inert `secx:assumption` provenance. Behind the default-OFF `secprop-annotations`
+// feature; pure `const &str` + Turtle data over the zero-dependency
+// `sparq-secprop-vocab` leaf. NO protocol is annotated `secx:Malicious` — the
+// module docs give the honesty rules.
+#[cfg(feature = "secprop-annotations")]
+pub mod secprop;
 // [OPUS-4.8] sq-it50: the owned ChaCha20 CSPRNG backing SecureRng — private
 // implementation detail (not a public API), so its key schedule can be
 // ZeroizeOnDrop-scrubbed (which ecosystem rand_chacha cannot do from our side).

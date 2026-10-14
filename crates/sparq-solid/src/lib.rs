@@ -289,6 +289,11 @@ pub struct PodStore {
     /// cached static view, so attaching or detaching needs no cache invalidation.
     #[cfg(feature = "odrl-bridge")]
     odrl: odrl_enforce::OdrlEnforcement,
+    /// The graphs the last successful static WAC/ACP materialization covered: every deny
+    /// that applies to one of them is in the auth view. Emptied when the view is dropped.
+    /// Only these can be granted by an attached ODRL permission.
+    #[cfg(feature = "odrl-bridge")]
+    statically_covered: Arc<FxHashSet<String>>,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -454,6 +459,8 @@ impl PodStore {
             view_dropped: false,
             #[cfg(feature = "odrl-bridge")]
             odrl: odrl_enforce::OdrlEnforcement::default(),
+            #[cfg(feature = "odrl-bridge")]
+            statically_covered: Arc::default(),
         }
     }
 
@@ -481,6 +488,7 @@ impl PodStore {
     /// [OPUS-4.8] sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
         let stats = materialize_wac(&mut self.graph)?;
+        self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
@@ -644,6 +652,7 @@ impl PodStore {
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
         let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
@@ -914,13 +923,145 @@ impl PodStore {
         self.apply_odrl(d, session, resource, mode)
     }
 
-    /// Remove the modes an attached ODRL prohibition denies (issue #6743) from a point
-    /// decision. Deny-only: it never grants, so the status and governing-ACL provenance
-    /// are unchanged. The identity when no policy is attached.
-    fn apply_odrl(&self, mut d: WacDecision, session: &Session, resource: &str, mode: Mode) -> WacDecision {
+    /// Apply the attached ODRL policies (issue #6743) to a point decision: add the modes
+    /// an attached permission grants ([`PodStore::odrl_grants`]), then remove the modes
+    /// an attached prohibition denies. Grants apply only to an authoritative (`Resolved`)
+    /// decision and leave the status and governing-ACL provenance unchanged. The
+    /// identity when no policy is attached.
+    fn apply_odrl(&self, d: WacDecision, session: &Session, resource: &str, mode: Mode) -> WacDecision {
+        self.apply_odrl_with(d, session, resource, mode, true)
+    }
+
+    /// [`PodStore::apply_odrl`], with grants applied only when `grant` holds.
+    fn apply_odrl_with(
+        &self,
+        mut d: WacDecision,
+        session: &Session,
+        resource: &str,
+        mode: Mode,
+        grant: bool,
+    ) -> WacDecision {
+        if !self.odrl_attached() {
+            return d;
+        }
+        if grant && d.status == AclStatus::Resolved {
+            let held = std::mem::take(&mut d.granted_modes);
+            d.granted_modes = [Mode::Read, Mode::Write, Mode::Append, Mode::Control]
+                .into_iter()
+                .filter(|m| held.contains(m) || self.odrl_grants(session, *m, resource))
+                .collect();
+            d.allow = d.allow || self.odrl_grants(session, mode, resource);
+        }
         d.granted_modes.retain(|m| !self.odrl_denies(session, *m, resource));
         d.allow = d.allow && !self.odrl_denies(session, mode, resource);
         d
+    }
+
+    /// The effective verdict for `mode` on `target`, given the static view's `granted`:
+    /// an attached permission can add the mode, an attached prohibition removes it.
+    fn odrl_gate(&self, session: &Session, mode: Mode, target: &str, granted: bool) -> bool {
+        let granted = granted
+            || (self.odrl_grants(session, mode, target) && self.resolved(session, mode, target));
+        granted && !self.odrl_denies(session, mode, target)
+    }
+
+    /// Whether the static decision for `target` is authoritative.
+    fn resolved(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        decide::decide_one(self.acl_index(), &self.auth, session, target, mode).status
+            == AclStatus::Resolved
+    }
+
+    /// Whether an attached ODRL permission grants `mode` on `target` for `session`: the
+    /// one grant-eligibility predicate every path uses. Only `Read` is granted, and only
+    /// on a graph that exists now and that the last static WAC/ACP materialization
+    /// covered (so every deny that applies to it is in the view), when the auth view
+    /// does not explicitly deny it. The caller checks that the target's decision is
+    /// authoritative.
+    #[cfg(feature = "odrl-bridge")]
+    fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        self.odrl_grants_present(session, mode, target)
+            && self.graph.named.iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
+    }
+
+    /// [`PodStore::odrl_grants`] for a `target` the caller knows exists now.
+    #[cfg(feature = "odrl-bridge")]
+    fn odrl_grants_present(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        self.statically_covered.contains(target)
+            && self.odrl.grants(session, mode, target)
+            && !self.auth.denies(session, mode, target)
+    }
+
+    /// Commit an authorized update's effects to the graph. A graph the update removes, at any
+    /// point in it, leaves the static coverage first: a graph of that name created again (in
+    /// this update or a later one) is covered only once a static materialization runs again.
+    fn apply_update(&mut self, effects: &[sparq_engine::UpdateEffect]) -> Result<(), String> {
+        self.forget_removed_coverage(effects);
+        sparq_engine::apply_effects(&mut self.graph, effects)
+    }
+
+    /// Drop from the static coverage every graph `effects` removes.
+    #[cfg(feature = "odrl-bridge")]
+    fn forget_removed_coverage(&mut self, effects: &[sparq_engine::UpdateEffect]) {
+        use spargebra::algebra::GraphTarget;
+        let mut covered: Option<FxHashSet<String>> = None;
+        for effect in effects {
+            let sparq_engine::UpdateEffect::Drop(target) = effect else { continue };
+            let set = covered.get_or_insert_with(|| (*self.statically_covered).clone());
+            match target {
+                GraphTarget::NamedNode(n) => {
+                    set.remove(n.as_str());
+                }
+                GraphTarget::NamedGraphs | GraphTarget::AllGraphs => set.clear(),
+                GraphTarget::DefaultGraph => {}
+            }
+        }
+        if let Some(set) = covered {
+            self.statically_covered = Arc::new(set);
+        }
+    }
+
+    /// Feature-off twin: nothing is ever covered.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn forget_removed_coverage(&mut self, _effects: &[sparq_engine::UpdateEffect]) {}
+
+    /// Record the graphs a static WAC/ACP materialization just covered: every named graph
+    /// outside the reserved space, each of which the loader seeded as a resource.
+    #[cfg(feature = "odrl-bridge")]
+    fn record_static_coverage(&mut self) {
+        let covered = self
+            .graph
+            .named
+            .iter()
+            .filter_map(|(n, _)| match n {
+                Term::NamedNode(g) if !g.as_str().starts_with(loader::RESERVED_PREFIX) => {
+                    Some(g.as_str().to_owned())
+                }
+                _ => None,
+            })
+            .collect();
+        self.statically_covered = Arc::new(covered);
+    }
+
+    /// Feature-off twin: nothing is ever granted, so nothing is recorded.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn record_static_coverage(&mut self) {}
+
+    /// Whether any ODRL policy is attached.
+    #[cfg(feature = "odrl-bridge")]
+    fn odrl_attached(&self) -> bool {
+        !self.odrl.is_empty()
+    }
+
+    /// Feature-off twin: nothing can be attached.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn odrl_attached(&self) -> bool {
+        false
+    }
+
+    /// Feature-off twin of the grant gate: nothing is attached, nothing is granted.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn odrl_grants(&self, _: &Session, _: Mode, _: &str) -> bool {
+        false
     }
 
     /// Whether an attached ODRL prohibition removes `mode` on `target` for `session`:
@@ -1036,10 +1177,11 @@ impl PodStore {
             child_name,
             mode,
         );
-        // The child-name refusal above stays first; a prohibition on the container or on
-        // the child it would mint can only narrow what is left.
-        let d = self.apply_odrl(d, session, container, mode);
-        self.apply_odrl(d, session, &format!("{container}{child_name}"), mode)
+        // The child-name refusal above stays first. A permission never grants a create (it
+        // grants only `Read`); a prohibition on the container or on the child it would mint
+        // can only narrow what is left.
+        let d = self.apply_odrl_with(d, session, container, mode, false);
+        self.apply_odrl_with(d, session, &format!("{container}{child_name}"), mode, false)
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
@@ -1109,10 +1251,27 @@ impl PodStore {
         );
         let auth = Arc::clone(&self.auth);
         let sets = self.cache.get_or_compute(&key, |entry| entry.fill(&auth, s, mode));
-        // Attached ODRL prohibitions only narrow the cached static set (issue #6743).
+        // Attached ODRL policies apply on top of the cached static set (issue #6743): a
+        // permission adds a stored graph, a prohibition removes one.
         #[cfg(feature = "odrl-bridge")]
         if !self.odrl.is_empty() {
-            return SessionEntry::sets_from(self.odrl.filter(s, mode, &sets.sorted));
+            let mut set = sets.sorted.to_vec();
+            if mode == Mode::Read && self.odrl.has_permissions() {
+                let have: FxHashSet<&str> = sets.sorted.iter().map(NamedNode::as_str).collect();
+                // Each graph here exists, so the existence half of `odrl_grants` holds.
+                for (name, _) in self.graph.named.iter() {
+                    let Term::NamedNode(g) = name else { continue };
+                    let g_str = g.as_str();
+                    if !have.contains(g_str)
+                        && self.odrl_grants_present(s, mode, g_str)
+                        && self.resolved(s, mode, g_str)
+                    {
+                        set.push(g.clone());
+                    }
+                }
+                set.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+            }
+            return SessionEntry::sets_from(self.odrl.filter(s, mode, &set));
         }
         sets
     }
@@ -1407,19 +1566,19 @@ impl PodStore {
         if let Some(reads) = &reads {
             update::scope_reads(&upd, reads)?;
         }
-        let veto = |mode: Mode, g: &str| self.odrl_denies(s, mode, g);
-        let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs(), &veto)?;
+        let odrl = |mode: Mode, g: &str, granted: bool| self.odrl_gate(s, mode, g, granted);
+        let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs(), &odrl)?;
         // An update made only of INSERT DATA / DELETE DATA has effects its text alone gives,
         // on exactly the graphs the static check just authorized (with the same needs). When it
         // leaves the rules alone there is nothing to try out first: commit it, with no fork.
         if !permit.rematerialize && !permit.var_graphs {
             if let Some(effects) = sparq_engine::data_update_effects(sparql, budget)? {
                 debug_assert_eq!(
-                    update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &veto),
+                    update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &odrl),
                     Ok(false),
                     "the static check covers a data-only update's effects"
                 );
-                return sparq_engine::apply_effects(&mut self.graph, &effects)
+                return self.apply_update(&effects)
                     .map_err(|e| format!("the update could not be committed: {e}"));
             }
         }
@@ -1439,10 +1598,10 @@ impl PodStore {
                     s,
                     &effects,
                     self.group_docs(),
-                    &veto,
+                    &odrl,
                 )?;
                 if !wrote_rules {
-                    return sparq_engine::apply_effects(&mut self.graph, &effects)
+                    return self.apply_update(&effects)
                         .map_err(|e| format!("the update could not be committed: {e}"));
                 }
             }
@@ -1459,7 +1618,7 @@ impl PodStore {
         let effects = if permit.var_graphs {
             let group_docs = self.group_docs();
             let mut authorize = |dels: &[Option<Term>], ins: &[Option<Term>]| {
-                update::authorize_writes(&auth, s, group_docs, dels, ins, &mut auth_input, &veto)
+                update::authorize_writes(&auth, s, group_docs, dels, ins, &mut auth_input, &odrl)
             };
             sparq_engine::update_in_place_algebra_capturing(
                 &mut candidate,
@@ -1480,7 +1639,7 @@ impl PodStore {
         // Authorize what it did, however each operation reached its targets, against the view
         // in force before it.
         let wrote_rules =
-            update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &veto)?;
+            update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &odrl)?;
         let rules_changed = permit.rematerialize || auth_input || wrote_rules;
         // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
         // update, and nothing is changed, so no writer of one access-control document can take
@@ -1505,7 +1664,7 @@ impl PodStore {
         drop(candidate);
         // Commit: the effects to the store itself (one journaled, durable commit for a
         // directory-backed graph), then the view rebuilt from the rules now stored.
-        if let Err(e) = sparq_engine::apply_effects(&mut self.graph, &effects) {
+        if let Err(e) = self.apply_update(&effects) {
             // Part of it may be applied in memory: the rules may no longer match the view.
             if rules_changed {
                 self.drop_auth_view();
@@ -1540,6 +1699,10 @@ impl PodStore {
         // No other grant source (the ODRL bridge, the trust graph) rebuilds it either, until a
         // static materialization succeeds (see [`PodStore::may_install_grants`]).
         self.view_dropped = true;
+        #[cfg(feature = "odrl-bridge")]
+        {
+            self.statically_covered = Arc::default();
+        }
         self.reindex_with(ReindexScope::Full);
     }
 
@@ -1902,14 +2065,16 @@ impl PodStore {
         (matched, retracted)
     }
 
-    /// Attach an ODRL `policy` whose prohibitions are evaluated per request for the
-    /// accessing session (issue #6743), with the session's agent as party and its clock
-    /// as request time. Every authorizing entry point (the reads, views and queries,
+    /// Attach an ODRL `policy` that is evaluated per request for the accessing session
+    /// (issue #6743), with the session's agent as party and its clock as request time.
+    /// Every authorizing entry point (the reads, views and queries,
     /// [`PodStore::wac_allow`], [`PodStore::decide`], [`PodStore::decide_batch`],
-    /// [`PodStore::decide_create`] and every update) then refuses a mode some attached
-    /// prohibition applies to. Deny-only: the policy's permissions grant nothing here.
-    /// See [`odrl_enforce`] for the action-to-mode mapping and the graphs it never
-    /// touches.
+    /// [`PodStore::decide_create`] and every update) then grants `Read` where an attached
+    /// permission permits `odrl:read` through `decide`, on a graph that exists and that
+    /// the last static materialization covered, where the static decision is
+    /// authoritative and does not explicitly deny it, and refuses a mode some attached
+    /// prohibition applies to. See [`odrl_enforce`] for the action-to-mode mapping and the graphs it
+    /// never touches.
     ///
     /// # Errors
     ///

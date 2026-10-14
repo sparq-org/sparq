@@ -1232,8 +1232,10 @@ module — no training, no graph state, no I/O.
 - **`BooleanEncoder`** — one ±1 sign dimension, **exact, 2-valued**, round-trips (`true`→+1,
   `false`→−1; `decode(encode(b)) == b`).
 - **`DateEncoder`** — maps `xsd:date`/`dateTime`/`dateTimeStamp`/`gYear` to an order-preserving
-  epoch lane (via `sparq-core`'s `Timeline`) and reuses the numeric encoder, so chronological order
-  is preserved.
+  epoch lane (via `sparq-core`'s temporal parsers) and reuses the numeric encoder, so chronological
+  order is preserved. The `dateTime`/`dateTimeStamp` lane is **datatype-aware** (`Temporal::of_lit`),
+  so a timezone-free lexical encodes as `xsd:dateTime` but has **no value** as `xsd:dateTimeStamp`
+  (which requires a timezone) — `temporal_value` returns `None`.
 - **`SchemaHeader`** — the self-describing `.spqv` partition descriptor: contiguous `Block`s
   (encoder + `Metric` + dim span) with a **metric-correctness guard** (`check_euclidean`) so a whole-row
   L2/cosine search never silently runs over a non-Euclidean (e.g. future taxonomy) block. Round-trips
@@ -1745,7 +1747,7 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
   `Graph` you then embed.
 - `mpc-protocols`, `noir-circuit-patterns` — unrelated sibling skills in this workspace.
 
-### Temporal year parsing (GPT-6)
+### Temporal year parsing
 
 The `gYear` epoch lane preserves the four-digit year width, including the sign,
 when constructing the civil-date input. Conversion to epoch seconds is checked;
