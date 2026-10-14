@@ -521,6 +521,13 @@ fn conjunction_counts_distinct_fresh_values() {
         conjunction_satisfiable(&[], &[dt("rdfs:Literal")], 1, &[]),
         Tri::No
     );
+    // No positive ranges means rdfs:Literal: the data domain is infinite.
+    assert_eq!(conjunction_satisfiable(&[], &[], usize::MAX, &[]), Tri::Yes);
+    let many: Vec<Value> = (0..100).map(|i| v(&i.to_string(), "integer")).collect();
+    assert_eq!(
+        conjunction_satisfiable(&[], &[dt("string")], usize::MAX, &many),
+        Tri::Yes
+    );
     // An Unknown anywhere makes the whole check Unknown.
     let unsupported = restrict("string", &[("pattern", s(r"\p{IsBasicLatin}"))]);
     assert_eq!(
