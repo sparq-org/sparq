@@ -408,8 +408,9 @@ pub struct ServerConfig {
     /// writing potentially-sensitive query text to disk / a SIEM. Operators who genuinely need the
     /// raw text opt in explicitly. This is **log-CONTENT redaction, not anonymity**: the log still
     /// records method, path/endpoint, status, a size signal and timing (it would not be a request
-    /// log otherwise). It is also NOT the ZK/MPC privacy story. Inert unless `verbose` is also on
-    /// (no request log => nothing to redact). See [`crate::redact`].
+    /// log otherwise). It is also NOT the ZK/MPC privacy story. The request log exists only with
+    /// `verbose`; the same switch also redacts the detail an error withholds from its client, in the
+    /// warning that records it, with or without `verbose`. See [`crate::redact`].
     pub redact_logs: bool,
     /// (sq-0bxp) **Per-query access audit log** runtime switch (CDMC CD-2 / ISO
     /// 27001 A.8.15 / EU CRA logging). When `true`, every query / update / Graph-Store request
@@ -5015,6 +5016,17 @@ pub fn harden(routes: Router, config: &ServerConfig) -> Router {
             move |req: axum::extract::Request, next: axum::middleware::Next| {
                 let allow = allow.clone();
                 async move { cors_layer(allow, req, next).await }
+            },
+        ))
+    };
+    // With redaction off, error details are logged in full ([`crate::redact::log_detail`]); with
+    // it on (the default) no layer is added and they are redacted.
+    let routes = if config.redact_logs {
+        routes
+    } else {
+        routes.layer(axum::middleware::from_fn(
+            |req: axum::extract::Request, next: axum::middleware::Next| {
+                crate::redact::with_full_details(next.run(req))
             },
         ))
     };
@@ -10063,7 +10075,9 @@ async fn cors_layer(
 /// client-facing message back to its detailed cause.
 fn sanitized_error(status: StatusCode, class: &str, safe_msg: &str, detail: &str) -> Response {
     // Detail (the echoed token / path / input) goes ONLY to the server log, gated behind the
-    // operator's opt-in subscriber — never into the response body.
+    // operator's opt-in subscriber — never into the response body — and there redacted unless
+    // the server logs full requests (`ServerConfig::redact_logs`).
+    let detail = crate::redact::log_detail(detail);
     tracing::warn!(target: "sparq_server", class = class, detail = %detail, "request error (detail withheld from client)");
     json_error(status, safe_msg)
 }
@@ -11193,6 +11207,61 @@ mod json_error_tests {
         // The sensitive fragments must not have leaked into the client-facing body.
         assert!(!body.contains("alice_smith"), "leaked loaded-data fragment: {body}");
         assert!(!body.contains("/srv/data"), "leaked filesystem path: {body}");
+    }
+}
+
+#[cfg(test)]
+mod error_detail_log_tests {
+    //! The detail an error withholds from its client is redacted in the warning that records it
+    //! too, unless the server logs full requests (`ServerConfig::redact_logs` false).
+    use super::{router, AppState, ServerConfig};
+    use sparq_core::Graph;
+    use std::sync::{Arc, Mutex};
+    use tower::ServiceExt;
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// What the server logs for a query that does not parse, with redaction on or off.
+    async fn logged(redact_logs: bool) -> String {
+        let out = Captured::default();
+        let writer = out.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let config = ServerConfig { redact_logs, ..ServerConfig::default() };
+        let state = AppState::with_config(Graph::default(), config);
+        let req = axum::http::Request::builder()
+            .uri("/sparql?query=SELECT%20patient_alice_smith%20WHERE")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = router(state).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+        let log = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
+        assert!(log.contains("detail withheld from client"), "no error record: {log}");
+        log
+    }
+
+    #[tokio::test]
+    async fn the_detail_is_redacted_unless_full_requests_are_logged() {
+        // The parser's message names where the query went wrong ("expected …").
+        let log = logged(true).await;
+        assert!(!log.contains("expected"), "the redacted log carries the detail: {log}");
+        assert!(log.contains("detail=<redacted len="), "{log}");
+        let log = logged(false).await;
+        assert!(log.contains("expected"), "the full log withholds the detail: {log}");
     }
 }
 

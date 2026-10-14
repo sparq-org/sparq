@@ -1504,7 +1504,7 @@ env overrides the default.
 | `--max-subscriptions N` | `SPARQ_MAX_SUBSCRIPTIONS` | `256` | server-wide subs |
 | `--max-subscriptions-per-conn N` | `SPARQ_MAX_SUBSCRIPTIONS_PER_CONN` | `16` | per-socket subs |
 | `--verbose` | — | off | TraceLayer request logging (respects `RUST_LOG`); request URIs **redacted by default** — see "Request-log redaction" |
-| `--log-full-requests` | `SPARQ_LOG_FULL_REQUESTS` | off (redaction ON) | (`sq-toze.34`) OPT OUT of request-log redaction: log the raw request URI (incl. the full `?query=` SPARQL text) verbatim. Inert without `--verbose` — see "Request-log redaction" |
+| `--log-full-requests` | `SPARQ_LOG_FULL_REQUESTS` | off (redaction ON) | (`sq-toze.34`) OPT OUT of log redaction: with `--verbose`, log the raw request URI (incl. the full `?query=` SPARQL text) verbatim; with or without it, log error details in full — see "Request-log redaction" |
 | `--auth-token TOKEN` | `SPARQ_AUTH_TOKEN` | off (no auth) | require `Authorization: Bearer TOKEN` on every WRITE (SPARQL Update + GSP PUT/POST/DELETE) → `401` + `WWW-Authenticate: Bearer` otherwise; constant-time compared (QLever's `-a`) |
 | `--auth-token-read` | `SPARQ_AUTH_TOKEN_READ` | off | ALSO gate reads with the same token (only meaningful with a token set) |
 | `--allow-remote` | `SPARQ_ALLOW_REMOTE` | off | opt in to a non-loopback bind; without it a non-loopback `--addr` is **refused** unless the surface is fully authenticated (`--auth-token` AND `--auth-token-read`), with it it warns and proceeds |
@@ -1694,6 +1694,11 @@ log uses). Logs stay correlation-useful (same query → same `fp`) without expos
 **`--log-full-requests`** (env `SPARQ_LOG_FULL_REQUESTS=1`) opts OUT and logs the URI verbatim,
 as the bare TraceLayer did — the deliberate debug escape hatch. Library: `ServerConfig {
 verbose: true, redact_logs: true /* default */, .. }`.
+
+The same switch governs the detail an error withholds from its client (a parse error quoting
+the query or a term, an engine message quoting data): the warning that records it logs the
+`<redacted len=N fp=…>` placeholder, with or without `--verbose`, unless `--log-full-requests`
+is set, and then the detail in full.
 
 **Default rationale:** enabling `--verbose` for debugging should not silently write
 potentially-sensitive query text to disk / a SIEM; content-logging is the *deliberate* choice.
