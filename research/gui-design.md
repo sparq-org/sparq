@@ -756,7 +756,7 @@ record of how it was shaped. The GUI lane (`gui.yml`) is
   `ubuntu`. Reuse the exact runner labels already proven in `release.yml`
   (`macos-14`, `macos-15-intel`, `ubuntu-latest`, `ubuntu-24.04-arm`, `windows-latest`) so
   the GUI CI matrix and the release matrix can't drift.
-- **Build + lint + typecheck**: `next lint` + `tsc` are already the site's gate
+- **Build + lint + typecheck**: `eslint src` + `tsc` are already the site's gate
   (`site/package.json:15`); the GUI adds `cargo build` / `cargo clippy` for
   `gui/src-tauri/`, inheriting the repo's `-D warnings` bar.
 - **E2E**: Playwright is already wired for the site (`@playwright/test`,

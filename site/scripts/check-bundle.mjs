@@ -229,8 +229,8 @@ export function findSnapshotLeaks(fingerprint, chunks) {
 
 /**
  * The chunks a route's page entry loads, which is what Next ≤15 listed under app-build-manifest.json
- * `pages["<route>/page"]` minus the root main files (webpack runtime, main-app, framework), which
- * cannot hold a heavy module. Next 16 dropped that manifest but still writes
+ * `pages["<route>/page"]` minus the root main files (readFirstLoadSets adds those from
+ * build-manifest.json). Next 16 dropped that manifest but still writes
  * `.next/server/app/<route>/page_client-reference-manifest.js`, whose `clientModules` give each
  * client module's chunk list; the modules the page entry loads are the ones whose list includes
  * the page's own `static/chunks/app/<route>/page-<hash>.js`. Their union is the page entry's
@@ -272,9 +272,10 @@ export function firstLoadFromClientManifest(manifest, manifestKey) {
 
 /**
  * Reads each guarded route's `page_client-reference-manifest.js` under `<nextDir>/server/app` and
- * derives its first-load set (see firstLoadFromClientManifest). A route whose manifest is missing
- * gets no set, which analyzeBundle reports; a manifest with no module loading the page entry is a
- * FIRST-LOAD error. The manifest is the build's own output, evaluated in an empty vm context.
+ * derives its first-load set: the root main files from build-manifest.json plus the page entry's
+ * chunks (see firstLoadFromClientManifest). A route whose manifest is missing gets no set, which
+ * analyzeBundle reports; a manifest with no module loading the page entry is a FIRST-LOAD error.
+ * The manifest is the build's own output, evaluated in an empty vm context.
  *
  * @param {string} nextDir  the site's `.next` directory
  * @returns {{ pages: Record<string, string[]>, errors: string[] }}
@@ -282,6 +283,15 @@ export function firstLoadFromClientManifest(manifest, manifestKey) {
 export function readFirstLoadSets(nextDir) {
   const pages = {};
   const errors = [];
+  // Every route also loads the root main files (webpack runtime, main-app and their split
+  // chunks), which client reference manifests leave out; app-build-manifest's `/page` held them.
+  const buildManifest = join(nextDir, "build-manifest.json");
+  const rootMainFiles = existsSync(buildManifest)
+    ? (JSON.parse(readFileSync(buildManifest, "utf8")).rootMainFiles ?? [])
+    : [];
+  if (rootMainFiles.length === 0) {
+    errors.push("FIRST-LOAD: .next/build-manifest.json lists no rootMainFiles.");
+  }
   for (const { manifestKey } of GUARDED_ROUTES) {
     const path = join(nextDir, "server", "app", `${manifestKey.slice(1)}_client-reference-manifest.js`);
     if (!existsSync(path)) continue;
@@ -289,7 +299,8 @@ export function readFirstLoadSets(nextDir) {
     runInNewContext(readFileSync(path, "utf8"), context);
     const { chunks, error } = firstLoadFromClientManifest(context.__RSC_MANIFEST, manifestKey);
     if (error) errors.push(error);
-    else pages[manifestKey] = chunks;
+    // Recorded even on error, so analyzeBundle does not report the route a second time.
+    pages[manifestKey] = [...rootMainFiles.filter((f) => !chunks.includes(f)), ...chunks];
   }
   return { pages, errors };
 }

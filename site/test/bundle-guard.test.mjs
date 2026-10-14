@@ -256,23 +256,53 @@ test("readFirstLoadSets reads Next 16's client reference manifests from .next/se
       );
     };
     // Every module of a page entry carries the same required-chunk list, as Next writes it.
+    writeFileSync(
+      join(nextDir, "build-manifest.json"),
+      JSON.stringify({ rootMainFiles: ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js"] }),
+    );
     const page = ["static/chunks/9568-a.js", "static/chunks/app/page-x.js"];
     write("page_client-reference-manifest.js", "/page", [page, page, ["static/chunks/app/layout-l.js"]]);
     write("capabilities/page_client-reference-manifest.js", "/capabilities/page", [
       ["static/chunks/app/layout-l.js"],
     ]);
     const { pages, errors } = readFirstLoadSets(nextDir);
-    assert.deepEqual(pages, { "/page": page });
+    assert.deepEqual(pages, {
+      "/page": ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js", ...page],
+      "/capabilities/page": ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js"],
+    });
     assert.equal(errors.length, 1);
     assert.match(errors[0], /^FIRST-LOAD: .*\/capabilities\/page/);
     // /surface/data-formats has no manifest at all: no set, so analyzeBundle reports the route.
     const inputs = healthyInputs();
     inputs.app = { pages };
     const { errors: analyzed } = analyzeBundle(inputs);
+    // /capabilities is reported once, as FIRST-LOAD above, not again by analyzeBundle.
+    assert.ok(!analyzed.some((e) => e.includes("/capabilities (")), analyzed.join("\n"));
     assert.ok(
       analyzed.some((e) => e.startsWith("ISOLATION: no first-load set for guarded route /surface/data-formats")),
       analyzed.join("\n"),
     );
+  } finally {
+    rmSync(nextDir, { recursive: true, force: true });
+  }
+});
+
+test("readFirstLoadSets flags a heavy chunk that lands in a root main file", () => {
+  const nextDir = mkdtempSync(join(tmpdir(), "bundle-guard-"));
+  try {
+    writeFileSync(
+      join(nextDir, "build-manifest.json"),
+      JSON.stringify({ rootMainFiles: ["static/chunks/heavy-0.js"] }),
+    );
+    const file = join(nextDir, "server", "app", "page_client-reference-manifest.js");
+    mkdirSync(dirname(file), { recursive: true });
+    const m = clientManifest("/page", [["static/chunks/app/page-x.js"]]);
+    writeFileSync(file, `globalThis.__RSC_MANIFEST={"/page":${JSON.stringify(m["/page"])}};`);
+    const { pages } = readFirstLoadSets(nextDir);
+    const inputs = healthyInputs();
+    inputs.app.pages["/page"] = pages["/page"];
+    const { errors } = analyzeBundle(inputs);
+    assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
   } finally {
     rmSync(nextDir, { recursive: true, force: true });
   }
