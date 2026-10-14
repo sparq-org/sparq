@@ -12,12 +12,18 @@
 //! The same fail-closed contract as the ALCH layer holds: [`extract()`] understands a graph
 //! in full or refuses it, naming the triple it could not read.
 
+pub(crate) mod clausify;
 pub mod datatypes;
 pub mod dl_profile;
 pub mod extract;
+pub(crate) mod hypertableau;
 pub mod model;
+pub mod reasoner;
 pub(crate) mod vocab;
 
 pub use dl_profile::{check_dl, DlProfileReport, Unchecked, Violation, ViolationKind};
 pub use extract::{extract, ExtractError, ExtractErrorKind};
 pub use model::Ontology;
+pub use reasoner::{
+    check, Budget, Classification, Consistency, DlReport, Reasoner, UnknownReason, MAX_CARDINALITY,
+};
