@@ -6566,6 +6566,44 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        // With an `If-Match`, a date is not evaluated (RFC 9110 section 13.2.2), so `*` alone
+        // decides: no comparison, and no Read asked.
+        let status = send(
+            dave.clone(),
+            "PUT",
+            p.clone(),
+            vec![
+                ("if-match", "*".into()),
+                ("if-unmodified-since", date.clone()),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        // Deleting a container on `*` reads no listing either, a page past the last included.
+        let g = create(
+            &st,
+            &request("POST", "/", &[("slug", "g"), ("link", CONTAINER_LINK)], ""),
+            &owner,
+            &root,
+        )
+        .await;
+        let g = path_of(&hdr(&g, "location")).to_string();
+        let status = send(
+            dave.clone(),
+            "DELETE",
+            g.clone(),
+            vec![("if-match", "\"other\"".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(
+            dave.clone(),
+            "DELETE",
+            format!("{g}?page=99"),
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
         // Read is asked of the container the create compares, not of another: Erin may read
         // only `e/`, and is told how its listing compares.
         let e = create(
