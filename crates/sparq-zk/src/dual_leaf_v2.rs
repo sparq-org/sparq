@@ -71,8 +71,12 @@
 //! sentinel under its own key-derivation context, re-deriving with a `u32`
 //! counter until the result lies outside the band, and [`is_in_handle_band`] is
 //! the predicate this module's tests assert it against. V1's `VALUE_NONE = 2`
-//! lies inside the band, so V1 retains the in-band sentinel and V2 is what
-//! discharges this §14.1 requirement.
+//! lies inside the band, so V1 retains the in-band sentinel and V2 discharges
+//! this §14.1 requirement ON THE HOST SIDE. The in-circuit half is still OPEN:
+//! no Noir global or assert names the V2 sentinel, so nothing in a member
+//! enforces the band exclusion — the committer does, and the members reject the
+//! out-of-band value only because their `u64` range decomposition (and
+//! `filter_value_dl_bool`'s `{0, 1}` constraint) cannot represent it.
 //!
 //! The §14.1 **`LANG_NONE` separation assumption is NOT discharged here**: the
 //! no-language slot still folds the V1 [`crate::dual_leaf::LANG_NONE`] tag, whose
@@ -297,11 +301,13 @@ pub fn is_in_handle_band(f: &Fr) -> bool {
 /// part until the result lies OUTSIDE the reachable handle band
 /// ([`is_in_handle_band`]).
 ///
-/// This is what discharges the `research/zk-field-native-encoding.md` §14.1
-/// reserved-tag requirement: the tag is a domain-separated constant whose band
-/// exclusion is a CHECKABLE invariant (asserted by this module's tests) rather
-/// than an argument about where a hash output lands. V1's
-/// `crate::dual_leaf::VALUE_NONE` retains the in-band value.
+/// This discharges the `research/zk-field-native-encoding.md` §14.1
+/// reserved-tag requirement ON THE HOST SIDE: the tag is a domain-separated
+/// constant whose band exclusion is a CHECKABLE invariant (asserted by this
+/// module's tests) rather than an argument about where a hash output lands. V1's
+/// `crate::dual_leaf::VALUE_NONE` retains the in-band value. The in-circuit half
+/// of the requirement remains OPEN — there is no Noir global or assert for this
+/// sentinel yet (see the module docs).
 ///
 /// A re-derivation is expected never to be needed (the band is a vanishing
 /// fraction of the field); the counter exists so the construction is TOTAL rather
@@ -1195,7 +1201,12 @@ mod tests {
         let salt = salt_from_bytes(&[7u8; 32]);
         let g = graph_triples();
         let v2 = commit_triples(&g, salt).unwrap();
-        let v1 = dual_leaf::commit_triples_dual(&g, salt).unwrap();
+        let v1 = dual_leaf::commit_triples_dual(
+            &g,
+            salt,
+            crate::commit::MethodUse::LegacyAlreadyIssued,
+        )
+        .unwrap();
         let sc = crate::commit::commit_triples(&g, salt).unwrap();
         assert_ne!(v2.commitment, v1.commitment);
         assert_ne!(v2.commitment, sc.commitment);

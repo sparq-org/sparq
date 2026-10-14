@@ -97,7 +97,9 @@ zk:poseidon2-rdfc10-v1
 # reachable value-handle band [0, 2^64) u (p - 2^64, p) that every value-lane member
 # range-checks. So v1 does not meet the research/zk-field-native-encoding.md §14.1
 # reserved-tag requirement (a domain-separated constant asserted OUTSIDE that band).
-# zk:poseidon2-dualleaf-v2 derives both differently and discharges it. This records an
+# zk:poseidon2-dualleaf-v2 derives both differently and discharges it on the HOST side
+# (no Noir global or assert names that sentinel yet, so the in-circuit half of the
+# requirement is still open for both versions). This records an
 # unmet requirement of the v1 DERIVATION; it is not a claim about either version's
 # audited security.
 #
@@ -109,7 +111,7 @@ zk:poseidon2-rdfc10-v1
 # ════════════════════════════════════════════════════════════════════════════
 
 zk:poseidon2-dualleaf-v1
-  rdfs:comment "SUPERSEDED by zk:poseidon2-dualleaf-v2 and not production-selectable for new issuance; recognised and verifiable for already-issued credentials. Its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, so the research/zk-field-native-encoding.md §14.1 reserved-tag requirement is unmet; v2 discharges it. Same INV-VL downgrade as v2; not externally audited (sq-qhy4)."@en-GB ;
+  rdfs:comment "SUPERSEDED by zk:poseidon2-dualleaf-v2 and not production-selectable for new issuance; recognised and verifiable for already-issued credentials. Its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, so the research/zk-field-native-encoding.md §14.1 reserved-tag requirement is unmet; v2 discharges it on the host side (the in-circuit half is still open). Same INV-VL downgrade as v2; not externally audited (sq-qhy4)."@en-GB ;
   secx:hasProperty
     [ secx:property secx:ZeroKnowledgeType ; secx:level secx:ComputationalZK ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
@@ -145,7 +147,8 @@ zk:poseidon2-dualleaf-v1
 # key-derivation mode over a length-framed (datatype, params) pair, its reserved
 # no-value sentinel is derived under its own context and asserted OUTSIDE the
 # reachable value-handle band (discharging the research/zk-field-native-encoding.md
-# §14.1 reserved-tag requirement), and the xsd:boolean lane has a dedicated member
+# §14.1 reserved-tag requirement on the HOST side — the in-circuit half, a Noir
+# global and assert for the sentinel, has not shipped), and the xsd:boolean lane has a dedicated member
 # that constrains its handle and bound to {0, 1} in-circuit.
 #
 # The SECURITY POSTURE IS THE SAME AS v1's: the versioning changes constant derivation,
@@ -157,7 +160,7 @@ zk:poseidon2-dualleaf-v1
 # ════════════════════════════════════════════════════════════════════════════
 
 zk:poseidon2-dualleaf-v2
-  rdfs:comment "The versioned dual-leaf scheme: value-lane constants derived in BLAKE3 key-derivation mode over a length-framed (datatype, params) pair, a no-value sentinel asserted outside the reachable value-handle band, and a bit-domain xsd:boolean member. Discharges the research/zk-field-native-encoding.md §14.1 reserved-tag requirement that v1 leaves unmet. Same INV-VL downgrade and the same unaudited posture as v1 (CR-G8 / sq-qhy4)."@en-GB ;
+  rdfs:comment "The versioned dual-leaf scheme: value-lane constants derived in BLAKE3 key-derivation mode over a length-framed (datatype, params) pair, a no-value sentinel asserted outside the reachable value-handle band, and a bit-domain xsd:boolean member. Discharges, on the host side, the research/zk-field-native-encoding.md §14.1 reserved-tag requirement that v1 leaves unmet; the in-circuit half of that requirement has not shipped. Same INV-VL downgrade and the same unaudited posture as v1 (CR-G8 / sq-qhy4)."@en-GB ;
   secx:hasProperty
     [ secx:property secx:ZeroKnowledgeType ; secx:level secx:ComputationalZK ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,

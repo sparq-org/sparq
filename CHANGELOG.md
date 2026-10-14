@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   key-derivation mode over the length-framed `(datatype IRI, lane params)` pair, the degenerate fold
   left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
   value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
-  `research/zk-field-native-encoding.md` §14.1 asks for. V1's constants, vectors and public API are
+  `research/zk-field-native-encoding.md` §14.1 asks for, discharging that reserved-tag requirement on
+  the HOST side. The in-circuit half stays open: no Noir global or assert names the sentinel, so a
+  member refuses it only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
   §14.1 `LANG_NONE` assumption is not discharged. Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
@@ -26,7 +28,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ProofInputs::FilterValueDlBool`, `manifest::boolean_lane_const_v2`,
   `build::build_filter_value_dl_bool`, `toml::filter_value_dl_bool_prover_toml`, the verifier's
   public-input reconstruction and the dispatch matrix. The `DualLeafV1` boolean lane keeps sharing the
-  integer member, unchanged. No soundness or privacy claim.
+  integer member, unchanged. Only the boolean lane has V2 compose helpers so far: the integer,
+  decimal, double, dateTime and date lanes have V2 host encoders but no V2 `manifest`/`build`/`toml`
+  helper, so a V2 proof over those lanes is not buildable from this crate yet. No soundness or
+  privacy claim.
+
+### Changed
+
+- **sparq-zk:** `CommitmentMethod::DualLeafV1` is no longer production-selectable
+  (`is_production_selectable()` is `false` for it), and `secprop::production_method_iris()` yields the
+  V2 scheme IRI in its place. V1 stays recognised, decodable and verifiable for already-issued
+  graphs; the new `CommitmentMethod::checked_for_issuance` and `RegistryEntry::with_issuance_method`
+  refuse it fail-closed when a NEW entry selects a method, while `with_method` still records any
+  method as-is for decoding and legacy entries. Every other fresh-V1 entry point now takes the
+  same `commit::MethodUse` (`NewIssuance` is the default and is refused for V1;
+  `LegacyAlreadyIssued` is the written-down opt-in for re-deriving or re-verifying an
+  already-issued commitment): `dual_leaf::{commit_triples_dual, commit_graph_dual}` (new
+  `DualCommitError::MethodNotSelectable`), `sparq-zk-compose`'s
+  `build::build_filter_value_dl_boolean` (new `build::BuildValueDlV1Error`),
+  `dispatch::resolve_circuit_for_use` (new `DispatchError::MethodNotSelectableForIssuance`) and
+  `driver::CircuitProver::prove_in_for_method` (refuses before any `nargo`/`bb` subprocess).
+  `dispatch::resolve_circuit` itself is unchanged — it is the verification view, so an
+  already-issued graph keeps resolving.
+- **sparq-zk-compose:** the `DualLeafV2` `xsd:boolean` lane constant is now bound to its own
+  member. `dispatch::check_lane_member_pairing` refuses a `ProofInputs::FilterValueDl` carrying
+  `manifest::boolean_lane_const_v2()` (`DispatchError::LaneMemberMismatch`), and
+  `verifier::prefilter_manifest_structure` runs that check per sub-proof before reading them for
+  anything else (`CheckError::LaneMemberMismatch`). `datatype_const` is a public input no member
+  pins, and the shared integer member range-decomposes its handle over the whole `u64` domain, so
+  the pairing is refused structurally. This is a host/structural boundary: the value-lane verifier
+  gates stay closed until the verifier authenticates the method and pins member, lane, scale and
+  bound itself (sq-j506).
 - **sparq-reason:** `MaterializedN3Graph::with_limits` builds the incremental N3 graph under
   a `ClosureLimits` (`new` uses the default). The counting path now sizes each builtin's
   argument list and result before building it and charges a round and fact allowance; past

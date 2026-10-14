@@ -446,7 +446,9 @@ pub fn production_method_iris() -> Vec<&'static str> {
 /// value-handle band `[0, 2^64) ∪ (p − 2^64, p)`, so V1 does not meet the
 /// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement (a
 /// domain-separated constant asserted outside that band). V2 derives both
-/// differently and discharges it. This is a recorded UNMET REQUIREMENT of the V1
+/// differently and discharges it on the HOST side; the in-circuit half of that
+/// requirement (a Noir global and assert for the sentinel) has not shipped for
+/// either version. This is a recorded UNMET REQUIREMENT of the V1
 /// derivation, not a claim about either method's audited security: both carry the
 /// same INV-VL downgrade and the estate is NOT externally audited (sq-qhy4).
 pub const fn dual_leaf_v1_posture() -> &'static str {
@@ -455,7 +457,7 @@ pub const fn dual_leaf_v1_posture() -> &'static str {
      credentials. Its value-lane constants are plain folds of the datatype bytes and its \
      reserved no-value sentinel lies INSIDE the reachable value-handle band, so the \
      research/zk-field-native-encoding.md §14.1 reserved-tag requirement is UNMET; v2 \
-     discharges it. Same INV-VL downgrade as v2; NOT externally audited (sq-qhy4)"
+     discharges it on the host side (the in-circuit half is still open). Same INV-VL downgrade as v2; NOT externally audited (sq-qhy4)"
 }
 
 /// The least-safe research dial `value-only`'s posture, returned in prose (it is NOT

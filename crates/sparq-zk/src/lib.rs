@@ -85,7 +85,8 @@ pub mod dual_leaf_datetime;
 // DualLeafV2 — the versioned dual-leaf scheme: value-lane constants derived in
 // BLAKE3's key-derivation mode over length-framed `(datatype, params)`, and a
 // no-value sentinel asserted outside the reachable value-handle band (the
-// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement). Same
+// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement, on the
+// HOST side; the in-circuit half of that requirement is still open). Same
 // OFF-by-default `dual-leaf` gate, same INV-VL downgrade + CR-G8 / sq-qhy4 audit
 // obligation as `dual_leaf`, whose V1 surface is unchanged.
 #[cfg(feature = "dual-leaf")]
