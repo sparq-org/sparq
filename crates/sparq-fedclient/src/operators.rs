@@ -675,7 +675,7 @@ impl ScatterPool {
                 // Take the next job under the lock, then RELEASE the lock before running it
                 // (so workers run jobs in parallel, only the dequeue is serialised).
                 let job = {
-                    let guard = rx.lock().expect("[OPUS-4.8] sq-vtba: pool queue lock");
+                    let guard = rx.lock().expect("sq-vtba: pool queue lock");
                     guard.recv()
                 };
                 match job {
