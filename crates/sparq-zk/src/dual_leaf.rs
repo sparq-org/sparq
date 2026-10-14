@@ -96,8 +96,10 @@ use oxrdf::{Literal, NamedOrBlankNode, Term, Triple};
 /// The reserved "no language" sentinel for the `LANG_NONE` slot — mirrors the
 /// Noir `filter_value::LANG_NONE` global. A real language tag would be
 /// `blake3(lang)`; numeric datatypes have no language, so they fold this fixed
-/// field tag, which is distinct from any plausible blake3 output (a small
-/// reserved value) so a value component can never collide a language-tagged one.
+/// field tag. A language constant keeps the low 248 bits of `blake3(lang)` and
+/// nothing excludes the value 1, so a tag folds to `LANG_NONE` only if its hash
+/// hits that fixed target. The separation rests on the truncated hash's
+/// preimage resistance for a fixed target, not on construction.
 pub const LANG_NONE: u64 = 1;
 
 /// The `xsd:integer` datatype IRI (the integer value-lane datatype class,
