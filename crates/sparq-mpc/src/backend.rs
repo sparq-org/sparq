@@ -602,6 +602,51 @@ impl MaliciousSecurity {
     }
 }
 
+/// Declared offline preprocessing cost, independent of measured online communication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreprocessingCost {
+    /// No offline preprocessing is required; both estimates are explicitly zero.
+    None,
+    /// A linear item budget with an optional per-party byte cost per item.
+    PerOperation {
+        /// Items consumed per modeled multiplication.
+        items_per_multiplication: u64,
+        /// Additional items consumed per modeled ordering comparison.
+        items_per_comparison: u64,
+        /// Declared bytes per item per party; `None` means unmodeled, never zero.
+        bytes_per_item_per_party: Option<u64>,
+    },
+}
+
+impl PreprocessingCost {
+    /// Estimate offline items; return `None` if the declared budget overflows.
+    pub fn estimate_items(self, multiplications: u64, comparisons: u64) -> Option<u64> {
+        match self {
+            Self::None => Some(0),
+            Self::PerOperation {
+                items_per_multiplication,
+                items_per_comparison,
+                ..
+            } => multiplications
+                .checked_mul(items_per_multiplication)?
+                .checked_add(comparisons.checked_mul(items_per_comparison)?),
+        }
+    }
+
+    /// Estimate offline bytes per party; preserve unknown costs and overflow as `None`.
+    pub fn estimate_bytes_per_party(self, multiplications: u64, comparisons: u64) -> Option<u64> {
+        match self {
+            Self::None => Some(0),
+            Self::PerOperation {
+                bytes_per_item_per_party,
+                ..
+            } => self
+                .estimate_items(multiplications, comparisons)?
+                .checked_mul(bytes_per_item_per_party?),
+        }
+    }
+}
+
 /// Static description of a concrete backend's guarantees — what a federation
 /// inspects to decide whether a backend is acceptable BEFORE running anything.
 ///
@@ -638,6 +683,8 @@ pub struct BackendInfo {
     /// federation. Use [`BackendInfo::malicious_secure`] for the coarse bool.
     /// `[OPUS-4.8]`
     pub malicious_security: MaliciousSecurity,
+    /// Declared offline cost; this is a budget model, not a measurement.
+    pub requires_preprocessing: PreprocessingCost,
 }
 
 impl BackendInfo {
@@ -648,11 +695,13 @@ impl BackendInfo {
     /// detect-and-abort only); it is threaded into the
     /// [`MaliciousSecurity::HonestMajorityRobust`] projection so the old enum's
     /// `max_cheaters` stays faithful. `[OPUS-4.8]`
+    /// Defaults to no preprocessing; backends needing it must set `requires_preprocessing`.
     pub fn new(name: &'static str, security: SecurityDescriptor, robust_cheaters: usize) -> Self {
         BackendInfo {
             name,
             trust_model: security.trust_model(),
             malicious_security: security.malicious_security(robust_cheaters),
+            requires_preprocessing: PreprocessingCost::None,
             security,
         }
     }

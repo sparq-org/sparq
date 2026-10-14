@@ -55,7 +55,7 @@
 //! rather than any hard-coded figure. The example binary
 //! (`examples/mpc_bench_matrix.rs`) prints both the JSON and a human table.
 
-use crate::backend::{MaliciousSecurity, OperatorClass, TrustModel};
+use crate::backend::{MaliciousSecurity, MpcBackend, OperatorClass, PreprocessingCost, TrustModel};
 use crate::field::Fp;
 use crate::join::{HiddenKeyedRows, HiddenValueJoin};
 use crate::metrics::CommCounter;
@@ -201,6 +201,8 @@ pub struct MatrixCell {
     pub security: CellSecurity,
     /// The deterministic modelled communication for this cell.
     pub comm: CommCounter,
+    /// Backend-declared offline cost, evaluated against this cell's modeled operation counts.
+    pub declared_preprocessing: PreprocessingCost,
 }
 
 impl MatrixCell {
@@ -219,6 +221,15 @@ impl MatrixCell {
     /// Secure multiplications.
     pub fn multiplications(self) -> u64 {
         self.comm.multiplications
+    }
+
+    /// Modeled ordering comparisons; equality tests already count as multiplications.
+    pub fn comparisons(self) -> u64 {
+        match self.query_class {
+            // The sort counter records one multiplication per compare-exchange.
+            QueryClass::ObliviousSort => self.comm.multiplications,
+            _ => 0,
+        }
     }
 }
 
@@ -248,13 +259,18 @@ impl MatrixResults {
     ///      "bytes_per_party": B, "total_bytes": TB,
     ///      "rounds_sequential": R, "rounds_batched": Rb,
     ///      "multiplications": M, "field_elements_opened": O,
-    ///      "field_elements_shared": S, "offline_bytes": 0}
+    ///      "field_elements_shared": S, "offline_bytes": OB,
+    ///      "declared_preprocessing": {"basis": "declared-model",
+    ///        "items": I, "bytes_per_party": PB}}
     ///   ]
     /// }
     /// ```
-    /// `offline_bytes` is explicitly `0` (semi-honest Shamir has no preprocessing)
-    /// so a future SPDZ backend's preprocessing shows up as a regression, not a
-    /// hidden cost (design record §5.2, the Ozdemir-Boneh / ORQ lesson). `[OPUS-4.8]`
+    /// `declared_preprocessing` estimates the backend's declared offline budget
+    /// using the cell's modeled multiplications and ordering comparisons. It is
+    /// not a measurement. No preprocessing gives explicit zeros; unknown byte
+    /// costs or overflowing estimates give JSON `null`. `offline_bytes` is the
+    /// legacy total-byte projection (declared bytes per party times parties),
+    /// also `null` when unknown or overflowing.
     pub fn to_json(&self) -> String {
         let mut s = String::new();
         s.push_str("{\n");
@@ -277,13 +293,22 @@ impl MatrixResults {
         s.push_str("  \"cells\": [\n");
         for (i, c) in self.cells.iter().enumerate() {
             let comma = if i + 1 < self.cells.len() { "," } else { "" };
+            let items = c
+                .declared_preprocessing
+                .estimate_items(c.multiplications(), c.comparisons());
+            let bytes_per_party = c
+                .declared_preprocessing
+                .estimate_bytes_per_party(c.multiplications(), c.comparisons());
+            let offline_bytes = bytes_per_party.and_then(|b| b.checked_mul(c.parties as u64));
             s.push_str(&format!(
                 "    {{\"query_class\": \"{}\", \"parties\": {}, \"threshold\": {}, \
                  \"scale\": {}, \"security\": \"{}\", \"trust_model\": \"{}\", \
                  \"malicious_security\": \"{}\", \"bytes_per_party\": {}, \
                  \"total_bytes\": {}, \"rounds_sequential\": {}, \"rounds_batched\": {}, \
                  \"multiplications\": {}, \"field_elements_opened\": {}, \
-                 \"field_elements_shared\": {}, \"offline_bytes\": 0}}{}\n",
+                 \"field_elements_shared\": {}, \"offline_bytes\": {}, \
+                 \"declared_preprocessing\": {{\"basis\": \"declared-model\", \
+                 \"items\": {}, \"bytes_per_party\": {}}}}}{}\n",
                 c.query_class.id(),
                 c.parties,
                 c.threshold,
@@ -298,6 +323,9 @@ impl MatrixResults {
                 c.multiplications(),
                 c.comm.field_elements_opened,
                 c.comm.field_elements_shared,
+                json_estimate(offline_bytes),
+                json_estimate(items),
+                json_estimate(bytes_per_party),
                 comma,
             ));
         }
@@ -342,6 +370,10 @@ impl MatrixResults {
         }
         s
     }
+}
+
+fn json_estimate(value: Option<u64>) -> String {
+    value.map_or_else(|| "null".to_string(), |v| v.to_string())
 }
 
 fn trust_id(t: TrustModel) -> &'static str {
@@ -644,6 +676,7 @@ pub fn cell(query_class: QueryClass, n: usize, scale: usize) -> Result<MatrixCel
         scale,
         security,
         comm,
+        declared_preprocessing: backend.info().requires_preprocessing,
     })
 }
 
@@ -816,5 +849,98 @@ mod tests {
         assert!(json.contains("\"offline_bytes\": 0"));
         assert!(json.contains("hidden_value_equi_join"));
         assert!(json.contains("\"field_bytes\": 8"));
+    }
+
+    #[test]
+    fn matrix_rows_declare_zero_preprocessing_for_current_backends() {
+        // Shamir is currently the only concrete backend; cover every matrix cell.
+        let r = run_matrix(DEFAULT_PARTIES, 4, 8).unwrap();
+        for c in &r.cells {
+            assert_eq!(c.declared_preprocessing, PreprocessingCost::None);
+        }
+        let json = r.to_json();
+        let rows: Vec<_> = json
+            .lines()
+            .filter(|line| line.contains("\"query_class\""))
+            .collect();
+        assert_eq!(rows.len(), 20);
+        for row in rows {
+            assert!(row.contains("\"declared_preprocessing\": {\"basis\": \"declared-model\", \"items\": 0, \"bytes_per_party\": 0}"));
+            assert!(row.contains("\"offline_bytes\": 0,"));
+        }
+    }
+
+    #[test]
+    fn declared_preprocessing_uses_cell_multiplications_and_comparisons() {
+        let cost = PreprocessingCost::PerOperation {
+            items_per_multiplication: 2,
+            items_per_comparison: 3,
+            bytes_per_item_per_party: Some(7),
+        };
+        // Four join equalities use four multiplications; a four-row sort has
+        // five compare-exchanges, each modeled as a multiplication + comparison.
+        for (query, scale, expected) in [
+            (QueryClass::CumulativeSumAggregate, 1, (0, 0, 0)),
+            (QueryClass::HiddenValueEquiJoin, 2, (8, 56, 168)),
+            (QueryClass::ObliviousSort, 4, (25, 175, 525)),
+        ] {
+            let mut c = cell(query, 3, scale).unwrap();
+            c.declared_preprocessing = cost;
+            let json = MatrixResults {
+                party_counts: vec![3],
+                cells: vec![c],
+            }
+            .to_json();
+            assert!(json.contains(&format!(
+                "\"declared_preprocessing\": {{\"basis\": \"declared-model\", \"items\": {}, \"bytes_per_party\": {}}}",
+                expected.0, expected.1,
+            )), "{json}");
+            assert!(json.contains(&format!("\"offline_bytes\": {},", expected.2)));
+        }
+    }
+
+    #[test]
+    fn declared_preprocessing_unknown_bytes_serialize_as_null_even_without_items() {
+        for (query, scale, items) in [
+            (QueryClass::CumulativeSumAggregate, 1, 0),
+            (QueryClass::ObliviousSort, 4, 25),
+        ] {
+            let mut c = cell(query, 3, scale).unwrap();
+            c.declared_preprocessing = PreprocessingCost::PerOperation {
+                items_per_multiplication: 2,
+                items_per_comparison: 3,
+                bytes_per_item_per_party: None,
+            };
+            let json = MatrixResults {
+                party_counts: vec![3],
+                cells: vec![c],
+            }
+            .to_json();
+            assert!(json.contains(&format!(
+                "\"declared_preprocessing\": {{\"basis\": \"declared-model\", \"items\": {items}, \"bytes_per_party\": null}}",
+            )), "{json}");
+            assert!(json.contains("\"offline_bytes\": null,"));
+        }
+    }
+
+    #[test]
+    fn declared_preprocessing_overflow_is_unknown() {
+        let cost = PreprocessingCost::PerOperation {
+            items_per_multiplication: 2,
+            items_per_comparison: 3,
+            bytes_per_item_per_party: Some(u64::MAX),
+        };
+        assert_eq!(cost.estimate_items(u64::MAX, 0), None);
+        assert_eq!(cost.estimate_items(0, u64::MAX), None);
+        assert_eq!(cost.estimate_items(u64::MAX / 2, 1), None);
+        assert_eq!(cost.estimate_bytes_per_party(1, 0), None);
+        assert_eq!(
+            PreprocessingCost::None.estimate_items(u64::MAX, u64::MAX),
+            Some(0)
+        );
+        assert_eq!(
+            PreprocessingCost::None.estimate_bytes_per_party(u64::MAX, u64::MAX),
+            Some(0)
+        );
     }
 }
