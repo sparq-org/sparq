@@ -128,6 +128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
+  entry with a variable outside a formula, as `insert` already does, instead of adding it
+  to the base.
+
 - **sparq-policy:** `contains` and `detect_conflicts` now prove containment and certain
   overlap through `odrl:and` / `odrl:or` / `odrl:xone` compound constraints where the
   runtime semantics decide it, instead of always answering `Unknown` / `Possible`; they
