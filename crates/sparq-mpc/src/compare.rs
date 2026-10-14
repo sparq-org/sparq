@@ -123,6 +123,7 @@
 
 use crate::field::Fp;
 use crate::partial::{HolderId, MpcError, PartialResult};
+use crate::randomness::DistributedRandomness;
 use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
 
 /// Bit-width the comparison decomposes operands into. `p = 2^61 − 1`, so a value
@@ -236,7 +237,11 @@ fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
 /// `t = ⌊(n−1)/2⌋ ⇒ n >= 2t+1`, so this only fires on a mis-built backend; it
 /// fails with a descriptive error rather than letting `degree_reduce` panic later.
 pub(crate) fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
-    if n < 2 * t + 1 {
+    // Checked, so a misreported `t` cannot wrap `2t+1` past the guard.
+    if t.checked_mul(2)
+        .and_then(|v| v.checked_add(1))
+        .is_none_or(|r| r > n)
+    {
         return Err(MpcError::Protocol(format!(
             "secure comparison needs n >= 2t+1 (each multiplication's degree reduction does); \
              got n = {n}, t = {t}"
@@ -260,49 +265,60 @@ fn const_sharing(n: usize, c: Fp) -> Vec<Share> {
 /// Each bit is a fresh degree-`t` sharing of a 0/1. The cleartext value is used
 /// ONLY to deal the bit shares — it is never opened or returned, mirroring
 /// [`ShamirDealer::share`].
-fn share_bits(dealer: &mut ShamirDealer, v: Fp) -> Vec<Vec<Share>> {
+///
+/// **Routed through the randomness seam (sq-yyro, issue #6117).** Each bit sharing
+/// is dealt with [`DistributedRandomness::vss_own_input`] — the holder's OWN input
+/// bit — rather than the dealer's inherent `share`. For [`ShamirDealer`] that
+/// method *is* `share`, so the drawn Shamir coefficients and their order are
+/// unchanged; a source that cannot verifiably share a holder's own input (PRSS
+/// today) makes this fail closed instead of silently dealing an unverified sharing.
+fn share_bits(source: &mut dyn DistributedRandomness, v: Fp) -> Result<Vec<Vec<Share>>, MpcError> {
     let raw = v.value();
     (0..COMPARE_BITS)
         .map(|k| {
             let bit = (raw >> k) & 1;
-            dealer.share(Fp::new(bit))
+            source.vss_own_input(Fp::new(bit))
         })
         .collect()
 }
 
 /// Secret AND of two secret-shared bits: `[a ∧ b] = [a]·[b]` (a multiplication on
 /// 0/1 values is exactly logical AND). One [`shamir::mul_shares_raw`] (degree `2t`)
-/// followed by one [`ShamirDealer::degree_reduce`] back to a fresh degree-`t`
+/// followed by one [`shamir::degree_reduce_through`] back to a fresh degree-`t`
 /// sharing — the multiplication CHAIN step that needs the landed degree reduction
 /// (sq-dvuc). `mul_shares_raw` preserves the canonical `x = 1..=n` point set (it is
-/// component-wise), which is exactly `degree_reduce`'s fail-closed precondition.
-fn secret_and(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
+/// component-wise), which is exactly the reduction's fail-closed precondition.
+fn secret_and(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
     let prod_2t = shamir::mul_shares_raw(a, b)?;
-    dealer.degree_reduce(&prod_2t)
+    shamir::degree_reduce_through(source, &prod_2t)
 }
 
 /// `[a ∧ ¬b]` for secret BITS `a`, `b` (= `a > b` at a single bit). `¬b = 1 − b`
 /// is a local affine map on the sharing; the `∧` is one secure multiplication.
 fn secret_and_not(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a: &[Share],
     b: &[Share],
 ) -> Result<Vec<Share>, MpcError> {
     let not_b = shamir::add_constant(&shamir::scale(b, Fp::one().neg()), Fp::one()); // 1 - b
-    secret_and(dealer, a, &not_b)
+    secret_and(source, a, &not_b)
 }
 
 /// `[a == b]` for secret BITS: `1 − (a − b)^2`. `(a−b)` is local; `(a−b)^2` is one
 /// secure multiplication; `1 − …` is local. Returns a secret-shared 0/1 (`1` iff
 /// the bits are equal).
 fn secret_bit_eq(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a: &[Share],
     b: &[Share],
 ) -> Result<Vec<Share>, MpcError> {
     let diff = shamir::sub_shares(a, b)?; // a - b ∈ {-1,0,1} (mod p)
     let sq_2t = shamir::mul_shares_raw(&diff, &diff)?; // (a-b)^2 ∈ {0,1}
-    let sq_t = dealer.degree_reduce(&sq_2t)?;
+    let sq_t = shamir::degree_reduce_through(source, &sq_2t)?;
     // 1 - (a-b)^2 : bits equal ⇒ 1, differ ⇒ 0.
     Ok(shamir::add_constant(
         &shamir::scale(&sq_t, Fp::one().neg()),
@@ -315,11 +331,11 @@ fn secret_bit_eq(
 /// `a > b`. See the module docs for the recurrence. The operands' bit sharings are
 /// the only inputs; nothing is opened here.
 fn greater_than_bits(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a_bits: &[Vec<Share>],
     b_bits: &[Vec<Share>],
 ) -> Result<Vec<Share>, MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     // gt accumulates the verdict; eq tracks "all higher bits equal so far".
     let mut gt = const_sharing(n, Fp::zero()); // [0]
     let mut eq = const_sharing(n, Fp::one()); // [1]
@@ -329,12 +345,12 @@ fn greater_than_bits(
         let b_k = &b_bits[k];
         // term = eq · (a_k ∧ ¬b_k) : contributes 1 only at the first MSB-down bit
         // where a_k=1, b_k=0 while everything above was equal.
-        let a_gt_b_here = secret_and_not(dealer, a_k, b_k)?;
-        let term = secret_and(dealer, &eq, &a_gt_b_here)?;
+        let a_gt_b_here = secret_and_not(source, a_k, b_k)?;
+        let term = secret_and(source, &eq, &a_gt_b_here)?;
         gt = shamir::add_shares(&gt, &term)?;
         // eq = eq · (a_k == b_k) : once a higher bit differed, eq is 0 forever.
-        let eq_here = secret_bit_eq(dealer, a_k, b_k)?;
-        eq = secret_and(dealer, &eq, &eq_here)?;
+        let eq_here = secret_bit_eq(source, a_k, b_k)?;
+        eq = secret_and(source, &eq, &eq_here)?;
     }
     Ok(gt)
 }
@@ -344,11 +360,11 @@ fn greater_than_bits(
 /// product against a public bit is a local affine map, so the only secure
 /// multiplications are the `eq`/`gt` chain steps.
 fn greater_than_public_bits(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a_bits: &[Vec<Share>],
     pub_val: u64,
 ) -> Result<Vec<Share>, MpcError> {
-    greater_than_public_bits_with(dealer, a_bits, pub_val)
+    greater_than_public_bits_with(source, a_bits, pub_val)
 }
 
 /// sq-g7t5 — the same MSB-first public-threshold comparator as
@@ -358,11 +374,11 @@ fn greater_than_public_bits(
 /// `pub_val`'s bits are public constants, so only the `eq`/`gt` chain costs secure
 /// multiplications. Returns a fresh degree-`t` sharing of `value > pub_val`.
 fn greater_than_public_bits_with(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a_bits: &[Vec<Share>],
     pub_val: u64,
 ) -> Result<Vec<Share>, MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     let mut gt = const_sharing(n, Fp::zero());
     let mut eq = const_sharing(n, Fp::one());
     let l = a_bits.len();
@@ -374,19 +390,19 @@ fn greater_than_public_bits_with(
         let eq_here: Vec<Share> = if b_k == 1 {
             // When b_k=1, a_k ∧ ¬b_k = a_k ∧ ¬1 = 0 is a PUBLIC CONSTANT,
             // so term = eq · 0 = 0 and `gt` is unchanged — adding it is a no-op.
-            // SKIP the `secret_and(dealer, &eq, a_gt_b_here)` here: it would be a
+            // SKIP the `secret_and(source, &eq, a_gt_b_here)` here: it would be a
             // wasted mul + degree-reduce round on a known-zero operand. Only the
             // `eq` update remains a secure multiplication. (a_k == 1) == a_k.
             a_k.clone()
         } else {
             // b_k=0: a_k ∧ ¬0 = a_k, so term = eq · a_k IS a real secure mult.
             // (a_k == 0) == 1 - a_k.
-            let term = secret_and(dealer, &eq, a_k)?;
+            let term = secret_and(source, &eq, a_k)?;
             gt = shamir::add_shares(&gt, &term)?;
             shamir::add_constant(&shamir::scale(a_k, Fp::one().neg()), Fp::one())
         };
         // eq = eq · (a_k == b_k) — one secure multiplication.
-        eq = secret_and(dealer, &eq, &eq_here)?;
+        eq = secret_and(source, &eq, &eq_here)?;
     }
     Ok(gt)
 }
@@ -472,7 +488,8 @@ fn deal_random_solved_bits(dealer: &mut ShamirDealer) -> (Vec<Share>, Vec<Vec<Sh
 /// ## Protocol (for `p ≡ 3 (mod 4)`, which `p = 2^61−1 ≡ 7 (mod 8)` satisfies)
 ///
 /// 1. Generate a jointly-random NONZERO `[a]` (no party knows `a`). In this
-///    in-process simulation we draw `a` from the dealer's CSPRNG and `share()` it;
+///    in-process simulation we draw `a` from the randomness source (the
+///    single-dealer simulation's CSPRNG) as one `shared_nonzero_mask`;
 ///    in deployment `[a]` is the sum of each party's freshly-shared contribution
 ///    (a fresh degree-`t` random sharing nobody can open) — the routine opens
 ///    NOTHING about `a`, so the simulation and the deployed generator are
@@ -494,14 +511,15 @@ fn deal_random_solved_bits(dealer: &mut ShamirDealer) -> (Vec<Share>, Vec<Vec<Sh
 /// the shared bit `[b]` as a degree-`t` sharing. Honest-majority, semi-honest —
 /// NOT malicious (inherits the module model; the open of `c` is unauthenticated,
 /// the same boundary as every other open in this crate).
-fn square_protocol_random_bit(dealer: &mut ShamirDealer) -> Result<Vec<Share>, MpcError> {
-    let t = dealer.threshold();
+fn square_protocol_random_bit(
+    source: &mut dyn DistributedRandomness,
+) -> Result<Vec<Share>, MpcError> {
+    let t = source.threshold();
     // A few retries to absorb the negligible `c == 0` event; in practice the first
     // attempt always succeeds (Pr[a == 0] = 1/p ≈ 2^{-61}).
     for _attempt in 0..64 {
         // 1. Jointly-random NONZERO [a] — no party knows a; never reconstructed.
-        let a_value = dealer.draw_nonzero_fp();
-        let a = dealer.share(a_value);
+        let a = source.shared_nonzero_mask()?;
         // 2. Open ONLY c = a² (degree-2t product). This is the single disclosure,
         //    and it is independent of the sign bit of a.
         let a_sq_2t = shamir::mul_shares_raw(&a, &a)?;
@@ -562,14 +580,14 @@ fn square_protocol_random_bit(dealer: &mut ShamirDealer) -> Result<Vec<Share>, M
 /// reference for the differential regression tests.
 #[cfg(test)]
 fn deal_random_solved_bits_via_square_protocol(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
 ) -> Result<(Vec<Share>, Vec<Vec<Share>>), MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     let mut r_bits: Vec<Vec<Share>> = Vec::with_capacity(DECOMP_MASK_BITS);
     let mut r_value = const_sharing(n, Fp::zero());
     for k in 0..DECOMP_MASK_BITS {
         // One shared bit nobody knows (square-protocol; only c = a² is opened).
-        let bit_sharing = square_protocol_random_bit(dealer)?;
+        let bit_sharing = square_protocol_random_bit(source)?;
         // Accumulate r = Σ r_k 2^k as a free local linear combination, so [r] and
         // the [r_k] stay consistent — exactly as the cleartext-dealt version did.
         let weighted = shamir::scale(&bit_sharing, Fp::new(1u64 << k));
@@ -581,8 +599,12 @@ fn deal_random_solved_bits_via_square_protocol(
 
 /// sq-g7t5 — `[a ∨ b]` (logical OR) of two secret-shared bits:
 /// `a + b − a·b`. One secure multiplication (the `a·b` term); the rest is local.
-fn secret_or(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
-    let and = secret_and(dealer, a, b)?;
+fn secret_or(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
+    let and = secret_and(source, a, b)?;
     let sum = shamir::add_shares(a, b)?;
     shamir::sub_shares(&sum, &and)
 }
@@ -645,11 +667,11 @@ fn secret_or(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<
 /// [`crate::auth_disclose`].
 #[cfg(test)]
 fn secure_bit_decompose(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a: &ShamirBackend,
     a_shares: &[Share],
 ) -> Result<Vec<Vec<Share>>, MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     // 1. Fresh random solved-bits. sq-mnv5 — the mask `[r]` and its
     //    shared bits now come from the DEPLOYMENT-GRADE square-protocol generator
     //    ([`deal_random_solved_bits_via_square_protocol`]): every bit is jointly
@@ -658,7 +680,7 @@ fn secure_bit_decompose(
     //    the in-process dealer dealt the mask in cleartext (a simulation artefact).
     //    The privileged cleartext-dealt path [`deal_random_solved_bits`] is kept
     //    for the differential regression test that pins the two agree.
-    let (r_value, r_bits) = deal_random_solved_bits_via_square_protocol(dealer)?;
+    let (r_value, r_bits) = deal_random_solved_bits_via_square_protocol(source)?;
 
     // 2. Masked open: c = a + r (the ONLY opening; statistically hides a). We use
     //    the backend's robust reconstruct, exactly like every other open.
@@ -686,7 +708,7 @@ fn secure_bit_decompose(
             r_k.clone()
         };
         // a_k = x XOR borrow = x + borrow − 2·x·borrow (one secure mult).
-        let x_and_borrow = secret_and(dealer, &x, &borrow)?;
+        let x_and_borrow = secret_and(source, &x, &borrow)?;
         let a_k = {
             let s = shamir::add_shares(&x, &borrow)?;
             shamir::sub_shares(&s, &shamir::scale(&x_and_borrow, Fp::new(2)))?
@@ -700,8 +722,8 @@ fn secure_bit_decompose(
         };
         //   ¬x = 1 − x (local); borrow_in ∧ ¬x : one secure mult.
         let not_x = shamir::add_constant(&shamir::scale(&x, Fp::one().neg()), Fp::one());
-        let borrow_and_notx = secret_and(dealer, &borrow, &not_x)?;
-        borrow = secret_or(dealer, &nc_and_r, &borrow_and_notx)?;
+        let borrow_and_notx = secret_and(source, &borrow, &not_x)?;
+        borrow = secret_or(source, &nc_and_r, &borrow_and_notx)?;
         out.push(a_k);
     }
     Ok(out)
@@ -717,8 +739,12 @@ fn secure_bit_decompose(
 /// sq-bgsn — `[a ⊕ b]` (logical XOR) of two secret-shared bits:
 /// `a + b − 2·a·b`. One secure multiplication (the `a·b` term); the rest is local.
 /// Used by the Rabbit bit-add / bit-sub circuits.
-fn secret_xor(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
-    let and = secret_and(dealer, a, b)?;
+fn secret_xor(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
+    let and = secret_and(source, a, b)?;
     let sum = shamir::add_shares(a, b)?;
     shamir::sub_shares(&sum, &shamir::scale(&and, Fp::new(2)))
 }
@@ -746,11 +772,11 @@ fn secret_xor(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec
 /// ops on the shared bit; the only secure multiplications are the `eq`/`lt` chain
 /// steps. Returns the shared `[w]`; nothing is opened.
 fn rabbit_lt_bits_public_less_than_shared(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     c: u64,
     r_bits: &[Vec<Share>],
 ) -> Result<Vec<Share>, MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     let mut lt = const_sharing(n, Fp::zero());
     let mut eq = const_sharing(n, Fp::one());
     let l = r_bits.len();
@@ -765,13 +791,13 @@ fn rabbit_lt_bits_public_less_than_shared(
             r_k.clone()
         } else {
             // c_k=0 ⇒ "c<r here" = eq · r_k IS a real secure multiplication.
-            let term = secret_and(dealer, &eq, r_k)?;
+            let term = secret_and(source, &eq, r_k)?;
             lt = shamir::add_shares(&lt, &term)?;
             // (c_k == r_k) == 1 − r_k.
             shamir::add_constant(&shamir::scale(r_k, Fp::one().neg()), Fp::one())
         };
         // eq = eq · (c_k == r_k) — one secure multiplication.
-        eq = secret_and(dealer, &eq, &eq_here)?;
+        eq = secret_and(source, &eq, &eq_here)?;
     }
     Ok(lt)
 }
@@ -785,13 +811,13 @@ fn rabbit_lt_bits_public_less_than_shared(
 /// a FREE local linear combination, so `[r]` and the `[r_k]` are consistent by
 /// construction. Honest-majority, semi-honest.
 fn deal_full_field_solved_bits(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
 ) -> Result<(Vec<Share>, Vec<Vec<Share>>), MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     let mut r_bits: Vec<Vec<Share>> = Vec::with_capacity(RABBIT_MASK_BITS);
     let mut r_value = const_sharing(n, Fp::zero());
     for k in 0..RABBIT_MASK_BITS {
-        let bit_sharing = square_protocol_random_bit(dealer)?;
+        let bit_sharing = square_protocol_random_bit(source)?;
         let weighted = shamir::scale(&bit_sharing, Fp::new(1u64 << k));
         r_value = shamir::add_shares(&r_value, &weighted)?;
         r_bits.push(bit_sharing);
@@ -808,13 +834,13 @@ fn deal_full_field_solved_bits(
 /// times `[w]` (a local scale of the single `[w]` sharing), so forming the addend is
 /// free; only the carry propagation costs mults.
 fn rabbit_add_public_and_w_times_const(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     c: u64,
     w: &[Share],
     konst: u64,
     width: usize,
 ) -> Result<Vec<Vec<Share>>, MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     let mut out: Vec<Vec<Share>> = Vec::with_capacity(width);
     let mut carry = const_sharing(n, Fp::zero()); // [0]
     for k in 0..width {
@@ -832,7 +858,7 @@ fn rabbit_add_public_and_w_times_const(
             addend_k.clone()
         };
         // sum_k = x XOR carry = x + carry − 2·x·carry (one secure mult).
-        let x_and_carry = secret_and(dealer, &x, &carry)?;
+        let x_and_carry = secret_and(source, &x, &carry)?;
         let sum_k = {
             let s = shamir::add_shares(&x, &carry)?;
             shamir::sub_shares(&s, &shamir::scale(&x_and_carry, Fp::new(2)))?
@@ -844,7 +870,7 @@ fn rabbit_add_public_and_w_times_const(
         } else {
             const_sharing(n, Fp::zero())
         };
-        carry = secret_or(dealer, &ck_and_addend, &x_and_carry)?;
+        carry = secret_or(source, &ck_and_addend, &x_and_carry)?;
         out.push(sum_k);
     }
     Ok(out)
@@ -857,12 +883,12 @@ fn rabbit_add_public_and_w_times_const(
 /// `secure_bit_decompose`'s borrow loop, but both operands are shared so the result
 /// bit's XOR also costs a mult).
 fn rabbit_sub_shared_bits(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     lhs_bits: &[Vec<Share>],
     r_bits: &[Vec<Share>],
     width: usize,
 ) -> Result<Vec<Vec<Share>>, MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     let zero = const_sharing(n, Fp::zero());
     let mut out: Vec<Vec<Share>> = Vec::with_capacity(width);
     let mut borrow = const_sharing(n, Fp::zero()); // [0]
@@ -870,15 +896,15 @@ fn rabbit_sub_shared_bits(
         let l_k = lhs_bits.get(k).unwrap_or(&zero);
         let r_k = r_bits.get(k).unwrap_or(&zero);
         // x = l_k XOR r_k (both shared) — one secure mult.
-        let x = secret_xor(dealer, l_k, r_k)?;
+        let x = secret_xor(source, l_k, r_k)?;
         // a_k = x XOR borrow — one secure mult.
-        let a_k = secret_xor(dealer, &x, &borrow)?;
+        let a_k = secret_xor(source, &x, &borrow)?;
         // borrow_out = (¬l_k ∧ r_k) ∨ (¬x ∧ borrow). ¬l_k = 1 − l_k (local).
         let not_l = shamir::add_constant(&shamir::scale(l_k, Fp::one().neg()), Fp::one());
-        let notl_and_r = secret_and(dealer, &not_l, r_k)?;
+        let notl_and_r = secret_and(source, &not_l, r_k)?;
         let not_x = shamir::add_constant(&shamir::scale(&x, Fp::one().neg()), Fp::one());
-        let notx_and_borrow = secret_and(dealer, &not_x, &borrow)?;
-        borrow = secret_or(dealer, &notl_and_r, &notx_and_borrow)?;
+        let notx_and_borrow = secret_and(source, &not_x, &borrow)?;
+        borrow = secret_or(source, &notl_and_r, &notx_and_borrow)?;
         out.push(a_k);
     }
     Ok(out)
@@ -940,27 +966,27 @@ fn rabbit_sub_shared_bits(
 /// disclosing it; it is a precondition the caller proves in-protocol (the lifted
 /// `verify_value_in_range_rabbit`). Honest-majority, semi-honest.
 fn secure_bit_decompose_rabbit(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     x_shares: &[Share],
 ) -> Result<Vec<Vec<Share>>, MpcError> {
     // 1. Fresh full-field solved-bits (no party knows r).
-    let (r_value, r_bits) = deal_full_field_solved_bits(dealer)?;
+    let (r_value, r_bits) = deal_full_field_solved_bits(source)?;
 
     // 2. Open c = (x + r) mod p — the ONLY opening; (near-)uniform, hides x.
     let masked = shamir::add_shares(x_shares, &r_value)?;
     let c = backend.reconstruct(&masked)?.value();
 
     // 3a. Wrap indicator w = 1{c < r} via the public-vs-shared LTBits.
-    let w = rabbit_lt_bits_public_less_than_shared(dealer, c, &r_bits)?;
+    let w = rabbit_lt_bits_public_less_than_shared(source, c, &r_bits)?;
 
     // 3b. t_B = c + w·p (public c, public p, shared single bit w); width L+1 holds
     //     c + w·p < 2p < 2^62 with no overflow.
     let width = RABBIT_MASK_BITS + 1;
-    let t_bits = rabbit_add_public_and_w_times_const(dealer, c, &w, crate::field::P, width)?;
+    let t_bits = rabbit_add_public_and_w_times_const(source, c, &w, crate::field::P, width)?;
 
     // 3c. x_B = t_B ⊖ r_B (both shared). The low RABBIT_VALUE_BITS bits are x's bits.
-    let mut x_bits = rabbit_sub_shared_bits(dealer, &t_bits, &r_bits, width)?;
+    let mut x_bits = rabbit_sub_shared_bits(source, &t_bits, &r_bits, width)?;
     x_bits.truncate(RABBIT_VALUE_BITS);
     Ok(x_bits)
 }
@@ -985,12 +1011,12 @@ fn secure_bit_decompose_rabbit(
 /// test product is opened (uniform-nonzero / zero), so the value is never
 /// reconstructed. Honest-majority, semi-honest.
 fn verify_value_in_range_rabbit(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     value_shares: &[Share],
     value_bits: &[Vec<Share>],
     context: &'static str,
 ) -> Result<(), MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     // Recompose from the RABBIT_VALUE_BITS recovered bits (a FREE local linear comb).
     let mut recomposed = const_sharing(n, Fp::zero());
     for (k, bit) in value_bits.iter().enumerate() {
@@ -1002,7 +1028,7 @@ fn verify_value_in_range_rabbit(
     // recomposition is itself < 2^RABBIT_VALUE_BITS — so this single zero-test is
     // EXACTLY value ∈ [0, 2^RABBIT_VALUE_BITS).
     let recompose_diff = shamir::sub_shares(value_shares, &recomposed)?;
-    if !secret_is_zero(dealer, &recompose_diff)? {
+    if !secret_is_zero(source, &recompose_diff)? {
         return Err(MpcError::Protocol(format!(
             "{context} (Rabbit): in-protocol range proof FAILED — the \
              secret-shared value does not equal the bit-composition of its recovered \
@@ -1027,12 +1053,13 @@ fn verify_value_in_range_rabbit(
 /// "was `v` zero?" — it leaks nothing about `v`'s magnitude or any other value that
 /// went into `v`. The nonzero mask is essential: a zero mask would open `m = 0`
 /// even for `v != 0` (a false "in-range"). Honest-majority, semi-honest.
-fn secret_is_zero(dealer: &mut ShamirDealer, v: &[Share]) -> Result<bool, MpcError> {
-    let t = dealer.threshold();
-    // Fresh NONZERO mask (a CSPRNG draw in production, sq-1vt). Nonzero is
-    // load-bearing: m = v·0 = 0 would falsely report v == 0.
-    let mask_value = dealer.draw_nonzero_fp();
-    let mask = dealer.share(mask_value);
+fn secret_is_zero(source: &mut dyn DistributedRandomness, v: &[Share]) -> Result<bool, MpcError> {
+    let t = source.threshold();
+    // Fresh NONZERO mask through the randomness seam — the single-dealer
+    // simulation draws it from its masking CSPRNG (sq-1vt). Nonzero is
+    // load-bearing and is the seam method's structural contract: m = v·0 = 0
+    // would falsely report v == 0.
+    let mask = source.shared_nonzero_mask()?;
     let m_shares = shamir::mul_shares_raw(v, &mask)?;
     // Open the degree-2t product through the SAME robust path as every other open
     // (mirrors `HiddenValueJoin::secure_equal`); m == 0 ⇔ v == 0. `v` itself is
@@ -1089,12 +1116,12 @@ fn secret_is_zero(dealer: &mut ShamirDealer, v: &[Share]) -> Result<bool, MpcErr
 /// twin's `auth_disclose::auth_verify_sum_in_range`.
 #[cfg(test)]
 fn verify_sum_in_range(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     sum_shares: &[Share],
     sum_bits: &[Vec<Share>],
     context: &'static str,
 ) -> Result<(), MpcError> {
-    let n = dealer.parties();
+    let n = source.parties();
     // Recompose the sum from ALL L recovered bits, and SEPARATELY the high part
     // (bits >= DECOMP_VALUE_BITS). Both are FREE local linear combinations of the
     // bit sharings — no secure multiplication.
@@ -1110,7 +1137,7 @@ fn verify_sum_in_range(
 
     // Clause (1): no field wrap / fits L bits ⇔ sum − Σ b_k 2^k == 0.
     let recompose_diff = shamir::sub_shares(sum_shares, &recomposed)?;
-    if !secret_is_zero(dealer, &recompose_diff)? {
+    if !secret_is_zero(source, &recompose_diff)? {
         return Err(MpcError::Protocol(format!(
             "{context}: in-protocol range proof FAILED — the secret-shared sum \
              does not equal the bit-composition of its recovered {DECOMP_MASK_BITS} bits \
@@ -1123,7 +1150,7 @@ fn verify_sum_in_range(
 
     // Clause (2): below the supported magnitude ⇔ all bits >= DECOMP_VALUE_BITS are
     // zero ⇔ the high part is zero.
-    if !secret_is_zero(dealer, &high_part)? {
+    if !secret_is_zero(source, &high_part)? {
         return Err(MpcError::Protocol(format!(
             "{context}: in-protocol range proof FAILED — the secret-shared sum is \
              >= 2^{DECOMP_VALUE_BITS} = {DECOMP_VALUE_MAX_EXCLUSIVE} (a bit at or above position \
@@ -1152,12 +1179,28 @@ pub fn secure_greater_than(
     a: Fp,
     b: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    check_party_count(dealer.parties(), dealer.threshold())?;
+    secure_greater_than_through(dealer, a, b)
+}
+
+/// [`secure_greater_than`] with every sharing and re-sharing drawn through the
+/// [`crate::randomness::DistributedRandomness`] seam (sq-yyro, issue #6117), so a
+/// dealer-less source can drive the comparison chain behind the same trait. The
+/// single-dealer simulation draws exactly what `secure_greater_than` always drew,
+/// so its output is unchanged. Operand bits come from
+/// [`DistributedRandomness::vss_own_input`] (a holder's own input), so a source
+/// that refuses to share a holder's input — PRSS today — makes this fail closed
+/// with that source's error.
+pub(crate) fn secure_greater_than_through(
+    source: &mut dyn DistributedRandomness,
+    a: Fp,
+    b: Fp,
+) -> Result<Vec<Share>, MpcError> {
+    check_party_count(source.parties(), source.threshold())?;
     check_in_range("a", a)?;
     check_in_range("b", b)?;
-    let a_bits = share_bits(dealer, a);
-    let b_bits = share_bits(dealer, b);
-    greater_than_bits(dealer, &a_bits, &b_bits)
+    let a_bits = share_bits(source, a)?;
+    let b_bits = share_bits(source, b)?;
+    greater_than_bits(source, &a_bits, &b_bits)
 }
 
 /// **Secure greater-than against a PUBLIC threshold**, opening only the verdict bit
@@ -1178,11 +1221,24 @@ pub fn secure_threshold(
     secret: Fp,
     threshold: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    check_party_count(dealer.parties(), dealer.threshold())?;
+    secure_threshold_through(dealer, secret, threshold)
+}
+
+/// [`secure_threshold`] with every sharing and re-sharing drawn through the
+/// [`crate::randomness::DistributedRandomness`] seam (sq-yyro, issue #6117). Same
+/// delegation, preconditions and security model as
+/// [`secure_greater_than_through`]; the single-dealer simulation's output is
+/// unchanged.
+pub(crate) fn secure_threshold_through(
+    source: &mut dyn DistributedRandomness,
+    secret: Fp,
+    threshold: Fp,
+) -> Result<Vec<Share>, MpcError> {
+    check_party_count(source.parties(), source.threshold())?;
     check_in_range("secret", secret)?;
     check_in_range("threshold", threshold)?;
-    let a_bits = share_bits(dealer, secret);
-    greater_than_public_bits(dealer, &a_bits, threshold.value())
+    let a_bits = share_bits(source, secret)?;
+    greater_than_public_bits(source, &a_bits, threshold.value())
 }
 
 /// sq-xhaw — `[a == b]` over two full secret-shared `F_p` values,
@@ -1226,12 +1282,27 @@ pub fn secure_equal_to_bit(
     a: Fp,
     b: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    check_party_count(dealer.parties(), dealer.threshold())?;
+    secure_equal_to_bit_through(dealer, a, b)
+}
+
+/// [`secure_equal_to_bit`] with every sharing and re-sharing drawn through the
+/// [`crate::randomness::DistributedRandomness`] seam (sq-yyro, issue #6117), so a
+/// dealer-less source can drive the equality chain behind the same trait. The
+/// single-dealer simulation draws exactly what `secure_equal_to_bit` always drew,
+/// so its output is unchanged; a source that refuses
+/// [`DistributedRandomness::vss_own_input`] — PRSS today — makes this fail closed
+/// with that source's error.
+pub(crate) fn secure_equal_to_bit_through(
+    source: &mut dyn DistributedRandomness,
+    a: Fp,
+    b: Fp,
+) -> Result<Vec<Share>, MpcError> {
+    check_party_count(source.parties(), source.threshold())?;
     check_in_range("a", a)?;
     check_in_range("b", b)?;
-    let a_bits = share_bits(dealer, a);
-    let b_bits = share_bits(dealer, b);
-    equal_to_bit_from_bits(dealer, &a_bits, &b_bits)
+    let a_bits = share_bits(source, a)?;
+    let b_bits = share_bits(source, b)?;
+    equal_to_bit_from_bits(source, &a_bits, &b_bits)
 }
 
 /// The bit-vector core of [`secure_equal_to_bit`]: `[a == b] = ∏_k [a_k == b_k]`
@@ -1243,7 +1314,7 @@ pub fn secure_equal_to_bit(
 /// degree-reduce rounds than a left fold), while the total multiplication COUNT is
 /// the same `L − 1` ANDs plus `L` per-bit equalities.
 fn equal_to_bit_from_bits(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a_bits: &[Vec<Share>],
     b_bits: &[Vec<Share>],
 ) -> Result<Vec<Share>, MpcError> {
@@ -1252,11 +1323,11 @@ fn equal_to_bit_from_bits(
     let mut layer: Vec<Vec<Share>> = a_bits
         .iter()
         .zip(b_bits.iter())
-        .map(|(ak, bk)| secret_bit_eq(dealer, ak, bk))
+        .map(|(ak, bk)| secret_bit_eq(source, ak, bk))
         .collect::<Result<_, _>>()?;
     if layer.is_empty() {
         // No bits ⇒ vacuously equal; the trivial sharing of 1.
-        return Ok(const_sharing(dealer.parties(), Fp::one()));
+        return Ok(const_sharing(source.parties(), Fp::one()));
     }
     // Balanced AND-tree: pair adjacent sharings and `secret_and` them until one
     // remains. `secret_and` of two 0/1 sharings is exactly logical AND.
@@ -1265,7 +1336,7 @@ fn equal_to_bit_from_bits(
         let mut it = layer.into_iter();
         while let Some(lhs) = it.next() {
             match it.next() {
-                Some(rhs) => next.push(secret_and(dealer, &lhs, &rhs)?),
+                Some(rhs) => next.push(secret_and(source, &lhs, &rhs)?),
                 None => next.push(lhs), // odd one out rides to the next layer
             }
         }
@@ -2922,5 +2993,288 @@ mod tests {
             assert!(RABBIT_VALUE_BITS == COMPARE_BITS);
             assert!(RABBIT_MASK_BITS == 61);
         }
+    }
+}
+
+#[cfg(test)]
+mod randomness_seam_tests {
+    //! sq-yyro / issue #6117 — the comparison path's randomness now flows through
+    //! [`DistributedRandomness`] instead of the dealer's inherent methods. These
+    //! tests pin two things:
+    //!
+    //! 1. **Externally visible behaviour is unchanged.** The single-dealer
+    //!    simulation draws EXACTLY what it drew before the routing — same values,
+    //!    same order, same count — so every pinned sharing and every post-call
+    //!    witness draw is byte-identical to the pre-routing code.
+    //! 2. **A PRSS source behaves honestly.** It drives the mask-only primitives
+    //!    correctly (`shared_nonzero_mask` is real, dealer-less randomness) and
+    //!    FAILS CLOSED the moment a path needs to share a holder's own input,
+    //!    because PRSS refuses `vss_own_input` rather than faking an unverified
+    //!    sharing.
+    use super::*;
+    use crate::prss::PrssRandomness;
+    use crate::shamir::ShamirBackend;
+
+    fn ys(shares: &[Share]) -> Vec<u64> {
+        shares.iter().map(|s| s.y.value()).collect()
+    }
+
+    /// Every number below was captured by running the SAME call on the
+    /// PRE-ROUTING code (inline `dealer.share` / `draw_nonzero_fp` /
+    /// `degree_reduce`) and printing it. The trailing `draw_fp()` is a WITNESS: it
+    /// pins how many draws the call consumed from the masking RNG, so an extra or
+    /// missing draw fails even when the returned sharing happens to agree, and the
+    /// returned sharing pins the reductions' re-sharing randomness. Swapping the
+    /// two operands' input sharings is not caught: a BGW reduction's output
+    /// depends only on the secret and the fresh re-sharing, not on the inputs.
+    #[test]
+    fn seeded_entry_points_draw_exactly_what_the_dealer_drew_before_the_seam() {
+        let mut dealer = ShamirBackend::new_seeded(5, 0x5EED1).unwrap().dealer();
+        let gt = secure_greater_than(&mut dealer, Fp::new(12_345), Fp::new(999)).unwrap();
+        assert_eq!(
+            ys(&gt),
+            [
+                1239038611644483031,
+                1579827560802816270,
+                1022366847474999718,
+                1872499480874727326,
+                1824382451788305143
+            ]
+        );
+        assert_eq!(dealer.draw_fp().value(), 741042373994360979);
+
+        let mut dealer = ShamirBackend::new_seeded(5, 0x5EED2).unwrap().dealer();
+        let th = secure_threshold(&mut dealer, Fp::new(100_001), Fp::new(100_000)).unwrap();
+        assert_eq!(
+            ys(&th),
+            [
+                688843720071228573,
+                671335656898233119,
+                2253318819694707590,
+                823107190033264084,
+                992386786341290503
+            ]
+        );
+        assert_eq!(dealer.draw_fp().value(), 567516998934974379);
+
+        let mut dealer = ShamirBackend::new_seeded(5, 0x5EED3).unwrap().dealer();
+        let eq = secure_equal_to_bit(&mut dealer, Fp::new(777), Fp::new(777)).unwrap();
+        assert_eq!(
+            ys(&eq),
+            [
+                1183736440118617399,
+                1462764251340989568,
+                837083433667116508,
+                1612536996310692170,
+                1483281930058022603
+            ]
+        );
+        assert_eq!(dealer.draw_fp().value(), 520081441683015349);
+    }
+
+    /// The two helpers whose draw SHAPE changed the most: `share_bits` (now
+    /// `vss_own_input` per bit), `secret_is_zero` and `square_protocol_random_bit`
+    /// (now one `shared_nonzero_mask` instead of `draw_nonzero_fp` + `share`).
+    /// Same pinning discipline as above.
+    #[test]
+    fn seeded_helpers_draw_exactly_what_the_dealer_drew_before_the_seam() {
+        let backend = ShamirBackend::new_seeded(5, 0x5EED4).unwrap();
+        let mut dealer = backend.dealer();
+        let v = dealer.share(Fp::zero());
+        assert!(secret_is_zero(&mut dealer, &v).unwrap());
+        assert_eq!(dealer.draw_fp().value(), 841836279402472391);
+
+        let mut dealer = ShamirBackend::new_seeded(5, 0x5EED5).unwrap().dealer();
+        let bit = square_protocol_random_bit(&mut dealer).unwrap();
+        assert_eq!(
+            ys(&bit),
+            [
+                1250136422930490730,
+                1767424272705996666,
+                1551863549326517809,
+                603454252792054159,
+                1228039392316299667
+            ]
+        );
+        assert_eq!(dealer.draw_fp().value(), 314803855971477989);
+
+        let mut dealer = ShamirBackend::new_seeded(5, 0x5EED8).unwrap().dealer();
+        let bits = share_bits(&mut dealer, Fp::new(0xABCD)).unwrap();
+        assert_eq!(bits.len(), COMPARE_BITS);
+        assert_eq!(
+            ys(&bits[0]),
+            [
+                1019715604101880959,
+                1282736186249256184,
+                789061746442125676,
+                1844535293894183386,
+                2143313819391735363
+            ]
+        );
+        assert_eq!(
+            ys(&bits[COMPARE_BITS - 1]),
+            [
+                848169888518064165,
+                531358332683372099,
+                1355408341709617753,
+                1014476906383107176,
+                1814407035917534319
+            ]
+        );
+        assert_eq!(dealer.draw_fp().value(), 1247405691980092598);
+        let gtp = greater_than_public_bits_with(&mut dealer, &bits, 0x1234).unwrap();
+        assert_eq!(
+            ys(&gtp),
+            [
+                1007256199904615024,
+                1330255971782179134,
+                968999315632692331,
+                2229329240669848566,
+                499559728466259937
+            ]
+        );
+        assert_eq!(dealer.draw_fp().value(), 1158023473405003339);
+    }
+
+    /// `disclose_threshold_verdict` mints its own dealer from the backend, so the
+    /// seeded run is deterministic end-to-end: the verdict it discloses over the
+    /// seam must be the same one the pre-routing code disclosed.
+    #[test]
+    fn seeded_disclose_threshold_verdict_is_unchanged() {
+        let backend = ShamirBackend::new_seeded(5, 0x5EED6).unwrap();
+        let sum = backend.dealer().share(Fp::new(123_456));
+        let out = disclose_threshold_verdict(&backend, &sum, 100_000).unwrap();
+        assert_eq!(out.rows.len(), 1);
+        match &out.rows[0][0] {
+            Some(oxrdf::Term::Literal(l)) => assert_eq!(l.value(), "true"),
+            other => panic!("expected a boolean literal, got {:?}", other),
+        }
+    }
+
+    /// `secret_is_zero` and `square_protocol_random_bit` need ONLY
+    /// `shared_nonzero_mask`, which PRSS genuinely implements (dealer-lessly, zero
+    /// online rounds). So a PRSS source must drive them *correctly* — the routing
+    /// is what makes that possible at all, and it is the only end-to-end evidence
+    /// that these call sites no longer depend on the dealer's inherent methods.
+    ///
+    /// PRSS draws from OS entropy, so this asserts the protocol INVARIANT (the
+    /// zero-test verdict / the bit being 0-or-1), not pinned values.
+    #[test]
+    fn prss_drives_the_mask_only_primitives_correctly() {
+        let backend = ShamirBackend::new(5).unwrap();
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        // The seam contract the caller relies on: matching (n, t).
+        assert_eq!(
+            (
+                DistributedRandomness::parties(&prss),
+                DistributedRandomness::threshold(&prss)
+            ),
+            (backend.parties(), backend.threshold())
+        );
+        let zero = backend.dealer().share(Fp::zero());
+        let nonzero = backend.dealer().share(Fp::new(7));
+        assert!(secret_is_zero(&mut prss, &zero).unwrap());
+        assert!(!secret_is_zero(&mut prss, &nonzero).unwrap());
+
+        let bit = square_protocol_random_bit(&mut prss).unwrap();
+        let b = backend.reconstruct(&bit).unwrap();
+        assert!(
+            b == Fp::zero() || b == Fp::one(),
+            "square-protocol bit must reconstruct to 0/1, got {}",
+            b.value()
+        );
+    }
+
+    /// Fail-closed: every comparison entry point starts by sharing the holder's
+    /// own operand bits, which PRSS refuses outright (it is a correlated-randomness
+    /// generator, not an input-sharing protocol). The refusal must surface as
+    /// PRSS's own `NotYetImplemented`, never a silently unverified sharing.
+    #[test]
+    fn prss_fails_closed_where_the_chain_must_share_a_holders_own_input() {
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        assert!(matches!(
+            share_bits(&mut prss, Fp::new(5)),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
+        for outcome in [
+            secure_equal_to_bit_through(&mut prss, Fp::new(1), Fp::new(1)),
+            secure_greater_than_through(&mut prss, Fp::new(2), Fp::new(1)),
+            secure_threshold_through(&mut prss, Fp::new(2), Fp::new(1)),
+        ] {
+            assert!(
+                matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+                "a PRSS source must refuse to share a holder's own input, got {:?}",
+                outcome
+            );
+        }
+    }
+
+    /// A source whose plain `shared_mask` deals ZERO and whose
+    /// `shared_nonzero_mask` deals a real nonzero value — the `r = 0` threat from
+    /// the [`crate::randomness`] module note, made deterministic.
+    ///
+    /// This pins the CHOICE of seam method at the two mask call sites in this
+    /// module. The two methods consume the same number of RNG draws in the
+    /// single-dealer simulation, so the pinned-value tests above cannot tell them
+    /// apart; this one can.
+    struct ZeroPlainMaskSource {
+        inner: ShamirDealer,
+    }
+    impl DistributedRandomness for ZeroPlainMaskSource {
+        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            DistributedRandomness::threshold(&self.inner)
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            Ok(self.inner.share(Fp::zero()))
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            self.inner.vss_own_input(secret)
+        }
+    }
+
+    /// The `*_through` paths read `t` off the source, so the party-count guard
+    /// must not let a misreported `t` wrap `2t+1` back under `n`
+    /// (`usize::MAX/2 + 3` wraps to 5).
+    #[test]
+    fn party_count_guard_rejects_a_threshold_that_would_wrap() {
+        for t in [3, usize::MAX / 2, usize::MAX / 2 + 3, usize::MAX] {
+            let err = check_party_count(5, t).unwrap_err();
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("needs n >= 2t+1")),
+                "t = {t}: {err:?}"
+            );
+        }
+        assert!(check_party_count(5, 2).is_ok());
+    }
+
+    /// `secret_is_zero` masks with `m = v·r` and opens it: with `r = 0` it would
+    /// report "v is zero" for EVERY `v`, i.e. a false in-range / false equality.
+    /// And `square_protocol_random_bit` needs `a ≠ 0` for `c = a²` to be a usable
+    /// residue — with `a = 0` it exhausts its retries and fails closed instead of
+    /// emitting a bit. Both must therefore draw the NONZERO seam method.
+    #[test]
+    fn the_masks_come_from_the_nonzero_seam_method() {
+        let backend = ShamirBackend::new_seeded(5, 0xE9A2).unwrap();
+        let mut dealer = backend.dealer();
+        let nonzero = dealer.share(Fp::new(7));
+        let zero = dealer.share(Fp::zero());
+        let mut source = ZeroPlainMaskSource {
+            inner: backend.dealer(),
+        };
+        assert!(
+            !secret_is_zero(&mut source, &nonzero).unwrap(),
+            "a nonzero value must not test as zero — the mask must be the nonzero one"
+        );
+        assert!(secret_is_zero(&mut source, &zero).unwrap());
+        assert!(square_protocol_random_bit(&mut source).is_ok());
     }
 }
