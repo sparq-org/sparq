@@ -1102,7 +1102,7 @@ pub async fn handle<S: Store + 'static>(
                 }
                 // A conditional create is evaluated against the listing, which only the owner
                 // may read: anyone else is refused rather than told how it compares.
-                if !owner && super::resources::compares_state(&req.headers, true) {
+                if !owner && super::resources::compares_state(&req.headers, false) {
                     return state.deny(agent);
                 }
                 let held =
@@ -2063,7 +2063,24 @@ mod tests {
             post(owner.clone(), ("if-match", "\"other\"".into())).await,
             StatusCode::PRECONDITION_FAILED
         );
-        // `*` asks only whether the container exists.
+        // The listing has no `Last-Modified`, so a date compares nothing.
+        let date = crate::http_date::format(std::time::SystemTime::now()).unwrap();
+        assert_eq!(
+            post(someone.clone(), ("if-unmodified-since", date)).await,
+            StatusCode::CREATED
+        );
+        // `*` asks only whether the container exists, so no listing is read: not even a page of
+        // it past the last.
+        let req = test_store::request(
+            Method::POST,
+            &format!("{REQUESTS_PATH}?page=99"),
+            &[("content-type", LWS_JSON), ("if-match", "*")],
+            &access_doc("AccessRequest", "https://b/", None),
+        );
+        assert_eq!(
+            handle(&state, &req, &someone).await.status(),
+            StatusCode::CREATED
+        );
         assert_eq!(
             post(someone, ("if-match", "*".into())).await,
             StatusCode::CREATED

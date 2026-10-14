@@ -462,12 +462,13 @@ fn evaluate(
 
 /// Whether a write's preconditions compare the target's state: an `If-Match` or `If-None-Match`
 /// naming a tag, or, when the write evaluates times (`dated`), an `If-Unmodified-Since` it applies.
-/// A bare `*` asks only whether the target exists, and a field outside the grammar fails whatever
-/// the state, so neither tells the caller anything about a representation.
+/// A bare `*` asks only whether the target exists, an empty list names no tag, and a field outside
+/// the grammar fails whatever the state, so none of them tells the caller anything about a
+/// representation.
 pub(crate) fn compares_state(headers: &HeaderMap, dated: bool) -> bool {
     let names_a_tag = |name: header::HeaderName| {
         entity_tag::field(headers, name)
-            .is_some_and(|v| matches!(TagList::parse(&v), Ok(TagList::Tags(_))))
+            .is_some_and(|v| matches!(TagList::parse(&v), Ok(TagList::Tags(t)) if !t.is_empty()))
     };
     names_a_tag(header::IF_MATCH)
         || names_a_tag(header::IF_NONE_MATCH)
@@ -495,6 +496,11 @@ async fn precondition_read_check<S: Store + 'static>(
     }
     Ok(())
 }
+
+/// The tag a precondition is evaluated against when it asks only whether an existing target
+/// exists ([`compares_state`] false): `*` matches it, and no tag can be named that it equals
+/// without counting as a comparison.
+pub(crate) const EXISTS: &str = "\"\"";
 
 /// Whether the request carries a precondition a state-changing method evaluates.
 pub(crate) fn is_conditional(req: &LwsRequest) -> bool {
@@ -1598,9 +1604,13 @@ async fn create<S: Store + 'static>(
         let (etag, modified) =
             if parent == state.cfg.storage() && serves_description(get.header(header::ACCEPT)) {
                 (Some(description_etag(&storage_description(state))), None)
+            } else if !compares_state(&req.headers, true) {
+                // Only whether the container exists is asked, and it does: no listing is read,
+                // so none that cannot be produced (a page past the last) answers instead.
+                (Some(EXISTS.to_string()), None)
             } else {
                 // The storage description is public; the listing is not.
-                if let Err(r) = precondition_read_check(state, req, parent, agent, true).await {
+                if let Err(r) = recheck(state, Action::Read, parent, agent).await {
                     return r;
                 }
                 // Held exclusively: no change to a member is in flight.
@@ -2349,7 +2359,9 @@ async fn update<S: Store + 'static>(
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
-    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
+    if let Err(r) =
+        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
+    {
         return r;
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
@@ -3430,7 +3442,9 @@ async fn patch<S: Store + 'static>(
     if !is_json_type(&meta.content_type) {
         return not_json();
     }
-    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
+    if let Err(r) =
+        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
+    {
         return r;
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
@@ -3462,6 +3476,9 @@ async fn patch<S: Store + 'static>(
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
+    // The new tag describes the content as patched, which only a reader may learn (a writer that
+    // may not read it would otherwise learn its length and a hash of it).
+    let reader = state.allowed(Action::Read, uri, agent).await;
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -3480,7 +3497,9 @@ async fn patch<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    if reader {
+        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    }
     resp
 }
 
@@ -3517,7 +3536,10 @@ async fn delete<S: Store + 'static>(
         Ok(m) => m,
         Err(r) => return r,
     };
-    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
+    // A data resource's date is compared only when it has one; a container's listing may have
+    // one.
+    let dated = uri.ends_with('/') || meta.last_modified.is_some();
+    if let Err(r) = precondition_read_check(state, req, uri, agent, dated).await {
         return r;
     }
     // The validators the preconditions are evaluated against (RFC 9110 section 13): a data
@@ -3528,6 +3550,9 @@ async fn delete<S: Store + 'static>(
             Some(quoted(&meta.etag)),
             meta.last_modified.map(|t| to_secs(epoch_ms(t))),
         )
+    } else if is_conditional(req) && !compares_state(&req.headers, true) {
+        // Only whether the container exists is asked, and it does (see [`create`]).
+        (Some(EXISTS.to_string()), None)
     } else if is_conditional(req) {
         // The whole subtree is held: no change to a member is in flight.
         let listing = read_container(state, &plain_get(req), uri, &meta, true)
@@ -4683,7 +4708,12 @@ async fn linkset<S: Store + 'static>(
                 meta,
                 patched,
                 locks,
-                LinksetValidator::Sent,
+                // The tag describes the linkset as patched, which only a reader may learn.
+                if state.allowed(Action::Read, uri, agent).await {
+                    LinksetValidator::Sent
+                } else {
+                    LinksetValidator::Withheld
+                },
             )
             .await
         }
@@ -4882,10 +4912,12 @@ where
 
 /// Whether a stored linkset's `204` carries its new `ETag`.
 enum LinksetValidator {
-    /// A PATCH: the client may go on patching with the tag.
+    /// A PATCH by a client that may read the linkset: it may go on patching with the tag.
     Sent,
     /// A PUT: what is stored is not what was sent (references resolved, the server-managed links
     /// restored), so the response carries no validator (RFC 9110 section 9.3.4); a GET reads it.
+    /// A PATCH by a writer that may not read the linkset: the tag would describe a document it
+    /// may not read.
     Withheld,
 }
 
@@ -6482,8 +6514,65 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let status = send(bob.clone(), "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::CREATED);
-        let status = send(dave.clone(), "POST", c, vec![("if-match", "*".into())]).await;
+        let status = send(dave.clone(), "POST", c.clone(), vec![("if-match", "*".into())]).await;
         assert_eq!(status, StatusCode::CREATED);
+        // `*` asks only whether the container exists, so it reads no listing: a page past the
+        // last, which a listing would answer with 404, tells a writer nothing about the members.
+        let page = format!("{c}?page=99");
+        let status = send(dave.clone(), "POST", page, vec![("if-match", "*".into())]).await;
+        assert_eq!(status, StatusCode::CREATED);
+        // `*` alongside a date the write compares is still a comparison.
+        let status = send(
+            dave.clone(),
+            "PUT",
+            p.clone(),
+            vec![
+                ("if-none-match", "*".into()),
+                ("if-unmodified-since", date.clone()),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Read is asked of the container the create compares, not of another: Erin may read
+        // only `e/`, and is told how its listing compares.
+        let e = create(
+            &st,
+            &request("POST", "/", &[("slug", "e"), ("link", CONTAINER_LINK)], ""),
+            &owner,
+            &root,
+        )
+        .await;
+        let e_uri = hdr(&e, "location");
+        let erin = "https://erin.example/#me";
+        st.access
+            .put_grant_for_test("erin", grant(json!(["create"]), erin));
+        st.access.put_grant_for_test(
+            "erin-reads-e",
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": ["read"], "assignee": erin,
+                    "target": {"type": "Container", "value": [e_uri.clone()]}}]),
+                &root,
+            )
+            .unwrap(),
+        );
+        let erin = agent(erin);
+        let status = send(erin.clone(), "POST", path_of(&e_uri).into(), other()).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let status = send(erin, "POST", c.clone(), other()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // A patch's new tag describes content only a reader may learn.
+        for (who, sent) in [(&dave, false), (&bob, true)] {
+            for (path, body) in [(&p, add), (&meta, link)] {
+                let r = handle(
+                    &st,
+                    &request("PATCH", path, &[("content-type", JSON_PATCH)], body),
+                    who,
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::NO_CONTENT, "{path}");
+                assert_eq!(r.headers().contains_key("etag"), sent, "{path} {who:?}");
+            }
+        }
         // `*` stays open to a writer that may not read.
         for (method, path) in [
             ("PUT", meta.clone()),
