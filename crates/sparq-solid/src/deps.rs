@@ -2,29 +2,35 @@
 //! the reverse (issue #5312; `research/solid-pod-scoped-materializer-design.md` §5.2).
 //!
 //! The materializer reasons over one fact pool: every control document of the system plus,
-//! for WAC, every group document an `acl:agentGroup` names. Blank nodes are skolemized per
-//! document, so two documents can only meet through a shared IRI. A document's grants can
-//! therefore change when another document
+//! for WAC, every group document an `acl:agentGroup` names, together with the loader's
+//! structural facts. [`input_docs`] attributes that pool to its documents through the same
+//! per-triple path the loader uses ([`input_fact`]: `solidx:` facts dropped, blank nodes
+//! skolemized), so the index sees the reasoner's identities, and a control document also
+//! owns its structural `<R> solidx:ownAcl|ownAcr <doc>` and `solidx:inDoc` facts. A
+//! document's grants can therefore change when another document
 //!
-//! - defines a node this one links to through a [`LINKAGE`] predicate (an ACP control naming
-//!   a policy or matcher defined elsewhere, a WAC group whose members a group document
-//!   lists), or
+//! - defines a node this one links to through a [`LINKAGE`] or structural predicate (an
+//!   ACP control naming a policy or matcher defined elsewhere, a WAC group whose members a
+//!   group document lists, a document describing this control document's own IRI), or
 //! - states facts about a subject this one also describes (two documents sharing an
-//!   authorization or policy IRI, case (C) of the design record).
+//!   authorization or policy IRI, case (C) of the design record, including a resource IRI
+//!   and a skolemized blank node).
 //!
 //! [`ControlDeps::build`] follows both edge kinds to a fixpoint. It only derives state; no
-//! materialization reads it yet.
+//! materialization reads it yet. The trusted creator/owner and credential facts are not
+//! document content and are outside the index.
 
 use crate::loader::{
-    graph_iri, graph_triples, group_doc_of, referenced_group_docs, System, ACL_AGENT_GROUP,
-    ACL_SUFFIX, ACR_SUFFIX, RESERVED_PREFIX,
+    graph_iri, graph_triples, group_doc_of, in_doc_predicate, input_fact, is_authority_less,
+    own_predicate, referenced_group_docs, System, ACL_AGENT_GROUP, ACL_SUFFIX, ACR_SUFFIX,
+    RESERVED_PREFIX,
 };
-use oxrdf::Term;
+use oxrdf::{NamedNode, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::Graph;
 
 /// The document predicates whose object a rule body binds to a variable, so the object can
-/// join a fact from another document. `linkage_covers_every_rule_body_predicate` re-reads
+/// join a fact from another document. `linkage_covers_every_rule_body_predicate` parses
 /// `rules/*.n3` and fails when a rule binds the object of a predicate missing here.
 pub(crate) const LINKAGE: &[&str] = &[
     "http://www.w3.org/ns/auth/acl#accessTo",
@@ -48,6 +54,67 @@ pub(crate) const LINKAGE: &[&str] = &[
     "http://www.w3.org/ns/solid/acp#deny",
 ];
 
+/// One reasoning-input document and the facts the reasoner reads from it.
+pub(crate) struct InputDoc {
+    pub iri: String,
+    /// A control document of the system (as opposed to a WAC group document).
+    pub control: bool,
+    pub facts: Vec<[Term; 3]>,
+}
+
+/// The reasoning-input documents of `graph` for `system`, each with its attributed facts.
+/// A superset of the loader's selection: WAC group documents named from either system's
+/// control documents are included.
+pub(crate) fn input_docs(graph: &Graph, system: System) -> Vec<InputDoc> {
+    let suffix = if system == System::Wac {
+        ACL_SUFFIX
+    } else {
+        ACR_SUFFIX
+    };
+    let groups = if system == System::Wac {
+        referenced_group_docs(graph)
+    } else {
+        FxHashSet::default()
+    };
+    let (owns, in_doc) = (own_predicate(system), in_doc_predicate());
+    let mut out = Vec::new();
+    for (name, sub) in &graph.named {
+        let Some(iri) = graph_iri(name) else { continue };
+        if iri.starts_with(RESERVED_PREFIX) {
+            continue;
+        }
+        let resource = iri.strip_suffix(suffix).filter(|r| !is_authority_less(r));
+        let control = resource.is_some();
+        if !control && !groups.contains(iri) {
+            continue;
+        }
+        let mut facts: Vec<[Term; 3]> = graph_triples(sub)
+            .iter()
+            .filter_map(|t| input_fact(t, iri))
+            .collect();
+        if let Some(r) = resource {
+            let doc = Term::NamedNode(NamedNode::new_unchecked(iri));
+            let subjects: FxHashSet<Term> = facts.iter().map(|f| f[0].clone()).collect();
+            facts.extend(
+                subjects
+                    .into_iter()
+                    .map(|s| [s, in_doc.clone(), doc.clone()]),
+            );
+            facts.push([
+                Term::NamedNode(NamedNode::new_unchecked(r)),
+                owns.clone(),
+                doc,
+            ]);
+        }
+        out.push(InputDoc {
+            iri: iri.to_owned(),
+            control,
+            facts,
+        });
+    }
+    out
+}
+
 /// The dependency graph between the reasoning-input documents of one access-control system.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct ControlDeps {
@@ -60,48 +127,32 @@ pub(crate) struct ControlDeps {
 impl ControlDeps {
     /// The dependencies among `graph`'s reasoning-input documents for `system`.
     pub(crate) fn build(graph: &Graph, system: System) -> Self {
-        let suffix = if system == System::Wac {
-            ACL_SUFFIX
-        } else {
-            ACR_SUFFIX
-        };
-        let groups = if system == System::Wac {
-            referenced_group_docs(graph)
-        } else {
-            FxHashSet::default()
-        };
-        // Each input document's IRI-subject set and linked IRIs.
+        let inputs = input_docs(graph, system);
+        let (owns, in_doc) = (own_predicate(system), in_doc_predicate());
+        // Each input document's subjects, linked nodes and named group documents.
         let mut docs: FxHashMap<&str, Doc> = FxHashMap::default();
         let mut controls: Vec<&str> = Vec::new();
-        for (name, sub) in &graph.named {
-            let Some(iri) = graph_iri(name) else { continue };
-            if iri.starts_with(RESERVED_PREFIX) {
-                continue;
+        for input in &inputs {
+            if input.control {
+                controls.push(&input.iri);
             }
-            let control = iri.ends_with(suffix);
-            if !control && !groups.contains(iri) {
-                continue;
-            }
-            if control {
-                controls.push(iri);
-            }
-            let doc = docs.entry(iri).or_default();
-            for t in graph_triples(sub) {
-                if let Term::NamedNode(s) = &t[0] {
+            let doc = docs.entry(&input.iri).or_default();
+            for [s, p, o] in &input.facts {
+                if let Term::NamedNode(s) = s {
                     doc.subjects.insert(s.as_str().to_owned());
                 }
-                let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) else {
+                let (Term::NamedNode(pn), Term::NamedNode(on)) = (p, o) else {
                     continue;
                 };
-                if p.as_str() == ACL_AGENT_GROUP {
-                    doc.groups.insert(group_doc_of(o.as_str()).to_owned());
+                if pn.as_str() == ACL_AGENT_GROUP {
+                    doc.groups.insert(group_doc_of(on.as_str()).to_owned());
                 }
-                if LINKAGE.contains(&p.as_str()) {
-                    doc.links.insert(o.as_str().to_owned());
+                if LINKAGE.contains(&pn.as_str()) || *p == owns || *p == in_doc {
+                    doc.links.insert(on.as_str().to_owned());
                 }
             }
         }
-        // Subject IRI → the input documents describing it.
+        // Subject → the input documents describing it.
         let mut described_in: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
         for (iri, doc) in &docs {
             for s in &doc.subjects {
@@ -150,7 +201,7 @@ impl ControlDeps {
     }
 }
 
-/// One input document's IRI subjects, linked objects and named group documents.
+/// One input document's subjects, linked nodes and named group documents.
 #[derive(Default)]
 struct Doc {
     subjects: FxHashSet<String>,
@@ -247,17 +298,125 @@ mod tests {
         assert!(!wac.forward.contains_key("https://p.ex/.acr"));
     }
 
-    /// Every document predicate a rule body binds to a variable object is in [`LINKAGE`].
-    /// A predicate in the reasoner's own namespaces (`solidx:`, `auth:`, the `log:`/`string:`
-    /// builtins) is derived or built in, never read from a document.
+    #[test]
+    fn a_document_describing_a_control_documents_own_iri_is_a_dependency() {
+        // The loader's `<b/> solidx:ownAcr <b/.acr>` makes the control document's IRI a
+        // join key even when the document never mentions itself.
+        let nq = format!(
+            "<https://b.ex/.acr#c> <{ACP}apply> <https://b.ex/.acr#p> <https://b.ex/.acr> .\n\
+             <https://b.ex/.acr> <{ACP}accessControl> <https://f.ex/.acr#c> <https://f.ex/.acr> .\n"
+        );
+        let d = deps(&nq, System::Acp);
+        assert_eq!(d.forward["https://b.ex/.acr"], set(&["https://f.ex/.acr"]));
+        assert_eq!(d.reverse["https://f.ex/.acr"], set(&["https://b.ex/.acr"]));
+    }
+
+    #[test]
+    fn a_blank_node_meets_the_iri_it_is_skolemized_to() {
+        let skolem = match crate::loader::skolemize(
+            &Term::BlankNode(oxrdf::BlankNode::new_unchecked("p")),
+            "https://b.ex/.acr",
+        ) {
+            Term::NamedNode(n) => n.as_str().to_owned(),
+            other => panic!("expected an IRI, got {other}"),
+        };
+        let nq = format!(
+            "<https://b.ex/.acr#c> <{ACP}apply> _:p <https://b.ex/.acr> .\n\
+             <{skolem}> <{ACP}allOf> <https://m.ex/.acr#m> <https://f.ex/.acr> .\n"
+        );
+        let d = deps(&nq, System::Acp);
+        assert_eq!(d.forward["https://b.ex/.acr"], set(&["https://f.ex/.acr"]));
+        assert_eq!(
+            d.forward["https://f.ex/.acr"],
+            set(&[]),
+            "f links nothing of b"
+        );
+    }
+
+    /// Every fact the reasoner reads is attributed to an input document, except the
+    /// loader's per-IRI markers, which no document states.
+    #[test]
+    fn input_docs_attribute_every_assembled_fact() {
+        let markers = [
+            format!("{}isResource", crate::SOLIDX_NS),
+            format!("{}isWebId", crate::SOLIDX_NS),
+        ];
+        let blanks = format!(
+            "_:a <{ACL}agentGroup> <https://g.ex/team#t> <https://a.ex/.acl> .\n\
+             _:a <{ACL}accessTo> <https://a.ex/> <https://a.ex/.acl> .\n\
+             _:a <{ACL}mode> <{ACL}Read> <https://a.ex/.acl> .\n\
+             <https://g.ex/team#t> <http://www.w3.org/2006/vcard/ns#hasMember> _:m <https://g.ex/team> .\n\
+             <https://b.ex/.acr> <{ACP}accessControl> _:c <https://b.ex/.acr> .\n\
+             _:c <{ACP}apply> _:p <https://b.ex/.acr> .\n\
+             _:p <{ACP}allOf> _:m <https://b.ex/.acr> .\n\
+             _:m <{ACP}agent> <https://alice.ex/me> <https://b.ex/.acr> .\n\
+             <https://b.ex/r> <{ACP}agent> <https://bob.ex/me> <https://b.ex/r> .\n"
+        );
+        let mut checked = 0;
+        for nq in [crate::wac_fixture(), crate::acp_fixture(), blanks] {
+            let graph = Graph::load_dataset(&nq, "nquads").expect("loads");
+            for system in [System::Wac, System::Acp] {
+                let attributed: FxHashSet<[Term; 3]> = input_docs(&graph, system)
+                    .into_iter()
+                    .flat_map(|d| d.facts)
+                    .collect();
+                let assembled = crate::loader::assemble_facts(
+                    &graph,
+                    system,
+                    &crate::AccessProvenance::default(),
+                    &crate::VerifiedCredentials::default(),
+                )
+                .expect("assembles");
+                for fact in assembled {
+                    if matches!(&fact[1], Term::NamedNode(p) if markers.iter().any(|m| m == p.as_str()))
+                    {
+                        continue;
+                    }
+                    checked += 1;
+                    assert!(
+                        attributed.contains(&fact),
+                        "{system:?}: unattributed {fact:?}"
+                    );
+                }
+            }
+        }
+        assert!(checked > 50, "checked {checked} facts");
+    }
+
+    /// Every document predicate a rule body binds to a variable object is in [`LINKAGE`],
+    /// at any depth (negated `log:notIncludes` formulas included). A subject-position
+    /// variable needs no entry: every attributed subject is indexed. Predicates in the
+    /// reasoner's own namespaces are derived or built in, except the loader's structural
+    /// facts, which [`ControlDeps::build`] links itself. A variable predicate is accepted
+    /// only where the same rule binds it from a derived `solidx:` fact, which no document
+    /// can state (the loader drops `solidx:` predicates).
     #[test]
     fn linkage_covers_every_rule_body_predicate() {
+        use sparq_reason::n3::Term as N3;
         const OWN: [&str; 4] = [
             "https://sparq.dev/ns/solidx#",
             "https://sparq.dev/ns/auth#",
             "http://www.w3.org/2000/10/swap/log#",
             "http://www.w3.org/2000/10/swap/string#",
         ];
+        let solidx = crate::SOLIDX_NS;
+        let structural = [
+            format!("{solidx}ownAcl"),
+            format!("{solidx}ownAcr"),
+            format!("{solidx}inDoc"),
+        ];
+        fn atoms<'a>(ts: &'a [[N3; 3]], out: &mut Vec<&'a [N3; 3]>) {
+            for t in ts {
+                out.push(t);
+                for x in t {
+                    match x {
+                        N3::Formula(inner) => atoms(inner, out),
+                        N3::Triple(inner) => atoms(std::slice::from_ref(&**inner), out),
+                        _ => {}
+                    }
+                }
+            }
+        }
         let rules = [
             include_str!("../rules/common.n3"),
             include_str!("../rules/wac.n3"),
@@ -265,47 +424,43 @@ mod tests {
             include_str!("../rules/acp-b.n3"),
             include_str!("../rules/acp-c.n3"),
         ];
-        let mut found = 0;
+        let (mut found, mut structural_found) = (0, 0);
         for text in rules {
-            let mut prefixes: FxHashMap<&str, &str> = FxHashMap::default();
-            let mut tokens: Vec<&str> = Vec::new();
-            for line in text.lines() {
-                let line = line.split(" #").next().unwrap_or(line);
-                let line = if line.trim_start().starts_with('#') {
-                    ""
-                } else {
-                    line
-                };
-                let words: Vec<&str> = line.split_whitespace().collect();
-                if words.first() == Some(&"@prefix") {
-                    let iri = words[2].trim_start_matches('<').trim_end_matches('>');
-                    prefixes.insert(words[1].trim_end_matches(':'), iri);
-                    continue;
+            let parsed = sparq_reason::n3::parser::parse(text).expect("rules parse");
+            assert!(
+                parsed.backward_rules.is_empty(),
+                "backward rules are not indexed"
+            );
+            for rule in &parsed.rules {
+                let mut body = Vec::new();
+                atoms(&rule.premise, &mut body);
+                for [_, p, o] in body.iter().copied() {
+                    match p {
+                        N3::Var(v) => assert!(
+                            body.iter().any(|[_, q, b]| *b == N3::Var(v.clone())
+                                && matches!(q, N3::Iri(q) if q.starts_with(solidx))),
+                            "rule body has a document-reachable variable predicate ?{v}"
+                        ),
+                        N3::Iri(p) if matches!(o, N3::Var(_)) => {
+                            if structural.contains(p) {
+                                structural_found += 1;
+                            } else if !OWN.iter().any(|ns| p.starts_with(ns)) {
+                                found += 1;
+                                assert!(
+                                    LINKAGE.contains(&p.as_str()),
+                                    "rule body binds the object of <{p}>"
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
                 }
-                tokens.extend(words);
-            }
-            for w in tokens.windows(3) {
-                let (p, o) = (w[1], w[2]);
-                if !o.starts_with('?') || p.starts_with('?') {
-                    continue;
-                }
-                let Some((prefix, local)) = p.split_once(':') else {
-                    continue;
-                };
-                let Some(ns) = prefixes.get(prefix) else {
-                    continue;
-                };
-                if OWN.contains(ns) {
-                    continue;
-                }
-                let iri = format!("{ns}{local}");
-                found += 1;
-                assert!(
-                    LINKAGE.contains(&iri.as_str()),
-                    "rule body binds the object of <{iri}>"
-                );
             }
         }
         assert!(found > 10, "the rule scan matched {found} predicates");
+        assert!(
+            structural_found > 0,
+            "the rule scan matched no structural predicate"
+        );
     }
 }

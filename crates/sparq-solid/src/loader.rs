@@ -112,7 +112,7 @@ const SPECIAL_AGENTS: [&str; 5] = [
     "http://www.w3.org/ns/auth/acl#AuthenticatedAgent",
 ];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum System {
     Wac,
     Acp,
@@ -142,7 +142,7 @@ pub(crate) fn graph_iri(name: &Term) -> Option<&str> {
 /// Both components are percent-encoded so the separator cannot occur inside either
 /// component: distinct (graph IRI, label) pairs produce distinct, valid IRIs.
 /// Named nodes and literals pass through unchanged.
-fn skolemize(t: &Term, graph_iri: &str) -> Term {
+pub(crate) fn skolemize(t: &Term, graph_iri: &str) -> Term {
     match t {
         Term::BlankNode(b) => named(&format!(
             "urn:skolem:graph:{}:{}",
@@ -151,6 +151,28 @@ fn skolemize(t: &Term, graph_iri: &str) -> Term {
         )),
         other => other.clone(),
     }
+}
+
+/// One triple of the input document `graph_iri` as the reasoner reads it: `None` for a
+/// dropped `solidx:` fact (see [`is_reserved_derivation_predicate`]), otherwise skolemized.
+/// Assembly and the dependency index ([`crate::deps`]) share it, so both see the same
+/// identities.
+pub(crate) fn input_fact(t: &[Term; 3], graph_iri: &str) -> Option<[Term; 3]> {
+    if is_reserved_derivation_predicate(t) {
+        return None;
+    }
+    Some([skolemize(&t[0], graph_iri), skolemize(&t[1], graph_iri), skolemize(&t[2], graph_iri)])
+}
+
+/// The structural `<R> solidx:ownAcl|ownAcr <R.acl|R.acr>` predicate for `system`.
+pub(crate) fn own_predicate(system: System) -> Term {
+    let own = if system == System::Wac { "ownAcl" } else { "ownAcr" };
+    named(&format!("{SOLIDX_NS}{own}"))
+}
+
+/// The `<s> solidx:inDoc <control document>` provenance predicate.
+pub(crate) fn in_doc_predicate() -> Term {
+    named(&format!("{SOLIDX_NS}inDoc"))
 }
 
 /// A term for the IRI `iri` (the loader only ever mints IRIs it built itself).
@@ -190,10 +212,9 @@ pub(crate) fn assemble_facts(
 ) -> Result<Vec<[Term; 3]>, String> {
     let mut out: Vec<[Term; 3]> = Vec::new();
     let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
-    let own_pred = if system == System::Wac { "ownAcl" } else { "ownAcr" };
     let is_resource = named(&format!("{SOLIDX_NS}isResource"));
-    let owns = named(&format!("{SOLIDX_NS}{own_pred}"));
-    let in_doc_p = named(&format!("{SOLIDX_NS}inDoc"));
+    let owns = own_predicate(system);
+    let in_doc_p = in_doc_predicate();
     let is_webid = named(&format!("{SOLIDX_NS}isWebId"));
 
     // 1) resources: every non-control, non-auth graph + every structural container
@@ -256,12 +277,9 @@ pub(crate) fn assemble_facts(
             // sq-3jtd.5: hard-reject any forged derivation-internal fact
             // (`solidx:creator|owner|appliesToResource|…`) smuggled into the control
             // document — only the loader/rules may produce `solidx:` facts.
-            if is_reserved_derivation_predicate(&t) {
-                continue;
-            }
-            let s = skolemize(&t[0], iri);
-            in_doc.insert(s.clone());
-            out.push([s, skolemize(&t[1], iri), skolemize(&t[2], iri)]);
+            let Some(fact) = input_fact(&t, iri) else { continue };
+            in_doc.insert(fact[0].clone());
+            out.push(fact);
             collect_agents(&t, &mut webids, &mut group_docs, &mut principal_iris);
         }
         for s in in_doc {
@@ -279,14 +297,8 @@ pub(crate) fn assemble_facts(
             for t in graph_triples(sub) {
                 // sq-3jtd.5: same derivation-internal guard for group
                 // documents — a forged `solidx:` fact here would feed the reasoner too.
-                if is_reserved_derivation_predicate(&t) {
-                    continue;
-                }
-                out.push([
-                    skolemize(&t[0], iri),
-                    skolemize(&t[1], iri),
-                    skolemize(&t[2], iri),
-                ]);
+                let Some(fact) = input_fact(&t, iri) else { continue };
+                out.push(fact);
                 if let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) {
                     if p.as_str() == VCARD_MEMBER {
                         webids.insert(o.as_str().to_owned());
@@ -489,7 +501,7 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
 /// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
 /// root. The `://` must follow the scheme itself (an opaque IRI such as
 /// `urn:example:x://` does not match).
-fn is_authority_less(iri: &str) -> bool {
+pub(crate) fn is_authority_less(iri: &str) -> bool {
     let Some(scheme) = iri.strip_suffix("://") else { return false };
     let mut chars = scheme.chars();
     chars.next().is_some_and(|c| c.is_ascii_alphabetic())
