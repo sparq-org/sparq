@@ -5765,6 +5765,96 @@ mod tests {
         );
     }
 
+    /// Every header value and the body of one response, as text, so a test can check that a value
+    /// appears NOWHERE in it, not just in the `ETag` header.
+    async fn response_text(result: Result<Response, ServerError>) -> (u16, String) {
+        let resp = result.unwrap_or_else(IntoResponse::into_response);
+        let status = resp.status().as_u16();
+        let mut text: String = resp
+            .headers()
+            .iter()
+            .map(|(name, value)| format!("{name}: {}\n", String::from_utf8_lossy(value.as_bytes())))
+            .collect();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        text.push_str(&String::from_utf8_lossy(&body));
+        (status, text)
+    }
+
+    /// The container's current membership ETag, as its reader Alice sees it, without the quotes.
+    async fn container_etag(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+    ) -> String {
+        let alice = VerifiedToken {
+            web_id: Some(ALICE.into()),
+            ..VerifiedToken::default()
+        };
+        let got = run_verb(state, "GET", "/alice/c/", alice).await;
+        assert_eq!(got.status, 200, "Alice reads her container: {got:?}");
+        let etag = got.etag.expect("a reader receives the container ETag");
+        etag.trim_start_matches("W/").trim_matches('"').to_string()
+    }
+
+    /// V5 as an invariant rather than one path: whatever a non-reader sends, to the container, its
+    /// members or its `.acl`, and with or without conditional headers naming the ETag, no response
+    /// carries the container's membership ETag anywhere (header or body), neither the value before
+    /// the request nor the one after it. A new response path that emits it to a non-reader fails here.
+    #[tokio::test]
+    async fn v5_no_response_path_shows_a_non_reader_the_container_etag() {
+        for path in ["/alice/c/", EXISTING, MISSING, "/alice/c/.acl"] {
+            for verb in ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] {
+                for conditional in [None, Some("if-match"), Some("if-none-match"), Some("star")] {
+                    for (label, token) in [("anonymous", anon()), ("bob", bob())] {
+                        let state = dropbox_with_secret().await;
+                        let before = container_etag(&state).await;
+                        let mut headers = match verb {
+                            "PUT" | "POST" => turtle_headers(),
+                            "PATCH" => n3_patch_headers(),
+                            _ => HeaderMap::new(),
+                        };
+                        match conditional {
+                            Some("star") => {
+                                headers
+                                    .insert(header::IF_NONE_MATCH, HeaderValue::from_static("*"));
+                            }
+                            Some(name) => {
+                                let value =
+                                    HeaderValue::from_str(&format!("\"{before}\"")).unwrap();
+                                headers.insert(HeaderName::from_static(name), value);
+                            }
+                            None => {}
+                        }
+                        let uri: axum::http::Uri = path.parse().unwrap();
+                        let (s, t) = (State(state.clone()), Extension(token));
+                        let result = match verb {
+                            "GET" => get_handler(s, t, uri, headers).await,
+                            "HEAD" => head_handler(s, t, uri, headers).await,
+                            "OPTIONS" => options_handler(s, t, uri).await,
+                            "PUT" => put_handler(s, t, uri, headers, request_body_bytes()).await,
+                            "POST" => post_handler(s, t, uri, headers, request_body_bytes()).await,
+                            "PATCH" => {
+                                let patch = insert_only_patch("https://pod.example/alice/c/x#me");
+                                patch_handler(s, t, uri, headers, patch).await
+                            }
+                            "DELETE" => delete_handler(s, t, uri, headers).await,
+                            _ => unreachable!(),
+                        };
+                        let (status, text) = response_text(result).await;
+                        let after = container_etag(&state).await;
+                        for etag in [&before, &after] {
+                            assert!(
+                                !text.contains(etag.as_str()),
+                                "{verb} {path} as {label} ({conditional:?}) answered {status} with \
+                                 the container ETag {etag}:\n{text}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // =====================================================================================
     // CREATE-AUTHZ CONTAINER-MODIFICATION (PR #3 review finding [HIGH]) — creating a member (or an
     // intermediate container) requires `acl:Append`/`Write` on the CONTAINING container, in ADDITION
