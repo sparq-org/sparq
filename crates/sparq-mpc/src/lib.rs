@@ -102,8 +102,8 @@
 //! bundle carries zero MPC surface (mirrors how `sparq-zk` is isolated).
 #![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
 
-// [OPUS-4.8] sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION for
-// honest-majority malicious-with-abort security. `AuthenticatedShare = ([x],[α·x])`
+// [OPUS-4.8] sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION design
+// §3 builds honest-majority malicious-with-abort security on (tamper-evident today). `AuthenticatedShare = ([x],[α·x])`
 // layered over the degree-t Shamir sharing, plus the session-global secret-shared
 // MAC key `[α]` (no party knows α; never reconstructed) and the FREE linear ops
 // (add/scale/sub/add-constant applied to both [x] and [α·x]). Foundation only —
@@ -128,19 +128,20 @@ pub mod batched;
 // salary > £100k" disclosing only the verdict. Honest-majority, semi-honest (NOT
 // malicious) — reported as OperatorClass::Comparison. See the module docs.
 pub mod compare;
-// [OPUS-4.8] sq-ka8m (sq-mnv5 residual; design Hole 4): the MALICIOUS-SECURE
-// (honest-majority, with-abort) twin of `compare`. Carries an IT-MAC through the
-// WHOLE decompose+compare chain (`MacSession::auth_mul`, §2.4 route (a)) and
+// [OPUS-4.8] sq-ka8m (sq-mnv5 residual; design Hole 4): the TAMPER-EVIDENT
+// (honest-majority, with-abort) IT-MAC twin of `compare`. Carries an IT-MAC through
+// the WHOLE decompose+compare chain (`MacSession::auth_mul`, §2.4 route (a)) and
 // MAC-checks the boolean verdict BEFORE opening it (`MacSession::mac_check`, §2.5),
-// so a tamper in ANY gate (forged share / wrong degree_reduce re-sharing) aborts
+// so a tamper that leaves a checked value inconsistent with its MAC aborts
 // fail-closed — at the minimal n=2t+1 where RS redundancy is zero (soundness from
-// the secret α). Reported as OperatorClass::Comparison @ Malicious+Abort. See the
-// module docs and `research/mpc-malicious-security-design.md`.
+// the secret α). NOT AXIS-1 `Malicious` today: `auth_mul` adopts a second-operand
+// value tamper. `OperatorClass::Comparison` is still reported semi-honest-only. See
+// the module docs and `research/mpc-malicious-security-design.md`.
 pub mod auth_compare;
 // [OPUS-4.8] sq-6fv7 (sq-ka8m residual): the IT-MAC-HARDENED twin of
 // `compare::disclose_threshold_verdict` — the federation £100k path that operates
 // on an EXISTING secret-shared sum. sq-ka8m's `auth_compare` made the cleartext
-// fresh-operand comparison malicious-secure, but the disclose path's THREE
+// fresh-operand comparison tamper-evident, but the disclose path's THREE
 // decomposition opens (the square-protocol `a²`, the masked open `c = sum + r`, and
 // the boolean `verdict`) were still semi-honest (no integrity check). This module
 // routes all three through the §2.5 batched IT-MAC check: the existing sum is
@@ -263,8 +264,8 @@ pub mod randomness;
 pub mod prss;
 // [OPUS-4.8] sq-m34i (MPC WI-1): Reed-Solomon consistency-checked + robust
 // (Berlekamp-Welch) reconstruction over Fp — detect-and-abort / correct tampered
-// shares when redundancy is present. Closes malicious-security gap (D) at the
-// Shamir layer (parent bead sq-uu0u). See the module docs for the threat model.
+// shares when redundancy is present. Addresses malicious-security gap (D) for share
+// opens at the Shamir layer (parent bead sq-uu0u). See the module docs for the threat model.
 pub mod robust;
 pub mod shamir;
 // [OPUS-4.8] sq-18lk: oblivious shuffle (Waksman/Benes net) + sort (Batcher
@@ -377,8 +378,9 @@ pub use compare::{
     DECOMP_STAT_SECURITY_BITS, DECOMP_VALUE_BITS, DECOMP_VALUE_MAX_EXCLUSIVE, RABBIT_MASK_BITS,
     RABBIT_VALUE_BITS, RABBIT_VALUE_MAX_EXCLUSIVE,
 };
-// [OPUS-4.8] sq-ka8m: the malicious-secure (honest-majority, with-abort) comparison
+// [OPUS-4.8] sq-ka8m: the tamper-evident (honest-majority, with-abort) comparison
 // surface — IT-MAC-carried decompose+compare chain, verdict MAC-checked before open.
+// NOT AXIS-1 `Malicious` today; see the `auth_compare` module security tier.
 pub use auth_compare::{malicious_greater_than, malicious_threshold, open_auth_verdict};
 // [OPUS-4.8] sq-6fv7: the IT-MAC-hardened disclose path over an EXISTING sum — the
 // three decomposition opens (a², c=sum+r, verdict) routed through the MAC-check.
