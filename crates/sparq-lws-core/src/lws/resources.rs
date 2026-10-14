@@ -115,6 +115,16 @@ async fn handle_now<S: Store + 'static>(
 ) -> Response {
     let path = req.path.as_str();
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
+        // A linkset describes a resource, and no resource's name ends in `.meta` (see
+        // [`sanitize_slug`]): what is stored under such a name is a linkset's own record, which
+        // has no linkset and is no resource. Whatever is stored, it is not there.
+        if stem.to_ascii_lowercase().ends_with(META_SUFFIX) {
+            return if state.needs_auth(agent) {
+                state.challenge(None)
+            } else {
+                problem(StatusCode::NOT_FOUND, None)
+            };
+        }
         let uri = state.cfg.absolute(stem);
         return linkset(state, req, agent, &uri).await;
     }
@@ -11576,5 +11586,72 @@ mod tests {
         super::super::test_store::put_back(&st, &uri).await;
         assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
         assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+    }
+
+    /// Review finding: the linkset route took `X.meta.meta` for the linkset of `X.meta`, a
+    /// linkset's own record, and authorized and served it as a resource: a reader refused `X` and
+    /// its linkset was answered on the record's format, size and date, and a writer could store
+    /// records under it that outlived `X`. No resource's name ends in `.meta`, so nothing is there.
+    #[tokio::test]
+    async fn a_linksets_record_is_no_resource() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str, constraint: Value| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (carol, dave) = ("https://carol.example/#me", "https://dave.example/#me");
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read"]), carol, json_only));
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let doc = st.cfg.absolute("/doc.txt");
+        let record = format!("{doc}.meta");
+        assert!(st.store.meta(&record).await.unwrap().is_some());
+        let status = |method: Method, path: &'static str, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", LINKSET_JSON)];
+                let body = r#"{"linkset": []}"#;
+                handle(&st, &req(method, path, &h, body), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert_eq!(
+            status(Method::GET, "/doc.txt.meta", agent(carol)).await,
+            StatusCode::FORBIDDEN
+        );
+        for path in [
+            "/doc.txt.meta.meta",
+            "/doc.txt.META.meta",
+            "/doc.txt.meta.meta.meta",
+        ] {
+            for who in [agent(OWNER), agent(carol), agent(dave)] {
+                for method in [Method::GET, Method::PUT, Method::PATCH, Method::DELETE] {
+                    let got = status(method.clone(), path, who.clone()).await;
+                    assert_eq!(
+                        got,
+                        StatusCode::NOT_FOUND,
+                        "{method} {path} {:?}",
+                        who.subject
+                    );
+                }
+            }
+            let got = status(Method::GET, path, Agent::anonymous()).await;
+            assert_eq!(got, StatusCode::UNAUTHORIZED, "{path}");
+        }
+        for key in [format!("{doc}.meta.meta"), format!("{doc}.meta.meta.meta")] {
+            assert!(st.store.meta(&key).await.unwrap().is_none(), "{key}");
+        }
     }
 }
