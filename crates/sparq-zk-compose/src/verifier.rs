@@ -3155,8 +3155,13 @@ fn authenticate_hidden_only_method(
         .iter()
         .find(|hi| hi.commitment.to_field() == Some(*c_fr))
         .and_then(|hi| hi.message.to_field());
+    // A candidate set exists from here on, so a declared `m` that is absent or
+    // does not decode cannot equal any candidate: refused like any other
+    // unmatched message rather than left to the method-unbound default.
     let Some(declared) = declared else {
-        return Ok(HiddenOnlyMethod::NoCandidateSet);
+        return Err(CheckError::HiddenIssuerMessageMismatch {
+            commitment: label.to_string(),
+        });
     };
     let inputs = CommitmentMessageInputs {
         commitment: c_fr,
@@ -3193,8 +3198,7 @@ fn authenticate_hidden_only_method(
 ///   `m` is one of its candidates, so the method it names is the one the bb gate
 ///   will bind.
 /// - [`Self::NoCandidateSet`] — no candidate set could be built at all (no
-///   disclosed status reference to derive `status_ref` from, no hidden entry over
-///   this commitment, or a malformed declared `m`). Nothing is authenticated, and
+///   disclosed status reference to derive `status_ref` from). Nothing is authenticated, and
 ///   the message that would be bound is the method-UNBOUND one, so the caller
 ///   applies the policy to [`AuthenticatedMethod::Unbound`] — which is the method
 ///   the bb stage then holds the proof to, so the policy still decides on the
@@ -9612,6 +9616,16 @@ mod tests {
                 Err(CheckError::HiddenIssuerMessageMismatch { .. })
             ),
             "an `m` matching no verifier-built candidate is refused, not passed over"
+        );
+
+        let mut malformed = with(&bound);
+        malformed.hidden_issuer_attestations[0].message = FieldHex("not-hex".into());
+        assert!(
+            matches!(
+                authenticate_hidden_only_method(&malformed, &c, &salt, "c"),
+                Err(CheckError::HiddenIssuerMessageMismatch { .. })
+            ),
+            "an `m` that does not decode is refused once a candidate set exists"
         );
 
         let mut no_rev = with(&bound);
