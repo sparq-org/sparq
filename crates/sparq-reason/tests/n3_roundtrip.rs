@@ -824,17 +824,13 @@ fn a_document_level_binder_is_never_moved_into_a_formula() {
         (&doc_level, format!("@forAll <http://ex/x> .\n{{ <http://ex/x> <http://ex/p> <http://ex/o> . }} => {concl}")),
         (&in_premise, format!("{{ @forAll <http://ex/x> . <http://ex/x> <http://ex/p> <http://ex/o> . }} => {concl}")),
     ] {
-        let doc = if src == &in_premise {
-            assert_eq!(
-                reason_n3_pass_all(src, RuleVars::N3).unwrap_err(),
-                "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)"
-            );
+        // GH #6882: the premise's own universal is matched, and written back in place.
+        let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+        if src == &in_premise {
             let mut out = String::new();
             write_rule(&one_rule(src), RuleKind::Forward, RuleVars::N3, &mut out).expect("exact rule writer");
-            out
-        } else {
-            reason_n3_pass_all(src, RuleVars::N3).expect("pass-all")
-        };
+            assert_eq!(out, doc);
+        }
         assert_eq!(doc, want);
         assert_eq!(premise(&doc), premise(src));
     }
@@ -1129,14 +1125,25 @@ fn same_binding(g: &Generated, doc: &parser::Parsed) -> Result<(), String> {
 fn random_scopes_round_trip_or_are_refused() {
     let mut r = Rng(0x9E37_79B9_7F4A_7C15);
     let (mut wrote, mut refused, mut caught) = (0, 0, 0);
+    let mut accepted_premise_universals = 0;
     for _ in 0..3000 {
         let g = generate(&mut r);
         let src = parser::parse(&g.text).unwrap_or_else(|e| panic!("{e}\n{}", g.text));
         same_binding(&g, &src).unwrap_or_else(|e| panic!("the PARSER disagrees with the oracle: {e}\n{}", g.text));
-        let quantified_premise = g.statements.iter().flat_map(|(_, mentions)| mentions).flatten().any(|v| v.starts_with("__up."));
+        // GH #6882: a premise's own universal is matched where it is a plain operand (or
+        // in a list there) of a stored-predicate atom; one inside a quoted formula of the
+        // premise is still refused.
+        let quantified_premise = src.rules.iter().any(|r| {
+            r.premise.iter().any(|[s, p, o]| {
+                mentions_premise_universal(p) || [s, o].into_iter().any(premise_universal_in_formula)
+            })
+        });
         match reason_n3_pass_all(&g.text, RuleVars::N3) {
             Ok(doc) => {
                 assert!(!quantified_premise, "a quantified antecedent was accepted: {}", g.text);
+                accepted_premise_universals += usize::from(
+                    src.rules.iter().any(|r| r.premise.iter().flatten().any(mentions_premise_universal)),
+                );
                 let back = parser::parse(&doc).unwrap_or_else(|e| panic!("{e}\n{doc}"));
                 same_binding(&g, &back).unwrap_or_else(|e| panic!("re-bound silently: {e}\n{}\n---\n{doc}", g.text));
                 wrote += 1;
@@ -1153,7 +1160,32 @@ fn random_scopes_round_trip_or_are_refused() {
             }
         }
     }
-    eprintln!("{wrote} written, {refused} refused ({caught} by the re-parse gate)");
-    // Supported generated documents keep exact scopes; quantified antecedents are refused.
-    assert!(wrote > 0 && refused > 0 && wrote + refused == 3000 && caught == 0, "{wrote} written, {refused} refused, {caught} by the gate");
+    eprintln!("{wrote} written ({accepted_premise_universals} with premise universals), {refused} refused ({caught} by the re-parse gate)");
+    // Supported generated documents keep exact scopes, premise universals included;
+    // unsupported quantified antecedents are refused.
+    assert!(
+        wrote > 0 && refused > 0 && accepted_premise_universals > 0 && wrote + refused == 3000 && caught == 0,
+        "{wrote} written, {refused} refused, {caught} by the gate"
+    );
+}
+
+/// Does `t` mention a rule premise's own universal (`__up.<iri>`), at any depth?
+fn mentions_premise_universal(t: &Term) -> bool {
+    match t {
+        Term::Var(v) => v.starts_with("__up."),
+        Term::List(ms) => ms.iter().any(mentions_premise_universal),
+        Term::Triple(tr) => tr.iter().any(mentions_premise_universal),
+        Term::Formula(ts) => ts.iter().flatten().any(mentions_premise_universal),
+        _ => false,
+    }
+}
+
+/// Does `t` hold a quoted formula that mentions a premise's own universal?
+fn premise_universal_in_formula(t: &Term) -> bool {
+    match t {
+        Term::Formula(ts) => ts.iter().flatten().any(mentions_premise_universal),
+        Term::List(ms) => ms.iter().any(premise_universal_in_formula),
+        Term::Triple(tr) => tr.iter().any(premise_universal_in_formula),
+        _ => false,
+    }
 }

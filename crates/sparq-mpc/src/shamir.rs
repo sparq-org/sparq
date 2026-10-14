@@ -1693,7 +1693,11 @@ fn extract_integer_vector(p: &PartialResult) -> Result<Vec<u64>, MpcError> {
 /// fail closed with that source's error, and a re-sharing that is not the canonical
 /// `n`-party sharing on `x = 1..=n` is refused. Same preconditions and security model
 /// as [`ShamirDealer::degree_reduce`]; the caller must pass a source whose
-/// `(parties(), threshold())` match the `(n, t)` that produced `shares_2t`.
+/// `(parties(), threshold())` match the `(n, t)` that produced `shares_2t`. That
+/// match is a caller PRECONDITION, not something this function can verify: a source
+/// that under-reports `t` while `2t+1 <= n` still holds passes every check here and
+/// yields a silently WRONG reduction (too few recombination points for the true
+/// degree-`2t` polynomial), rather than an error.
 pub fn degree_reduce_through(
     source: &mut dyn DistributedRandomness,
     shares_2t: &[Share],
@@ -1769,13 +1773,13 @@ pub fn degree_reduce_through(
         // non-canonical re-sharing would silently drop or misplace a
         // contribution. Every re-sharing must be the full n-party sharing on
         // `x = 1..=n`, in order.
-        if sub.len() != n || sub.iter().enumerate().any(|(j, sh)| sh.x != j as u64 + 1) {
-            return Err(MpcError::Protocol(format!(
+        crate::randomness::require_canonical_sharing(&sub, n).map_err(|_| {
+            MpcError::Protocol(format!(
                 "degree_reduce: the randomness source returned a re-sharing that is not the \
                  canonical {n}-party sharing on x = 1..={n} ({} shares)",
                 sub.len()
-            )));
-        }
+            ))
+        })?;
         resharings.push(sub);
     }
 
@@ -2025,108 +2029,32 @@ mod tests {
         ));
     }
 
-    /// How [`MalformedResharingSource`] corrupts each own-input re-sharing.
-    #[derive(Clone, Copy, Debug)]
-    enum Malformation {
-        Short,
-        Long,
-        Permuted,
-        DuplicateX,
-        WrongX,
-    }
-
-    /// A source that delegates to a real dealer but corrupts the SHAPE of every
-    /// own-input re-sharing.
-    struct MalformedResharingSource {
-        inner: ShamirDealer,
-        how: Malformation,
-    }
-    impl DistributedRandomness for MalformedResharingSource {
-        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
-            self.inner.randomness_model()
-        }
-        fn parties(&self) -> usize {
-            DistributedRandomness::parties(&self.inner)
-        }
-        fn threshold(&self) -> usize {
-            DistributedRandomness::threshold(&self.inner)
-        }
-        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_mask()
-        }
-        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_nonzero_mask()
-        }
-        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
-            let mut sub = self.inner.vss_own_input(secret)?;
-            match self.how {
-                Malformation::Short => {
-                    sub.pop();
-                }
-                Malformation::Long => {
-                    let x = sub.len() as u64 + 1;
-                    sub.push(Share { x, y: Fp::zero() });
-                }
-                Malformation::Permuted => sub.swap(0, 1),
-                Malformation::DuplicateX => sub[1].x = sub[0].x,
-                Malformation::WrongX => sub[0].x = 0,
-            }
-            Ok(sub)
-        }
-    }
-
     #[test]
     fn degree_reduce_through_rejects_a_malformed_resharing() {
         // The accumulation pairs sub-shares with parties by position, so a malformed
-        // re-sharing (any shape below) must be refused by the re-sharing check.
-        for how in [
-            Malformation::Short,
-            Malformation::Long,
-            Malformation::Permuted,
-            Malformation::DuplicateX,
-            Malformation::WrongX,
-        ] {
-            let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
-            let mut dealer = b.dealer();
-            let prod =
-                mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
-            let mut source = MalformedResharingSource {
-                inner: b.dealer(),
-                how,
-            };
-            match degree_reduce_through(&mut source, &prod) {
-                Err(MpcError::Protocol(msg)) => assert!(
-                    msg.contains("re-sharing that is not the canonical"),
-                    "{how:?}: refused by the wrong check: {msg}"
-                ),
-                other => panic!("{how:?}: a malformed re-sharing must fail closed, got {other:?}"),
+        // re-sharing (any shape, at any of the 2t+1 recombination positions) must be
+        // refused by the re-sharing check. Each case corrupts exactly ONE re-sharing.
+        use crate::randomness::test_sources::{MalformedSource, SeamMethod, ALL_MALFORMATIONS};
+        for skip in 0..5 {
+            for how in ALL_MALFORMATIONS {
+                let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+                let mut dealer = b.dealer();
+                let prod =
+                    mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
+                let mut source =
+                    MalformedSource::new(b.dealer(), SeamMethod::VssOwnInput, skip, how);
+                match degree_reduce_through(&mut source, &prod) {
+                    Err(MpcError::Protocol(msg)) => assert!(
+                        msg.contains("re-sharing that is not the canonical"),
+                        "re-sharing {skip}, {how:?}: refused by the wrong check: {msg}"
+                    ),
+                    other => panic!(
+                        "re-sharing {skip}, {how:?}: a malformed re-sharing must fail closed, \
+                         got {other:?}"
+                    ),
+                }
+                assert!(source.fired(), "re-sharing {skip} was never drawn");
             }
-        }
-    }
-
-    /// A dealer-backed source that misreports its threshold.
-    struct MisreportedThresholdSource {
-        inner: ShamirDealer,
-        t: usize,
-    }
-    impl DistributedRandomness for MisreportedThresholdSource {
-        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
-            self.inner.randomness_model()
-        }
-        fn parties(&self) -> usize {
-            DistributedRandomness::parties(&self.inner)
-        }
-        fn threshold(&self) -> usize {
-            self.t
-        }
-        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_mask()
-        }
-        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_nonzero_mask()
-        }
-        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
-            self.inner.vss_own_input(secret)
         }
     }
 
@@ -2134,17 +2062,25 @@ mod tests {
     fn degree_reduce_through_rejects_source_metadata_outside_honest_majority() {
         // n = 5 allows t <= 2. A larger t, including one whose 2t+1 overflows,
         // must be refused before any arithmetic or draw relies on it.
+        //
+        // `usize::MAX / 2 + 3` is the adversarial case the CHECKED arithmetic
+        // exists for: with wrapping `2t + 1` it lands on exactly 5 = n, so a plain
+        // `2 * t + 1 <= n` test would ACCEPT it and then reduce against a
+        // nonsensical threshold. `checked_mul(2)` overflows instead, so the source
+        // is refused — and the refusal must come from the source-metadata check,
+        // which is why the assertion matches that check's own wording rather than
+        // the (similar) share-count message below it.
         let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
         let mut dealer = b.dealer();
         let prod = mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
-        for t in [3, usize::MAX / 2, usize::MAX] {
-            let mut source = MisreportedThresholdSource {
+        for t in [3, usize::MAX / 2 + 3, usize::MAX / 2, usize::MAX] {
+            let mut source = crate::randomness::test_sources::MisreportedThresholdSource {
                 inner: b.dealer(),
                 t,
             };
             match degree_reduce_through(&mut source, &prod) {
                 Err(MpcError::Protocol(msg)) => assert!(
-                    msg.contains("needs n >= 2t+1"),
+                    msg.contains("the randomness source reports"),
                     "t={t}: refused by the wrong check: {msg}"
                 ),
                 other => panic!("t={t}: must fail closed, got {other:?}"),
@@ -2527,14 +2463,18 @@ mod tests {
         // constructor) is what the `with_unchecked_threshold` escape hatch
         // exists to exercise: degree_reduce over the FULL n-party sharing must
         // return a descriptive MpcError::Protocol, NEVER panic / mis-reduce.
-        // This pins the fail-closed `shares_2t.len() < 2*self.t + 1` precondition
-        // in BOTH the comparison direction AND the `2*self.t + 1` arithmetic: a
-        // flip that raises the guard's threshold or reverses it lets the
-        // too-short sharing through to the `[..2*self.t + 1]` slice, which is
-        // out of range on the deficient n-party vector → PANIC (a caught mutant)
-        // rather than the original's clean Protocol. The spread of (n, t) puts n
-        // at several offsets from 2t+1 so each arithmetic variant (2*t → 2/t,
-        // 2+t; 2*t+1 → 2*t-1, 2*t*1) diverges on at least one config.
+        //
+        // The guard this pins now lives in `degree_reduce_through`, which
+        // `degree_reduce` delegates to: the recombination count `2t + 1` is
+        // computed with CHECKED arithmetic from the randomness source's reported
+        // `(n, t)` and accepted only while it is `<= n`. On every deficient config
+        // below that filter rejects, so the reduction returns before deriving any
+        // λ-weight or drawing any re-sharing. Drop the `<= n` filter and the
+        // too-short sharing reaches the `[..recomb]` slice, which is out of range
+        // on the deficient n-party vector → PANIC (a caught mutant) rather than
+        // the original's clean Protocol. The spread of (n, t) puts n at several
+        // offsets from 2t+1 so each arithmetic variant (2*t → 2/t, 2+t; 2*t+1 →
+        // 2*t-1, 2*t*1) diverges on at least one config.
         for &(n, t) in &[(3usize, 2usize), (4, 2), (5, 3), (6, 3)] {
             let b = ShamirBackend::with_unchecked_threshold(n, t); // n < 2t+1
             let mut dealer = b.dealer();

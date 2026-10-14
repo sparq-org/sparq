@@ -664,10 +664,12 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// are different facts and get different keys. Blank-node labels and backward-chaining
 /// copies (`__bw<n>___ua.<iri>`) are likewise kept as the distinct terms they are. The
 /// key itself uses no interning ids, pointers, hashes, locale or number formatting, but it is
-/// only as reproducible as the TERMS: it inherits the engine's traversal-order dependence.
-/// An existential's skolem label (`__sk<n>_<label>`) is allocated in hash-set delta order,
-/// and `log:conclusion` appends derived rows in that order, so the same input can key
-/// differently across runs or platforms (as `why()` strings already do on `main`; GH #6749).
+/// only as reproducible as the TERMS. For the same parsed input, an existential's skolem
+/// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
+/// numbered in the sorted order of each round's firing keys (GH #6749). It is not canonical
+/// across reordered isomorphic documents, and binding values that still carry traversal
+/// order (`log:collectAllIn` lists, `log:conclusion` formulas, whose rows follow the nested
+/// closure's set order, backward-renamed terms) can still move it (GH #6844).
 fn term_key(t: &Term) -> String {
     fn quoted(s: &str, out: &mut String) {
         out.push('"');

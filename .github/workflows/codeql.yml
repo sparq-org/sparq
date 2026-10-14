@@ -55,8 +55,9 @@ on:
 permissions:
   contents: read
 
+# The event is in the key so a scheduled run and a push to main never cancel each other.
 concurrency:
-  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  group: codeql-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:

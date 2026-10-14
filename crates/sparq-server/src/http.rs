@@ -1363,7 +1363,7 @@ pub fn bind_posture(addr: &SocketAddr, allow_remote: bool, auth: AuthPosture) ->
                  is not open to anonymous access. NOTE: the token is a single shared secret \
                  (not per-user authz) — deliver it over TLS (terminate at a proxy), and front \
                  it with a real authorization layer (a reverse proxy / gateway or sparq-solid) \
-                 for per-user access control. [OPUS-4.8] sq-cxk5: the /subscriptions WebSocket \
+                 for per-user access control. The /subscriptions WebSocket \
                  AND /subscriptions/sse stream (read surfaces) are gated by --auth-token-read \
                  too — browser WS clients pass the token as a 'Sec-WebSocket-Protocol: \
                  bearer.<token>' subprotocol."
@@ -4509,16 +4509,9 @@ fn negotiate_shacl_report_turtle(accept: Option<&str>) -> bool {
     // Highest-q wins; JSON is the default when nothing (or a wildcard) is preferred over Turtle.
     let mut turtle_q = f32::NEG_INFINITY;
     let mut json_q = 0.0f32; // the default floor — JSON is always acceptable
-    for part in accept.split(',') {
-        let mut it = part.split(';');
-        let media = it.next().unwrap_or("").trim().to_ascii_lowercase();
-        let mut q = 1.0f32;
-        for param in it {
-            if let Some(v) = param.trim().strip_prefix("q=") {
-                q = v.parse().unwrap_or(1.0);
-            }
-        }
-        match media.as_str() {
+    for range in sparq_core::accept::media_ranges(accept) {
+        let q = range.q;
+        match range.essence.as_str() {
             "text/turtle" | "application/x-turtle" => turtle_q = turtle_q.max(q),
             "application/json" | "application/sparql-results+json" => json_q = json_q.max(q),
             _ => {}

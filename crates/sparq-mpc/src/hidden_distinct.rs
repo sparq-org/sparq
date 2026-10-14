@@ -82,7 +82,7 @@
 //! Honest-majority, semi-honest ONLY — inherits the [`crate::shamir::ShamirBackend`]
 //! / [`crate::compare`] / [`crate::oblivious_join`] model and adds **no new
 //! assumption**. Every comparison, equality and conditional swap routes through
-//! [`crate::shamir::ShamirDealer::degree_reduce`], whose reshare has no in-protocol
+//! [`crate::shamir::degree_reduce_through`], whose reshare has no in-protocol
 //! check that a deviating party reshared honestly, so this is **NOT** maliciously
 //! secure (the same degree-`2t`-at-`n=2t+1` residual the rest of the backend
 //! documents; sq-6d6g / sq-km34 IT-MAC is the named fix). The confidentiality this
@@ -98,15 +98,30 @@
 //! pays) plus a constant-limb conditional swap; the adjacent scan is `N − 1` secure
 //! equalities; the compaction is the `B`-slot [`crate::oblivious_join`] cost. The
 //! returned [`DistinctCost`] reports these counts (no hard-coded wall-clock).
+//!
+//! ## Randomness (sq-yyro, issue #6117)
+//!
+//! The sort-and-scan stage draws every sharing through the
+//! [`crate::randomness::DistributedRandomness`] seam: the key sharings (`a_key`
+//! then `b_key`, row by row) via `vss_own_input`, every conditional swap and AND
+//! via [`crate::shamir::degree_reduce_through`], and every comparison / equality
+//! via the [`crate::compare`] `*_through` chain. The single-dealer simulation
+//! draws exactly what it drew before (seeded pin tests); a source that cannot
+//! share a holder's own input (PRSS today) makes any DISTINCT over rows fail
+//! closed. The final oblivious output stage
+//! ([`crate::oblivious_join::oblivious_set_output`]) still mints its own dealer.
 
-use crate::compare::{secure_equal_to_bit, secure_greater_than, COMPARE_MAX_EXCLUSIVE};
+use crate::compare::{
+    secure_equal_to_bit_through, secure_greater_than_through, COMPARE_MAX_EXCLUSIVE,
+};
 use crate::field::Fp;
 use crate::oblivious::SortingNetwork;
 use crate::oblivious_join::{
     oblivious_set_output, Candidate, MatchBit, ObliviousOutput, OutputSlot,
 };
 use crate::partial::{HolderId, MpcError, PartialResult};
-use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
+use crate::randomness::{checked_vss_own_input, require_source_matches, DistributedRandomness};
+use crate::shamir::{self, ShamirBackend, Share};
 use oxrdf::{Term, Variable};
 
 /// Reserved subject-end / object-end variable names the operator projects onto
@@ -170,17 +185,17 @@ struct SortRow {
 /// Conditional swap of two sharings under a secret 0/1 control bit: returns
 /// `(x', y')` where `x' = x + bit·(y − x)` and `y' = y − bit·(y − x)`. When
 /// `bit = 0` the pair is unchanged; when `bit = 1` it is swapped. One
-/// [`shamir::mul_shares_raw`] + [`ShamirDealer::degree_reduce`] for the shared
+/// [`shamir::mul_shares_raw`] + [`shamir::degree_reduce_through`] for the shared
 /// `bit·(y − x)` term, reused for both sides; nothing is opened.
 fn conditional_swap(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     bit: &[Share],
     x: &[Share],
     y: &[Share],
 ) -> Result<(Vec<Share>, Vec<Share>), MpcError> {
     let y_minus_x = shamir::sub_shares(y, x)?;
     let delta_2t = shamir::mul_shares_raw(bit, &y_minus_x)?; // bit·(y − x), degree 2t
-    let delta = dealer.degree_reduce(&delta_2t)?; // back to degree t
+    let delta = shamir::degree_reduce_through(source, &delta_2t)?; // back to degree t
     let x_new = shamir::add_shares(x, &delta)?; // x + bit·(y − x)
     let y_new = shamir::sub_shares(y, &delta)?; // y − bit·(y − x)
     Ok((x_new, y_new))
@@ -188,28 +203,34 @@ fn conditional_swap(
 
 /// Secret AND of two 0/1 sharings: `[a ∧ b] = [a]·[b]` (one mul + degree reduce).
 /// Local mirror of `compare.rs`'s `secret_and` (file-lane discipline).
-fn secret_and(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
+fn secret_and(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
     let prod_2t = shamir::mul_shares_raw(a, b)?;
-    dealer.degree_reduce(&prod_2t)
+    shamir::degree_reduce_through(source, &prod_2t)
 }
 
 /// Secret-shared lexicographic strict-greater on the composite key `(a, b)`:
 /// `(a_i, b_i) > (a_j, b_j)` iff `a_i > a_j`, OR `a_i == a_j` AND `b_i > b_j`. Built
-/// from [`secure_greater_than`] + [`secure_equal_to_bit`]; the result is a fresh
-/// degree-`t` 0/1 sharing that is **never opened** (it drives the conditional swap
-/// arithmetically).
+/// from [`crate::compare::secure_greater_than`] +
+/// [`crate::compare::secure_equal_to_bit`] (their seam-drawing `*_through` forms);
+/// the result is a fresh degree-`t` 0/1 sharing that is **never opened** (it drives
+/// the conditional swap arithmetically).
 fn lex_greater_bit(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a_i: Fp,
     b_i: Fp,
     a_j: Fp,
     b_j: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    let a_gt = secure_greater_than(dealer, a_i, a_j)?; // [a_i > a_j]
-    let a_eq = secure_equal_to_bit(dealer, a_i, a_j)?; // [a_i == a_j]
-    let b_gt = secure_greater_than(dealer, b_i, b_j)?; // [b_i > b_j]
-                                                       // tie_break = [a_i == a_j] ∧ [b_i > b_j]
-    let tie_break = secret_and(dealer, &a_eq, &b_gt)?;
+    let a_gt = secure_greater_than_through(source, a_i, a_j)?; // [a_i > a_j]
+    let a_eq = secure_equal_to_bit_through(source, a_i, a_j)?; // [a_i == a_j]
+    let b_gt = secure_greater_than_through(source, b_i, b_j)?; // [b_i > b_j]
+
+    // tie_break = [a_i == a_j] ∧ [b_i > b_j]
+    let tie_break = secret_and(source, &a_eq, &b_gt)?;
     // `a_gt` and `tie_break` are mutually exclusive (`tie_break ⇒ a_i == a_j ⇒
     // ¬(a_i > a_j)`), so their disjunction is their SUM (no overlap to subtract);
     // both are 0/1 so the sum is 0/1.
@@ -217,25 +238,26 @@ fn lex_greater_bit(
 }
 
 /// Secret-shared equality on the composite key `(a, b)`: `(a_i, b_i) == (a_j, b_j)`
-/// iff `a_i == a_j` AND `b_i == b_j`. Two [`secure_equal_to_bit`] + one
-/// [`secret_and`]; never opened.
+/// iff `a_i == a_j` AND `b_i == b_j`. Two [`crate::compare::secure_equal_to_bit`]
+/// (seam-drawing form) + one [`secret_and`]; never opened.
 fn lex_equal_bit(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     a_i: Fp,
     b_i: Fp,
     a_j: Fp,
     b_j: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    let a_eq = secure_equal_to_bit(dealer, a_i, a_j)?;
-    let b_eq = secure_equal_to_bit(dealer, b_i, b_j)?;
-    secret_and(dealer, &a_eq, &b_eq)
+    let a_eq = secure_equal_to_bit_through(source, a_i, a_j)?;
+    let b_eq = secure_equal_to_bit_through(source, b_i, b_j)?;
+    secret_and(source, &a_eq, &b_eq)
 }
 
 /// Reconstruct the plaintext composite key of a [`SortRow`] for the secret
 /// comparator's bit-decomposition inputs. The simulation plays ALL parties, so it
-/// holds the cleartext exactly as [`ShamirDealer::share`] and the secure comparator
-/// already do — nothing is revealed OUTSIDE the simulation (the verdict it produces
-/// is a sharing that is never opened). Returns `(a, b)` as field elements.
+/// holds the cleartext exactly as [`crate::shamir::ShamirDealer::share`] and the
+/// secure comparator already do — nothing is revealed OUTSIDE the simulation (the
+/// verdict it produces is a sharing that is never opened). Returns `(a, b)` as
+/// field elements.
 fn row_key(backend: &ShamirBackend, row: &SortRow) -> Result<(Fp, Fp), MpcError> {
     Ok((
         backend.reconstruct(&row.a_key)?,
@@ -303,21 +325,28 @@ fn check_params(
 /// scan so each distinct key's FIRST occurrence has `keep = 1` and every later
 /// duplicate has `keep = 0`. Returns one [`Candidate`] per sorted row (payload
 /// `(a_term, b_term)`, selector the secret keep-bit) plus the modelled gate counts.
+///
+/// Every sharing is drawn from `source`, which the caller has matched to
+/// `backend` ([`require_source_matches`]).
 fn build_distinct_candidates(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     pairs: &[SecretEndpointPair],
 ) -> Result<(Vec<Candidate>, usize, usize), MpcError> {
-    // Share each pair's keys; carry the disclosed terms co-indexed.
-    let mut rows: Vec<SortRow> = pairs
-        .iter()
-        .map(|p| SortRow {
-            a_key: dealer.share(p.a_key),
-            b_key: dealer.share(p.b_key),
+    // Share each pair's keys (a_key then b_key, row by row — the holder's own
+    // inputs, shape-checked); carry the disclosed terms co-indexed.
+    let n = backend.parties();
+    let mut rows: Vec<SortRow> = Vec::with_capacity(pairs.len());
+    for p in pairs {
+        let a_key = checked_vss_own_input(source, n, p.a_key)?;
+        let b_key = checked_vss_own_input(source, n, p.b_key)?;
+        rows.push(SortRow {
+            a_key,
+            b_key,
             a_term: p.a_term.clone(),
             b_term: p.b_term.clone(),
-        })
-        .collect();
+        });
+    }
 
     // --- Oblivious sort by the secret composite key. ---
     let net = SortingNetwork::new(rows.len());
@@ -331,9 +360,9 @@ fn build_distinct_candidates(
         // Secret swap bit: swap iff row[i] > row[j] lexicographically (so the column
         // ends ASCENDING). A fresh degree-`t` 0/1 sharing — NEVER opened; it drives
         // the arithmetic conditional swap of the key limbs below.
-        let swap = lex_greater_bit(dealer, ai, bi, aj, bj)?;
-        let (a_i_new, a_j_new) = conditional_swap(dealer, &swap, &rows[i].a_key, &rows[j].a_key)?;
-        let (b_i_new, b_j_new) = conditional_swap(dealer, &swap, &rows[i].b_key, &rows[j].b_key)?;
+        let swap = lex_greater_bit(source, ai, bi, aj, bj)?;
+        let (a_i_new, a_j_new) = conditional_swap(source, &swap, &rows[i].a_key, &rows[j].a_key)?;
+        let (b_i_new, b_j_new) = conditional_swap(source, &swap, &rows[i].b_key, &rows[j].b_key)?;
         rows[i].a_key = a_i_new;
         rows[j].a_key = a_j_new;
         rows[i].b_key = b_i_new;
@@ -356,17 +385,16 @@ fn build_distinct_candidates(
     }
 
     // --- Adjacent-equality scan → secret keep-bit. ---
-    let n_parties = backend.parties();
     let mut adjacent_equalities = 0usize;
     let mut candidates: Vec<Candidate> = Vec::with_capacity(rows.len());
     for r in 0..rows.len() {
         let keep = if r == 0 {
             // Row 0 always keeps: the constant shared 1.
-            const_sharing(n_parties, Fp::one())
+            const_sharing(n, Fp::one())
         } else {
             let (a_r, b_r) = row_key(backend, &rows[r])?;
             let (a_p, b_p) = row_key(backend, &rows[r - 1])?;
-            let dup = lex_equal_bit(dealer, a_r, b_r, a_p, b_p)?;
+            let dup = lex_equal_bit(source, a_r, b_r, a_p, b_p)?;
             adjacent_equalities += 1;
             sub_from_one(&dup) // keep = 1 − dup
         };
@@ -422,9 +450,26 @@ pub fn distinct_hidden_pairs_slots(
     pairs: &[SecretEndpointPair],
     bound: usize,
 ) -> Result<(Vec<OutputSlot>, DistinctCost), MpcError> {
+    distinct_hidden_pairs_slots_through(&mut backend.dealer(), backend, pairs, bound)
+}
+
+/// [`distinct_hidden_pairs_slots`] with the sort-and-scan stage's randomness drawn
+/// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117). The
+/// single-dealer simulation draws exactly what the public function always drew,
+/// so its output is unchanged. A source whose `(n, t)` differs from `backend`'s is
+/// refused ([`require_source_matches`]); a source that cannot share a holder's own
+/// input (PRSS today) makes a DISTINCT over any rows fail closed with that
+/// source's error. The oblivious output stage still mints its own dealer from
+/// `backend`.
+pub(crate) fn distinct_hidden_pairs_slots_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    pairs: &[SecretEndpointPair],
+    bound: usize,
+) -> Result<(Vec<OutputSlot>, DistinctCost), MpcError> {
+    require_source_matches(source, backend)?;
     check_params(backend, pairs, bound)?;
-    let mut dealer = backend.dealer();
-    let (candidates, sort_ce, adj_eq) = build_distinct_candidates(backend, &mut dealer, pairs)?;
+    let (candidates, sort_ce, adj_eq) = build_distinct_candidates(backend, source, pairs)?;
     let (slots, _out_cost) = oblivious_set_output(backend, &candidates, 2, bound)?;
     let cost = DistinctCost {
         rows: pairs.len(),

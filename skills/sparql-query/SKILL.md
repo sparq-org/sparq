@@ -89,6 +89,10 @@ The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_
 - `sparq_core::civil::{days_from_civil, civil_from_days, format_utc}` convert proleptic-Gregorian
   dates to and from days since 1970-01-01 and format epoch seconds as a UTC `xsd:dateTime`
   (`YYYY-MM-DDTHH:MM:SSZ`), dependency-free.
+- `sparq_core::accept::media_ranges(&str)` parses an `Accept` header into `MediaRange`s
+  (lowercased `essence`, weight `q`, `param(name)`, `specificity(media_type)`); a weight that is
+  not a valid qvalue is `0`, and quoted parameter values may contain `,` and `;`. Every sparq HTTP
+  surface (sparq-server, the Solid / LWS server and its SPARQL endpoint) negotiates with it.
 - `pub struct QueryResult { pub vars: Vec<oxrdf::Variable>, pub rows: Vec<Vec<Option<oxrdf::Term>>> }`
   — `len()` / `is_empty()` count solution rows. The layout is **columnar** (the `vars` header is
   stored once, not per cell); index a cell as `result.rows[row][col]` where `col` is the position of
