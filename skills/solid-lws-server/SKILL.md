@@ -105,7 +105,9 @@ Generate the DPoP proof for the exact HTTP method and target URI. Reusing a
 proof fails because its `jti` is replay-protected. A valid token proves identity
 but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
-`acl:Control` mode.
+`acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
+it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
+the new `ETag` only to a writer that may read the target.
 
 A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
 or `acl:AuthenticatedAgent`, or `acl:agentGroup`. A group grant resolves only when
@@ -370,9 +372,11 @@ What the server exposes, all discoverable from the storage description
   `422`; a resource whose text is not JSON as written gets `415`. Sizes are those of the JSON as
   written, and a `test` is charged for what it reads of both sides. A patch whose outcome depends on the content needs Read as
   well as Modify, and without it is refused (`401`/`403`) before it is applied: every operation
-  but `add`, and an `add` below the top level or at an array index. A patch of top-level `add`s
-  alone is open to a writer without Read; when it cannot apply (the document is not an object),
-  or the resource is not readable JSON, that writer is refused the same way rather than told why. A `POST` whose request is cancelled after the member is written is
+  but `add`, and an `add` to the whole document (`""`), below the top level, or at an array
+  index. A patch of top-level `add`s alone is open to a writer without Read; when it cannot apply
+  (the document is not an object, the resource is not readable JSON, or the result would be past
+  the size limit), that writer is refused the same way rather than told why. Only the size limit
+  says anything then: whether what it adds still fits. A `POST` whose request is cancelled after the member is written is
   still announced; a `DELETE` that fails, and is being put back, announces nothing. `livez` and
   `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
@@ -561,7 +565,11 @@ What the server exposes, all discoverable from the storage description
   `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
-  outcome would have been. A bare `*` asks only whether the target exists and needs no Read. A
+  outcome would have been. A bare `*` asks only whether the target exists and needs no Read: a writer learns
+  that much from any write's response (`201` or `204`, a `DELETE`'s `404`). The Read check comes
+  first, before the target's existence, format or metadata decide anything, and an
+  `If-Unmodified-Since` counts as a comparison on every route that evaluates dates, whether or not
+  the target has a recorded time. A
   precondition that compares no state (`*`, or a field the write ignores or cannot read) is
   evaluated on the target's existence alone, without its listing, so neither a page past the last
   nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
