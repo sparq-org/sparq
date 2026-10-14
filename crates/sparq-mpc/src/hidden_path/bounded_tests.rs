@@ -538,7 +538,7 @@ fn malformed_draws_in_the_or_fold_are_refused() {
     }
 }
 
-/// Under PRSS only the draw-free shape runs: `{0,1}` with no self-loop adds the
+/// Under PRSS only the draw-free shape runs: `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair adds the
 /// constant reflexive diagonal and the length-1 edges with no hop equality and no
 /// colliding pair to OR-fold, so it draws nothing from the source. `{1,2}` needs a
 /// hop equality (a holder's own input shared), which PRSS refuses — it fails

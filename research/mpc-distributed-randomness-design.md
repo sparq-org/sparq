@@ -388,7 +388,7 @@ and the crate remains research-grade and externally unaudited (`sq-qhy4` pending
    `*_through` entry point that combines a source with a `ShamirBackend` refuses a source whose
    `(n, t)` differs from the backend's (`randomness::require_source_matches`). Under PRSS the
    DISTINCT / path stages run only their draw-free shapes (an empty DISTINCT, `k = 1` with
-   distinct endpoint pairs, `{0,1}` with no self-loop); every shape that needs a holder's own
+   distinct endpoint pairs, `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair); every shape that needs a holder's own
    input shared fails closed with PRSS's `NotYetImplemented`.
 
    *Still calling the dealer directly:*

@@ -106,7 +106,7 @@
 //! [`crate::shamir::degree_reduce_through`]. The single-dealer simulation draws
 //! exactly what it drew before (seeded pin tests); a source that cannot share a
 //! holder's own input (PRSS today) can still run the draw-free shapes (`k = 1`
-//! with distinct endpoint pairs, `{0,1}` with no self-loop) but makes every path
+//! with distinct endpoint pairs, `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair) but makes every path
 //! that needs a secure equality or an OR-fold fail closed. The final oblivious
 //! output stage ([`crate::oblivious_join::oblivious_set_output`]) still mints its
 //! own dealer.
