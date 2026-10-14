@@ -23,10 +23,10 @@ use super::clausify::{clausify, AtomKind, Clauses};
 use super::dl_profile::{check_dl, DlProfileReport, Violation};
 use super::hypertableau::{ClauseIndex, Exhausted, Tableau};
 use super::model::Ontology;
-use super::vocab::Vocab;
-use rustc_hash::FxHashSet;
-use sparq_core::dict::{Dict, Id, NO_ID};
-use std::cell::OnceCell;
+use super::vocab::{iri_of, OWL};
+use rustc_hash::{FxHashMap, FxHashSet};
+use sparq_core::dict::{Dict, Id};
+use std::cell::{Cell, OnceCell};
 
 pub use super::hypertableau::Budget;
 
@@ -86,6 +86,9 @@ pub struct DlReport {
     ///
     /// [`Consistent`]: Consistency::Consistent
     pub classification: Option<Classification>,
+    /// Why a consistent ontology has no classification (the budget ran out), so callers
+    /// can tell a missing hierarchy from an inconsistent or undecided ontology.
+    pub classification_unknown: Option<UnknownReason>,
 }
 
 /// A reasoner over one ontology.
@@ -94,8 +97,9 @@ pub struct Reasoner {
     index: ClauseIndex,
     budget: Budget,
     imports: Vec<Id>,
-    thing: Id,
-    nothing: Id,
+    /// The atom of each class the clauses mention, by IRI, so queries do not depend on
+    /// dictionary ids (an IRI interned after construction, or never, is still recognised).
+    class_iris: FxHashMap<String, u32>,
     /// Whether TBox plus ABox has a model (`None`: the budget ran out), once computed.
     model: OnceCell<Option<bool>>,
 }
@@ -124,14 +128,17 @@ impl Reasoner {
             source: onto.axioms[u.axiom].source.clone(),
         })?;
         let index = ClauseIndex::new(&clauses);
-        let v = Vocab::intern(dict);
+        let class_iris = clauses
+            .classes
+            .iter()
+            .filter_map(|&(id, a)| iri_of(dict, id).map(|iri| (iri, a)))
+            .collect();
         Ok(Reasoner {
             clauses,
             index,
             budget,
             imports: onto.imports.clone(),
-            thing: v.thing,
-            nothing: v.nothing,
+            class_iris,
             model: OnceCell::new(),
         })
     }
@@ -178,26 +185,21 @@ impl Reasoner {
     }
 
     /// How a class IRI enters a test.
-    fn concept(&self, class: Id) -> Concept {
-        // A vocabulary IRI absent from the dictionary interns as `NO_ID`.
-        if class == NO_ID {
-            Concept::Fresh
-        } else if class == self.thing {
-            Concept::Thing
-        } else if class == self.nothing {
-            Concept::Nothing
-        } else {
-            match self.clauses.class_atom(class) {
-                Some(a) => Concept::Atom(a),
+    fn concept(&self, class: &str) -> Concept {
+        match class.strip_prefix(OWL) {
+            Some("Thing") => Concept::Thing,
+            Some("Nothing") => Concept::Nothing,
+            _ => match self.class_iris.get(class) {
+                Some(&a) => Concept::Atom(a),
                 None => Concept::Fresh,
-            }
+            },
         }
     }
 
     /// Whether some element can be in `class` and outside `outside` (a TBox test; the ABox
     /// cannot change it for a consistent ontology without nominals).
-    fn test(&self, class: Option<u32>, outside: Option<u32>) -> Option<bool> {
-        let mut t = Tableau::new(&self.clauses, &self.index, self.budget);
+    fn test(&self, class: Option<u32>, outside: Option<u32>, pool: Pool) -> Option<bool> {
+        let mut t = self.tableau(pool);
         let root = t.add_root();
         if let Some(b) = outside {
             t.forbid(root, b);
@@ -205,21 +207,33 @@ impl Reasoner {
         if let Some(a) = class {
             t.assert_concept(root, a);
         }
-        t.run().ok()
+        let r = t.run();
+        settle(pool, &t);
+        r.ok()
+    }
+
+    /// A tableau with the whole budget, or with what is left of a shared `pool`.
+    fn tableau(&self, pool: Pool) -> Tableau<'_> {
+        let mut budget = self.budget;
+        if let Some(left) = pool {
+            budget.max_steps = left.get();
+        }
+        Tableau::new(&self.clauses, &self.index, budget)
     }
 
     /// `Some(true)` when the class is satisfiable, `Some(false)` when it is not, `None` when
     /// it cannot be decided: the budget ran out, consistency is unknown, or an unloaded
     /// import could make a satisfiable class unsatisfiable. An inconsistent ontology makes
     /// every class unsatisfiable.
-    pub fn is_satisfiable(&self, class: Id) -> Option<bool> {
+    pub fn is_satisfiable(&self, class: &str) -> Option<bool> {
         if !self.abox_model()? {
             return Some(false);
         }
+        let pool = None;
         let sat = match self.concept(class) {
             Concept::Nothing => false,
-            Concept::Thing | Concept::Fresh => self.test(None, None)?,
-            Concept::Atom(a) => self.test(Some(a), None)?,
+            Concept::Thing | Concept::Fresh => self.test(None, None, pool)?,
+            Concept::Atom(a) => self.test(Some(a), None, pool)?,
         };
         (!sat || self.imports.is_empty()).then_some(sat)
     }
@@ -228,21 +242,26 @@ impl Reasoner {
     /// it cannot be decided (as for [`is_satisfiable`](Self::is_satisfiable)). A class that
     /// occurs in no axiom is constrained by nothing: it is below only `owl:Thing`, itself,
     /// and what `owl:Thing` is below.
-    pub fn is_subclass_of(&self, sub: Id, sup: Id) -> Option<bool> {
+    pub fn is_subclass_of(&self, sub: &str, sup: &str) -> Option<bool> {
         if !self.abox_model()? {
             return Some(true);
         }
-        let below = match (self.concept(sub), self.concept(sup)) {
-            _ if sub == sup => true,
+        let below = self.below(self.concept(sub), self.concept(sup), sub == sup, None)?;
+        (below || self.imports.is_empty()).then_some(below)
+    }
+
+    /// Whether `sub ⊑ sup` holds in a consistent ontology (`same`: the same class).
+    fn below(&self, sub: Concept, sup: Concept, same: bool, pool: Pool) -> Option<bool> {
+        Some(match (sub, sup) {
+            _ if same => true,
             (Concept::Nothing, _) | (_, Concept::Thing) => true,
             (sub_c, Concept::Nothing | Concept::Fresh) => match sub_c {
-                Concept::Atom(a) => !self.test(Some(a), None)?,
-                _ => !self.test(None, None)?,
+                Concept::Atom(a) => !self.test(Some(a), None, pool)?,
+                _ => !self.test(None, None, pool)?,
             },
-            (Concept::Atom(a), Concept::Atom(b)) => !self.test(Some(a), Some(b))?,
-            (_, Concept::Atom(b)) => !self.test(None, Some(b))?,
-        };
-        (below || self.imports.is_empty()).then_some(below)
+            (Concept::Atom(a), Concept::Atom(b)) => !self.test(Some(a), Some(b), pool)?,
+            (_, Concept::Atom(b)) => !self.test(None, Some(b), pool)?,
+        })
     }
 
     /// Classifies the named classes. `None` unless the ontology is consistent with nothing
@@ -255,11 +274,16 @@ impl Reasoner {
         let is_class = |a: u32| matches!(self.clauses.atoms[a as usize], AtomKind::Class(_));
         let mut out = Classification::default();
         let mut subs: FxHashSet<(Id, Id)> = FxHashSet::default();
+        // One budget for the whole classification, not one per class.
+        let left = Cell::new(self.budget.max_steps);
+        let pool = Some(&left);
         for &(id, a) in classes {
-            let mut t = Tableau::new(&self.clauses, &self.index, self.budget);
+            let mut t = self.tableau(pool);
             let root = t.add_root();
             t.assert_concept(root, a);
-            if !t.run().ok()? {
+            let r = t.run();
+            settle(pool, &t);
+            if !r.ok()? {
                 out.unsatisfiable.push(id);
                 continue;
             }
@@ -272,7 +296,8 @@ impl Reasoner {
                 let AtomKind::Class(bid) = self.clauses.atoms[b as usize] else {
                     unreachable!("checked")
                 };
-                let entailed = deterministic || self.is_subclass_of(id, bid)?;
+                let entailed =
+                    deterministic || self.below(Concept::Atom(a), Concept::Atom(b), false, pool)?;
                 if entailed {
                     subs.insert((id, bid));
                 }
@@ -292,6 +317,17 @@ impl Reasoner {
             .filter(|p| !self.clauses.told.contains(p))
             .collect();
         Some(out)
+    }
+}
+
+/// What is left of a budget shared by several tests (`None`: each test has the whole
+/// budget).
+type Pool<'a> = Option<&'a Cell<u64>>;
+
+/// Charges the work of `t` to `pool`.
+fn settle(pool: Pool, t: &Tableau) {
+    if let Some(left) = pool {
+        left.set(left.get().saturating_sub(t.work()));
     }
 }
 
@@ -316,6 +352,7 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
                 profile,
                 consistency: Consistency::Unknown(reason),
                 classification: None,
+                classification_unknown: None,
             }
         }
     };
@@ -325,9 +362,13 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
     } else {
         None
     };
+    let classification_unknown = (consistency == Consistency::Consistent
+        && classification.is_none())
+    .then_some(UnknownReason::ResourceBudget);
     DlReport {
         profile,
         consistency,
         classification,
+        classification_unknown,
     }
 }

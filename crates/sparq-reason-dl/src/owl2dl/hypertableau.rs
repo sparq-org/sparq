@@ -345,8 +345,18 @@ impl<'c> Tableau<'c> {
     /// Counts one unit of inner work; `true` when the budget is spent and the caller should
     /// stop (`run` then reports [`Exhausted`] before using any partial result).
     fn probe(&self) -> bool {
-        self.probes.set(self.probes.get() + 1);
+        self.charge(1)
+    }
+
+    /// Counts `n` units of inner work; `true` when the budget is spent.
+    fn charge(&self, n: usize) -> bool {
+        self.probes.set(self.probes.get().saturating_add(n as u64));
         self.over_budget()
+    }
+
+    /// The work done so far (steps plus inner work), in budget units.
+    pub(crate) fn work(&self) -> u64 {
+        self.steps.saturating_add(self.probes.get())
     }
 
     // ---- facts ------------------------------------------------------------------------
@@ -490,6 +500,7 @@ impl<'c> Tableau<'c> {
             .iter()
             .map(|(&n, rs)| (n, rs.clone()))
             .collect();
+        self.charge(self.ineq.len());
         let ineqs: Vec<(Node, Dep)> = self
             .ineq
             .iter()
@@ -530,6 +541,7 @@ impl<'c> Tableau<'c> {
 
     fn prune_descendants(&mut self, t: Node) {
         let len = self.nodes.len();
+        self.charge(len);
         let mut desc = vec![false; len];
         for n in (t as usize + 1)..len {
             let node = &self.nodes[n];
@@ -558,6 +570,7 @@ impl<'c> Tableau<'c> {
         for &a in node.label.keys() {
             out.extend_from_slice(&self.index.by_x_atom[a as usize]);
         }
+        self.charge(out.len());
         if !self.index.by_role.is_empty() {
             for (&n, rs) in &node.adj {
                 if !self.nodes[n as usize].active {
@@ -818,6 +831,8 @@ impl<'c> Tableau<'c> {
                 continue;
             }
             let sig = self.signature(n as Node, p as Node);
+            // Building and hashing the signature is work proportional to its length.
+            self.charge(sig.len());
             match seen.entry(sig) {
                 std::collections::hash_map::Entry::Vacant(e) => {
                     e.insert(n as Node);
@@ -850,6 +865,10 @@ impl<'c> Tableau<'c> {
 
     fn expand(&mut self) -> bool {
         let blocked = self.blocked();
+        if self.over_budget() {
+            // `run` reports the exhaustion before using anything.
+            return true;
+        }
         let mut todo: Vec<(Node, Atom, u32, Role, Option<Atom>, Dep)> = Vec::new();
         for (n, node) in self.nodes.iter().enumerate() {
             if !node.active || blocked[n] {

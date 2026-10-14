@@ -396,38 +396,143 @@ fn at_most_with_many_successors_is_decided() {
     assert!(consistent(&at_most(5)));
 }
 
+const THING: &str = "http://www.w3.org/2002/07/owl#Thing";
+const NOTHING: &str = "http://www.w3.org/2002/07/owl#Nothing";
+
 #[test]
 fn queries_answer_builtin_and_unmentioned_classes() {
-    // `:D ⊑ ¬owl:Nothing` is a tautology that puts `owl:Nothing` in the dictionary.
-    let (d, r) = reasoner(&format!(
+    let (_, r) = reasoner(&format!(
         "{DECL} :A rdfs:subClassOf :B . owl:Thing rdfs:subClassOf :C . :D owl:disjointWith owl:Nothing ."
     ));
-    let (thing, nothing) = (owl(&d, "Thing"), owl(&d, "Nothing"));
-    assert_eq!(r.is_satisfiable(nothing), Some(false));
-    assert_eq!(r.is_satisfiable(thing), Some(true));
-    assert_eq!(r.is_subclass_of(ex(&d, "A"), thing), Some(true));
-    assert_eq!(r.is_subclass_of(nothing, ex(&d, "A")), Some(true));
-    assert_eq!(r.is_subclass_of(ex(&d, "A"), ex(&d, "B")), Some(true));
-    assert_eq!(r.is_subclass_of(ex(&d, "B"), ex(&d, "A")), Some(false));
+    assert_eq!(r.is_satisfiable(NOTHING), Some(false));
+    assert_eq!(r.is_satisfiable(THING), Some(true));
+    assert_eq!(r.is_subclass_of("http://ex/A", THING), Some(true));
+    assert_eq!(r.is_subclass_of(NOTHING, "http://ex/A"), Some(true));
+    assert_eq!(r.is_subclass_of("http://ex/A", "http://ex/B"), Some(true));
+    assert_eq!(r.is_subclass_of("http://ex/B", "http://ex/A"), Some(false));
     // :X occurs in no axiom, but everything is a :C.
-    let x = d.lookup(&OTerm::NamedNode(NamedNode::new_unchecked("http://ex/X")));
-    assert_eq!(r.is_subclass_of(x, ex(&d, "C")), Some(true));
-    assert_eq!(r.is_subclass_of(x, ex(&d, "B")), Some(false));
+    assert_eq!(r.is_subclass_of("http://ex/X", "http://ex/C"), Some(true));
+    assert_eq!(r.is_subclass_of("http://ex/X", "http://ex/B"), Some(false));
+}
+
+#[test]
+fn builtin_classes_are_recognised_without_dictionary_entries() {
+    // Neither owl:Thing nor owl:Nothing occurs in the graph.
+    let (d, r) = reasoner(":A a owl:Class . :B a owl:Class . :A rdfs:subClassOf :B .");
+    assert_eq!(owl(&d, "Nothing"), sparq_core::dict::NO_ID);
+    assert_eq!(r.is_satisfiable(NOTHING), Some(false));
+    assert_eq!(r.is_satisfiable(THING), Some(true));
+    assert_eq!(r.is_subclass_of("http://ex/A", THING), Some(true));
+    assert_eq!(r.is_subclass_of(THING, NOTHING), Some(false));
+    assert_eq!(r.is_subclass_of(NOTHING, "http://ex/B"), Some(true));
 }
 
 #[test]
 fn queries_respect_inconsistency_and_imports() {
-    let (d, r) = reasoner(&format!("{DECL} :A owl:disjointWith :B . :a a :A , :B ."));
-    assert_eq!(r.is_satisfiable(ex(&d, "C")), Some(false));
-    assert_eq!(r.is_subclass_of(ex(&d, "C"), ex(&d, "D")), Some(true));
+    let (_, r) = reasoner(&format!("{DECL} :A owl:disjointWith :B . :a a :A , :B ."));
+    assert_eq!(r.is_satisfiable("http://ex/C"), Some(false));
+    assert_eq!(r.is_subclass_of("http://ex/C", "http://ex/D"), Some(true));
     assert!(r.classify().is_none());
-    let (d, r) = reasoner(&format!(
+    let (_, r) = reasoner(&format!(
         "{DECL} <http://ex/o> a owl:Ontology ; owl:imports <http://ex/other> . :A rdfs:subClassOf :B ."
     ));
     // Entailed now, entailed whatever the import adds; a non-entailment could change.
-    assert_eq!(r.is_subclass_of(ex(&d, "A"), ex(&d, "B")), Some(true));
-    assert_eq!(r.is_subclass_of(ex(&d, "B"), ex(&d, "A")), None);
-    assert_eq!(r.is_satisfiable(ex(&d, "A")), None);
+    assert_eq!(r.is_subclass_of("http://ex/A", "http://ex/B"), Some(true));
+    assert_eq!(r.is_subclass_of("http://ex/B", "http://ex/A"), None);
+    assert_eq!(r.is_satisfiable("http://ex/A"), None);
+}
+
+/// A k-bit binary counter: `Start` needs a chain of 2^k distinct nodes before blocking.
+fn counter(k: usize) -> String {
+    let all =
+        |c: &str| format!("[ a owl:Restriction ; owl:onProperty :r ; owl:allValuesFrom {c} ]");
+    let and = |cs: &[String]| format!("[ a owl:Class ; owl:intersectionOf ( {} ) ]", cs.join(" "));
+    let mut o = String::from(":r a owl:ObjectProperty . :Ctr a owl:Class . :Start a owl:Class .\n");
+    o += ":Ctr rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r ; owl:someValuesFrom :Ctr ] .\n";
+    for i in 0..k {
+        let _ = writeln!(o, ":B{i} a owl:Class . :N{i} a owl:Class .");
+        let low: Vec<String> = (0..i).map(|j| format!(":B{j}")).collect();
+        let with = |head: &str| {
+            let mut v = vec![head.to_string()];
+            v.extend(low.iter().cloned());
+            v
+        };
+        if low.is_empty() {
+            let _ = writeln!(o, ":B0 rdfs:subClassOf {} .", all(":N0"));
+            let _ = writeln!(o, ":N0 rdfs:subClassOf {} .", all(":B0"));
+            continue;
+        }
+        let _ = writeln!(
+            o,
+            "{} rdfs:subClassOf {} .",
+            and(&with(&format!(":B{i}"))),
+            all(&format!(":N{i}"))
+        );
+        let _ = writeln!(
+            o,
+            "{} rdfs:subClassOf {} .",
+            and(&with(&format!(":N{i}"))),
+            all(&format!(":B{i}"))
+        );
+        for j in 0..i {
+            let _ = writeln!(
+                o,
+                "{} rdfs:subClassOf {} .",
+                and(&[format!(":B{i}"), format!(":N{j}")]),
+                all(&format!(":B{i}"))
+            );
+            let _ = writeln!(
+                o,
+                "{} rdfs:subClassOf {} .",
+                and(&[format!(":N{i}"), format!(":N{j}")]),
+                all(&format!(":N{i}"))
+            );
+        }
+    }
+    let start: Vec<String> = std::iter::once(":Ctr".to_string())
+        .chain((0..k).map(|i| format!(":N{i}")))
+        .collect();
+    let _ = writeln!(o, ":Start owl:equivalentClass {} .", and(&start));
+    o
+}
+
+#[test]
+fn the_budget_bounds_blocking_work() {
+    // Signature building for blocking is charged, so a small budget stops a long chain
+    // quickly instead of running the per-expansion scans unbounded.
+    let (d, t) = Graph::parse_to_triples(&format!("{PRE}{}", counter(12)), "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let budget = Budget {
+        max_steps: 200_000,
+        max_nodes: 100_000,
+    };
+    let r = Reasoner::new(&d, &o, budget).unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(r.is_satisfiable("http://ex/Start"), None);
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    // With the same budget a small counter is decided.
+    let (d, t) = Graph::parse_to_triples(&format!("{PRE}{}", counter(3)), "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let r = Reasoner::new(&d, &o, budget).unwrap();
+    assert_eq!(r.is_satisfiable("http://ex/Start"), Some(true));
+    // Classification shares one budget, so some budget decides consistency but not the
+    // hierarchy, and the report says why the hierarchy is missing.
+    let mut saw_missing = false;
+    for steps in (50..5_000).step_by(50) {
+        let report = check(
+            &d,
+            &o,
+            Budget {
+                max_steps: steps,
+                max_nodes: 100_000,
+            },
+        );
+        let missing =
+            report.consistency == Consistency::Consistent && report.classification.is_none();
+        assert_eq!(report.classification_unknown.is_some(), missing, "{steps}");
+        saw_missing |= missing;
+    }
+    assert!(saw_missing);
 }
 
 #[test]
@@ -717,7 +822,9 @@ fn render(d: &Dict, report: &DlReport, names: &BTreeMap<Id, String>) -> String {
         Consistency::Unknown(r) => return format!("UNKNOWN {r:?}"),
     }
     let _ = d;
-    let c = report.classification.as_ref().expect("consistent");
+    let Some(c) = report.classification.as_ref() else {
+        return format!("UNKNOWN {:?}", report.classification_unknown);
+    };
     let mut body = Vec::new();
     for u in &c.unsatisfiable {
         body.push(format!("UNSAT {}", names[u]));

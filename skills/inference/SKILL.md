@@ -711,8 +711,11 @@ Shearer and Horrocks) over DL-clauses, with pairwise anywhere blocking, merging 
 dependency-directed backjumping. It returns a `DlReport` with the profile report,
 `consistency` (`Consistent`, `Inconsistent`, or `Unknown(reason)`) and, when consistent, a
 `Classification` (unsatisfiable named classes, every entailed named subsumption, and the
-`inferred` ones not asserted). `owl2dl::Reasoner::new(&dict, &onto, budget)` answers single
-`is_satisfiable` / `is_subclass_of` queries (`Option<bool>`; `owl:Thing`, `owl:Nothing` and
+`inferred` ones not asserted; `classification_unknown` says why a consistent ontology has
+none, which happens when the shared classification budget runs out).
+`owl2dl::Reasoner::new(&dict, &onto, budget)` answers single
+`is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
+(`Option<bool>`; `owl:Thing`, `owl:Nothing` and
 classes no axiom mentions included; `None` when an unloaded import could change a negative
 answer). The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`,
 number restrictions up to `MAX_CARDINALITY`; anything else (data properties and

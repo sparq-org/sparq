@@ -143,10 +143,6 @@ impl Clauses {
     pub(crate) fn supers(&self, r: Role) -> &[Role] {
         &self.supers[(2 * r.idx + u32::from(r.inv)) as usize]
     }
-
-    pub(crate) fn class_atom(&self, id: Id) -> Option<Atom> {
-        self.classes.iter().find(|(c, _)| *c == id).map(|(_, a)| *a)
-    }
 }
 
 /// A concept in negation normal form over [`Atom`]s.
