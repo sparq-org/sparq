@@ -35,6 +35,14 @@ pub mod derivation;
 #[cfg(feature = "dual-leaf")]
 pub mod dispatch;
 pub mod driver;
+// The DualLeafV1 value-lane builders and renderers, reachable only by this
+// explicit name: the ordinary names build and render the V2 lanes.
+#[cfg(feature = "dual-leaf")]
+pub mod legacy_v1;
+// The typed value-lane proving inputs behind the checked prove entry
+// `driver::CircuitProver::prove_value_lane`.
+#[cfg(feature = "dual-leaf")]
+pub mod value_lane;
 // sq-xqfg (HolderPoP T5): in-circuit holder-PoK host-side wiring (B2).
 pub mod holder;
 pub mod issuer;
