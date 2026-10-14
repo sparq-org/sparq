@@ -158,12 +158,10 @@ pub(crate) fn if_range_holds(headers: &http::HeaderMap, etag: &str) -> bool {
     if lines.next().is_some() {
         return false;
     }
-    // One strong tag, in the RFC 9110 grammar; a weak tag never matches: the comparison is strong.
-    match TagList::parse(line.as_bytes()) {
-        Ok(TagList::Tags(tags)) => match tags[..] {
-            [(false, tag)] => parse_current(etag) == Some(tag),
-            _ => false,
-        },
+    // One strong tag, in the RFC 9110 grammar, and no list; a weak tag never matches: the
+    // comparison is strong.
+    match crate::entity_tag::single(line.as_bytes()) {
+        Some((false, tag)) => parse_current(etag) == Some(tag),
         _ => false,
     }
 }
@@ -363,6 +361,13 @@ mod tests {
         assert!(!holds(&[b"\"\xff\""], "\"a\""));
         // One tag in the RFC 9110 grammar: a list never holds, and only space and tab may surround it.
         assert!(!holds(&[b"\"a\", \"b\""], "\"a\""));
+        // Nor a list of one: If-Range takes one tag, with no empty members around it.
+        assert!(!holds(&[b"\"a\","], "\"a\""));
+        assert!(!holds(&[b",\"a\""], "\"a\""));
+        assert!(!holds(&[b" , \"a\" "], "\"a\""));
+        // A comma inside the quoted tag is part of it.
+        assert!(holds(&[b"\"a,b\""], "\"a,b\""));
+        assert!(!holds(&[b"\"a,b\""], "\"a\""));
         assert!(holds(&[b" \"a\"\t"], "\"a\""));
         assert!(!holds(&[b"\xc2\xa0\"a\""], "\"a\""));
     }
