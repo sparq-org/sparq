@@ -118,6 +118,7 @@ fn main() {
         "u3",
         &fin.intents,
         &fin.expected_decisions,
+        &BTreeMap::new(),
         max_cases,
     ));
     cases.extend(build_cases(
@@ -125,6 +126,7 @@ fn main() {
         "u4",
         &con.intents,
         &con.expected_decisions,
+        &con.group_memberships,
         max_cases,
     ));
 
@@ -198,6 +200,7 @@ fn build_cases(
     prefix: &str,
     intents: &[IntentRow],
     expected: &[ExpectedDecision],
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
     max_cases: usize,
 ) -> Vec<Case> {
     // Bucket the ODRL expected-decision rows by construct signature.
@@ -241,7 +244,7 @@ fn build_cases(
         .enumerate()
         .map(|(n, ed)| {
             let relevant = relevant_intents(intents, &ed.request.resource);
-            build_case(format!("{}-{:04}", prefix, n), use_case, ed, &relevant)
+            build_case(format!("{}-{:04}", prefix, n), use_case, ed, &relevant, group_memberships)
         })
         .collect()
 }
@@ -258,7 +261,13 @@ fn relevant_intents<'a>(intents: &'a [IntentRow], resource: &str) -> Vec<&'a Int
         .collect()
 }
 
-fn build_case(id: String, use_case: &'static str, ed: &ExpectedDecision, relevant: &[&IntentRow]) -> Case {
+fn build_case(
+    id: String,
+    use_case: &'static str,
+    ed: &ExpectedDecision,
+    relevant: &[&IntentRow],
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
+) -> Case {
     let policy_iri = format!("urn:sparq:acbench:odre:{}", id);
     let policy_nt = compile_case_policy(&policy_iri, relevant);
     let action = primary_action(&ed.request.mode);
@@ -280,22 +289,20 @@ fn build_case(id: String, use_case: &'static str, ed: &ExpectedDecision, relevan
     // Party-collection / wildcard-assignee membership evidence. `sparq_policy` matches an
     // assignee by identity or by SUPPLIED membership edge — it never invents membership —
     // so the harness supplies exactly the edges the corpus's own group closure asserts
-    // (`agent` is in group `g` iff `agent.starts_with(g)`, the convention the acbench
-    // oracle uses), plus the two ODRL wildcard collections.
+    // (mapped to this policy's PartyCollection IRIs), plus the ODRL wildcard collections.
     let mut party_collections: Vec<String> = vec![format!("{}All", ODRL_NS)];
     if !ed.request.agent.is_empty() {
         party_collections.push(format!("{}AllAuthenticated", ODRL_NS));
     }
     for (idx, it) in relevant.iter().enumerate() {
         if let Audience::Group(g) = &it.audience {
-            if ed.request.agent.starts_with(g.as_str()) {
+            if group_memberships.get(g).is_some_and(|members| members.contains(&ed.request.agent)) {
                 party_collections.push(party_iri(&it.resource_uri, idx));
             }
         }
     }
-    for collection in &party_collections {
-        req = req.with_party_membership(ed.request.agent.clone(), collection.clone());
-    }
+    req = req.with_party_memberships(party_collections.iter()
+        .map(|collection| (ed.request.agent.clone(), collection.clone())));
 
     let owned: Vec<IntentRow> = relevant.iter().map(|r| (*r).clone()).collect();
     let oracle_allow = oracle_odrl(&ed.request, &owned) == Decision::Allow;
@@ -644,4 +651,34 @@ fn jstr<S: AsRef<str>>(s: S) -> String {
 fn jarr<'a, I: Iterator<Item = &'a String>>(items: I) -> String {
     let body: Vec<String> = items.map(jstr).collect();
     format!("[{}]", body.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consortium_export_supplies_collection_evidence_to_both_evaluators() {
+        let ds = consortium::generate(&GenParams::smoke());
+        let mut ed = ExpectedDecision {
+            request: sparq_acbench::Request {
+                agent: "https://consortium.example/agents/inst0-m0".to_owned(),
+                client: None,
+                resource: "https://consortium.example/inst0/papers/p0".to_owned(),
+                mode: AccessMode::read_only(),
+            },
+            model: AcModel::Odrl,
+            decision: Decision::Allow,
+        };
+        let relevant = relevant_intents(&ds.intents, &ed.request.resource);
+        let missing = build_case("missing".into(), "consortium", &ed, &relevant, &BTreeMap::new());
+        assert!(!missing.sparq_allow);
+        let member = build_case("member".into(), "consortium", &ed, &relevant, &ds.group_memberships);
+        assert!(member.sparq_allow);
+        assert!(member.party_collections.contains(&party_iri(&ed.request.resource, 1)));
+        ed.request.agent = "https://consortium.example/agents/inst0-m999".to_owned();
+        let outsider = build_case("outsider".into(), "consortium", &ed, &relevant, &ds.group_memberships);
+        assert!(!outsider.sparq_allow);
+        assert!(!outsider.party_collections.contains(&party_iri(&ed.request.resource, 1)));
+    }
 }

@@ -21,11 +21,13 @@ It links `sparq-solid` (with `odrl-bridge` ON) and runs the real WAC/ACP/ODRL en
 
 Under-share (oracle=Allow, engine=Deny) is logged as advisory, not a failure. For WAC the
 `sparq-acbench` oracle evaluates all matching intents while the engine uses "nearest ACL
-document wins" (bead sq-kvvcl.2). For ODRL the driver deliberately supplies no world-state
-evidence for group / subtree / temporal / purpose / count intents, because deriving it
-would test the oracle against itself — see the translation contract at the top of
+document wins" (bead sq-kvvcl.2). For ODRL the driver supplies group membership from the generators
+as explicit request evidence. It supplies no world-state evidence for subtree / temporal /
+purpose / count intents — see the translation contract at the top of
 `src/main.rs` (issue #4415) for why each rewrite is faithful or narrowing. The
-security-critical check (over-share) is fully fail-closed for all three models.
+security-critical check (over-share) is fully fail-closed for all three models. The bridge
+also refuses to persist non-lasting grants, including membership-dependent evaluator
+allows; these remain under-share advisories.
 
 ## Running
 

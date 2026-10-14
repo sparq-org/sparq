@@ -35,6 +35,8 @@
 //! **Only bead `sq-i6du2.2` edits this file.**
 //! All other beads in the `sq-i6du2` family leave it untouched.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
@@ -87,6 +89,8 @@ struct Group {
 ///
 /// All fields are deterministic for a given [`GenParams`] (same seed, same output).
 pub struct PersonalDataset {
+    /// Group IRIs mapped to their resolved agent members, including nested membership.
+    pub group_memberships: BTreeMap<String, BTreeSet<String>>,
     /// N-Quads lines forming the data graph (resources, containers, metadata).
     pub data_nquads: Vec<String>,
     /// Compiled WAC policy graph.
@@ -284,6 +288,17 @@ pub fn generate(params: &GenParams) -> PersonalDataset {
         }
     }
 
+    // Resolve the nesting chain from leaves to parents; export agent members only.
+    let mut group_memberships: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for group in groups.iter().rev() {
+        let members = group_memberships.entry(group.uri.clone()).or_default();
+        members.extend(group.members.iter().cloned());
+        let members = members.clone();
+        if let Some(parent) = &group.parent {
+            group_memberships.entry(parent.clone()).or_default().extend(members);
+        }
+    }
+
     // ── Group closure map ─────────────────────────────────────────────────────────
     // Build a closure: set of agents allowed by group membership (for ACP expansion).
     let friend_group_members: Vec<String> = groups
@@ -390,6 +405,7 @@ pub fn generate(params: &GenParams) -> PersonalDataset {
     let queries = build_query_fixtures(&resources, &owner_uri, &friend_agent, &intents);
 
     PersonalDataset {
+        group_memberships,
         data_nquads,
         wac_policy,
         acp_policy,

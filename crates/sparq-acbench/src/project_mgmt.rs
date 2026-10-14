@@ -28,6 +28,8 @@
 //! with `sf`. The PRNG is seeded once from `params.seed` and advanced in a fixed order so
 //! the same [`GenParams`] always produces the same corpus.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use rand::RngCore;
 use rand::SeedableRng;
 use rand::rngs::SmallRng;
@@ -41,6 +43,8 @@ use crate::{
 
 /// Output of the U2 commercial-project-management generator.
 pub struct ProjectMgmtDataset {
+    /// Group IRIs mapped to their resolved agent members, including nested membership.
+    pub group_memberships: BTreeMap<String, BTreeSet<String>>,
     /// N-Quads lines forming the data graph.
     pub data_nquads: Vec<String>,
     /// Compiled WAC policy graph.
@@ -224,6 +228,7 @@ pub fn generate(params: &GenParams) -> ProjectMgmtDataset {
     let mut rng = SmallRng::seed_from_u64(params.seed);
 
     let mut data_nquads: Vec<String> = Vec::new();
+    let mut group_memberships: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut intents: Vec<IntentRow> = Vec::new();
     let mut expressibility_matrix: Vec<(usize, ExpressibilityEntry)> = Vec::new();
 
@@ -258,6 +263,7 @@ pub fn generate(params: &GenParams) -> ProjectMgmtDataset {
                 } else {
                     agent_uri(oi, mi)
                 };
+                group_memberships.entry(group.clone()).or_default().insert(member.clone());
                 data_nquads.push(format!(
                     "{} {} {} .",
                     iri(&group),
@@ -283,6 +289,8 @@ pub fn generate(params: &GenParams) -> ProjectMgmtDataset {
         ));
         // Two agents from each org (deterministic indices 0, 1).
         for mi in 0..2_u32 {
+            group_memberships.entry(sub_group.clone()).or_default()
+                .extend([agent_uri(oi, mi), agent_uri(oi2, mi)]);
             data_nquads.push(format!(
                 "{} {} {} .",
                 iri(&sub_group),
@@ -568,6 +576,7 @@ pub fn generate(params: &GenParams) -> ProjectMgmtDataset {
     let churn_steps = build_churn_steps(no, np, &intents);
 
     ProjectMgmtDataset {
+        group_memberships,
         data_nquads,
         wac_policy,
         acp_policy,
