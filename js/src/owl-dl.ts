@@ -6,8 +6,8 @@
  * The bundle is loaded LAZILY: nothing here imports it statically, so a page that imports
  * `@sparq-org/sparq` but never calls {@link checkOwlDl} never fetches it. The first call
  * imports `../wasm-dl/sparq_dl_wasm.js` dynamically and initialises it (in Node from the bytes
- * on disk, elsewhere by `fetch` relative to the module); the load is memoised and retried
- * after a failure.
+ * on disk, elsewhere by `fetch` relative to the module); the load is memoised and a failed
+ * initialisation is retried on the next call (a browser keeps a failed glue-module fetch cached).
  *
  * Every answer is three-valued and fail-closed: when the reasoner gives no verdict the result
  * says `"unknown"` with the reason and, where there are any, the offending input triples.

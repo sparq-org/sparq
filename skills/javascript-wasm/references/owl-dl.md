@@ -38,7 +38,7 @@ is **not** a rejection: it resolves with `consistent: "unknown"` and the refusal
 The reasoner is its own wasm bundle (`wasm-dl/`, built from `crates/sparq-dl-wasm`), never
 imported statically: the first `checkOwlDl` call does `import('../wasm-dl/sparq_dl_wasm.js')`
 and initialises it (Node reads the `.wasm` from disk; browsers fetch it next to the glue).
-The load is memoised and retried after a failure. A page that never calls `checkOwlDl` never
+The load is memoised; a failed initialisation (for example the `.wasm` fetch) is retried on the next call, but a browser keeps a failed fetch of the glue module itself in its module map, so that case needs a reload. A page that never calls `checkOwlDl` never
 fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*`
 (`checkOwlDl(tbox, abox, format, optionsJson) -> string`).
 
@@ -64,8 +64,10 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
 }
 ```
 
-- `triples` are the ORIGINAL input triples behind the answer, each one N-Triples line
-  (`<s> <p> <o> .`).
+- `triples` are the input triples behind the answer, each one N-Triples line
+  (`<s> <p> <o> .`). IRIs and literals are the input's; blank-node labels are per document and
+  may be renamed (an ABox label that also occurs in the TBox) or generated (`[]` nodes). For
+  `store.checkOwlDl` the TBox lines come from the re-serialised default graph.
 - The four refusal kinds come from the reverse mapping: `Unparsed` (a triple no OWL 2
   mapping rule reads), `Malformed` (recognisably OWL but ill-formed, e.g. a restriction with
   two fillers), `Ambiguous` (a property whose kind cannot be settled), `Unsupported` (valid
@@ -76,7 +78,10 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
   `IllTypedLiteral`, `UnknownDatatype`, `InvalidFacet`, `InvalidDatatypeDefinition`,
   `TopDataPropertyMisuse`, `ExtractionNote`, `InsufficientOperands`. Only `NonSimpleProperty`
   and `IrregularPropertyHierarchy` block reasoning (`reason.kind: 'NotInDl'`); the others are
-  reported in `profile` while consistency is still decided.
+  reported in `profile` while consistency is still decided. The verdict is about the
+  ontology as the OWL 2 RDF mapping reads it: an assertion with an undeclared (e.g. misspelt)
+  property is read as an annotation and plays no part in consistency, so check
+  `profile.violations` for `Undeclared` / `ExtractionNote` when you pass a separate ABox.
 - `unsatisfiable` and `inferredSubClassOf` are empty unless `classification` is
   `'complete'`. An inconsistent ontology has `classification: null` (it entails everything).
   A consistent one whose classification ran out of budget has `{ unknown: 'ResourceBudget' }`.
@@ -86,7 +91,9 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
 The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`: class
 constructors except nominals, object properties with inverses and hierarchies, the role
 characteristics (functional, inverse-functional, reflexive, irreflexive, symmetric,
-asymmetric, disjoint), qualified cardinality, and class / object-property / negative /
+asymmetric, disjoint), qualified cardinality up to the reasoner's cardinality bound
+(`MAX_CARDINALITY`; larger numbers, and axioms needing more successors than the clause limit,
+answer `OutOfFragment`; very deeply nested expressions are refused as `Unsupported`), and class / object-property / negative /
 `sameAs` / `differentFrom` assertions. **Data properties and datatypes, nominals
 (`oneOf`, `hasValue`), other property chains, keys, and the top/bottom object properties
 currently answer `consistent: 'unknown'` with `reason.kind: 'OutOfFragment'`** and the

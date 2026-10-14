@@ -47,7 +47,7 @@ Most callers want the typed wrapper instead: `import { checkOwlDl } from '@sparq
     "classification": "complete" | { "unknown": kind } | null }
   ```
 
-  `triples` are the original input triples as N-Triples lines. Field-by-field semantics:
+  `triples` are the input triples behind each answer as N-Triples lines (blank-node labels may be renamed or generated). Field-by-field semantics:
   [`skills/javascript-wasm/references/owl-dl.md`](../../skills/javascript-wasm/references/owl-dl.md).
 - **Fail-closed.** An ontology the reverse mapping refuses is a result
   (`"consistent": "unknown"` with the refusal as `reason`), not an error; only a parse error

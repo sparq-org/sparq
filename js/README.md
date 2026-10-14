@@ -349,7 +349,7 @@ dynamically on its first call, so importing `@sparq-org/sparq` never loads it.
 `store.checkOwlDl(abox?, { budget })` uses a store's default graph as the TBox.
 
 Answers are three-valued and never guessed. The decided fragment is ALCHIQ
-with `hasSelf`, transitive roles and `R∘R ⊑ R` (inverses, qualified cardinality,
+with `hasSelf`, transitive roles and `R∘R ⊑ R` (inverses, qualified cardinality up to a fixed bound,
 the role characteristics and the ABox included); **data properties, datatypes
 and nominals currently answer `consistent: 'unknown'` with reason
 `OutOfFragment`** and the offending input triples (as N-Triples lines). A graph
