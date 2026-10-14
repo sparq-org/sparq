@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the names they had; its answers are unchanged (#6927).
   `Graph::is_directory_backed()` reports whether a graph or any named graph under it is
   opened from a directory; it is always `false` without the `mmap` feature (#6944).
+- **sparq-solid:** an ODRL permission attached to a pod document now grants Read per request
+  through `sparq_policy::decide`, for a target that exists and has a full static decision;
+  attached permissions never grant Append, Write or Control, and a prohibition still vetoes
+  (#6941).
+- **Security-property vocabulary:** two ordered dimensions, `secx:AdversaryModel`
+  (Malicious ⊐ Covert ⊐ SemiHonest) and `secx:CorruptionThreshold` (DishonestMajority ⊐
+  HonestMajority ⊐ SuperHonestMajority), with ODRL leftOperands
+  `secx:requiresAdversaryModel` / `secx:requiresCorruptionThreshold` and their order chains
+  in the admissibility ruleset. sparq-mpc ships a per-protocol annotation graph behind the
+  default-off `secprop-annotations` feature. The change is additive, but the serialised
+  `sparq-secprop-vocab` registry, the ODRL profile Turtle and the admissibility ruleset text
+  gain the new facts, so anything that pins those outputs byte for byte will see them
+  (#6977).
 
 ### Changed
 
@@ -100,6 +113,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-policy:** `contains` and `detect_conflicts` now prove containment and certain
+  overlap through `odrl:and` / `odrl:or` / `odrl:xone` compound constraints where the
+  runtime semantics decide it, instead of always answering `Unknown` / `Possible`; they
+  still never report `Contains` or `Certain` a compound cannot prove (#6985).
+- **sparq-solid:** blank nodes in ACL/ACR documents are skolemized on the document's IRI
+  instead of its position, so writing or deleting one document no longer renumbers another
+  document's skolem IRIs and clears the authorization cache (#6960).
 - **sparq-reason (N3):** `ClosureLimits::max_term_bytes` now also covers numeric builtin
   results, forward and reverse, which are sized from their value before the literal is
   rendered (#6929), and the parse behind `log:parsedAsN3` and `log:semantics`, which is

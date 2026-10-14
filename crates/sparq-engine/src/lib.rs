@@ -94,6 +94,11 @@ pub use sparq_engine_service::service::{allowlist_entry_host_matches, allowlist_
 // `sparq-fedclient` so its guard and results reader cannot drift from the engine's.
 #[cfg(feature = "service")]
 pub use sparq_engine_service::service::{is_forbidden_ip, parse_srj_into, srj_term, RowSink};
+// The ureq-3 SSRF resolve (allowlist check, strict pre-DNS refusal, private-address filter),
+// shared with `sparq-fedclient`'s HTTP clients so there is one implementation of it.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+pub use sparq_engine_service::service::{resolve_vetted, EgressRefusal};
 // Bind-join (VALUES pushdown) block-size knob — the only OPT-IN tunable for the
 // SERVICE bound-join pushdown (on-by-default, correctness-preserving). [OPUS-4.8] (sq-sjkj)
 #[cfg(feature = "service")]

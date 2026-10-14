@@ -324,7 +324,7 @@ pub fn lower_leaf_fragment(tp: &TriplePattern) -> FragPattern {
     )
 }
 
-/// Map one fedplan [`Term`] position to a [`PatternTerm`] for a [`FragPattern`]..
+/// Map one fedplan [`Term`] position to a [`PatternTerm`] for a [`FragPattern`].
 fn term_to_pattern_term(t: &Term) -> PatternTerm {
     match t {
         Term::Var(v) => PatternTerm::Var(v.0.clone()),

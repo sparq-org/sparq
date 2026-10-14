@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -11,13 +12,14 @@ SPEC = importlib.util.spec_from_file_location(
 selector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(selector)
 BASE, HEAD = "a" * 40, "b" * 40
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _workflow_trigger_paths import classifier_globs, trigger_paths  # noqa: E402
 
 
 class NativeSelectionTests(unittest.TestCase):
     def test_workflow_always_creates_job_but_scopes_every_heavy_step(self):
         workflow = (ROOT / ".github/workflows/zk-native-composition.yml").read_text()
         self.assertIn("  merge_group:\n    types: [checks_requested]", workflow)
-        self.assertNotIn("    paths:", workflow)
         self.assertIn("name: native credential and circuit composition", workflow)
         self.assertIn("python3 scripts/ci_native_composition_paths.py", workflow)
         self.assertIn("Require explicit classification output", workflow)
@@ -33,6 +35,14 @@ class NativeSelectionTests(unittest.TestCase):
         self.assertIn('--cargo-metadata "$RUNNER_TEMP/native-bindings-build/metadata.json"', workflow)
         self.assertIn("python3 scripts/tests/test_ci_native_composition_paths.py",
                       (ROOT / ".github/workflows/docs-quality.yml").read_text())
+
+    def test_trigger_paths_filters_equal_the_classifier(self):
+        # The filter only spares a runner; it must never drop an input the classifier keeps.
+        workflow = ROOT / ".github/workflows/zk-native-composition.yml"
+        expected = classifier_globs(selector.NATIVE_PREFIXES, selector.NATIVE_FILES)
+        for event in ("pull_request", "push"):
+            self.assertEqual(trigger_paths(workflow, event), expected, event)
+        self.assertEqual(trigger_paths(workflow, "merge_group"), [])
 
     def test_native_shared_and_gate_inputs_require_work(self):
         paths = ["zk/native-composition/Cargo.lock", "zk/native-composition/vendor/ark-relations-0.4.0/Cargo.toml",

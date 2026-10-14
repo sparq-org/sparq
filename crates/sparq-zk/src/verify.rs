@@ -340,7 +340,7 @@ fn canonical_u64(lex: &str) -> Option<u64> {
 
 /// Walk a FILTER expression and collect every top-level integer comparison it
 /// imposes. `AND` chains are flattened (each conjunct is its own obligation).
-/// `?v != c` (spargebra `Not(Equal(..))`,) is recognised as a
+/// `?v != c` (spargebra `Not(Equal(..))`) is recognised as a
 /// `Ne` comparison. Any other FILTER node that is NOT a flat conjunction of
 /// bindable integer comparisons (general negation `!(...)`, disjunction,
 /// arithmetic, `?a op ?b`, function calls, non-integer literals, …) makes the

@@ -39,11 +39,13 @@
 name: pr-title
 
 # Title is only meaningful on a pull_request. Re-validate when the title changes
-# (`edited`), on (re)open, and on new pushes — the activity types the action documents.
+# (`edited`) and on (re)open. NOT on `synchronize`: a push cannot change the title,
+# so a run per push only spent a runner to repeat the last verdict. The check is
+# advisory (not required), so a head commit with no fresh run blocks nothing.
 # NOT on merge_group: a merge_group ref has no PR title to validate.
 on:
   pull_request:
-    types: [opened, edited, reopened, synchronize]
+    types: [opened, edited, reopened]
 
 # Least privilege: the validator only READS the PR (its title) to post the check result.
 permissions:

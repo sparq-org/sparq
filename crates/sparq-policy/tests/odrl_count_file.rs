@@ -1,6 +1,5 @@
 //! Cross-process `odrl:count` enforcement tests for [`FileCounterStore`] — the
 //! distributed-atomicity follow-up (sq-5z1q) to the in-process `InMemoryCounterStore`.
-//!.
 //!
 //! Coverage:
 //! - the file store driven through the **real** `evaluate_and_exercise` path (first N

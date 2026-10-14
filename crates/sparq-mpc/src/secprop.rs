@@ -218,13 +218,48 @@ mod tests {
     /// through [`annotations_n3`] (a positive control lives in a test fixture).
     #[test]
     fn annotations_n3_names_only_implemented_protocols() {
-        let subjects: Vec<String> = annotations_n3()
-            .lines()
-            .filter_map(|l| l.strip_prefix("mpc:"))
-            .map(|local| format!("{}{}", MPC_NS, local.trim_end()))
+        use oxrdf::Term;
+        use std::collections::BTreeSet;
+        // Parse the graph rather than scanning lines, so a subject written any way
+        // Turtle allows is seen.
+        let g = sparq_core::Graph::load_str(annotations_n3(), "turtle").expect("graph parses");
+        let pat: sparq_core::store::Pattern = [None, None, None];
+        let scan = g.store.scan(&pat);
+        let triples: Vec<[Term; 3]> = scan
+            .rows
+            .iter()
+            .map(|r| {
+                let t = scan.to_spo(r);
+                [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])]
+            })
             .collect();
-        let want: Vec<String> = ANNOTATED_PROTOCOLS.iter().map(|p| p.to_string()).collect();
-        assert_eq!(subjects, want);
+        let has_property = format!("{}hasProperty", sparq_secprop_vocab::SEC_PROP_NS);
+        let named: BTreeSet<String> = triples
+            .iter()
+            .filter_map(|[s, _, _]| match s {
+                Term::NamedNode(n) => Some(n.as_str().to_string()),
+                _ => None,
+            })
+            .collect();
+        let want: BTreeSet<String> = ANNOTATED_PROTOCOLS.iter().map(|p| p.to_string()).collect();
+        assert_eq!(
+            named, want,
+            "named subjects must be exactly the implemented protocols"
+        );
+        // Every blank-node subject is a property assertion attached to a protocol.
+        let attached: std::collections::HashSet<&Term> = triples
+            .iter()
+            .filter(|[s, p, _]| {
+                matches!(s, Term::NamedNode(n) if want.contains(n.as_str()))
+                    && matches!(p, Term::NamedNode(n) if n.as_str() == has_property)
+            })
+            .map(|[_, _, o]| o)
+            .collect();
+        for [s, _, _] in &triples {
+            if let Term::BlankNode(_) = s {
+                assert!(attached.contains(s), "unattached blank-node subject {s}");
+            }
+        }
         assert!(!annotations_n3().to_lowercase().contains("illustrative"));
     }
 

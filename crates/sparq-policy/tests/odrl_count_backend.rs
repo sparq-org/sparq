@@ -1,6 +1,6 @@
 //! Distributed-backend `odrl:count` enforcement tests for [`BackendCounterStore`] — the
 //! Redis-`INCR` / SQL-`UPDATE…WHERE consumed<limit RETURNING` follow-up (sq-u3yo) to the
-//! single-host [`FileCounterStore`] (sq-5z1q)..
+//! single-host [`FileCounterStore`] (sq-5z1q).
 //!
 //! The bead asks for Redis / SQL *distributed* [`UsageCounterStore`] backends as drop-ins
 //! against the **unchanged** trait. A live Redis/Postgres dependency does not belong in
