@@ -1748,3 +1748,71 @@ fn resources_requests_reject_a_missing_uri_parameter() {
         assert!(resp["error"]["message"].as_str().unwrap().contains(method));
     }
 }
+
+/// The trusted ACP context the embedder materialized the store with stays in force after
+/// a write through the server: a credential-keyed deny still applies once another
+/// session's authorized `.acr` update has rebuilt the view.
+#[test]
+fn acp_trusted_context_survives_a_write_through_the_server() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    const CAROL: &str = "https://carol.ex/card#me";
+    const FLAGGED: &str = "https://issuer.ex/req#Flagged";
+    let (docs, meta) = ("https://pod.ex/docs/.acr", "https://pod.ex/other.acr.acr");
+    let nq = format!(
+        "<https://pod.ex/docs/d0#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/docs/d0> .
+<https://pod.ex/other#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/other> .
+<{docs}> <{ACP}memberAccessControl> <{docs}#c> <{docs}> .
+<{docs}#c> <{ACP}apply> <{docs}#everyone> <{docs}> .
+<{docs}#c> <{ACP}apply> <{docs}#flagged> <{docs}> .
+<{docs}#everyone> <{ACP}allow> <{ACL}Read> <{docs}> .
+<{docs}#everyone> <{ACP}anyOf> <{docs}#public> <{docs}> .
+<{docs}#public> <{ACP}agent> <{ACP}PublicAgent> <{docs}> .
+<{docs}#flagged> <{ACP}deny> <{ACL}Read> <{docs}> .
+<{docs}#flagged> <{ACP}allOf> <{docs}#mf> <{docs}> .
+<{docs}#mf> <{ACP}vc> <{FLAGGED}> <{docs}> .
+<{meta}> <{ACP}accessControl> <{meta}#c> <{meta}> .
+<{meta}#c> <{ACP}apply> <{meta}#p> <{meta}> .
+<{meta}#p> <{ACP}allow> <{ACL}Write> <{meta}> .
+<{meta}#p> <{ACP}anyOf> <{meta}#m> <{meta}> .
+<{meta}#m> <{ACP}agent> <{ALICE}> <{meta}> .
+"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture parses"));
+    let mut creds = sparq_solid::VerifiedCredentials::new();
+    creds.hold(CAROL, FLAGGED);
+    store
+        .materialize_acp_with_credentials(&sparq_solid::AccessProvenance::new(), &creds)
+        .expect("acp materializes");
+    let config = SolidServerConfig {
+        agent: Some(ALICE.to_string()),
+        acp: true,
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    let carol_reads = |s: &SolidMcpServer| {
+        let carol = sparq_solid::Session {
+            agent: Some(CAROL),
+            client: None,
+            issuer: None,
+            now: None,
+        };
+        s.store()
+            .decide(&carol, "https://pod.ex/docs/d0", sparq_solid::Mode::Read)
+            .allow
+    };
+    assert!(!carol_reads(&s), "the credential deny applies");
+    let (text, is_err) = tool(
+        &mut s,
+        "update",
+        json!({"sparql": "INSERT DATA { GRAPH <https://pod.ex/other.acr> { \
+            <https://pod.ex/other.acr> <http://www.w3.org/ns/solid/acp#accessControl> \
+            <https://pod.ex/other.acr#c> } }"}),
+    );
+    assert!(!is_err, "alice holds Write on the .acr: {text}");
+    assert!(
+        !carol_reads(&s),
+        "the credential deny still applies after the write"
+    );
+}

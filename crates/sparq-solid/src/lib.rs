@@ -294,6 +294,11 @@ pub struct PodStore {
     /// Only these can be granted by an attached ODRL permission.
     #[cfg(feature = "odrl-bridge")]
     statically_covered: Arc<FxHashSet<String>>,
+    /// The trusted ACP context (creator/owner provenance and verified credentials) of the
+    /// last successful ACP materialization. Every ACP rebuild the store makes on its own,
+    /// after an access-control write or an update, uses it, so a write never drops the
+    /// grants and denies that context decides.
+    acp_context: (AccessProvenance, VerifiedCredentials),
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -461,6 +466,7 @@ impl PodStore {
             odrl: odrl_enforce::OdrlEnforcement::default(),
             #[cfg(feature = "odrl-bridge")]
             statically_covered: Arc::default(),
+            acp_context: Default::default(),
         }
     }
 
@@ -525,8 +531,22 @@ impl PodStore {
     ///
     /// As [`PodStore::materialize_wac`] (reserved-encoding collisions in
     /// agent/client IRIs; reasoner failure).
+    ///
+    /// The view uses the trusted context (provenance and credentials) last passed to
+    /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
+    /// none until then; pass empty ones to those to clear it.
     pub fn materialize_acp(&mut self) -> Result<MaterializeStats, String> {
-        self.materialize_acp_with(&AccessProvenance::new())
+        self.rematerialize_acp_scoped(ReindexScope::Full)
+    }
+
+    /// Rebuild the ACP view under the stored trusted context, invalidating the session
+    /// cache at `scope`.
+    pub(crate) fn rematerialize_acp_scoped(
+        &mut self,
+        scope: ReindexScope,
+    ) -> Result<MaterializeStats, String> {
+        let (provenance, credentials) = self.acp_context.clone();
+        self.materialize_acp_with_scoped(&provenance, &credentials, scope)
     }
 
     /// (Re-)materialize the ACP auth view using TRUSTED per-resource creator/owner facts,
@@ -538,7 +558,8 @@ impl PodStore {
     /// are asserted by the caller (the storage layer that minted the resource) and are
     /// **never** read from the resource graph — a writer who embeds `<r> solidx:creator
     /// <self>` in a document they control cannot thereby grant themselves access (design
-    /// doc §2.4). `materialize_acp()` is exactly `materialize_acp_with(&AccessProvenance::new())`.
+    /// doc §2.4). The store keeps `provenance` for the ACP rebuilds it makes itself (after an
+    /// access-control write or an update, and [`PodStore::materialize_acp`]).
     ///
     /// # Errors
     ///
@@ -652,6 +673,7 @@ impl PodStore {
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
         let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        self.acp_context = (provenance.clone(), credentials.clone());
         self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
@@ -1675,8 +1697,8 @@ impl PodStore {
             let rebuilt = if acp {
                 materialize_acp_with_credentials(
                     &mut candidate,
-                    &AccessProvenance::new(),
-                    &VerifiedCredentials::new(),
+                    &self.acp_context.0,
+                    &self.acp_context.1,
                 )
             } else {
                 materialize_wac(&mut candidate)

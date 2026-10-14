@@ -353,22 +353,15 @@ impl PodStore {
     /// diffs the old vs new `AuthIndex` per-origin and invalidates exactly the origins whose
     /// buckets changed — NOT merely the written ACL's own origin (a write at origin A can
     /// affect origin B's grants; the diff catches every such case). sq-vhhl0 doc
-    /// sweep. ACP re-materializes with no provenance, exactly as the non-scoped
-    /// `materialize_acp()` the write path used before — and, sq-ysv3u, with no
-    /// verified credentials either, so an `acp:vc` matcher stays fail-closed across an ACL
-    /// write exactly as it is on a plain `materialize_acp()`.
+    /// sweep. ACP re-materializes under the store's trusted context (the provenance and
+    /// credentials of the last ACP materialization), like [`PodStore::materialize_acp`].
     fn rematerialize_scoped(
         &mut self,
         acp: bool,
         scope: crate::ReindexScope,
     ) -> Result<(), String> {
         if acp {
-            self.materialize_acp_with_scoped(
-                &crate::AccessProvenance::new(),
-                &crate::VerifiedCredentials::new(),
-                scope,
-            )
-            .map(|_| ())
+            self.rematerialize_acp_scoped(scope).map(|_| ())
         } else {
             self.materialize_wac_scoped(scope).map(|_| ())
         }
