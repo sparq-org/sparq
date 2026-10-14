@@ -42,7 +42,9 @@ use crate::compare::secure_equal_to_bit;
 use crate::field::Fp;
 use crate::oblivious_join::{self, Candidate, MatchBit, ObliviousOutputCost};
 use crate::partial::{HolderId, MpcError, PartialResult};
-use crate::randomness::DistributedRandomness;
+use crate::randomness::{
+    checked_shared_nonzero_mask, checked_vss_own_input, DistributedRandomness,
+};
 use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
 use oxrdf::{Term, Variable};
 use std::collections::BTreeMap;
@@ -457,9 +459,27 @@ impl HiddenValueJoin {
         // Secret-share both keys, then run the shared-input core. The scalar path
         // deals its own shares; the batched path deals a whole key COLUMN up front
         // (a `BatchedShares`) and passes the per-row sharings straight in.
-        let sa = source.vss_own_input(a)?;
-        let sb = source.vss_own_input(b)?;
-        self.secure_equal_shared(source, &sa, &sb)
+        let (n, t) = Self::equality_params(source)?;
+        let sa = checked_vss_own_input(source, n, a)?;
+        let sb = checked_vss_own_input(source, n, b)?;
+        Self::secure_equal_core(source, n, t, &sa, &sb)
+    }
+
+    /// Read the source's `(n, t)` ONCE and refuse metadata outside the
+    /// honest-majority headroom one multiplication needs (`2t+1 <= n`, checked so
+    /// a misreported `t` cannot wrap past the guard). Every later use of `n` / `t`
+    /// in the equality path is this validated pair, never a re-read.
+    fn equality_params(source: &dyn DistributedRandomness) -> Result<(usize, usize), MpcError> {
+        let (n, t) = (source.parties(), source.threshold());
+        if t.checked_mul(2)
+            .and_then(|v| v.checked_add(1))
+            .is_none_or(|r| r > n)
+        {
+            return Err(MpcError::Protocol(format!(
+                "secure_equal needs n >= 2t+1 (n={n}, t={t})"
+            )));
+        }
+        Ok((n, t))
     }
 
     /// The match-bit core of [`Self::secure_equal`], over keys that are ALREADY
@@ -511,24 +531,26 @@ impl HiddenValueJoin {
         sa: &[Share],
         sb: &[Share],
     ) -> Result<bool, MpcError> {
-        let t = source.threshold();
-        // Honest-majority headroom: one multiplication needs 2t+1 <= n parties.
-        // Checked, so a misreported `t` cannot wrap `2t+1` past the guard.
-        if t.checked_mul(2)
-            .and_then(|v| v.checked_add(1))
-            .is_none_or(|r| r > source.parties())
-        {
-            return Err(MpcError::Protocol(format!(
-                "secure_equal needs n >= 2t+1 (n={}, t={})",
-                source.parties(),
-                t
-            )));
-        }
+        let (n, t) = Self::equality_params(source)?;
+        Self::secure_equal_core(source, n, t, sa, sb)
+    }
+
+    /// The masked-product equality core shared by [`Self::secure_equal`] and
+    /// [`Self::secure_equal_shared`], over the source's already-validated
+    /// `(n, t)` ([`Self::equality_params`]).
+    fn secure_equal_core(
+        source: &mut dyn DistributedRandomness,
+        n: usize,
+        t: usize,
+        sa: &[Share],
+        sb: &[Share],
+    ) -> Result<bool, MpcError> {
         // Fresh nonzero mask r through the randomness seam (the single-dealer
         // simulation draws it from its masking CSPRNG — sq-1vt). Nonzero is
         // load-bearing and part of the seam method's structural contract: masking
-        // by zero would make m=0 even for unequal keys (a false match).
-        let r = source.shared_nonzero_mask()?;
+        // by zero would make m=0 even for unequal keys (a false match). Its shape is
+        // checked against the validated `n` before it is paired with `d`.
+        let r = checked_shared_nonzero_mask(source, n)?;
         // d = a - b (local, degree t).
         let d = shamir::sub_shares(sa, sb)?;
         // m = d * r (one multiplication, degree 2t).
@@ -2508,6 +2530,50 @@ mod randomness_seam_tests {
         }
         fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
             self.inner.vss_own_input(secret)
+        }
+    }
+
+    /// Both key sharings and the equality mask are shape-checked where they are
+    /// consumed. Each case corrupts exactly ONE draw and must be refused by the
+    /// shape check itself.
+    #[test]
+    fn malformed_draws_are_refused_at_every_equality_consumption_site() {
+        use crate::randomness::test_sources::{
+            MalformedSource, SeamMethod, ALL_MALFORMATIONS, SHAPE_REFUSAL,
+        };
+        let backend = ShamirBackend::new_seeded(5, 0xE9A5).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let sa = backend.dealer().share(Fp::new(11));
+        let sb = backend.dealer().share(Fp::new(12));
+        for how in ALL_MALFORMATIONS {
+            for (label, method, skip, scalar) in [
+                ("key a", SeamMethod::VssOwnInput, 0, true),
+                ("key b", SeamMethod::VssOwnInput, 1, true),
+                ("mask (scalar path)", SeamMethod::SharedNonzeroMask, 0, true),
+                (
+                    "mask (shared path)",
+                    SeamMethod::SharedNonzeroMask,
+                    0,
+                    false,
+                ),
+            ] {
+                let mut src = MalformedSource::new(backend.dealer(), method, skip, how);
+                let outcome = if scalar {
+                    join.secure_equal(&mut src, Fp::new(11), Fp::new(12))
+                } else {
+                    join.secure_equal_shared(&mut src, &sa, &sb)
+                };
+                match outcome {
+                    Err(MpcError::Protocol(m)) => {
+                        assert!(
+                            m.contains(SHAPE_REFUSAL),
+                            "{label}, {how:?}: wrong check: {m}"
+                        )
+                    }
+                    other => panic!("{label}, {how:?}: must fail closed, got {other:?}"),
+                }
+                assert!(src.fired(), "{label}: the targeted draw never happened");
+            }
         }
     }
 

@@ -58,6 +58,8 @@ jobs:
         with:
           key: lws-conformance
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: check the floor checker
+        run: python3 -B crates/sparq-lws-core/conformance/lws/check-floor.py --self-test
       - name: build touchstone
         working-directory: touchstone
         run: ./mvnw -q -B -ntp -pl harness-cli -am -Dmaven.test.skip=true package

@@ -352,8 +352,9 @@ and the crate remains research-grade and externally unaudited (`sq-qhy4` pending
    descriptive `RandomnessModel` label a source self-reports.
    **Status: IN PROGRESS** (#6117). The seam reports `parties()` / `threshold()`. In every case
    below the single-dealer simulation draws exactly what it drew before the routing (pinned by
-   seeded tests), and a source that cannot serve a call makes it fail closed with that source's
-   own error.
+   seeded tests: returned sharings, a witness draw after the call, and for the larger stages the
+   complete draw transcript — every seam method and returned value, in order), and a source that
+   cannot serve a call makes it fail closed with that source's own error.
 
    *Drawing through the seam:*
    - `degree_reduce` — each recombination party's re-sharing via `vss_own_input`
@@ -371,18 +372,37 @@ and the crate remains research-grade and externally unaudited (`sq-qhy4` pending
      to in-crate `*_through` functions taking `&mut dyn DistributedRandomness`, and
      `disclose_threshold_verdict` mints its dealer from the backend as before and hands it to the
      seam-taking helpers.
+   - The hidden-key **DISTINCT** (`hidden_distinct`) sort-and-scan stage — the key sharings via
+     `vss_own_input`, every conditional swap and AND via `degree_reduce_through`, every
+     lexicographic comparison / equality via the `compare` `*_through` chain
+     (`distinct_hidden_pairs_slots_through`; the public functions delegate with the backend's
+     dealer).
+   - The hidden **property-path** chain and bounded / alternation union (`hidden_path`) — every
+     hop equality via `secure_equal_to_bit_through`, every AND / OR-fold via
+     `degree_reduce_through` (`eval_exact_k_chain_hidden_slots_through`,
+     `eval_bounded_path_hidden_slots_through`; the public functions delegate).
+
+   Every sharing drawn from the seam is **shape-checked** where it is consumed
+   (`randomness::require_canonical_sharing`: exactly `n` shares on `x = 1..=n`, in order), the
+   helpers that open at degree `2t` guard the source-reported `t` before using it, and every
+   `*_through` entry point that combines a source with a `ShamirBackend` refuses a source whose
+   `(n, t)` differs from the backend's (`randomness::require_source_matches`). Under PRSS the
+   DISTINCT / path stages run only their draw-free shapes (an empty DISTINCT, `k = 1` with
+   distinct endpoint pairs, `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair); every shape that needs a holder's own
+   input shared fails closed with PRSS's `NotYetImplemented`.
 
    *Still calling the dealer directly:*
-   - `compare::deal_random_solved_bits` (test-only reference generator) — it needs `draw_bit`,
-     which the seam has no method for.
+   - The **oblivious output stage** — `oblivious_join::oblivious_set_output`'s selector / tag
+     sharings and the oblivious shuffle's permutation draws. It mints its own dealer from the
+     backend, so `hidden_distinct` / `hidden_path` / the batched joins still reach the dealer
+     there.
    - `join::BatchedHiddenInput::shared_keys` — `ShamirDealer::share_batch`; the seam has no
-     batch method.
-   - `hidden_distinct` / `hidden_path` — their local `secret_and` / `secret_or` degree
-     reductions and `distinct_hidden_pairs`' key sharings. Unblocked by the `compare`
-     `*_through` entry points above; a follow-on batch.
-   - The oblivious-shuffle / oblivious-output control bits, the `authenticated` / `auth_compare`
-     / `auth_disclose` MAC-session twins, and the remaining `backend` / `batched` / `robust`
-     input-dealing paths.
+     batch method. Likewise `ShamirBackend`'s `MpcBackend::share_private_input(s)`.
+   - The IT-MAC twins (`authenticated` / `auth_compare` / `auth_disclose`), which draw through
+     their `MacSession`.
+   - `transport` and `bench`.
+   - `ShamirDealer::draw_bit`, used only by the test-only reference generator
+     `compare::deal_random_solved_bits`; the seam has no bit method.
 
    No entry point is gated on `require_deployable()` yet, because it refuses every source today.
 
