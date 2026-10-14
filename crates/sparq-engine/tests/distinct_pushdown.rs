@@ -565,7 +565,7 @@ fn block_scan_anchor_driven_side_equivalence() {
 // pruned by an O(1) membership test instead of the clip+gallop block scan. The load-bearing
 // invariant is DISTINCT result-SET equivalence between the incidence-pruned path and the exact
 // block scan; these tests differentially verify that within one feature-ON binary via the
-// runtime toggle, plus the answer-safety corners (overlay invalidation, probe-bound decline).
+// runtime toggle, plus the answer-safety corners (overlay invalidation, conditioned probes).
 #[cfg(feature = "cs-anchor-incidence")]
 mod incidence {
     use super::*;
@@ -740,30 +740,106 @@ mod incidence {
         assert!(!built, "incidence must decline (not build a set) on a graph with an overlay");
     }
 
-    /// A probe with an EXTRA bound position (`?person ex:knows ?x` joined to the anchor via
-    /// ?person, but here the projected predicate slot is bound to a constant in one branch)
-    /// must DECLINE the incidence prune — the base incidence set is over the whole predicate,
-    /// not conditioned on the extra constraint — and the exact scan answers correctly.
-    #[test]
-    fn probe_with_extra_bound_position_declines() {
-        // Query whose probe pattern binds the OBJECT to a constant: the projected `?predicate`
-        // relates a person only via SOME triple, but the pushdown's block scan is over the
-        // constrained pattern. The incidence set (unconstrained) must NOT prune it. We assert
-        // equivalence; the pushdown may decline the whole shape, which is also correct.
+    /// Large enough to use the block scan. Each no-hit predicate touches an anchor member
+    /// on a DIFFERENT triple from its bound-constant match, so unconditioned incidence would
+    /// retain it. Target/other conditions have disjoint answers to expose stale cache reuse.
+    fn conditioned_dataset() -> Graph {
         let mut ttl = String::new();
         for p in 0..300 {
             ttl.push_str(&format!("ex:p{p} rdf:type foaf:Person .\n"));
-            ttl.push_str(&format!("ex:p{p} foaf:knows ex:target .\n"));
-            ttl.push_str(&format!("ex:p{p} foaf:mbox ex:other .\n"));
         }
-        let g = load(&ttl);
-        // Probe binds the object to ex:target: DISTINCT ?predicate where a person is subject of
-        // a triple whose OBJECT is ex:target. (foaf:knows qualifies; foaf:mbox does not.)
-        let q = "SELECT DISTINCT ?predicate WHERE {\n\
-                   ?person rdf:type foaf:Person .\n\
-                   ?person ?predicate ex:target\n\
-                 }";
-        let (off, on) = incidence_on_off(&g, q);
-        assert_eq!(off, on, "extra-bound-position probe differs on vs off (unsound prune?)");
+        ttl.push_str(
+            "ex:p0 ex:hit ex:target .\n\
+             ex:p1 ex:miss ex:other .\n\
+             ex:outsider ex:miss ex:target .\n\
+             ex:source ex:incomingHit ex:p0 .\n\
+             ex:otherSource ex:incomingMiss ex:p1 .\n\
+             ex:source ex:incomingMiss ex:outsider .\n\
+             ex:outsider ex:never ex:target, ex:other .\n\
+             ex:p2 ex:never ex:unqueried .\n\
+             ex:source ex:incomingNever ex:outsider .\n\
+             ex:otherSource ex:incomingNever ex:outsider .\n\
+             ex:unqueried ex:incomingNever ex:p2 .\n\
+             ex:p0 ex:literalHit \"target\" .\n\
+             ex:p1 ex:literalMiss \"other\" .\n\
+             ex:outsider ex:literalMiss \"target\" .\n",
+        );
+        load(&ttl)
+    }
+
+    fn assert_conditioned(g: &Graph, body: &str, predicates: &[&str]) {
+        let q = format!("SELECT DISTINCT ?predicate WHERE {{ {body} }}");
+        let (off, on) = incidence_on_off(g, &q);
+        assert_eq!(off, on, "conditioned incidence differs from the exact path");
+        let mut expected: Table = predicates
+            .iter()
+            .map(|p| vec![Some(format!("<http://example.org/{p}>"))])
+            .collect();
+        expected.sort();
+        assert_eq!(on, expected);
+        let (full, pushed) = on_off(g, &q);
+        assert_eq!(full, pushed, "conditioned pushdown differs from the full join");
+        assert_eq!(full, expected);
+
+        anchor_incidence_testing::reset_stats();
+        assert_eq!(table(g, &q), expected);
+        let (built, pruned) = anchor_incidence_testing::stats();
+        assert!(built, "conditioned incidence must build");
+        assert!(pruned > 0, "conditioned incidence must prune a no-hit predicate");
+    }
+
+    #[test]
+    fn probe_with_extra_bound_object_prunes() {
+        assert_conditioned(
+            &conditioned_dataset(),
+            "?person rdf:type foaf:Person . ?person ?predicate ex:target",
+            &["hit"],
+        );
+    }
+
+    #[test]
+    fn probe_with_extra_bound_subject_prunes() {
+        assert_conditioned(
+            &conditioned_dataset(),
+            "?person rdf:type foaf:Person . ex:source ?predicate ?person",
+            &["incomingHit"],
+        );
+    }
+
+    #[test]
+    fn probe_with_extra_bound_literal_prunes() {
+        assert_conditioned(
+            &conditioned_dataset(),
+            "?person rdf:type foaf:Person . ?person ?predicate \"target\"",
+            &["literalHit"],
+        );
+    }
+
+    #[test]
+    fn conditioned_cache_separates_bound_ids_and_join_positions() {
+        let branches = [
+            "{ ?person rdf:type foaf:Person . ?person ?predicate ex:target }",
+            "{ ?person rdf:type foaf:Person . ?person ?predicate ex:other }",
+            "{ ?person rdf:type foaf:Person . ex:source ?predicate ?person }",
+            "{ ?person rdf:type foaf:Person . ex:otherSource ?predicate ?person }",
+        ];
+        let g = conditioned_dataset();
+        assert_conditioned(&g, &branches.join(" UNION "), &["hit", "miss", "incomingHit", "incomingMiss"]);
+        let reversed: Vec<_> = branches.into_iter().rev().collect();
+        assert_conditioned(&g, &reversed.join(" UNION "), &["hit", "miss", "incomingHit", "incomingMiss"]);
+    }
+
+    #[test]
+    fn incidence_declines_non_predicate_projection() {
+        let g = conditioned_dataset();
+        for probe in ["?subject ?predicate ?person", "?subject ex:incomingHit ?person"] {
+            let q = format!("SELECT DISTINCT ?subject WHERE {{ ?person rdf:type foaf:Person . {probe} }}");
+            let (off, on) = incidence_on_off(&g, &q);
+            assert_eq!(off, on, "predicate incidence must not prune projected subjects");
+            assert!(!on.is_empty());
+            anchor_incidence_testing::reset_stats();
+            assert_eq!(table(&g, &q), off);
+            assert_eq!(anchor_incidence_testing::stats(), (false, 0));
+        }
     }
 }

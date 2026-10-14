@@ -1,3 +1,12 @@
+//! Predicate incidence diagnostics for the opt-in DISTINCT semijoin prune.
+//!
+//! The per-pushdown cache builds sets lazily for requested anchor/probe keys, including
+//! the extra bound (position, id). Each set stores at most the graph's distinct predicate
+//! count P; with B distinct branch keys, additional memory is O(B * P) ids plus O(B) cache
+//! entries (including cached declines), not an index over every possible bound term.
+//! Sets are shared by identical branches and dropped when the pushdown returns. Construction
+//! checks the existing query budget while scanning; no triple rows are retained in the cache.
+
 use std::cell::Cell;
 
 thread_local! {
