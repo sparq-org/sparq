@@ -1578,7 +1578,8 @@ async fn create<S: Store + 'static>(
     // Both are released before the container's own metadata is touched (which takes its lock
     // exclusively).
     //
-    // A conditional create is evaluated against the container's listing, and takes the
+    // A conditional create is evaluated against the container's listing (or, when it compares
+    // no state, only `*`, against the container's existence), and takes the
     // container's lock exclusively so no other create or delete changes the listing between the
     // evaluation and the create.
     let conditional = is_conditional(req);
@@ -3455,8 +3456,14 @@ async fn patch<S: Store + 'static>(
         );
         r
     };
+    // A writer that may not read the content applies only a blind patch ([`patch_read_check`]),
+    // and is told nothing about the content, its format included, when even that cannot apply: it
+    // is refused as it would be had the patch read the content. Nor does the new tag, which
+    // describes the content as patched (its length and a hash of it), go to it.
+    let reader = state.allowed(Action::Read, uri, agent).await;
+    let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
     if !is_json_type(&meta.content_type) {
-        return not_json();
+        return unread(not_json());
     }
     if let Err(r) =
         precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
@@ -3481,12 +3488,6 @@ async fn patch<S: Store + 'static>(
     // Its numbers are held as their text ([`NUMBER_MARK`]) while the patch applies, so the
     // content is written back with every number it does not touch as it was.
     // An empty body is not JSON either.
-    // A writer that may not read the content applies only a blind patch ([`patch_read_check`]),
-    // and is told nothing about the content when even that cannot apply: it is refused as it
-    // would be had the patch read the content. Nor does the new tag, which describes the content
-    // as patched (its length and a hash of it), go to it.
-    let reader = state.allowed(Action::Read, uri, agent).await;
-    let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
     let target = match read_numbers_as_text(&body) {
         Ok(target) => target,
         Err(Unreadable::Number) => return unread(number_refused()),
@@ -10579,8 +10580,24 @@ mod tests {
         let status = patch(dave.clone(), list.clone(), blind.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(
-            patch(bob.clone(), list, blind).await,
+            patch(bob.clone(), list, blind.clone()).await,
             StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // Nor is a writer without Read told the resource's format.
+        let req = request(
+            "POST",
+            "/",
+            &[("slug", "t.txt"), ("content-type", "text/plain")],
+            "plain",
+        );
+        let r = create(&st, &req, &owner, &root).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let text = path_of(&hdr(&r, "location")).to_string();
+        let status = patch(dave.clone(), text.clone(), blind.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob.clone(), text, blind).await,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
         );
         // A linkset is patched under the same rule.
         let meta = format!("{doc}{META_SUFFIX}");
