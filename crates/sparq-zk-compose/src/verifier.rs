@@ -1463,15 +1463,30 @@ pub enum CheckError {
     /// `CircuitId.k` bits (no default/pad-to-false). `expected` = k.
     // codex 2221 MEDIUM: attribution must be present + exactly k bits.
     AttributionMalformed { proof: usize, expected: usize, got: usize },
-    /// A value-lane sub-proof paired a lane constant with a member that is not
-    /// that lane's — the `DualLeafV2` `xsd:boolean` lane constant presented on the
-    /// shared integer member, whose relation range-decomposes its handle to the
-    /// whole `u64` domain instead of constraining it to `{0, 1}`. Refused here
-    /// because `datatype_const` is a public input no member pins to a lane. The
-    /// refusal is `crate::dispatch::check_lane_member_pairing`'s, raised per
-    /// sub-proof.
+    /// A value-lane sub-proof's `(member, datatype_const)` pairing was refused —
+    /// a lane constant on a member that is not that lane's (e.g. the `DualLeafV2`
+    /// `xsd:boolean` lane constant on the shared integer member, whose relation
+    /// range-decomposes its handle over the whole `u64` domain instead of
+    /// constraining it to `{0, 1}`), a constant NO shipped lane derives, or a
+    /// `FieldHex` whose text is not the canonical rendering of the element it
+    /// decodes to. Refused here because `datatype_const` is a public input no
+    /// member pins to a lane. The refusal is
+    /// `crate::dispatch::check_lane_member_pairing`'s, raised per sub-proof, and
+    /// `reason` carries its `Display`.
     #[cfg(feature = "dual-leaf")]
     LaneMemberMismatch { proof: usize, reason: String },
+    /// A value-lane sub-proof that NO query edge binds.
+    ///
+    /// `filter_edge_true` — the only place a sub-proof discharges a query FILTER
+    /// obligation — accepts `ProofInputs::FilterInt` and nothing else, so a
+    /// value-lane sub-proof cannot discharge any obligation in THIS verifier (the
+    /// value-lane query binding is sq-j506). An extra value-lane sub-proof
+    /// appended to an otherwise valid manifest would therefore be reconstructed
+    /// and verified at stage 3 while discharging nothing, and a relying party
+    /// reading the accepted manifest could take it for a checked FILTER. It is
+    /// refused here instead.
+    #[cfg(feature = "dual-leaf")]
+    UnboundValueLaneSubProof { proof: usize },
     /// A scan sub-proof's per-graph `commitments` are NOT strictly increasing on
     /// the field representative (plan S2.5): two adjacent commitments
     /// are equal or out of order. `scan_check` step 1b enforces
@@ -2084,6 +2099,15 @@ impl std::fmt::Display for CheckError {
                 f,
                 "sub-proof {proof}: {reason}"
             ),
+            #[cfg(feature = "dual-leaf")]
+            CheckError::UnboundValueLaneSubProof { proof } => write!(
+                f,
+                "sub-proof {} is a value-lane member that no query edge binds: this \
+                 verifier discharges a query FILTER only through a filter_int edge, so \
+                 a value-lane sub-proof would be verified while discharging nothing \
+                 (value-lane query binding is sq-j506) — refused",
+                proof
+            ),
             CheckError::ScanCommitmentsNotStrictlyIncreasing { proof, at } => write!(
                 f,
                 "scan sub-proof {proof}: per-graph commitments are not strictly increasing at index {at} (commitments[{at}] <= commitments[{at_prev}]) (plan S2.5 / sq-vxq8: distinct-graph strict ordering — a duplicate or out-of-order commitment is the duplicate-inclusion / COUNT forgery, e.g. the same credential included twice to claim 'I hold >=2 tickets')",
@@ -2645,16 +2669,23 @@ fn prefilter_manifest_structure_impl(
     revocation_policy: &RevocationPolicy,
     skip_query_binding: bool,
 ) -> Result<Vec<JoinEdge>, CheckError> {
-    // --- Stage 0: the LANE<->MEMBER pairing, before any other reading of the
-    // sub-proofs. A lane constant may only ride the member that constrains that
-    // lane's handle domain; `datatype_const` is a public input no member pins, so
-    // a `DualLeafV2` boolean lane constant presented on the shared integer member
-    // (whose relation range-decomposes the handle over the whole `u64` domain) is
-    // refused here rather than answered under the integer relation. ---
+    // --- Stage 0: the LANE<->MEMBER pairing + the unbound-value-lane refusal,
+    // before any other reading of the sub-proofs. A lane constant may only ride
+    // the member that constrains that lane's handle domain; `datatype_const` is a
+    // public input no member pins, so a lane constant on the wrong member, a
+    // constant no shipped lane derives, and a non-canonically spelled `FieldHex`
+    // are all refused here rather than answered under the wrong relation. ---
     #[cfg(feature = "dual-leaf")]
     for (i, sp) in manifest.sub_proofs.iter().enumerate() {
         crate::dispatch::check_lane_member_pairing(&sp.inputs)
             .map_err(|e| CheckError::LaneMemberMismatch { proof: i, reason: e.to_string() })?;
+        // And a value-lane sub-proof that no query edge binds is refused rather
+        // than verified-but-undischarging: `filter_edge_true` accepts a
+        // `FilterInt` edge and nothing else, so no value-lane member can satisfy a
+        // query FILTER obligation in this verifier (sq-j506 is that wiring).
+        if crate::dispatch::value_lane_fields(&sp.inputs).is_some() {
+            return Err(CheckError::UnboundValueLaneSubProof { proof: i });
+        }
     }
 
     // --- Stage 1a: query-fragment gate + (flat stage-1 only) cross-graph
