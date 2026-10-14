@@ -23,12 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MaterializedN3Graph` charge each before it is stored; a round past a set allowance
   returns `"n3: forward closure limit exceeded … max_join_rows …"` instead of building rows
   that multiply with each unconstrained premise pattern. `ClosureLimits` is
-  `#[non_exhaustive]`, so the new field is additive. The `compiled-rules` evaluator's first round of each stratum
-  is now naive, as the text engine's is, instead of seeding each join position with the
-  whole store. (#6938)
+  `#[non_exhaustive]`, so the new field is additive. The `compiled-rules` evaluator's
+  first round of each stratum is now naive, as the text engine's is, instead of seeding
+  each join position with the whole store. (#6938)
 
 ### Changed
 
+- **sparq-reason (N3):** a run already refused by a `ClosureLimits` limit no longer reports
+  a negation or aggregation evaluated after the refusal ("refused a negation or aggregation
+  … over an incomplete set"); it fails with the refusal itself, which names the limit
+  (for example `… over max_term_bytes (…)`). Both are refusals: only the error text
+  changes. (#6938)
 - **sparq-reason (N3):** formula-level `@forAll` declarations keep their own scope,
   including nested and sibling quoted formulas. Naive, compiled and incremental engines
   reject `@forAll` in a rule's own premise or a scoped body pattern with a specific error;

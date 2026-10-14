@@ -376,8 +376,8 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 ///   `StepBudget::containment`), and a search it stops is a cut;
 /// * the backtracking of formula unification (a `{ … }` pattern matched against a
 ///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding
-///   and holds one binding per pattern statement, so it adds no rows, but no budget bounds
-///   its branches (up to k! for a formula of k statements);
+///   and holds one binding per pattern statement, so it adds no rows; its backtracking is
+///   not charged to a step budget (tracked in GH #6953);
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time
@@ -471,17 +471,27 @@ impl Default for ClosureLimits {
 /// Spent, it refuses the run (the cut and the run's error, as [`derived_term`] does) and
 /// stays spent: later rounds of the same closure produce nothing, so the closure reaches
 /// its end quickly and fails with the refusal.
+///
+/// `usize::MAX`, the default, is the unbounded sentinel: no accounting at all, and every
+/// charge succeeds, so the default can never refuse. A set limit is checked exactly.
 pub(crate) struct JoinWork {
     left: Cell<usize>,
     limit: usize,
     spent: Cell<bool>,
+    /// The limit is the unbounded sentinel: charges are not counted.
+    unbounded: bool,
 }
 
 impl JoinWork {
     /// The allowance of one round of a closure of the run `run`.
     pub(crate) fn forward(run: &Truncation) -> JoinWork {
         let limit = run.limits.max_join_rows;
-        JoinWork { left: Cell::new(limit), limit, spent: Cell::new(false) }
+        JoinWork {
+            left: Cell::new(limit),
+            limit,
+            spent: Cell::new(false),
+            unbounded: limit == usize::MAX,
+        }
     }
 
     /// A new round: the full allowance again, unless it was spent.
@@ -494,14 +504,18 @@ impl JoinWork {
     /// The join kernel's view of the rows the round may still produce.
     #[cfg(feature = "compiled-rules")]
     pub(crate) fn kernel_view(&self) -> RowsLeft {
-        RowsLeft(self.left.get())
+        // Unbounded: `rows > usize::MAX` never holds, so the kernel never stops.
+        RowsLeft(if self.unbounded { usize::MAX } else { self.left.get() })
     }
 
     /// Charge `n` rows or firings about to be stored: `true` when the round's allowance
     /// covers them. Otherwise the run is refused (recorded on `run`) and nothing may be
-    /// stored.
+    /// stored. Under the unbounded default it always succeeds and counts nothing.
     #[inline]
     pub(crate) fn charge(&self, n: usize, run: &Truncation) -> bool {
+        if self.unbounded {
+            return true;
+        }
         match self.left.get().checked_sub(n) {
             Some(left) => {
                 self.left.set(left);
@@ -1317,6 +1331,28 @@ pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_unbounded_join_work_never_refuses() {
+        let run = Truncation::top_level();
+        let work = JoinWork::forward(&run);
+        assert!(work.charge(usize::MAX, &run));
+        assert!(work.charge(usize::MAX, &run));
+        assert!(work.charge(usize::MAX.saturating_mul(3), &run));
+        work.round();
+        assert!(work.charge(usize::MAX, &run));
+        assert_eq!(run.refusal(), None);
+        assert_eq!(run.get(), None);
+        // A set limit is checked exactly.
+        let run = Truncation::top_level_with(ClosureLimits {
+            max_join_rows: 2,
+            ..ClosureLimits::default()
+        });
+        let work = JoinWork::forward(&run);
+        assert!(work.charge(2, &run));
+        assert!(!work.charge(1, &run));
+        assert!(run.refusal().is_some_and(|e| e.contains("max_join_rows (2)")));
+    }
 
     thread_local! {
         /// A test's `(rounds, facts)` closure allowance in place of the defaults.
