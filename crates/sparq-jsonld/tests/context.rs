@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-oy1f.24) End-to-end tests for the JSON-LD 1.1 Context Processing +
+//! (sq-oy1f.24) End-to-end tests for the JSON-LD 1.1 Context Processing +
 //! Create Term Definition + IRI Expansion foundation, exercised through the crate's public
 //! API. Fixtures are drawn from the worked examples of the W3C JSON-LD 1.1 API spec
 //! (<https://www.w3.org/TR/json-ld11-api/>). No network: remote contexts use the

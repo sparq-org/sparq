@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-3dyje.11 (#2763) — wasm-parity: pinned SPARQL semantics sample,
+// sq-3dyje.11 (#2763) — wasm-parity: pinned SPARQL semantics sample,
 // wasm32 ≡ committed native-verified results (research/testing-strategy-assessment-2026-07.md §7.6).
 //
 // The 7 existing wasm-bindgen test files pin the JS-boundary CONTRACTS (result

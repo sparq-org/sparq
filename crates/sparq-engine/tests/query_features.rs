@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-6vshe.9 — query-feature integration-test harness.
+//! sq-6vshe.9 — query-feature integration-test harness.
 //! Consolidates dataset-view, DP-planner, parse-depth, prepared-query, and
 //! RDF-star-write tests into a single link unit.
 //!

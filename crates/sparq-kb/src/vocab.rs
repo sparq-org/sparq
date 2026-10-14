@@ -24,7 +24,7 @@
 //! [`OPEN`] etc. name `skos:Concept` instances — and the technique-relation graph leans
 //! on the established `cito:extends` / `cito:usesMethodIn`. See PROVENANCE.md.
 //!
-//! [OPUS-4.8] sq-2m6zm.1 (epic sq-2m6zm); design record PR #1063. Flag for re-review
+//! sq-2m6zm.1 (epic sq-2m6zm); design record PR #1063. Flag for re-review
 //! when Fable returns. 🤖 SPARQ agent — dogfooding sparq as a project knowledge graph.
 
 /// The `pkg:` namespace base (sparq-local; a standardisation pass would rehome the
@@ -179,7 +179,7 @@ pub const SOURCE_RELIABILITY_MEASUREMENT: &str =
 // `pkg/kb#` instance namespace) — they are GRAPH identifiers, NOT `pkg:` vocabulary
 // terms, so they are byte-pinned by `tier_graph_iris_are_pinned` below and are
 // deliberately NOT in `ALL` (which pins the `pkg:` vocabulary against `pkg.ttl`).
-// [SONNET-4.6] sq-tzars.7 🤖 SPARQ agent — provenance-driven GenAI KB.
+// sq-tzars.7 🤖 SPARQ agent — provenance-driven GenAI KB.
 
 /// The `pkg/graph#` sub-namespace holding the per-tier named-graph IRIs.
 pub const GRAPH_NS: &str = "https://sparq.dev/ns/pkg/graph#";
@@ -268,7 +268,7 @@ mod tests {
     /// Turtle must be backed by a Rust constant. If a term is renamed/added in one
     /// and not the other this test fails — the published Turtle the maintainer reads
     /// and the constants downstream code uses cannot silently diverge (mirrors the
-    /// `sparq-trust` `ttl_pins_match_rust_constants` discipline). [OPUS-4.8]
+    /// `sparq-trust` `ttl_pins_match_rust_constants` discipline).
     #[test]
     fn ttl_pins_match_rust_constants() {
         const TTL: &str = include_str!("../ontology/pkg/pkg.ttl");
@@ -326,7 +326,7 @@ mod tests {
     /// tier-aware export script (sq-tzars.8) key off these EXACT strings, so a rename must
     /// be a conscious, test-breaking change. The tier graph IRIs are graph identifiers,
     /// NOT `pkg:` vocabulary terms, so they must stay OUT of [`ALL`] (which is pinned
-    /// against `pkg.ttl`) — that separation is asserted here too. [SONNET-4.6]
+    /// against `pkg.ttl`) — that separation is asserted here too.
     #[test]
     fn tier_graph_iris_are_pinned() {
         assert_eq!(GRAPH_NS, "https://sparq.dev/ns/pkg/graph#");

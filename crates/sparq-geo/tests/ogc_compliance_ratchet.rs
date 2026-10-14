@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-9h1r — OGC GeoSPARQL compliance ratchet.
+//! sq-9h1r — OGC GeoSPARQL compliance ratchet.
 //!
 //! A fixture-gated, pass-count **ratchet** over a corpus of OGC GeoSPARQL
 //! conformance-style assertions: each fixture is a geometry pair, a `geof:`
@@ -55,22 +55,22 @@
 use sparq_geo::geof::lex;
 use sparq_geo::GeoError;
 
-/// [OPUS-4.8] Pass-count FLOOR for the OGC topology compliance fixtures
+/// Pass-count FLOOR for the OGC topology compliance fixtures
 /// (sq-9h1r). A ratchet: it may only RISE. Set to the number of assertions in
 /// [`FIXTURES`] (expanded across both operand orders) at commit time; raising it
 /// is a deliberate act when fixtures are added.
 ///
-/// [OPUS-4.8] sq-cbe4t — raised 119 -> 158: 39 net-new, hand-derived DE-9IM
+/// sq-cbe4t — raised 119 -> 158: 39 net-new, hand-derived DE-9IM
 /// assertions deepen the under-covered axes (order-sensitive relations in their
 /// REVERSE direction so the spec's symmetry/asymmetry is pinned, MULTI* operands,
 /// and the contains-view of the point/line/polygon inclusion rows). Each new
 /// fixture's expected boolean is the OGC matrix truth value AND the value the
-/// engine GENUINELY returns — none is a faked pass. [SONNET-4.6] sq-z1xv8: the
+/// engine GENUINELY returns — none is a faked pass. sq-z1xv8: the
 /// central scoreboard floor (`crates/sparq-conformance/src/scoreboard.rs`) is no
 /// longer a mirror — it imports the same shared const, so raising it here is a
 /// single edit in `sparq-conformance-floors`.
 ///
-/// [SONNET-4.6] sq-lk3aw.1 — raised 158 -> 197: 39 net-new hand-derived
+/// sq-lk3aw.1 — raised 158 -> 197: 39 net-new hand-derived
 /// DE-9IM assertions extend coverage across five under-covered axes:
 /// (1) sf/eh/rcc8 for two polygons sharing an edge (external-connection cell,
 /// the `rcc8ec`/`ehMeet`/`sfTouches` family that was absent before);
@@ -79,7 +79,7 @@ use sparq_geo::GeoError;
 /// (4) point vs line (interior-point `sfWithin` and endpoint `sfTouches`);
 /// (5) additional rcc8/eh DISJOINT assertions over the existing polygon pairs
 /// that were missing the reverse-symmetric or multi-pair coverage.
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).
@@ -287,7 +287,7 @@ const FIXTURES: &[Fixture] = &[
     fx(BIG, CORNER_TANGENT, "rcc8tppi", true),
     fx(BIG, CORNER_TANGENT, "rcc8tpp", false),
     // ========================================================================
-    // [OPUS-4.8] sq-cbe4t — fuller R4-R6/R21-R24 coverage. Each entry's expected
+    // sq-cbe4t — fuller R4-R6/R21-R24 coverage. Each entry's expected
     // boolean is hand-derived from the relation's DE-9IM matrix per the OGC
     // GeoSPARQL specification, and is net-new (a distinct operand pair / order /
     // geometry shape) over the rows above. The additions deepen three under-
@@ -363,7 +363,7 @@ const FIXTURES: &[Fixture] = &[
     // …and BIG is the tangential proper-part-INVERSE (tppi), not the non-tangential one.
     fx(BIG, CORNER_TANGENT, "rcc8ntppi", false),
     // ========================================================================
-    // [SONNET-4.6] sq-lk3aw.1 — 39 net-new, hand-derived DE-9IM assertions.
+    // sq-lk3aw.1 — 39 net-new, hand-derived DE-9IM assertions.
     // Each expected boolean is derived from the relation's DE-9IM pattern per
     // the OGC GeoSPARQL specification and verified to be the value the engine
     // GENUINELY returns; none is a faked pass.
@@ -444,14 +444,14 @@ const FIXTURES: &[Fixture] = &[
 
 /// A MultiPolygon of two disjoint unit-ish squares — exercises MULTI* operand
 /// topology (a point inside the first part is contained; one in neither part is
-/// disjoint). [OPUS-4.8] sq-cbe4t
+/// disjoint). sq-cbe4t
 const MULTI_TWO_SQUARES: &str =
     "MULTIPOLYGON(((0 0,4 0,4 4,0 4,0 0)),((6 6,8 6,8 8,6 8,6 6)))";
 
 /// A polygon that shares its LEFT edge with SMALL_INSIDE's RIGHT edge (at x=2,
 /// y=1..2). The two polygons are EXTERNALLY CONNECTED: their interiors are
 /// disjoint but their boundaries meet along a 1-D segment — the
-/// `rcc8ec`/`ehMeet`/`sfTouches` cell. [SONNET-4.6] sq-lk3aw.1
+/// `rcc8ec`/`ehMeet`/`sfTouches` cell. sq-lk3aw.1
 const ADJACENT_TO_SMALL: &str = "POLYGON((2 1, 4 1, 4 2, 2 2, 2 1))";
 
 fn run_fixtures(fixtures: &[Fixture]) -> (usize, usize, Vec<String>) {
@@ -519,12 +519,12 @@ fn gml_equivalence_for_topology() {
         expected: bool,
     }
     // A 2x2 square at the origin, in GML-SF. The gml: prefix is declared on the
-    // root element so the fixture is well-formed XML. [OPUS-4.8]
+    // root element so the fixture is well-formed XML.
     const SQUARE_GML: &str = "<gml:Polygon xmlns:gml=\"http://www.opengis.net/gml\">\
 <gml:exterior><gml:LinearRing>\
 <gml:posList>0 0 2 0 2 2 0 2 0 0</gml:posList>\
 </gml:LinearRing></gml:exterior></gml:Polygon>";
-    // A point, in GML-SF (gml: prefix declared on the root element). [OPUS-4.8]
+    // A point, in GML-SF (gml: prefix declared on the root element).
     const POINT_GML: &str =
         "<gml:Point xmlns:gml=\"http://www.opengis.net/gml\"><gml:pos>1 1</gml:pos></gml:Point>";
 

@@ -1,4 +1,4 @@
-// [OPUS-5] sq-rsd3v.3 (#2946): witnessed-rule-shape N3 derivation -- the host
+// sq-rsd3v.3 (#2946): witnessed-rule-shape N3 derivation -- the host
 // mirror of the in-circuit relation `zk/compose/compose_core/src/n3.nr`, plus
 // the PROVABLE-SUBSET admission gate and the rule-graph commitment builder.
 // Epic sq-rsd3v; parent #2616. Blocked-by sq-rsd3v.2 (#2614).

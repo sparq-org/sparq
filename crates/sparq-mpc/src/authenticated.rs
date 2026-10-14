@@ -1,12 +1,13 @@
-// [OPUS-4.8] sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION for
-// honest-majority malicious-with-abort MPC. Layered over the existing degree-t
+// sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION design
+// §3 builds honest-majority malicious-with-abort MPC on (not delivered today). Layered over the existing degree-t
 // Shamir sharing (`crate::shamir`). This module is the CARRIER (the `[[x]]` pair
 // + the free linear ops); the MAC-carrying multiplication (sq-km34.3,
 // `MacSession::auth_mul`) and the batched MAC-check (sq-km34.4,
 // `MacSession::mac_check`) live in `crate::shamir`, and the registry wiring
 // (sq-km34.7) is a SEPARATE bead that has NOT landed.
 //! Authenticated (IT-MAC) secret sharing over the honest-majority Shamir backend
-//! — the foundation of malicious-with-abort security.
+//! — the foundation malicious-with-abort security would build on; today's paths
+//! are tamper-evident only.
 //!
 //! Design (authoritative): `research/mpc-malicious-security-design.md` §2.1–2.2
 //! (the construction) and §2.3 (free linear ops). Skill `mpc-protocols`:
@@ -74,16 +75,20 @@
 //!
 //! ## Security tier (stated, not over-claimed)
 //!
-//! This foundation is the carrier for **honest-majority, malicious-with-abort**
-//! security (design §3, "the achieved tier"). On its own it changes NO advertised
+//! This foundation is the carrier design §3 targets for **honest-majority,
+//! malicious-with-abort** security; today's paths reach only tamper-evident-with-abort
+//! (see [`crate::auth_compare`]'s security tier). On its own it changes NO advertised
 //! guarantee: it adds the MAC sharing alongside the value sharing and keeps the
-//! linear ops free and correct. The malicious-security PROPERTY materialises only
-//! on a path where the multiplication carries the MAC
+//! linear ops free and correct. Tamper DETECTION on opened values needs a path where
+//! the multiplication carries the MAC
 //! ([`MacSession::auth_mul`](crate::shamir::MacSession::auth_mul), sq-km34.3) AND
 //! the batched check
 //! ([`MacSession::mac_check`](crate::shamir::MacSession::mac_check), sq-km34.4)
-//! fires before any opened value is acted on. Both have landed, so that path
-//! EXISTS — but it is opt-in: on any path that does not run it (the plain
+//! fires before any opened value is acted on. Both have landed, so that
+//! tamper-evident path EXISTS. Malicious security does NOT: it additionally needs
+//! multiplication-gate verification binding BOTH operands, because `auth_mul`
+//! adopts a value tamper on its second operand, and that is not implemented. The
+//! tamper-evident path is opt-in: on any path that does not run it (the plain
 //! [`ShamirBackend`](crate::shamir::ShamirBackend) aggregate, the semi-honest
 //! join/compare surfaces) the parties are still trusted to follow the protocol,
 //! and the backend's advertised tier is unchanged pending sq-km34.7. Nothing here
@@ -109,7 +114,7 @@
 //! [`ShamirDealer::new_mac_session`](crate::shamir::ShamirDealer::new_mac_session)).
 //! What is never reconstructed is the *shared* `[α]` and the MAC shares `[α·x]`.
 //! A test (`mac_key_is_never_reconstructed_*`) pins that no `α`-opening path
-//! exists. `[OPUS-4.8]`
+//! exists.
 
 use crate::field::Fp;
 use crate::partial::MpcError;
@@ -127,14 +132,14 @@ use crate::shamir::{add_constant, add_shares, scale, sub_shares, Share, ShareVec
 /// value's MAC `α·x`. What is never reconstructed is the *shared* `[α]` (this type)
 /// and the MAC shares `[α·x]`: `α` itself is never returned to, nor opened by, any
 /// caller (no public accessor exposes it). The same `[α]` then authenticates every
-/// value in the session via [`AuthenticatedShare`]. `[OPUS-4.8]`
+/// value in the session via [`AuthenticatedShare`].
 ///
 /// **`α` is structurally un-openable.** This type stores `[α]` only as its private
 /// per-party share vector and exposes NO method that reconstructs it. The only
 /// share-level accessor, `MacKey::scaled_constant_mac` (crate-private), returns a
 /// sharing of `α·c` for a PUBLIC constant `c` (the add-constant MAC term of §2.3)
 /// — a derived sharing, never `[α]` itself. This is the structural realisation of
-/// the bead's acceptance criterion (2): no code path opens `α`. `[OPUS-4.8]`
+/// the bead's acceptance criterion (2): no code path opens `α`.
 ///
 /// **Does NOT derive [`Debug`].** The per-party share vector `[α]` is secret key
 /// material; a derived `Debug` would print every share, and *any* `t+1` of them
@@ -142,7 +147,7 @@ use crate::shamir::{add_constant, add_shares, scale, sub_shares, Share, ShareVec
 /// `assert_eq!` failure) would leak the very key the whole construction protects.
 /// Instead [`MacKey`] has a MANUAL [`Debug`] that REDACTS the shares
 /// (`MacKey { alpha: <redacted>, .. }`), so it stays printable for diagnostics
-/// without ever exposing `[α]`. `[OPUS-4.8]`
+/// without ever exposing `[α]`.
 #[derive(Clone)]
 pub struct MacKey {
     /// The degree-`t` Shamir sharing `[α]` (one [`Share`] per party). Private so
@@ -155,7 +160,7 @@ pub struct MacKey {
     t: usize,
 }
 
-// [OPUS-4.8] Manual `Debug` that REDACTS the `[α]` shares. The `shares` vector is
+// Manual `Debug` that REDACTS the `[α]` shares. The `shares` vector is
 // the secret-shared MAC key; printing it (any `t+1` shares reconstruct `α`) would
 // defeat the "α is never reconstructable" guarantee through a back door. We surface
 // only the non-secret shape (party count + threshold) and an explicit `<redacted>`
@@ -170,7 +175,7 @@ impl std::fmt::Debug for MacKey {
     }
 }
 
-// [OPUS-4.8] sq-u8a8: zeroize the `[α]` shares on drop. The `shares` vector IS
+// sq-u8a8: zeroize the `[α]` shares on drop. The `shares` vector IS
 // the secret-shared MAC key — any `t+1` of them reconstruct `α` — so when a
 // `MacKey` is dropped we scrub the share material from memory rather than leaving
 // it in the freed allocation. `Share` derives `Zeroize`, so `Vec<Share>` zeroizes
@@ -189,7 +194,7 @@ impl MacKey {
     /// `α` retained — secret, in-process — inside its
     /// [`MacSession`](crate::shamir::MacSession) to mint MACs) can build one;
     /// external code cannot supply its own `[α]`. The threshold `t` is recorded so
-    /// authenticated sharings are checked to match it. `[OPUS-4.8]`
+    /// authenticated sharings are checked to match it.
     pub(crate) fn from_shares(shares: ShareVec, t: usize) -> Self {
         MacKey { shares, t }
     }
@@ -215,7 +220,7 @@ impl MacKey {
     /// is public, so revealing a sharing of `α·c` is no more than revealing a
     /// sharing of (public-`c`) × (secret-`α`), which is exactly the MAC of the
     /// public value `c` and is meant to be added into another MAC sharing — it is
-    /// never opened on its own here. `[OPUS-4.8]`
+    /// never opened on its own here.
     pub(crate) fn scaled_constant_mac(&self, c: Fp) -> ShareVec {
         scale(&self.shares, c)
     }
@@ -243,7 +248,7 @@ impl MacKey {
     /// opens it — the shares flow into [`scale`] and only the (leakage-free) `σ` is
     /// opened, never `[α]`. Kept crate-private exactly as
     /// [`AuthenticatedShare::mac_shares`] is, so no public surface can pull `[α]` out
-    /// and reconstruct `α`. `[OPUS-4.8]`
+    /// and reconstruct `α`.
     pub(crate) fn alpha_shares(&self) -> &[Share] {
         &self.shares
     }
@@ -251,7 +256,7 @@ impl MacKey {
     /// **Test-only.** The raw `[α]` shares, so the independence test (acceptance
     /// (3)) can argue about `≤ t` views of `α`. The `cfg` gate keeps this out of
     /// the public/production API — there is deliberately no non-test accessor that
-    /// returns the shares for reconstruction. `[OPUS-4.8]`
+    /// returns the shares for reconstruction.
     #[cfg(test)]
     pub(crate) fn shares_for_test(&self) -> ShareVec {
         self.shares.clone()
@@ -273,7 +278,7 @@ impl MacKey {
 /// The value `[x]` reconstructs via the existing
 /// [`ShamirBackend::reconstruct`](crate::shamir::ShamirBackend::reconstruct); the
 /// MAC `[α·x]` reconstructs the same way and equals `α · x` — the relation a
-/// later batched check (sq-km34.4) verifies WITHOUT opening `α`. `[OPUS-4.8]`
+/// later batched check (sq-km34.4) verifies WITHOUT opening `α`.
 ///
 /// **Does NOT derive [`Debug`].** A derived `Debug` would print the private `mac`
 /// field — the `[α·x]` shares. For `authenticated_share(1)` those are shares of `α`
@@ -283,7 +288,7 @@ impl MacKey {
 /// the `pub(crate)` restriction on `Self::mac_shares`, undermining the "α is never
 /// reconstructable" guarantee. Instead [`AuthenticatedShare`] has a MANUAL [`Debug`]
 /// that surfaces the openable value sharing `[x]` (already public via
-/// [`Self::value_shares`]) but REDACTS the MAC shares. `[OPUS-4.8]`
+/// [`Self::value_shares`]) but REDACTS the MAC shares.
 #[derive(Clone)]
 pub struct AuthenticatedShare {
     /// `[x]` — the degree-`t` Shamir sharing of the value.
@@ -292,7 +297,7 @@ pub struct AuthenticatedShare {
     mac: ShareVec,
 }
 
-// [OPUS-4.8] Manual `Debug` that REDACTS the MAC shares. The `mac` vector is the
+// Manual `Debug` that REDACTS the MAC shares. The `mac` vector is the
 // `[α·x]` sharing; for `authenticated_share(1)` it is a sharing of `α` itself, and
 // any `t+1` of those shares reconstruct `α` — so a derived `Debug` would leak the
 // MAC key through a back door round the `pub(crate)` `mac_shares()` accessor. We
@@ -309,7 +314,7 @@ impl std::fmt::Debug for AuthenticatedShare {
     }
 }
 
-// [OPUS-4.8] sq-u8a8: zeroize the MAC shares `[α·x]` on drop. For
+// sq-u8a8: zeroize the MAC shares `[α·x]` on drop. For
 // `authenticated_share(1)` the `mac` vector is a sharing of `α` itself, so it is
 // key material; we scrub it on drop rather than leaving it in freed memory. The
 // `value` sharing `[x]` is the openable value (already public via
@@ -329,7 +334,7 @@ impl AuthenticatedShare {
     /// must be on the identical party-point set (same length, same `x` per index);
     /// otherwise the linear ops below could not pair them and the MAC relation
     /// would be meaningless. `pub(crate)`: only the dealer mints these (it alone
-    /// computed `α·x` from the secret `α` it holds transiently). `[OPUS-4.8]`
+    /// computed `α·x` from the secret `α` it holds transiently).
     pub(crate) fn new(value: ShareVec, mac: ShareVec) -> Result<Self, MpcError> {
         if value.len() != mac.len() {
             return Err(MpcError::Protocol(
@@ -370,9 +375,9 @@ impl AuthenticatedShare {
     /// which only ever consumes it inside the random linear combination) — there is
     /// no public surface that returns the MAC shares, so the `x = 1` extraction is
     /// closed. (`value_shares()` stays public: it opens `[x]`, the value, never
-    /// `α`.) `[OPUS-4.8]`
+    /// `α`.)
     //
-    // [OPUS-4.8] sq-km34.3: the `allow(dead_code)` that used to sit here is GONE.
+    // sq-km34.3: the `allow(dead_code)` that used to sit here is GONE.
     // Its justification was "the MAC-check machinery is NOT built yet, so this has
     // no non-test caller" — no longer true: `auth_mul` and `mac_check` both call
     // this in a plain (non-test) library build. The lint now genuinely guards the
@@ -398,12 +403,12 @@ impl AuthenticatedShare {
 //   α·(x − y) = α·x − α·y        → sub: sub both components
 //   α·(x + c) = α·x + α·c        → add-constant: value gets +c, MAC gets +α·c
 // All are LOCAL / zero-round, so the authenticated SUM aggregate stays the
-// zero-round honest-majority sweet spot (design §2.3 / §5). [OPUS-4.8]
+// zero-round honest-majority sweet spot (design §2.3 / §5).
 // =============================================================================
 
 /// Add two authenticated sharings: `[[x]] + [[y]] = ([x]+[y], [α·x]+[α·y])`
 /// (design §2.3). FREE / local — both components add component-wise, no round.
-/// Inputs must be on the identical party-point set. `[OPUS-4.8]`
+/// Inputs must be on the identical party-point set.
 pub fn auth_add(
     a: &AuthenticatedShare,
     b: &AuthenticatedShare,
@@ -415,7 +420,6 @@ pub fn auth_add(
 
 /// Subtract two authenticated sharings: `[[x]] − [[y]] = ([x]−[y], [α·x]−[α·y])`
 /// (design §2.3). FREE / local. Inputs must be on the identical party-point set.
-/// `[OPUS-4.8]`
 pub fn auth_sub(
     a: &AuthenticatedShare,
     b: &AuthenticatedShare,
@@ -428,9 +432,9 @@ pub fn auth_sub(
 /// Multiply an authenticated sharing by a PUBLIC field constant `c`:
 /// `c · [[x]] = (c·[x], c·[α·x])` (design §2.3, since `α·(c·x) = c·(α·x)`). FREE /
 /// local. (This is scaling by a *public* scalar — NOT secret×secret multiplication,
-/// which is sq-km34.2 and needs real work.) `[OPUS-4.8]`
+/// which is sq-km34.2 and needs real work.)
 pub fn auth_scale(a: &AuthenticatedShare, c: Fp) -> AuthenticatedShare {
-    // [OPUS-4.8] Route through `new` so the value/MAC point-alignment invariant is
+    // Route through `new` so the value/MAC point-alignment invariant is
     // enforced in exactly one place rather than re-asserted (or silently assumed)
     // here. `scale` is point-preserving and `a` is already a valid alignment, so
     // `new` cannot fail — but we go through it rather than building the struct
@@ -448,7 +452,7 @@ pub fn auth_scale(a: &AuthenticatedShare, c: Fp) -> AuthenticatedShare {
 /// [`AuthenticatedShare`] does not carry its own threshold, so the threshold is not
 /// re-verified here (the dealer mints the key and the sharing at the same `t`, so a
 /// matching party set on the same session implies a matching `t`). A party-set
-/// mismatch is a protocol error. `[OPUS-4.8]`
+/// mismatch is a protocol error.
 pub fn auth_add_constant(
     a: &AuthenticatedShare,
     c: Fp,
@@ -465,7 +469,7 @@ pub fn auth_add_constant(
     AuthenticatedShare::new(value, mac)
 }
 
-/// [OPUS-4.8] sq-km34.2 — the **authenticated cumulative-SUM aggregate** (design
+/// sq-km34.2 — the **authenticated cumulative-SUM aggregate** (design
 /// §2.3): the MAC-carrying analogue of the backend's plain
 /// [`run_secure`](crate::backend::MpcBackend::run_secure) fold.
 /// Folds a slice of authenticated sharings with [`auth_add`], so it returns
@@ -482,14 +486,15 @@ pub fn auth_add_constant(
 /// **This helper only propagates MAC shares — it never invokes the batched
 /// `mac_check` (§2.5) itself.** Tamper detection requires the CALLER to include
 /// the result in a successful `mac_check` before opening or otherwise relying on
-/// it. And as everywhere on this chain, the malicious-with-abort security claim
-/// is research-grade: internally re-audited, but EXTERNAL accredited-cryptographer
-/// sign-off is PENDING `sq-qhy4`.
+/// it. Even then the chain is tamper-evident, NOT malicious-with-abort: protocol
+/// verification is incomplete (multiplication gates are not verified on both
+/// operands), and separately EXTERNAL accredited-cryptographer sign-off is PENDING
+/// `sq-qhy4`.
 ///
 /// All addends must be authenticated under the SAME session key `α` and shared on
 /// the identical party-point set (as [`auth_add`] requires). An empty input is a
 /// protocol error — like `run_secure`, there is no meaningful sum of zero addends
-/// to disclose, and we never invent one. `[OPUS-4.8]`
+/// to disclose, and we never invent one.
 pub fn auth_sum(shares: &[AuthenticatedShare]) -> Result<AuthenticatedShare, MpcError> {
     let (first, rest) = shares.split_first().ok_or_else(|| {
         MpcError::Protocol("auth_sum: no authenticated inputs to aggregate".into())
@@ -518,7 +523,7 @@ mod tests {
     use super::*;
     use crate::shamir::{reconstruct_at_zero, ShamirBackend};
 
-    /// [OPUS-4.8] sq-u8a8: compile-level assertion that the secret-bearing share
+    /// sq-u8a8: compile-level assertion that the secret-bearing share
     /// element type implements [`zeroize::Zeroize`] (so the `MacKey` / `AuthenticatedShare`
     /// drop scrub of their `Vec<Share>` MAC material type-checks). `MacKey` and
     /// `AuthenticatedShare` themselves zeroize their share vectors on `Drop`; a
@@ -666,7 +671,7 @@ mod tests {
     /// material and only the non-secret shape (party count + threshold). We assert
     /// the redaction marker is present and that NO share's `y` value appears in the
     /// output. `MacSession`'s `Debug` delegates to this one, so the session is
-    /// covered too. `[OPUS-4.8]`
+    /// covered too.
     #[test]
     fn mac_key_debug_redacts_alpha_shares() {
         let backend = ShamirBackend::new_seeded(5, 0xD00D).unwrap();
@@ -695,7 +700,7 @@ mod tests {
     /// back door round the `pub(crate)` `mac_shares()` accessor. The manual [`Debug`]
     /// prints `<redacted>` for the MAC and keeps the openable value sharing `[x]`. We
     /// assert the redaction marker is present and that NO MAC share's `y` value
-    /// appears in the output. `[OPUS-4.8]`
+    /// appears in the output.
     #[test]
     fn authenticated_share_debug_redacts_mac_shares() {
         let backend = ShamirBackend::new_seeded(5, 0xBEEF).unwrap();
@@ -856,7 +861,7 @@ mod tests {
 
     /// `auth_sum` rejects an empty aggregate (like `run_secure`): there is no
     /// meaningful sum of zero addends to disclose, so it is a protocol error, not
-    /// a silent zero. `[OPUS-4.8]`
+    /// a silent zero.
     #[test]
     fn auth_sum_rejects_empty_input() {
         assert!(matches!(auth_sum(&[]), Err(MpcError::Protocol(_))));

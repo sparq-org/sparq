@@ -1,7 +1,7 @@
 //! Standard **filtered link-prediction** eval harness for the shallow-KGE trainer, plus the P0
 //! **ablation matrix**, a **long-tail breakdown**, and a **synthetic gUFO slice**.
 //!
-//! [OPUS-4.8] sq-0wo9e.8 / P6 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.8 / P6 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §P6 eval harness). **Opt-in** (`kge` cargo feature, off by default, implies `structure`);
 //! nothing in the default build or core engine changes.
 //!
@@ -36,7 +36,7 @@
 //! [`ModelKind`](crate::train::ModelKind) on [`EvalConfig::train`]; it is the same for all four
 //! cells of a single run so the deltas isolate the prior.
 //!
-//! # The gUFO-prior axis (wired, default OFF) — [FABLE-5] kern/ufo-priors
+//! # The gUFO-prior axis (wired, default OFF) — kern/ufo-priors
 //!
 //! The gUFO-prior axis ([`AblationCell::gufo_prior`], toggled by [`EvalConfig::gufo_prior`]) is now
 //! **wired**: when ON, the [`crate::ufo_priors`] reader mines the UFO-**provable** disjointness
@@ -113,7 +113,7 @@ fn splitmix64(state: &mut u64) -> u64 {
 
 /// A 64-bit hash of a triple, for deterministic, leakage-free split assignment.
 ///
-/// [OPUS-4.8] sq-0wo9e.8: the mixing parameter is a PRNG SEED, NOT a cryptographic salt — this is a
+/// sq-0wo9e.8: the mixing parameter is a PRNG SEED, NOT a cryptographic salt — this is a
 /// non-cryptographic splitmix64-based hash used only to deterministically partition triples into
 /// train/valid/test. It is deliberately NOT named `salt`: CodeQL's `rust/hard-coded-cryptographic-value`
 /// heuristic flags any literal flowing into a `salt`-named parameter as a hard-coded crypto salt (6 FPs
@@ -313,7 +313,7 @@ pub struct AblationCell {
     pub closure: bool,
     /// Type-constrained negatives (vs uniform-random)? (the type-negative prior).
     pub type_constrained: bool,
-    /// The gUFO prior — **wired** ([FABLE-5] kern/ufo-priors): mirrors [`EvalConfig::gufo_prior`].
+    /// The gUFO prior — **wired** (kern/ufo-priors): mirrors [`EvalConfig::gufo_prior`].
     /// When `true` the UFO-provable disjointness mask ([`crate::ufo_priors`]) was applied to the
     /// serve-time candidate pool of every ranking in this cell; when `false` (the default) the
     /// mask was never constructed and the cell is the byte-identical baseline.
@@ -372,7 +372,7 @@ fn filtered_rank(
         if splits.is_true(&cand) {
             continue;
         }
-        // [FABLE-5] kern/ufo-priors: the gUFO-prior serve-time hard mask (only under
+        // kern/ufo-priors: the gUFO-prior serve-time hard mask (only under
         // `EvalConfig::gufo_prior`, else `None` and this arm is byte-identical to the baseline).
         // Drops a candidate whose type is PROVABLY disjoint from the relation's declared
         // domain/range class — answer-safe (see `UfoMask::provably_excluded`; the held-out
@@ -500,7 +500,7 @@ pub struct EvalConfig {
     pub split_seed: u64,
     /// Long-tail frequency threshold (an answer entity with train-freq ≤ this is "long-tail").
     pub long_tail_threshold: u32,
-    /// [FABLE-5] kern/ufo-priors — the gUFO-prior ablation switch. **Default `false`** (the
+    /// kern/ufo-priors — the gUFO-prior ablation switch. **Default `false`** (the
     /// byte-identical baseline: the UFO mask is never constructed and no ranking changes). When
     /// `true`, the UFO-provable disjointness mask ([`crate::ufo_priors`]) is applied to every
     /// ranking's candidate pool as the answer-safe serve-time hard mask (see the module docs).
@@ -523,14 +523,14 @@ impl EvalConfig {
             split_seed: seed ^ 0xF00D,
             long_tail_threshold: 2,
             // Default OFF: the gUFO prior is opt-in per run; with it off the harness is the
-            // byte-identical pre-wiring baseline. [FABLE-5] kern/ufo-priors
+            // byte-identical pre-wiring baseline. kern/ufo-priors
             gufo_prior: false,
             gufo_ns: crate::ufo_priors::GUFO_NS,
         }
     }
 }
 
-// ---- The gUFO serve-time mask ([FABLE-5] kern/ufo-priors) ---------------------------------------
+// ---- The gUFO serve-time mask (kern/ufo-priors) ---------------------------------------
 
 /// The serve-time UFO mask of one (possibly closed) eval graph: the UFO-augmented
 /// [`DisjointnessOracle`] plus the id-level lookups the ranking loop needs (candidate `rdf:type`s
@@ -648,7 +648,7 @@ pub fn run_ablation(
         let graph = &closed.graph;
         let splits = Splits::split(graph, cfg.train_frac, cfg.valid_frac, cfg.split_seed);
 
-        // [FABLE-5] kern/ufo-priors: the gUFO serve-time mask, built ONCE per closure arm and
+        // kern/ufo-priors: the gUFO serve-time mask, built ONCE per closure arm and
         // ONLY when the axis is explicitly on — with it off (the default) no UFO code runs and
         // the run is byte-identical to the pre-wiring baseline (asserted by tests).
         let ufo_mask = if cfg.gufo_prior {
@@ -1193,7 +1193,7 @@ type SketchContribution = ([Id; 3], Vec<f32>);
 /// [`sketch_predicate`](crate::grounding::sketch_predicate)), pooled through
 /// [`ProvenanceWeights::pool_weighted`](crate::provenance::ProvenanceWeights::pool_weighted) under
 /// `mode`. Deterministic: each row is written independently from a contribution list built in
-/// `graph.iter_ids()` order, so hash-map iteration order cannot affect the result. [OPUS-5] sq-w2af4
+/// `graph.iter_ids()` order, so hash-map iteration order cannot affect the result. sq-w2af4
 fn sketch_augmented(
     model: &TrainedModel,
     graph: &Graph,
@@ -1684,7 +1684,7 @@ pub fn synthetic_relational_ttl(n_entities: usize, seed: u64) -> String {
 /// sized by `n_entities`. The vocabulary mirrors the real `pkg.ttl` predicate set so the reader
 /// exercises the REAL provenance path, not a mock.
 ///
-/// [OPUS-5] sq-w2af4: the slice also carries **statement-level** provenance — a share of the noise
+/// sq-w2af4: the slice also carries **statement-level** provenance — a share of the noise
 /// edges are asserted by an otherwise-*good* head and their doubt is expressed on an RDF 1.2
 /// reifier (`:st rdf:reifies <<( s p o )>>` + a low `pkg:confidence`). That is the case entity-level
 /// provenance structurally cannot express, and it is what gives one subject's edges *differing*
@@ -2035,7 +2035,7 @@ ex:c ex:rel ex:y .
         assert!(cells.iter().all(|c| !c.gufo_prior));
     }
 
-    // ---- gUFO-prior axis ([FABLE-5] kern/ufo-priors) --------------------------------------------
+    // ---- gUFO-prior axis (kern/ufo-priors) --------------------------------------------
 
     #[test]
     fn gufo_prior_on_a_gufo_free_graph_is_byte_identical_to_off() {

@@ -43,12 +43,12 @@
 //! every length against the remaining input so a truncated / malformed buffer is a clean
 //! [`WireError`], never a panic or an out-of-bounds read (this crate is `forbid(unsafe_code)`).
 //!
-//! [OPUS-4.8] sq-6ihg — Fable re-review when available.
+//! sq-6ihg — Fable re-review when available.
 
 use crate::source::{FragBinding, FragTerm};
 
 /// The 4-byte magic prefixing a binary brTPF binding block: ASCII `"bTPF"`. Lets a reader
-/// reject a buffer that is not a binding block before interpreting any length. [OPUS-4.8].
+/// reject a buffer that is not a binding block before interpreting any length.
 pub const BINARY_MAGIC: [u8; 4] = *b"bTPF";
 
 /// The binary wire format version (the byte after [`BINARY_MAGIC`]). Bumped on any
@@ -72,7 +72,7 @@ const KIND_BLANK: u8 = 1;
 const KIND_LITERAL: u8 = 2;
 
 /// A failure decoding a binary brTPF binding block. Every variant is a *clean* error — a
-/// malformed or truncated buffer never panics and never reads out of bounds. [OPUS-4.8].
+/// malformed or truncated buffer never panics and never reads out of bounds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireError {
     /// The buffer was shorter than the fixed header, or a length field pointed past the
@@ -214,7 +214,7 @@ fn position_key(name: &str) -> Option<&'static str> {
 /// The header flag bit for a name that is EXACTLY a canonical short position key (`s`/`p`/`o`).
 /// Only the canonical short form earns the no-name-bytes header slot, because a decoded position
 /// flag reconstructs the name as `s`/`p`/`o`; the long forms (`subject`/…) would not round-trip
-/// through a flag, so they ride the EXTRA section under their own name. [OPUS-4.8] sq-6ihg.
+/// through a flag, so they ride the EXTRA section under their own name. sq-6ihg.
 fn canonical_position_flag(name: &str) -> Option<u8> {
     match name {
         "s" => Some(HDR_SUBJECT),
@@ -549,7 +549,7 @@ mod tests {
         );
     }
 
-    // [FABLE-5] sq-3dyje.6 (mutation-kill): position_key must map EACH of the three brTPF
+    // sq-3dyje.6 (mutation-kill): position_key must map EACH of the three brTPF
     // slots, in BOTH long and short spellings. cargo-mutants showed the `"predicate" | "p"`
     // arm could be deleted with no test noticing: no existing test binds a predicate slot,
     // so a predicate binding silently vanished from the text wire (and the header flag from

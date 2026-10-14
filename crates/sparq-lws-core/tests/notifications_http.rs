@@ -437,7 +437,7 @@ async fn bind_live_server() -> (String, KeyKit, KeyKit, NotificationHub) {
     (base_url, issuer_key, client_key, notification_hub)
 }
 
-// [GPT-5.6] A current-thread runtime makes the burst deterministic: the receive task cannot drain
+// A current-thread runtime makes the burst deterministic: the receive task cannot drain
 // the broadcast channel until this task yields after filling it beyond its fixed capacity.
 #[tokio::test(flavor = "current_thread")]
 async fn live_websocket_overflow_closes_and_increments_metrics() {

@@ -1,4 +1,4 @@
-// [OPUS-4.8] Per-holder local SPARQL sub-evaluation — the REAL M0 core.
+// Per-holder local SPARQL sub-evaluation — the REAL M0 core.
 //! Per-holder local SPARQL sub-evaluation.
 //!
 //! Architecture refs: §4.1 (holders own one-or-more signed named graphs),

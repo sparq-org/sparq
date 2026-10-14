@@ -1,5 +1,5 @@
 //! W3C vc-di-eddsa `eddsa-rdfc-2022` published test vector, verified through the
-//! public API. [OPUS-5.5] zkp-14.2.
+//! public API. zkp-14.2.
 //!
 //! Test data origin: W3C Recommendation "Data Integrity EdDSA Cryptosuites v1.0"
 //! (15 May 2025), Appendix B.1 (`eddsa-rdfc-2022` representation) —

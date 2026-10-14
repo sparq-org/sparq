@@ -1,6 +1,6 @@
 //! Structure-aware vectorisation **preprocessing + sampling-logic** layer (P0).
 //!
-//! [OPUS-4.8] sq-0wo9e.1 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.1 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §5.A + §2 row "domain/range"). This module is the **lowest-risk, additive** slice of the
 //! structure-aware-vectorisation epic. It is **opt-in** (the `structure` cargo feature, off by
 //! default) and changes **nothing** in the default `sparq-vectors` build or the core engine.

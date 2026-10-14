@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-pbz04.1.2 (epic sq-pbz04.1, substrate seam 3) — the ORDERING-PARITY
+//! sq-pbz04.1.2 (epic sq-pbz04.1, substrate seam 3) — the ORDERING-PARITY
 //! oracle for the `substrate-compare` feature: the reasoner-side comparator
 //! (`sparq_reason::compare::sort_ids`, the shared `sparq_substrate::compare` total order
 //! over dictionary ids) must order an ENTAILED solution multiset BYTE-IDENTICALLY to a
@@ -35,7 +35,7 @@
 //! same triples; the ORDER BY total order is deterministic, so the multisets match.
 //! The separate `multiset_duplicate_order_matches_engine_order_by` test pins
 //! duplicate-VALUE ordering in a no-entailment fixture where duplicate values are
-//! deliberately asserted. [SONNET-4.6]
+//! deliberately asserted.
 //!
 //! (Compiled only with `--features substrate-compare` — a Cargo `required-features`
 //! target. sparq-engine is a dev-dependency here purely as the parity oracle.)
@@ -170,7 +170,7 @@ fn entailed_solution_order_matches_engine_order_by() {
 /// Expected numeric ORDER BY: `[−3, 2, 2, 5, 10, 10]`.  A lexicographic comparator
 /// would yield `["−3"…, "10"…, "10"…, "2"…, "2"…, "5"…]`, diverging from the engine.
 /// This test goes RED if `sort_ids` is substituted with a lexicographic sort —
-/// the mutation spot-check confirming the assertion is not vacuous. [SONNET-4.6]
+/// the mutation spot-check confirming the assertion is not vacuous.
 #[test]
 fn multiset_duplicate_order_matches_engine_order_by() {
     // No RDFS schema: every object in `triples` comes from the asserted statements only.

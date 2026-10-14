@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-sjey1 (gh #3220) The MCP **resources** surface of the base
+//! sq-sjey1 (gh #3220) The MCP **resources** surface of the base
 //! [`McpServer`](crate::McpServer): the served dataset and each of its graphs, exposed
 //! as readable MCP resources.
 //!

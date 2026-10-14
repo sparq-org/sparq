@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const PREDICATES: [&str; 4] = ["http://e/color", "http://e/size", "http://e/tag", RDF_TYPE];
 
-// [GPT-5.6] A small deterministic generator exercises the algebraic laws without
+// A small deterministic generator exercises the algebraic laws without
 // adding a random-number dependency to this opt-in crate.
 struct Lcg(u64);
 

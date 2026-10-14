@@ -3,7 +3,7 @@
 pub(crate) const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
 
 /// Renders the fields of a Python-facing term in the notation used by `Term.__repr__`.
-// [GPT-5.6] sq-ct7gh: keep this function free of PyO3 so the disabled cdylib test
+// sq-ct7gh: keep this function free of PyO3 so the disabled cdylib test
 // harness does not prevent direct Rust coverage of rendering and literal escaping.
 pub(crate) fn render_n3(
     kind: &str,

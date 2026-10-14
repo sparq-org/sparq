@@ -2,7 +2,7 @@
 //! (`sq-0hu2w`): assert that downstream crates can reach these via `sparq_trust`
 //! without a separate `sparq-zk` dependency.
 //!
-//! [SONNET-4.6] sq-0hu2w
+//! sq-0hu2w
 
 /// Round-trip: a well-formed hex string must parse to `Some(PublicKey)` and
 /// re-serialise to the same hex via the `sparq_zk` sibling.

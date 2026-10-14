@@ -1,6 +1,6 @@
 //! bd-bridge eval — the bd→RDF read-model + the §4.5 four-criterion replacement gate.
 //!
-//! [OPUS-4.8] sq-2m6zm.5 (epic sq-2m6zm). 🤖 SPARQ agent — dogfooding sparq as a
+//! sq-2m6zm.5 (epic sq-2m6zm). 🤖 SPARQ agent — dogfooding sparq as a
 //! project knowledge graph. Written while Fable unavailable; flag for re-review when
 //! Fable returns.
 //!

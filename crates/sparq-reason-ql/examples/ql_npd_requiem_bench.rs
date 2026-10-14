@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-hmd7l.9 (epic sq-hmd7l): the sparq leg of the OWL 2 QL rewriting comparison
+//! sq-hmd7l.9 (epic sq-hmd7l): the sparq leg of the OWL 2 QL rewriting comparison
 //! vs Ontop on the NPD + Requiem suites (`scripts/bench/reason-ql-same-box.sh`). Run:
 //!
 //!     cargo run -p sparq-reason-ql --example ql_npd_requiem_bench --release --features experimental -- --smoke

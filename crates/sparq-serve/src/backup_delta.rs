@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-bu1a) The INCREMENTAL DELTA-STREAM companion to the Option-A base backup
+//! (sq-bu1a) The INCREMENTAL DELTA-STREAM companion to the Option-A base backup
 //! ([`crate::backup`]) — the change-stream / point-in-time-recovery (PITR) other half.
 //!
 //! ## What this is

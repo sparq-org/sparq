@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-lsp7k.1.6: JSON-RPC round trips for the opt-in shape-aware
+//! sq-lsp7k.1.6: JSON-RPC round trips for the opt-in shape-aware
 //! `describe_form` tool (feature `shacl`).
 //!
 //! The load-bearing invariant: the tool returns the SAME JSON string

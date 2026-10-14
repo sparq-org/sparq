@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-z589, epic sq-3183) End-to-end tests for the **approximate** `vec:` magic
+//! (sq-z589, epic sq-3183) End-to-end tests for the **approximate** `vec:` magic
 //! predicate path: `query_vec_approx` / `prepare_vec_approx` run the k-NN search through an
 //! on-disk [`DiskAnnIndex`] (Vamana) instead of the exact `nearest_exact` scan.
 //!

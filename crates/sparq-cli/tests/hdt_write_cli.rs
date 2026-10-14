@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-8ju74) End-to-end tests for the `to-hdt` EXPORT subcommand: the actual
+//! (sq-8ju74) End-to-end tests for the `to-hdt` EXPORT subcommand: the actual
 //! sparq-cli binary exporting a loaded RDF document as a standard-layout HDT archive, then
 //! loading that archive back through its own `query` HDT path. Compiled and run only with
 //! the opt-in `hdt-write` cargo feature (which implies `hdt`, the loader):

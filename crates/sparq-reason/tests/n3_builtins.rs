@@ -1,7 +1,7 @@
 //! N3 builtin correctness — reverse/invertible modes, comparison operators, and the
 //! error/edge paths (arg-count + type mismatch).
 //!
-//! 🤖 SPARQ agent — sq-qcnn test-quality slice [OPUS-4.8].
+//! 🤖 SPARQ agent — sq-qcnn test-quality slice.
 //!
 //! Differential against cwm/EYE builtin semantics. Each case is a self-contained N3 document
 //! whose forward rule's premise uses ONE builtin; the conclusion fires iff the builtin binds /

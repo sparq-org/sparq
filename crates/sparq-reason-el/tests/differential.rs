@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-evb1: differential-correctness fixtures for the EL+⊥ classifier.
+// sq-evb1: differential-correctness fixtures for the EL+⊥ classifier.
 //
 // ORACLE NOTE (best-judgment decision, flagged for the maintainer in the PR + a GH issue):
 // the bead asks for a differential check vs ELK (Java, Apache-2.0). Making ELK a CI/build
@@ -173,7 +173,7 @@ fn rl_incompleteness_witness_is_complete_under_el() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// [OPUS-4.8] sq-bif: correctness-coverage additions. The fixtures above pin the CR1-CR5 closure
+// sq-bif: correctness-coverage additions. The fixtures above pin the CR1-CR5 closure
 // via the `is_subclass_of` / `unsatisfiable_classes` oracles; the tests below close GENUINE gaps
 // in the *public surface* and the *extractor's fragment recogniser* — paths the existing suite
 // never asserts: the `super_classes` accessor contract, the `Report` field semantics, the RHS /
@@ -296,7 +296,7 @@ fn explicit_owl_nothing_superclass_makes_class_unsatisfiable() {
     );
 }
 
-// [SONNET-4.6] sq-26zuf: ⊤ is deliberately absent from the named-class projection, but a
+// sq-26zuf: ⊤ is deliberately absent from the named-class projection, but a
 // global ⊤ ⊑ ⊥ clash must remain visible to callers through the classification report.
 #[test]
 fn thing_subclass_of_nothing_is_reported() {

@@ -1,5 +1,5 @@
 //! Stateful `odrl:count` enforcement tests, through the REAL evaluator +
-//! counter-store path. [OPUS-4.8] sq-zi5w.
+//! counter-store path. sq-zi5w.
 //!
 //! Coverage: first N exercises grant + (N+1)th denies (`lteq`, `lt`, `eq`); a denied
 //! base decision burns no budget; per-(party, target, rule) budget isolation; the
@@ -247,7 +247,7 @@ fn no_count_constraint_unbounded() {
 }
 
 /// "alice may read asset/x" under TWO `odrl:count` constraints (a tighter and a looser
-/// limit on the same rule → same usage counter). [OPUS-4.8] sq-ea27.
+/// limit on the same rule → same usage counter). sq-ea27.
 fn policy_two_counts(op_a: &str, bound_a: &str, op_b: &str, bound_b: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
@@ -270,7 +270,7 @@ fn policy_two_counts(op_a: &str, bound_a: &str, op_b: &str, bound_b: &str) -> sp
 // ---------------------------------------------------------------------------
 // 10. MULTI-LIMIT: two `odrl:count` constraints on one rule share ONE usage counter
 //     (same CountKey). The TIGHTEST limit governs, and each exercise consumes EXACTLY
-//     ONE unit — never one-per-constraint (the multi-consume bug). [OPUS-4.8] sq-ea27.
+//     ONE unit — never one-per-constraint (the multi-consume bug). sq-ea27.
 // ---------------------------------------------------------------------------
 #[test]
 fn two_counts_tightest_governs_and_consumes_one() {
@@ -308,7 +308,7 @@ fn two_counts_tightest_governs_and_consumes_one() {
 // 11. MULTI-LIMIT ATOMICITY: under concurrent exercises against a rule carrying TWO
 //     count constraints, the store grants EXACTLY the tightest limit — never over-grants
 //     (the multi-limit TOCTOU window between the pre-check and the consume is closed).
-//     [OPUS-4.8] sq-ea27.
+//     sq-ea27.
 // ---------------------------------------------------------------------------
 #[test]
 fn concurrent_multi_limit_never_overgrants() {
@@ -355,7 +355,7 @@ fn concurrent_multi_limit_never_overgrants() {
 
 // ---------------------------------------------------------------------------
 // 12. MULTI-LIMIT pre-exhausted: if the tightest limit is already reached, a further
-//     exercise denies and burns nothing. [OPUS-4.8] sq-ea27.
+//     exercise denies and burns nothing. sq-ea27.
 // ---------------------------------------------------------------------------
 #[test]
 fn two_counts_denies_when_tightest_exhausted() {

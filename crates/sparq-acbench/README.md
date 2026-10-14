@@ -38,6 +38,10 @@ assert_eq!(oracle_wac(&request, &[]), Decision::Deny);
 - **Fail-closed harness**: `Decision::Deny` is the default; any mismatch → nonzero exit.
 - **Four use-case generators** (beads `sq-i6du2.2`–`.5`): personal data storage (U1),
   commercial project management (U2), financial services (U3), research consortium (U4).
+- **Exported group closure**: U1, U2, and U4 expose `group_memberships`, a sorted map
+  from group IRIs to resolved agent sets (including nested membership). ODRL consumers
+  map these to compiled collection IRIs and supply explicit request evidence. U3 only
+  names advisory groups; it does not generate membership rolls.
 - **Zero dependency on `sparq-core` / `sparq-engine`**: opt-in crate architecture.
 
 ## 📚 Learn more

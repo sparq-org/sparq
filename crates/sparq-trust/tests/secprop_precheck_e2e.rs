@@ -27,7 +27,7 @@
 //! Runs only with the `secprop-precheck` feature; the `feature-matrix.yml` /
 //! `feature-matrix.d/sparq-trust.yml` leg EXECUTES it.
 //!
-//! 🤖 SPARQ agent — sq-dt5hv (epic sq-0dksu, Phase 5) + sq-nrwqs (Phase 5.1) [OPUS-4.8].
+//! 🤖 SPARQ agent — sq-dt5hv (epic sq-0dksu, Phase 5) + sq-nrwqs (Phase 5.1).
 //! Flag for re-review when Fable returns.
 #![cfg(feature = "secprop-precheck")]
 
@@ -59,7 +59,7 @@ const ACR_ABAC_RULE: &str = r#"@prefix schema: <http://schema.org/> .
 { ?x schema:age ?y . ?y math:greaterThan 18 } => { ?x auth:read <https://pod.ex/resourceX> } .
 "#;
 
-// [OPUS-4.8] sq-nrwqs (Phase 5.1): the method's secprop annotation graph is NO LONGER
+// sq-nrwqs (Phase 5.1): the method's secprop annotation graph is NO LONGER
 // caller-supplied — the pre-check resolves it from the bundled sparq-zk
 // `secprop-methods.ttl`, and the requester's ODRL preference is STRUCTURED (validated
 // `AdmissibilityConstraint` IRIs), not raw N3. The string-canonical method's bundled block

@@ -1,4 +1,4 @@
-//! TBox-capture accounting tests — sq-pbz04.3.3 [SONNET-4.6]
+//! TBox-capture accounting tests — sq-pbz04.3.3
 //!
 //! Validates the total-accounting invariant: every `rdfs:`/`owl:` predicate triple is EITHER
 //! captured (positive inclusion), counted in `skipped` (non-QL axiom), counted in
@@ -34,7 +34,7 @@ fn iri(local: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// A1 — owl:equivalentClass rewrites BOTH directions [SONNET-4.6]
+// A1 — owl:equivalentClass rewrites BOTH directions
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -95,7 +95,7 @@ fn equivalent_class_complex_object_counts_skipped() {
 }
 
 // ---------------------------------------------------------------------------
-// A2 — owl:equivalentProperty rewrites BOTH directions [SONNET-4.6]
+// A2 — owl:equivalentProperty rewrites BOTH directions
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -132,7 +132,7 @@ fn equivalent_property_captures_both_directions() {
 }
 
 // ---------------------------------------------------------------------------
-// A3 — owl:disjointWith reports consistency_relevant > 0 [SONNET-4.6]
+// A3 — owl:disjointWith reports consistency_relevant > 0
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -269,7 +269,7 @@ fn all_values_from_still_counted_skipped() {
 }
 
 // ---------------------------------------------------------------------------
-// A5 — fully_captured() correctness [SONNET-4.6]
+// A5 — fully_captured() correctness
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -347,7 +347,7 @@ fn fully_captured_consistency_relevant_does_not_block() {
 }
 
 // ---------------------------------------------------------------------------
-// A6 — annotation predicates not counted as unrecognised_schema [SONNET-4.6]
+// A6 — annotation predicates not counted as unrecognised_schema
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -378,7 +378,7 @@ fn owl_annotation_predicates_not_counted_as_unrecognised() {
 }
 
 // ---------------------------------------------------------------------------
-// A7 — ABox triples (non-rdfs/owl predicates) are silently ignored [SONNET-4.6]
+// A7 — ABox triples (non-rdfs/owl predicates) are silently ignored
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -397,19 +397,19 @@ fn abox_triples_do_not_affect_any_tally() {
 
 // ---------------------------------------------------------------------------
 // B1 — rdf:type characteristic-property typing counted as unrecognised_schema
-//      [SONNET-4.6] sq-pbz04.3.3
+//      sq-pbz04.3.3
 //
 // MUTATION-KILL: `functional_property_typing_is_counted_unrecognised` MUST go RED on the
 // pre-fix code (before the rdf:type arm was added to TBox::extract). Confirmed: on the pre-fix
 // branch the test fails because FunctionalProperty triples were silently dropped (predicate
 // `rdf:type` is in the `rdf:` namespace, not `rdfs:`/`owl:`, so is_unrecognised_schema returned
-// false and unrecognised_schema stayed 0). [SONNET-4.6]
+// false and unrecognised_schema stayed 0).
 // ---------------------------------------------------------------------------
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 /// MUTATION-KILL test: `:hasSSN rdf:type owl:FunctionalProperty` must increment
-/// `unrecognised_schema` and make `fully_captured()` return false. [SONNET-4.6] sq-pbz04.3.3
+/// `unrecognised_schema` and make `fully_captured()` return false. sq-pbz04.3.3
 #[test]
 fn functional_property_typing_is_counted_unrecognised() {
     let ts = triples(&[&format!(
@@ -444,7 +444,7 @@ fn functional_property_typing_is_counted_unrecognised() {
     );
 }
 
-/// Cover all 7 characteristic property types to pin the full enumeration. [SONNET-4.6] sq-pbz04.3.3
+/// Cover all 7 characteristic property types to pin the full enumeration. sq-pbz04.3.3
 #[test]
 fn characteristic_property_types_are_all_counted() {
     let characteristic = [
@@ -481,10 +481,10 @@ fn characteristic_property_types_are_all_counted() {
 }
 
 // ---------------------------------------------------------------------------
-// B2 — QL-legal rdf:type declarations must NOT be miscounted [SONNET-4.6]
+// B2 — QL-legal rdf:type declarations must NOT be miscounted
 // ---------------------------------------------------------------------------
 
-/// A TBox with only QL-legal entity-kind declarations stays `fully_captured`. [SONNET-4.6] sq-pbz04.3.3
+/// A TBox with only QL-legal entity-kind declarations stays `fully_captured`. sq-pbz04.3.3
 #[test]
 fn ql_legal_declarations_stay_fully_captured() {
     let ts = triples(&[
@@ -514,7 +514,7 @@ fn ql_legal_declarations_stay_fully_captured() {
 
 // ---------------------------------------------------------------------------
 // B3 — ontology metadata predicates (owl:imports, owl:versionIRI, etc.) must
-//      NOT be counted as unrecognised_schema [SONNET-4.6] sq-pbz04.3.3
+//      NOT be counted as unrecognised_schema sq-pbz04.3.3
 //
 // MUTATION-KILL: this test MUST go RED on the pre-fix code (before owl:imports
 // and owl:versionIRI were added to ANNOTATION_OWL). On pre-fix code those
@@ -523,13 +523,13 @@ fn ql_legal_declarations_stay_fully_captured() {
 // sub-predicates or annotations), so unrecognised_schema > 0 and
 // fully_captured() returns false. After the fix they are classified as the
 // "classified-annotation" bucket (silently ignored) and the test passes.
-// [SONNET-4.6] sq-pbz04.3.3
+// sq-pbz04.3.3
 // ---------------------------------------------------------------------------
 
 /// MUTATION-KILL: an ontology carrying `owl:imports`, `owl:versionIRI`, and
 /// `owl:versionInfo` (plus a QL-legal axiom) must have `fully_captured()==true`
 /// and `unrecognised_schema==0`. This goes RED on the pre-fix code where those
-/// predicates were classified as unrecognised schema vocabulary. [SONNET-4.6]
+/// predicates were classified as unrecognised schema vocabulary.
 #[test]
 fn ontology_metadata_predicates_not_counted_as_unrecognised() {
     // A realistic ontology header: imports link, version IRI, version info label,

@@ -5,7 +5,7 @@
 //! `vocab::tests::ttl_pins_match_rust_constants` unit test additionally pins the IRIs
 //! against the Rust constants; this test is the *syntactic* guard.
 //!
-//! [OPUS-4.8] sq-pfae.2 (issue #940). 🤖 SPARQ agent — trust-graph authorisation.
+//! sq-pfae.2 (issue #940). 🤖 SPARQ agent — trust-graph authorisation.
 
 use oxttl::TurtleParser;
 

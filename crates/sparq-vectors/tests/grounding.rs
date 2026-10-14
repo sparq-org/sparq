@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-0wo9e.5 (epic sq-0wo9e) — integration tests for the P4 **flexible grounding**
+//! sq-0wo9e.5 (epic sq-0wo9e) — integration tests for the P4 **flexible grounding**
 //! selector + verbaliser over a REAL graph + a REAL `.spqv` store (the modalities that need a
 //! built store / schema header cannot be exercised by the in-crate unit tests alone).
 //!
@@ -12,7 +12,7 @@
 //!   over the un-closed graph (the honest "complete relative to whatever you closed under" contract);
 //! - the subgraph grounding contains only facts present in the graph (never an approximate signal).
 //!
-//! [OPUS-5] sq-w2af4 adds the **provenance-weighting** half of the design's §USE-1 integration
+//! sq-w2af4 adds the **provenance-weighting** half of the design's §USE-1 integration
 //! points, both end-to-end through the REAL path (never a mock):
 //! - point 3: graph provenance → `SchemaHeader` → `ground`/`ground_weighted` → `fuse_rrf_weighted`.
 //!   `weight_header` supplies the graph-global per-block *default*; a `NodeWeighting` handed to
@@ -100,7 +100,7 @@ fn typed_sub_vector_projects_only_requested_blocks() {
     };
     assert_eq!(values, vec![1.0, 2.0, 3.0, 4.0], "numeric block only");
     assert_eq!(blocks, vec![Encoder::Numeric]);
-    // [OPUS-5] sq-w2af4: a header recording no fusion weight grounds fail-open at 1.0.
+    // sq-w2af4: a header recording no fusion weight grounds fail-open at 1.0.
     assert_eq!(weights, vec![1.0], "one fail-open weight per kept block");
 
     // Keep all (empty keep list) → the full row.
@@ -124,7 +124,7 @@ fn typed_sub_vector_projects_only_requested_blocks() {
     assert_eq!(weights, vec![1.0, 1.0]);
 }
 
-/// [OPUS-5] sq-w2af4 — the point-3 loop, END-TO-END through the REAL path: graph provenance →
+/// sq-w2af4 — the point-3 loop, END-TO-END through the REAL path: graph provenance →
 /// `weight_header` → the `.spqv` `SchemaHeader` → `ground` → `fuse_rrf_weighted`. A block fed by a
 /// LOW-provenance PREDICATE hands the fusion path a smaller modality multiplier than one fed by a
 /// high-provenance predicate, so the high-provenance modality wins the fused ranking.
@@ -248,7 +248,7 @@ ex:shaky  pkg:assurance secx:Conjectured ; pkg:confidence "0.3" ;
     assert_eq!(weights, vec![1.0, 1.0], "ablation-off leaves every block unweighted");
 }
 
-/// [OPUS-5] sq-w2af4 — the PER-NODE half of point 3, END-TO-END: `ground_weighted` scales a node's
+/// sq-w2af4 — the PER-NODE half of point 3, END-TO-END: `ground_weighted` scales a node's
 /// modality by **that node's own incident edges**, not by any graph-wide aggregate. Two nodes with
 /// the same feeding predicate but opposite incident-edge provenance must get *different* weights,
 /// each derived only from its own contributions — and a node with no incident edge for the
@@ -350,7 +350,7 @@ ex:silent ex:other ex:o3 .
     }
 }
 
-/// [OPUS-5] sq-w2af4 — the point-2 loop, END-TO-END: `sketch_predicate` pools a node's
+/// sq-w2af4 — the point-2 loop, END-TO-END: `sketch_predicate` pools a node's
 /// multi-valued predicate over the REAL `.spqv` store, weighting each contribution by **the
 /// asserting statement's** `w(t)`. The fixture reifies one of `ex:hub`'s two `ex:cites` statements
 /// as doubtful (RDF 1.2 `rdf:reifies` + a low `pkg:confidence`) while `ex:hub` itself stays a

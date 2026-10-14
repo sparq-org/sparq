@@ -10,7 +10,7 @@
 //!    fabricated-citation count (target 0).
 //! 3. A Finding with NO `prov:wasDerivedFrom` renders NO fabricated citation.
 //!
-//! [SONNET-4.6] sq-2489d.11. 🤖 SPARQ agent — citation renderer for the PKG-native tier.
+//! sq-2489d.11. 🤖 SPARQ agent — citation renderer for the PKG-native tier.
 //!
 //! Run: `cargo test -p sparq-kb --features query --test citations`
 #![cfg(feature = "query")]

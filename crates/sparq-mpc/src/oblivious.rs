@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-18lk: oblivious shuffle (Waksman/Benes net) + oblivious sort
+// sq-18lk: oblivious shuffle (Waksman/Benes net) + oblivious sort
 // substrate over Shamir F_p. Keystone hidden-regime primitive (ORQ SOSP'25): DISTINCT,
 // ORDER BY, GROUP BY-over-hidden, MIN/MAX, OPTIONAL/MINUS, the set-returning
 // oblivious-join output path, and ~linear joins all reduce to it. Native-only;
@@ -715,7 +715,7 @@ pub fn shuffle(
 /// [`WaksmanNetwork`] to obtain the per-switch control bits it drives over the
 /// wire. Same unbiased Fisher–Yates over the dealer's masking RNG, same
 /// fail-closed `n > P` guard — the network tier must not re-implement a second
-/// sampler. `[OPUS-4.8]` sq-bdbv.
+/// sampler. sq-bdbv.
 pub fn sample_random_permutation(
     dealer: &mut ShamirDealer,
     n: usize,
@@ -732,7 +732,7 @@ pub fn sample_random_permutation(
 /// field elements via `uniform_below`), so a column whose length exceeds `P` is
 /// rejected with a typed [`MpcError`] rather than producing a biased permutation
 /// or hanging. `n` is a row count, so `n > P` is unreachable in any real
-/// deployment; this guards the boundary explicitly anyway. `[OPUS-4.8]`
+/// deployment; this guards the boundary explicitly anyway.
 fn random_permutation(dealer: &mut ShamirDealer, n: usize) -> Result<Vec<usize>, MpcError> {
     // Reject up front so the `as u64` cast below cannot lose information and the
     // sampler is never asked for a `bound > P` it cannot serve unbiasedly.
@@ -758,7 +758,7 @@ fn random_permutation(dealer: &mut ShamirDealer, n: usize) -> Result<Vec<usize>,
 /// the sampler draws uniform field elements in `[0, P)`, so a `bound > P` cannot
 /// be served — the rejection `limit = P − (P % bound)` would be `0` and the loop
 /// would never terminate. Such a `bound` is rejected with a typed [`MpcError`]
-/// instead of hanging. `[OPUS-4.8]`
+/// instead of hanging.
 fn uniform_below(dealer: &mut ShamirDealer, bound: u64) -> Result<u64, MpcError> {
     debug_assert!(bound >= 1);
     let p = crate::field::P;
@@ -1504,7 +1504,7 @@ mod tests {
     // FAIL-CLOSED: `uniform_below` must reject a `bound > P` with a typed error
     // instead of spinning forever (the `limit = P − (P % bound) = 0` non-
     // termination Copilot flagged). For `1 <= bound <= P` it must terminate and
-    // return a value in range. `[OPUS-4.8]` (Copilot review #88).
+    // return a value in range. (Copilot review #88).
     #[test]
     fn uniform_below_rejects_bound_above_modulus_and_terminates_below() {
         let backend = ShamirBackend::new_seeded(5, 0xBEEF).unwrap();
@@ -1525,7 +1525,7 @@ mod tests {
 
     // FAIL-CLOSED: `random_permutation` rejects a column length > P (would force
     // an unserviceable `uniform_below` bound). Reachable sizes produce a valid
-    // permutation of `0..n`. `[OPUS-4.8]` (Copilot review #88).
+    // permutation of `0..n`. (Copilot review #88).
     #[test]
     fn random_permutation_rejects_oversized_and_is_valid_below() {
         let backend = ShamirBackend::new_seeded(5, 0x1234).unwrap();

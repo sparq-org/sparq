@@ -20,7 +20,7 @@ pub struct ActionReport {
     pub denied: usize,
 }
 
-/// A deterministic aggregate of a batch of policy decisions. [GPT-5.6] sq-mu4au.
+/// A deterministic aggregate of a batch of policy decisions. sq-mu4au.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionReport {
     /// Number of decisions in the batch.

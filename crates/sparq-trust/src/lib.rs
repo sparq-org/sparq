@@ -114,7 +114,7 @@
 //! - **`sq-wvne`** — ZKAPs-grade unlinkable presentation needs a 3-part ZK composite:
 //!   **out of PoC scope** (no privacy/ZK).
 //!
-//! [OPUS-4.8] sq-pfae PoC (issue #940). Written while Fable unavailable — flag for
+//! sq-pfae PoC (issue #940). Written while Fable unavailable — flag for
 //! re-review when Fable returns. 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 #![forbid(unsafe_code)]
@@ -248,7 +248,7 @@ pub use graph::{
 pub use policy::{parse_policy, ControlGate, PolicyError, ShapeRef, TrustRule};
 #[cfg(feature = "did")]
 pub use policy::{resolve_rule_keys, IssuerBinding};
-// [SONNET-4.6] sq-0hu2w: re-export the sig primitives so downstream crates that need to
+// sq-0hu2w: re-export the sig primitives so downstream crates that need to
 // parse/hold a `PublicKey` (e.g. callers constructing a `TrustRule.issuer_key` or calling
 // the admission gate) do NOT need a direct `sparq-zk` dependency — `sparq-trust` is the
 // single dependency chokepoint.

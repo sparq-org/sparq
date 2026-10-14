@@ -52,7 +52,7 @@
 //! test below keeps the published Turtle and these constants from drifting (the same
 //! discipline as [`crate::vocab`]).
 //!
-//! [FABLE-5] sq-6syab.2 (epic sq-6syab; issue #1592; design record
+//! sq-6syab.2 (epic sq-6syab; issue #1592; design record
 //! `research/trust-expression-spec.md`). 🤖 SPARQ agent — trust-expression
 //! certification-scope layer.
 

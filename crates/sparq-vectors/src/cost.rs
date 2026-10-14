@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7hx6, epic sq-3183) **Filtered-ANN pre-filter vs post-filter cost model** —
+//! (sq-7hx6, epic sq-3183) **Filtered-ANN pre-filter vs post-filter cost model** —
 //! deciding when materialising a transitive [`IdMask`] and pre-filtering
 //! the search is worth it, versus running the search unfiltered and dropping the disallowed hits
 //! afterwards.
@@ -90,7 +90,7 @@ pub struct CostModel {
 
 impl Default for CostModel {
     fn default() -> Self {
-        // [OPUS-4.8] non-canonical constant: a single modelled scatter penalty, not a measured fit.
+        // non-canonical constant: a single modelled scatter penalty, not a measured fit.
         // It only shifts the crossover (m ≤ n / scatter_penalty); it never affects the answer.
         CostModel {
             scatter_penalty: 2.0,
@@ -211,7 +211,7 @@ pub fn nearest_filtered_costed(
     (hits, est)
 }
 
-/// [SONNET-4.6] **Cost-model-driven filtered top-`k` with the VG-TIE-1 boundary tie-break** —
+/// **Cost-model-driven filtered top-`k` with the VG-TIE-1 boundary tie-break** —
 /// [`nearest_filtered_costed`] upgraded to the answer-exact mode contract of
 /// `site/specs/sparql-vector-genai.typ`: result-set *membership* at a score tie on the k boundary
 /// is decided by ascending Unicode-codepoint order of the tied candidates' canonical N-Triples
@@ -260,7 +260,7 @@ pub fn nearest_filtered_costed_tiebreak(
     Ok((select_top_k_tiebreak(graph, scored, k)?, est))
 }
 
-/// [OPUS-4.8] How many candidates an **approximate** index must over-fetch to expect `k` survivors
+/// How many candidates an **approximate** index must over-fetch to expect `k` survivors
 /// after post-filtering at selectivity `mask_len / store_len`. `ceil(k / selectivity)`, clamped to
 /// the store size and to at least `k`.
 ///
@@ -275,7 +275,7 @@ pub fn nearest_filtered_costed_tiebreak(
 /// cluster *below* the fetched prefix; iterative over-fetch removes that boundary at the cost of
 /// extra index probes.
 ///
-/// [OPUS-4.8] (sq-ip3a) That iterative over-fetch path now exists:
+/// (sq-ip3a) That iterative over-fetch path now exists:
 /// [`nearest_filtered_overfetch`](crate::backend::nearest_filtered_overfetch) over the pluggable
 /// [`AnnBackend`](crate::backend::AnnBackend) seam (exact default; approximate
 /// [`ApproxBackend`](crate::backend::ApproxBackend) behind `approx-ann`). This function sizes its
@@ -419,7 +419,7 @@ mod tests {
         assert_eq!(overfetch_target(5, 0, 1000), 5); // empty mask guard
     }
 
-    // [SONNET-4.6] Direct unit gate for `nearest_filtered_costed_tiebreak`: VG-TIE-1 boundary
+    // Direct unit gate for `nearest_filtered_costed_tiebreak`: VG-TIE-1 boundary
     // membership over the mask-ADMITTED pool (seed excluded before the boundary), identical from
     // both cost-model branches. The tie group mixes an IRI with two inlined numeric literals so
     // dictionary-id order and N-Triples codepoint order genuinely disagree (see the ann.rs
@@ -517,7 +517,7 @@ mod tests {
             assert_eq!(terms(&g, &hits), vec![TEN.to_string()]);
         }
 
-        /// [SONNET-4.6] (#2445 review) A blank node admitted by the mask and landing in the
+        /// (#2445 review) A blank node admitted by the mask and landing in the
         /// boundary tie group is a fail-closed error, not a ranked candidate — its
         /// document-local label has no cross-implementation tie-break key.
         #[test]

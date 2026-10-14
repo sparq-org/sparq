@@ -20,7 +20,7 @@ pub enum Term {
     /// formula-scoped), a quoted triple is TRANSPARENT structure, exactly like
     /// [`Term::List`]: variables inside it are ordinary rule variables that
     /// match and bind against the corresponding component of a quoted triple
-    /// in the data (SPARQL-star / RDF-star triple-pattern semantics). [FABLE-5]
+    /// in the data (SPARQL-star / RDF-star triple-pattern semantics).
     Triple(Box<[Term; 3]>),
 }
 

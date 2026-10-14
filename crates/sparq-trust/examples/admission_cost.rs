@@ -1,6 +1,6 @@
 //! Deterministic admission and certification-closure cost evidence (`sq-r78pf`).
 //!
-//! [GPT-5.6] This example deliberately records operation-independent counts only. It
+//! This example deliberately records operation-independent counts only. It
 //! contains no clock sampling, elapsed duration, allocator telemetry, or host metadata.
 
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Triple};

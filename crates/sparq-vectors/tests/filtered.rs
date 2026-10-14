@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-1wc1) Predicate-constrained (filtered) ANN gate. Compiled only with the opt-in
+//! (sq-1wc1) Predicate-constrained (filtered) ANN gate. Compiled only with the opt-in
 //! `filtered-ann` feature (`cargo test -p sparq-vectors --features filtered-ann`).
 //!
 //! Covers:
@@ -16,7 +16,7 @@
 use sparq_vectors::{
     nearest_exact, nearest_exact_filtered, DiskAnnIndex, FilterConfig, IdMask, VectorStore,
 };
-// [OPUS-4.8] (sq-ip3a) The HNSW filtered entry point is the approximate backend — `approx-ann` only.
+// (sq-ip3a) The HNSW filtered entry point is the approximate backend — `approx-ann` only.
 #[cfg(feature = "approx-ann")]
 use sparq_vectors::VectorIndex;
 

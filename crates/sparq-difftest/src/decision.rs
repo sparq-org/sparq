@@ -1,4 +1,4 @@
-//! Admission-decision equivalence comparator with a **fail-closed asymmetry** check. [FABLE-5]
+//! Admission-decision equivalence comparator with a **fail-closed asymmetry** check.
 //!
 //! Every trust-graph / WAC / ODRL differential test so far has hand-rolled its own allow/deny
 //! set comparison in-crate. This module is the shared, engine-independent comparator: a
@@ -61,7 +61,7 @@ impl<T: Ord> DecisionOutcome<T> {
     }
 }
 
-/// The trusted reference outcome in a directional decision comparison. [GPT-5.6]
+/// The trusted reference outcome in a directional decision comparison.
 ///
 /// This is intentionally a distinct type from [`Candidate`]: callers must name which outcome
 /// defines the no-escalation boundary, so swapping the two arguments cannot compile.

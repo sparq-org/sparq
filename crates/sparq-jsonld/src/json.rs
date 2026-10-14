@@ -1,6 +1,6 @@
 //! The minimal, dependency-free JSON value model (`Json` AST).
 //!
-//! [OPUS-4.8] (sq-oy1f.23) Moved **verbatim** out of `sparq-engine`'s JSON-LD writer
+//! (sq-oy1f.23) Moved **verbatim** out of `sparq-engine`'s JSON-LD writer
 //! (`serialize/compact.rs`) so the whole document-level JSON-LD 1.1 pipeline can share one
 //! JSON value type without pulling in `serde_json`. The move is behaviour-neutral: the
 //! engine re-exports this type at its old path (`sparq_engine::serialize::compact::Json`,
@@ -36,6 +36,35 @@ impl Default for Json {
 }
 
 impl Json {
+    /// Constructs a JSON `null`.
+    pub(crate) fn null() -> Json {
+        Json::Raw("null".to_string())
+    }
+
+    /// True iff this is a JSON `null`.
+    pub(crate) fn is_null(&self) -> bool {
+        matches!(self, Json::Raw(r) if r == "null")
+    }
+
+    /// True iff this is a string, number, or boolean (not `null`).
+    pub(crate) fn is_scalar(&self) -> bool {
+        match self {
+            Json::Str(_) => true,
+            Json::Raw(r) => r != "null",
+            _ => false,
+        }
+    }
+
+    /// True iff this is a map with an `@list` entry; other entries are allowed.
+    pub(crate) fn is_list_object(&self) -> bool {
+        self.get("@list").is_some()
+    }
+
+    /// True iff this is a map with an `@value` entry; other entries are allowed.
+    pub(crate) fn is_value_object(&self) -> bool {
+        self.get("@value").is_some()
+    }
+
     /// Constructs an empty JSON object.
     pub fn obj() -> Json {
         Json::Obj(Vec::new())
@@ -128,7 +157,7 @@ impl Json {
         }
     }
 
-    /// Parses a JSON text into a [`Json`] value. [OPUS-4.8] (sq-oy1f.24) A minimal,
+    /// Parses a JSON text into a [`Json`] value. (sq-oy1f.24) A minimal,
     /// dependency-free recursive-descent parser used to read remote `@context` and
     /// `@import` documents retrieved through a [`DocumentLoader`](crate::loader::DocumentLoader).
     ///
@@ -238,7 +267,7 @@ impl Parser<'_> {
     }
 
     fn parse_number(&mut self) -> Result<Json, JsonParseError> {
-        // [OPUS-4.8] (sq-oy1f.24) Enforce the RFC 8259 number grammar strictly:
+        // (sq-oy1f.24) Enforce the RFC 8259 number grammar strictly:
         //   number = [ "-" ] int [ frac ] [ exp ]
         //   int    = "0" / ( digit1-9 *DIGIT )   (no leading zeros)
         //   frac   = "." 1*DIGIT                 (a "." requires a digit)
@@ -314,14 +343,14 @@ impl Parser<'_> {
                         _ => return Err(self.error("invalid escape")),
                     }
                 }
-                // [OPUS-4.8] (sq-oy1f.24) RFC 8259 forbids raw control characters
+                // (sq-oy1f.24) RFC 8259 forbids raw control characters
                 // (U+0000..=U+001F) inside a string; they must be escaped. Reject them so a
                 // malformed remote `@context`/`@import` document is not treated as valid.
                 Some(b) if b < 0x20 => {
                     return Err(self.error("unescaped control character in string"));
                 }
                 Some(_) => {
-                    // [FABLE-5] (sq-hmd7l.42) Copy the maximal run of plain bytes (no
+                    // (sq-hmd7l.42) Copy the maximal run of plain bytes (no
                     // quote, no backslash, no control character) in one step, validating
                     // UTF-8 once per run. The previous per-character path ran
                     // `str::from_utf8` over the WHOLE remaining input for every character
@@ -491,6 +520,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn null_and_object_predicates() {
+        // Expected columns: null, scalar, list object, value object.
+        for (input, expected) in [
+            ("null", [true, false, false, false]),
+            ("42", [false, true, false, false]),
+            ("true", [false, true, false, false]),
+            ("false", [false, true, false, false]),
+            (r#""null""#, [false, true, false, false]),
+            ("[]", [false, false, false, false]),
+            ("{}", [false, false, false, false]),
+            (r#"{"@list":[]}"#, [false, false, true, false]),
+            (r#"{"@value":null}"#, [false, false, false, true]),
+            (r#"{"@value":1,"extra":2}"#, [false, false, false, true]),
+            (r#"{"@list":null,"extra":2}"#, [false, false, true, false]),
+            (r#"{"value":1,"list":[]}"#, [false, false, false, false]),
+            (r#"{"@list":[],"@value":1}"#, [false, false, true, true]),
+        ] {
+            let value = Json::parse(input).unwrap();
+            assert_eq!(value == Json::null(), expected[0], "{input}");
+            let actual = [
+                value.is_null(),
+                value.is_scalar(),
+                value.is_list_object(),
+                value.is_value_object(),
+            ];
+            assert_eq!(actual, expected, "{input}");
+        }
+    }
+
+    #[test]
     fn default_is_empty_object() {
         assert_eq!(Json::default(), Json::Obj(Vec::new()));
         assert!(Json::default().is_obj());
@@ -625,7 +684,7 @@ mod tests {
         assert!(Json::parse("\"\\uD83D\"").is_err());
     }
 
-    /// [FABLE-5] (sq-hmd7l.42) The run-copying string fast path: plain runs (including
+    /// (sq-hmd7l.42) The run-copying string fast path: plain runs (including
     /// multi-byte UTF-8) interleaved with escapes and terminators must decode exactly as
     /// the old per-character path did, and invalid UTF-8 must still be reported at the
     /// first invalid byte.

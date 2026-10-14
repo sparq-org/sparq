@@ -64,7 +64,7 @@
 //! does **not** perform that ratification — it computes the proposed partition only. See the
 //! crate `README.md` and `research/mpc-untrusted-planner-routing-design.md` §2.2 / §4.4 / §6.
 //!
-//! [OPUS-4.8] sq-i1wh2.
+//! sq-i1wh2.
 
 use std::collections::BTreeMap;
 
@@ -205,7 +205,7 @@ impl QueryOperator {
 ///
 /// This function makes **no** soundness/privacy claim and computes only the *proposed* partition;
 /// the per-source fail-closed re-enforcement + verifier ratification of the leakage envelope is
-/// the deferred, audit-gated Phase 4. See the module docs and the crate `README.md`. [OPUS-4.8]
+/// the deferred, audit-gated Phase 4. See the module docs and the crate `README.md`.
 /// sq-i1wh2.
 pub fn route_operators(
     selected: &SelectedPrivateSources,

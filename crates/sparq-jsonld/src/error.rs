@@ -1,6 +1,6 @@
 //! The W3C JSON-LD 1.1 error-code registry.
 //!
-//! [OPUS-4.8] (sq-oy1f.23) Every native pipeline algorithm is fallible and returns
+//! (sq-oy1f.23) Every native pipeline algorithm is fallible and returns
 //! [`JsonLdError`], which carries a [`JsonLdErrorCode`] whose string form is the **exact**
 //! spec code (e.g. `"invalid @context"`, `"keyword redefinition"`, `"loading document
 //! failed"`). Modelling the codes as a closed enum is what makes the W3C
@@ -17,7 +17,7 @@ use std::fmt;
 /// A JSON-LD 1.1 error code. The [`JsonLdErrorCode::as_str`] form is the exact string the
 /// specification defines, so it can be compared directly against a suite manifest's
 /// `expectErrorCode`.
-// [OPUS-4.8] Deliberately a *closed* enum (no `#[non_exhaustive]`): the JSON-LD 1.1 error
+// Deliberately a *closed* enum (no `#[non_exhaustive]`): the JSON-LD 1.1 error
 // registry is a fixed, spec-defined set, and closing it lets the conformance harness match
 // `expectErrorCode` exhaustively so an unhandled or renamed spec code is a compile-time
 // failure rather than a silent wrong-code pass (design record §4). A spec erratum adding a

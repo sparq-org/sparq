@@ -1,11 +1,11 @@
-// [OPUS-4.8] sq-jxl0: single-source the crate overview from README.md so crates.io
+// sq-jxl0: single-source the crate overview from README.md so crates.io
 // (package.readme) and the docs.rs front page render identical content. The README's
 // `## Usage` rust fences are compiled as doctests (hidden `#`-scaffolding inside them).
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 mod eval;
-// [FABLE-5] (sq-uz0) sh:shapesGraph / owl:imports shapes-graph ASSEMBLY
+// (sq-uz0) sh:shapesGraph / owl:imports shapes-graph ASSEMBLY
 // (W3C SHACL §§3.1/3.3 (shapes-graph)) — OPT-IN behind the `imports` cargo feature so the base
 // validation path carries zero assembly code when off. Zero new dependencies:
 // a pure traversal over `GraphView` + `Dict` the crate already uses.
@@ -14,11 +14,11 @@ pub mod imports;
 pub mod model;
 pub mod path;
 mod report;
-// [OPUS-4.8] (sq-d1dw) SHACL-AF rules (`sh:rule`) — OPT-IN behind the `shacl-af`
+// (sq-d1dw) SHACL-AF rules (`sh:rule`) — OPT-IN behind the `shacl-af`
 // cargo feature so the base validation path carries zero rule code when off.
 #[cfg(feature = "shacl-af")]
 pub mod rules;
-// [OPUS-4.8] (sq-v0b8, #796) SHACL Compact Syntax (SCS) PARSER (text → shapes
+// (sq-v0b8, #796) SHACL Compact Syntax (SCS) PARSER (text → shapes
 // triples) — OPT-IN behind the `scs` cargo feature so the base validation path
 // (and the default + wasm bundles) carry zero parser code when off.
 #[cfg(feature = "scs")]
@@ -26,28 +26,28 @@ pub mod scs;
 mod sparql;
 pub mod view;
 
-// [FABLE-5] (sq-11a) `IllFormedConstruct` records a shapes-graph construct that
+// (sq-11a) `IllFormedConstruct` records a shapes-graph construct that
 // violates the SHACL syntax rules; `validate_strict` reports the shapes graph as
 // a failure (the test-suite `sht:Failure` outcome) when any were found.
 pub use model::{Component, IllFormedConstruct, PreBindingFailure, Shape, ShapesModel, Target};
 pub use path::Path;
-// [OPUS-4.8] (sq-lz99x) `ShapeDiagnostic` surfaces a constraint the validator
+// (sq-lz99x) `ShapeDiagnostic` surfaces a constraint the validator
 // SKIPPED because it could not be evaluated (e.g. an uncompilable `sh:pattern`).
-// [OPUS-4.8] (sq-sx15d) `DEFAULT_CONFORMANCE_DISALLOWS` is the SHACL 1.2 default
+// (sq-sx15d) `DEFAULT_CONFORMANCE_DISALLOWS` is the SHACL 1.2 default
 // disallowed-severity set used to compute `ValidationReport::conforms`.
 pub use report::{
     ShapeDiagnostic, ValidationReport, ValidationResult, DEFAULT_CONFORMANCE_DISALLOWS,
 };
 
-// [OPUS-4.8] (sq-v0b8) SHACL Compact Syntax parser public surface (feature `scs`).
+// (sq-v0b8) SHACL Compact Syntax parser public surface (feature `scs`).
 #[cfg(feature = "scs")]
 pub use scs::{parse as parse_scs, parse_to_graph as parse_scs_to_graph, ScsError, DEFAULT_BASE};
 
-// [FABLE-5] (sq-uz0) Shapes-graph assembly public surface (feature `imports`).
+// (sq-uz0) Shapes-graph assembly public surface (feature `imports`).
 #[cfg(feature = "imports")]
 pub use imports::{resolve_imports, resolve_shapes_graph, ShapesGraphResolution};
 
-// [OPUS-4.8] SHACL-AF rules + node-expression public surface (feature `shacl-af`).
+// SHACL-AF rules + node-expression public surface (feature `shacl-af`).
 #[cfg(feature = "shacl-af")]
 pub use rules::{
     apply_rules, apply_rules_in_scope, apply_rules_in_scope_with_model, apply_rules_with_model,
@@ -58,7 +58,7 @@ pub use rules::{
 use oxrdf::Triple;
 use sparq_core::Graph;
 
-/// [GPT-5.6] (sq-lsp7k.2.1) Selects which facts validation can observe.
+/// (sq-lsp7k.2.1) Selects which facts validation can observe.
 ///
 /// This surface is available only with the `shacl-af` feature because
 /// [`AssertedPlusInferred`](Self::AssertedPlusInferred) computes the SHACL-AF
@@ -77,7 +77,7 @@ pub enum FactDomain {
 /// validation report. Constructs the shapes graph never declares (or declares
 /// ill-formed — e.g. an unparsable path) are skipped rather than failing; use
 /// [`validate_strict`] to report ill-formed constructs as a failure instead
-/// (the W3C test-suite `sht:Failure` outcome). [FABLE-5] (sq-11a)
+/// (the W3C test-suite `sht:Failure` outcome). (sq-11a)
 pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
     let model = ShapesModel::parse(shapes);
     validate_with_model(data, &model)
@@ -86,12 +86,12 @@ pub fn validate(data: &Graph, shapes: &Graph) -> ValidationReport {
 /// [`validate`] against an already-parsed shapes model (amortises shape
 /// parsing across many data graphs).
 ///
-/// [OPUS-4.8] (sq-5q76d) `ValidationReport::conforms` honours a shapes-graph
+/// (sq-5q76d) `ValidationReport::conforms` honours a shapes-graph
 /// `sh:conformanceDisallows` declaration ([`ShapesModel::conformance_disallows`])
 /// when present, falling back to the default {Violation, Warning, Info} set.
 pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationReport {
     let (results, mut diagnostics) = eval::validate_graph(data, model);
-    // [FABLE-5] (sq-c1v3e) Surface the parse-time ill-formed-construct records
+    // (sq-c1v3e) Surface the parse-time ill-formed-construct records
     // ([`ShapesModel::ill_formed`]) on the LENIENT path too, as report
     // diagnostics — visibility without failing: each construct is still skipped
     // and `conforms` is unaffected (diagnostics never contribute results). The
@@ -108,7 +108,7 @@ pub fn validate_with_model(data: &Graph, model: &ShapesModel) -> ValidationRepor
     )
 }
 
-/// [GPT-5.6] (sq-lsp7k.2.1) Validates over the selected [`FactDomain`].
+/// (sq-lsp7k.2.1) Validates over the selected [`FactDomain`].
 ///
 /// [`FactDomain::Asserted`] is identical to [`validate`].
 /// [`FactDomain::AssertedPlusInferred`] first computes the SHACL-AF rule
@@ -119,7 +119,7 @@ pub fn validate_with_domain(data: &Graph, shapes: &Graph, domain: FactDomain) ->
     validate_with_domain_and_model(data, shapes, &model, domain)
 }
 
-/// [GPT-5.6] (sq-lsp7k.2.1) [`validate_with_domain`] against an already-parsed
+/// (sq-lsp7k.2.1) [`validate_with_domain`] against an already-parsed
 /// shapes model, amortising shape parsing across data graphs.
 ///
 /// `shapes` remains required for the inferred domain because SHACL-AF rule node
@@ -141,13 +141,13 @@ pub fn validate_with_domain_and_model(
     }
 }
 
-/// [OPUS-4.8] (sq-0mjfd) A SHACL processing **failure** (W3C SHACL §3.4): the
+/// (sq-0mjfd) A SHACL processing **failure** (W3C SHACL §3.4): the
 /// shapes graph declares something a conformant processor cannot soundly
 /// evaluate, so the spec says it signals a *failure* rather than produce a
 /// validation report. Two producers: a SHACL-SPARQL pre-binding violation (a
 /// `sh:sparql` constraint or constraint-component validator using `MINUS` /
 /// `VALUES` / `SERVICE` / a sub-`SELECT` that drops a pre-bound variable / a
-/// `BIND` that re-binds one), and [FABLE-5] (sq-11a) an **ill-formed
+/// `BIND` that re-binds one), and (sq-11a) an **ill-formed
 /// shapes-graph construct** (a violated SHACL syntax rule — an unparsable
 /// `sh:path`, a non-integer `sh:minCount`, a malformed SHACL list, …). Carries
 /// the offending nodes + the violated rules for diagnostics.
@@ -155,14 +155,14 @@ pub fn validate_with_domain_and_model(
 pub struct ShaclFailure {
     /// The pre-binding failures found (may be empty when `ill_formed` is not).
     pub pre_binding: Vec<model::PreBindingFailure>,
-    /// [FABLE-5] (sq-11a) The ill-formed shapes-graph constructs found (may be
+    /// (sq-11a) The ill-formed shapes-graph constructs found (may be
     /// empty when `pre_binding` is not). At least one of the two vecs is non-empty.
     pub ill_formed: Vec<model::IllFormedConstruct>,
 }
 
 impl std::fmt::Display for ShaclFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // [OPUS-4.8] positional format args (rust/unused-variable CodeQL FP).
+        // positional format args (rust/unused-variable CodeQL FP).
         write!(
             f,
             "SHACL failure: {} unsound SHACL-SPARQL pre-binding(s), {} ill-formed shapes-graph construct(s)",
@@ -184,10 +184,10 @@ impl std::fmt::Display for ShaclFailure {
 
 impl std::error::Error for ShaclFailure {}
 
-/// [OPUS-4.8] (sq-0mjfd) STRICT validation (W3C SHACL §3.4 failure outcome): like
+/// (sq-0mjfd) STRICT validation (W3C SHACL §3.4 failure outcome): like
 /// [`validate`], but returns `Err(ShaclFailure)` when the shapes graph declares
 /// something a conformant processor rejects — a SHACL-SPARQL pre-binding
-/// violation, or [FABLE-5] (sq-11a) an ill-formed shapes-graph construct
+/// violation, or (sq-11a) an ill-formed shapes-graph construct
 /// ([`ShapesModel::ill_formed`]). The lenient [`validate`] instead skips such a
 /// construct (its lenient ill-formed-shape policy), so use this when the
 /// distinction matters (e.g. the W3C `mf:result sht:Failure` entries).
@@ -196,9 +196,9 @@ pub fn validate_strict(data: &Graph, shapes: &Graph) -> Result<ValidationReport,
     validate_strict_with_model(data, &model)
 }
 
-/// [OPUS-4.8] (sq-0mjfd) [`validate_strict`] against an already-parsed model: an
+/// (sq-0mjfd) [`validate_strict`] against an already-parsed model: an
 /// `Err` if the model recorded any pre-binding failure
-/// ([`ShapesModel::pre_binding_failures`]) or [FABLE-5] (sq-11a) any ill-formed
+/// ([`ShapesModel::pre_binding_failures`]) or (sq-11a) any ill-formed
 /// shapes-graph construct ([`ShapesModel::ill_formed`]), else the lenient
 /// validation report.
 pub fn validate_strict_with_model(
@@ -239,7 +239,7 @@ pub fn graph_from_triples<I: IntoIterator<Item = Triple>>(triples: I) -> Graph {
     Graph::from_parts(dict, ids)
 }
 
-/// [OPUS-4.8] (sq-7iai) The number of DISTINCT focus nodes the model's targeted
+/// (sq-7iai) The number of DISTINCT focus nodes the model's targeted
 /// shapes select over `data` — i.e. the size of the union of every targeted
 /// shape's focus-node set, deduplicated exactly as the validator's own
 /// `focus_nodes` enumeration does. This is a deterministic *target-selection*
@@ -255,7 +255,7 @@ pub fn count_focus_nodes(data: &Graph, model: &ShapesModel) -> usize {
     eval::count_focus_nodes(data, model)
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) The calling thread's monotonically-increasing count of
+/// (sq-7d3dj.33.1) The calling thread's monotonically-increasing count of
 /// `sh:sparql` constraint query executions the validator has run (one per engine
 /// query). Thread-local so a `validate` on one thread is not perturbed by a
 /// concurrent `validate` on another; snapshot and read the delta on the SAME thread.
@@ -333,7 +333,7 @@ mod tests {
         assert!(r.to_turtle().contains("sh:conforms true"));
     }
 
-    /// [OPUS-4.8] (sq-5q76d) A shapes-graph `sh:conformanceDisallows` (here only
+    /// (sq-5q76d) A shapes-graph `sh:conformanceDisallows` (here only
     /// `sh:Violation`) OVERRIDES the default {Violation,Warning,Info} set: a
     /// Warning-only result then conforms (mirrors conformance-disallows-001).
     #[test]
@@ -361,7 +361,7 @@ mod tests {
         assert!(!validate(&graph2, &graph2).conforms);
     }
 
-    /// [OPUS-4.8] (sq-0mjfd) `validate_strict` REJECTS a shapes graph whose
+    /// (sq-0mjfd) `validate_strict` REJECTS a shapes graph whose
     /// `sh:sparql` constraint violates the pre-binding rules (here a MINUS), while
     /// the lenient `validate` skips it and returns a (conforming) report.
     #[test]
@@ -382,7 +382,7 @@ mod tests {
         assert!(validate(&graph, &graph).conforms);
     }
 
-    /// [OPUS-4.8] (sq-0mjfd) `sh:reifierShape`: a value whose reifier fails the
+    /// (sq-0mjfd) `sh:reifierShape`: a value whose reifier fails the
     /// reifier shape produces a `sh:ReifierShapeConstraintComponent` result.
     #[test]
     fn reifier_shape_validates_reifiers() {
@@ -402,7 +402,7 @@ mod tests {
             .ends_with("ReifierShapeConstraintComponent")));
     }
 
-    /// [OPUS-4.8] (sq-0mjfd) `sh:uniqueLang` distinguishes base direction: two
+    /// (sq-0mjfd) `sh:uniqueLang` distinguishes base direction: two
     /// `@ar--ltr` values collide, but `@ar`, `@ar--ltr`, `@ar--rtl` are distinct.
     #[test]
     fn unique_lang_keys_on_base_direction() {
@@ -451,7 +451,7 @@ mod tests {
             .any(|c| c.ends_with("MinInclusiveConstraintComponent")));
     }
 
-    /// [OPUS-4.8] (sq-7iai) `count_focus_nodes` counts the DISTINCT focus nodes the
+    /// (sq-7iai) `count_focus_nodes` counts the DISTINCT focus nodes the
     /// targeted shapes select (independent of how many constraints they violate) —
     /// the SHACL benchmark suite's target-selection gate.
     #[test]
@@ -480,7 +480,7 @@ mod tests {
         assert_eq!(count_focus_nodes(&empty, &model), 0);
     }
 
-    /// [OPUS-4.8] (sq-bif) `count_focus_nodes` unions EVERY target kind — node,
+    /// (sq-bif) `count_focus_nodes` unions EVERY target kind — node,
     /// subjects-of, objects-of — deduplicated. A node selected by two distinct
     /// targets is counted once.
     #[test]
@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(count_focus_nodes(&data, &model), 3);
     }
 
-    // --- [OPUS-4.8] (sq-rnkdh) SHACL 1.2 targets & SPARQL node expressions ------
+    // --- (sq-rnkdh) SHACL 1.2 targets & SPARQL node expressions ------
 
     /// `sh:targetWhere [ <inline shape> ]`: the focus nodes are the data-graph
     /// nodes that CONFORM to the inline shape. Here only `ex:alice` (a Person with
@@ -679,7 +679,7 @@ mod tests {
             .any(|t| t.predicate.as_str().ends_with("conforms")));
     }
 
-    /// [OPUS-4.8] (sq-sx15d) `sh:conforms` fails when ANY result is in the SHACL-1.2
+    /// (sq-sx15d) `sh:conforms` fails when ANY result is in the SHACL-1.2
     /// default disallowed set {Violation, Warning, Info}; `conforms_violations_only`
     /// is the strictly-weaker CI toggle that fails only on `sh:Violation`. A
     /// Warning result fails `conforms` (Warning is disallowed by default) but
@@ -808,7 +808,7 @@ mod tests {
             .any(|x| x.source_component.ends_with("MinCountConstraintComponent")));
     }
 
-    // [OPUS-4.8] Regression for review 1616: a cyclic sh:property reference must NOT overflow the
+    // Regression for review 1616: a cyclic sh:property reference must NOT overflow the
     // stack. The Property component recurses through validate_shape directly, bypassing the
     // conforms() (focus, shape) guard; without an equivalent guard a self-referential property
     // shape over cyclic data recurses forever. Re-entry counts as conforming (SHACL leaves
@@ -853,7 +853,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] Regression for review 1616 (implicit class shape discovery): a node that is an
+    // Regression for review 1616 (implicit class shape discovery): a node that is an
     // rdfs:Class with SHACL constraints — but NOT explicitly typed sh:NodeShape and with no
     // sh:target* — is an implicit node shape with an implicit class target. Root discovery
     // previously skipped it, silently ignoring its constraints; it must now be validated.
@@ -892,7 +892,7 @@ mod tests {
             .any(|x| x.source_component.ends_with("MinCountConstraintComponent")));
     }
 
-    // [OPUS-4.8] (sq-bif) `load_turtle_with_base` resolves relative IRIs against
+    // (sq-bif) `load_turtle_with_base` resolves relative IRIs against
     // the supplied base (the seam `Graph::load_str` does not expose, used by the
     // W3C manifest loaders) and surfaces a parse error as an `Err(String)`.
     #[test]
@@ -922,7 +922,7 @@ mod tests {
         assert!(load_turtle_with_base("", "not a valid base").is_err());
     }
 
-    // [OPUS-4.8] (sq-bif) `graph_from_triples` interns oxrdf triples — including
+    // (sq-bif) `graph_from_triples` interns oxrdf triples — including
     // a BLANK-NODE subject (the subject match arm `Graph::load_str` round-trips
     // but the helper handles explicitly) — into a queryable Graph.
     #[test]
@@ -964,7 +964,7 @@ mod tests {
             .is_empty());
     }
 
-    /// [OPUS-4.8] (sq-mue75) A `sh:sparql` result carries `sh:sourceConstraint`
+    /// (sq-mue75) A `sh:sparql` result carries `sh:sourceConstraint`
     /// pointing at the `sh:SPARQLConstraint` node — distinct from `sh:sourceShape`
     /// (the shape) — and the Turtle report emits it. A Core (non-sparql) result
     /// carries no `sh:sourceConstraint`.
@@ -1018,7 +1018,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] (sq-mue75) A Core (non-`sh:sparql`) constraint result carries no
+    /// (sq-mue75) A Core (non-`sh:sparql`) constraint result carries no
     /// `sh:sourceConstraint` (the spec stamps it only on SPARQL-based results).
     #[test]
     fn core_result_has_no_source_constraint() {
@@ -1065,7 +1065,7 @@ mod tests {
         assert!(r.conforms, "{}", r.to_text());
     }
 
-    // --- [OPUS-4.8] (sq-7d3dj.33.1) sh:sparql focus-node batching --------------
+    // --- (sq-7d3dj.33.1) sh:sparql focus-node batching --------------
 
     /// A stable, order-independent key for one result, covering every field the
     /// W3C suite compares (focus / value / path / component / source shape+constraint
@@ -1166,7 +1166,7 @@ mod tests {
         assert_eq!(sparql_hits, 30, "expected 30 negative-age violations");
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Local, NON-canonical measurement of the batched vs
+    /// (sq-7d3dj.33.1) Local, NON-canonical measurement of the batched vs
     /// per-focus `sh:sparql` wall time on a synthetic workload shaped like the LUBM
     /// `sparql_constraint`/`sparql_heavy` benchmarks (a `SELECT $this ?value` with a
     /// two-triple BGP + type check, one solution per violating focus). Prints the
@@ -1259,7 +1259,7 @@ mod tests {
     }
 }
 
-// [OPUS-4.8] (sq-mk9n / sq-3w6n, `shacl-af`) The two SHACL-AF node-expression
+// (sq-mk9n / sq-3w6n, `shacl-af`) The two SHACL-AF node-expression
 // constraints: `sh:expression` (`sh:ExpressionConstraintComponent`) — a value
 // node violates when the node expression does not evaluate to `{ true }` — and
 // `sh:nodeByExpression` (`sh:NodeByExpressionConstraintComponent`) — a value node
@@ -1326,7 +1326,7 @@ mod expression_tests {
         );
     }
 
-    // ---- [OPUS-4.8] (sq-3w6n) sh:nodeByExpression ----
+    // ---- (sq-3w6n) sh:nodeByExpression ----
 
     #[test]
     fn node_by_expression_constant_iri_violates_nonconforming_value() {
@@ -1401,7 +1401,7 @@ mod expression_tests {
     }
 }
 
-// [FABLE-5] (sq-7d3dj.33.4) Report-equivalence tests for the id-level
+// (sq-7d3dj.33.4) Report-equivalence tests for the id-level
 // core-constraint fast path: the SAME (data, shapes) pair validated with the
 // fast path ON (the default) and OFF (`eval::with_id_fastpath_disabled`) must
 // produce BYTE-IDENTICAL reports — result order included (stricter than the
@@ -1557,7 +1557,7 @@ mod idfast_tests {
         assert_identical_reports(&data, &shapes, 0, 0);
     }
 
-    /// [FABLE-5] (sq-j9hls) `sh:class` / `sh:class (list)` instance checks and
+    /// (sq-j9hls) `sh:class` / `sh:class (list)` instance checks and
     /// `sh:closed` on the extended id routes: a subclass-closure hit, a typeless
     /// node, a literal value, a class ABSENT from the data dictionary (every
     /// value violates on both routes), a `sh:targetClass` enumeration through
@@ -1591,7 +1591,7 @@ mod idfast_tests {
         assert_identical_reports(&data, &shapes, 2, 4);
     }
 
-    /// [FABLE-5] (sq-j9hls) The comparand-path components on the extended id
+    /// (sq-j9hls) The comparand-path components on the extended id
     /// routes: `sh:equals` (both missing directions), `sh:disjoint` (shared
     /// value + an absent comparand predicate), `sh:lessThan(OrEquals)` (violating
     /// pairs + a non-comparable pair; the comparand walk is id-level, the pair
@@ -1619,7 +1619,7 @@ mod idfast_tests {
         assert_identical_reports(&data, &shapes, 7, 10);
     }
 
-    /// [FABLE-5] (sq-j9hls) `sh:hasValue` / `sh:in` / `sh:uniqueLang` on the
+    /// (sq-j9hls) `sh:hasValue` / `sh:in` / `sh:uniqueLang` on the
     /// extended id routes: exact (id-equality) membership hits, a VALUE-equal
     /// literal that is not term-equal (`5` vs `"5.0"^^xsd:decimal` — the
     /// literal-only materialising branch), a required value over an empty value

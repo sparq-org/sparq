@@ -1,5 +1,5 @@
 //! **Seeded deterministic query/data generator** — seed in, test case out, bit-for-bit
-//! reproducible. [FABLE-5] sq-gum8.6
+//! reproducible. sq-gum8.6
 //!
 //! No wall-clock, OS randomness, or external RNG crate is involved: the generator is
 //! driven by an in-crate [`SplitMix64`] (Steele, Lea & Flood's fixed 64-bit mixing
@@ -34,7 +34,7 @@
 //! function must be added in `predicate_atom` so this list, the TLP scope
 //! preconditions ([`crate::tlp`]), the exclusion list above, and the paper's §6.1
 //! grammar description (`site/papers/sparql-logic-bugs.typ`) stay in lockstep.
-//! [FABLE-5] sq-996jn (grammar note lineage: sq-b89wc)
+//! sq-996jn (grammar note lineage: sq-b89wc)
 //!
 //! Seed-compatibility note: extending the grammar CHANGES the case a given seed
 //! produces (the SplitMix64 draw sequence shifts), so a recorded seed reproduces its

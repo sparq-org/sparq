@@ -2,7 +2,7 @@
 //! committed fixtures, then run the SHACL gate (`pkg.shapes.ttl` +
 //! `literature.shapes.ttl`) over the EMITTED TTL — the REAL path, not a mock.
 //!
-//! [OPUS-4.8] sq-2489d.5 (epic sq-2489d). 🤖 SPARQ agent — provenance-driven GenAI KB.
+//! sq-2489d.5 (epic sq-2489d). 🤖 SPARQ agent — provenance-driven GenAI KB.
 //!
 //! This is the test that wires the two Phase-5 acceptance metrics together:
 //!   - the **citation-grounding rate** comes from the pipeline [`Sidecar`]; and
@@ -175,7 +175,7 @@ ex:human a pkg:Finding ;
 
 #[test]
 fn a_machine_timestamped_finding_passes_shacl() {
-    // [HAIKU-4.5] sq-tzars.2: positive SHACL case — a machine-extracted Finding with
+    // sq-tzars.2: positive SHACL case — a machine-extracted Finding with
     // prov:generatedAtTime (and all other required constraints) must pass the literature
     // shapes. This is the "happy path" for RULE 4.
     const TIMESTAMPED: &str = r#"
@@ -215,7 +215,7 @@ ex:good a pkg:Finding ;
 
 #[test]
 fn a_machine_finding_without_timestamp_is_rejected_by_shacl() {
-    // [HAIKU-4.5] sq-tzars.2: negative SHACL case — a machine-extracted Finding without
+    // sq-tzars.2: negative SHACL case — a machine-extracted Finding without
     // prov:generatedAtTime must be rejected by RULE 4, even if all other constraints are
     // satisfied. This proves the timestamp requirement is enforced (fail-closed).
     const MISSING_TIMESTAMP: &str = r#"
@@ -270,7 +270,7 @@ fn base_example_still_conforms_under_the_combined_shapes() {
 
 // ===========================================================================
 // sq-tzars.7 — tier partition (hand-authored / machine / license-restricted)
-// [SONNET-4.6] 🤖 SPARQ agent — provenance-driven GenAI KB. Fail-closed license
+// 🤖 SPARQ agent — provenance-driven GenAI KB. Fail-closed license
 // routing; exactly one tier per emitted statement; metadata-only public projection.
 // ===========================================================================
 
@@ -606,7 +606,7 @@ fn machine_and_restricted_full_tiers_conform_to_the_shacl_gate() {
 
 // ===========================================================================
 // sq-9m3rn — Golden/byte-pin test: PipelineOutput::turtle byte-compatibility
-// [HAIKU-4.5] 🤖 SPARQ agent — golden-file pin for #1540 refactor.
+// 🤖 SPARQ agent — golden-file pin for #1540 refactor.
 // ===========================================================================
 
 /// The committed golden file for the fixture pipeline's combined TTL output. This test
@@ -626,7 +626,7 @@ fn emitted_turtle_matches_golden_byte_for_byte() {
     use std::path::PathBuf;
 
     let extractor = RecordedExtractor::from_fixture().expect("replay extractor builds");
-    // Deterministic timestamp (sq-tzars.2 [HAIKU-4.5]): use the same fixed instant
+    // Deterministic timestamp (sq-tzars.2): use the same fixed instant
     // that was used to generate the golden file. This ensures byte-exact reproducibility.
     let fixed_time = Some("-4656-05-28T09:28:20.459270Z".to_string());
     let out = pipeline::run_with_time(FIXTURE_OPENALEX_BATCH, &extractor, fixed_time)

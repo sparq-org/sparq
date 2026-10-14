@@ -1,5 +1,5 @@
 //! Acceptance tests for the DISTINCT-projection loose (skip) index scan
-//! (bead sq-7d3dj.30.4). [OPUS-4.8]
+//! (bead sq-7d3dj.30.4).
 //!
 //! For `SELECT DISTINCT ?p WHERE { BGP / UNION-of-BGPs }` the engine enumerates the
 //! DISTINCT `?p` values directly from an existing permutation sorted by `?p` (a loose
@@ -282,7 +282,7 @@ fn empty_result_equivalence() {
 ///
 /// Counterexample data: `ex:a ex:knows ex:a` (self-loop) + `ex:b ex:likes ex:c`
 /// (no self-loop). Correct DISTINCT ?p = {ex:knows}; an unguarded skip-scan would
-/// return {ex:knows, ex:likes}. [SONNET-4.6]
+/// return {ex:knows, ex:likes}.
 #[test]
 fn intra_triple_repeated_var_fallback() {
     let g = load("ex:a ex:knows ex:a . ex:b ex:likes ex:c .");
@@ -314,7 +314,7 @@ fn intra_triple_repeated_var_fallback() {
 /// guard `prepare_pattern` tried to resolve the whole quoted term to a single ground id and
 /// returned the hard error "variable where a term was expected", failing the whole query
 /// (W3C conformance regressed 1229 -> 1228). The guard makes the pushdown decline so the
-/// fallback produces the equivalent answer. [OPUS-4.8] (sq-7d3dj.30.4)
+/// fallback produces the equivalent answer. (sq-7d3dj.30.4)
 #[test]
 fn quoted_triple_term_pattern_fallback() {
     // Two documents each annotating a triple term, plus a plain (non-annotating) triple that
@@ -366,7 +366,7 @@ fn public_toggle_and_stats() {
     assert!(!fired && emitted == 0 && scanned == 0, "stats not cleared by reset");
 }
 
-// ── [FABLE-5] (sq-7d3dj.30.10) permutation-metadata / pattern-trick strategy tests ──────
+// ── (sq-7d3dj.30.10) permutation-metadata / pattern-trick strategy tests ──────
 //
 // bead sq-7d3dj.30.10 added TWO strategies under the existing DISTINCT pushdown, chosen by
 // anchor cardinality, and a shared-anchor cache across UNION branches:
@@ -519,7 +519,7 @@ fn slice_over_distinct_preserved() {
     }
 }
 
-/// [FABLE-5] (sq-7d3dj.30.10) DIRECT coverage of the block-scan strategy's ANCHOR-DRIVEN
+/// (sq-7d3dj.30.10) DIRECT coverage of the block-scan strategy's ANCHOR-DRIVEN
 /// intersection side: a LARGE anchor (> the small-anchor threshold, so the block scan runs)
 /// that is nonetheless much smaller than a candidate `?p`-block, so `block_intersects_anchor`
 /// takes its "walk the shorter sorted anchor, binary-search into the block" branch. The

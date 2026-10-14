@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-qcnn.24 (epic sq-qcnn, test-quality program): DIRECT, deterministic,
+// sq-qcnn.24 (epic sq-qcnn, test-quality program): DIRECT, deterministic,
 // value-asserting unit tests for the PROVER-FREE public surface of sparq-zk-compose
 // that the bb-gated e2e suite reaches only through a live nargo/bb toolchain. These
 // raise the per-crate line-coverage floor and kill assertion-light survivors on the
@@ -134,7 +134,7 @@ fn revoke_prover_toml_renders_exact_body_for_active_index() {
         version: 1,
         bits: vec![0b0000_0010],
     };
-    // [GPT-6] Cover the entire byte-sized status snapshot; never truncate it.
+    // Cover the entire byte-sized status snapshot; never truncate it.
     let depth = 3u32;
     let root = merkle_root(&snapshot, depth).expect("root");
     let index = 0u64;

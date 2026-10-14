@@ -1,0 +1,9 @@
+@prefix acp: <http://www.w3.org/ns/solid/acp#> .
+@prefix acl: <http://www.w3.org/ns/auth/acl#> .
+
+<https://pod.ex/doc.acr> acp:accessControl <https://pod.ex/doc.acr#control> .
+<https://pod.ex/doc.acr#control> acp:apply <https://pod.ex/doc.acr#policy> .
+<https://pod.ex/doc.acr#policy>
+    acp:allow acl:Read ;
+    acp:anyOf [ acp:agent acp:PublicAgent ] ;
+    acp:noneOf [ acp:agent <https://bob.ex/card#me> ] .

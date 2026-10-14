@@ -23,7 +23,7 @@
 //! cargo test -p sparq-trust --features store,cert-graph --test trust_store_cert_rules
 //! ```
 //!
-//! [SONNET-4.6] sq-pfae.16. 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae.16. 🤖 SPARQ agent — trust-graph authorisation PoC.
 //! No cryptographic-soundness or privacy claim: the ZK estate is internally re-audited
 //! but external accredited-cryptographer sign-off is PENDING (sq-qhy4). MPC is
 //! semi-honest only.

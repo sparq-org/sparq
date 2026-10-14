@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-ez1rc (epic sq-pbz04): EL end-to-end SNOMED/GO-style scaling TEST — the executed,
+// sq-ez1rc (epic sq-pbz04): EL end-to-end SNOMED/GO-style scaling TEST — the executed,
 // CI-gated counterpart of `examples/snomed_go_scale_bench.rs`. It generates a biomedical-shaped EL
 // slice (wide is-a forest + transitive part-of with a SNOMED right-identity role chain + existential
 // hasLocation/partOf restrictions), runs the WHOLE pipeline composed — normalise + RBox (CR10/CR11)

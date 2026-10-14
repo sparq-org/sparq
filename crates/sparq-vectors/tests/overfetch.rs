@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-ip3a, follow-up to sq-7hx6) **Approximate filtered backend + iterative
+//! (sq-ip3a, follow-up to sq-7hx6) **Approximate filtered backend + iterative
 //! over-fetch** gate. Compiled only with `filtered-ann` (the over-fetch path) AND `approx-ann`
 //! (the approximate backend it exercises):
 //!

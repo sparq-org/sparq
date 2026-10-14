@@ -1,4 +1,4 @@
-//! [OPUS-5] (sq-7d3dj.30.15) Tripwire that the server's DEFAULT feature set keeps the
+//! (sq-7d3dj.30.15) Tripwire that the server's DEFAULT feature set keeps the
 //! engine's DPccp join-order planner (sq-7d3dj.30.5 / #1732) lit — the shipped
 //! `sparq-server` binary must plan joins the same way the CLI and the canonical
 //! benchmarks do.

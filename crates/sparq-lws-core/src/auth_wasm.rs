@@ -41,7 +41,7 @@ impl VerifiedToken {
 mod tests {
     use super::VerifiedToken;
 
-    // [GPT-5.6] Direct native coverage witness for the host-authenticated constructor.
+    // Direct native coverage witness for the host-authenticated constructor.
     #[test]
     fn from_authenticated_webid_preserves_identity() {
         let token = VerifiedToken::from_authenticated_webid("https://id.example/alice#me");
@@ -50,7 +50,7 @@ mod tests {
         assert!(!token.is_public());
     }
 
-    // [GPT-5.6] Direct native coverage witness for the public-credentials constructor.
+    // Direct native coverage witness for the public-credentials constructor.
     #[test]
     fn public_constructs_anonymous_credentials() {
         let token = VerifiedToken::public();
@@ -59,7 +59,7 @@ mod tests {
         assert!(token.is_public());
     }
 
-    // [GPT-5.6] Direct native coverage witness for both outcomes of the public-state query.
+    // Direct native coverage witness for both outcomes of the public-state query.
     #[test]
     fn is_public_tracks_webid_presence() {
         let mut token = VerifiedToken::public();

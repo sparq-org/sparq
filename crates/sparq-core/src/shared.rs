@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-yj76l, gh #1121) Ergonomic thread-safe sharing of a [`Graph`] across the
+//! (sq-yj76l, gh #1121) Ergonomic thread-safe sharing of a [`Graph`] across the
 //! async handlers of a web server (axum / actix / tower) — opt-in behind the `shared`
 //! feature so the lean default / wasm build never pays for it.
 //!

@@ -18,7 +18,7 @@ use crate::poseidon2;
 use oxrdf::Triple;
 use std::collections::HashMap;
 
-// [OPUS-4.8] sq-zzxt: the commitment-method config registry.
+// sq-zzxt: the commitment-method config registry.
 //
 // This is the config-plumbing layer of the maintainer-greenlit (#769)
 // configurable-commitment build-out (design: `research/zk-configurable-commitment-design.md`,
@@ -80,14 +80,14 @@ pub enum CommitmentMethod {
     /// lexical-identity hash in one leaf. **REMOVES INV-VL** (value<->lexical
     /// agreement becomes trusted-issuer-honesty, #769 accepted at research grade;
     /// CR-G8 / sq-qhy4). Config-only here; the leaf encoding is sq-j506 (NOT
-    /// implemented). [OPUS-4.8]
+    /// implemented).
     DualLeafV1,
     /// (ii) `value-only` (`zk:poseidon2-valuehook-v1`): a single value-first leaf;
     /// the lexical hash is **dropped**, so term identity is lost entirely. A
     /// **benchmark / research comparison dial only** — never select for real
     /// issuance (`research/zk-configurable-commitment-design.md` §2.2, §10 default
     /// (2)). Gated behind the OFF-by-default `commitment-value-only` feature so a
-    /// normal build cannot select it. [OPUS-4.8]
+    /// normal build cannot select it.
     #[cfg(feature = "commitment-value-only")]
     ValueOnlyV1,
 }
@@ -307,7 +307,7 @@ mod tests {
         assert_ne!(c1.commitment, c2.commitment);
     }
 
-    // [OPUS-4.8] sq-zzxt: the commitment-method config registry.
+    // sq-zzxt: the commitment-method config registry.
 
     #[test]
     fn method_default_is_string_canonical() {
@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(c.leaf_index(&absent), None);
     }
 
-    // [OPUS-4.8] sq-qcnn.25: DETERMINISM + resolution value pins. Assert exact
+    // sq-qcnn.25: DETERMINISM + resolution value pins. Assert exact
     // VALUES (not just no-panic) over the commitment/leaf-resolution surface.
     // NO soundness claim (sq-qhy4).
 

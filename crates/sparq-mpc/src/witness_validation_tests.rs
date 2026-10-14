@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-7leq: encode the witness-validation-before-proving TEST
+// sq-7leq: encode the witness-validation-before-proving TEST
 // OBLIGATION for the collaborative-proof (coZK) path. Written while Fable
 // unavailable — re-review on return. This module ENCODES an obligation against
 // an admittedly NOT-sound area (sq-qhy4 single-prover audit; sq-9hrn coZK

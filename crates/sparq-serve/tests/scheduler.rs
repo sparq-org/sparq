@@ -448,7 +448,7 @@ fn no_regression_all_cheap_workload() {
     // noisy, so the gate is deliberately wide. The printed numbers are the data;
     // the assertion is the alarm.
     //
-    // [OPUS-4.8] Gate widened 3.5× → 8.0× after the EC2 quiet-box run. The *ratio*
+    // Gate widened 3.5× → 8.0× after the EC2 quiet-box run. The *ratio*
     // is dominated by the trivially-cheap baseline (a plain mpsc pool running
     // ~hundreds-of-ns jobs): on a quiet, fast-core box the same machinery measured
     // 3.9×–6.8× run-to-run (verified on the UNMODIFIED pre-fix code too — this is

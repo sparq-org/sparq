@@ -2,7 +2,7 @@
 //! shaped works batch into normalised, DOI-keyed [`SourceStub`]s. NO network — the input
 //! is a committed JSON string ([`super::FIXTURE_OPENALEX_BATCH`]).
 //!
-//! [OPUS-4.8] sq-2489d.5. The live connector (a real OpenAlex/S2 HTTP client) is the
+//! sq-2489d.5. The live connector (a real OpenAlex/S2 HTTP client) is the
 //! gated Phase-6 work; this adapter reads the *same record shape* off a fixture so the
 //! downstream pipeline is exercised identically whether the records came from a tape or a
 //! live pull. The DOI is the content-addressed join key (§4.2): the same paper from two
@@ -35,7 +35,7 @@ pub struct SourceStub {
     /// both connectors — `parse_openalex_batch` here and `parse_core_batch` in the
     /// `connector_core` module. Many bibliographic APIs omit licence metadata (CORE v3's
     /// search schema does), so `None` is the common — and deliberately safe — default.
-    /// [SONNET-4.6] sq-tzars.1
+    /// sq-tzars.1
     pub license: Option<String>,
 }
 
@@ -118,7 +118,7 @@ pub fn parse_openalex_batch(json: &str) -> Result<(Vec<SourceStub>, usize), Stri
 /// `primary_location.license` (the canonical host copy), falling back to
 /// `best_oa_location.license` and finally a top-level `license`. A blank string is treated
 /// as absent. `None` (the common case) is captured as an UNKNOWN licence and treated as
-/// non-redistributable downstream. [SONNET-4.6] sq-tzars.1
+/// non-redistributable downstream. sq-tzars.1
 fn openalex_license(rec: &Value) -> Option<String> {
     let from = |key: &str| {
         rec.get(key)

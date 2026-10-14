@@ -1,4 +1,4 @@
-// [FABLE-5] sq-1rg2q.2: typed focus kinds + bound node factories (rdfjs/wrapper #83-#87).
+// sq-1rg2q.2: typed focus kinds + bound node factories (rdfjs/wrapper #83-#87).
 
 //! **PROPOSED**: typed focus kinds and bound node factories.
 //!

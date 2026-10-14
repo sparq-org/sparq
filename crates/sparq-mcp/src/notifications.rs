@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-cmjmr — the MCP **resources subscription + notification** machinery
+//! sq-cmjmr — the MCP **resources subscription + notification** machinery
 //! behind the pod-backed server (feature `solid`), bound to Solid Notifications
 //! Protocol semantics (MCP-Solid proposal draft §8 / §10, Class N).
 //!

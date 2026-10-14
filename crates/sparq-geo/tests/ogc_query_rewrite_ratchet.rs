@@ -1,5 +1,5 @@
 #![cfg(feature = "geosparql_rewrite")]
-//! [OPUS-4.8] sq-wf9qg — OGC GeoSPARQL **query-rewrite extension** conformance
+//! sq-wf9qg — OGC GeoSPARQL **query-rewrite extension** conformance
 //! ratchet (the `/conf/query-rewrite-extension` conformance class).
 //!
 //! The sibling ratchet [`ogc_compliance_ratchet`](../ogc_compliance_ratchet.rs)
@@ -51,7 +51,7 @@ use sparq_engine::{query, query_prepared, with_functions, PreparedQuery};
 use sparq_geo::geof::lex;
 use sparq_geo::{geof_registry, geosparql_rewrite, GeoError};
 
-/// [OPUS-4.8] sq-wf9qg — pass-count FLOOR for the OGC GeoSPARQL query-rewrite
+/// sq-wf9qg — pass-count FLOOR for the OGC GeoSPARQL query-rewrite
 /// conformance cases. A ratchet: it may only RISE. This is the ACTUAL measured
 /// pass count of [`CASES`] expanded across the query orientations the harness
 /// drives; raising it is a deliberate act when cases are added. The remainder of
@@ -62,8 +62,8 @@ use sparq_geo::{geof_registry, geosparql_rewrite, GeoError};
 /// MEASURED: the 24 cases in [`CASES`] (19 original + 5 added in sq-lk3aw.2:
 /// `sfCrosses`, `ehEquals`, `ehCovers`, `rcc8eq`, `rcc8tppi`), each driven in
 /// BOTH the subject-variable and object-variable orientation, all pass = 48.
-/// Set to that actual count. [SONNET-4.6] sq-lk3aw.2
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// Set to that actual count. sq-lk3aw.2
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).
@@ -168,7 +168,7 @@ const CASES: &[Case] = &[
     // ---- Simple Features over the region corpus -----------------------------
     Case { relation: "sfOverlaps", features: REGIONS, fixed: "big" },
     Case { relation: "sfEquals", features: REGIONS, fixed: "big" },
-    // [SONNET-4.6] sq-lk3aw.2 — sfCrosses: a line that enters and exits the
+    // sq-lk3aw.2 — sfCrosses: a line that enters and exits the
     // big polygon crosses it; the MIXED corpus contains `lineCross` which does
     // exactly that. sfCrosses is undefined for point-polygon (always false in
     // DE-9IM), so only `lineCross` matches in the subject orientation.
@@ -180,7 +180,7 @@ const CASES: &[Case] = &[
     Case { relation: "ehDisjoint", features: REGIONS, fixed: "far" },
     Case { relation: "ehMeet", features: REGIONS, fixed: "big" },
     Case { relation: "ehOverlap", features: REGIONS, fixed: "big" },
-    // [SONNET-4.6] sq-lk3aw.2 — ehEquals: reflexive on `big`; the only pair
+    // sq-lk3aw.2 — ehEquals: reflexive on `big`; the only pair
     // in REGIONS with the same WKT is (big, big). ehCovers(A, B): A covers B
     // (every point of B is in the closure of A's interior); `big` covers all
     // contained regions (`small`, `tangent`). Both fixed on "big".
@@ -193,7 +193,7 @@ const CASES: &[Case] = &[
     Case { relation: "rcc8ec", features: REGIONS, fixed: "big" },
     Case { relation: "rcc8dc", features: REGIONS, fixed: "far" },
     Case { relation: "rcc8po", features: REGIONS, fixed: "big" },
-    // [SONNET-4.6] sq-lk3aw.2 — rcc8eq: reflexive on `big`. rcc8tppi(A, B)
+    // sq-lk3aw.2 — rcc8eq: reflexive on `big`. rcc8tppi(A, B)
     // means B is a Tangential Proper Part of A; with fixed="tangent" the
     // subject orientation finds `big` (which has `tangent` as a TPP sharing
     // the corner-vertex boundary).
@@ -422,7 +422,7 @@ fn rewrite_is_structural_noop_for_non_topology_query() {
 /// rewrite of `?f1 geo:sfWithin ?f2` yields EXACTLY the same result set as the
 /// manually-written geometry-resolution FILTER form executed through the STANDARD
 /// engine. This directly proves the rewrite is a semantics-preserving algebra
-/// transformation, not just a syntax convenience. [SONNET-4.6] sq-lk3aw.2
+/// transformation, not just a syntax convenience. sq-lk3aw.2
 #[test]
 fn semantics_preserving_rewrite_matches_explicit_filter_form() {
     let graph = Graph::load_str(&corpus_ttl(MIXED), "turtle").unwrap();
@@ -433,7 +433,7 @@ fn semantics_preserving_rewrite_matches_explicit_filter_form() {
     // Manually-written equivalent FILTER form — the expansion the rewrite
     // produces, written explicitly so we can run it through the STANDARD path.
     // Plain string literal (no format! — the earlier "positional format args" comment
-    // was a copy/paste error and has been removed). [SONNET-4.6]
+    // was a copy/paste error and has been removed).
     let filter_sparql = "PREFIX geo:  <http://www.opengis.net/ont/geosparql#>
                          PREFIX geof: <http://www.opengis.net/def/function/geosparql/>
                          PREFIX ex:   <http://example.org/>
@@ -456,7 +456,7 @@ fn semantics_preserving_rewrite_matches_explicit_filter_form() {
 
     // Assert row counts match first so a count divergence is caught before the
     // pair-by-pair comparison (otherwise a shorter result set could coincidentally
-    // compare equal after sorting). [SONNET-4.6]
+    // compare equal after sorting).
     assert_eq!(
         rewrite_result.rows.len(),
         filter_result.rows.len(),
@@ -468,7 +468,7 @@ fn semantics_preserving_rewrite_matches_explicit_filter_form() {
     // Collect both result sets using `map` (NOT `filter_map`) so that a row with an
     // unbound ?f1 or ?f2 binding causes the test to FAIL loudly rather than being
     // silently dropped — a silent drop could hide a divergence between the two paths.
-    // [SONNET-4.6]
+    //
     let mut rewrite_pairs: Vec<(String, String)> = rewrite_result
         .rows
         .iter()

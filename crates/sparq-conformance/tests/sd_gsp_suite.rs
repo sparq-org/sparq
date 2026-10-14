@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-1uuxz (epic sq-my8wd) — the SPARQL 1.1 **Service-Description** (SD) +
+//! sq-1uuxz (epic sq-my8wd) — the SPARQL 1.1 **Service-Description** (SD) +
 //! **Graph-Store Protocol** (GSP) conformance lane, wired as a RATCHETED gate that mirrors the
 //! SPARQL / SHACL / GeoSPARQL / Solid / JSON-LD / sparql11-service / http-protocol ratchets in
 //! this crate (crate-local `cargo test` + a pinned pass-count FLOOR that may only RISE, registered
@@ -70,7 +70,7 @@ mod gated {
         let div = report.divergences();
         let failures = report.failures();
 
-        // [OPUS-4.8] The CI ratchet greps this exact `TOTAL sd-gsp` line (pass count in field $3),
+        // The CI ratchet greps this exact `TOTAL sd-gsp` line (pass count in field $3),
         // mirroring the service / http-protocol / JSON-LD lanes' `TOTAL <cat>` shape. Positional
         // `format!`/`println!` args (not inline `{pass}`) per the CodeQL `rust/unused-variable`
         // false-positive guard in the shared agent contract.

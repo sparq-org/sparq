@@ -1,6 +1,6 @@
 //! A **distributed** [`UsageCounterStore`] over any backend that can do one atomic
 //! conditional-increment — the Redis-`INCR` / SQL-`UPDATE…WHERE consumed<limit RETURNING`
-//! seam. [OPUS-4.8] sq-u3yo.
+//! seam. sq-u3yo.
 //!
 //! [`crate::count::InMemoryCounterStore`] shares a budget within one process; [`crate::
 //! count_file::FileCounterStore`] (sq-5z1q) shares it across processes on one host (or a
@@ -57,7 +57,7 @@
 use crate::count::{ConsumeResult, CountKey, UsageCounterStore};
 
 /// The single atomic primitive a distributed counter backend must provide — the seam an
-/// operator drops Redis / SQL into. [OPUS-4.8] sq-u3yo.
+/// operator drops Redis / SQL into. sq-u3yo.
 ///
 /// # The one method ([`checked_increment`](AtomicCounterBackend::checked_increment))
 ///
@@ -113,7 +113,7 @@ pub trait AtomicCounterBackend {
     fn read(&self, key: &str) -> Result<u64, BackendError>;
 }
 
-/// The outcome of an [`AtomicCounterBackend::checked_increment`]. [OPUS-4.8] sq-u3yo.
+/// The outcome of an [`AtomicCounterBackend::checked_increment`]. sq-u3yo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendOutcome {
     /// One unit was consumed; carries the new consumed count (`1..=limit`).
@@ -124,7 +124,7 @@ pub enum BackendOutcome {
 
 /// An opaque backend error (connection drop, server error, lock timeout) — carries a human
 /// message for logging; its only semantic effect is fail-closed ([`ConsumeResult::
-/// Unavailable`] / `None`). [OPUS-4.8] sq-u3yo.
+/// Unavailable`] / `None`). sq-u3yo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendError {
     message: String,
@@ -153,7 +153,7 @@ impl std::fmt::Display for BackendError {
 impl std::error::Error for BackendError {}
 
 /// A [`UsageCounterStore`] over any [`AtomicCounterBackend`] — the drop-in adapter for a
-/// Redis / SQL distributed budget. [OPUS-4.8] sq-u3yo.
+/// Redis / SQL distributed budget. sq-u3yo.
 ///
 /// See the module docs for the whole rationale. The adapter is intentionally tiny: it
 /// encodes the [`CountKey`] into one collision-free backend key, runs the backend's single

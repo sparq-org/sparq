@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-bxog: integration tests for the SSE (Server-Sent Events) transport for
+//! sq-bxog: integration tests for the SSE (Server-Sent Events) transport for
 //! SPARQL update subscriptions — `GET /subscriptions/sse`.
 //!
 //! These boot the real axum server on an ephemeral port and speak raw HTTP/SSE with
@@ -11,10 +11,10 @@
 //! Coverage: (1) register → `subscribed` + initial-result frames; (2) a committed UPDATE
 //! triggers a `notification` diff frame; (3) a non-matching UPDATE produces no frame;
 //! (4) dropping the stream releases the global slot (no leak); (5) bad-query refusals
-//! surface as real HTTP error statuses BEFORE the stream opens; (6) [OPUS-4.8] sq-bxog
+//! surface as real HTTP error statuses BEFORE the stream opens; (6) sq-bxog
 //! (Copilot #120) an initial result over the row cap is a 413 (matching `/sparql`), NOT a 503.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -387,7 +387,7 @@ async fn sse_malformed_query_is_400() {
 }
 
 // ---------------------------------------------------------------------------
-// (6) [OPUS-4.8] sq-bxog (Copilot #120): an initial result over the max-results / row cap is
+// (6) sq-bxog (Copilot #120): an initial result over the max-results / row cap is
 //     refused with 413 PAYLOAD_TOO_LARGE — the SAME status `/sparql` gives a row-cap overflow
 //     (`engine_error_response`), NOT the blanket 503 the SSE path used before. 503 is reserved
 //     for genuine capacity/overload (subscription-slot exhaustion — see test (4)).

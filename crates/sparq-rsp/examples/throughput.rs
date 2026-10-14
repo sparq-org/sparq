@@ -11,7 +11,7 @@
 //! cargo run --release -p sparq-rsp --example throughput -- --json /tmp/rsp.json
 //! ```
 //!
-//! [OPUS-4.8] (sq-cxji) `--json <path>` writes the SAME rows STDOUT prints — the
+//! (sq-cxji) `--json <path>` writes the SAME rows STDOUT prints — the
 //! deterministic `windows`/`rows` counts plus the advisory throughput timings — as
 //! a stable, DEPENDENCY-FREE JSON document, mirroring the `format!`-JSON convention
 //! of `crates/sparq-mpc/examples/mpc_net_bench.rs::cell_json` and
@@ -145,7 +145,7 @@ fn run_windowing_only(window_ticks: u64, out: &mut Vec<Row>) {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json <path> machine-readable results emit
+// (sq-cxji) --json <path> machine-readable results emit
 // ---------------------------------------------------------------------------
 
 /// Extracts `--json <path>` (and its value) from argv, returning argv WITHOUT the
@@ -278,7 +278,7 @@ fn main() {
         &mut rows,
     );
 
-    // [OPUS-4.8] (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
+    // (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
     // given. STDOUT above is the unchanged human/README table.
     if let Some(path) = json_path {
         let doc = results_json(&rows);
@@ -291,7 +291,7 @@ fn main() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json emit tests
+// (sq-cxji) --json emit tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {

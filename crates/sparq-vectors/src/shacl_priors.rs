@@ -2,7 +2,7 @@
 //! SHACL shapes model (and `owl:FunctionalProperty` from the data graph) into the layout the
 //! structure-aware encoders consume (structure-aware vectorisation **P2**).
 //!
-//! [OPUS-4.8] sq-0wo9e.3 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.3 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §2 + §7 "sparq-shacl already evaluates `sh:datatype`, `sh:in`, `sh:not`, `min/maxCount` — the
 //! prior extractor reads these from `model.rs` (no SHACL changes; a new reader in the opt-in
 //! crate)"). It is **opt-in** behind the `structure-shacl` cargo feature (off by default) — the

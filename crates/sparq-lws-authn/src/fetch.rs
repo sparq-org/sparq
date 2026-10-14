@@ -202,9 +202,9 @@ pub fn public_addrs(
 /// Whether an address is one the server must not be made to reach: anything but a globally
 /// reachable unicast address. The one predicate every outbound request uses: identity
 /// documents, OpenID Providers, JWKS and webhook inboxes alike. The classifier every SSRF guard
-/// in sparq shares ([`sparq_core::net::is_forbidden_ip`]), so it cannot drift from the
-/// federation client's.
-pub use sparq_core::net::is_forbidden_ip;
+/// in sparq shares (sparq-core's `net.rs`, compiled into this crate), so it cannot drift from
+/// the federation client's.
+pub use crate::net::is_forbidden_ip;
 
 #[cfg(test)]
 mod tests {

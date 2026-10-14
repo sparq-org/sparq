@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3jtd.8 — the WAC **conformance corpus**: a table of independent, minimal
+//! sq-3jtd.8 — the WAC **conformance corpus**: a table of independent, minimal
 //! scenarios, each isolating one Solid WAC-spec construct, run through this crate's WAC
 //! authorization engine (`materialize_wac` + `AuthIndex::accessible`) with its expected
 //! `(agent, client, mode, resource) → allow | deny` decisions asserted.
@@ -17,7 +17,7 @@
 //! *content* of those tests (the `.acl` shapes and their expected allow/deny per
 //! principal), which is exactly what an authorization oracle can reproduce.
 //!
-//! [OPUS-4.8] sq-t58w.6 — the scenario corpus itself now lives in the shared `tests/common`
+//! sq-t58w.6 — the scenario corpus itself now lives in the shared `tests/common`
 //! module (`common::wac_corpus()`) so a SECOND test target (the differential oracle,
 //! `sq-t58w.7`) can consume the IDENTICAL scenarios without copy-paste. This file is the
 //! corpus's first consumer; the test set + assertions below are unchanged by the move.
@@ -49,7 +49,7 @@ fn wac_conformance_corpus_decision_parity() {
         "WAC conformance mismatch(es) across {} scenarios / {total_decisions} decisions:\n{failures}",
         reports.len(),
     );
-    // [OPUS-4.8] sq-t58w.6 — the RATCHET line. The corpus move into `tests/common`
+    // sq-t58w.6 — the RATCHET line. The corpus move into `tests/common`
     // dropped the stdout summary the `solid-conformance` CI job greps; restore it in
     // the SHACL/geo runner shape (`pass N / fail M (floor F)`) so the belt-and-braces
     // grep gate re-checks the scenario count. `pass` is the count of passing scenarios

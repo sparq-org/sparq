@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t58w.7 — the **independent procedural WAC reference evaluator**.
+//! sq-t58w.7 — the **independent procedural WAC reference evaluator**.
 //!
 //! A from-scratch, hand-written reading of Solid Web Access Control
 //! (<https://solidproject.org/TR/wac>) over the parsed N-Quad model — the second paradigm

@@ -100,7 +100,7 @@ mod tests {
     /// the `+ doe/36524` term changes from 0 to 1 at this date; a mutation that
     /// replaces it with `- doe/36524` would produce `yoe=99` (year 2099) instead of
     /// `yoe=100` (year 2100), yielding the nonexistent date "2100-02-29". This test
-    /// pins the exact output to catch that arithmetic mutation. [OPUS-4.8] sq-qcnn.20
+    /// pins the exact output to catch that arithmetic mutation. sq-qcnn.20
     #[test]
     fn year_2100_first_century_correction_date() {
         // 2100-03-01 00:00:00 UTC: epoch secs = 47541 * 86400 = 4_107_542_400.
@@ -124,7 +124,7 @@ mod tests {
     /// * **doy = 275** (December 1): `(5×275 + 2)/153 = 9` (December) vs `8` (November).
     ///   December 1 at 2001 = epoch 1_007_164_800. Mutation gives "2001-11-31" (invalid).
     ///
-    /// [SONNET-4.6] sq-qcnn.39
+    /// sq-qcnn.39
     #[test]
     fn month_boundary_july_and_december() {
         // doy=122: 2001-07-01T00:00:00Z, epoch = 11504 * 86_400 = 993_945_600.
@@ -135,7 +135,7 @@ mod tests {
 
     /// Round-trip the doy-boundary instants through the sparq-core xsd:dateTime
     /// parser to confirm they are valid calendar dates (not "June 31" or "November 31"
-    /// artefacts produced by the mutated algorithm). [SONNET-4.6] sq-qcnn.39
+    /// artefacts produced by the mutated algorithm). sq-qcnn.39
     #[test]
     fn month_boundary_instants_round_trip() {
         for &secs in &[993_945_600_i64, 1_007_164_800] {

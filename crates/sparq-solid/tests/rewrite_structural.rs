@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-2xdr — behavioural tests for the query-rewrite path
+//! sq-2xdr — behavioural tests for the query-rewrite path
 //! ([`sparq_solid::rewrite_for`] / [`sparq_solid::wrap_for_view`]).
 //!
 //! These exercise the recursive `wrap_in_graph` / `wrap_expr` walk over the SPARQL

@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-pbz04.3.4 (epic sq-pbz04.3, design record
+//! sq-pbz04.3.4 (epic sq-pbz04.3, design record
 //! research/owl2-ql-cq-gate-broadening.md §4+§6) — the PINNED NAMED-CASE floor of
 //! the `pr:QL` `sparql11/entailment` arm: the subset that graduates under the
 //! SIX-CONDITION soundness predicate, plus the exhaustive hold-reason taxonomy
@@ -76,7 +76,7 @@ mod gated {
     /// mirrored in the central scoreboard (`scoreboard::SUITES`) and read
     /// TEXTUALLY by `tests/scoreboard_floors.rs`. It may only RISE — raise it
     /// (with the named list) as gate broadenings make more cases genuinely pass
-    /// all six conditions. [FABLE-5] sq-pbz04.3.4
+    /// all six conditions. sq-pbz04.3.4
     ///
     /// Raised 11 → 15 by sq-pbz04.3.6 (the body-blank-node lifting): with body
     /// blank nodes lifted to fresh non-distinguished variables — AND the emitter
@@ -86,7 +86,7 @@ mod gated {
     /// differential-oracle test strengthening) — the four undistinguished-variable
     /// `sparqldl` cases now pass all six conditions. Per the CodeQL
     /// positional-`format!` guard, the exact `println!` ratchet line the runner
-    /// prints is `QL entailment graduated floor 15 of 31 (pinned 15)`. [OPUS-4.8]
+    /// prints is `QL entailment graduated floor 15 of 31 (pinned 15)`.
     /// sq-pbz04.3.6
     pub const QL_ENTAILMENT_FLOOR: usize = 15;
 
@@ -180,10 +180,10 @@ mod gated {
     ///   and evaluated over the unmodified data returns EXACTLY the W3C oracle:
     ///   sparqldl-08 → `{(?X=:a, ?Y=:ee)}` (the only closed `:p`/`:r` path through
     ///   `:aa`), sparqldl-07 → `{(?X=:dd, ?Y=:bb, ?Z=:ee)}`. Result-equivalent.
-    ///   All six pass. [OPUS-4.8] sq-pbz04.3.6
+    ///   All six pass. sq-pbz04.3.6
     ///
     /// Each rewrote through the REAL `rewrite_production` and returned EXACTLY
-    /// the W3C oracle's answers over the unmodified data. [SONNET-4.6] [OPUS-4.8]
+    /// the W3C oracle's answers over the unmodified data.
     pub const QL_ENTAILMENT_FLOOR_CASES: &[&str] = &[
         "lang",
         "plainLit",

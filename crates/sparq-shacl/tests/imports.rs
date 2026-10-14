@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-uz0) Acceptance tests for the opt-in `imports` feature:
+//! (sq-uz0) Acceptance tests for the opt-in `imports` feature:
 //! shapes-graph ASSEMBLY per W3C SHACL §§3.1/3.3 (shapes-graph) — `sh:shapesGraph` discovery in the
 //! data graph plus the transitive, cycle-guarded `owl:imports` closure of every
 //! referenced shapes document. Dereferencing an IRI to a document is the

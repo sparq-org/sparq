@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-qonbz.2 — delta-aware adjacency for the OWL-RL semi-naive fixpoint.
+//! sq-qonbz.2 — delta-aware adjacency for the OWL-RL semi-naive fixpoint.
 //!
 //! Replaces the `out`/`inc` `FxHashMap<Id, FxHashMap<Id, Vec<Id>>>` adjacency tables in
 //! [`crate::owl::owl_rl_closure`] with a pair of [`sparq_substrate::join::delta::DeltaTable`]
@@ -63,7 +63,7 @@ fn inc_keys() -> JoinKeys {
 /// Only populated for predicates in `need` (transitive / functional / inv-functional),
 /// exactly like the `FxHashMap` adjacency it replaces.
 ///
-/// [SONNET-4.6] sq-qonbz.2
+/// sq-qonbz.2
 pub(crate) struct DeltaAdj {
     out_tbl: DeltaTable,
     inc_tbl: DeltaTable,

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-xor3: the WRITE/update path enforcement (design doc §4.4 / §7 item 6).
+//! sq-xor3: the WRITE/update path enforcement (design doc §4.4 / §7 item 6).
 //!
 //! The read path ([`crate::PodStore::query_as`]) restricts a query to the session's
 //! `auth:read` graph set. This module is its write-path mirror: before a SPARQL Update
@@ -233,12 +233,26 @@ fn analyze(upd: &Update) -> WriteReqs {
     reqs
 }
 
-/// Does the session have `need` on the concrete graph `g`? `veto` removes a mode the
-/// static view grants (the store's request-time ODRL prohibitions, issue #6743).
-fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need, veto: &Veto<'_>) -> bool {
-    let has = |mode: Mode| {
-        auth.accessible(s, mode).iter().any(|x| x == g) && !veto(mode, g.as_str())
-    };
+/// Whether every operation of `upd` changes data only (`INSERT DATA`, `DELETE DATA`,
+/// `DELETE`/`INSERT … WHERE`): no `CLEAR`, `DROP`, `CREATE` or `LOAD`, nor a `COPY` or
+/// `MOVE`, which the parser lowers to a `DROP` (an `ADD` lowers to an `INSERT … WHERE`
+/// alone). Attached policies grant changes only in such a request.
+pub(crate) fn changes_data_only(upd: &Update) -> bool {
+    upd.operations.iter().all(|op| {
+        matches!(
+            op,
+            GraphUpdateOperation::InsertData { .. }
+                | GraphUpdateOperation::DeleteData { .. }
+                | GraphUpdateOperation::DeleteInsert { .. }
+        )
+    })
+}
+
+/// Does the session have `need` on the concrete graph `g`? `odrl` turns the static
+/// view's verdict into the effective one (the store's request-time ODRL layer, issue
+/// #6743).
+fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need, odrl: &Gate<'_>) -> bool {
+    let has = |mode: Mode| odrl(mode, g.as_str(), auth.accessible(s, mode).iter().any(|x| x == g));
     match need {
         Need::Write => has(Mode::Write),
         Need::WriteOrAppend => has(Mode::Write) || has(Mode::Append),
@@ -271,8 +285,9 @@ pub(crate) struct Permit {
     pub var_graphs: bool,
 }
 
-/// A per-graph veto over the static write view: `veto(mode, graph)` removes `mode`.
-pub(crate) type Veto<'a> = dyn Fn(Mode, &str) -> bool + 'a;
+/// The request-time layer over the static write view: `odrl(mode, graph, granted)` is
+/// the effective verdict for `mode` on `graph`, given whether the static view grants it.
+pub(crate) type Gate<'a> = dyn Fn(Mode, &str, bool) -> bool + 'a;
 
 /// Check that every graph an update's patterns name is in `readable` (the session's read
 /// view), so a `DELETE`/`INSERT … WHERE` reads exactly what a query by the same session
@@ -454,7 +469,7 @@ pub(crate) fn check(
     session: &Session,
     upd: &Update,
     group_docs: &FxHashSet<String>,
-    veto: &Veto<'_>,
+    odrl: &Gate<'_>,
 ) -> Result<Permit, String> {
     let mut reqs = analyze(upd);
 
@@ -482,7 +497,7 @@ pub(crate) fn check(
 
     // Static per-graph requirements.
     for (g, need) in &reqs.graphs {
-        if !allowed(auth, session, g, *need, veto) {
+        if !allowed(auth, session, g, *need, odrl) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(*need),
@@ -498,7 +513,7 @@ pub(crate) fn check(
             // convention (writing an .acl under a CLEAR ALL needs the Write grant that
             // only Control-holders have).
             let g_need = strongest(need, need_for_graph(g.as_str(), need));
-            if !allowed(auth, session, &g, g_need, veto) {
+            if !allowed(auth, session, &g, g_need, odrl) {
                 return Err(format!(
                     "update denied: a graph-wildcard operation (variable GRAPH target or \
                      CLEAR/DROP ALL|NAMED) requires {} permission on every graph, but the \
@@ -535,7 +550,7 @@ pub(crate) fn authorize_writes(
     deletes: &[Option<Term>],
     inserts: &[Option<Term>],
     auth_input: &mut bool,
-    veto: &Veto<'_>,
+    odrl: &Gate<'_>,
 ) -> Result<(), String> {
     let slots = deletes
         .iter()
@@ -554,7 +569,7 @@ pub(crate) fn authorize_writes(
             }
         };
         let need = need_for_graph(g.as_str(), base);
-        if !allowed(auth, session, g, need, veto) {
+        if !allowed(auth, session, g, need, odrl) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(need),
@@ -583,13 +598,13 @@ pub(crate) fn check_effects(
     session: &Session,
     effects: &[sparq_engine::UpdateEffect],
     group_docs: &FxHashSet<String>,
-    veto: &Veto<'_>,
+    odrl: &Gate<'_>,
 ) -> Result<bool, String> {
     use sparq_engine::UpdateEffect;
     let mut rules = false;
     let mut need_on = |n: &NamedNode, base: Need| -> Result<(), String> {
         let need = need_for_graph(n.as_str(), base);
-        if !allowed(auth, session, n, need, veto) {
+        if !allowed(auth, session, n, need, odrl) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(need),
@@ -638,7 +653,8 @@ pub(crate) fn check_effects(
                 }
             },
             UpdateEffect::Create(Term::NamedNode(n)) => {
-                need_on(n, Need::WriteOrAppend)?;
+                // `CREATE` needs `Write`, as [`analyze`] requires of its static target.
+                need_on(n, Need::Write)?;
                 written.push(n);
             }
             UpdateEffect::Create(_) => {

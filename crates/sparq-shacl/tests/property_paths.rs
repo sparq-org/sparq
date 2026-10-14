@@ -1,4 +1,4 @@
-//! [OPUS-4.8] End-to-end SHACL property-path coverage (sq-qap0).
+//! End-to-end SHACL property-path coverage (sq-qap0).
 //!
 //! Each SHACL path form (predicate, inverse, sequence, alternative,
 //! zeroOrMore, oneOrMore, zeroOrOne, and nested combinations) is exercised

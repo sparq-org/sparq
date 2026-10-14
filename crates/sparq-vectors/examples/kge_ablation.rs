@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-0wo9e.8 / P6 (epic sq-0wo9e, design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.8 / P6 (epic sq-0wo9e, design `research/structure-aware-vectorisation.md`
 //! §P6 eval harness) — the runnable **P0 ablation** for structure-aware vectorisation.
 //!
 //! Trains the thin in-tree shallow KGE ([`sparq_vectors::train`]) and measures it with the
@@ -218,7 +218,7 @@ fn main() {
     }
 
     // ---- Phase-4 PROVENANCE-WEIGHTING: all three design-§USE-1 integration points --------------
-    // [OPUS-5] sq-w2af4. The `w(t)` reader feeds three points, each with its OWN paired ablation:
+    // sq-w2af4. The `w(t)` reader feeds three points, each with its OWN paired ablation:
     //   (1) the TRAINING axis  — `run_weight_ablation`  (sq-2489d.4): scale each positive's SGD step;
     //   (2) the POOLING  axis  — `run_pooling_ablation` (sq-w2af4):  structural-sketch pooling of
     //       a node's neighbours weighted by each ASSERTION's w(t), instead of the uniform mean. It

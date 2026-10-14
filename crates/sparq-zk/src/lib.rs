@@ -43,7 +43,7 @@
 //! NOTHING in the sparq workspace depends on this crate; default builds and
 //! the wasm artifact are byte-identical with or without it.
 //!
-//! ## FIPS posture (CR-G4) [OPUS-4.8]
+//! ## FIPS posture (CR-G4)
 //!
 //! The primitives here — BN254, Poseidon2, and Schnorr over Baby-JubJub
 //! ([`sig`]) — are **not** FIPS-approved and are **not** inside any FIPS 140-3 /
@@ -52,11 +52,11 @@
 //! approval. This crate is `publish = false` and not in the default dependency
 //! graph, so a FIPS-constrained operator keeps it out of FIPS scope by not
 //! opting in. See `compliance/cryptoreview/fips-posture.md`.
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 pub mod canon;
 pub mod commit;
-// [OPUS-5] sq-j3b9 (follow-up to sq-8jv7, gap CR-G5): the scalar-independent
+// sq-j3b9 (follow-up to sq-8jv7, gap CR-G5): the scalar-independent
 // Baby-JubJub ladder used by the SECRET-scalar paths of `sig` (key derivation +
 // Schnorr signing). Crate-internal — no public API, no new dependency, and the
 // public-data `verify` path deliberately keeps the faster arkworks
@@ -64,20 +64,20 @@ pub mod commit;
 // claim signing is constant-time (arkworks field ops remain unasserted — see the
 // module docs and `compliance/cryptoreview/side-channel-analysis.md`).
 mod ct;
-// [OPUS-4.8] sq-xojl: DUAL-LEAF value-lane host encoding (VALUE_HOOK + lexical
+// sq-xojl: DUAL-LEAF value-lane host encoding (VALUE_HOOK + lexical
 // leaf). OPT-IN behind the `dual-leaf` cargo feature (OFF by default): the
 // default string-canonical pipeline is byte-unchanged. Carries the documented
 // INV-VL downgrade (#769 accepted, CR-G8 / sq-qhy4); NOT externally audited.
 #[cfg(feature = "dual-leaf")]
 pub mod dual_leaf;
-// [FABLE-5] sq-hh7a4: dual-leaf `xsd:boolean` host encoder (same feature gate,
+// sq-hh7a4: dual-leaf `xsd:boolean` host encoder (same feature gate,
 // same INV-VL downgrade + CR-G8 / sq-qhy4 audit obligation as `dual_leaf`).
 #[cfg(feature = "dual-leaf")]
 pub mod dual_leaf_boolean;
 pub mod encode;
 pub mod field;
 pub mod ingest;
-// [FABLE-5] sq-we9vs: dual-leaf `xsd:dateTime`/`xsd:date` host encoders — the
+// sq-we9vs: dual-leaf `xsd:dateTime`/`xsd:date` host encoders — the
 // §13 signed scaled-epoch, Z-only, fail-closed lanes (same feature gate, same
 // INV-VL downgrade + CR-G8 / sq-qhy4 audit obligation as `dual_leaf`).
 #[cfg(feature = "dual-leaf")]
@@ -85,7 +85,7 @@ pub mod dual_leaf_datetime;
 pub mod poseidon2;
 mod poseidon2_constants;
 pub mod registry;
-// [OPUS-4.8] sq-bevd3 (Phase 3, epic sq-0dksu): the PER-METHOD security-properties
+// sq-bevd3 (Phase 3, epic sq-0dksu): the PER-METHOD security-properties
 // annotation graph + the over-claim guards (no `Proven` on a positive property while
 // sq-qhy4 is open; completeness; source-layer non-transfer). OPT-IN behind the
 // `secprop-annotations` cargo feature (OFF by default): the default build is
@@ -96,7 +96,7 @@ pub mod registry;
 pub mod secprop;
 pub mod sig;
 pub mod trace;
-// [OPUS-4.8] sq-9c5e: OFF-circuit W3C Verifiable-Credential ingest bridge —
+// sq-9c5e: OFF-circuit W3C Verifiable-Credential ingest bridge —
 // verify a source VC's Data-Integrity proof (`eddsa-rdfc-2022` / `ecdsa-rdfc-2019`)
 // at the HOST, then re-commit + record `zk:sourceCryptosuite` provenance. OPT-IN
 // behind the `vc-bridge` cargo feature (OFF by default): the default build pulls
@@ -106,7 +106,7 @@ pub mod trace;
 // externally audited (sq-qhy4).
 #[cfg(feature = "vc-bridge")]
 pub mod vc_bridge;
-// [OPUS-5] sq-txg1y (issue #3234): the ADDITIVE JSON-LD VC *envelope* entry point
+// sq-txg1y (issue #3234): the ADDITIVE JSON-LD VC *envelope* entry point
 // layered on top of `vc_bridge` — split a DI-secured VC JSON document into its
 // unsecured document + proof configuration, multibase-decode `proofValue`, expand
 // both halves to RDF (`oxjsonld`, caller-supplied `@context` allowlist, NO
@@ -114,7 +114,7 @@ pub mod vc_bridge;
 // OFF-by-default `vc-bridge` gate; the RDF-native API is unchanged.
 #[cfg(feature = "vc-bridge")]
 pub mod vc_bridge_json;
-// [OPUS-5] sq-u5y1f (issue #3235): the SELECTIVE-DISCLOSURE ingest SEAM for
+// sq-u5y1f (issue #3235): the SELECTIVE-DISCLOSURE ingest SEAM for
 // `bbs-2023` / `ecdsa-sd-2023` (design §5.3). A real BBS / `ecdsa-sd-2023` verifier
 // is NOT in this repo, so the module is a DELEGATION boundary: the host plugs its
 // own audited verifier into `SelectiveDisclosureVerifier`, sparq does the RDFC10

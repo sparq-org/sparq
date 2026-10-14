@@ -1,4 +1,4 @@
-//! [OPUS-4.8] A/B throughput sketch: the direct sparq-side decoder (default
+//! A/B throughput sketch: the direct sparq-side decoder (default
 //! `load_reader`, plan levers H1–H4) vs the upstream-backed oracle
 //! (`load_reader_via_upstream`, i.e. `hdt::Hdt::read` + per-id translation) on the
 //! same in-memory HDT bytes. Median-of-N, both producing identical graphs.

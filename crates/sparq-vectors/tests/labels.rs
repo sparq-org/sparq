@@ -7,7 +7,7 @@ use sparq_vectors::{
     embed_labels, embed_labels_with, nearest_term_exact, Embedder, HashEmbedder, LabelConfig,
     VectorStore,
 };
-// [OPUS-4.8] (sq-ip3a) The HNSW index is the approximate backend — `approx-ann` only.
+// (sq-ip3a) The HNSW index is the approximate backend — `approx-ann` only.
 #[cfg(feature = "approx-ann")]
 use sparq_vectors::VectorIndex;
 

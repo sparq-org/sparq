@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-mk9n) The SHACL-function registry and the **function-expression
+//! (sq-mk9n) The SHACL-function registry and the **function-expression
 //! form** of the SHACL-AF node-expression algebra (a child module of
 //! [`crate::rules`], compiled only behind the `shacl-af` feature).
 //!
@@ -28,7 +28,7 @@
 //! and `var` (`"focusNode"` is the focus node; any other name resolves against a
 //! caller-supplied variable scope — the W3C suite's `sht:scope-<name>` injection —
 //! else the empty set, matching the `var-unbound` entry). `sh:SPARQLFunction`
-//! custom functions are dispatched through the engine. [OPUS-4.8] (sq-u5rxj) the
+//! custom functions are dispatched through the engine. (sq-u5rxj) the
 //! `shnex:var "bound"` scope-injection entry is now supported via the threaded
 //! [`crate::rules::Scope`].
 
@@ -475,7 +475,7 @@ impl Func {
                 });
                 v
             }
-            // [OPUS-4.8] (sq-u5rxj) `var "name"`: `"focusNode"` is the focus node;
+            // (sq-u5rxj) `var "name"`: `"focusNode"` is the focus node;
             // any other name resolves against the caller-supplied `scope` (the W3C
             // suite's `sht:scope-<name>` injection), or the empty set when absent.
             Op::Var(name) => {

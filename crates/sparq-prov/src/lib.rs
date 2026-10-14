@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-ntcg: crate has zero `unsafe`.
+#![forbid(unsafe_code)] // sq-ntcg: crate has zero `unsafe`.
 
 //! # sparq-prov — W3C PROV-O lineage for DERIVED data
 //!
@@ -41,14 +41,14 @@
 //! the proof tree is a finer-grained provenance (it names the rule and exact
 //! premises for each fact) than a single CONSTRUCT-style activity.
 //! `prov_ntriples` renders that lineage as N-Triples in one call. See the
-//! `reason` module. <!-- [GPT-5.6] sq-8jn86 -->
+//! `reason` module. <!-- sq-8jn86 -->
 //!
 //! **Missing-answer explanation** is available under the non-default `why-not`
 //! feature. The `why_not` function accepts one basic graph pattern and a fully
 //! ground target binding, then reports exactly the substituted triples absent
 //! from the graph. `why_not_report_ntriples` and `why_not_report_turtle` render
 //! that result as deterministic, PROV-flavoured RDF 1.2. More general SPARQL
-//! algebra is rejected as unsupported. <!-- [GPT-5.6] sq-lsp7k -->
+//! algebra is rejected as unsupported. <!-- sq-lsp7k -->
 //!
 //! **Out of scope for per-triple lineage** (a deliberate honesty boundary, not a TODO):
 //! the structural UPDATE operations `CLEAR` / `DROP` / `CREATE` change a graph's
@@ -70,19 +70,19 @@ use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sparq_core::Graph;
 use sparq_engine::QueryBudget;
 
-// [OPUS-4.8] sq-xwdd: SPARQL UPDATE lineage — capture PROV-O for the data an
+// sq-xwdd: SPARQL UPDATE lineage — capture PROV-O for the data an
 // `INSERT … WHERE` / `INSERT DATA` / `DELETE …` operation changes in a store. Like
 // the CONSTRUCT path it depends only on sparq-core/sparq-engine (no extra feature).
 mod update;
 pub use update::{derive_update, derive_update_with_budget, UpdateDerivation};
-// [OPUS-4.8] sq-m3i0: reasoner-materialization lineage — map a sparq-reason
+// sq-m3i0: reasoner-materialization lineage — map a sparq-reason
 // `why()` proof tree → PROV-O RDF. Non-default feature, so the sparq-reason dep
 // is pulled only when asked for.
 #[cfg(feature = "reason")]
 pub mod reason;
 #[cfg(feature = "reason")]
 pub use reason::{prov_from_proof, prov_ntriples, ProvProofConfig};
-// [GPT-5.6] sq-lsp7k.17: exact missing-conjunct explanation, opt-in so the
+// sq-lsp7k.17: exact missing-conjunct explanation, opt-in so the
 // default public API remains unchanged.
 #[cfg(feature = "why-not")]
 mod why_not;
@@ -94,7 +94,7 @@ pub use why_not::{
 // ── PROV-O vocabulary IRIs ─────────────────────────────────────────────────
 const PROV: &str = "http://www.w3.org/ns/prov#";
 
-// [GPT-5.6] sq-ijw35: one Turtle writer for both derivation surfaces so they
+// sq-ijw35: one Turtle writer for both derivation surfaces so they
 // always serialise the identical `prov_graph()` triple set with the same prefixes.
 fn triples_to_prov_turtle(triples: &[Triple]) -> String {
     let serializer = oxttl::TurtleSerializer::new()
@@ -214,7 +214,7 @@ impl Derivation {
     }
 
     /// The configured input-source IRIs, in their original order.
-    // [GPT-5.6] sq-cg237
+    // sq-cg237
     pub fn used_inputs(&self) -> &[NamedNode] {
         &self.used
     }
@@ -308,7 +308,7 @@ impl Derivation {
     /// The same PROV-O lineage as [`prov_graph`](Self::prov_graph), serialised as
     /// prefix-compacted Turtle.
     ///
-    /// [GPT-5.6] sq-ijw35
+    /// sq-ijw35
     pub fn prov_turtle(&self) -> String {
         triples_to_prov_turtle(&self.prov_graph())
     }

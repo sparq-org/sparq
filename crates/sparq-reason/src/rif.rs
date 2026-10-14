@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-rh4gu (epic sq-pbz04) — a **RIF-Core** front-end over the N3
+//! sq-rh4gu (epic sq-pbz04) — a **RIF-Core** front-end over the N3
 //! forward-chaining rule engine.
 //!
 //! RIF-Core is the W3C *Rule Interchange Format* **Core** dialect — the
@@ -28,7 +28,7 @@
 //!
 //! ## Equal-atom semantics — body-only, resolved at COMPILE TIME by substitution
 //!
-//! [SONNET-4.6] sq-pbz04.5.4 / [OPUS-4.8] sq-26vwp — RIF-Core is an important
+//! sq-pbz04.5.4 / sq-26vwp — RIF-Core is an important
 //! special case for `Equal` (`a = b`) atoms: unlike RIF-BLD (which permits equality
 //! in heads and applies **congruence closure** / equality-propagating semantics),
 //! **RIF-Core forbids `Equal` in rule conclusions** and gives body equality
@@ -59,7 +59,7 @@
 //!    fires exactly for the individuals that manage themselves — with no `owl:sameAs`
 //!    assertion needed (reflexivity honoured) and without over-firing on distinct
 //!    nodes that merely carry an `owl:sameAs` triple.
-//! 4. **`t1 = t2` (two distinct NON-variable terms)** — [SONNET-4.6] sq-anyad:
+//! 4. **`t1 = t2` (two distinct NON-variable terms)** — sq-anyad:
 //!    decided by **NUMERIC value-space equality** when BOTH sides are well-formed
 //!    numeric literals, via the SHARED substrate comparator
 //!    `sparq_substrate::numeric::Num::cmp_relational` (sq-v5evr, issue #1646 —
@@ -77,7 +77,7 @@
 //!    compared EXACTLY by `sparq_substrate::numeric::cmp_plain_decimal` (string
 //!    arithmetic, arbitrary precision, no `f64` promotion), so
 //!    `"+1<39 digits>" = "1<39 digits>"` is TRUE and an unequal huge pair is vacuous.
-//!    [OPUS-5]
+//!
 //!    Everything else stays fail-closed with [`RifError::DistinctGroundEqual`] —
 //!    the NON-numeric literal-equality half (`pred:boolean-equal`,
 //!    `pred:literal-not-identical` over strings/booleans/dates), an IRI or `List`
@@ -126,7 +126,7 @@
 use crate::n3::Term as N3Term;
 use crate::xsd_facets::integer_facet_bounds;
 use sparq_core::dict::{Dict, Id};
-// [SONNET-4.6] sq-anyad — the SHARED value-space numeric tower: the RIF Equal-atom
+// sq-anyad — the SHARED value-space numeric tower: the RIF Equal-atom
 // path decides distinct-ground NUMERIC equality with the substrate's own
 // `as_numeric` classifier (the same one sparq-engine's value path uses) and its
 // relational comparator `Num::cmp_relational` (sq-v5evr, #1646 — already driven by
@@ -142,7 +142,7 @@ use std::fmt;
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDFS_SUBCLASS_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
-/// The one EXACT non-integer numeric tier — see [`exact_decimal_lexical`]. [OPUS-5]
+/// The one EXACT non-integer numeric tier — see [`exact_decimal_lexical`].
 const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
 /// N3 builtin namespaces the RIF builtins lower onto (the chainer recognises these).
 const MATH: &str = "http://www.w3.org/2000/10/swap/math#";
@@ -154,7 +154,7 @@ const LIST: &str = "http://www.w3.org/2000/10/swap/list#";
 /// monotone Horn subset, so the nonmonotonic / production / non-Core items here
 /// are not even *in* the dialect; the rest are larger-dialect surface tracked for
 /// honesty. Cross-referenced by the expressivity suite so the gaps are legible.
-// [SONNET-4.6] sq-pbz04.5.2 — deferral ledger (§3.2) added below.
+// sq-pbz04.5.2 — deferral ledger (§3.2) added below.
 pub const UNIMPLEMENTED: &[&str] = &[
     // NONMONOTONIC / NON-CORE by dialect (would break monotonicity — excluded by design):
     "negation-as-failure (Naf) — RIF-Core is monotone; NAF is not in the dialect",
@@ -166,7 +166,7 @@ pub const UNIMPLEMENTED: &[&str] = &[
     "disjunction (Or) in rule bodies",
     "the RIF/XML presentation-syntax importer (this front-end takes the in-engine model)",
     // DEFERRED BUILTINS — soundly not mapped, each with its precise reason (§3.2):
-    // [SONNET-4.6] sq-pbz04.5.2
+    // sq-pbz04.5.2
     "func:numeric-integer-divide DEFERRED: F&O op:numeric-integer-divide truncates \
      toward zero; EYE/N3 math:integerQuotient is floor division. They diverge on any \
      negative operand (−7 idiv 2 = −3 vs floor(−3.5) = −4). A truncating N3-side \
@@ -177,12 +177,12 @@ pub const UNIMPLEMENTED: &[&str] = &[
     "pred:matches DEFERRED: XPath/XSD regex dialect ≠ Rust regex crate dialect \
      (e.g. XSD character-class subtraction is not supported). A mapping cannot fail \
      closed on dialect-divergent patterns without a real XSD-regex front-end — deferred.",
-    // [SONNET-4.6] sq-pbz04.5.4 / [OPUS-4.8] sq-26vwp — Equal-atom handling:
+    // sq-pbz04.5.4 / sq-26vwp — Equal-atom handling:
     // Equal in a rule CONCLUSION is REJECTED (RIF-Core syntactic restriction) via
     // RifError::EqualInConclusion. Body Equal is resolved at compile time by
     // substitution/unification (t=t eliminated; ?x=t substituted; ?x=?y unified).
     // ONLY distinct-GROUND value-equality remains deferred (fail-closed), below.
-    // [SONNET-4.6] sq-anyad — the NUMERIC half is now IMPLEMENTED (sq-v5evr landed);
+    // sq-anyad — the NUMERIC half is now IMPLEMENTED (sq-v5evr landed);
     // only the non-numeric literal-equality half remains deferred.
     "pred:boolean-equal / pred:literal-not-identical / equality of distinct value-equal \
      NON-NUMERIC GROUND constants DEFERRED (fail-closed): needs value-space equality \
@@ -317,7 +317,7 @@ pub enum Builtin {
     ListContains,
     /// list length (function: n = length(list)).
     ListLength,
-    // [SONNET-4.6] sq-pbz04.5.2 — 5 soundly-mapped builtins (§3.1 equivalences):
+    // sq-pbz04.5.2 — 5 soundly-mapped builtins (§3.1 equivalences):
     /// `pred:numeric-not-equal` (a ≠ b) — N3 target: `math:notEqualTo`.
     /// §3.1 equivalence: both are numeric value-space inequality over the same
     /// promotion tower; the chainer's `MathNe` exists and is exercised by the N3
@@ -356,7 +356,7 @@ impl Builtin {
                 | Builtin::NumericGreaterThan
                 | Builtin::NumericNotLessThan
                 | Builtin::NumericNotGreaterThan
-                | Builtin::NumericNotEqual // [SONNET-4.6] sq-pbz04.5.2
+                | Builtin::NumericNotEqual // sq-pbz04.5.2
                 | Builtin::StringContains
                 | Builtin::StringStartsWith
                 | Builtin::StringEndsWith
@@ -375,7 +375,7 @@ impl Builtin {
             | Builtin::NumericGreaterThan
             | Builtin::NumericNotLessThan
             | Builtin::NumericNotGreaterThan
-            | Builtin::NumericNotEqual // [SONNET-4.6] sq-pbz04.5.2
+            | Builtin::NumericNotEqual // sq-pbz04.5.2
             | Builtin::StringContains
             | Builtin::StringStartsWith
             | Builtin::StringEndsWith
@@ -389,11 +389,11 @@ impl Builtin {
             // unary-input functions producing one result
             Builtin::StringLength
             | Builtin::ListLength
-            | Builtin::StringUpperCase  // [SONNET-4.6] sq-pbz04.5.2
+            | Builtin::StringUpperCase  // sq-pbz04.5.2
             | Builtin::StringLowerCase
             | Builtin::StringEncodeForUri => 2,
             // variadic list concat: MINIMUM arity (1 input + 1 output = 2)
-            // [SONNET-4.6] sq-pbz04.5.2
+            // sq-pbz04.5.2
             Builtin::ListConcatenate => 2,
         }
     }
@@ -401,7 +401,7 @@ impl Builtin {
     /// `true` only for the variadic-arity builtins (`func:concatenate`), where
     /// `arity()` returns the **minimum** accepted argument count and `validate`
     /// uses a `>=` check. All other builtins have a fixed arity (`==` check).
-    // [SONNET-4.6] sq-pbz04.5.2
+    // sq-pbz04.5.2
     pub fn is_variadic(self) -> bool {
         matches!(self, Builtin::ListConcatenate)
     }
@@ -437,7 +437,7 @@ pub enum Atom {
     },
     /// **Equality**: `a = b` (body-only). Resolved at compile time by
     /// substitution/unification (`resolve_body_equalities`) — never lowered to an
-    /// `owl:sameAs` triple. See the module-level Equal-atom semantics. [OPUS-4.8] sq-26vwp
+    /// `owl:sameAs` triple. See the module-level Equal-atom semantics. sq-26vwp
     Equal {
         /// The left term.
         left: Term,
@@ -496,7 +496,7 @@ impl Atom {
     /// Lower a positive atom to one N3 triple. (Builtins lower separately, since a
     /// function builtin emits the producer/consumer ordering the chainer needs.)
     ///
-    /// [OPUS-4.8] sq-26vwp — `Equal` returns `None`: body `Equal` atoms are resolved
+    /// sq-26vwp — `Equal` returns `None`: body `Equal` atoms are resolved
     /// away by `resolve_body_equalities` BEFORE lowering (never emitted as an
     /// `owl:sameAs` triple) and `Equal` in a head is rejected by `validate`, so an
     /// `Equal` atom must never reach this function. A `None` here therefore fails
@@ -579,7 +579,7 @@ pub enum RifError {
     /// An `Equal` atom appeared in a rule HEAD. RIF-Core (unlike RIF-BLD) does
     /// **not** permit equality in conclusions — it is a Core syntactic restriction.
     /// `validate()` rejects any rule whose head contains an `Equal` atom with this
-    /// error. [SONNET-4.6] sq-pbz04.5.4
+    /// error. sq-pbz04.5.4
     EqualInConclusion,
     /// A body `Equal` atom has two **distinct non-variable** terms that **numeric
     /// value-space equality cannot decide** — e.g. `"true"^^xsd:boolean =
@@ -593,7 +593,7 @@ pub enum RifError {
     /// `Num::cmp_relational` (sq-v5evr, issue #1646) — value-equal eliminates the
     /// atom, value-unequal makes the rule vacuous. The NON-numeric literal-equality
     /// half stays fail-closed rather than answering incorrectly.
-    /// [SONNET-4.6] sq-pbz04.5.4 / sq-anyad
+    /// sq-pbz04.5.4 / sq-anyad
     DistinctGroundEqual {
         /// The left-hand term (rendered as a string for display).
         left: String,
@@ -634,13 +634,13 @@ impl fmt::Display for RifError {
                 "RIF-Core builtin {:?} may not appear in a rule head (builtins are body-only)",
                 op
             ),
-            // [SONNET-4.6] sq-pbz04.5.4
+            // sq-pbz04.5.4
             RifError::EqualInConclusion => write!(
                 f,
                 "RIF-Core does not permit Equal (=) in a rule conclusion; use RIF-BLD \
                  for equality-in-head semantics (Core syntactic restriction)"
             ),
-            // [SONNET-4.6] sq-pbz04.5.4 / sq-anyad
+            // sq-pbz04.5.4 / sq-anyad
             RifError::DistinctGroundEqual { left, right } => write!(
                 f,
                 "RIF-Core body Equal with distinct ground terms ({} = {}) that NUMERIC \
@@ -700,7 +700,7 @@ impl Document {
     pub fn validate(&self) -> Result<(), RifError> {
         for rule in &self.rules {
             // Head atoms must be positive and must NOT be Equal.
-            // [SONNET-4.6] sq-pbz04.5.4: RIF-Core forbids Equal in conclusions.
+            // sq-pbz04.5.4: RIF-Core forbids Equal in conclusions.
             for h in &rule.head {
                 match h {
                     Atom::Builtin { op, .. } => {
@@ -712,7 +712,7 @@ impl Document {
                     _ => {}
                 }
             }
-            // [OPUS-4.8] sq-26vwp — resolve body `Equal` atoms by compile-time
+            // sq-26vwp — resolve body `Equal` atoms by compile-time
             // substitution / unification FIRST. The returned rule has NO body `Equal`
             // atoms: each is eliminated (`t = t`), substituted (`?x = t`), or unified
             // (`?x = ?y`); a distinct-ground `t1 = t2` fails closed with
@@ -720,7 +720,7 @@ impl Document {
             // bind — a head var bound solely by `?x = t` is now genuinely bound; a head
             // var bound solely by `?x = ?x` is now genuinely unbound (correctly caught
             // by the UnboundHeadVar sweep below).
-            // [SONNET-4.6] sq-anyad — the `satisfiable` flag is deliberately IGNORED
+            // sq-anyad — the `satisfiable` flag is deliberately IGNORED
             // here: a value-space-unsatisfiable body (`1 = 2`) still gets the full
             // range-restriction sweep, so an unsafe rule is reported loudly instead of
             // being excused by its vacuity. Only lowering acts on the flag.
@@ -733,7 +733,7 @@ impl Document {
             for atom in &resolved.body {
                 match atom {
                     Atom::Builtin { op, args } => {
-                        // [SONNET-4.6] sq-pbz04.5.2 — variadic builtins use >= check.
+                        // sq-pbz04.5.2 — variadic builtins use >= check.
                         let arity_ok = if op.is_variadic() {
                             args.len() >= op.arity()
                         } else {
@@ -759,7 +759,7 @@ impl Document {
                             output[0].vars_into(&mut bound);
                         }
                     }
-                    // [OPUS-4.8] sq-26vwp — invariant: `resolve_body_equalities` removed
+                    // sq-26vwp — invariant: `resolve_body_equalities` removed
                     // every body `Equal`. Reaching this arm is an internal resolution bug;
                     // fail closed rather than silently treating it as a binding-generating
                     // positive atom (which would resurrect the old owl:sameAs behaviour).
@@ -800,11 +800,11 @@ impl Document {
         self.validate()?;
         let mut out = String::new();
         for rule in &self.rules {
-            // [OPUS-4.8] sq-26vwp — lower the RESOLVED rule (body `Equal` atoms
+            // sq-26vwp — lower the RESOLVED rule (body `Equal` atoms
             // substituted/unified away). A rule whose body becomes empty after
             // resolution (e.g. `?x # C :- ?x = <a>`) is an unconditional FACT.
             let resolved = resolve_body_equalities(rule)?;
-            // [SONNET-4.6] sq-anyad — a body `Equal` that reduced to two numerically
+            // sq-anyad — a body `Equal` that reduced to two numerically
             // UNEQUAL ground literals (`1 = 2`) makes the body unsatisfiable: the rule
             // is VACUOUS, so it emits nothing at all. Dropping it is exact (it could
             // never have fired) and preserves monotonicity. This check precedes the
@@ -877,7 +877,7 @@ fn require_bound(terms: &[Term], bound: &BTreeSet<String>) -> Result<(), RifErro
 /// The caller passes atoms of a RESOLVED rule (`resolve_body_equalities`), which
 /// contains NO body `Equal` atoms; a stray `Equal` would make `positive_to_n3`
 /// return `None`, and the `expect` below fails closed rather than emitting an
-/// unsound `owl:sameAs` triple. [OPUS-4.8] sq-26vwp
+/// unsound `owl:sameAs` triple. sq-26vwp
 fn lower_body_atom(atom: &Atom) -> String {
     match atom {
         Atom::Builtin { op, args } => lower_builtin(*op, args),
@@ -891,7 +891,7 @@ fn lower_body_atom(atom: &Atom) -> String {
     }
 }
 
-/// The outcome of resolving a rule's body `Equal` atoms. [SONNET-4.6] sq-anyad
+/// The outcome of resolving a rule's body `Equal` atoms. sq-anyad
 struct Resolved {
     /// The rule with every body `Equal` removed (eliminated / substituted / unified).
     rule: Rule,
@@ -904,7 +904,7 @@ struct Resolved {
 
 /// Resolve every body `Equal` atom of `rule` by **compile-time substitution /
 /// unification**, returning an equivalent rule whose body contains NO `Equal`
-/// atoms. [OPUS-4.8] sq-26vwp — this is RIF-Core's ground-identity equality done
+/// atoms. sq-26vwp — this is RIF-Core's ground-identity equality done
 /// at validate/lower time, NOT by matching an `owl:sameAs` triple at runtime.
 ///
 /// The rewrites, applied to a **fixpoint** over the body's `Equal` atoms (a
@@ -913,7 +913,7 @@ struct Resolved {
 /// * `?x = t` (one side a variable) → substitute `t` for `?x` throughout head+body
 ///   (the variable becomes bound-by-substitution).
 /// * `?x = ?y` (two distinct variables) → unify: rename one to the other everywhere.
-/// * `t1 = t2` (two distinct NON-variable terms) → [SONNET-4.6] sq-anyad: decided by
+/// * `t1 = t2` (two distinct NON-variable terms) → sq-anyad: decided by
 ///   [`ground_value_equal`] when both are numeric literals — value-EQUAL drops the
 ///   atom like `t = t`, value-UNEQUAL marks the whole rule unsatisfiable
 ///   ([`Resolved::satisfiable`]); anything else is [`RifError::DistinctGroundEqual`]
@@ -946,7 +946,7 @@ fn resolve_body_equalities(rule: &Rule) -> Result<Resolved, RifError> {
                         changed = true;
                     }
                     _ => {
-                        // Two distinct NON-variable terms. [SONNET-4.6] sq-anyad —
+                        // Two distinct NON-variable terms. sq-anyad —
                         // the NUMERIC half is decided by the shared substrate
                         // comparator; everything else fails closed (never guess).
                         match ground_value_equal(&l, &r) {
@@ -995,7 +995,7 @@ fn resolve_body_equalities(rule: &Rule) -> Result<Resolved, RifError> {
 /// `xsd:decimal` paths are unchanged. The comparison runs through
 /// `sparq_substrate::numeric::cmp_plain_decimal`, so it is exact at ARBITRARY precision:
 /// an out-of-tower lexical is bounds-checked as faithfully as a small one, and a lexical
-/// that is not a plain decimal at all fails closed here too. [OPUS-5]
+/// that is not a plain decimal at all fails closed here too.
 fn integer_facets_ok(datatype: &str, lex: &str) -> bool {
     let Some((min, max)) = integer_facet_bounds(datatype) else {
         return true;
@@ -1030,7 +1030,7 @@ fn integer_facets_ok(datatype: &str, lex: &str) -> bool {
 /// `sparq_substrate::numeric::as_numeric` — the substrate's public literal →
 /// numeric-tower classifier, shared with sparq-engine's value path, so the RIF
 /// front-end can never diverge from it on what *is* a number.
-/// [SONNET-4.6] sq-anyad
+/// sq-anyad
 fn numeric_value(t: &Term) -> Option<Num> {
     match t {
         Term::Lit { lex, datatype } => {
@@ -1056,7 +1056,7 @@ fn numeric_value(t: &Term) -> Option<Num> {
 /// no `.` at all (`"1.5"^^xsd:integer` is ill-formed and stays fail-closed) and must lie
 /// inside the value space of its declared derived integer datatype ([`integer_facets_ok`]
 /// — this fallback must not rescue a facet violation `numeric_value` just refused); the
-/// digit shape itself is validated by `cmp_plain_decimal`. [OPUS-5]
+/// digit shape itself is validated by `cmp_plain_decimal`.
 fn exact_decimal_lexical(t: &Term) -> Option<&str> {
     match t {
         Term::Lit { lex, datatype } if sparq_core::is_integer_datatype(datatype.as_str()) => {
@@ -1072,7 +1072,7 @@ fn exact_decimal_lexical(t: &Term) -> Option<&str> {
 }
 
 /// Decide a body `Equal` between two DISTINCT ground terms by **numeric value-space
-/// equality**. [SONNET-4.6] sq-anyad — the numeric half of the deferral, unblocked by
+/// equality**. sq-anyad — the numeric half of the deferral, unblocked by
 /// the substrate comparator `Num::cmp_relational` (sq-v5evr, issue #1646).
 ///
 /// * `Some(true)` / `Some(false)` — the pair was decided. Either both sides are
@@ -1082,7 +1082,7 @@ fn exact_decimal_lexical(t: &Term) -> Option<&str> {
 ///   well-formed `xsd:integer`/`xsd:decimal` too large for the tower's `i128` mantissa
 ///   — both sides are exact-tier lexicals and
 ///   `sparq_substrate::numeric::cmp_plain_decimal` compared them EXACTLY by string
-///   arithmetic, at arbitrary precision and with no `f64` promotion. [OPUS-5]
+///   arithmetic, at arbitrary precision and with no `f64` promotion.
 /// * `None` — NOT decidable here, so the caller fails closed: a non-numeric literal
 ///   on either side (`pred:boolean-equal`, `pred:literal-not-identical` over
 ///   strings / booleans / dates — the half of sq-anyad that is still deferred), an
@@ -1099,7 +1099,7 @@ fn ground_value_equal(l: &Term, r: &Term) -> Option<bool> {
         (Some(a), Some(b)) => a.cmp_relational(b).map(|o| o == Ordering::Equal),
         // At least one side is not tower-representable. It can still be a WELL-FORMED
         // integer/decimal beyond the `i128` mantissa — decide those exactly rather than
-        // reporting a valid pair as undecidable. [OPUS-5]
+        // reporting a valid pair as undecidable.
         _ => {
             let a = exact_decimal_lexical(l)?;
             let b = exact_decimal_lexical(r)?;
@@ -1111,7 +1111,7 @@ fn ground_value_equal(l: &Term, r: &Term) -> Option<bool> {
 /// Insert `v -> t` into `subst`, keeping the map idempotent (every existing value
 /// that mentions `v` is rewritten to `t`). `t` must already be resolved w.r.t.
 /// `subst` (the caller applies `apply_subst_term` first). Occurs-check: a variable
-/// equated to a compound term containing itself is rejected. [OPUS-4.8] sq-26vwp
+/// equated to a compound term containing itself is rejected. sq-26vwp
 fn bind_var(
     subst: &mut BTreeMap<String, Term>,
     v: String,
@@ -1130,7 +1130,7 @@ fn bind_var(
 }
 
 /// Apply a (fully resolved, idempotent) substitution to a term — a single lookup
-/// per variable suffices, recursing into `List` terms. [OPUS-4.8] sq-26vwp
+/// per variable suffices, recursing into `List` terms. sq-26vwp
 fn apply_subst_term(t: &Term, subst: &BTreeMap<String, Term>) -> Term {
     match t {
         Term::Var(v) => subst.get(v).cloned().unwrap_or_else(|| t.clone()),
@@ -1141,7 +1141,7 @@ fn apply_subst_term(t: &Term, subst: &BTreeMap<String, Term>) -> Term {
     }
 }
 
-/// Apply a substitution to every term of an atom. [OPUS-4.8] sq-26vwp
+/// Apply a substitution to every term of an atom. sq-26vwp
 fn apply_subst_atom(a: &Atom, subst: &BTreeMap<String, Term>) -> Atom {
     let s = |t: &Term| apply_subst_term(t, subst);
     match a {
@@ -1158,7 +1158,7 @@ fn apply_subst_atom(a: &Atom, subst: &BTreeMap<String, Term>) -> Atom {
 }
 
 /// Replace every occurrence of variable `v` in `t` with `replacement` (recursing
-/// into `List` terms). Used to keep the substitution map idempotent. [OPUS-4.8] sq-26vwp
+/// into `List` terms). Used to keep the substitution map idempotent. sq-26vwp
 fn replace_var_in_term(t: &Term, v: &str, replacement: &Term) -> Term {
     match t {
         Term::Var(name) if name == v => replacement.clone(),
@@ -1170,7 +1170,7 @@ fn replace_var_in_term(t: &Term, v: &str, replacement: &Term) -> Term {
 }
 
 /// Does variable `v` occur anywhere in `t` (recursing into `List` terms)? The
-/// occurs-check for unification. [OPUS-4.8] sq-26vwp
+/// occurs-check for unification. sq-26vwp
 fn term_contains_var(t: &Term, v: &str) -> bool {
     match t {
         Term::Var(name) => name == v,
@@ -1216,7 +1216,7 @@ fn lower_builtin(op: Builtin, args: &[Term]) -> String {
         Builtin::StringLength => bin(&n3(&args[0]), STRING, "length", &n3(&args[1])),
         // list function: list list:length out
         Builtin::ListLength => bin(&n3(&args[0]), LIST, "length", &n3(&args[1])),
-        // [SONNET-4.6] sq-pbz04.5.2 — 5 new soundly-mapped builtins:
+        // sq-pbz04.5.2 — 5 new soundly-mapped builtins:
         // pred:numeric-not-equal: a math:notEqualTo b
         Builtin::NumericNotEqual => bin(&n3(&args[0]), MATH, "notEqualTo", &n3(&args[1])),
         // func:upper-case: s string:upperCase out
@@ -1267,7 +1267,7 @@ fn n3_term(t: &N3Term) -> String {
         // A nested formula cannot appear in a lowered RIF-Core document.
         N3Term::Formula(_) => "{ }".to_string(),
         // RIF-Core has no frame/term form that lowers to an RDF-star quoted
-        // triple, but render one faithfully if it ever flows through. [FABLE-5]
+        // triple, but render one faithfully if it ever flows through.
         N3Term::Triple(tr) => {
             format!("<< {} {} {} >>", n3_term(&tr[0]), n3_term(&tr[1]), n3_term(&tr[2]))
         }
@@ -1570,7 +1570,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------- Equal-atom tests
-    // [SONNET-4.6] sq-pbz04.5.4 — the three Equal-atom semantic requirements:
+    // sq-pbz04.5.4 — the three Equal-atom semantic requirements:
     // (1) Equal in conclusion is rejected (non-vacuous);
     // (2) ground-identity body Equal works (trivially true, rule fires);
     // (3) value-equality (distinct ground constants) is fail-closed-abstained.
@@ -1638,7 +1638,7 @@ mod tests {
 
     /// (2b) A body `?n=?n` that is the SOLE binder of a head variable must be
     /// REJECTED as UnboundHeadVar: the atom is eliminated at lowering, so the head
-    /// variable would be genuinely unbound in the emitted N3 rule. [OPUS-4.8] sq-26vwp.
+    /// variable would be genuinely unbound in the emitted N3 rule. sq-26vwp.
     #[test]
     fn body_equal_identity_sole_binder_rejects_unbound_head_var() {
         // Rule: ?n rdf:type C :- ?n = ?n
@@ -1674,7 +1674,7 @@ mod tests {
         );
     }
 
-    // ---- [SONNET-4.6] sq-anyad — distinct-ground body Equal: the NUMERIC half is
+    // ---- sq-anyad — distinct-ground body Equal: the NUMERIC half is
     // decided by the shared substrate comparator (sq-v5evr / #1646); the non-numeric
     // literal-equality half (pred:boolean-equal / pred:literal-not-identical) stays
     // fail-closed. ----
@@ -1790,13 +1790,13 @@ mod tests {
             // Ill-formed numeric lexical: not a well-formed number, so not decidable.
             (("abc", "integer"), ("1", "integer")),
             // Ill-formed BEYOND the tower too: a fraction part is invalid for
-            // xsd:integer, so the exact-lexical fallback must not rescue it. [OPUS-5]
+            // xsd:integer, so the exact-lexical fallback must not rescue it.
             (("170141183460469231731687303715884105728.5", "integer"), ("1", "integer")),
             // Numeric datatype on one side only.
             (("1", "integer"), ("1", "string")),
             // Out-of-tower exact value vs a BINARY float tier: deciding this needs the
             // float's exact decimal expansion, which this front-end does not do — so it
-            // fails closed rather than promoting the huge integer to a lossy f64. [OPUS-5]
+            // fails closed rather than promoting the huge integer to a lossy f64.
             (("170141183460469231731687303715884105728", "integer"), ("1.0E0", "double")),
         ] {
             let d = distinct_ground_equal_doc(l, r);
@@ -1816,7 +1816,7 @@ mod tests {
     /// string is — so it must fail closed rather than decide the atom. `as_numeric`
     /// classifies every XSD integer datatype by the same `i64`/`i128` parse and the
     /// exact-lexical fallback carries no bound, so this is the facet check both paths
-    /// need (`integer_facets_ok`). [OPUS-5]
+    /// need (`integer_facets_ok`).
     #[test]
     fn body_equal_derived_integer_facet_violations_fail_closed() {
         // A magnitude past `i128`, so it also exercises the arbitrary-precision path.
@@ -1855,7 +1855,7 @@ mod tests {
     /// (3c''') The controls for the facet check: the INCLUSIVE boundary values of each
     /// derived integer datatype are valid, so they are still DECIDED against the
     /// equal-valued `xsd:integer` and the rule fires. Without these the facet check could
-    /// be off by one (or reject everything) and (3c'') would still pass. [OPUS-5]
+    /// be off by one (or reject everything) and (3c'') would still pass.
     #[test]
     fn body_equal_derived_integer_facet_boundaries_are_valid_and_decided() {
         for (l, r) in [
@@ -1893,7 +1893,7 @@ mod tests {
     /// `i128` mantissa are still DECIDED — `as_numeric` classifies them out, so the
     /// exact plain-decimal fallback compares the lexicals by string arithmetic. Two
     /// lexical forms of the same >i128 value (leading `+`, padding zeros, decimal
-    /// spelling of an integer) are value-EQUAL, so the rule fires. [OPUS-5]
+    /// spelling of an integer) are value-EQUAL, so the rule fires.
     #[test]
     fn body_equal_out_of_tower_value_equal_numerics_are_decided_and_the_rule_fires() {
         // i128::MAX + 1 — one past the exact tower, so `as_numeric` returns None.
@@ -1931,7 +1931,7 @@ mod tests {
     /// (3c'') The mirror: UNEQUAL well-formed values beyond the tower make the rule
     /// VACUOUS (it validates and derives nothing) rather than failing closed — including
     /// a pair that differs only past the i128 boundary, which a lossy `f64` fallback
-    /// would wrongly report equal. [OPUS-5]
+    /// would wrongly report equal.
     #[test]
     fn body_equal_out_of_tower_value_unequal_numerics_make_the_rule_vacuous() {
         const HUGE: &str = "170141183460469231731687303715884105728";
@@ -2031,7 +2031,7 @@ mod tests {
         );
     }
 
-    // ---- [OPUS-4.8] sq-26vwp — variable / mixed Equal via compile-time substitution ----
+    // ---- sq-26vwp — variable / mixed Equal via compile-time substitution ----
 
     /// V2 (under-derivation gone): `?x = ?y` is UNIFIED at compile time, so the rule
     /// fires exactly when the two variables bind the SAME node — with NO `owl:sameAs`
@@ -2282,13 +2282,13 @@ mod tests {
         assert!(e.to_string().contains("body-only"));
         let e = RifError::UnboundBuiltinInput { var: "n".to_string() };
         assert!(e.to_string().contains("range-restricted"));
-        // [SONNET-4.6] sq-pbz04.5.4 — new error variants
+        // sq-pbz04.5.4 — new error variants
         let e = RifError::EqualInConclusion;
         assert!(
             e.to_string().contains("conclusion"),
             "EqualInConclusion display mentions conclusion"
         );
-        // [SONNET-4.6] sq-anyad — the message now names the NON-numeric half as the
+        // sq-anyad — the message now names the NON-numeric half as the
         // remaining deferral (the numeric half is implemented).
         let e = RifError::DistinctGroundEqual {
             left: "true^^boolean".into(),

@@ -1,6 +1,6 @@
 #![cfg(feature = "paths")]
 
-// [SONNET-4.6] sq-lsp7k.3 acceptance and mutation-witnessed START/END graph-pattern coverage.
+// sq-lsp7k.3 acceptance and mutation-witnessed START/END graph-pattern coverage.
 
 use oxrdf::{NamedNode, Term, Variable};
 use sparq_core::Graph;

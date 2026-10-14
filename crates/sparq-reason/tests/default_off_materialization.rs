@@ -1,5 +1,5 @@
 //! Default-feature (explain OFF) forward-chaining correctness + compile-out guard
-//! ([OPUS-4.8] sq-bif.11).
+//! (sq-bif.11).
 //!
 //! The crate's `explain` feature is NON-DEFAULT by design: when it is off, every
 //! explanation structure and hook is `cfg`'d out entirely and the reasoning path must be

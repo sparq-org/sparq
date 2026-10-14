@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-zgbso.1 — MEASURED SPIKE: ODRL permission evaluation as N3 inference
+//! sq-zgbso.1 — MEASURED SPIKE: ODRL permission evaluation as N3 inference
 //! rules vs the hand-written Rust path. NOT production wiring; no public API; no
 //! default-build change (this example is gated behind the default-OFF `odrl-bridge`
 //! feature). Design record: `research/odrl-n3-compiled-rules.md` (epic sq-zgbso, #1582).

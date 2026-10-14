@@ -1,5 +1,4 @@
 //! **Opt-in live conformance probe for the `driver` presets** (bead `sq-gum8.10`).
-//! [OPUS-5]
 //!
 //! This is the step that turns *one concrete configuration's*
 //! `PresetEvidence::UpstreamDocs` into `LiveInstance`: it points a preset at the running

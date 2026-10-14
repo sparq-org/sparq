@@ -89,7 +89,7 @@ impl Dec {
     // Deliberately NOT `Ord::cmp`: this is the FALLIBLE total order (it returns
     // `Option<Ordering>` so a scale-alignment overflow can fall back to f64), so it cannot
     // implement the infallible `Ord`/`PartialOrd` trait method. Kept as `cmp` so the engine
-    // call sites are byte-identical to pre-move (this is a verbatim code-move). [OPUS-4.8]
+    // call sites are byte-identical to pre-move (this is a verbatim code-move).
     #[allow(clippy::should_implement_trait)]
     #[inline]
     pub fn cmp(self, o: Dec) -> Option<Ordering> {
@@ -160,7 +160,7 @@ impl Dec {
         if self.scale == 0 || self.mant == 0 {
             return Dec { mant: self.mant, scale: 0 };
         }
-        // [OPUS-4.8] `10i128.pow(self.scale)` overflows (debug panic / release wrap) for any
+        // `10i128.pow(self.scale)` overflows (debug panic / release wrap) for any
         // valid decimal whose scale is >= 39 (10^39 > i128::MAX). When the power exceeds i128
         // the integer part is necessarily 0 (|mant| < i128::MAX < 10^scale), so |value| < 1 and
         // also < 0.5 (2*i128::MAX < 10^39 <= 10^scale), making the rounded result obvious from
@@ -221,7 +221,7 @@ impl Dec {
     /// `Dec { mant: 46_116_862_933_052_948_481, scale: 1 }` — i.e. `4611686293305294848.1` —
     /// has correctly-rounded `f32` bits `0x5E80_0001`, but `f64()` lands exactly on the
     /// midpoint `0x5E80_0000`/`0x5E80_0001`, which ties-to-even narrows DOWN to
-    /// `0x5E80_0000`. [OPUS-5] issue #3796
+    /// `0x5E80_0000`. issue #3796
     ///
     /// - **scale 0** (the representation an `xsd:integer` beyond `i64` takes) is an exact
     ///   integer, and `i128 as f32` is a single correctly-rounded conversion.
@@ -296,7 +296,7 @@ pub fn split_decimal(s: &str) -> Option<(bool, &str, &str)> {
 /// length — pure string arithmetic, no `f64` and no `i128` bound. `None` if either
 /// lexical is not a well-formed decimal. Signed zeros (`-0`, `-0.0`) compare equal to
 /// zero. This is the string-exact tier [`Num::cmp_total`]'s f64-tie disambiguation
-/// rides on. [FABLE-5] sq-wjl8i
+/// rides on. sq-wjl8i
 pub fn cmp_plain_decimal(a: &str, b: &str) -> Option<Ordering> {
     let (na, ia, fa) = split_decimal(a)?;
     let (nb, ib, fb) = split_decimal(b)?;
@@ -332,7 +332,7 @@ pub fn cmp_plain_decimal(a: &str, b: &str) -> Option<Ordering> {
 /// The EXACT plain-decimal expansion of a finite `f64` (every finite `f64` is an exact
 /// decimal rational; the longest needs 1074 fraction digits). `None` for `NaN` / `±INF`.
 /// Cold-path helper for the f64-tie disambiguation in [`Num::cmp_total`] and the
-/// engine's numeric sort cells. [FABLE-5] sq-wjl8i
+/// engine's numeric sort cells. sq-wjl8i
 pub fn f64_exact_decimal(f: f64) -> Option<String> {
     if !f.is_finite() {
         return None;
@@ -347,7 +347,7 @@ pub fn f64_exact_decimal(f: f64) -> Option<String> {
 /// pure string arithmetic throughout. Deliberately NO `f64` fast path: `Dec::f64` is a
 /// two-rounding image (mantissa conversion then a division), so a strict `f64` verdict
 /// here is not boundary-trustworthy — and this helper is only reached on the cold
-/// f64-tie path of the total order. [FABLE-5] sq-wjl8i
+/// f64-tie path of the total order. sq-wjl8i
 fn cmp_dec_f64(d: Dec, f: f64) -> Ordering {
     if f == f64::INFINITY {
         return Ordering::Less;
@@ -438,7 +438,7 @@ impl Num {
     /// arithmetic): the `i64` value `4_611_686_293_305_294_849` has correctly-rounded `f32`
     /// bits `0x5E80_0001`, but `as f64 as f32` yields `0x5E80_0000` — one ULP low. So
     /// `SUM(?int, "0.0"^^xsd:float)` and `AVG` over a mixed integer/float column returned a
-    /// wrong float for integer magnitudes above 2^53 before this. [OPUS-5] issue #3796
+    /// wrong float for integer magnitudes above 2^53 before this. issue #3796
     ///
     /// Per tier: `Int` and `Dec` convert directly (see [`Dec::f32`]); `Float` is already the
     /// value; `Double` narrows once (`f64 as f32` is itself correctly rounded).
@@ -464,7 +464,7 @@ impl Num {
     }
 
     /// The TOTAL order over numeric values used by the SPARQL `ORDER BY` extension
-    /// (the `CompareTerm::exact_cmp` hook of `sparq_substrate::compare`) — [FABLE-5]
+    /// (the `CompareTerm::exact_cmp` hook of `sparq_substrate::compare`) —
     /// sq-wjl8i. Unlike the relational comparison (XPath `op:numeric-*`, where a
     /// float/double operand PROMOTES the pair to a possibly-collapsing `f64` and `NaN`
     /// is incomparable), this is the **exact-rational** order over the values,
@@ -522,7 +522,7 @@ impl Num {
     /// - otherwise an operand is `Float` — promote the pair to **`f32`**, through
     ///   [`Num::f32`](Self::f32) so the promotion is a SINGLE correctly-rounded conversion.
     ///
-    /// [OPUS-5] This last case used to fall through to `f64` like everything else, and the
+    /// This last case used to fall through to `f64` like everything else, and the
     /// doc here asserted that was correct. It is not: `xs:double` is only the common type
     /// when an operand really IS a double. The error is invisible below 2^53 and appears
     /// above it — `Num::Int(4611686293305294849)` versus the `f32` `0x5E80_0001` (the
@@ -541,7 +541,7 @@ impl Num {
     /// - **`<`, `>`, `=`, `!=` FILTER expressions and value-space equality**
     ///   (D-entailment, RIF `pred:numeric-equal`) — use `cmp_relational`: NaN is an error.
     ///
-    /// [OPUS-4.8] sq-v5evr — the value-space equality/relational-compare hoist.
+    /// sq-v5evr — the value-space equality/relational-compare hoist.
     #[inline]
     pub fn cmp_relational(self, o: Num) -> Option<Ordering> {
         // Exact tier: both Int/Dec → exact Dec comparison (no f64 promotion).
@@ -553,7 +553,7 @@ impl Num {
         // FLOAT tier: no operand is a Double, but one is a Float, so XPath's least common
         // type is `xs:float` — promote BOTH through `Num::f32` (a single correctly-rounded
         // conversion) and decide there. Comparing this pair as `f64` is a different, wrong
-        // answer above 2^53. [OPUS-5] issue #3796
+        // answer above 2^53. issue #3796
         if self.rank().max(o.rank()) == 2 {
             return self.f32().partial_cmp(&o.f32());
         }
@@ -574,7 +574,7 @@ impl Num {
         if rank == 2 {
             // Promote each operand with a SINGLE rounding (`Num::f32`, NOT `f64() as f32`)
             // and evaluate in `f32`, so no value on the `xsd:float` tier is rounded twice.
-            // [OPUS-5] issue #3796
+            // issue #3796
             return Some(Num::Float(apply_f32(self.f32(), o.f32(), op)));
         }
         // Exact tier: integer / decimal.
@@ -619,7 +619,7 @@ impl Num {
     /// Unary negation, preserving the datatype (overflow falls back to double).
     // Deliberately NOT `Neg::neg`: SPARQL unary minus promotes to `Double` on `i64`/`Dec`
     // overflow (it never panics/wraps), so the typed result differs from a plain `Neg`. Kept
-    // as `neg` so the engine call site is byte-identical to pre-move (verbatim move). [OPUS-4.8]
+    // as `neg` so the engine call site is byte-identical to pre-move (verbatim move).
     #[allow(clippy::should_implement_trait)]
     #[inline]
     pub fn neg(self) -> Num {
@@ -669,14 +669,14 @@ impl Num {
     ///
     /// The float tiers use `round_half_to_pos_inf`, NOT the naive `(x + 0.5).floor()`:
     /// the `x + 0.5` addition double-rounds, so a value just below half such as
-    /// `0.49999999999999994` would wrongly round up to `1` instead of `0`. [OPUS-4.8]
+    /// `0.49999999999999994` would wrongly round up to `1` instead of `0`.
     #[inline]
     pub fn round(self) -> Num {
         match self {
             Num::Int(_) => self,
             Num::Dec(d) => Num::Dec(d.round_to_int(RoundMode::HalfUp)),
             // f32 promotes to f64 losslessly and the integral result is exact in f32,
-            // so the shared f64 helper yields the correct f32 round. [OPUS-4.8]
+            // so the shared f64 helper yields the correct f32 round.
             Num::Float(f) => Num::Float(round_half_to_pos_inf(f as f64) as f32),
             Num::Double(d) => Num::Double(round_half_to_pos_inf(d)),
         }
@@ -866,7 +866,7 @@ fn apply_f64(a: f64, b: f64, op: ArithOp) -> f64 {
 /// full `f32` bit space (including subnormals) found no divergence — but the native form is
 /// single-rounded by construction rather than by an argument, and it leaves no
 /// `as f64 ... as f32` shape in this module for the next reader to have to re-audit.
-/// [OPUS-5] issue #3796
+/// issue #3796
 #[inline]
 fn apply_f32(a: f32, b: f32, op: ArithOp) -> f32 {
     match op {
@@ -890,7 +890,7 @@ fn apply_f32(a: f32, b: f32, op: ArithOp) -> f32 {
 /// making the half-comparison exact there. (For negative `x` the subtraction is only
 /// correctly rounded, not exact, but that never flips the half tie.) Ties
 /// (`x - floor(x) == 0.5`) go to the larger integer, i.e. towards `+INF`, matching
-/// `round(-2.5) = -2`. NaN / ±INF / ±0.0 pass through unchanged. [OPUS-4.8]
+/// `round(-2.5) = -2`. NaN / ±INF / ±0.0 pass through unchanged.
 #[inline]
 fn round_half_to_pos_inf(x: f64) -> f64 {
     let fl = x.floor();
@@ -907,7 +907,7 @@ fn round_half_to_pos_inf(x: f64) -> f64 {
 /// Parse an xsd:float/xsd:double lexical: the XSD spellings of the specials, plus the
 /// ordinary scientific notation Rust's parser shares with XSD. `None` = ill-formed.
 ///
-/// [FABLE-5] (sq-9781x) Delegates to the lowest-tier `sparq_core::parse_xsd_f64` — the
+/// (sq-9781x) Delegates to the lowest-tier `sparq_core::parse_xsd_f64` — the
 /// SINGLE shared body of this parser — so the numeric-value CACHE (`Graph::numeric_value`,
 /// built in `sparq-core`) and this evaluator seam can never diverge on which double/float
 /// lexicals are numeric. `sparq-substrate` depends on `sparq-core`, so the shared body
@@ -931,7 +931,7 @@ pub fn parse_xsd_f64(v: &str) -> Option<f64> {
 /// `"4611686293305294849"` has correctly-rounded `f32` bits `0x5E80_0001`, but parsing at
 /// `f64` and narrowing yields `0x5E80_0000`. Rust's decimal → binary parser is correctly
 /// rounded at both widths, so the direct parse is one rounding of the true value.
-/// [OPUS-5] issue #3796
+/// issue #3796
 #[inline]
 pub fn parse_xsd_f32(v: &str) -> Option<f32> {
     let wide = parse_xsd_f64(v)?;
@@ -1111,7 +1111,7 @@ mod tests {
     fn round_float_tier_no_double_rounding() {
         // Regression for sq-l11x2: the naive `(x + 0.5).floor()` double-rounds because
         // the `x + 0.5` addition is itself rounded, so a value just below one-half wrongly
-        // rounds UP. `0.49999999999999994` (the f64 predecessor of 0.5) must round to 0. [OPUS-4.8]
+        // rounds UP. `0.49999999999999994` (the f64 predecessor of 0.5) must round to 0.
         let just_below_half = 0.49999999999999994_f64;
         assert!(just_below_half < 0.5);
         // Pin the exact defect the OLD formula exhibited so any regression is loud:
@@ -1169,7 +1169,7 @@ mod tests {
     #[test]
     fn ceil_floor_float_tier_are_single_rounded() {
         // ceil/floor already use the single correctly-rounded f64/f32 ops (no double
-        // rounding); pin the boundary value alongside round to keep the trio in scope. [OPUS-4.8]
+        // rounding); pin the boundary value alongside round to keep the trio in scope.
         let jbh = 0.49999999999999994_f64;
         assert_eq!(Num::Double(jbh).ceil().f64(), 1.0);
         assert_eq!(Num::Double(jbh).floor().f64(), 0.0);
@@ -1207,7 +1207,7 @@ mod tests {
 
     #[test]
     fn parse_xsd_f64_f32_accept_xsd_specials_reject_rust_only_spellings() {
-        // [OPUS-4.8] sq-rkzhr — direct coverage of the shared parser that BOTH the exact
+        // sq-rkzhr — direct coverage of the shared parser that BOTH the exact
         // `as_numeric` path and (after sq-rkzhr) the lenient engine `as_num`/`as_f64`
         // compare seam route through: the XSD spellings parse; the Rust-`FromStr`-only
         // spellings XSD forbids do not, so the two comparison paths can never disagree on
@@ -1220,7 +1220,7 @@ mod tests {
         assert_eq!(parse_xsd_f64("6"), Some(6.0));
         for bad in ["inf", "+inf", "infinity", "-infinity", "nan", "Infinity", "NAN", ""] {
             // Positional arg (not inline `{bad}`) to dodge the CodeQL
-            // `rust/unused-variable` false positive. [OPUS-4.8]
+            // `rust/unused-variable` false positive.
             assert_eq!(parse_xsd_f64(bad), None, "parse_xsd_f64 must reject {:?}", bad);
         }
         // f32 narrows the same acceptance set.
@@ -1231,7 +1231,7 @@ mod tests {
 
     #[test]
     fn double_float_lexical_two_convention_per_surface_policy() {
-        // [OPUS-4.8] sq-rkzhr — LOCK the deliberate two-convention split so a future
+        // sq-rkzhr — LOCK the deliberate two-convention split so a future
         // refactor cannot silently collapse it. `lexical` (STR / serialize / arithmetic
         // result construction) keeps the PLAIN-integral form the W3C SPARQL expected-result
         // files use for computed double/float arithmetic ("6", not "6.0E0"); while
@@ -1257,7 +1257,7 @@ mod tests {
         assert_eq!(Num::Double(f64::NAN).canonical_lexical(), "NaN");
     }
 
-    // [OPUS-4.8] sq-qcnn.12 — DIRECT unit tests over the numeric value tower's arithmetic /
+    // sq-qcnn.12 — DIRECT unit tests over the numeric value tower's arithmetic /
     // rounding / accessor / lexical surface. Each asserts an EXACT value (not merely
     // "no panic") so a mutation of the comparison / arithmetic / branch logic goes red:
     // this is the mutation-killing coverage the epic's floor-raise gates.
@@ -1458,7 +1458,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // xsd:float promotion / parse must round to single precision EXACTLY ONCE.
-    // [OPUS-5] issue #3796
+    // issue #3796
     //
     // Every fixture below was constructed and cross-checked with EXACT RATIONAL
     // arithmetic, not with floats: `H = (2m+1) * 2^38` is an f32 MIDPOINT that is
@@ -1829,7 +1829,7 @@ mod tests {
     }
 
     // --- Num::cmp_relational — the SPARQL relational (</>/ =) numeric comparison ---
-    // [OPUS-4.8] sq-v5evr: the value-space equality/relational-compare hoist.
+    // sq-v5evr: the value-space equality/relational-compare hoist.
 
     /// Basic ordering: int < dec < float < double ordering by value, and the identity
     /// `cmp_relational(x, x) == Some(Equal)` for the non-NaN variants.
@@ -1892,7 +1892,7 @@ mod tests {
     ///
     /// Fixture: the `f32` nearest `4611686293305294849` is exactly `0x5E80_0001`
     /// (= 2^62 + 2^39), so under correct float-tier promotion the two are EQUAL, while the
-    /// f64 route makes the integer strictly Less. [OPUS-5] issue #3796
+    /// f64 route makes the integer strictly Less. issue #3796
     #[test]
     fn cmp_relational_integer_and_decimal_vs_float_compare_in_the_float_tier() {
         use Ordering::*;
@@ -1928,7 +1928,7 @@ mod tests {
         assert_eq!(Num::Float(-0.0).cmp_relational(Num::Int(0)), Some(Equal));
     }
 
-    // [SONNET-4.6] sq-qcnn.40 — targeted tests killing the surviving mutants identified
+    // sq-qcnn.40 — targeted tests killing the surviving mutants identified
     // from nightly run 28776460517. Each asserts an EXACT value so a mutation of the
     // comparison / arithmetic / sign logic goes red.
 
@@ -2116,7 +2116,7 @@ mod tests {
         }
     }
 
-    /// [FABLE-5] (sq-9781x / sq-74oy4 / sq-6b1lj) TRUE cross-seam differential: the sparq-core
+    /// (sq-9781x / sq-74oy4 / sq-6b1lj) TRUE cross-seam differential: the sparq-core
     /// numeric-value CACHE acceptance (`sparq_core::numeric_cache_value` — the EXACT acceptance
     /// `numerics_of`/`numeric_of`/`dictspill` compute, NOT a re-implementation, so this is not
     /// circular) vs the datatype-AWARE evaluator `as_numeric` (`Num::of_literal`, which decides

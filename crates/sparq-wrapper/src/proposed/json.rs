@@ -24,7 +24,7 @@
 //! 1.2 base direction). Nothing is coerced to a bare JSON string, number, or
 //! boolean, so no lexical form and no datatype is lost on the way out.
 
-// [SONNET-4.6] sq-1rg2q.11: deterministic, cycle-total JSON projection.
+// sq-1rg2q.11: deterministic, cycle-total JSON projection.
 
 use crate::Node;
 use oxrdf::{Literal, Term};

@@ -1,4 +1,4 @@
-//! sparq-serve concurrent-serving-core micro-benchmark. [OPUS-4.8] sq-ncvq.12. Run:
+//! sparq-serve concurrent-serving-core micro-benchmark. sq-ncvq.12. Run:
 //!     cargo run -p sparq-serve --example bench --release
 //!
 //! Measures the lock-free serving primitives that motivate the crate (the

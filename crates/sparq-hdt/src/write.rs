@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-2te / sq-ashy — HDT WRITE support: serialise a sparq [`Graph`] to
+//! sq-2te / sq-ashy — HDT WRITE support: serialise a sparq [`Graph`] to
 //! an `.hdt` archive (the mirror of [`crate::load`]).
 //!
 //! ## The write path (direct in-memory encode — no N-Triples round-trip)

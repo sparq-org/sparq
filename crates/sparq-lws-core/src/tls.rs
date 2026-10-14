@@ -81,7 +81,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum_server::tls_rustls::RustlsConfig;
-// [OPUS-5] sq-5ah3p: PEM decoding comes from `rustls-pki-types`' `PemObject` trait, reached through
+// sq-5ah3p: PEM decoding comes from `rustls-pki-types`' `PemObject` trait, reached through
 // rustls' own `pki_types` re-export rather than a separate direct dependency — that spelling makes
 // version skew between the DER types rustls accepts and the ones we decode structurally impossible,
 // and it retires the archived `rustls-pemfile` shim (RUSTSEC-2025-0134), which since 2.x has been a
@@ -1084,7 +1084,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-5] sq-5ah3p: the behavioural contract of the two PEM loaders, pinned independently of
+    /// sq-5ah3p: the behavioural contract of the two PEM loaders, pinned independently of
     /// which crate implements the decode. These four properties are exactly what the retired
     /// `rustls-pemfile` calls provided, so they are what the `PemObject` migration must preserve:
     /// (1) EVERY `CERTIFICATE` section is returned, in file order, leaf first; (2) a non-certificate

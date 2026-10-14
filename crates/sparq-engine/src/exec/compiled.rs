@@ -1678,7 +1678,7 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         // §17.4.3.12 `simple literal ENCODE_FOR_URI(string literal)`. A number / IRI /
         // boolean is a TYPE ERROR — the old `value_str` coercion wrongly encoded e.g.
         // `ENCODE_FOR_URI(123)` to the simple literal "123".
-        F::EncodeForUri => str_lit(&ev(0)?).map(|(s, _)| simple(encode_for_uri(&s))).unwrap_or(Value::Error),
+        F::EncodeForUri => str_lit(&ev(0)?).map(|(s, _)| simple(sparq_core::percent::encode(&s))).unwrap_or(Value::Error),
         F::Iri => match ev(0)? {
             // An IRI argument passes through unchanged.
             Value::Term(Term::NamedNode(n)) => Value::Term(Term::NamedNode(n)),
@@ -2707,16 +2707,10 @@ pub(super) fn lit_with_lang(s: String, lang: Option<&str>) -> Value {
 /// Lowercase-hex digest of a string-literal argument, or a type error.
 #[cfg(feature = "digest")]
 pub(super) fn digest_hex<D: md5::Digest>(v: &Value) -> Value {
-    use std::fmt::Write;
     match string_literal(v) {
-        Some(s) => {
-            let out = D::digest(s.as_bytes());
-            let mut hex = String::with_capacity(out.len() * 2);
-            for byte in out {
-                let _ = write!(hex, "{byte:02x}");
-            }
-            Value::Term(Term::Literal(Literal::new_simple_literal(hex)))
-        }
+        Some(s) => Value::Term(Term::Literal(Literal::new_simple_literal(
+            sparq_core::hex::encode(&D::digest(s.as_bytes())),
+        ))),
         None => Value::Error,
     }
 }
@@ -2793,21 +2787,6 @@ pub(super) fn build_regex(pattern: &str, flags: &str) -> Option<regex::Regex> {
         .ignore_whitespace(!literal && flags.contains('x'))
         .build()
         .ok()
-}
-
-/// SPARQL `ENCODE_FOR_URI`: percent-encode everything except the unreserved set (RFC 3986
-/// ALPHA / DIGIT / `-` `.` `_` `~`).
-pub(super) fn encode_for_uri(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            out.push(byte as char);
-        } else {
-            out.push('%');
-            out.push_str(&format!("{byte:02X}"));
-        }
-    }
-    out
 }
 
 /// Extract a numeric `xsd:dateTime` component (0=year…5=seconds) from a value's lexical

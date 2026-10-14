@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-qsm5z) Integration tests for the `query-registry` feature's
+//! (sq-qsm5z) Integration tests for the `query-registry` feature's
 //! `GET /queries` and `DELETE /queries/{id}` HTTP routes.
 //!
 //! These exercise the REAL HTTP path (not a mock): boot the server, drive it over
@@ -195,7 +195,7 @@ async fn cancel_query_correct_token_unknown_id_is_404() {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-t1isr — EXPLAIN ANALYZE query-registry wiring
+// sq-t1isr — EXPLAIN ANALYZE query-registry wiring
 //
 // These tests verify the HTTP-layer behaviour of the EXPLAIN ANALYZE → registry wiring.
 //
@@ -369,7 +369,7 @@ async fn explain_registered_while_in_flight_via_state_accessor() {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-m9prn — SPARQL UPDATE registration + kill
+// sq-m9prn — SPARQL UPDATE registration + kill
 //
 // A running UPDATE holds the single sequenced writer thread, so it is the operation an
 // operator most needs to see and kill: every write queued behind it is blocked until it

@@ -26,6 +26,11 @@ use super::model::Term;
 const BW_DEPTH: usize = 64;
 /// Steps one formula-containment search may take.
 const CONTAINMENT_BUDGET: usize = 100_000;
+/// Pairing attempts the unifications of one budget may make past the free allowances of
+/// their formula matches ([`StepBudget::unification`]).
+const UNIFICATION_BUDGET: usize = 100_000;
+/// Why a unification was cut short.
+const UNIFICATION_CUT: &str = "formula unification exhausted its step budget";
 /// Cells one walk of an `rdf:first`/`rdf:rest` data list may visit.
 const LIST_WALK_CAP: usize = 100_000;
 
@@ -176,28 +181,90 @@ pub(crate) fn backward_step(
     }
 }
 
-/// A fresh step budget for one formula-containment search.
-pub(crate) struct StepBudget(usize);
+/// A step budget: for one formula-containment search, or for unifications.
+///
+/// A unification budget also carries a free allowance for the formula match it is in
+/// ([`StepBudget::enter_formula`]): the pairings of a search that never backtracks.
+/// Steps come from the free allowance first; it is dropped when the outermost formula
+/// match ends, so it never carries over to another match or tops up `left`.
+pub(crate) struct StepBudget {
+    /// Steps left beyond the free allowance. Never added to.
+    left: usize,
+    /// The free allowance of the outermost formula match in progress.
+    free: usize,
+    /// Formula matches in progress, nested.
+    depth: usize,
+    /// A step was refused: the budget stays spent.
+    spent: bool,
+}
 
 impl StepBudget {
-    pub(crate) fn containment() -> Self {
-        StepBudget(CONTAINMENT_BUDGET)
+    fn new(left: usize) -> Self {
+        StepBudget {
+            left,
+            free: 0,
+            depth: 0,
+            spent: false,
+        }
     }
 
-    /// Take one step; `false` once the budget is spent.
+    pub(crate) fn containment() -> Self {
+        Self::new(CONTAINMENT_BUDGET)
+    }
+
+    /// The budget of unifications: `UNIFICATION_BUDGET` steps, plus each outermost
+    /// formula match's free allowance.
+    pub(crate) fn unification() -> Self {
+        Self::new(UNIFICATION_BUDGET)
+    }
+
+    /// A formula match starts. The outermost one gets `free` steps for itself and every
+    /// match nested in it.
+    pub(crate) fn enter_formula(&mut self, free: usize) {
+        if self.depth == 0 {
+            self.free = free;
+        }
+        self.depth += 1;
+    }
+
+    /// A formula match ended. When it was the outermost, its unused free steps are
+    /// dropped.
+    pub(crate) fn exit_formula(&mut self) {
+        self.depth -= 1;
+        if self.depth == 0 {
+            self.free = 0;
+        }
+    }
+
+    /// Take one step; `false` once the budget is spent, and from then on.
     pub(crate) fn take(&mut self) -> bool {
-        match self.0.checked_sub(1) {
+        if self.spent {
+            return false;
+        }
+        if let Some(n) = self.free.checked_sub(1) {
+            self.free = n;
+            return true;
+        }
+        match self.left.checked_sub(1) {
             Some(n) => {
-                self.0 = n;
+                self.left = n;
                 true
             }
-            None => false,
+            None => {
+                self.spent = true;
+                false
+            }
         }
+    }
+
+    /// Mark the budget spent: every later step is refused.
+    pub(crate) fn spend(&mut self) {
+        self.spent = true;
     }
 
     /// The search result, cut if the budget ran out.
     pub(crate) fn finish<T>(self, value: T) -> Bounded<T> {
-        if self.0 == 0 {
+        if self.spent || self.left == 0 {
             Bounded::cut(
                 value,
                 "formula containment search exhausted its step budget",
@@ -206,6 +273,11 @@ impl StepBudget {
             Bounded::complete(value)
         }
     }
+}
+
+/// A unification of the run `run` ran out of steps: it did not unify, which is a cut.
+pub(crate) fn unification_exhausted(run: &Truncation) {
+    run.record(UNIFICATION_CUT);
 }
 
 /// Walk a list cell by cell: `next(cell)` yields `(member, rest)` for a cons cell, or
@@ -374,10 +446,14 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// * the steps of a formula-scope search beyond the matches it finds: each search is
 ///   bounded by its own step budget (`CONTAINMENT_BUDGET`, through
 ///   `StepBudget::containment`), and a search it stops is a cut;
-/// * the backtracking of formula unification (a `{ … }` pattern matched against a
-///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding
-///   and holds one binding per pattern statement, so it adds no rows; its backtracking is
-///   not charged to a step budget (tracked in GH #6953);
+/// * the pairings formula unification tries (a `{ … }` pattern matched against a
+///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding,
+///   so it adds no rows. Each unification has its own step budget
+///   (`StepBudget::unification`): `UNIFICATION_BUDGET` steps, plus a free allowance for
+///   its outermost formula match that covers a search that never backtracks and is
+///   dropped when that match ends. Past it the terms do not unify and the run records a
+///   cut. The unifications of one formula-containment search share one such budget, and
+///   one that runs out stops that search as a cut (GH #6953);
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time
@@ -1344,6 +1420,24 @@ pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #6953: a formula match's free allowance covers only that match: what it leaves
+    /// unused is dropped when it ends, so repeated matches never top up the budget.
+    #[test]
+    fn free_formula_steps_never_top_up_the_budget() {
+        let mut steps = StepBudget::unification();
+        for _ in 0..3 {
+            steps.enter_formula(UNIFICATION_BUDGET);
+            steps.enter_formula(UNIFICATION_BUDGET); // nested: no allowance of its own
+            assert!(steps.take());
+            steps.exit_formula();
+            steps.exit_formula();
+        }
+        let taken = std::iter::from_fn(|| steps.take().then_some(())).count();
+        assert_eq!(taken, UNIFICATION_BUDGET);
+        steps.enter_formula(10);
+        assert!(!steps.take(), "a spent budget stays spent");
+    }
 
     #[test]
     fn the_unbounded_join_work_never_refuses() {

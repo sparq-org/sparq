@@ -1,6 +1,6 @@
 //! The `arrow`-feature-gated bridge: a SPARQL SELECT result → a `pyarrow.Table`.
 //!
-//! [OPUS-4.8] sq-lt1ml (gh-910). The whole module compiles only with `--features arrow`;
+//! sq-lt1ml (gh-910). The whole module compiles only with `--features arrow`;
 //! the default wheel carries none of it (and no Arrow dependency). It reuses the merged
 //! `sparq-arrow` projection (`to_record_batch`: one `struct<kind, value, datatype,
 //! language, direction>` column per variable) and bridges the resulting Arrow

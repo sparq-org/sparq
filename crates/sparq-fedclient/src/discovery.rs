@@ -42,7 +42,7 @@
 //! missing. It reuses the same [`Fetcher`](crate::discovery::Fetcher) policy seam, caches every
 //! outcome, and fails open on
 //! timeout/error/budget exhaustion. Only a well-formed ASK `false` prunes; successful row counts
-//! replace fallback estimates and otherwise affect ranking/join order only. [GPT-5.6] sq-fx5id.
+//! replace fallback estimates and otherwise affect ranking/join order only. sq-fx5id.
 //!
 //! ## SSRF caution on every fetch
 //!
@@ -60,7 +60,7 @@
 //! + orchestration are tested with an in-memory [`MapFetcher`](crate::discovery::MapFetcher)
 //! and pay **zero** network in CI.
 //
-// [OPUS-4.8] sq-nfxl (epic sq-dnko): Phase-1 discovery client + Service-Description parser.
+// sq-nfxl (epic sq-dnko): Phase-1 discovery client + Service-Description parser.
 // Net-new: the SD->Capability parser + the SSRF-guarded fetch seam + the ASK fallback.
 // Reused: SourceDescriptor::from_void_nt for the VoID+scs statistics half. Flagged for
 // Fable re-review when available.
@@ -83,14 +83,14 @@ const SD_SPARQL11_QUERY: &str = "http://www.w3.org/ns/sparql-service-description
 /// when built with the `service` feature). We surface it as [`Capability::federated_query`].
 const SD_BASIC_FEDERATED_QUERY: &str =
     "http://www.w3.org/ns/sparql-service-description#BasicFederatedQuery";
-/// [OPUS-4.8] sq-yyy3: the sparq PROV-O **data-lineage** extension feature IRI a `sparq-server`
+/// sq-yyy3: the sparq PROV-O **data-lineage** extension feature IRI a `sparq-server`
 /// advertises via `sd:feature` when it serves W3C PROV-O lineage for the data it derives. We
 /// surface it as [`Capability::provenance_lineage`] so a federation client can prefer (or record)
 /// a source that can answer "where did this come from?". An SD that omits it yields the
 /// recall-safe `false` default; it is never inferred from anything but this exact IRI.
 const PROV_LINEAGE_FEATURE_IRI: &str = "http://sparq.dev/ns/prov#lineage";
 
-/// [OPUS-4.8] sq-ym6kf: the `sd:supportedVersion` predicate — the SPARQL 1.2 Service Description
+/// sq-ym6kf: the `sd:supportedVersion` predicate — the SPARQL 1.2 Service Description
 /// (ED) move that splits the version-agnostic LANGUAGE (`sd:SPARQLQuery`/`sd:SPARQLUpdate`) from
 /// the language VERSION. A `sparq-server` (sq-2msb / gh-917) advertises the SPARQL language
 /// versions it conformance-verifies via `sd:supportedVersion <sparql:version-*>`. The CLIENT
@@ -98,7 +98,7 @@ const PROV_LINEAGE_FEATURE_IRI: &str = "http://sparq.dev/ns/prov#lineage";
 const SD_SUPPORTED_VERSION: &str =
     "http://www.w3.org/ns/sparql-service-description#supportedVersion";
 
-/// [OPUS-4.8] sq-ym6kf: the `sparql:` namespace (`http://www.w3.org/ns/sparql#`) the
+/// sq-ym6kf: the `sparql:` namespace (`http://www.w3.org/ns/sparql#`) the
 /// `sparql:version-*` version IRIs live in. MUST match `sparq-server/src/descriptors.rs`
 /// (the writer this parser consumes).
 const SPARQL_NS: &str = "http://www.w3.org/ns/sparql#";
@@ -136,7 +136,7 @@ pub enum SparqlVersion {
     Sparql11,
 }
 
-/// [OPUS-4.8] sq-ym6kf: one SPARQL language VERSION a source advertises via the SPARQL 1.2
+/// sq-ym6kf: one SPARQL language VERSION a source advertises via the SPARQL 1.2
 /// Service Description (ED) `sd:supportedVersion <sparql:version-*>` predicate — the
 /// version-agnostic-language / explicit-version split sq-2msb's server side emits.
 ///
@@ -255,7 +255,7 @@ pub struct Capability {
     pub interface: Interface,
     /// The SPARQL query language advertised (`sd:supportedLanguage`), if any.
     pub sparql_version: Option<SparqlVersion>,
-    /// [OPUS-4.8] sq-ym6kf: the SPARQL language VERSIONS the source advertises via the SPARQL 1.2
+    /// sq-ym6kf: the SPARQL language VERSIONS the source advertises via the SPARQL 1.2
     /// SD `sd:supportedVersion <sparql:version-*>` predicate (sorted + de-duplicated). This is the
     /// CLIENT consumer of the server-side advertisement sq-2msb added: a 1.2-aware federation
     /// client reads it to detect full-1.2 (triple-term / `dir`-lang) support **without probing**.
@@ -279,7 +279,7 @@ pub struct Capability {
     pub update: bool,
     /// Whether the source advertises `sd:BasicFederatedQuery` (a SERVICE-capable endpoint).
     pub federated_query: bool,
-    /// [OPUS-4.8] sq-yyy3: whether the source advertises the sparq PROV-O data-lineage feature
+    /// sq-yyy3: whether the source advertises the sparq PROV-O data-lineage feature
     /// (`sd:feature <http://sparq.dev/ns/prov#lineage>`) — it can serve W3C PROV-O lineage for the
     /// data it derives. Purely informational for the planner (it constrains no pushdown), so it is
     /// the recall-safe `false` default unless the SD names the exact lineage feature IRI.
@@ -301,7 +301,7 @@ impl Capability {
         Capability {
             interface: Interface::Endpoint,
             sparql_version: Some(SparqlVersion::Sparql11),
-            // [OPUS-4.8] sq-ym6kf: an ASK-only endpoint published no SD, so it advertises NO
+            // sq-ym6kf: an ASK-only endpoint published no SD, so it advertises NO
             // `sd:supportedVersion` — its version posture is UNKNOWN (empty), never an over-claim.
             sparql_versions: Vec::new(),
             pushable_filters: FilterClass::Full,
@@ -311,7 +311,7 @@ impl Capability {
             order_limit: false,
             update: false,
             federated_query: false,
-            // [OPUS-4.8] sq-yyy3: an ASK-only endpoint published no SD, so it makes no lineage
+            // sq-yyy3: an ASK-only endpoint published no SD, so it makes no lineage
             // claim — recall-safe `false`.
             provenance_lineage: false,
             result_formats: vec![MediaType(
@@ -327,7 +327,7 @@ impl Capability {
             .any(MediaType::is_sparql_results_json)
     }
 
-    /// [OPUS-4.8] sq-ym6kf: whether the source **advertises** the FULL SPARQL 1.2 / RDF 1.2
+    /// sq-ym6kf: whether the source **advertises** the FULL SPARQL 1.2 / RDF 1.2
     /// language version (`sd:supportedVersion <sparql:version-1.2>`) — i.e. triple terms and
     /// `dir`-tagged literals — so a 1.2-aware federation client can push those constructs to it
     /// without first probing.
@@ -343,7 +343,7 @@ impl Capability {
             .contains(&SparqlLanguageVersion::Full12)
     }
 
-    /// [OPUS-4.8] sq-ym6kf: whether the source advertised **any** `sd:supportedVersion` at all.
+    /// sq-ym6kf: whether the source advertised **any** `sd:supportedVersion` at all.
     /// `false` means its language-version posture is **UNKNOWN** (the source predates the SPARQL
     /// 1.2 SD term, or simply omitted it) — never read `false` as "no version supported".
     pub fn advertises_sparql_versions(&self) -> bool {
@@ -449,7 +449,7 @@ pub fn parse_service_description(nt: &str) -> Result<Option<Capability>, String>
     result_formats.sort();
     result_formats.dedup();
 
-    // --- [OPUS-4.8] sq-ym6kf: sd:supportedVersion → the SPARQL language VERSIONS the source
+    // --- sq-ym6kf: sd:supportedVersion → the SPARQL language VERSIONS the source
     // advertises (the SPARQL 1.2 SD predicate sq-2msb's server side emits). Only `sparql:version-*`
     // named-node objects are recognised; a non-`sparql:` IRI / literal / blank node is ignored, and
     // ABSENCE leaves the Vec empty (version posture UNKNOWN, never read as "no version supported").
@@ -474,7 +474,7 @@ pub fn parse_service_description(nt: &str) -> Result<Option<Capability>, String>
             .unwrap_or(false)
     };
     let federated_query = has_feature(SD_BASIC_FEDERATED_QUERY);
-    // [OPUS-4.8] sq-yyy3: the sparq PROV-O data-lineage extension feature.
+    // sq-yyy3: the sparq PROV-O data-lineage extension feature.
     let provenance_lineage = has_feature(PROV_LINEAGE_FEATURE_IRI);
 
     // A SPARQL endpoint evaluates a full FILTER grammar and a VALUES bind-join block; a
@@ -528,7 +528,7 @@ pub trait Fetcher {
 ///
 /// `max_probes` counts actual HTTP requests, including failed ASK/SELECT requests; cache hits
 /// are free. `cardinality_cap` bounds the number of solution rows requested from an endpoint.
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PatternProbeConfig {
@@ -552,7 +552,7 @@ impl Default for PatternProbeConfig {
 }
 
 /// Recall-safe result of probing one `(endpoint, triple-pattern)` pair.
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatternProbeOutcome {
@@ -570,7 +570,7 @@ pub enum PatternProbeOutcome {
 }
 
 /// Deterministic counters for one [`PatternProbeSession`].
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PatternProbeStats {
@@ -586,7 +586,7 @@ pub struct PatternProbeStats {
 ///
 /// Construct one session per federated query and pass it to
 /// `crate::planner::select_sources_with_pattern_probes`. Failures are cached as `Unknown`, so a
-/// repeated pattern (or a bind-join with many bindings) never reissues the probe. [GPT-5.6]
+/// repeated pattern (or a bind-join with many bindings) never reissues the probe.
 /// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 pub struct PatternProbeSession<'a> {
@@ -706,7 +706,7 @@ fn probe_url(endpoint: &str, query: &str) -> String {
     for param in params.split('&') {
         // Match the name as a server decodes it (`%71uery` is `query`); keep the text verbatim.
         let name = param.split_once('=').map_or(param, |(name, _)| name);
-        if !param.is_empty() && percent_encoding::percent_decode_str(name).ne("query".bytes()) {
+        if !param.is_empty() && sparq_core::percent::decode(name, false) != "query" {
             url.push_str(param);
             url.push('&');
         }
@@ -1021,7 +1021,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         assert!(cap.result_formats.windows(2).all(|w| w[0] < w[1]), "sorted");
         // SPARQL 1.1 ⇒ aggregates / paths / order-limit pushable.
         assert!(cap.aggregates && cap.property_paths && cap.order_limit);
-        // [OPUS-4.8] sq-yyy3: this SD does NOT advertise the PROV-O lineage feature, so the flag
+        // sq-yyy3: this SD does NOT advertise the PROV-O lineage feature, so the flag
         // is the recall-safe `false` (it is set ONLY by the exact lineage feature IRI).
         assert!(
             !cap.provenance_lineage,
@@ -1029,7 +1029,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         );
     }
 
-    // ---- [OPUS-4.8] sq-ym6kf: sd:supportedVersion (the SPARQL 1.2 SD version advertisement) ----
+    // ---- sq-ym6kf: sd:supportedVersion (the SPARQL 1.2 SD version advertisement) ----
 
     /// A served-shape SD fragment carrying the EXACT `sd:supportedVersion <sparql:version-*>`
     /// triples `sparq-server/src/descriptors.rs` emits for a build that conformance-verifies
@@ -1095,7 +1095,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
 
     #[test]
     fn parse_sd_extracts_supported_versions() {
-        // [OPUS-4.8] sq-ym6kf: the CLIENT consumes the server-side `sd:supportedVersion`
+        // sq-ym6kf: the CLIENT consumes the server-side `sd:supportedVersion`
         // advertisement (sq-2msb): the version set is parsed, sorted, and a 1.2-aware client can
         // detect FULL 1.2 (triple-term / dir-lang) support without probing.
         let cap = parse_service_description(SERVED_SD_WITH_VERSIONS_NT)
@@ -1185,7 +1185,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
 
     #[test]
     fn ask_fallback_has_unknown_version_set() {
-        // [OPUS-4.8] sq-ym6kf: an ASK-only endpoint published no SD, so it advertises no version —
+        // sq-ym6kf: an ASK-only endpoint published no SD, so it advertises no version —
         // the fallback capability's set is empty (UNKNOWN), never an over-claim of 1.2 support.
         let cap = Capability::ask_fallback();
         assert!(cap.sparql_versions.is_empty());
@@ -1195,7 +1195,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
 
     #[test]
     fn parse_sd_with_provenance_feature_sets_flag() {
-        // [OPUS-4.8] sq-yyy3: a node advertising the sparq PROV-O data-lineage feature
+        // sq-yyy3: a node advertising the sparq PROV-O data-lineage feature
         // (`sd:feature <http://sparq.dev/ns/prov#lineage>`, exactly what
         // `descriptors::sd_ntriples` emits when `Capabilities::provenance`) is surfaced as
         // `Capability::provenance_lineage`. Adding it leaves BasicFederatedQuery untouched.
@@ -1455,7 +1455,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
     // that ureq actually calls applies it correctly — including the host-authority parse
     // (`rsplit(':')`), the IPv6 bracket strip, and the `allow_private_host` allowlist bypass.
     // All cases use IP-LITERAL netlocs so `to_socket_addrs` is hermetic (no DNS lookup, no
-    // network), so the tests are deterministic. [OPUS-4.8] sq-73om (follow-up to sq-nfxl).
+    // network), so the tests are deterministic. sq-73om (follow-up to sq-nfxl).
 
     #[cfg(not(target_arch = "wasm32"))]
     fn resolver_denying() -> EgressFilterResolver {
@@ -1475,7 +1475,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         }
     }
 
-    /// [OPUS-4.8] sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building the
+    /// sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building the
     /// `http://<netloc>/` URI the resolver parses, with a default `Config` + no-deadline timeout.
     #[cfg(not(target_arch = "wasm32"))]
     fn resolve_netloc(

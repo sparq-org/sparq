@@ -1,4 +1,4 @@
-//! Exec-accuracy measurement wired to [`EndpointLlm`] — bead sq-2m6zm.7. [SONNET-4.6]
+//! Exec-accuracy measurement wired to [`EndpointLlm`] — bead sq-2m6zm.7.
 //!
 //! Mirrors `exec_accuracy.rs` / `live_exec_accuracy` but drives the loop through the
 //! **`nlq-endpoint` feature**'s [`EndpointLlm`] (a provider-agnostic OpenAI-compatible
@@ -285,7 +285,6 @@ fn endpoint_exec_accuracy() {
 /// Confirms that [`EndpointConfig::from_env`] returns a descriptive error when the
 /// required env vars are absent, and that [`EndpointLlm::new`] succeeds from a valid
 /// config. Exercises the public API used by `endpoint_exec_accuracy` without a live call.
-/// [SONNET-4.6]
 #[test]
 fn endpoint_config_missing_vars_gives_actionable_error() {
     // Serialize env access against the process-wide lock (same pattern as endpoint.rs

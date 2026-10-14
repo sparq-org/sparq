@@ -17,8 +17,8 @@
 //!
 //! ## What the structure binds
 //!
-//! * Every block id is **random** (§4.1/§8.3) — never a hash of plaintext or
-//!   ciphertext — so the block set leaks no equality/confirmation information.
+//! * The production helpers draw **random** block ids (§4.1/§8.3) — never hashes
+//!   of plaintext or ciphertext — to avoid equality/confirmation leakage.
 //! * A node's plaintext is the **encrypted parent** of its children: it carries,
 //!   for each child, the child's random block id, its chunk index, and
 //!   `SHA-256` of the child's canonical [`BlockEnvelope`] bytes. Those links are
@@ -66,9 +66,11 @@
 //! ```
 
 use crate::cbor::{enc_array, enc_bytes, enc_map, enc_uint, read_struct_map, Limits, Reader};
-use crate::envelope::{open_block, seal_block_random, BlockContext, BlockEnvelope, PAD_CLASSES};
+use crate::envelope::{open_block, seal_block, BlockContext, BlockEnvelope, PAD_CLASSES};
 use crate::error::{Error, Result};
 use crate::ids::{BlockId, CommitId, ObjectId, Secret32};
+use crate::suite::AEAD_NONCE_LEN;
+use rand_core::{OsRng, RngCore};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The chunk index reserved for an object's Merkle **root** node block. No other
@@ -360,6 +362,37 @@ pub fn seal_object_with(
     plaintext: &[u8],
     layout: ObjectLayout,
 ) -> Result<SealedObject> {
+    seal_object_deterministic(k_read, ctx, object, plaintext, layout, |_| {
+        let block = BlockId::random();
+        let mut nonce = [0u8; AEAD_NONCE_LEN];
+        OsRng.fill_bytes(&mut nonce);
+        (block, nonce)
+    })
+}
+
+/// Seal an object with caller-supplied block ids and nonces for reproducible vectors.
+///
+/// `block_material` receives each chunk index once, in sealing order: leaves,
+/// then internal nodes bottom-up, then the root at index `0`. It returns that
+/// block's id and nonce. With fixed inputs and material, all wire bytes are
+/// deterministic; the returned blocks remain root-first.
+///
+/// Callers must supply distinct block ids and never reuse a nonce with the same
+/// derived block key for different plaintexts. Production callers should use
+/// [`seal_object`] or [`seal_object_with`] for fresh random ids and nonces.
+///
+/// # Errors
+///
+/// Returns an error for an invalid layout, block-count or plaintext-length
+/// overflow, or a plaintext that exceeds the largest padding class.
+pub fn seal_object_deterministic(
+    k_read: &Secret32,
+    ctx: &BlockContext,
+    object: &ObjectId,
+    plaintext: &[u8],
+    layout: ObjectLayout,
+    mut block_material: impl FnMut(u64) -> (BlockId, [u8; AEAD_NONCE_LEN]),
+) -> Result<SealedObject> {
     layout.validate()?;
 
     // An empty object still has exactly one (empty) leaf, so the tree shape is
@@ -394,7 +427,8 @@ pub fn seal_object_with(
         let data = plaintext.get(start..end).unwrap_or(&[]);
         let index = next_index;
         next_index += 1;
-        let env = seal_block_random(k_read, ctx, object, index, chunk_count, data)?;
+        let (block, nonce) = block_material(index);
+        let env = seal_block(k_read, ctx, object, &block, index, chunk_count, nonce, data)?;
         lower.push((
             ChildLink { block: env.block_id, chunk_index: index, digest: env.digest() },
             data.len() as u64,
@@ -423,7 +457,9 @@ pub fn seal_object_with(
                 children: group.iter().map(|(link, _)| *link).collect(),
                 subtree_len,
             };
-            let env = seal_block_random(k_read, ctx, object, index, chunk_count, &node.encode())?;
+            let (block, nonce) = block_material(index);
+            let env =
+                seal_block(k_read, ctx, object, &block, index, chunk_count, nonce, &node.encode())?;
             upper.push((
                 ChildLink { block: env.block_id, chunk_index: index, digest: env.digest() },
                 subtree_len,

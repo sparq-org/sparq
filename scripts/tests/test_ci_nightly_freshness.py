@@ -460,7 +460,14 @@ class ProductionWiring(unittest.TestCase):
         self.assertEqual(gate["steps"][-1]["run"], "python3 scripts/ci_nightly_freshness.py")
         for key in ["coverage-nightly", "mutants-nightly-advisory"]:
             self.assertEqual(self.jobs[key]["needs"], "nightly-gate")
-            self.assertEqual(self.jobs[key]["if"], "needs.nightly-gate.outputs.fresh == 'true'")
+        self.assertEqual(self.jobs["coverage-nightly"]["if"], "needs.nightly-gate.outputs.fresh == 'true'")
+        # The mutation sweep is weekly: the Saturday cron (or a manual force) behind the same gate.
+        self.assertEqual(self.mutation["if"],
+                         "needs.nightly-gate.outputs.fresh == 'true' && (github.event_name == "
+                         "'workflow_dispatch' || github.event.schedule == '17 3 * * 6')")
+        # PyYAML reads the `on:` key as True.
+        crons = [s["cron"] for s in self.workflow[True]["schedule"]]
+        self.assertEqual(crons, ["17 3 * * 0-5", "17 3 * * 6"])
         self.assertEqual(self.mutation["strategy"]["max-parallel"], 8)
         self.assertFalse(self.mutation["strategy"]["fail-fast"])
         self.assertTrue(self.mutation["continue-on-error"])

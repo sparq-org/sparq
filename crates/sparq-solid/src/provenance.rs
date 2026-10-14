@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3jtd.5 — TRUSTED per-resource creator/owner provenance.
+//! sq-3jtd.5 — TRUSTED per-resource creator/owner provenance.
 //!
 //! `acp:CreatorAgent` / `acp:OwnerAgent` matchers grant the *creator* / *owner* of the
 //! resource being accessed. "Who created `<r>`" is structural storage metadata the
@@ -94,7 +94,7 @@ impl AccessProvenance {
 
 #[cfg(test)]
 mod tests {
-    // [OPUS-4.8] sq-2xdr — behaviour tests for the trusted creator/owner channel. The
+    // sq-2xdr — behaviour tests for the trusted creator/owner channel. The
     // `iter()` accessor is `pub(crate)` (consumed by the loader), so it can only be
     // exercised from an in-crate test, not an integration test.
     use super::*;

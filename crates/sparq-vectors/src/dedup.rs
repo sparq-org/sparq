@@ -1,4 +1,4 @@
-//! [FABLE-5] (#2251) **Recall-gated ANN over raw concept vectors**: `build_ann` / `knn` /
+//! (#2251) **Recall-gated ANN over raw concept vectors**: `build_ann` / `knn` /
 //! `dedup` — an HNSW-class index over caller-supplied `(id, vector)` pairs (no
 //! [`VectorStore`](crate::VectorStore) required), plus **recall-gated type-level
 //! deduplication**: near-duplicate merges are computed from approximate nearest-neighbour

@@ -1,6 +1,6 @@
 //! Vectorized (columnar / vector-at-a-time) execution primitives — the first
 //! concrete building block of the **M4 plan** (`research/optimization-techniques.md`,
-//! bead `sq-hvfe`). [OPUS-4.8]
+//! bead `sq-hvfe`).
 //!
 //! The general evaluator (the crate's internal `exec` module) is *row-materialising*: an intermediate
 //! result is a `Vec<Row>` where `Row = SmallVec<[Id; 4]>` (one heap-friendly tuple
@@ -409,7 +409,7 @@ mod tests {
         let unit = DataChunk::from_columns(vec![], 3).unwrap();
         assert_eq!(unit.len(), 3);
         assert_eq!(unit.width(), 0);
-        // [OPUS-4.8] (sq-xx3u) Annotate the expected value as `Vec<Vec<Id>>`. The inner
+        // (sq-xx3u) Annotate the expected value as `Vec<Vec<Id>>`. The inner
         // `vec![]` literals carry no elements to pin their type, and once `serde_json`
         // unifies into the test build's dependency graph (3+ features, e.g.
         // `service`/`serialize-rdf`), its `impl PartialEq<serde_json::Value> for u32`

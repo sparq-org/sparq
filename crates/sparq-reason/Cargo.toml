@@ -9,11 +9,11 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# [OPUS-4.8] crate-local README so crates.io (package.readme) matches the docs.rs front
+# crate-local README so crates.io (package.readme) matches the docs.rs front
 # page (lib.rs include_str!("../README.md")) — same content on both registries.
 readme = "README.md"
 
-# [OPUS-4.8] sq-emay: build docs.rs with all features so `explain`/`parallel` items render.
+# sq-emay: build docs.rs with all features so `explain`/`parallel` items render.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -33,15 +33,15 @@ parallel = ["dep:rayon", "sparq-core/parallel"]
 # structure and hook is cfg'd out entirely (zero hot-path cost, byte-identical behavior,
 # zero wasm impact: sparq-reason is never in the wasm dependency graph anyway).
 explain = []
-# [GPT-5.6] sq-aej8u — opt-in instrumentation; all hooks are absent by default.
+# sq-aej8u — opt-in instrumentation; all hooks are absent by default.
 profile = []
-# [OPUS-4.8] sq-e5atd (epic sq-pbz04) — OPT-IN D-entailment (datatype / value-space,
+# sq-e5atd (epic sq-pbz04) — OPT-IN D-entailment (datatype / value-space,
 # RDF 1.1 Semantics §7-8): `Profile::D`, the rdfD1 datatype-typing materializer + the
 # correct typed value-space comparison (`dtype` module). NON-DEFAULT by design — when off
 # the `dtype` module + `Profile::D` variant are cfg'd out entirely (the lean default build
 # carries zero D-entailment code; the byte/bundle ratchets are unchanged, and sparq-reason
 # is never in the wasm dependency graph anyway).
-# [FABLE-5] sq-pbz04.6.3 (epic sq-pbz04.6, substrate seam 2): D-entailment's typed
+# sq-pbz04.6.3 (epic sq-pbz04.6, substrate seam 2): D-entailment's typed
 # numeric value-space keys now DELEGATE to the SHARED `sparq-substrate::numeric`
 # comparator (the same `Dec`/`Num`/`split_decimal`/`parse_xsd_f64` the SPARQL engine
 # FILTER path uses), so the reasoner and the engine can never diverge on numeric
@@ -52,7 +52,7 @@ profile = []
 # (facet validation is dtype-resident by design, per the design record §4 seam
 # decision) — see the module doc for the byte-identical-behaviour ledger.
 d-entail = ["sparq-substrate/numeric"]
-# [OPUS-4.8] sq-rh4gu (epic sq-pbz04) — OPT-IN RIF-Core front-end: the W3C RIF
+# sq-rh4gu (epic sq-pbz04) — OPT-IN RIF-Core front-end: the W3C RIF
 # *Core* dialect (the MONOTONE Horn-rule common subset of RIF-BLD/PRD) as a rule
 # front-end over the existing N3 forward chainer. `rif::Document` validates a
 # RIF-Core rule set for DATALOG safety / range-restriction and lowers it to N3 so
@@ -63,7 +63,7 @@ d-entail = ["sparq-substrate/numeric"]
 # anyway). Pure-Rust, reuses the in-tree N3 engine — no new deps, no new Profile
 # variant (so no cfg-gated match-arm churn in any consumer crate).
 rif-core = []
-# [SONNET-4.6] sq-pbz04.5.3 — OPT-IN RIF/XML importer: parse the W3C RIF-Core XML
+# sq-pbz04.5.3 — OPT-IN RIF/XML importer: parse the W3C RIF-Core XML
 # presentation syntax into `rif::Document` with Or-split / Exists-flatten desugaring
 # and a fail-closed taxonomy (ImportDirective / NonCoreElement / UnknownExternal /
 # NamedArgUniterm / UnrecognizedElement / MalformedXml / ValidationFailed variants).
@@ -71,10 +71,10 @@ rif-core = []
 # parsing. NON-DEFAULT — when off the `rif_xml` module is cfg'd out entirely; the lean
 # default / wasm build carries zero RIF/XML code. Unblocks sq-pbz04.5.5 (W3C RIF test-suite arm).
 rif-xml = ["rif-core", "dep:quick-xml"]
-# [OPUS-4.8] sq-yk6or (epic sq-pbz04, THE SUBSTRATE PAYOFF) — OPT-IN: drive the SHARED
+# sq-yk6or (epic sq-pbz04, THE SUBSTRATE PAYOFF) — OPT-IN: drive the SHARED
 # `sparq-substrate::join` hash-join kernels (the same `JoinKeys` + `build_table` + `probe_emit`
 # + generic `Budget` the SPARQL engine drives) for the RDFS single-pass predicate join
-# (rdfs2/3/7) and — [FABLE-5] sq-pbz04.1.1 — the rdfs9 type join (object-keyed probe; only
+# (rdfs2/3/7) and — sq-pbz04.1.1 — the rdfs9 type join (object-keyed probe; only
 # the PropExpand orientation-swap branch stays hand-rolled, by documented disposition in
 # substrate_join.rs), instead of the hand-rolled `FxHashMap` adjacency probe. This proves the
 # maintainer's "share join logic across the engine AND the reasoners" goal end-to-end. The
@@ -83,12 +83,12 @@ rif-xml = ["rif-core", "dep:quick-xml"]
 # NON-DEFAULT by design so the byte/bundle ratchets stay exactly as the hand-rolled path, and
 # the shared-join cost is measurable by toggling the flag. Pulls `sparq-substrate` (path dep,
 # `rows` + `join` features) ONLY when enabled — `sparq-core` + `smallvec` + `rustc-hash` are
-# already in this crate's tree, so it adds NO new transitive crate. ([FABLE-5] sq-pbz04.1.2:
+# already in this crate's tree, so it adds NO new transitive crate. (sq-pbz04.1.2:
 # the substrate slice features moved from the dep declaration into this entry so each
 # substrate-* feature pulls ONLY its own slice — `substrate-compare` alone does not drag the
 # join kernels in, and vice versa. Same net feature set as before when this flag is on.)
 substrate-join = ["dep:smallvec", "sparq-substrate/rows", "sparq-substrate/join"]
-# [FABLE-5] sq-pbz04.1.2 (epic sq-pbz04.1, substrate seam 3) — OPT-IN: the reasoner-side
+# sq-pbz04.1.2 (epic sq-pbz04.1, substrate seam 3) — OPT-IN: the reasoner-side
 # adoption of the SHARED SPARQL term total order. The `compare` module implements
 # `sparq_substrate::compare::CompareTerm` for the reasoner's term representation (a
 # dictionary `Id` resolved against its `Dict`), so ordering ENTAILED solutions
@@ -104,7 +104,7 @@ substrate-join = ["dep:smallvec", "sparq-substrate/rows", "sparq-substrate/join"
 # `numeric` (the exact Num/Dec tower the f64-collapse recheck needs) slices ONLY when
 # enabled — NO new transitive crate.
 substrate-compare = ["sparq-substrate/compare", "sparq-substrate/numeric"]
-# [FABLE-5] sq-zgbso.3 (epic sq-zgbso, issue #1582) — OPT-IN id-level COMPILED-rule
+# sq-zgbso.3 (epic sq-zgbso, issue #1582) — OPT-IN id-level COMPILED-rule
 # evaluation for the scoped N3 subset the Solid access-control rules use: `n3::compiled`
 # lowers N3 rule text (parsed ONCE by the existing `n3::parser`) to a rule IR whose
 # constants are a symbol table pre-interned into the caller's `Dict`, then runs a
@@ -120,7 +120,7 @@ substrate-compare = ["sparq-substrate/compare", "sparq-substrate/numeric"]
 # unchanged. Pulls the substrate `rows` + `join` slices ONLY when enabled — NO new
 # transitive crate (`sparq-core`/`smallvec`/`rustc-hash`/`regex` are already in-tree).
 compiled-rules = ["dep:smallvec", "sparq-substrate/rows", "sparq-substrate/join"]
-# [FABLE-5] sq-6tykl.3 (epic sq-6tykl, RDFox-parity BIG ROCK, Phase 1) — OPT-IN
+# sq-6tykl.3 (epic sq-6tykl, RDFox-parity BIG ROCK, Phase 1) — OPT-IN
 # STRATIFIED DATALOG rules: a small native rule dialect (design record
 # research/stratified-datalog-rules.md — the maintainer's open question 4 resolved to a
 # native RDFox-modelled surface) with NOT (negation as failure) and AGGREGATE COUNT
@@ -165,8 +165,8 @@ percent-encoding.workspace = true
 # sparq-reason is never in the wasm graph, so sparq-core's opt-in-oxiri posture does not apply.
 oxiri = "0.2"
 rayon = { workspace = true, optional = true }
-# [OPUS-4.8] sq-yk6or: the SHARED evaluation substrate (epic sq-qonbz, merged #1300).
-# [OPUS-4.8] sq-pbz04.5.1: this dep is now NON-OPTIONAL, carrying ONLY the `numeric` slice
+# sq-yk6or: the SHARED evaluation substrate (epic sq-qonbz, merged #1300).
+# sq-pbz04.5.1: this dep is now NON-OPTIONAL, carrying ONLY the `numeric` slice
 # (`default-features = false`) — the N3 chainer's exact `math:` arithmetic core is the shared
 # `numeric::Dec`/`Num` tower (seam-2 tower adoption, research §2), so the reasoner and the
 # SPARQL engine can never diverge on exact-decimal arithmetic. The deviation from "opt-in
@@ -180,20 +180,20 @@ rayon = { workspace = true, optional = true }
 # features above (each names exactly the slices it needs), so the base `numeric` slice never
 # drags the join/compare machinery in.
 sparq-substrate = { path = "../sparq-substrate", version = "0.1.6", default-features = false, features = ["numeric"] }
-# [OPUS-4.8] sq-yk6or: the `Row`/`Key` SmallVec aliases the substrate join kernels operate on.
+# sq-yk6or: the `Row`/`Key` SmallVec aliases the substrate join kernels operate on.
 # OPTIONAL: linked ONLY by `substrate-join`. Same crate sparq-substrate uses, so the row
 # representation is byte-identical across the engine, the substrate and this reasoner.
 smallvec = { workspace = true, optional = true }
 # string:matches N3 builtin (regex). Not in the LEAN sparq-wasm bundle, but pure-Rust and
 # wasm-portable: sparq-reason ships to the browser via the tier-b sparq-reason-wasm bundle
-# ([OPUS-4.8] sq-6qw3) — regex compiles to wasm32-unknown-unknown.
+# (sq-6qw3) — regex compiles to wasm32-unknown-unknown.
 regex = "1"
 # Runtime-parsed N3 documents are keyed by a SPECIFIED hash (SHA-256 of their text and base,
 # GH #6775): the key reaches exported blank labels and proof keys, so it must not change
 # between builds as a std hasher may. Pure Rust and wasm-portable; already in the workspace
 # tree (0.10, as sparq-canon / sparq-crdt pin it).
 sha2 = "0.10"
-# [SONNET-4.6] sq-pbz04.5.3 — RIF/XML importer; OPTIONAL, linked only by `rif-xml`.
+# sq-pbz04.5.3 — RIF/XML importer; OPTIONAL, linked only by `rif-xml`.
 # No `encoding` feature: RIF/XML from the W3C test suite is UTF-8; non-UTF-8 XML will
 # fail at parse with EncodingError::Utf8 (acceptable fail-closed posture).  Dropping
 # the feature avoids pulling in unvetted `encoding_rs 0.8.35` (cargo-vet gating failure
@@ -202,7 +202,7 @@ sha2 = "0.10"
 quick-xml = { version = "0.41", default-features = false, optional = true }
 
 [dev-dependencies]
-# [FABLE-5] sq-pbz04.1.2 / [SONNET-4.6]: the ordering-parity ORACLE for the
+# sq-pbz04.1.2 /: the ordering-parity ORACLE for the
 # `substrate-compare` seam — tests/compare_parity.rs runs a REAL engine `ORDER BY`
 # over the same materialised closure and asserts the reasoner-side sort is
 # byte-identical. Keep a `version` alongside `path` so Cargo retains this test-only
@@ -211,20 +211,20 @@ quick-xml = { version = "0.41", default-features = false, optional = true }
 # depend on sparq-reason.
 sparq-engine = { path = "../sparq-engine", version = "0.1.6" }
 
-# [FABLE-5] sq-pbz04.1.2: the engine-vs-reasoner ordering-parity test — compiled only with
+# sq-pbz04.1.2: the engine-vs-reasoner ordering-parity test — compiled only with
 # the feature it exercises, so default-feature `--all-targets` builds stay engine-light.
 [[test]]
 name = "compare_parity"
 required-features = ["substrate-compare"]
 
-# [SONNET-4.6] sq-qonbz.2: cross-assert — OWL-RL DeltaAdj path (prp-fp/ifp/trp probes)
+# sq-qonbz.2: cross-assert — OWL-RL DeltaAdj path (prp-fp/ifp/trp probes)
 # produces byte-identical closures to the OWL-RL spec semantics. Compiled only with the
 # feature it exercises; the default build carries zero of it.
 [[test]]
 name = "substrate_join_owl"
 required-features = ["substrate-join"]
 
-# [OPUS-5] sq-3xsx0: the bench Datalog encodings' cls-int1 generalises to ANY
+# sq-3xsx0: the bench Datalog encodings' cls-int1 generalises to ANY
 # owl:intersectionOf list arity — the rule shape is validated through this crate's own
 # semi-naive Datalog fixpoint, so it needs (and only needs) the `datalog` feature.
 [[test]]
@@ -240,7 +240,7 @@ required-features = ["datalog"]
 name = "owl_reify"
 required-features = ["quoted-triples"]
 
-# [FABLE-5] sq-zgbso.3: the compiled-vs-text result-equivalence oracle (closure
+# sq-zgbso.3: the compiled-vs-text result-equivalence oracle (closure
 # set-equality vs `reason_n3` over the sparq-solid WAC/ACP/ODRL-spike rule corpus, read
 # READ-ONLY from ../sparq-solid/rules at runtime). Compiled only with the feature it
 # exercises (default `--all-targets` builds carry none of it); run in CI by the
@@ -249,7 +249,7 @@ required-features = ["quoted-triples"]
 name = "compiled_equivalence"
 required-features = ["compiled-rules"]
 
-# [FABLE-5] sq-zgbso.3: the in-crate measurement instrument for the sq-zgbso.1 spike's
+# sq-zgbso.3: the in-crate measurement instrument for the sq-zgbso.1 spike's
 # open question — the fraction of a WAC/ACP-shaped materialize the per-call fact
 # TEXT round-trip (serialize -> re-parse -> String-term fixpoint) costs vs the id-level
 # compiled path, on loader-shaped fixture facts. Wall-clock output is NON-canonical
@@ -258,7 +258,7 @@ required-features = ["compiled-rules"]
 name = "compiled_rules_bench"
 required-features = ["compiled-rules"]
 
-# [OPUS-5] sq-zgbso.6: the Phase-4 SPIKE that gates RDFS/OWL-RL-as-compiled-N3 — compiles
+# sq-zgbso.6: the Phase-4 SPIKE that gates RDFS/OWL-RL-as-compiled-N3 — compiles
 # `rules/rdfs.n3` (the same six rules src/rdfs.rs implements) through the compiled-rules
 # evaluator, asserts closure equivalence against `materialize(Profile::Rdfs, ..)` on a
 # hand-written differential corpus (each document carrying the conclusions RDFS requires
@@ -272,7 +272,7 @@ required-features = ["compiled-rules"]
 name = "rdfs_n3_spike"
 required-features = ["compiled-rules"]
 
-# [FABLE-5] sq-hmd7l.24: the W3C RIF conformance PASS-RATE runner (bench registry id
+# sq-hmd7l.24: the W3C RIF conformance PASS-RATE runner (bench registry id
 # `rif-conformance`) — the CONFORMANCE-ONLY arm of the RIF axis (verdict:
 # NOT-COMPARABLE; no runnable open-source RIF peer exists — research/gap-rif-2026-07.md).
 # `--smoke` self-asserts pinned verdicts on the vendored sparq-authored subset in

@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.9.3: end-to-end tests for the double-opt-in `GET /complete` endpoint.
+//! sq-lsp7k.9.3: end-to-end tests for the double-opt-in `GET /complete` endpoint.
 //!
 //! The suite drives the real axum route over a generation-cached `CompletionIndex`. It witnesses
 //! runtime-off 404, exact IRI/local-name/label JSON, a post-update stale-cache rebuild, and the

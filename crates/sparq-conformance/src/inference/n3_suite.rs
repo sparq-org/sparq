@@ -401,7 +401,7 @@ fn expand_lists(rows: &[[NTerm; 3]]) -> Vec<[NTerm; 3]> {
             }
             // A quoted `<< s p o >>` triple term is transparent structure:
             // recurse so a list/formula nested in a component still expands
-            // (GH #2012). [FABLE-5]
+            // (GH #2012).
             NTerm::Triple(tr) => NTerm::Triple(Box::new([
                 expand(&tr[0], counter, out),
                 expand(&tr[1], counter, out),
@@ -435,7 +435,7 @@ fn oxrdf_to_n3(t: &oxrdf::Term) -> NTerm {
             l.language().map(|s| s.to_string()),
         ),
         // RDF 1.2 quoted-triple term: convert faithfully now the N3 model has
-        // a first-class `NTerm::Triple` (GH #2012). [FABLE-5]
+        // a first-class `NTerm::Triple` (GH #2012).
         oxrdf::Term::Triple(t) => NTerm::Triple(Box::new([
             match &t.subject {
                 oxrdf::NamedOrBlankNode::NamedNode(n) => NTerm::Iri(n.as_str().to_string()),
@@ -830,7 +830,7 @@ fn term_iso(a: &NTerm, b: &NTerm, bij: &mut Bij, steps: &mut usize) -> bool {
         }
         // Quoted `<< s p o >>` triple terms: transparent structure, component
         // by component (so a blank inside one still joins the bijection —
-        // GH #2012). [FABLE-5]
+        // GH #2012).
         (NTerm::Triple(x), NTerm::Triple(y)) => x
             .iter()
             .zip(y.iter())

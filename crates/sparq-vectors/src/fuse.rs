@@ -21,7 +21,7 @@
 //! for [`hybrid_search`], which drives N retriever closures off one query `Term` and
 //! fuses their ranked `Term` lists by [`fuse_rrf`], deduplicating by `Term`:
 //!
-//! [OPUS-4.8] (sq-ip3a) `ignore`d, not `no_run`: it references the HNSW `VectorIndex`, which is
+//! (sq-ip3a) `ignore`d, not `no_run`: it references the HNSW `VectorIndex`, which is
 //! gated behind the opt-in `approx-ann` feature, so this illustration must not be compiled in the
 //! default doctest build. The executed RRF example below carries no ANN dependency.
 //!
@@ -87,7 +87,7 @@ pub fn fuse_rrf<T: Clone + Eq + Hash>(
 /// [`fuse_rrf`] but each list carries a non-negative weight —
 /// `score(item) = Σ_lists weight_l / (k + rank_l)`, ranks 1-based. Use it to
 /// down-weight a noisier signal without dropping it (e.g. text 1.0,
-/// structural 0.5); weight 0 mutes a list ENTIRELY — [OPUS-4.8] its items do
+/// structural 0.5); weight 0 mutes a list ENTIRELY — its items do
 /// not appear unless another weighted list also ranks them (review 1874: a
 /// muted list previously injected its items at score 0.0, so they could surface
 /// as standalone results when `top_k` was large or every list was zero-weighted).
@@ -110,7 +110,7 @@ pub fn fuse_rrf_weighted<T: Clone + Eq + Hash>(
     let mut acc: FxHashMap<T, (f64, usize)> = FxHashMap::default();
     let mut order = 0usize;
     for (list, weight) in lists {
-        // [OPUS-4.8] Skip muted (weight 0) lists entirely so they inject no standalone items —
+        // Skip muted (weight 0) lists entirely so they inject no standalone items —
         // a 0.0 contribution would still register the item in `acc` and let it surface in the
         // top-k. A muted list contributes nothing. See review 1874.
         if *weight == 0.0 {
@@ -128,13 +128,13 @@ pub fn fuse_rrf_weighted<T: Clone + Eq + Hash>(
     top_n(acc, top_k)
 }
 
-/// [OPUS-4.8] sq-88c6 — a borrowed retriever for [`hybrid_search`]: maps a query of type
+/// sq-88c6 — a borrowed retriever for [`hybrid_search`]: maps a query of type
 /// `Q` to a ranked `Vec<(T, f64)>` (best first). `&mut dyn` so heterogeneous retrievers
 /// (a `VectorIndex::nearest_term` closure, a `Sim::most_similar` closure, …) share one
 /// slice. Construct as `&mut |q: &Q| { … }`.
 pub type Retriever<'r, Q, T> = &'r mut dyn FnMut(&Q) -> Vec<(T, f64)>;
 
-/// [OPUS-4.8] sq-88c6 — **Hybrid retrieval over one query item, fused by [`fuse_rrf`].**
+/// sq-88c6 — **Hybrid retrieval over one query item, fused by [`fuse_rrf`].**
 ///
 /// Drives every `retriever` off the same `query` (typically a [`Term`](oxrdf::Term)),
 /// then fuses the resulting ranked lists by item with Reciprocal Rank Fusion, returning
@@ -333,7 +333,7 @@ mod tests {
         assert!((fused[1].1 - 1.0 / 62.0).abs() < 1e-12);
     }
 
-    // [OPUS-4.8] Regression for review 1874: an item that exists ONLY in a zero-weight (muted)
+    // Regression for review 1874: an item that exists ONLY in a zero-weight (muted)
     // list must NOT surface as a standalone result. Previously a 0.0 contribution still inserted
     // it into the accumulator, so it could appear when top_k was large enough.
     #[test]
@@ -347,7 +347,7 @@ mod tests {
         assert!(fused.iter().all(|(t, _)| *t != "only_in_muted" && *t != "z"));
     }
 
-    // [OPUS-4.8] When EVERY list is muted, the fused result is empty (not a pile of 0.0-scored
+    // When EVERY list is muted, the fused result is empty (not a pile of 0.0-scored
     // items). Review 1874.
     #[test]
     fn weighted_rrf_all_zero_weights_yields_empty() {
@@ -364,7 +364,7 @@ mod tests {
         fuse_rrf_weighted(&[(&a, -0.1)], 60.0, 1);
     }
 
-    // [OPUS-4.8] sq-88c6 — hybrid_search: two retriever closures fused by RRF.
+    // sq-88c6 — hybrid_search: two retriever closures fused by RRF.
 
     #[test]
     fn hybrid_search_fuses_two_retrievers_consensus_wins() {

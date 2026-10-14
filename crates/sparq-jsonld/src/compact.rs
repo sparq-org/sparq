@@ -1,6 +1,6 @@
 //! Compaction Algorithm (JSON-LD 1.1 API §7) — document-level, over expanded input.
 //!
-//! [FABLE-5] (sq-oy1f.27) The W3C **Compaction Algorithm** and **Value Compaction**
+//! (sq-oy1f.27) The W3C **Compaction Algorithm** and **Value Compaction**
 //! (spec "Compaction Algorithms", <https://www.w3.org/TR/json-ld11-api/#compaction-algorithms>),
 //! running over the *expanded document* with a real
 //! [`ActiveContext`] — rather than as a bespoke inverse of
@@ -38,6 +38,7 @@
 //! the initial expansion) are dereferenced only through the [`DocumentLoader`]
 //! (deny-by-default via [`NoopLoader`](crate::loader::NoopLoader)).
 
+use crate::cache::Lru;
 use crate::context::inverse::{compact_iri, InverseContext};
 use crate::context::{budget, ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
@@ -65,7 +66,7 @@ use std::sync::Arc;
 /// API). Returns the first spec [`JsonLdError`] raised by expansion, context processing,
 /// or compaction.
 ///
-/// [FABLE-5] (sq-oy1f.27)
+/// (sq-oy1f.27)
 pub fn compact(
     input: &Json,
     context: &Json,
@@ -92,7 +93,7 @@ fn compact_inner(
 /// caller `context` is embedded under `@context` unless it is empty (`null`, `{}`, or
 /// `[]`).
 ///
-/// [FABLE-5] (sq-oy1f.27)
+/// (sq-oy1f.27)
 pub fn compact_expanded(
     expanded: &Json,
     context: &Json,
@@ -164,15 +165,20 @@ fn compact_expanded_inner(
     Ok(result)
 }
 
-thread_local! {
-    /// The last self-contained root context processed on this thread, keyed by the
-    /// context value and options. Callers serialising many documents against one
-    /// context (the engine writer, the playground) skip re-processing it and rebuilding
-    /// its inverse context on every call.
-    static LAST_ROOT: RefCell<Option<(Json, JsonLdOptions, Rc<Ctx>)>> = const { RefCell::new(None) };
+struct RootContext {
+    local: Json,
+    base: Option<String>,
+    options: JsonLdOptions,
+    ctx: Rc<Ctx>,
 }
 
-/// The processed root context for `ctx_value`, reusing [`LAST_ROOT`] when it matches.
+thread_local! {
+    /// Recent self-contained processed contexts and their inverse contexts. Keep the
+    /// full options key: the retained IRI/derived-context memos are reused across calls.
+    static ROOT_CACHE: RefCell<Lru<RootContext>> = const { RefCell::new(Lru::new()) };
+}
+
+/// The processed root context for `ctx_value`, reusing [`ROOT_CACHE`] when it matches.
 /// Only contexts that cannot reach the loader (no remote references, no `@import`) are
 /// cached, since a loader may resolve the same IRI differently between calls.
 fn root_ctx(
@@ -183,11 +189,10 @@ fn root_ctx(
 ) -> Result<Rc<Ctx>, JsonLdError> {
     let cacheable = self_contained(ctx_value);
     if cacheable {
-        let hit = LAST_ROOT.with(|last| {
-            last.borrow()
-                .as_ref()
-                .filter(|(v, o, _)| v == ctx_value && o == options)
-                .map(|(_, _, c)| Rc::clone(c))
+        let hit = ROOT_CACHE.with(|cache| {
+            cache.borrow_mut()
+                .get(|e| e.base.as_deref() == base && e.options == *options && e.local == *ctx_value)
+                .map(|e| Rc::clone(&e.ctx))
         });
         if let Some(ctx) = hit {
             return Ok(ctx);
@@ -197,8 +202,13 @@ fn root_ctx(
         ActiveContext::new(base).process(ctx_value, options.base.as_deref(), loader, options)?;
     let ctx = Rc::new(Ctx::new(active));
     if cacheable {
-        LAST_ROOT.with(|last| {
-            *last.borrow_mut() = Some((ctx_value.clone(), options.clone(), Rc::clone(&ctx)));
+        ROOT_CACHE.with(|cache| {
+            cache.borrow_mut().insert(RootContext {
+                local: ctx_value.clone(),
+                base: base.map(str::to_string),
+                options: options.clone(),
+                ctx: Rc::clone(&ctx),
+            });
         });
     }
     Ok(ctx)
@@ -360,7 +370,7 @@ struct Ctx {
     /// On the root context only: contexts derived mid-walk (step 4 reversion, step 5
     /// property-scoped and step 9 type-scoped contexts), memoised so each distinct switch
     /// builds its active and inverse context once rather than once per node (and, with
-    /// the root cached in [`LAST_ROOT`], once across calls), within the limits in
+    /// the root cached in [`ROOT_CACHE`], once across calls), within the limits in
     /// [`Env::derived`]. Keys name contexts by id, so a dropped context is never mistaken
     /// for a later one.
     derived: RefCell<Vec<(DerivedKey, Rc<Ctx>)>>,
@@ -396,7 +406,7 @@ impl Ctx {
 
     /// Clears this root's IRI memos (its own and its derived contexts') once they hold
     /// more than [`MEMO_CAP`] IRIs between them. The root outlives the call in
-    /// [`LAST_ROOT`] and node ids differ per document, so without this the memos would keep
+    /// [`ROOT_CACHE`] and node ids differ per document, so without this the memos would keep
     /// every IRI ever compacted on the thread. Within one call they hold up to
     /// [`MEMO_CALL_CAP`] IRIs, which keeps large documents fast, and each IRI holds at most
     /// [`MEMO_SHAPES`] value shapes. The derived contexts are dropped here once the cache
@@ -581,7 +591,7 @@ fn compact_element(
     let type_scoped = ctx;
 
     // step 2: scalars (and null) are already in compact form.
-    if is_scalar(element) || is_null(element) {
+    if element.is_scalar() || element.is_null() {
         return Ok(element.clone());
     }
     env.visit()?;
@@ -594,7 +604,7 @@ fn compact_element(
             // Recursion is counted per object; an array directly in an array counts too.
             let _nested = if matches!(item, Json::Arr(_)) { Some(budget::nest()?) } else { None };
             let compacted = compact_element(ctx, active_property, item, read, env)?;
-            if !is_null(&compacted) {
+            if !compacted.is_null() {
                 result.push(compacted);
             }
         }
@@ -626,7 +636,7 @@ fn compact_element(
                 .and_then(|p| cur.active.term_definition(p))
                 .and_then(|d| d.type_mapping())
                 == Some("@json");
-            if is_scalar(&v) || json_mapped {
+            if v.is_scalar() || json_mapped {
                 return Ok(v);
             }
         }
@@ -638,7 +648,7 @@ fn compact_element(
     // step 7: a list object under a @list-container term compacts to its bare items.
     // A bare array reverts no context, so they are read (and compacted) under the
     // incoming one.
-    if is_list_object(element)
+    if element.is_list_object()
         && term_container(&ctx.active, active_property)
             .iter()
             .any(|c| c == "@list")
@@ -650,7 +660,7 @@ fn compact_element(
     // A list object outside a @list-container term (one nested in another list) is read
     // with its items under the enclosing active property, not under @list, so they are
     // compacted that way too (a type coercion on the property applies to them).
-    if is_list_object(element) {
+    if element.is_list_object() {
         let list = element.get("@list").expect("list object");
         let items = match compact_element(cur, active_property, list, Read::Value, env)? {
             items @ Json::Arr(_) => items,
@@ -823,7 +833,7 @@ fn compact_element(
                 || iap == "@list"
                 || !env.options.compact_arrays;
 
-            let item_is_list = is_list_object(item);
+            let item_is_list = item.is_list_object();
             let item_is_graph = is_graph_object(item);
             let list_container = container.iter().any(|c| c == "@list");
             // A plain @index map keys an item (not a graph's nodes) by the item's @index.
@@ -1403,8 +1413,8 @@ fn add_to_container_map(
             |k: &str| item_ctx.active.expand_iri(k, false, true).as_deref() == Some(index_iri.as_str());
         // A list value of the index property is one value, whose items cannot key the map.
         let holds_list = match item.get(&index_iri) {
-            Some(Json::Arr(vals)) => vals.iter().any(is_list_object),
-            Some(v) => is_list_object(v),
+            Some(Json::Arr(vals)) => vals.iter().any(Json::is_list_object),
+            Some(v) => v.is_list_object(),
             None => false,
         };
         let container_key = match &compacted_item {
@@ -1727,25 +1737,6 @@ fn type_strings(j: &Json) -> Vec<&str> {
     }
 }
 
-/// True iff `j` is a JSON `null`.
-fn is_null(j: &Json) -> bool {
-    matches!(j, Json::Raw(r) if r == "null")
-}
-
-/// True iff `j` is a scalar (string, number, or boolean — not `null`).
-fn is_scalar(j: &Json) -> bool {
-    match j {
-        Json::Str(_) => true,
-        Json::Raw(r) => r != "null",
-        _ => false,
-    }
-}
-
-/// True iff `j` is a list object (a map with an `@list` entry).
-fn is_list_object(j: &Json) -> bool {
-    j.is_obj() && j.get("@list").is_some()
-}
-
 /// True iff `j` is a graph object: a map with `@graph` whose other entries are at most
 /// `@id`, `@index`, and `@context`.
 fn is_graph_object(j: &Json) -> bool {
@@ -1781,6 +1772,93 @@ mod tests {
     use super::*;
     use crate::NoopLoader;
 
+    #[test]
+    fn distinct_frames_reuse_cached_inverse_contexts() {
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let input = Json::parse(r#"[{"@id":"http://ex/s","http://ex/p":[{"@value":"v"}]}]"#).unwrap();
+        let opts = JsonLdOptions::default();
+        let fopts = crate::frame::FrameOptions::default();
+        // Every frame is distinct, but its context alternates between two definitions.
+        // Both the expanded-frame cache and a single-entry root cache miss each time.
+        for i in 0..6 {
+            let term = if i % 2 == 0 { "p" } else { "q" };
+            let f = Json::parse(&format!(r#"{{"@context":{{"{term}":"http://ex/p"}},"{term}":{{}},"@id":["http://ex/s","http://ex/unused{i}"]}}"#)).unwrap();
+            let out = crate::frame::frame(&input, &f, &opts, &fopts, &NoopLoader).unwrap();
+            let mut bytes = String::new();
+            out.write(&mut bytes);
+            assert_eq!(bytes, format!(r#"{{"@context":{{"{term}":"http://ex/p"}},"@id":"http://ex/s","{term}":"v"}}"#));
+        }
+        assert_eq!(ROOT_CACHE.with(|cache| cache.borrow().hits), 4);
+    }
+
+    #[test]
+    fn root_cache_evicts_the_least_recent_inverse_context() {
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let opts = JsonLdOptions::default();
+        let contexts: Vec<_> = (0..9).map(|i| Json::parse(&format!(r#"{{"p":"http://ex/{i}"}}"#)).unwrap()).collect();
+        let get = |c: &Json| root_ctx(c, None, &opts, &NoopLoader).unwrap();
+        let first: Vec<_> = contexts[..8].iter().map(get).collect();
+        assert!(Rc::ptr_eq(&first[0], &get(&contexts[0])));
+        get(&contexts[8]);
+        assert!(Rc::ptr_eq(&first[0], &get(&contexts[0])));
+        assert!(!Rc::ptr_eq(&first[1], &get(&contexts[1])));
+    }
+
+    #[test]
+    fn root_cache_separates_base_and_options() {
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let local = Json::parse(r#"{"p":"http://ex/p"}"#).unwrap();
+        let opts = JsonLdOptions::default();
+        let other = JsonLdOptions { compact_arrays: false, ..opts.clone() };
+        let a = root_ctx(&local, Some("http://ex/a/"), &opts, &NoopLoader).unwrap();
+        let b = root_ctx(&local, Some("http://ex/b/"), &opts, &NoopLoader).unwrap();
+        let c = root_ctx(&local, Some("http://ex/a/"), &other, &NoopLoader).unwrap();
+        assert_eq!(a.active.base_iri(), Some("http://ex/a/"));
+        assert_eq!(b.active.base_iri(), Some("http://ex/b/"));
+        assert!(!Rc::ptr_eq(&a, &c));
+        assert_eq!(ROOT_CACHE.with(|cache| cache.borrow().hits), 0);
+        assert!(Rc::ptr_eq(&a, &root_ctx(&local, Some("http://ex/a/"), &opts, &NoopLoader).unwrap()));
+        assert!(Rc::ptr_eq(&b, &root_ctx(&local, Some("http://ex/b/"), &opts, &NoopLoader).unwrap()));
+        assert!(Rc::ptr_eq(&c, &root_ctx(&local, Some("http://ex/a/"), &other, &NoopLoader).unwrap()));
+        // Exercise output options through the public compaction entry point as well.
+        let input = Json::parse(r#"[{"http://ex/p":[{"@value":"v"}]}]"#).unwrap();
+        for o in [&opts, &other, &opts, &other] {
+            let out = compact_expanded(&input, &local, o, &NoopLoader).unwrap();
+            let node = match out.get("@graph") {
+                Some(Json::Arr(nodes)) => &nodes[0],
+                _ => &out,
+            };
+            let expected = if o.compact_arrays {
+                Json::Str("v".into())
+            } else {
+                Json::Arr(vec![Json::Str("v".into())])
+            };
+            assert_eq!(node.get("p"), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn root_cache_does_not_reuse_loader_state() {
+        struct Loader(std::cell::Cell<usize>);
+        impl DocumentLoader for Loader {
+            fn load_document(&self, url: &str) -> Result<crate::RemoteDocument, JsonLdError> {
+                let n = self.0.get();
+                self.0.set(n + 1);
+                Ok(crate::RemoteDocument::new(format!(r#"{{"@context":{{"p":"http://ex/{n}"}}}}"#), url))
+            }
+        }
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let loader = Loader(std::cell::Cell::new(0));
+        let remote = Json::Str("http://ex/context".into());
+        let opts = JsonLdOptions::default();
+        let first = root_ctx(&remote, None, &opts, &loader).unwrap();
+        let second = root_ctx(&remote, None, &opts, &loader).unwrap();
+        assert_eq!(first.active.term_definition("p").unwrap().iri(), Some("http://ex/0"));
+        assert_eq!(second.active.term_definition("p").unwrap().iri(), Some("http://ex/1"));
+        assert!(root_ctx(&remote, None, &opts, &NoopLoader).is_err());
+        assert_eq!(ROOT_CACHE.with(|cache| cache.borrow().hits), 0);
+    }
+
     // The cached root context outlives each call, so its IRI memo must stay bounded
     // however many distinct node ids pass through it.
     #[test]
@@ -1794,7 +1872,7 @@ mod tests {
             let doc = Json::parse(&format!("[{}]", nodes.join(","))).unwrap();
             compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         }
-        let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.memo.borrow().len()));
+        let len = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.memo.borrow().len()));
         assert!(len.is_some_and(|n| n <= MEMO_CAP), "memo size {len:?}");
     }
 
@@ -1814,7 +1892,7 @@ mod tests {
             .unwrap();
             compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         }
-        let n = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.derived.borrow().len()));
+        let n = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.derived.borrow().len()));
         assert!(n.is_some_and(|n| n <= DERIVED_CAP + 4), "derived {n:?}");
     }
 
@@ -1876,7 +1954,7 @@ mod tests {
             Json::Arr(v)
         };
         assert!(same_entries(&sorted(&back), &sorted(&doc)), "round trip changed the data");
-        let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.derived.borrow().len()));
+        let len = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.derived.borrow().len()));
         assert_eq!(len, Some(0));
     }
 
@@ -1998,7 +2076,7 @@ mod tests {
         .unwrap();
         let doc = Json::parse(r#"[{"@id":"http://ex/s","@type":["http://ex/B"]}]"#).unwrap();
         compact_expanded(&doc, &ctx, &JsonLdOptions::default(), &NoopLoader).unwrap();
-        let retained = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.retained.get()));
+        let retained = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.retained.get()));
         assert!(retained.is_some_and(|n| n > 4096), "retained {retained:?}");
     }
 
@@ -2135,8 +2213,8 @@ mod tests {
         // Dismantle iteratively: dropping a value this deep recurses too.
         while let Json::Obj(mut m) = doc {
             doc = match m.pop() {
-                Some((_, Json::Arr(mut a))) => a.pop().unwrap_or(Json::Raw("null".into())),
-                _ => Json::Raw("null".into()),
+                Some((_, Json::Arr(mut a))) => a.pop().unwrap_or(Json::null()),
+                _ => Json::null(),
             };
         }
     }
@@ -2255,9 +2333,9 @@ mod tests {
             .unwrap();
             compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         }
-        let shapes = LAST_ROOT.with(|last| {
+        let shapes = ROOT_CACHE.with(|last| {
             let last = last.borrow();
-            let (_, _, c) = last.as_ref().unwrap();
+            let c = &last.last().unwrap().ctx;
             let memo = c.memo.borrow();
             memo.get("http://ex/p").map(Vec::len)
         });

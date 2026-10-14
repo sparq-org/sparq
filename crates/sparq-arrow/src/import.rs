@@ -33,7 +33,7 @@ impl std::fmt::Display for ArrowError {
 
 impl std::error::Error for ArrowError {}
 
-// [GPT-5.6] One schema-validation path serves RecordBatch, IPC, and Parquet imports so
+// One schema-validation path serves RecordBatch, IPC, and Parquet imports so
 // schema-only readers cannot drift from the full row decoders.
 pub(crate) fn variables_from_schema(schema: &Schema) -> Result<Vec<Variable>, ArrowError> {
     let mut vars = Vec::with_capacity(schema.fields().len());
@@ -51,7 +51,7 @@ pub(crate) fn variables_from_schema(schema: &Schema) -> Result<Vec<Variable>, Ar
                 field.name()
             )));
         }
-        // [GPT-5.6] Report malformed struct arity explicitly before the exact-schema
+        // Report malformed struct arity explicitly before the exact-schema
         // check so safely constructed malformed batches fail closed without a cell read.
         if matches!(
             field.data_type(),
@@ -103,7 +103,7 @@ pub(crate) fn variables_from_schema(schema: &Schema) -> Result<Vec<Variable>, Ar
 /// assert_eq!(restored.rows, result.rows);
 /// ```
 pub fn from_record_batch(batch: &RecordBatch) -> Result<QueryResult, ArrowError> {
-    // [GPT-5.6] Validate before reading: Arrow permits arbitrary struct schemas, while
+    // Validate before reading: Arrow permits arbitrary struct schemas, while
     // this inverse is sound only for the exact lossless projection emitted by this crate.
     let schema = batch.schema();
     let vars = variables_from_schema(schema.as_ref())?;
@@ -173,7 +173,7 @@ fn read_cell(
     )?))
 }
 
-// [FABLE-5] The single bound-term decoder: RecordBatch struct cells and the flattened
+// The single bound-term decoder: RecordBatch struct cells and the flattened
 // CSV fields both reconstruct terms through this one path, so the two decoders cannot
 // drift on kind dispatch, metadata rejection, or literal assembly.
 pub(crate) fn term_from_parts(
@@ -336,7 +336,7 @@ fn read_literal(
     }
 }
 
-// [FABLE-5] pub(crate): the CSV decoder reports per-cell errors in the same shape.
+// pub(crate): the CSV decoder reports per-cell errors in the same shape.
 pub(crate) fn cell_error(column: &str, row: usize, message: impl std::fmt::Display) -> ArrowError {
     ArrowError::invalid(format!(
         "invalid RDF term at column '{column}', row {row}: {message}"

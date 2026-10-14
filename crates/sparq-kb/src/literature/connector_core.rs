@@ -1,7 +1,7 @@
 //! The **CORE API v3 connector** — a live (`literature-live`) HTTP adapter that turns the
 //! CORE `/v3/search/works` search response into the same DOI-keyed `SourceStub`s the
 //! `connector` module's `parse_openalex_batch` produces, so the downstream pipeline is
-//! source-agnostic (§4.2). [SONNET-4.6] sq-tzars.1 (epic sq-tzars, design record
+//! source-agnostic (§4.2). sq-tzars.1 (epic sq-tzars, design record
 //! `research/research-kb-program.md`). 🤖 SPARQ agent — research-KB live ingestion.
 //!
 //! ## Two layers, two features
@@ -99,7 +99,7 @@ fn stubs_from_results(results: &[Value]) -> (Vec<SourceStub>, usize) {
 
 /// Capture the CORE record's license, fail-closed to `None`. A blank string is treated as
 /// absent. CORE v3's search schema omits per-record licensing, so this is `None` in
-/// practice — which the tiering treats as non-redistributable. [SONNET-4.6] sq-tzars.1
+/// practice — which the tiering treats as non-redistributable. sq-tzars.1
 fn core_license(rec: &Value) -> Option<String> {
     rec.get("license")
         .and_then(Value::as_str)

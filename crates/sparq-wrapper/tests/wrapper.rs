@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-1rg2q M1: behavior witnesses over real sparq-core mutation paths.
+// sq-1rg2q M1: behavior witnesses over real sparq-core mutation paths.
 
 use oxrdf::vocab::xsd;
 use oxrdf::{Literal, NamedNode, Term};

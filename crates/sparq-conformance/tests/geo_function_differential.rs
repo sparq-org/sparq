@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-iwulr — GeoSPARQL geometry-function DIFFERENTIAL vs a captured
+//! sq-iwulr — GeoSPARQL geometry-function DIFFERENTIAL vs a captured
 //! JTS/GEOS golden truth-table.
 //!
 //! sparq-geo computes the GeoSPARQL topology + measurement functions by wrapping
@@ -40,7 +40,7 @@
 //! `corrupted_golden_row_is_detected`: flipping a real golden row's expected
 //! value makes the row checker report a mismatch.
 
-// [FABLE-5] With the lane feature OFF this runner is a single self-SKIP test, so
+// With the lane feature OFF this runner is a single self-SKIP test, so
 // the bare `cargo test -p sparq-conformance` and the default `--workspace` shards
 // neither link the georust geometry stack nor go red. (cfg gate, not a runtime
 // branch — zero geometry code compiles in the default state.)
@@ -177,7 +177,7 @@ mod gated {
         }
     }
 
-    // [GPT-5.6] Keep the cfg-gated constant in code spans so rustdoc does not resolve it
+    // Keep the cfg-gated constant in code spans so rustdoc does not resolve it
     // when this optional lane is disabled (the #926 intra-doc-link trap).
     /// One `distance.tsv` row: degree-unit (planar coordinate-space) distance
     /// within `DISTANCE_RTOL`.

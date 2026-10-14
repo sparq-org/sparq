@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.22: direct coverage for public introspection read-side failures
+// sq-bif.22: direct coverage for public introspection read-side failures
 // and budgeted schema retrieval, without enabling optional crate features.
 
 use sparq_core::Graph;

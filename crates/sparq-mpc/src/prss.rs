@@ -1,4 +1,4 @@
-// [OPUS-5] sq-yyro follow-on (issue #3531): the PRSS correlated-randomness
+// sq-yyro follow-on (issue #3531): the PRSS correlated-randomness
 // SOURCE behind `crate::randomness::DistributedRandomness` — replicated-PRF seed
 // setup + the `Σ_A PRF(k_A, ctr)·f_A` degree-`t` generator. Small-`n`
 // honest-majority only; fails closed where the `C(n, t)` seed count is
@@ -605,6 +605,14 @@ fn unqualified_sets(n: usize, t: usize) -> Vec<Vec<u64>> {
 impl DistributedRandomness for PrssRandomness {
     fn randomness_model(&self) -> RandomnessModel {
         RandomnessModel::Prss
+    }
+
+    fn parties(&self) -> usize {
+        PrssRandomness::parties(self)
+    }
+
+    fn threshold(&self) -> usize {
+        PrssRandomness::threshold(self)
     }
 
     /// A fresh degree-`t` sharing of the PRSS value at the next counter — each

@@ -1,4 +1,4 @@
-# [FABLE-5] sq-gum8.6 (epic sq-gum8, paper P2a): the metamorphic + differential
+# sq-gum8.6 (epic sq-gum8, paper P2a): the metamorphic + differential
 # logic-bug harness for SPARQL engines — TLP and NoREC re-derived for SPARQL's
 # three-valued (true / false / error) effective-boolean-value semantics, a
 # differential oracle over crates/sparq-difftest, a seeded deterministic query
@@ -47,7 +47,7 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 # #3712: `driver::form_urlencode`'s encoder (protocol-drivers only; already in the tree via ureq).
 percent-encoding = { workspace = true, optional = true }
 
-# [GPT-5.6] sq-hgqza: self-relative generation + oracle-check throughput only;
+# sq-hgqza: self-relative generation + oracle-check throughput only;
 # Criterion is dev-only and never enters the crate's lean dependency graph.
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }

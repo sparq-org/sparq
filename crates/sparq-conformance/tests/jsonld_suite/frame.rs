@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.29 — the W3C JSON-LD 1.1 `frame` lane runner, moved to the
+//! sq-oy1f.29 — the W3C JSON-LD 1.1 `frame` lane runner, moved to the
 //! NATIVE DOCUMENT-LEVEL oracle (`sparq_jsonld::frame::frame()` + `json_ld_equal`),
 //! matching the `expand` / `flatten` / `compact` lanes. The former RDF-answer-
 //! equivalence oracle over the RDF-first engine framer is retired here: the native
@@ -12,7 +12,7 @@ use sparq_jsonld::frame::{frame as jsonld_frame, FrameOptions};
 use sparq_jsonld::{JsonLdOptions, NoopLoader, ProcessingMode};
 use std::path::Path;
 
-/// [FABLE-5] sq-oy1f.29 — run the SEPARATE W3C `w3c/json-ld-framing` suite against
+/// sq-oy1f.29 — run the SEPARATE W3C `w3c/json-ld-framing` suite against
 /// the NATIVE document-level framer.
 ///
 /// ## Pipeline (the native framing path)

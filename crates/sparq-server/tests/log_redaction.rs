@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-toze.34, epic sq-toze) Integration test for the **request-log redaction**
+//! (sq-toze.34, epic sq-toze) Integration test for the **request-log redaction**
 //! option — the `--verbose` request log must NOT leak SPARQL query text (a PII/privacy exposure:
 //! `GET /sparql?query=…` puts the full query in the logged URI).
 //!
@@ -13,7 +13,7 @@
 //! Only one global subscriber may be installed per process, so BOTH cases run against ONE
 //! subscriber in a single `#[tokio::test]`; the capture buffer is cleared between cases.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the

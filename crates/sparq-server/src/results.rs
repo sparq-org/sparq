@@ -493,7 +493,7 @@ fn tsv_escape(b: u8) -> Option<&'static str> {
 // ---------------------------------------------------------------------------
 
 fn xml_text_escape<W: Write + ?Sized>(w: &mut W, s: &str) -> Res {
-    // [OPUS-4.8] Leading/trailing whitespace in element TEXT content is silently dropped by
+    // Leading/trailing whitespace in element TEXT content is silently dropped by
     // any XML parser that trims text events (the default for quick-xml / the `sparesults`
     // reference parser, and most SAX-style consumers) — so a literal `"  pad  "` written as
     // `<literal>  pad  </literal>` round-trips to `"pad"`. (Found by the serializer oracle in
@@ -515,7 +515,7 @@ fn xml_text_escape<W: Write + ?Sized>(w: &mut W, s: &str) -> Res {
 }
 
 /// Escapes the XML-significant characters (`&`, `<`, `>`) in text content; boundary
-/// whitespace handling is done by [`xml_text_escape`]. [OPUS-4.8]
+/// whitespace handling is done by [`xml_text_escape`].
 fn xml_text_body_escape(b: u8) -> Option<&'static str> {
     match b {
         b'&' => Some("&amp;"),
@@ -525,7 +525,7 @@ fn xml_text_body_escape(b: u8) -> Option<&'static str> {
     }
 }
 
-/// A boundary whitespace character as its XML numeric character reference. [OPUS-4.8]
+/// A boundary whitespace character as its XML numeric character reference.
 /// `trim_matches` in [`xml_text_escape`] strips only these four, so the boundary slices it
 /// passes here contain nothing else.
 fn ws_charref(b: u8) -> Option<&'static str> {
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn xml_text_body_escapes_markup_characters() {
-        // [OPUS-4.8] sq-4vao: a literal value containing XML-significant characters must be
+        // sq-4vao: a literal value containing XML-significant characters must be
         // escaped in the `<literal>` text body, NOT emitted verbatim — otherwise a literal like
         // `<script>` would break the results document (and be an injection vector). Exercises the
         // `<` and `>` body arms (the `&` arm too) of `xml_text_body_escape`.
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn xml_triple_term_with_a_blank_node_subject() {
-        // [OPUS-4.8] sq-4vao: a triple term whose SUBJECT is a blank node exercises the
+        // sq-4vao: a triple term whose SUBJECT is a blank node exercises the
         // `NamedOrBlankNode::BlankNode` subject arm of the `<triple>` XML encoder (the existing
         // triple-term test only covers a named-node subject). The bnode label is data-dependent,
         // so assert on the structural `<bnode>` element, not its id.
@@ -896,7 +896,7 @@ mod tests {
         tsv.lines().skip(1).flat_map(|l| l.split('\t')).any(|c| c == value)
     }
 
-    // [OPUS-4.8] sq-qcnn.37: direct unit tests for the pure XML/TSV encoding helpers that the
+    // sq-qcnn.37: direct unit tests for the pure XML/TSV encoding helpers that the
     // integration path leaves uncovered (the specific special-char arms and the decimal-no-dot
     // false path). These exercise the REAL encoding logic, not a proxy.
 
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn ws_charref_covers_newline_space_and_passthrough_arms() {
-        // [OPUS-4.8] sq-qcnn.37: cover the two arms not exercised by the tab/CR test above.
+        // sq-qcnn.37: cover the two arms not exercised by the tab/CR test above.
         assert_eq!(ws_charref(b'\n'), Some("&#10;"));
         assert_eq!(ws_charref(b' '), Some("&#32;"));
         // Any other byte passes through verbatim (the defensive `_` arm).
@@ -991,7 +991,7 @@ mod tests {
 
     #[test]
     fn is_turtle_boolean_returns_false_for_non_boolean_lexical_form() {
-        // [OPUS-4.8] sq-qcnn.37: exercise the non-matching (returns-false) arm of
+        // sq-qcnn.37: exercise the non-matching (returns-false) arm of
         // is_turtle_boolean. The matching arms are already exercised indirectly through
         // the `tsv_abbreviation_edge_cases` test ("true"^^xsd:boolean).
         assert!(!is_turtle_boolean("yes"));

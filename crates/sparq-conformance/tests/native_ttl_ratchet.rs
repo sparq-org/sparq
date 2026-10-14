@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-jocpn) Prove the native Turtle parser produces the SAME W3C rdf-turtle pass/fail
+//! (sq-jocpn) Prove the native Turtle parser produces the SAME W3C rdf-turtle pass/fail
 //! set as oxttl. Run this test with AND without `--features native-ttl-suite`; the printed
 //! per-test outcome line set must be IDENTICAL across the two runs (the conformance-set-identical
 //! invariant). When the W3C data is not fetched (`tests/w3c/rdf-tests`), the test self-skips.

@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-ajl: forge-and-verify NEGATIVE suite for the soundness binding gates.
 //!
 //! This is the adversarial complement to the happy-path e2e tests: it is a
@@ -124,7 +124,7 @@ fn attest_full(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestatio
             version: Some(STATUS_VERSION),
             index_commitment: None,
         }),
-        holder: None, // [OPUS-4.8] sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
+        holder: None, // sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
     }
 }
 
@@ -643,7 +643,7 @@ fn forge_pubinput_verdict_substitution_rejected() {
 
 // === BINDING 7: distinct-graph strict ordering (duplicate-inclusion / COUNT) ===
 //
-// [OPUS-4.8] sq-vxq8 / plan S2.5. `scan_check` step 1b enforces
+// sq-vxq8 / plan S2.5. `scan_check` step 1b enforces
 // `commitments[0] < commitments[1] < ...` (strict, on the field representative) so
 // the K committed graphs are pairwise DISTINCT. This closes the
 // duplicate-inclusion / COUNT-forgery class: including the SAME credential twice
