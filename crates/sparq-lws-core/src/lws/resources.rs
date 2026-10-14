@@ -527,29 +527,39 @@ async fn unread_precondition<S: Store + 'static>(
     {
         return None;
     }
-    (!reads_stably(state, uri, agent).await).then(|| state.deny(agent))
+    match reads_stably(state, uri, agent).await {
+        Ok(true) => None,
+        Ok(false) => Some(state.deny(agent)),
+        Err(retry) => Some(retry),
+    }
 }
 
 /// Whether `agent` may read `uri`, decided without its lock the way [`authorize_unlocked`] decides:
 /// on what the resource was before a change in flight to it (or one set aside) began, and only once
-/// no change began or ended meanwhile. A resource such a change is creating was not there before
-/// it: Read on it is decided on the grants alone ([`allowed_absent`](super::access::allowed_absent)).
-async fn reads_stably<S: Store + 'static>(state: &LwsState<S>, uri: &str, agent: &Agent) -> bool {
-    use super::access::{allowed_absent, aside, Aside};
+/// no change began or ended meanwhile. A resource such a change is creating has no state before it
+/// to decide on: every caller, the owner included, is told to retry (`Err`), and nothing is
+/// decided on what the change wrote meanwhile.
+async fn reads_stably<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+    agent: &Agent,
+) -> Result<bool, Response> {
+    use super::access::{aside, existed_before, Aside};
+    let being_created = || retry_later("the resource is being created");
     stably(state, uri, || async {
         if !state.visible(uri) || state.locks.changing(uri) {
-            return match aside(state, Action::Read, uri, agent).await {
-                Ok(Aside::Allowed) => true,
-                Ok(Aside::Missing) => allowed_absent(state, Action::Read, uri, agent)
-                    .await
-                    .unwrap_or(false),
-                Ok(Aside::Denied) | Err(_) => false,
-            };
+            if !existed_before(state, uri).await.unwrap_or(false) {
+                return Err(being_created());
+            }
+            return Ok(matches!(
+                aside(state, Action::Read, uri, agent).await,
+                Ok(Aside::Allowed)
+            ));
         }
-        state.allowed(Action::Read, uri, agent).await
+        Ok(state.allowed(Action::Read, uri, agent).await)
     })
     .await
-    .unwrap_or(false)
+    .unwrap_or(Ok(false))
 }
 
 /// The tag a precondition is evaluated against when it asks only whether an existing target
@@ -11861,11 +11871,12 @@ mod tests {
         );
     }
 
-    /// Review finding: the Read check before the lock let a writer through, unchecked, on a
-    /// resource a stalled change was creating (one that was not there before it). Read on it is
-    /// decided on the grants alone: a writer without Read is refused as on any other target.
+    /// Review findings: the Read check before the lock let a writer through, unchecked, on a
+    /// resource a stalled change was creating (one with no state before it), and then answered it
+    /// differently for different callers. Every caller, the owner included, is told to retry, the
+    /// same way, on the resource and on its linkset.
     #[tokio::test]
-    async fn the_read_check_before_the_lock_decides_a_resource_being_created_on_the_grants() {
+    async fn a_resource_being_created_is_retried_by_every_caller_alike() {
         use super::super::test_store::{agent, closed_state, request as req, OWNER};
         let (st, store) = closed_state(100).await;
         let root = st.cfg.storage();
@@ -11881,6 +11892,8 @@ mod tests {
             .put_grant_for_test("dave", grant(json!(["modify"]), dave));
         st.access
             .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob));
+        // A create that lands, reports a failure, and cannot be taken back: it is set aside,
+        // with nothing there before it.
         let uri = st.cfg.absolute("/new.json");
         store
             .fail_after_create
@@ -11893,16 +11906,40 @@ mod tests {
             .store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(r.status().is_server_error(), "{}", r.status());
         assert!(!st.visible(&uri), "the create is set aside");
-        let patch = |who: &str| {
-            let (st, who) = (st.clone(), agent(who));
-            async move {
-                let h = [("content-type", JSON_PATCH)];
-                handle(&st, &req(Method::PATCH, "/new.json", &h, "[]"), &who)
-                    .await
-                    .status()
+        let callers = [agent(OWNER), agent(bob), agent(dave), Agent::anonymous()];
+        let requests = [
+            (Method::PATCH, "/new.json", JSON_PATCH, "[]", None),
+            (Method::PATCH, "/new.json.meta", JSON_PATCH, "[]", None),
+            (Method::PUT, "/new.json", JSON, "{}", Some("\"x\"")),
+        ];
+        for (method, path, ty, body, tag) in requests {
+            let mut answers = Vec::new();
+            for who in &callers {
+                let mut h = vec![("content-type", ty)];
+                if let Some(tag) = tag {
+                    h.push(("if-match", tag));
+                }
+                let r = handle(&st, &req(method.clone(), path, &h, body), who).await;
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                answers.push((r.status(), headers, body_of(r).await));
             }
-        };
-        assert_eq!(patch(dave).await, StatusCode::FORBIDDEN);
-        assert_ne!(patch(bob).await, StatusCode::FORBIDDEN);
+            assert_eq!(
+                answers[0].0,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{method} {path}"
+            );
+            assert!(
+                answers[0].1.iter().any(|h| h.starts_with("retry-after")),
+                "{method} {path}"
+            );
+            for answer in &answers[1..] {
+                assert_eq!(answer, &answers[0], "{method} {path}");
+            }
+        }
     }
 }
