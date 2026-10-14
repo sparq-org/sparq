@@ -29,6 +29,8 @@ const TOTAL_DFA_BYTES: usize = 64 << 20;
 /// Longer patterns answer Unknown, bounding what parsing allocates before the automaton
 /// limits apply.
 const MAX_PATTERN_BYTES: usize = 4096;
+/// Formulas with more nodes answer Unknown, bounding what indexing allocates.
+const MAX_FORMULA_NODES: usize = 1 << 16;
 /// The byte between a string and its language tag.
 const SEP: u8 = 0xFF;
 
@@ -151,6 +153,19 @@ impl F {
         }
     }
 
+    /// Whether the formula has at most `*budget` nodes (spending the budget as it counts).
+    fn within(&self, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return false;
+        }
+        *budget -= 1;
+        match self {
+            F::Const(_) | F::Atom(_) => true,
+            F::Not(f) => f.within(budget),
+            F::And(fs) | F::Or(fs) => fs.iter().all(|f| f.within(budget)),
+        }
+    }
+
     /// The formula over atom indices, collecting each distinct atom once into `atoms`.
     fn index<'a>(&'a self, atoms: &mut Vec<&'a Atom>, seen: &mut HashMap<&'a Atom, usize>) -> G {
         match self {
@@ -267,6 +282,10 @@ fn chars(bytes: &[u8]) -> u64 {
 pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
     if let F::Const(false) = f {
         return Some(0);
+    }
+    let mut budget = MAX_FORMULA_NODES;
+    if !f.within(&mut budget) {
+        return None;
     }
     let mut atoms = Vec::new();
     let g = f.index(&mut atoms, &mut HashMap::new());
@@ -923,6 +942,17 @@ mod tests {
             count(&F::atom(Atom::Is(vec![0, b'a'])), Space::Text, 2),
             Some(0)
         );
+    }
+
+    #[test]
+    fn oversized_formulas_give_up() {
+        let many = |n: usize| {
+            (0..n).fold(F::Const(false), |f, i| {
+                f.or(F::atom(Atom::Is(format!("{i}").into_bytes())))
+            })
+        };
+        assert_eq!(count(&many(1000), Space::Text, 2000), Some(1000));
+        assert_eq!(count(&many(MAX_FORMULA_NODES), Space::Text, 2), None);
     }
 
     #[test]
