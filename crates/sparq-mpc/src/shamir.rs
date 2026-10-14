@@ -1686,7 +1686,11 @@ fn extract_integer_vector(p: &PartialResult) -> Result<Vec<u64>, MpcError> {
 /// fail closed with that source's error, and a re-sharing that is not the canonical
 /// `n`-party sharing on `x = 1..=n` is refused. Same preconditions and security model
 /// as [`ShamirDealer::degree_reduce`]; the caller must pass a source whose
-/// `(parties(), threshold())` match the `(n, t)` that produced `shares_2t`.
+/// `(parties(), threshold())` match the `(n, t)` that produced `shares_2t`. That
+/// match is a caller PRECONDITION, not something this function can verify: a source
+/// that under-reports `t` while `2t+1 <= n` still holds passes every check here and
+/// yields a silently WRONG reduction (too few recombination points for the true
+/// degree-`2t` polynomial), rather than an error.
 pub fn degree_reduce_through(
     source: &mut dyn DistributedRandomness,
     shares_2t: &[Share],
@@ -2127,17 +2131,25 @@ mod tests {
     fn degree_reduce_through_rejects_source_metadata_outside_honest_majority() {
         // n = 5 allows t <= 2. A larger t, including one whose 2t+1 overflows,
         // must be refused before any arithmetic or draw relies on it.
+        //
+        // `usize::MAX / 2 + 3` is the adversarial case the CHECKED arithmetic
+        // exists for: with wrapping `2t + 1` it lands on exactly 5 = n, so a plain
+        // `2 * t + 1 <= n` test would ACCEPT it and then reduce against a
+        // nonsensical threshold. `checked_mul(2)` overflows instead, so the source
+        // is refused — and the refusal must come from the source-metadata check,
+        // which is why the assertion matches that check's own wording rather than
+        // the (similar) share-count message below it.
         let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
         let mut dealer = b.dealer();
         let prod = mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
-        for t in [3, usize::MAX / 2, usize::MAX] {
+        for t in [3, usize::MAX / 2 + 3, usize::MAX / 2, usize::MAX] {
             let mut source = MisreportedThresholdSource {
                 inner: b.dealer(),
                 t,
             };
             match degree_reduce_through(&mut source, &prod) {
                 Err(MpcError::Protocol(msg)) => assert!(
-                    msg.contains("needs n >= 2t+1"),
+                    msg.contains("the randomness source reports"),
                     "t={t}: refused by the wrong check: {msg}"
                 ),
                 other => panic!("t={t}: must fail closed, got {other:?}"),
@@ -2520,14 +2532,18 @@ mod tests {
         // constructor) is what the `with_unchecked_threshold` escape hatch
         // exists to exercise: degree_reduce over the FULL n-party sharing must
         // return a descriptive MpcError::Protocol, NEVER panic / mis-reduce.
-        // This pins the fail-closed `shares_2t.len() < 2*self.t + 1` precondition
-        // in BOTH the comparison direction AND the `2*self.t + 1` arithmetic: a
-        // flip that raises the guard's threshold or reverses it lets the
-        // too-short sharing through to the `[..2*self.t + 1]` slice, which is
-        // out of range on the deficient n-party vector → PANIC (a caught mutant)
-        // rather than the original's clean Protocol. The spread of (n, t) puts n
-        // at several offsets from 2t+1 so each arithmetic variant (2*t → 2/t,
-        // 2+t; 2*t+1 → 2*t-1, 2*t*1) diverges on at least one config.
+        //
+        // The guard this pins now lives in `degree_reduce_through`, which
+        // `degree_reduce` delegates to: the recombination count `2t + 1` is
+        // computed with CHECKED arithmetic from the randomness source's reported
+        // `(n, t)` and accepted only while it is `<= n`. On every deficient config
+        // below that filter rejects, so the reduction returns before deriving any
+        // λ-weight or drawing any re-sharing. Drop the `<= n` filter and the
+        // too-short sharing reaches the `[..recomb]` slice, which is out of range
+        // on the deficient n-party vector → PANIC (a caught mutant) rather than
+        // the original's clean Protocol. The spread of (n, t) puts n at several
+        // offsets from 2t+1 so each arithmetic variant (2*t → 2/t, 2+t; 2*t+1 →
+        // 2*t-1, 2*t*1) diverges on at least one config.
         for &(n, t) in &[(3usize, 2usize), (4, 2), (5, 3), (6, 3)] {
             let b = ShamirBackend::with_unchecked_threshold(n, t); // n < 2t+1
             let mut dealer = b.dealer();
