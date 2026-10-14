@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-xqu (#2490): per-registered-query [`QueryBudget`] for
+//! sq-xqu (#2490): per-registered-query [`QueryBudget`] for
 //! window evaluation. Each registered form applies its budget to EVERY window
 //! (or tick) evaluation; a tripped budget surfaces as the evaluation error of
 //! the `push`/`flush` that closed the window, and a generous budget changes

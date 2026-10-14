@@ -347,7 +347,7 @@ its algorithm to that same crate). Honesty notes + tunables:
 
 ## Status
 
-Verified against `sparq-canon` 0.1.0 source. The standard RDFC-1.0 path is
+Verified against `sparq-canon` 0.1.6 source. The standard RDFC-1.0 path is
 `rdf-canon` 0.15.3 (W3C-suite validated); `sparq-canon` is the single-sourced
 bridge + public API. The opt-in, off-by-default `rdf12-triple-terms` profile
 (sq-hslb) is a native RDFC-1.0 re-implementation extended to RDF 1.2

@@ -8,7 +8,7 @@
 //! "no admissible proof" refusal) and **NON-EMPTY under the relaxed one** (so the
 //! gate is demonstrably not vacuously empty).
 //!
-//! 🤖 SPARQ agent — sq-ufsi9 (epic sq-0dksu), Phase 2 [OPUS-4.8]. Runs only with
+//! 🤖 SPARQ agent — sq-ufsi9 (epic sq-0dksu), Phase 2. Runs only with
 //! the `secprop-admissibility` feature; the `feature-matrix.yml` leg EXECUTES it.
 #![cfg(feature = "secprop-admissibility")]
 

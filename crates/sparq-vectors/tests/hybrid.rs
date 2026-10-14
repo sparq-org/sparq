@@ -1,11 +1,11 @@
-//! [OPUS-4.8] sq-88c6 — `hybrid_search` end to end: fuse this crate's embedding ANN
+//! sq-88c6 — `hybrid_search` end to end: fuse this crate's embedding ANN
 //! (`VectorIndex::nearest_term`, cosine) with `sparq-sim`'s structural similarity
 //! (`Sim::most_similar`, weighted Jaccard) BY `Term`, via Reciprocal Rank Fusion.
 //!
 //! `sparq-sim` is a DEV-dependency only — the `hybrid_search` helper is generic over
 //! retriever closures, so the library never depends on it.
 
-// [OPUS-4.8] (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
+// (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
 #![cfg(feature = "approx-ann")]
 
 use oxrdf::{NamedNode, Term};

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-1dd5t (#1047): the opt-in `canonicalizeNQuads(nquads)` wasm
+//! sq-1dd5t (#1047): the opt-in `canonicalizeNQuads(nquads)` wasm
 //! binding — RDFC-1.0 (RDF Dataset Canonicalization, the URDNA2015 successor)
 //! surfaced to JS so the `@sparq-org/sparq` RDF/JS `Dataset` can implement
 //! `toCanonical` / `equals` / `contains` by RDF-dataset **isomorphism** (blank

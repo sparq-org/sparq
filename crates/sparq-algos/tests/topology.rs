@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.20: deterministic, mutation-witnessed directed-topology oracles.
+//! sq-lsp7k.20: deterministic, mutation-witnessed directed-topology oracles.
 
 #![cfg(feature = "topology")]
 
@@ -33,7 +33,7 @@ fn directed_cycle_and_isolated_node_have_two_components() {
     assert_eq!(topological_sort(&graph), Err(CycleError));
 }
 
-/// [GPT-5.6] sq-awq7n: value-pins the dense-label count, including its empty-input
+/// sq-awq7n: value-pins the dense-label count, including its empty-input
 /// sentinel. The reciprocal d/e pair is the second SCC; a one-way edge would instead
 /// make d and e separate singleton SCCs, as `one_way_edge_does_not_merge_strong_components`
 /// verifies below.
@@ -92,7 +92,7 @@ fn self_loop_is_a_singleton_component_but_a_cycle() {
     assert_eq!(topological_sort(&graph), Err(CycleError));
 }
 
-/// [GPT-5.6] sq-ulsqh: pins both boolean outcomes and the self-loop boundary so negating
+/// sq-ulsqh: pins both boolean outcomes and the self-loop boundary so negating
 /// the thin `topological_sort(...).is_ok()` wrapper fails on the DAG and directed cycle.
 #[test]
 fn acyclicity_predicate_distinguishes_dag_cycle_and_self_loop() {

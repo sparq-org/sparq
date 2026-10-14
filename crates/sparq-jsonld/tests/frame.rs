@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.29 — integration tests for the native document-level Framing
+//! sq-oy1f.29 — integration tests for the native document-level Framing
 //! Algorithm (`sparq_jsonld::frame`), the bead's acceptance lane
 //! (`cargo test -p sparq-jsonld --test frame`). Each test targets one of the
 //! divergence classes the bead names: value patterns over `@value` alternative

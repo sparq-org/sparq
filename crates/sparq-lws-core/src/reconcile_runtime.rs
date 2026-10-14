@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-5ruwm: boot-only periodic reconciler wiring shared by every native backend.
+// sq-5ruwm: boot-only periodic reconciler wiring shared by every native backend.
 
 use std::collections::HashSet;
 use std::sync::Arc;

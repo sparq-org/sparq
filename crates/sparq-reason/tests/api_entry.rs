@@ -1,6 +1,6 @@
 //! Public API entry points of sparq-reason, called directly.
 //!
-//! 🤖 SPARQ agent — sq-qcnn test-quality slice [OPUS-4.8].
+//! 🤖 SPARQ agent — sq-qcnn test-quality slice.
 //!
 //! `Profile::parse`, `materialize(profile, …)`, and the N3 entry points (`reason_n3`,
 //! `reason_n3_proof`, `reason_n3_terms`) were dark when invoked through the crate's PUBLIC

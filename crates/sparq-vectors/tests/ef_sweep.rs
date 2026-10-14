@@ -1,6 +1,6 @@
 //! Per-query `ef_search` API tests (sq-jo6ty) — `nearest_with_ef` on `VectorIndex`.
 //!
-//! [SONNET-4.6] (sq-jo6ty) Three invariants checked here:
+//! (sq-jo6ty) Three invariants checked here:
 //!
 //! 1. **Default-ef parity**: `nearest_with_ef(q, k, build_ef)` returns the byte-identical
 //!    result as `nearest(q, k)` — the primary map is used in both cases.
@@ -16,7 +16,7 @@
 //! The test corpus is 5 000 × 32 (splitmix64 seed — deterministic, no I/O) which runs in
 //! a few seconds even in debug. Recall comparisons use `nearest_exact` as the oracle.
 
-// [SONNET-4.6] (sq-jo6ty) HNSW + nearest_with_ef are gated behind `approx-ann`.
+// (sq-jo6ty) HNSW + nearest_with_ef are gated behind `approx-ann`.
 #![cfg(feature = "approx-ann")]
 
 use sparq_vectors::{nearest_exact, HnswConfig, VectorIndex, VectorStore};
@@ -38,7 +38,7 @@ fn rand_vec(state: &mut u64, dim: usize) -> Vec<f32> {
 /// Build a small in-memory store (no file) and return the `VectorIndex`.
 /// N=5000, DIM=32, non-contiguous ids (id = i*7+3) to exercise the binary-search index.
 ///
-/// [SONNET-4.6] (sq-ey95c) The scratch path carries a per-call counter as well as the pid:
+/// (sq-ey95c) The scratch path carries a per-call counter as well as the pid:
 /// `cargo test` runs the tests in this binary on parallel threads of ONE process, so a
 /// pid-only name would have every test (and every call within a test) create, mmap and unlink
 /// the SAME file concurrently.
@@ -98,7 +98,7 @@ fn nearest_with_build_ef_equals_nearest() {
 
 /// The recall@k vs exact oracle must be non-decreasing as ef_search increases.
 ///
-/// [SONNET-4.6] (sq-jo6ty) This is the LOAD-BEARING invariant: it tests that
+/// (sq-jo6ty) This is the LOAD-BEARING invariant: it tests that
 /// `nearest_with_ef` actually controls the beam width (wider = more recall), not
 /// just returning the build-time ef result at every ef value.
 #[test]
@@ -211,7 +211,7 @@ fn nearest_with_ef_cache_reuse_is_deterministic() {
 
 // --- 5. Concurrent secondary path (sq-ey95c) --------------------------------------------
 
-/// [SONNET-4.6] (sq-ey95c) The secondary (`ef != build_ef`) path must be usable from many
+/// (sq-ey95c) The secondary (`ef != build_ef`) path must be usable from many
 /// threads at once: the ef cache is an `RwLock` over `Arc`-handled maps and the search runs
 /// with no lock held, so a shared `&VectorIndex` has to be `Sync`. This is a compile-time
 /// assertion — if the cache ever regresses to a non-`Sync` shape it fails to build.
@@ -226,7 +226,7 @@ fn vector_index_is_shareable_across_threads() {
 /// wins the lazy build, so this pins the contract that the losers search the winner's cached map
 /// rather than their own discarded one — a per-thread map would show up as disagreement here.
 ///
-/// [SONNET-4.6] (sq-ey95c) The baseline is deliberately the same `index`, NOT a rebuilt one:
+/// (sq-ey95c) The baseline is deliberately the same `index`, NOT a rebuilt one:
 /// `instant-distance`'s build is not bit-reproducible even at a fixed seed (see the caveat on
 /// `nearest_with_ef`), so comparing against a second `build_with` would be flaky by construction.
 #[test]

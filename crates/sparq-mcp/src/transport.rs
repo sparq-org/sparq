@@ -1,6 +1,6 @@
 //! The stdio transport — the standard MCP transport.
 //!
-//! [OPUS-4.8] (sq-0z43i, gh #909) MCP's stdio transport is line-delimited JSON-RPC:
+//! (sq-0z43i, gh #909) MCP's stdio transport is line-delimited JSON-RPC:
 //! the client writes one JSON object per line to the server's stdin and reads one
 //! JSON object per line from its stdout. This module is a thin blocking loop over
 //! [`McpServer::handle_message`] — it owns no protocol logic, so the dispatch core is

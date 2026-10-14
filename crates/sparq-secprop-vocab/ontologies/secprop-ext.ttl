@@ -191,8 +191,17 @@ secx:Assumption a owl:Class, rdfs:Class ;
 secx:IssuerHonesty a secx:Assumption ; rdfs:label "Issuer honesty"@en-GB .
 secx:DiscreteLog a secx:Assumption ; rdfs:label "Discrete-log hardness"@en-GB .
 secx:RandomOracle a secx:Assumption ; rdfs:label "Random-oracle model"@en-GB .
-secx:HonestMajority a secx:Assumption ; rdfs:label "Honest majority (MPC)"@en-GB .
-secx:SemiHonest a secx:Assumption ; rdfs:label "Semi-honest adversary (MPC)"@en-GB .
+# The two MPC assumptions are ALSO levels of the ordered secx:AdversaryModel /
+# secx:CorruptionThreshold dimensions minted below (issue #6186), so they are typed
+# `skos:Concept` as well as `secx:Assumption` — ONE IRI with two roles, deliberately
+# not a duplicate term: "semi-honest" is both a precondition a claim rests on
+# (`secx:assumption`, human-facing provenance) and the adversary model a protocol
+# holds (`secx:level`, what the admissibility reasoner discharges). Nothing here
+# declares `secx:Assumption` and `skos:Concept` disjoint, so the dual typing is
+# consistent; minting separate `…Level` twins would leave two IRIs meaning the same
+# thing and every existing `secx:assumption` annotation permanently inert.
+secx:HonestMajority a secx:Assumption, skos:Concept ; rdfs:label "Honest majority (MPC)"@en-GB .
+secx:SemiHonest a secx:Assumption, skos:Concept ; rdfs:label "Semi-honest adversary (MPC)"@en-GB .
 
 # ════════════════════ property dimensions + levels (§4.2.1) ══════════════════
 # [his] = reused from the vendored sec-prop: (the IRI is preserved; where his term
@@ -359,3 +368,30 @@ secx:SingleUse a owl:ObjectProperty, sec-prop:SecurityProperty ;
   rdfs:comment "SingleUse (nullifier-enforced) / Replayable. The anti-replay primitive his work flagged but did not put in the vocabulary; every current sparq method is Replayable today (honest)."@en-GB .
 secx:SingleUseEnforced a skos:Concept ; rdfs:label "Single-use (nullifier-enforced)"@en-GB .
 secx:Replayable a skos:Concept ; rdfs:label "Replayable"@en-GB .
+
+# ─── [new] MPC adversary model + corruption threshold (§5c; issue #6186) ──────
+# The two MPC trust-model axes as ORDERED dimensions, so an ODRL preference
+# (`secx:requiresAdversaryModel gteq secx:Malicious`) is discharged by the SHARED
+# admissibility reasoner's one `(dimension, level)` rule instead of resting on the
+# inert `secx:assumption` annotation. Each axis reuses an EXISTING assumption
+# individual as one of its levels rather than duplicating it: `secx:SemiHonest` is the
+# WEAKEST AdversaryModel level and `secx:HonestMajority` is the MIDDLE
+# CorruptionThreshold level (see the assumptions block above).
+#
+# Honest reading of the CorruptionThreshold order: "stronger" = tolerates MORE
+# corruption, so DishonestMajority (any t < n) ⊐ HonestMajority (t < n/2) ⊐
+# SuperHonestMajority (t < n/3). A protocol annotated HonestMajority therefore does
+# NOT satisfy `requiresCorruptionThreshold gteq secx:DishonestMajority` — the
+# mechanical exclusion issue #3275 asked for.
+
+secx:AdversaryModel a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Adversary model (MPC)"@en-GB ;
+  rdfs:comment "Malicious ⊐ Covert ⊐ SemiHonest. How far a corrupted party may deviate from the protocol. Orthogonal to secx:CorruptionThreshold (how many may be corrupted). The SemiHonest level is the same individual as the secx:SemiHonest assumption."@en-GB .
+secx:Malicious a skos:Concept ; rdfs:label "Malicious (actively deviating)"@en-GB .
+secx:Covert a skos:Concept ; rdfs:label "Covert (deviation detected with a deterrence probability)"@en-GB .
+
+secx:CorruptionThreshold a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Corruption threshold (MPC)"@en-GB ;
+  rdfs:comment "DishonestMajority ⊐ HonestMajority ⊐ SuperHonestMajority — ordered by how much corruption is TOLERATED, so dishonest-majority is the strongest guarantee. Orthogonal to secx:AdversaryModel. The HonestMajority level is the same individual as the secx:HonestMajority assumption."@en-GB .
+secx:DishonestMajority a skos:Concept ; rdfs:label "Dishonest majority (any t < n)"@en-GB .
+secx:SuperHonestMajority a skos:Concept ; rdfs:label "Super-honest majority (t < n/3)"@en-GB .

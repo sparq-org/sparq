@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-wlzi) The **id-keyed staleness contract** for `.spqv` / `.spqg`, demonstrated
+//! (sq-wlzi) The **id-keyed staleness contract** for `.spqv` / `.spqg`, demonstrated
 //! end-to-end. A [`VectorStore`] (and the `DiskAnnIndex` over it) is keyed by **raw dictionary term
 //! id**: a query resolves `graph.id_of(term) -> id` and looks `id` up in the store. The store is
 //! therefore valid ONLY against a graph whose `id -> term` binding equals the build-time binding.

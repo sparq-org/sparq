@@ -1,4 +1,4 @@
-//! **SPARQL UPDATE lineage** ([OPUS-4.8] sq-xwdd): capture W3C PROV-O provenance for
+//! **SPARQL UPDATE lineage** (sq-xwdd): capture W3C PROV-O provenance for
 //! the data a SPARQL `INSERT … WHERE` / `INSERT DATA` / `DELETE …` operation **changes**
 //! in a store.
 //!
@@ -95,7 +95,7 @@ impl UpdateDerivation {
     }
 
     /// The configured input-source IRIs, in their original order.
-    // [GPT-5.6] sq-cg237
+    // sq-cg237
     pub fn used_inputs(&self) -> &[NamedNode] {
         &self.used
     }
@@ -225,7 +225,7 @@ impl UpdateDerivation {
     /// The same PROV-O lineage as [`prov_graph`](Self::prov_graph), serialised as
     /// prefix-compacted Turtle.
     ///
-    /// [GPT-5.6] sq-ijw35
+    /// sq-ijw35
     pub fn prov_turtle(&self) -> String {
         crate::triples_to_prov_turtle(&self.prov_graph())
     }
@@ -509,7 +509,7 @@ mod tests {
         assert!(d.deleted().is_empty());
     }
 
-    /// [GPT-5.6] sq-cg237: the direct accessor exposes the configured input and agrees
+    /// sq-cg237: the direct accessor exposes the configured input and agrees
     /// with the update activity's materialised `prov:used` edge.
     #[test]
     fn update_used_inputs_are_exposed_and_materialised() {
@@ -691,7 +691,7 @@ mod tests {
         assert_eq!(parsed.len(), d.prov_graph().len());
     }
 
-    /// [GPT-5.6] sq-ijw35: the UpdateDerivation Turtle method preserves every
+    /// sq-ijw35: the UpdateDerivation Turtle method preserves every
     /// provenance triple, and the inserted-result entity uses the registered prefix.
     #[test]
     fn prov_turtle_round_trips_the_exact_update_graph() {
@@ -837,7 +837,7 @@ mod tests {
     }
 
     // ── sq-bif.4: UPDATE-lineage correctness-suite additions — uncovered branches in
-    // the effect partitioning, kind classification, and edge cases. [OPUS-4.8] ────────
+    // the effect partitioning, kind classification, and edge cases. ────────
 
     /// `UpdateDerivation::timing()` reports the captured activity window; under a fixed
     /// clock the start equals the end and both equal the configured instant.
@@ -1130,7 +1130,7 @@ mod tests {
     }
 
     // ── sq-qcnn.39: mutation-kill additions — exact prov_graph triple counts,
-    // prov:value annotation check, and USING keyword coverage. [SONNET-4.6] ─────
+    // prov:value annotation check, and USING keyword coverage. ─────
 
     /// `UpdateDerivation::prov_graph()` for an INSERT…WHERE update (inserts non-empty,
     /// 1 used input, no agent) must emit exactly 9 triples (5 activity: type/label/value/
@@ -1155,7 +1155,7 @@ mod tests {
 
     /// For a pure-DELETE update (2 deleted triples, 1 used input, no agent), the exact
     /// count is: 5 activity + 0 entity (inserts empty) + 1 used + 4 invalidation
-    /// (2 × entity-type + wasInvalidatedBy) = 10. [SONNET-4.6] sq-qcnn.39
+    /// (2 × entity-type + wasInvalidatedBy) = 10. sq-qcnn.39
     #[test]
     fn pure_delete_prov_graph_exact_triple_count() {
         let mut graph = g();
@@ -1175,7 +1175,7 @@ mod tests {
     }
 
     /// For a DELETE/INSERT WHERE (2 inserts, 2 deletes, 1 used input), the exact count
-    /// is: 5 activity + 3 entity + 1 used + 4 invalidation = 13. [SONNET-4.6] sq-qcnn.39
+    /// is: 5 activity + 3 entity + 1 used + 4 invalidation = 13. sq-qcnn.39
     #[test]
     fn delete_insert_prov_graph_exact_triple_count() {
         let mut graph = g();
@@ -1200,7 +1200,7 @@ mod tests {
     /// The update activity records the verbatim update text as a `prov:value` recipe —
     /// the same annotation that `Derivation` (CONSTRUCT) emits for the query text.
     /// No existing test checks for `prov:value` in `UpdateDerivation::prov_graph()`,
-    /// so this test kills the mutation that drops that push. [SONNET-4.6] sq-qcnn.39
+    /// so this test kills the mutation that drops that push. sq-qcnn.39
     #[test]
     fn update_prov_graph_contains_query_recipe() {
         let q = "PREFIX ex: <http://ex/> INSERT { ?s ex:years ?a } WHERE { ?s ex:age ?a }";
@@ -1222,7 +1222,7 @@ mod tests {
     /// (`starts_with("INSERT") || starts_with("DELETE") || starts_with("WITH") || starts_with("USING")`).
     /// Not having a direct test for `USING` leaves that branch arm unexercised by an
     /// exact-value assertion, allowing a mutation that removes the `starts_with("USING")`
-    /// conjunct to survive. [SONNET-4.6] sq-qcnn.39
+    /// conjunct to survive. sq-qcnn.39
     #[test]
     fn kind_label_using_is_delete_insert_where() {
         assert_eq!(
@@ -1246,7 +1246,7 @@ mod tests {
     /// and fnv1a("PREFIX ex: <http://ex/> INSERT { ?s ex:years ?a } WHERE { ?s ex:age ?a }")
     /// = 0x5125ddbf0b0c39fd.
     /// This kills any arithmetic mutation in `mint()` that alters the FNV-1a output,
-    /// exercising the UPDATE call path specifically. [SONNET-4.6] sq-qcnn.39
+    /// exercising the UPDATE call path specifically. sq-qcnn.39
     #[test]
     fn minted_iri_for_update_has_exact_known_value() {
         let q = "PREFIX ex: <http://ex/> INSERT { ?s ex:years ?a } WHERE { ?s ex:age ?a }";
@@ -1274,7 +1274,7 @@ mod tests {
     // unkillable — a falsely-detected in-term `;` can never have a blank tail (the term's
     // closing delimiter follows it), so control always defers to the precise second pass,
     // which returns the correct global answer. Only under-detection, stuck-state, and
-    // second-pass mutants are killable; the rows below cover those. [FABLE-5] ──────────
+    // second-pass mutants are killable; the rows below cover those. ──────────
 
     /// Baseline rows: presence/absence of a top-level `;`, the non-blank-tail
     /// requirement, and degenerate inputs (a bare `;` also pins the `i + 1` tail-slice

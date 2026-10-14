@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-fggn) Behavioural coverage for the scheduler's public surface
+//! (sq-fggn) Behavioural coverage for the scheduler's public surface
 //! that the existing `scheduler.rs` differential/fairness tests don't reach: the
 //! defaulted construction, the convenience `run`/`with_defaults` entry points, the
 //! non-blocking `try_take` poll, the `submitted`/`completed`/`depth` metrics, and
@@ -39,7 +39,7 @@ fn run_blocks_and_returns_the_result() {
 fn try_take_polls_without_consuming_until_done() {
     let sched = Scheduler::<u32>::with_defaults();
     // A job that blocks until we release it, so we can observe the pending poll.
-    // [GPT-6] Disconnect on unwind releases the worker before the scheduler joins it.
+    // Disconnect on unwind releases the worker before the scheduler joins it.
     let (release, gate) = mpsc::channel::<()>();
     let ticket = sched.submit(1, move || {
         let _ = gate.recv();
@@ -96,7 +96,7 @@ fn depth_reports_queue_occupancy() {
         heavy_concurrency: 1,
         heavy_threshold: 100,
     });
-    // [GPT-6] Occupy every worker so none can drain the backlog before depth().
+    // Occupy every worker so none can drain the backlog before depth().
     // Declare the release senders after sched: on assertion failure they drop
     // first, disconnecting the waits before Scheduler::drop joins the workers.
     let mut releases = Vec::new();

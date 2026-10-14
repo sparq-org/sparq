@@ -1,4 +1,4 @@
-//! [GPT-5.6] (sq-zvavi) Value-level differential tests for remote result codecs.
+//! (sq-zvavi) Value-level differential tests for remote result codecs.
 #![cfg(feature = "service")]
 
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Variable};
@@ -7,7 +7,7 @@ use serde_json::{json, Map, Value};
 
 // Compile the crate-private codec module into this integration-test crate. This keeps the
 // production surface private while giving the test access to its collected seams.
-// [GPT-5.6] (sq-zvavi)
+// (sq-zvavi)
 #[path = "../src/service.rs"]
 #[allow(dead_code)]
 mod service;

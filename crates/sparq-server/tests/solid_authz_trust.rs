@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-pfae.17 — integration tests for the OPT-IN stateless trust-graph extension
+//! sq-pfae.17 — integration tests for the OPT-IN stateless trust-graph extension
 //! to `POST /authz/decide` (the `solid-authz-trust` cargo feature).
 //!
 //! These tests run ONLY with the `solid-authz-trust` cargo feature (the whole file is gated).
@@ -30,14 +30,14 @@
 //! HONEST SCOPE: the trust extension is a clear-path admission mechanism (anchored-not-proven);
 //! it is NOT a ZK/MPC or unlinkability claim (sq-qhy4 pending external audit).
 //!
-//! [SONNET-4.6] sq-pfae.17 (Fix 2 + sq-zza2h injection tests). POSITIONAL format args throughout.
+//! sq-pfae.17 (Fix 2 + sq-zza2h injection tests). POSITIONAL format args throughout.
 #![cfg(feature = "solid-authz-trust")]
 
 use sparq_core::Graph;
 use sparq_server::{router, AppState, ServerConfig};
 use tokio::net::TcpListener;
 
-// [SONNET-4.6] sq-pfae.17 (Fix 3 / sq-zza2h): test helpers for the admission-path tests
+// sq-pfae.17 (Fix 3 / sq-zza2h): test helpers for the admission-path tests
 // that exercise the real Schnorr signature path. These imports are available because
 // sparq-trust and sparq-zk are dev-dependencies (added alongside Fix 3).
 use oxrdf::{NamedNode, NamedOrBlankNode, Term, Triple};
@@ -287,10 +287,10 @@ fn test_salt_hex() -> String {
 }
 
 /// Serialise a `Triple` to a default-graph N-Quads line.
-/// [SONNET-4.6] This is the same format `build_store_with_admitted` now emits (Fix 2):
+/// This is the same format `build_store_with_admitted` now emits (Fix 2):
 /// oxrdf Display for subject/predicate/object already includes the `<…>`/`_:` wrapper.
 fn triple_to_nquads_line(t: &Triple) -> String {
-    // [SONNET-4.6] POSITIONAL format args (CodeQL rust/unused-variable guard).
+    // POSITIONAL format args (CodeQL rust/unused-variable guard).
     format!("{} {} {} .", t.subject, t.predicate, t.object)
 }
 
@@ -366,7 +366,7 @@ async fn trust_block_not_object_is_403() {
         .unwrap();
     assert_eq!(resp.status(), 403, "malformed trust block => 403");
     let body: serde_json::Value = resp.json().await.unwrap();
-    // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+    // POSITIONAL format args (CodeQL guard).
     assert_eq!(
         body.get("allow").and_then(|v| v.as_bool()),
         Some(false),
@@ -478,7 +478,7 @@ async fn trust_empty_credentials_falls_through_to_wac_deny() {
         .send()
         .await
         .unwrap();
-    // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+    // POSITIONAL format args (CodeQL guard).
     // Session has no agent (anonymous) + no admitted facts => WAC deny => 403.
     assert_eq!(resp.status(), 403, "empty credentials + anon session => 403 WAC deny");
     let body: serde_json::Value = resp.json().await.unwrap();
@@ -722,7 +722,7 @@ async fn happy_path_valid_credential_grants_access_with_trust_justification() {
         .send()
         .await
         .unwrap();
-    // [SONNET-4.6] POSITIONAL format args (CodeQL rust/unused-variable guard).
+    // POSITIONAL format args (CodeQL rust/unused-variable guard).
     assert_eq!(
         resp.status(),
         200,
@@ -808,7 +808,7 @@ async fn injection_gate_bad_signature_does_not_flip_wac_to_allow() {
         .await
         .unwrap();
     // BAD sig => admit() returns empty => no fact injected => alice not in group => WAC deny.
-    // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+    // POSITIONAL format args (CodeQL guard).
     assert_eq!(
         resp.status(),
         403,
@@ -875,7 +875,7 @@ async fn partial_failure_batch_cred_a_admits_cred_b_fails_alice_gets_read() {
         .await
         .unwrap();
     // A admits (good sig) => alice gets Read => 200 allow. B fails (bad sig) => ignored.
-    // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+    // POSITIONAL format args (CodeQL guard).
     assert_eq!(
         resp.status(),
         200,
@@ -1132,7 +1132,7 @@ async fn shape_scoped_certification_derives_rule_and_grants() {
         }],
     );
     let (status, resp_body) = post_decide(&base, &body).await;
-    // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+    // POSITIONAL format args (CodeQL guard).
     assert_eq!(
         status, 200,
         "a signed shape-scoped certification derives the issuer's rule => 200 allow"
@@ -1194,7 +1194,7 @@ async fn shape_scope_for_an_uncertified_predicate_derives_nothing_and_denies() {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-snopa.8 — the trust extension does NOT compose with the stateful lane.
+// sq-snopa.8 — the trust extension does NOT compose with the stateful lane.
 //
 // `trust_authz_decide` decides over its OWN store, built by injecting admitted facts into the
 // request-BODY dataset. `"source":"server"` supplies no such dataset, so combining the two

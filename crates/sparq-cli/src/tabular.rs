@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-lsp7k.8, epic sq-lsp7k) MATERIALIZING tabular→RDF import — the `tabular`
+//! (sq-lsp7k.8, epic sq-lsp7k) MATERIALIZING tabular→RDF import — the `tabular`
 //! subcommand: CSV **direct mapping** + the **R2RML materializing subset** over CSV logical
 //! tables. sparq's counter-story to SQL virtualization platforms is *import fast, reload fast*:
 //! CSV rows stream through a first-party RFC-4180 reader, are mapped row-by-row to N-Triples
@@ -23,7 +23,7 @@
 //! `rr:predicateObjectMap`, `rr:predicateMap`/`rr:predicate`, `rr:objectMap`/`rr:object`,
 //! `rr:template` (IRI-safe percent-encoding of substituted values in IRI maps),
 //! `rr:column`, `rr:constant`, `rr:termType` (IRI/Literal/BlankNode), `rr:datatype`,
-//! `rr:language`, plus — [OPUS-5] (sq-u1z86) — **cross-CSV joins**
+//! `rr:language`, plus — (sq-u1z86) — **cross-CSV joins**
 //! (`rr:parentTriplesMap` + `rr:joinCondition`/`rr:child`/`rr:parent`) and **named-graph
 //! output** (`rr:graphMap`/`rr:graph`). Everything else in the `rr:` namespace — notably
 //! `rr:sqlQuery`, `rr:sqlVersion`, `rr:inverseExpression` — is a LOUD error (fail-closed),
@@ -485,7 +485,7 @@ struct TermSpec {
     kind: TermKind,
 }
 
-/// [OPUS-5] (sq-u1z86) A referencing object map (`rr:parentTriplesMap` + `rr:joinCondition`)
+/// (sq-u1z86) A referencing object map (`rr:parentTriplesMap` + `rr:joinCondition`)
 /// compiled to a KEYED HASH JOIN: the parent table was pre-scanned once into
 /// `join-key tuple → the parent subjects that key generates`, so the child table can stream.
 #[derive(Clone, Debug)]
@@ -1042,7 +1042,7 @@ const RR_SUPPORTED: &[&str] = &[
     "object",
     "datatype",
     "language",
-    // [OPUS-5] (sq-u1z86) cross-CSV joins + named-graph output.
+    // (sq-u1z86) cross-CSV joins + named-graph output.
     "parentTriplesMap",
     "joinCondition",
     "child",
@@ -1269,7 +1269,7 @@ fn subject_of(
 }
 
 /// The `rr:graph` constants + `rr:graphMap` term maps attached to one subject / predicate-object
-/// map node. [OPUS-5] (sq-u1z86)
+/// map node. (sq-u1z86)
 fn graph_specs(rr: &RrGraph, node: &str, header: &[String]) -> Result<Vec<TermSpec>, String> {
     let mut out: Vec<TermSpec> = Vec::new();
     for g in rr.props(node, "graph") {
@@ -1350,7 +1350,7 @@ fn compile_tm(
     })
 }
 
-/// [OPUS-5] (sq-u1z86) Compile a referencing object map into a [`RefJoin`]: resolve the
+/// (sq-u1z86) Compile a referencing object map into a [`RefJoin`]: resolve the
 /// `rr:joinCondition`s, then PRE-SCAN the parent CSV once into the `key tuple → parent
 /// subjects` hash index the child rows probe as they stream.
 fn compile_ref(
@@ -1548,7 +1548,7 @@ fn parse_flags(args: &[String]) -> Flags {
                 f.infer = false;
                 i += 1;
             }
-            // [OPUS-5] (sq-u1z86) Mode-agnostic: row provenance applies to direct mapping
+            // (sq-u1z86) Mode-agnostic: row provenance applies to direct mapping
             // AND R2RML, so it is deliberately absent from the direct-mapping-only check.
             "--row-provenance" => {
                 f.row_provenance = true;

@@ -1,5 +1,4 @@
 //! Integration tests for the flattened CSV serialization of the RDF-term projection.
-//! [FABLE-5]
 #![cfg(feature = "csv")]
 
 use oxrdf::{BaseDirection, BlankNode, Literal, NamedNode, Term, Triple, Variable};
@@ -106,7 +105,7 @@ fn csv_roundtrip_keeps_unbound_distinct_from_empty_string_literal() {
     );
 }
 
-/// [FABLE-5] Value-pinned mutation witness: changing either expected name fails while
+/// Value-pinned mutation witness: changing either expected name fails while
 /// the encoded rows remain untouched.
 #[test]
 fn csv_schema_only_reader_recovers_nonempty_result_variables() {
@@ -217,7 +216,7 @@ fn csv_unknown_term_kind_fails_closed() {
     );
 }
 
-/// [FABLE-5] Byte-level dialect pin (the serializer is hand-rolled, so the dialect is
+/// Byte-level dialect pin (the serializer is hand-rolled, so the dialect is
 /// contract, not a library default): a field is quoted iff it contains a comma, a
 /// double quote, CR, or LF; quotes are escaped by doubling; records end with LF. A
 /// mutation that stops quoting any trigger byte, stops doubling quotes, or changes the

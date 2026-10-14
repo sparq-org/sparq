@@ -1001,6 +1001,18 @@ open), and `requiresPostQuantumForgery gteq …` removes the DL-signature method
 **principled refusal** ("no admissible proof") over silently serving a non-conforming one. The §4.3.3
 worked example is the golden test: empty under Alice's strict preference, non-empty under the relaxed one.
 
+**MPC trust model is on the order too (issues #3275 / #6186).** `LEVEL_ORDERS` carries two further
+chains — `secx:AdversaryModel` (`Malicious ⊐ Covert ⊐ SemiHonest`) and `secx:CorruptionThreshold`
+(`DishonestMajority ⊐ HonestMajority ⊐ SuperHonestMajority`, ordered by how much corruption is
+*tolerated*) — with `secx:requiresAdversaryModel` / `secx:requiresCorruptionThreshold` as their
+leftOperands. `secx:assumption` stays human-facing PROVENANCE: this reasoner keys only on
+`(dimension, level)`, so an `secx:assumption secx:SemiHonest` triple alone can never be discharged.
+`sparq-mpc` ships its per-protocol levels as `crates/sparq-mpc/ontologies/secprop-mpc-methods.ttl`
+(behind its default-OFF `secprop-annotations` feature, surfaced as `sparq_mpc::secprop::annotations_n3()`),
+so `requiresAdversaryModel gteq secx:Malicious` mechanically excludes **every** `sparq-mpc` protocol
+while `gteq secx:SemiHonest` admits them — the exclusion is computed by THIS reasoner, not by a
+crate-local predicate (end-to-end test `crates/sparq-mpc/tests/secprop_admissibility.rs`).
+
 ### Property-admissibility PRE-CHECK in the admission gate — opt-in `secprop-precheck` (sq-dt5hv Phase 5 + sq-nrwqs Phase 5.1, design §5b)
 
 `sparq_trust::admit_with_precheck(cred, rules, session, target, preference)` (behind the **default-OFF

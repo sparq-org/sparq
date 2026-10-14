@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-7d3dj.30.7) Equality-FILTER → value-join unification, behind the
+//! (sq-7d3dj.30.7) Equality-FILTER → value-join unification, behind the
 //! opt-in `value-join` cargo feature (OFF by default; when off none of this compiles
 //! and the conjunctive path is byte-identical to before).
 //!

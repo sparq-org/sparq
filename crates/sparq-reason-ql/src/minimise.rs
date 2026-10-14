@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-g19x0 (epic sq-pbz04): UCQ-containment MINIMISATION — the standard
+// sq-g19x0 (epic sq-pbz04): UCQ-containment MINIMISATION — the standard
 // query-containment-by-homomorphism test (Chandra–Merlin, STOC 1977), applied soundly to drop
 // redundant disjuncts from a rewritten union of conjunctive queries.
 //
@@ -192,7 +192,7 @@ fn match_atom(
 /// source variables to target terms; constants and `Unbound` existentials in the source are RIGID
 /// (must equal the target term exactly). A distinguished (frozen) source variable must map to the
 /// SAME distinguished variable in the target. Returns false on any conflict.
-/// [SONNET-4.6] sq-pbz04.3.1: `Literal` arm added for B2 — a source literal constant maps only
+/// sq-pbz04.3.1: `Literal` arm added for B2 — a source literal constant maps only
 /// to the identical target literal (like `Const`).
 fn bind(
     s: &Term,
@@ -204,7 +204,7 @@ fn bind(
         // A source constant maps only to the identical target constant.
         Term::Const(c) => matches!(t, Term::Const(c2) if c2 == c),
         // B2: a source literal maps only to the identical target literal (same three fields).
-        // [SONNET-4.6] sq-pbz04.3.1
+        // sq-pbz04.3.1
         Term::Lit(lv, ld, ll) => {
             matches!(t, Term::Lit(lv2, ld2, ll2) if lv2 == lv && ld2 == ld && ll2 == ll)
         }

@@ -54,7 +54,7 @@ pub const RECEIVE_PATH: &str = "/.notifications/WebSocketChannel2023/receive";
 /// The storage-description / well-known discovery document path.
 pub const WELL_KNOWN_SOLID_PATH: &str = "/.well-known/solid";
 
-// [GPT-5.6] Keep the hot-path counters private so callers can observe but cannot mutate them.
+// Keep the hot-path counters private so callers can observe but cannot mutate them.
 struct NotificationMetricCounters {
     dropped_subscribers_total: AtomicU64,
     lagged_events_total: AtomicU64,

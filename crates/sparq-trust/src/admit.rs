@@ -76,7 +76,7 @@
 //! live forgery vector D′ of §3.3); the opt-in `did` feature (`sq-pfae.3`, the `did`
 //! module) can bind it from a `trust:issuerDid` instead, narrowing — not eliminating — D′.
 //!
-//! [OPUS-4.8] sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 use crate::policy::{ShapeRef, TrustRule};
 use crate::vocab;
@@ -692,7 +692,7 @@ mod precheck {
         // triple (or an N3 rule) into the reasoning document. `cid -> left_operand` lets
         // us report the failed dimensions.
         //
-        // [OPUS-4.8] sq-ddbm8 DEFENCE-IN-DEPTH: `synthesise_policy` re-validates that every
+        // sq-ddbm8 DEFENCE-IN-DEPTH: `synthesise_policy` re-validates that every
         // operand is a well-formed IRIREF before writing it inside a `<…>` term. A
         // `NamedNode::new_unchecked` / unvalidated-`Deserialize` operand carrying a
         // term-breaking char (only reachable OUTSIDE the `NamedNode::new` path) is refused
@@ -773,7 +773,7 @@ mod precheck {
         let mut iris = Vec::with_capacity(constraints.len());
         let mut n3 = String::new();
         for (i, c) in constraints.iter().enumerate() {
-            // [OPUS-4.8] sq-ddbm8: re-validate BOTH operands are IRIREF-safe before either
+            // sq-ddbm8: re-validate BOTH operands are IRIREF-safe before either
             // is written inside a `<…>` term. Fail closed on the first unsafe operand — an
             // operand that could break out of object position must NEVER reach the policy.
             for operand in [c.left_operand.as_str(), c.right_operand.as_str()] {
@@ -782,7 +782,7 @@ mod precheck {
                 }
             }
             let cid = format!("urn:sparq:secprop:c{}", i);
-            // [OPUS-4.8] Write the per-constraint fragment straight into `n3` — writing to
+            // Write the per-constraint fragment straight into `n3` — writing to
             // an in-memory `String` is infallible, so no temporary `String` allocation on
             // the admission path. Byte-output-identical (same fragment, trailing `.\n`).
             writeln!(

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-b4fns, gh-906) A DURABLE, REPLAYABLE change-data-capture (CDC)
+//! (sq-b4fns, gh-906) A DURABLE, REPLAYABLE change-data-capture (CDC)
 //! stream in the Amazon-Neptune-Streams shape — the serialized, on-disk form of the
 //! in-memory group-commit delta the [`Writer`](crate::Writer) already produces.
 //!
@@ -49,7 +49,7 @@
 //! - **Segmented.** Records roll into a new segment file once the active segment reaches
 //!   [`ChangeLogConfig::segment_target_bytes`], so retention/truncation can drop whole old
 //!   segments.
-//! - **Retention (truncation).** [FABLE-5] (sq-n9s4d) [`ChangeLog::apply_retention`] drops
+//! - **Retention (truncation).** (sq-n9s4d) [`ChangeLog::apply_retention`] drops
 //!   whole OLD segments — oldest-first, never the active segment, never a partial segment —
 //!   under a [`RetentionPolicy`] combining consumer-ack (a HARD safety bound: a segment
 //!   holding any unacked record is never dropped), age, and total-size pressure. Trimming
@@ -62,7 +62,7 @@
 //!   validates each record's framing + digest (fail-closed on a torn tail — a half-written
 //!   trailing record is truncated, not silently replayed), and resumes appending at the next
 //!   seq. [`ChangeLog::poll`] streams records from any `from_seq` onward.
-//! - **Re-baseline (honest gap).** [FABLE-5] (sq-r2cu1) A BROKEN stream — a dropped record
+//! - **Re-baseline (honest gap).** (sq-r2cu1) A BROKEN stream — a dropped record
 //!   after a recording I/O failure (see [`into_commit_hook`](ChangeLog::into_commit_hook)'s
 //!   error policy), or a `Writer::restore` (new lineage; the commit hook deliberately never
 //!   fires) — fail-closes every later [`record_commit`](ChangeLog::record_commit) via the
@@ -71,7 +71,7 @@
 //!   marking the uncaptured span and re-arms recording from the given generation — the log
 //!   is never wiped, and a consumer replaying past the gap record KNOWS the stream is not a
 //!   complete diff history there (re-bootstrap from a backup at or after the gap's
-//!   generation, then resume). [FABLE-5] (gh-2436) On a RUNNING recorder, rebase through
+//!   generation, then resume). (gh-2436) On a RUNNING recorder, rebase through
 //!   [`ChangeLog::into_commit_hook_with_control`]'s [`ChangeStreamControl`] (no stop /
 //!   re-open needed); for a restore that REPLACED the lineage (generation numbering
 //!   restarted), use [`ChangeLog::rebase_to_new_lineage`].
@@ -162,7 +162,7 @@ pub struct ChangeRecord {
     pub timestamp_unix_nanos: u128,
     /// The quad-level changes of this commit (inserts first, then deletes — each sorted).
     pub changes: Vec<Change>,
-    /// [FABLE-5] (sq-r2cu1) `true` iff this record is an operator **re-base marker** — an
+    /// (sq-r2cu1) `true` iff this record is an operator **re-base marker** — an
     /// HONEST GAP in the stream ([`ChangeLog::rebase_to`]), not a commit diff. The changes
     /// between the PREVIOUS record's generation and this record's [`generation`](Self::generation)
     /// were NOT captured (a dropped record after a recording failure, or a `Writer::restore`
@@ -212,7 +212,7 @@ impl Default for ChangeLogConfig {
     }
 }
 
-/// [FABLE-5] (sq-n9s4d) A retention/truncation policy for [`ChangeLog::apply_retention`]:
+/// (sq-n9s4d) A retention/truncation policy for [`ChangeLog::apply_retention`]:
 /// which whole OLD segments may be dropped. The three criteria compose as follows:
 ///
 /// - [`acked_through_seq`](Self::acked_through_seq) is a **hard safety bound**: when set, a
@@ -249,7 +249,7 @@ impl RetentionPolicy {
     }
 }
 
-/// [FABLE-5] (sq-n9s4d) What one [`ChangeLog::apply_retention`] pass actually dropped.
+/// (sq-n9s4d) What one [`ChangeLog::apply_retention`] pass actually dropped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RetentionReport {
     /// Number of whole segment files deleted by this pass.
@@ -377,14 +377,14 @@ impl ChangeLog {
         self.last_generation
     }
 
-    /// [FABLE-5] (sq-n9s4d) The earliest seq still retained on disk — `0` until
+    /// (sq-n9s4d) The earliest seq still retained on disk — `0` until
     /// [`apply_retention`](Self::apply_retention) drops a segment. A consumer whose resume
     /// offset was trimmed away (its [`poll`](Self::poll) fails closed) restarts from here.
     pub fn first_seq(&self) -> u64 {
         self.first_seq
     }
 
-    /// [FABLE-5] (sq-n9s4d) Applies `policy` (see [`RetentionPolicy`] for how the criteria
+    /// (sq-n9s4d) Applies `policy` (see [`RetentionPolicy`] for how the criteria
     /// compose) against the wall clock, dropping whole OLD segments oldest-first. Equivalent
     /// to [`apply_retention_at`](Self::apply_retention_at) with `now` = the current time.
     ///
@@ -402,7 +402,7 @@ impl ChangeLog {
         self.apply_retention_at(policy, now)
     }
 
-    /// [FABLE-5] (sq-n9s4d) [`apply_retention`](Self::apply_retention) with an explicit
+    /// (sq-n9s4d) [`apply_retention`](Self::apply_retention) with an explicit
     /// `now` (nanoseconds since the Unix epoch, the same clock as
     /// [`ChangeRecord::timestamp_unix_nanos`]) — the deterministic core, for hosts/tests
     /// that inject time.
@@ -559,7 +559,7 @@ impl ChangeLog {
         Ok(record)
     }
 
-    /// [FABLE-5] (sq-r2cu1) **Explicit operator re-base** — the resync primitive for a
+    /// (sq-r2cu1) **Explicit operator re-base** — the resync primitive for a
     /// BROKEN stream. Once a record is dropped (a recording I/O failure inside
     /// [`into_commit_hook`](Self::into_commit_hook)) or a `Writer::restore` replaces the
     /// lineage (the hook deliberately never fires for a restore publish),
@@ -600,7 +600,7 @@ impl ChangeLog {
         self.append_gap(generation)
     }
 
-    /// [FABLE-5] (gh-2436) [`rebase_to`](Self::rebase_to) for a **replaced writer lineage**
+    /// (gh-2436) [`rebase_to`](Self::rebase_to) for a **replaced writer lineage**
     /// whose generation numbering RESTARTED — the post-restore resync. sparq-server's online
     /// restore installs a fresh ring that restarts at generation 0, so the new baseline is
     /// typically NOT strictly greater than the last recorded generation and the same-lineage
@@ -686,7 +686,7 @@ impl ChangeLog {
     /// This is the resume primitive: after a restart a consumer that persisted its last-seen
     /// `seq` calls `poll(last_seen + 1)` and continues exactly where it left off.
     ///
-    /// [FABLE-5] (sq-n9s4d) If `from_seq` precedes the earliest RETAINED record (older
+    /// (sq-n9s4d) If `from_seq` precedes the earliest RETAINED record (older
     /// segments were dropped by [`apply_retention`](Self::apply_retention)), the poll
     /// **fails closed** with [`BackupError::Format`] rather than silently skipping the
     /// dropped records — a consumer that cannot tolerate the gap must handle it explicitly
@@ -696,7 +696,7 @@ impl ChangeLog {
         read_from(&self.dir, from_seq)
     }
 
-    /// [FABLE-5] (sq-bdaw5) Consumes the log into a **commit hook** for
+    /// (sq-bdaw5) Consumes the log into a **commit hook** for
     /// [`Writer::spawn_with_commit_hook`](crate::Writer::spawn_with_commit_hook): every
     /// commit the writer publishes is recorded via [`record_commit`](Self::record_commit)
     /// ON THE WRITER THREAD — once per published generation, so recording rides the
@@ -738,7 +738,7 @@ impl ChangeLog {
         }
     }
 
-    /// [FABLE-5] (gh-2436) [`into_commit_hook`](Self::into_commit_hook) plus an **operator
+    /// (gh-2436) [`into_commit_hook`](Self::into_commit_hook) plus an **operator
     /// control handle** over the SAME live log. Plain `into_commit_hook` consumes the append
     /// handle into the hook closure, so re-baselining a broken stream on a running server
     /// used to require stopping the recorder and re-opening the directory offline. Here the
@@ -770,7 +770,7 @@ impl ChangeLog {
     }
 }
 
-/// [FABLE-5] (gh-2436) Cloneable operator control handle over a [`ChangeLog`] that has been
+/// (gh-2436) Cloneable operator control handle over a [`ChangeLog`] that has been
 /// consumed into a live commit hook via
 /// [`into_commit_hook_with_control`](ChangeLog::into_commit_hook_with_control). Every call
 /// is serialized with the recording hook on the shared log mutex, so the single-writer
@@ -807,7 +807,7 @@ pub(crate) fn read_from(dir: &Path, from_seq: u64) -> Result<Vec<ChangeRecord>, 
     let mut segments = segment_files(dir)?;
     segments.sort_by_key(|(seq, _)| *seq);
 
-    // [FABLE-5] (sq-n9s4d) The stream starts at the oldest RETAINED segment's key (0 for a
+    // (sq-n9s4d) The stream starts at the oldest RETAINED segment's key (0 for a
     // never-trimmed log). Asking for records BEFORE that is fail-closed: retention dropped
     // them, and silently resuming later would violate the gapless-replay contract.
     let earliest = segments.first().map(|(seq, _)| *seq).unwrap_or(0);
@@ -941,11 +941,11 @@ fn encode_record_body(record: &ChangeRecord) -> String {
     let mut s = String::new();
     let ins = record.insert_count();
     let del = record.delete_count();
-    // [OPUS-4.8] positional format args (CodeQL rust/unused-variable false-positive).
+    // positional format args (CodeQL rust/unused-variable false-positive).
     s.push_str(&format!("seq {}\n", record.seq));
     s.push_str(&format!("generation {}\n", record.generation));
     s.push_str(&format!("timestamp {}\n", record.timestamp_unix_nanos));
-    // [FABLE-5] (sq-r2cu1) The re-base gap marker is an OPTIONAL header line, emitted only
+    // (sq-r2cu1) The re-base gap marker is an OPTIONAL header line, emitted only
     // when set — every pre-rebase record body (and its digest) stays byte-identical, and a
     // reader that predates the marker fails closed on the unknown key rather than replaying
     // a gap record as an ordinary empty commit.
@@ -985,7 +985,7 @@ fn decode_record_body(body: &str, path: &Path) -> Result<ChangeRecord, BackupErr
                 "seq" => seq = Some(parse_num(val, "seq", path)?),
                 "generation" => generation = Some(parse_num(val, "generation", path)?),
                 "timestamp" => timestamp = Some(parse_u128(val, "timestamp", path)?),
-                // [FABLE-5] (sq-r2cu1) Optional re-base gap marker (absent = ordinary
+                // (sq-r2cu1) Optional re-base gap marker (absent = ordinary
                 // commit record). Only the exact values `1`/`0` decode — anything else is
                 // fail-closed corruption, never a silent default.
                 "rebase" => {
@@ -1157,7 +1157,7 @@ fn segment_files(dir: &Path) -> Result<Vec<(u64, PathBuf)>, BackupError> {
     Ok(out)
 }
 
-/// [OPUS-5] (sq-l6zks) The earliest seq still RETAINED on disk — the first segment's key
+/// (sq-l6zks) The earliest seq still RETAINED on disk — the first segment's key
 /// (`0` for a never-trimmed or empty log). This is where a consumer with NO prior position
 /// starts (the [`change_sink`](crate::change_sink) relay's fresh-consumer case); a consumer
 /// that DOES have a prior position must not use it — [`read_from`] fails that case closed
@@ -1577,7 +1577,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // [OPUS-4.8] (sq-bif) Additional correctness coverage: the fail-closed decoder
+    // (sq-bif) Additional correctness coverage: the fail-closed decoder
     // validation arms (reachable only with a digest-VALID but structurally-corrupt
     // record body — so a regression that dropped one of these checks would let a
     // corrupt CDC record replay silently), the malformed-segment-filename fail-closed
@@ -1832,7 +1832,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // [FABLE-5] (sq-n9s4d) Retention/truncation coverage. Each test is mutation-
+    // (sq-n9s4d) Retention/truncation coverage. Each test is mutation-
     // witnessed: the comment names the specific regression that would turn it red.
     // -----------------------------------------------------------------------
 
@@ -2182,7 +2182,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // [FABLE-5] (sq-r2cu1) Re-baseline / resync coverage: the explicit operator
+    // (sq-r2cu1) Re-baseline / resync coverage: the explicit operator
     // primitive that resumes a broken stream (dropped record / Writer::restore)
     // without wiping the log, via an honest gap record.
     // -----------------------------------------------------------------------
@@ -2386,7 +2386,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // [FABLE-5] (gh-2436) Operator surface on a RUNNING recorder: the control handle from
+    // (gh-2436) Operator surface on a RUNNING recorder: the control handle from
     // `into_commit_hook_with_control` rebases the live log without stopping the recorder.
     // -----------------------------------------------------------------------
 

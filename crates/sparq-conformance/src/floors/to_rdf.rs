@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.40 — the W3C JSON-LD 1.1 `toRdf` lane ratchet floor
+//! sq-oy1f.40 — the W3C JSON-LD 1.1 `toRdf` lane ratchet floor
 //! (relocated from `tests/jsonld_suite.rs` to this lib-side single source).
 
 /// toRdf (JSON-LD → RDF via oxjsonld) pass floor. RATCHET: may only RISE.

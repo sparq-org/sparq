@@ -49,7 +49,7 @@ tower = "0.5"
 # `server::TlsStream` so the per-connection acceptor can read `peer_certificates()` ONCE after the
 # handshake. It stays behind the mTLS env flag: the default (flag-off) TLS + plain serve paths are
 # byte-identical.
-# [OPUS-5] sq-5ah3p: the PEM cert-chain + key parse into the DER types
+# sq-5ah3p: the PEM cert-chain + key parse into the DER types
 # `ServerConfig::builder().with_client_cert_verifier(..).with_single_cert(..)` needs (the mTLS path
 # can't use axum-server's `RustlsConfig::from_pem`, which hard-codes `with_no_client_auth`) no longer
 # needs a `rustls-pemfile` entry here. That crate is archived (RUSTSEC-2025-0134) and since 2.x has
@@ -143,7 +143,7 @@ http = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# [GPT-5.6] sq-r1ei8: the query-only Solid endpoint is a separately removable
+# sq-r1ei8: the query-only Solid endpoint is a separately removable
 # surface. All three direct dependency edges stay inactive in the core tier.
 form_urlencoded = { version = "1", optional = true }
 spargebra = { workspace = true, optional = true }
@@ -240,14 +240,14 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc
 solid-oidc-verifier = { git = "https://github.com/jeswr/solid-oidc-verifier", rev = "89c896249a726398b78302fd2f65eef0a82af681", features = ["network"] }
 sparq-core = { path = "../sparq-core", features = ["mmap"], optional = true }
 sparq-engine = { path = "../sparq-engine", optional = true }
-# [SONNET-4.6] sq-elg47: the ODRL usage-control evaluator behind the OPT-IN `odrl-authz`
+# sq-elg47: the ODRL usage-control evaluator behind the OPT-IN `odrl-authz`
 # read/query gate seam (`authz::odrl`) — the native reach to the sparq-policy /
 # sparq-solid odrl-bridge estate. An in-workspace path dep (std-only; its
 # sparq-core/sparq-engine edges are default-features-off and already in this crate's
 # native tree), so the feature adds NO new external crate. Native-only: the wasm request
 # core keeps the policy layer out of its dependency graph.
 sparq-policy = { path = "../sparq-policy", optional = true }
-# [OPUS-5] sq-hed3q: the trust-graph admission estate behind the OPT-IN, default-OFF
+# sq-hed3q: the trust-graph admission estate behind the OPT-IN, default-OFF
 # `trust-graph` feature — the LIBRARY seam `authz::trust_admit`, which adapts the `sparq-trust`
 # admission gate into this crate's own AccessMode/Decision vocabulary. `sparq-trust` runs the gate
 # (checked issuer signature over the RDFC-1.0 commitment, `trust:scope`, freshness, revocation,
@@ -282,13 +282,13 @@ subtle = "2.6"
 redis = { version = "1", default-features = false, features = ["r2d2"], optional = true }
 r2d2 = { version = "0.8", optional = true }
 mimalloc = "0.1"
-# [GPT-5.6] sq-oprna.2: HTTP/3 is a separate default-off UDP listener. Keep both
+# sq-oprna.2: HTTP/3 is a separate default-off UDP listener. Keep both
 # Quinn and the shared bridge absent from the ordinary Solid server dependency graph.
 quinn = { version = "0.11.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"], optional = true }
 sparq-http3 = { path = "../sparq-http3", optional = true, features = ["server"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# [GPT-5.6] sq-r1ei8: only the full wasm tier links the query engine. In
+# sq-r1ei8: only the full wasm tier links the query engine. In
 # particular, `--no-default-features --features wasm` remains the pure Solid
 # request core and keeps both crates out of its normal dependency graph.
 sparq-core = { path = "../sparq-core", default-features = false, optional = true }
@@ -384,7 +384,7 @@ redis-replay = ["dep:redis", "dep:r2d2"]
 # `--no-default-features` to build the engine-free profile.
 # See `sparq_lws_core::store::embedded` and `research/lws-design-records.md` §3.
 embedded-sparq = ["dep:sparq-core", "dep:sparq-engine"]
-# [GPT-5.6] sq-r1ei8: default-on full-tier query surface. The route, handler,
+# sq-r1ei8: default-on full-tier query surface. The route, handler,
 # protocol parser, and engine dependencies are all compiled out together; this
 # is independent of `embedded-sparq`, which remains an internal LDP store backend.
 sparql-endpoint = [
@@ -394,14 +394,14 @@ sparql-endpoint = [
     "dep:sparq-core",
     "dep:sparq-engine",
 ]
-# [SONNET-4.6] sq-elg47: OPT-IN native ODRL policy gate on the LDP read / SPARQL query path —
+# sq-elg47: OPT-IN native ODRL policy gate on the LDP read / SPARQL query path —
 # the src seam through which an ODRL policy (sparq-policy; the sparq-solid odrl-bridge estate)
 # gates a read natively, superseding the WAC-only graph-granularity contract (deny-overrides,
 # permit-extends — see `authz::odrl`). OFF by default: the default build compiles ZERO gate
 # code and the handler hot path is byte-identical. Enable AND attach a gate at router assembly
 # (`LdpState::set_odrl_gate`) for it to fire; enabled-but-unattached is behaviour-identical.
 odrl-authz = ["dep:sparq-policy"]
-# [OPUS-5] sq-hed3q: OPT-IN trust-graph admission seam (`authz::trust_admit`) — the PURE LIBRARY
+# sq-hed3q: OPT-IN trust-graph admission seam (`authz::trust_admit`) — the PURE LIBRARY
 # function that adapts the `sparq-trust` admission gate (an issuer-signed credential + the
 # Control-gated `.acr` rules) into an ADDITIVE, allow-only grant set in this crate's own
 # AccessMode/Decision vocabulary. OFF by default: the module is not compiled and neither
@@ -417,7 +417,7 @@ trust-graph = ["dep:sparq-solid", "dep:sparq-trust", "dep:sparq-zk"]
 # shape, not the default. Pure code gate — its deps (hyper client + hyper-util legacy pool) stay
 # resolved for the server transport either way.
 http-sparq = []
-# [GPT-5.6] sq-oprna.2: opt-in encrypted HTTP/3 transport. When TLS PEM paths are
+# sq-oprna.2: opt-in encrypted HTTP/3 transport. When TLS PEM paths are
 # configured, the binary binds UDP on the TCP listener's resolved address/port and
 # dispatches into the same hardened router. The default plain/TLS paths stay unchanged.
 http3 = ["dep:quinn", "dep:sparq-http3"]

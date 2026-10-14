@@ -1,4 +1,4 @@
-//! sparq-policy ODRL evaluator micro-benchmark. [OPUS-4.8] sq-r06h. Run:
+//! sparq-policy ODRL evaluator micro-benchmark. sq-r06h. Run:
 //!     cargo run -p sparq-policy --example bench --release
 //!
 //! Measures, on a synthetic ODRL `Set` of N permissions (each with an assignee,

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-0bxp) **Opt-in per-query access audit log** — CDMC CD-2 (access audit),
+//! (sq-0bxp) **Opt-in per-query access audit log** — CDMC CD-2 (access audit),
 //! composes with ISO 27001 A.8.15 (logging) and the EU CRA logging expectations.
 //!
 //! The CDMC audit (#234) rated access-audit a **2** because the server emits only

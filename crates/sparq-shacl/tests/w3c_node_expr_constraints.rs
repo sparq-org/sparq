@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-3w6n) Manifest-driven runner for the W3C SHACL **node
+//! (sq-3w6n) Manifest-driven runner for the W3C SHACL **node
 //! expression** test suite's `sht:Validate` entries — the `constraints/`
 //! subdirectory of `node-expr` (`expression-001`, `nodeByExpression-001`).
 //!

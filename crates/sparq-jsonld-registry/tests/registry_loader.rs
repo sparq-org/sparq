@@ -32,7 +32,7 @@ fn registered_context_round_trips_vendored_bytes() {
 
 #[test]
 fn every_registered_context_load_is_complete_and_idempotent() {
-    // [GPT-5.6] sq-sw1yr — pin the complete registry so deleting an expected entry
+    // sq-sw1yr — pin the complete registry so deleting an expected entry
     // cannot silently reduce the coverage of the per-context assertions below.
     assert_eq!(REGISTERED_CONTEXTS.len(), 4);
 

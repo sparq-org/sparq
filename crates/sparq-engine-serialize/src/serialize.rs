@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-678h) RDF serializer matrix — Turtle / TriG / N-Quads writers.
+//! (sq-678h) RDF serializer matrix — Turtle / TriG / N-Quads writers.
 //!
 //! sparq could *parse* Turtle / TriG / N-Quads / N-Triples but could only *write*
 //! N-Triples (via `sparq_engine::triples_to_ntriples`, which leans on oxrdf's canonical
@@ -83,7 +83,7 @@ pub fn default_prefixes() -> Prefixes {
     .collect()
 }
 
-/// [OPUS-4.8] (sq-l5kr) Builds a [`Prefixes`] map from a caller-supplied list of
+/// (sq-l5kr) Builds a [`Prefixes`] map from a caller-supplied list of
 /// `(prefix, namespace-IRI)` pairs — the explicit-prefix-policy entry point.
 ///
 /// The `graph_to_*_with` / `write_*` writers already take a [`Prefixes`] (a
@@ -587,7 +587,7 @@ fn render_subject_block(
 // ---------------------------------------------------------------------------
 // Streaming Turtle / TriG (opt-in `streaming-serialization`).
 //
-// [OPUS-4.8] (sq-townn, survey §A7) The buffered `write_turtle` / `write_trig` build a
+// (sq-townn, survey §A7) The buffered `write_turtle` / `write_trig` build a
 // FULL in-memory `String` for the whole graph, so a CONSTRUCT/DESCRIBE over a large graph
 // holds BOTH the materialised triples AND the fully-rendered string at once. These
 // `*_streaming` writers render the body directly into a `W: std::io::Write`, buffering only
@@ -680,7 +680,7 @@ where
     Ok(())
 }
 
-/// [OPUS-4.8] (sq-townn, survey §A7) Streams `triples` as Turtle into `w` WITHOUT building
+/// (sq-townn, survey §A7) Streams `triples` as Turtle into `w` WITHOUT building
 /// the whole rendered output `String` in memory: the used-prefix `@prefix` header followed
 /// by grouped predicate-object lists, one subject block buffered at a time.
 ///
@@ -762,7 +762,7 @@ fn write_graph_name(g: &Term, prefixes: &Prefixes, out: &mut String) {
     }
 }
 
-/// [OPUS-4.8] (sq-townn, survey §A7) Streams `graphs` as TriG into `w` WITHOUT building the
+/// (sq-townn, survey §A7) Streams `graphs` as TriG into `w` WITHOUT building the
 /// whole rendered output `String`: the shared used-prefix `@prefix` header (one pass over
 /// the union of every graph's triples), then the default graph's statements (unwrapped),
 /// then each named graph as `GRAPH <g> { … }` — each graph's body streamed one subject block
@@ -1137,7 +1137,7 @@ fn graph_to_turtle_ids(graph: &Graph, prefixes: &Prefixes) -> String {
     w.finish(body)
 }
 
-/// [OPUS-4.8] (sq-townn, survey §A7) Streams a [`Graph`]'s default graph as Turtle into `w`
+/// (sq-townn, survey §A7) Streams a [`Graph`]'s default graph as Turtle into `w`
 /// with a caller-supplied prefix map, WITHOUT building the whole rendered output `String` —
 /// the front door for HTTP chunked CONSTRUCT/DESCRIBE responses over a large graph.
 ///
@@ -1170,7 +1170,7 @@ pub fn graph_to_trig(graph: &Graph) -> String {
     graph_to_trig_with(graph, &default_prefixes())
 }
 
-/// [OPUS-4.8] (sq-l5kr) Serializes a [`Graph`] (default + named graphs) as TriG with a
+/// (sq-l5kr) Serializes a [`Graph`] (default + named graphs) as TriG with a
 /// caller-supplied prefix map — the non-pretty counterpart to [`graph_to_turtle_with`], so
 /// the compact TriG path can also honour an explicit prefix policy (e.g. the site's
 /// `COMMON_PREFIXES`) instead of only the well-known defaults.
@@ -1183,7 +1183,7 @@ pub fn graph_to_trig_with(graph: &Graph, prefixes: &Prefixes) -> String {
     write_trig(&view, prefixes)
 }
 
-/// [OPUS-4.8] (sq-townn, survey §A7) Streams a [`Graph`] (default + named graphs) as TriG
+/// (sq-townn, survey §A7) Streams a [`Graph`] (default + named graphs) as TriG
 /// into `w` with a caller-supplied prefix map, WITHOUT building the whole rendered output
 /// `String`. The streaming counterpart to [`graph_to_trig_with`].
 ///
@@ -1218,7 +1218,7 @@ pub fn graph_to_nquads(graph: &Graph) -> String {
 // ===========================================================================
 // Pretty Turtle.
 //
-// [OPUS-4.8] (sq-ixc3.2) The long-term engine home for the site-side pretty
+// (sq-ixc3.2) The long-term engine home for the site-side pretty
 // reshaper shipped in #805 (sq-gb4o, `packages/sparq-client/src/pretty-turtle.ts`).
 // The site reshapes the engine's flat N-Triples in TS; this produces idiomatic
 // Turtle directly so the CLI / server / wasm all get it for free.
@@ -1628,7 +1628,7 @@ pub fn graph_to_trig_pretty(graph: &Graph) -> String {
     write_trig_pretty(&view, &default_prefixes(), &PrettyOptions::default())
 }
 
-/// [OPUS-4.8] sq-fe1s: Serializes a [`Graph`] (default + named graphs) as PRETTY TriG with
+/// sq-fe1s: Serializes a [`Graph`] (default + named graphs) as PRETTY TriG with
 /// caller-supplied prefixes and options — the TriG-side symmetry of
 /// [`graph_to_turtle_pretty_with`], so a consumer that already holds a [`Graph`] can choose
 /// the indent / abbreviation without rebuilding the `(name, triples)` view by hand.
@@ -1666,13 +1666,13 @@ pub fn graph_to_trig_pretty_with(
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
-// [OPUS-4.8] (sq-gg3j) RDF-list (`@list`) collapsing — see `detect_lists` below. A
+// (sq-gg3j) RDF-list (`@list`) collapsing — see `detect_lists` below. A
 // *well-formed, single-referenced* rdf:first/rdf:rest/rdf:nil chain is collapsed into a
 // native JSON-LD `@list` array; anything that fails the safety predicate (shared list cell,
 // extra predicates, missing/duplicate first/rest, a cycle, a non-blank cell) is left as
 // ordinary rdf:first/rdf:rest triples so the round-trip stays lossless either way.
 
-/// [OPUS-4.8] (sq-gg3j) Result of scanning one graph for collapsible RDF lists.
+/// (sq-gg3j) Result of scanning one graph for collapsible RDF lists.
 ///
 /// `heads[b]` holds, for every blank-node list **head** `b` that is safe to collapse, the
 /// list's element terms in order. `cells` is the full set of blank-node *list cells* (every
@@ -2118,7 +2118,7 @@ fn write_node_members(
 /// Serializes one graph (already grouped) as a JSON array of node objects into `out`. Shared by
 /// every form — the difference between forms is the `@context`/`@graph` framing the callers add.
 fn write_node_array(triples: &[Triple], prefixes: Option<&Prefixes>, out: &mut String) {
-    // [OPUS-4.8] (sq-gg3j) Find collapsible rdf:first/rdf:rest chains *per graph* (blank-node
+    // (sq-gg3j) Find collapsible rdf:first/rdf:rest chains *per graph* (blank-node
     // scope is per graph), then suppress their cells and render their heads as `@list`.
     let lists = detect_lists(triples);
     let (order, nodes) = group_nodes(triples, &lists);
@@ -2327,7 +2327,7 @@ pub fn graph_to_jsonld_framed(graph: &Graph, frame: &JsonLdValue) -> String {
 }
 
 // ===========================================================================
-// [OPUS-4.8] (sq-ixc3.3) PRETTY (indented) JSON-LD.
+// (sq-ixc3.3) PRETTY (indented) JSON-LD.
 //
 // The minified writers above assemble their document into a flat `String` token by
 // token. The pretty writers produce *exactly that same document* and then re-indent
@@ -2485,7 +2485,7 @@ pub fn graph_to_jsonld_pretty_with(
     write_jsonld_pretty(&view, form, prefixes, opts)
 }
 
-/// [OPUS-4.8] (sq-oy1f.5) The PRETTY (indented) form of [`write_jsonld_compact`]: the full
+/// (sq-oy1f.5) The PRETTY (indented) form of [`write_jsonld_compact`]: the full
 /// W3C JSON-LD 1.1 Compaction document against `context`, re-indented (whitespace only) with
 /// `opts`. The byte content is exactly [`write_jsonld_compact`]'s output run through the same
 /// presentation pass as [`write_jsonld_pretty`], so it parses back to the same RDF.
@@ -2498,7 +2498,7 @@ pub fn write_jsonld_compact_pretty(
     reindent_json(&minified, &opts.indent)
 }
 
-/// [OPUS-4.8] (sq-oy1f.5) The PRETTY (indented) analogue of [`graph_to_jsonld_compact`]:
+/// (sq-oy1f.5) The PRETTY (indented) analogue of [`graph_to_jsonld_compact`]:
 /// serialises a [`Graph`] as a full W3C JSON-LD 1.1 Compaction document against `context`
 /// and re-indents it with `opts`. Whitespace-only over [`graph_to_jsonld_compact`] (the same
 /// document, multi-line), so the round-trip and losslessness properties are identical.
@@ -2737,7 +2737,7 @@ mod tests {
     }
 
     // =======================================================================
-    // [OPUS-4.8] (sq-ixc3.2) PRETTY Turtle writer tests — round-trip + golden
+    // (sq-ixc3.2) PRETTY Turtle writer tests — round-trip + golden
     // output matching the site's `prettyTurtle` shape (#805 / sq-gb4o reference).
     // =======================================================================
 
@@ -3620,7 +3620,7 @@ ex:bob
     }
 
     // =======================================================================
-    // [OPUS-4.8] (sq-gg3j) RDF-list (`@list`) collapsing.
+    // (sq-gg3j) RDF-list (`@list`) collapsing.
     // =======================================================================
 
     /// Turtle `(...)` collection syntax expands to an rdf:first/rdf:rest/rdf:nil chain on
@@ -3784,7 +3784,7 @@ ex:bob
         assert_jsonld_list_iso(&g);
     }
 
-    // ---- [OPUS-4.8] (sq-ixc3.3) PRETTY (indented) JSON-LD ----
+    // ---- (sq-ixc3.3) PRETTY (indented) JSON-LD ----
     //
     // The pretty writer is a whitespace-only presentation pass over the minified writer.
     // The tests pin two load-bearing properties:
@@ -4033,7 +4033,7 @@ ex:bob
     }
 
     // =======================================================================
-    // [OPUS-4.8] (sq-l5kr) Caller-supplied prefix policy via `prefixes_from_pairs`.
+    // (sq-l5kr) Caller-supplied prefix policy via `prefixes_from_pairs`.
     //
     // The wasm `Store.serialize(.., prefixes?)` binding (and any other caller wanting
     // byte-parity output under its OWN prefix policy) feeds an ordered `(prefix, iri)`
@@ -4133,7 +4133,7 @@ ex:bob
     }
 
     // =======================================================================
-    // [OPUS-4.8] (sq-townn, survey §A7) Streaming Turtle / TriG tests.
+    // (sq-townn, survey §A7) Streaming Turtle / TriG tests.
     //
     // The load-bearing invariant: the STREAMED bytes equal the BUFFERED
     // `write_turtle` / `write_trig` bytes for the SAME graph — same used-prefix
@@ -4392,7 +4392,7 @@ ex:bob
     }
 
     // =======================================================================
-    // [OPUS-4.8] (sq-ixc3.4) Full W3C JSON-LD 1.1 Compaction tests.
+    // (sq-ixc3.4) Full W3C JSON-LD 1.1 Compaction tests.
     //
     // These exercise the REAL compaction path (`graph_to_jsonld_compact` /
     // `write_jsonld_compact`), not a stub: structural assertions check each 1.1
@@ -5306,14 +5306,14 @@ ex:bob
     }
 
     // =======================================================================
-    // [OPUS-4.8] Regression guards for the four JSON-LD 1.1 Compaction
+    // Regression guards for the four JSON-LD 1.1 Compaction
     // correctness bugs found by the adversarial audit of PR #950 and
     // differential-tested against the pyld W3C reference processor
     // (sq-oy1f.8/.9/.10/.11). Each asserts the spec-correct (pyld-verified)
     // shape AND the losslessness round-trip the original tests lacked.
     // =======================================================================
 
-    /// [OPUS-4.8] sq-oy1f.8 — an `@list`-container term carrying BOTH a list value and a
+    /// sq-oy1f.8 — an `@list`-container term carrying BOTH a list value and a
     /// co-located non-list sibling must keep the sibling, not silently drop it. pyld emits
     /// the list under the container term as a bare array and the sibling under the property
     /// IRI compacted without the list term (here the full IRI, no `@vocab`). The round-trip
@@ -5345,7 +5345,7 @@ ex:bob
         assert_compact_count_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.9 (faithfulness-corrected by sq-oy1f.12) — an `@language`-container
+    /// sq-oy1f.9 (faithfulness-corrected by sq-oy1f.12) — an `@language`-container
     /// term must NOT drop a value lacking a language tag. The ORIGINAL sq-oy1f.9 fix routed a
     /// non-string value (the `xsd:integer` `42`) into the language map's `@none` member — but
     /// that produces a document a STRICT third-party processor (pyld) REJECTS, because a
@@ -5382,7 +5382,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.10 — with two reverse-coverable edges where one object IS a
+    /// sq-oy1f.10 — with two reverse-coverable edges where one object IS a
     /// subject and the other is a pure object, the bulk strip used to drop the edge to the
     /// non-subject object. Every edge must survive: the relocated one through node
     /// inversion, the un-relocated one as a forward property.
@@ -5410,7 +5410,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.11 — `@vocab`-relative compaction must emit the vocab-relative
+    /// sq-oy1f.11 — `@vocab`-relative compaction must emit the vocab-relative
     /// form even when the stripped suffix contains a fragment (`#`) or slash (`/`); the
     /// prior `!rest.contains([':', '/', '#'])` guard over-restricted it to a full IRI. (The
     /// `:` case is deliberately still excluded — see `compact_iri` — because it is
@@ -5439,7 +5439,7 @@ ex:bob
     }
 
     // =======================================================================
-    // [OPUS-4.8] sq-oy1f.12/.13/.14 — STRICT third-party (pyld) FAITHFULNESS
+    // sq-oy1f.12/.13/.14 — STRICT third-party (pyld) FAITHFULNESS
     // regressions. The conformance suite's own oxjsonld self-reparse oracle
     // MASKED these: the bytes below were each fed to the pyld W3C reference
     // processor (expand + toRdf) and the reproduced N-Quads compared to the
@@ -5449,7 +5449,7 @@ ex:bob
     // `assert_compact_iso` guard additionally pins the sparq self-round-trip.
     // =======================================================================
 
-    /// [OPUS-4.8] sq-oy1f.12 — a forward edge whose predicate only has a `@reverse` term must
+    /// sq-oy1f.12 — a forward edge whose predicate only has a `@reverse` term must
     /// never be emitted inside an `@reverse` block: a reverse-term key inside a block
     /// DOUBLE-INVERTS for a strict processor (pyld reads `<alice> <parent> <bob>`). fromRdf
     /// yields no reverse properties, so the edge stays a forward member under its full IRI.
@@ -5477,7 +5477,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.12 — a non-string value (typed/numeric literal) must NOT be placed
+    /// sq-oy1f.12 — a non-string value (typed/numeric literal) must NOT be placed
     /// in a `@language` container map (a strict processor rejects the whole document:
     /// "language map values must be strings"). It goes to a SEPARATE non-language key, which
     /// preserves its datatype on read-back.
@@ -5507,7 +5507,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.12 — a PLAIN string (no language tag, xsd:string) under a
+    /// sq-oy1f.12 — a PLAIN string (no language tag, xsd:string) under a
     /// `@language` container IS validly placed in the `@none` member (a language map MAY hold
     /// `@none` strings). This case must keep working — only NON-string values move out.
     ///
@@ -5530,7 +5530,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.13 — a plain literal value under a `@type:@id`-coerced term must be
+    /// sq-oy1f.13 — a plain literal value under a `@type:@id`-coerced term must be
     /// emitted under a NON-coerced key, else a strict processor reads the literal string as a
     /// node IRI (a string literal silently becomes a node — data corruption).
     ///
@@ -5570,7 +5570,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.14 — several values sharing one language must each survive (an array
+    /// sq-oy1f.14 — several values sharing one language must each survive (an array
     /// per language slot); the prior single-set clobbered all but the last.
     ///
     /// pyld differential (verified): the array-per-language doc `toRdf`s to all three triples
@@ -5597,7 +5597,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.14 — a node reference under a `@container: @id` term must become an
+    /// sq-oy1f.14 — a node reference under a `@container: @id` term must become an
     /// `@id` map entry keyed by the node IRI, never a `{"@id": …}` value under the container
     /// term (a strict processor rejects that: `illegal key … @id`). The `@id` map is the
     /// spec Compaction shape and re-expands to the same edge.
@@ -5622,7 +5622,7 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.14 — a multi-value `@index` container groups all values (fromRdf has
+    /// sq-oy1f.14 — a multi-value `@index` container groups all values (fromRdf has
     /// no per-value `@index`, so they share the reserved `@none` index slot as an array). The
     /// document stays valid and every value survives.
     ///
@@ -5647,7 +5647,7 @@ ex:bob
     }
 
     // =======================================================================
-    // [OPUS-4.8] sq-qcnn.33 — coverage-raise tests: targeted direct unit tests
+    // sq-qcnn.33 — coverage-raise tests: targeted direct unit tests
     // for previously-uncovered public functions and code paths.  Each asserts
     // exact byte values (non-vacuous) and exercises the REAL writer path.
     // =======================================================================

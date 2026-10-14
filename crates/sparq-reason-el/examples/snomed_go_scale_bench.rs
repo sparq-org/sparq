@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ez1rc (epic sq-pbz04): EL end-to-end SNOMED/GO-style scaling benchmark — a
+//! sq-ez1rc (epic sq-pbz04): EL end-to-end SNOMED/GO-style scaling benchmark — a
 //! self-asserting, deterministic workload that exercises the WHOLE pipeline composed together:
 //! normalise (Baader–Brandt–Lutz) + RBox role automaton (CR10/CR11, the `rbox` feature) +
 //! transitive reduction to the Hasse diagram (the `hasse` feature). Run (BOTH features required):

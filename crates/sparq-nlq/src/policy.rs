@@ -5,7 +5,7 @@
 //! operations. This algebra-level split avoids keyword scanning and therefore
 //! cannot be confused by comments, string literals, or prefixes.
 
-// [GPT-5.6] sq-9zs3g: policy is decided from typed parser output, not source text.
+// sq-9zs3g: policy is decided from typed parser output, not source text.
 
 use spargebra::{Query, Update};
 

@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-3xsx0 — `cls-int1` in the bench Datalog encodings must generalise to ANY
+//! sq-3xsx0 — `cls-int1` in the bench Datalog encodings must generalise to ANY
 //! `owl:intersectionOf` list arity, not just the 1–2 the LUBM TBox happens to use.
 //!
 //! The competitor-comparison encodings in `bench/reason-encodings/` (Nemo `.rls`, VLog

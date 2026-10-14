@@ -21,15 +21,15 @@ pub const AUTHENTICATED: &str = "https://sparq.dev/ns/auth#Authenticated";
 pub const ANY_CLIENT: &str = "https://sparq.dev/ns/auth#AnyClient";
 /// Issuer IRI matched by any OIDC issuer (the issuer-dimension top; ACP has no "public
 /// issuer" special, so an absent `acp:issuer` is issuer-unconstrained ⇒ this top).
-/// [OPUS-4.8] sq-3jtd.6.
+/// sq-3jtd.6.
 pub const ANY_ISSUER: &str = "https://sparq.dev/ns/auth#AnyIssuer";
 
 /// A request context: who (WebID) through what (client identifier / origin), vouched
-/// for by which OIDC issuer (`acp:issuer`), and — for [OPUS-4.8] sq-0q7n — *when* (the
+/// for by which OIDC issuer (`acp:issuer`), and — for sq-0q7n — *when* (the
 /// wall-clock instant the request is evaluated at). `agent: None` = anonymous;
 /// `now: None` = no clock supplied.
 ///
-/// A session expands to at most 12 principals when grants are looked up ([OPUS-4.8]
+/// A session expands to at most 12 principals when grants are looked up (
 /// sq-3jtd.6 — the issuer dimension doubles the pre-issuer ≤6): always `auth:Public`;
 /// plus `auth:Authenticated` and the WebID itself when `agent` is given; for each of
 /// those agent-principals `ap`, the minted `urn:sparq:pair?agent=…&client=…` pair when
@@ -38,7 +38,7 @@ pub const ANY_ISSUER: &str = "https://sparq.dev/ns/auth#AnyIssuer";
 /// and the full triple when both are given. Expansion is internal — callers just supply
 /// the request context:
 ///
-/// # The clock (`now`) — [OPUS-4.8] sq-0q7n
+/// # The clock (`now`) — sq-0q7n
 ///
 /// `now` is the request instant as an `xsd:dateTime` lexical string (e.g.
 /// `"2026-06-17T09:00:00Z"`). It is consulted ONLY by time-windowed conditional grants
@@ -84,11 +84,11 @@ pub struct Session<'a> {
     /// The client identifier (WAC `acl:origin` / ACP `acp:client`); `None` = any client.
     pub client: Option<&'a str>,
     /// The OIDC issuer that vouched for the WebID (ACP `acp:issuer`); `None` = any issuer.
-    /// [OPUS-4.8] sq-3jtd.6 — only ACP matchers constrain on it; WAC has no issuer notion,
+    /// sq-3jtd.6 — only ACP matchers constrain on it; WAC has no issuer notion,
     /// so a WAC pod ignores it (no grant ever names a triple principal).
     pub issuer: Option<&'a str>,
     /// The request instant as an `xsd:dateTime` lexical string, consulted only by
-    /// time-windowed conditional grants ([OPUS-4.8] sq-0q7n). `None` = no clock supplied
+    /// time-windowed conditional grants (sq-0q7n). `None` = no clock supplied
     /// → a time-windowed grant fails closed.
     pub now: Option<&'a str>,
 }
@@ -96,7 +96,7 @@ pub struct Session<'a> {
 impl<'a> Session<'a> {
     /// This session with its request clock bound to `now` (an `xsd:dateTime` lexical
     /// string). Use it so a time-windowed conditional grant re-checks the live clock per
-    /// request instead of being frozen at materialization. [OPUS-4.8] sq-0q7n.
+    /// request instead of being frozen at materialization. sq-0q7n.
     ///
     /// ```
     /// use sparq_solid::Session;
@@ -184,7 +184,7 @@ pub fn pair_principal(agent: &str, client: &str) -> String {
     format!("urn:sparq:pair?agent={a}&client={c}")
 }
 
-/// [OPUS-4.8] sq-3jtd.6 — the deterministic THREE-dimension principal IRI minted by the
+/// sq-3jtd.6 — the deterministic THREE-dimension principal IRI minted by the
 /// ACP rules for an issuer-constrained grant (`string:encodeForUri` +
 /// `string:concatenation` in rules/acp-c.n3 — keep in sync; the same RFC 3986
 /// percent-encoding makes the minting INJECTIVE, so no agent/client/issuer value can
@@ -220,12 +220,12 @@ struct ConditionalGrant {
     allow: bool,
     agent: String,  // principal-space: WebID | auth:Public | auth:Authenticated
     client: String, // auth:AnyClient | concrete client id
-    // [OPUS-4.8] sq-3jtd.6: auth:AnyIssuer (issuer-unconstrained) | concrete OIDC issuer id.
+    // sq-3jtd.6: auth:AnyIssuer (issuer-unconstrained) | concrete OIDC issuer id.
     issuer: String,
     mode: Option<Mode>,
     graph: Option<NamedNode>,
     except: Vec<String>, // matcher IRIs
-    // [OPUS-4.8] sq-0q7n: an optional live-clock window from a faithfully-mappable
+    // sq-0q7n: an optional live-clock window from a faithfully-mappable
     // `odrl:dateTime` constraint. `not_before` = the grant is inactive UNTIL this
     // instant (inclusive); `not_after` = inactive AFTER it (inclusive). Both are
     // `xsd:dateTime` lexical strings, compared against `Session::now` per request (see
@@ -271,7 +271,7 @@ struct ConditionalGrant {
 pub struct AuthIndex {
     /// (principal IRI, mode) → per-graph-ORIGIN → graphs, for simple allow / deny triples.
     ///
-    /// [OPUS-4.8] sq-b7k7u: the graph set of each (principal, mode) is bucketed by the
+    /// sq-b7k7u: the graph set of each (principal, mode) is bucketed by the
     /// GRAPH's origin (`scheme://authority`, [`crate::loader::iri_origin`]). The flat set
     /// the audited walk used before is exactly the union of these buckets, so
     /// [`AuthIndex::accessible`] is byte-for-byte unchanged; the buckets additionally let
@@ -292,7 +292,7 @@ pub struct AuthIndex {
     /// matcher IRI → accept-sets (principal space), for exceptMatcher evaluation.
     matcher_agents: FxHashMap<String, FxHashSet<String>>,
     matcher_clients: FxHashMap<String, FxHashSet<String>>,
-    /// [OPUS-4.8] sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
+    /// sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
     matcher_issuers: FxHashMap<String, FxHashSet<String>>,
 }
 
@@ -319,7 +319,7 @@ impl AuthIndex {
             if let Some((mode, is_allow)) = Mode::from_pred(p.as_str()) {
                 if let Term::NamedNode(g) = &t[2] {
                     let map = if is_allow { &mut ix.allow } else { &mut ix.deny };
-                    // [OPUS-4.8] sq-b7k7u: bucket the grant under its graph's origin.
+                    // sq-b7k7u: bucket the grant under its graph's origin.
                     let origin = crate::loader::iri_origin(g.as_str()).to_owned();
                     map.entry((subj, mode)).or_default().entry(origin).or_default().push(g.clone());
                 }
@@ -338,7 +338,7 @@ impl AuthIndex {
                             ix.matcher_clients.entry(subj).or_default().insert(o.as_str().to_owned());
                         }
                     }
-                    // [OPUS-4.8] sq-3jtd.6: the issuer-dimension matcher accept-set fact.
+                    // sq-3jtd.6: the issuer-dimension matcher accept-set fact.
                     "https://sparq.dev/ns/solidx#acceptsIssuerP" => {
                         if let Term::NamedNode(o) = &t[2] {
                             let set = ix.matcher_issuers.entry(subj).or_default();
@@ -354,18 +354,18 @@ impl AuthIndex {
                 ("effect", Term::NamedNode(o)) => entry.allow = o.as_str() == format!("{AUTH_NS}Allow"),
                 ("agent", Term::NamedNode(o)) => entry.agent = o.as_str().to_owned(),
                 ("client", Term::NamedNode(o)) => entry.client = o.as_str().to_owned(),
-                // [OPUS-4.8] sq-3jtd.6: the conditional grant's issuer head.
+                // sq-3jtd.6: the conditional grant's issuer head.
                 ("issuer", Term::NamedNode(o)) => entry.issuer = o.as_str().to_owned(),
                 ("mode", Term::NamedNode(o)) => entry.mode = Mode::from_mode_iri(o.as_str()),
                 ("graph", Term::NamedNode(o)) => entry.graph = Some(o.clone()),
                 ("exceptMatcher", Term::NamedNode(o)) => entry.except.push(o.as_str().to_owned()),
-                // [OPUS-4.8] sq-0q7n: the live-clock window bounds (xsd:dateTime literals).
+                // sq-0q7n: the live-clock window bounds (xsd:dateTime literals).
                 ("notBefore", Term::Literal(o)) => entry.not_before = Some(o.value().to_owned()),
                 ("notAfter", Term::Literal(o)) => entry.not_after = Some(o.value().to_owned()),
                 _ => {}
             }
         }
-        // [OPUS-4.8] sq-b7k7u: bucket each conditional grant under its target graph's
+        // sq-b7k7u: bucket each conditional grant under its target graph's
         // origin (empty-origin key when it has no target graph — such a grant is inert).
         for g in cond.into_values() {
             let origin = g.graph.as_ref().map(|n| crate::loader::iri_origin(n.as_str()).to_owned()).unwrap_or_default();
@@ -387,7 +387,7 @@ impl AuthIndex {
     /// All principals the session matches: the agent-dimension principals, plus, for each
     /// one, the minted `(agent, client)` pair (when a client is given), the minted
     /// `(agent, client, issuer)` triple (when an issuer is given — with `auth:AnyClient`
-    /// as the client component if no client was supplied), and the full triple. [OPUS-4.8]
+    /// as the client component if no client was supplied), and the full triple.
     /// sq-3jtd.6: ≤12 lookups (the pre-issuer ≤6 doubled by the issuer dimension).
     fn principals(s: &Session) -> Vec<String> {
         let agents = Self::agent_principals(s);
@@ -431,7 +431,7 @@ impl AuthIndex {
                 set.contains(ANY_CLIENT) || s.client.map(|c| set.contains(c)).unwrap_or(false)
             }
         };
-        // [OPUS-4.8] sq-3jtd.6: the issuer-dimension twin of the client check.
+        // sq-3jtd.6: the issuer-dimension twin of the client check.
         let issuer_ok = match self.matcher_issuers.get(matcher) {
             None => false,
             Some(set) => {
@@ -443,9 +443,9 @@ impl AuthIndex {
 
     /// Does a conditional grant's (agent, client, issuer) head apply to this session,
     /// AND — for a time-windowed grant — does the session's clock fall inside the window?
-    /// [OPUS-4.8] sq-3jtd.6: the issuer head is the twin of the client head — the grant's
+    /// sq-3jtd.6: the issuer head is the twin of the client head — the grant's
     /// `auth:AnyIssuer` matches any session, else the session's issuer must equal it.
-    /// [OPUS-4.8] sq-0q7n: the `auth:notBefore`/`auth:notAfter` window is re-checked
+    /// sq-0q7n: the `auth:notBefore`/`auth:notAfter` window is re-checked
     /// against `Session::now` here, so a lapsed window denies *this request* without
     /// waiting for a ledger refresh.
     fn cond_applies(&self, g: &ConditionalGrant, s: &Session) -> bool {
@@ -480,7 +480,7 @@ impl AuthIndex {
         self.accessible_impl(s, mode, None)
     }
 
-    /// [OPUS-4.8] sq-b7k7u (issue #1571): [`AuthIndex::accessible`] RESTRICTED to graphs
+    /// sq-b7k7u (issue #1571): [`AuthIndex::accessible`] RESTRICTED to graphs
     /// whose origin (`scheme://authority`) is `origin` — the same fail-closed
     /// `∪ allow ∖ ∪ deny` (+ conditional) computation, but visiting only that origin's
     /// buckets. It is exactly `accessible(s, mode)` filtered to `origin`
@@ -493,7 +493,7 @@ impl AuthIndex {
 
     /// Returns all origin strings present in this index's allow/deny/cond buckets (may
     /// yield duplicates; collect into a set for uniqueness). Used by `reindex_with`'s
-    /// diff-based invalidation to enumerate the union of old + new origins. [SONNET-4.6]
+    /// diff-based invalidation to enumerate the union of old + new origins.
     /// sq-b7k7u fix.
     pub(crate) fn origin_keys(&self) -> impl Iterator<Item = &str> {
         let a = self.allow.values().flat_map(|by_o| by_o.keys().map(String::as_str));
@@ -507,7 +507,7 @@ impl AuthIndex {
     /// allow and deny maps, and same canonical set of conditional grants.
     ///
     /// Used by `reindex_with`'s diff-based invalidation: if this returns `false` for an
-    /// origin, that origin's session-cache slice must be re-derived. [SONNET-4.6]
+    /// origin, that origin's session-cache slice must be re-derived.
     /// sq-b7k7u fix — no confinement lemma assumed.
     pub(crate) fn bucket_eq(&self, other: &AuthIndex, origin: &str) -> bool {
         // Compare (principal, mode) → graph sets for allow and deny at this origin.
@@ -534,7 +534,7 @@ impl AuthIndex {
         // Compare conditional grants: canonical STRUCTURED key per grant (sorted except
         // list), collected as a set to be order-independent.
         //
-        // [FABLE-5] sq-vhhl0 (PR #1585 re-review follow-up): the key was previously a
+        // sq-vhhl0 (PR #1585 re-review follow-up): the key was previously a
         // `|`/`,`-joined `format!` string, which is NOT injective — a comma is a legal
         // IRI character, so two distinct except-vectors could canonicalize identically
         // (`["a,b"]` vs `["a", "b"]`), letting `bucket_eq` report two genuinely different
@@ -583,7 +583,7 @@ impl AuthIndex {
     /// identical between `self` and `other`. These matcher maps are **not** origin-bucketed:
     /// a change in any matcher can affect conditional-grant outcomes in any origin, so a
     /// matcher difference triggers full cache invalidation in `reindex_with` (the
-    /// diff-based approach falls back to `Full` when matchers change). [SONNET-4.6]
+    /// diff-based approach falls back to `Full` when matchers change).
     /// sq-b7k7u fix.
     pub(crate) fn matchers_eq(&self, other: &AuthIndex) -> bool {
         self.matcher_agents == other.matcher_agents
@@ -617,10 +617,10 @@ impl AuthIndex {
 
     /// The shared accessible walk. `only == Some(o)` restricts every lookup to origin `o`'s
     /// bucket (a per-origin decision); `only == None` unions all buckets — byte-for-byte
-    /// the pre-partition audited result. [OPUS-4.8] sq-b7k7u.
+    /// the pre-partition audited result. sq-b7k7u.
     fn accessible_impl(&self, s: &Session, mode: Mode, only: Option<&str>) -> Vec<NamedNode> {
         let invalid = |v: Option<&str>| v.is_some_and(|x| !crate::loader::session_value_allowed(x));
-        // [OPUS-4.8] sq-3jtd.6: the issuer is a triple-principal ingredient too — a session
+        // sq-3jtd.6: the issuer is a triple-principal ingredient too — a session
         // issuer inside the reserved space could otherwise impersonate a minted triple.
         if invalid(s.agent) || invalid(s.client) || invalid(s.issuer) {
             return Vec::new();
@@ -661,7 +661,7 @@ impl AuthIndex {
 }
 
 /// Collect the graphs of a (principal, mode) origin-bucketed grant map into `sink`:
-/// every origin's graphs when `only == None`, else just origin `o`'s. [OPUS-4.8] sq-b7k7u.
+/// every origin's graphs when `only == None`, else just origin `o`'s. sq-b7k7u.
 fn extend_from_buckets(
     sink: &mut FxHashSet<NamedNode>,
     by_origin: &FxHashMap<String, Vec<NamedNode>>,
@@ -678,7 +678,7 @@ fn extend_from_buckets(
 }
 
 /// Does the live clock `now` fall inside a conditional grant's
-/// `[not_before, not_after]` window (both bounds inclusive)? [OPUS-4.8] sq-0q7n.
+/// `[not_before, not_after]` window (both bounds inclusive)? sq-0q7n.
 ///
 /// - A grant with NO window (`not_before == None && not_after == None`) admits any
 ///   session, including one with `now == None` — there is no clock dimension to check.
@@ -722,7 +722,7 @@ fn window_admits(not_before: Option<&str>, not_after: Option<&str>, now: Option<
 
 /// Order two `xsd:dateTime` lexical forms by the **real UTC instant** they denote
 /// (offset-aware), returning `None` when either is unparseable — the single source of
-/// truth for the window re-check's dateTime comparison. [OPUS-4.8] sq-0q7n.
+/// truth for the window re-check's dateTime comparison. sq-0q7n.
 ///
 /// With the `odrl-bridge` feature this delegates straight to
 /// [`sparq_policy::cmp_datetime`], so the window enforces on byte-for-byte the same
@@ -747,7 +747,7 @@ fn cmp_datetime_instant(x: &str, y: &str) -> Option<std::cmp::Ordering> {
 /// unparseable). The comparator the lean default build uses; under `odrl-bridge` the
 /// runtime path delegates to `sparq_policy::cmp_datetime` instead, so this and its parser
 /// chain are compiled there **only** as support for the `parity_with_sparq_policy_evaluator`
-/// test that proves the two never drift. [OPUS-4.8] sq-0q7n.
+/// test that proves the two never drift. sq-0q7n.
 #[cfg(any(not(feature = "odrl-bridge"), test))]
 fn cmp_datetime_instant_local(x: &str, y: &str) -> Option<std::cmp::Ordering> {
     Some(parse_utc_instant(x)?.cmp(&parse_utc_instant(y)?))
@@ -755,7 +755,7 @@ fn cmp_datetime_instant_local(x: &str, y: &str) -> Option<std::cmp::Ordering> {
 
 /// A point on the UTC timeline as `(days-since-epoch, nanoseconds-into-day)`, after
 /// applying the lexical form's timezone offset — `Ord` by derive *is* instant ordering.
-/// Mirrors `sparq_policy::eval::Instant`. [OPUS-4.8] sq-0q7n.
+/// Mirrors `sparq_policy::eval::Instant`. sq-0q7n.
 #[cfg(any(not(feature = "odrl-bridge"), test))]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct UtcInstant {
@@ -766,7 +766,7 @@ struct UtcInstant {
 /// Parse an `xsd:dateTime`/`xsd:date` lexical form into a UTC instant (std-only, no
 /// `chrono`/`time`). Accepts `YYYY-MM-DD[Thh:mm:ss[.frac]][Z|±hh:mm]`; a missing tz is
 /// UTC. Returns `None` for anything not matching this grammar (→ fail-closed). This is
-/// the feature-off twin of `sparq_policy`'s `parse_instant`. [OPUS-4.8] sq-0q7n.
+/// the feature-off twin of `sparq_policy`'s `parse_instant`. sq-0q7n.
 #[cfg(any(not(feature = "odrl-bridge"), test))]
 fn parse_utc_instant(s: &str) -> Option<UtcInstant> {
     let s = s.trim();
@@ -899,7 +899,7 @@ fn days_from_civil(year: i64, month: u32, dom: u32) -> Option<i64> {
 
 #[cfg(test)]
 mod window_tests {
-    //! [OPUS-4.8] sq-0q7n — soundness of the live-clock window predicate. The
+    //! sq-0q7n — soundness of the live-clock window predicate. The
     //! integration suite (`tests/odrl_bridge.rs`) covers the `lteq`/`notAfter` path
     //! end-to-end; these unit tests pin the `gteq`/`notBefore`, two-sided, and
     //! fail-closed corner cases directly.
@@ -943,7 +943,7 @@ mod window_tests {
         assert!(!window_admits(Some(T0), Some(T2), Some("2027-01-01T00:00:00Z")), "after → deny");
     }
 
-    // [OPUS-4.8] sq-0q7n — REGRESSION for the access-control fail-open the adversarial
+    // sq-0q7n — REGRESSION for the access-control fail-open the adversarial
     // verify flagged: the pre-fix `window_admits` compared `now`/bounds with raw lexical
     // `str::cmp`, so a request whose clock is lexically-inside but instant-OUTSIDE the
     // window was wrongly admitted (granting access after the window closed / before it
@@ -1000,7 +1000,7 @@ mod window_tests {
         assert!(!window_admits(None, Some(T2), Some("???")), "bad clock → deny");
     }
 
-    /// [OPUS-4.8] sq-0q7n — the feature-off fallback comparator MUST agree with the
+    /// sq-0q7n — the feature-off fallback comparator MUST agree with the
     /// canonical `sparq_policy::cmp_datetime` (the evaluator's instant normalizer) on
     /// the offset-sensitive cases, so the two builds can never diverge.
     #[cfg(feature = "odrl-bridge")]
@@ -1024,7 +1024,7 @@ mod window_tests {
 
 #[cfg(test)]
 mod origin_partition_tests {
-    //! [OPUS-4.8] sq-b7k7u (issue #1571) — the load-bearing equivalence of the
+    //! sq-b7k7u (issue #1571) — the load-bearing equivalence of the
     //! origin-partitioned index: `accessible(s, m)` is byte-for-byte the union over origins
     //! of `accessible_in_origin(s, m, o)`. If this ever diverged, the per-origin decide path
     //! and the scoped session-cache re-assembly would return a set different from a full
@@ -1105,7 +1105,7 @@ mod origin_partition_tests {
 
 #[cfg(test)]
 mod bucket_eq_tests {
-    //! [FABLE-5] sq-vhhl0 — injectivity of the conditional-grant canonical key used by
+    //! sq-vhhl0 — injectivity of the conditional-grant canonical key used by
     //! `bucket_eq` (the diff-based session-cache invalidation seam, sq-b7k7u). The old
     //! key joined the sorted except-matcher IRIs with `,` inside a formatted string; a
     //! comma is a legal IRI character, so `except: ["urn:m:a,urn:m:b"]` (ONE matcher

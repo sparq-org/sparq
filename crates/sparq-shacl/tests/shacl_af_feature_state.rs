@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-bif.10) Feature-state coverage for the SHACL Advanced Features
+//! (sq-bif.10) Feature-state coverage for the SHACL Advanced Features
 //! (`shacl-af`) surface — the part the bead calls out as unmet: `src/rules.rs`
 //! had only inline `#[cfg(test)]` tests (which compile and run ONLY with the
 //! feature on), so the AGENTS.md "tests in BOTH feature states" standard was not

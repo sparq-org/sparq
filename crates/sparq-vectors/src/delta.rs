@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-pi44) **Incremental add / remove / update of vectors** against an
+//! (sq-pi44) **Incremental add / remove / update of vectors** against an
 //! already-finalized [`VectorStore`](crate::store::VectorStore) — WITHOUT a full re-embed
 //! and file rebuild.
 //!
@@ -47,7 +47,7 @@
 //! the crate docs / the sq-pi44 follow-up bead. `compact` is the durability path today: it
 //! materializes the delta into a normal, validated `.spqv`.
 //!
-//! # [OPUS-4.8] (sq-7e50) Persisted on-disk delta sidecar (`.spqd`)
+//! # (sq-7e50) Persisted on-disk delta sidecar (`.spqd`)
 //!
 //! The in-RAM delta above is lost when the [`VectorStore`](crate::store::VectorStore) handle drops
 //! — [`compact`](crate::store::VectorStore::compact) was the only durability path. sq-7e50 adds a
@@ -98,17 +98,17 @@ use crate::fingerprint::{Fingerprint, FINGERPRINT_LEN};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::Id;
 
-/// [OPUS-4.8] (sq-7e50) First four bytes of every persisted `.spqd` delta sidecar file.
+/// (sq-7e50) First four bytes of every persisted `.spqd` delta sidecar file.
 pub const SPQD_MAGIC: [u8; 4] = *b"SPQD";
-/// [OPUS-4.8] (sq-7e50) Current `.spqd` format version.
+/// (sq-7e50) Current `.spqd` format version.
 pub const SPQD_VERSION: u32 = 1;
-/// [OPUS-4.8] (sq-7e50) Byte length of the `.spqd` header: magic(4) + version(4) + dim(4) +
+/// (sq-7e50) Byte length of the `.spqd` header: magic(4) + version(4) + dim(4) +
 /// append_count(8) + tomb_count(8) + reserved(4) + fingerprint(`FINGERPRINT_LEN`). All counts and
 /// the fingerprint are fixed-width little-endian, so a sidecar written on one machine decodes
 /// identically on another (the same cross-machine discipline as the `.spqv` header / fingerprint).
 const SPQD_HEADER_LEN: usize = 32 + FINGERPRINT_LEN;
 
-/// [OPUS-4.8] (sq-pi44) The in-RAM delta sidecar: vectors appended/updated and ids tombstoned
+/// (sq-pi44) The in-RAM delta sidecar: vectors appended/updated and ids tombstoned
 /// since the base store was built, plus the graph [`Fingerprint`] the delta is keyed against.
 ///
 /// An id is in AT MOST one of `appended` / `tombstones` at any time — adding/updating an id clears
@@ -157,7 +157,7 @@ impl VectorDelta {
         self.appended.is_empty() && self.tombstones.is_empty()
     }
 
-    /// [OPUS-4.8] (sq-7e50) Serializes the delta to the little-endian `.spqd` on-disk format (see
+    /// (sq-7e50) Serializes the delta to the little-endian `.spqd` on-disk format (see
     /// the module docs). `dim` is the base store's vector dimension — every appended vector MUST
     /// be exactly `dim` long (the in-RAM `add`/`update` validation guarantees this) so the body is
     /// a fixed `dim·4`-byte stride per append, and `from_bytes` can recompute the exact length.
@@ -203,7 +203,7 @@ impl VectorDelta {
         out
     }
 
-    /// [OPUS-4.8] (sq-7e50) Parses a `.spqd` delta sidecar from `bytes`, returning the reconstructed
+    /// (sq-7e50) Parses a `.spqd` delta sidecar from `bytes`, returning the reconstructed
     /// in-RAM [`VectorDelta`] (its `generation` set from the header fingerprint block) and the base
     /// `dim` it was written for (the caller checks `dim` against its base store).
     ///
@@ -303,7 +303,7 @@ impl VectorDelta {
 
 #[cfg(test)]
 mod tests {
-    // [OPUS-4.8] (sq-7e50) Focused unit tests for the `.spqd` serde: the round-trip preserves the
+    // (sq-7e50) Focused unit tests for the `.spqd` serde: the round-trip preserves the
     // logical delta (incl. the None/unbound generation), the bytes are deterministic regardless of
     // map iteration order, and the corruption paths the integration tests do not exercise directly
     // (a both-appended-and-tombstoned id) are rejected. The store-level open/save and the
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn a_zero_dimension_header_is_rejected() {
-        // [OPUS-4.8] dim==0 is a corrupt header (no valid append stride): the decoder must reject it
+        // dim==0 is a corrupt header (no valid append stride): the decoder must reject it
         // up front, never divide-by / produce a degenerate zero-width delta. A from-scratch builder
         // can never emit it (`to_bytes` is only called with the base store's dim ≥ 1), so this only
         // arises from a corrupt/forged sidecar — fail closed.
@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn a_trailing_garbage_file_is_rejected_as_a_length_mismatch() {
-        // [OPUS-4.8] The length guard rejects a LONGER file too (trailing garbage), not only a short
+        // The length guard rejects a LONGER file too (trailing garbage), not only a short
         // one — a sidecar with extra bytes after the declared body is corrupt, never silently
         // ignored (which would let a partial overwrite go undetected).
         let mut bytes = sample(Some(fp(4, 2, 7))).to_bytes(4);
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn a_non_finite_appended_component_is_rejected() {
-        // [OPUS-4.8] The in-RAM `add`/`update` path rejects non-finite vectors, so a `.spqd` carrying
+        // The in-RAM `add`/`update` path rejects non-finite vectors, so a `.spqd` carrying
         // one is corrupt — the decoder re-checks (a forged/corrupt file could carry a NaN/inf the
         // builder never would), and must reject it so a non-finite vector can never re-enter the store
         // through a replay and poison cosine. Forge a NaN into the single append's body.
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn a_duplicate_id_in_the_append_section_is_rejected() {
-        // [OPUS-4.8] An id may appear at most once per section. A file repeating an append id is
+        // An id may appear at most once per section. A file repeating an append id is
         // corrupt (the in-RAM map could never produce it) — reject rather than silently keep the last,
         // which would mask a corrupt sidecar. Forge two appends of id 5 by hand-building the body.
         let mut bytes = VectorDelta::new(Some(fp(1, 1, 1))).to_bytes(2);
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn a_duplicate_id_in_the_tombstone_section_is_rejected() {
-        // [OPUS-4.8] Same invariant for tombstones: a repeated tombstone id is a corrupt file.
+        // Same invariant for tombstones: a repeated tombstone id is a corrupt file.
         let mut bytes = VectorDelta::new(Some(fp(1, 1, 1))).to_bytes(2);
         bytes[12..20].copy_from_slice(&0u64.to_le_bytes()); // append_count = 0
         bytes[20..28].copy_from_slice(&2u64.to_le_bytes()); // tomb_count   = 2
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn an_id_both_appended_and_tombstoned_is_rejected_as_corrupt() {
-        // [OPUS-4.8] The load-bearing delta invariant is "an id is in AT MOST one of appended /
+        // The load-bearing delta invariant is "an id is in AT MOST one of appended /
         // tombstoned" — `add`/`update` clears the tombstone and `remove` drops the append, so the two
         // sets are always disjoint. A `.spqd` that lists the same id in BOTH sections is corrupt
         // (no valid in-RAM delta could have produced it), and the decoder must reject it rather than

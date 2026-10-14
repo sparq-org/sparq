@@ -1,4 +1,4 @@
-//! First-party CORS origin allowlist — server configuration. [OPUS-4.8] (sq-o7o0)
+//! First-party CORS origin allowlist — server configuration. (sq-o7o0)
 //!
 //! ASVS V14.5.3 wants a deliberate, documented CORS decision. `sparq-server` is a
 //! SPARQL *data API* (it serves SPARQL-results JSON/XML/CSV/TSV and RDF, never an

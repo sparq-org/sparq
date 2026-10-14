@@ -550,7 +550,7 @@ impl ClassFeatureIdx {
     }
 }
 
-/// [OPUS-4.8] Conservative detection of OWL feature predicates/classes that are reachable through
+/// Conservative detection of OWL feature predicates/classes that are reachable through
 /// RDFS *before* any feature is asserted directly. The fast paths bypass the OWL fixpoint when no
 /// OWL feature is present, but an OWL feature can be *entailed* by RDFS first:
 ///   - rdfs7:  `(:p rdfs:subPropertyOf owl:sameAs), (:a :p :b)` ⊢ `(:a owl:sameAs :b)` — a feature
@@ -601,7 +601,7 @@ fn rdfs_reachable_features(
     (pred_hit, type_hit)
 }
 
-/// [OPUS-4.8] Strictly-transitive (≥1 hop) reachability of any node in `targets` from `start` over
+/// Strictly-transitive (≥1 hop) reachability of any node in `targets` from `start` over
 /// `adj`. The start node itself is NOT a hit even if it is a target — a feature reached only by
 /// being directly used is not "RDFS-derived". This is deliberately non-reflexive.
 fn reaches(start: Id, adj: &FxHashMap<Id, Vec<Id>>, targets: &FxHashSet<Id>) -> bool {
@@ -650,7 +650,7 @@ fn owl_uses_features(triples: &[[Id; 3]], v: &Vocab, o: &Owl) -> bool {
     if triples.iter().any(|&[_, p, ob]| preds.contains(&p) || (p == v.ty && types.contains(&ob))) {
         return true;
     }
-    // [OPUS-4.8] Also fall back to the fixpoint when an OWL feature predicate/class is reachable
+    // Also fall back to the fixpoint when an OWL feature predicate/class is reachable
     // through RDFS subPropertyOf/subClassOf (rdfs7/rdfs9) — the single-pass path would otherwise
     // emit the RDFS-derived feature triple without doing the equality/property reasoning. See 1402.
     let (pred_hit, type_hit) = rdfs_reachable_features(triples, v, &preds, &types);
@@ -685,7 +685,7 @@ fn monotone_only(triples: &[[Id; 3]], v: &Vocab, o: &Owl) -> Option<crate::rdfs:
     let recursive_types: FxHashSet<Id> =
         [o.transitive, o.functional, o.inv_functional].into_iter().collect();
 
-    // [OPUS-4.8] An OWL feature can also be introduced by RDFS entailment (rdfs7/rdfs9), e.g.
+    // An OWL feature can also be introduced by RDFS entailment (rdfs7/rdfs9), e.g.
     // `(:p rdfs:subPropertyOf owl:sameAs)` (recursive) or `(:C rdfs:subClassOf owl:SymmetricProperty)`
     // (monotone). The mono descriptor below is built from DIRECTLY-asserted feature axioms only, so
     // an RDFS-reachable feature — recursive OR monotone — would be silently dropped. Force the full
@@ -750,7 +750,7 @@ pub fn materialize_owl_rl(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize 
     pre + added
 }
 
-/// [FABLE-5] sq-afun3 (second increment of kern/quoted-triple-infer): the OWL 2 RL
+/// sq-afun3 (second increment of kern/quoted-triple-infer): the OWL 2 RL
 /// (+ RDFS) closure with the quoted-triple reify layer driven in an explicit
 /// [`ReifyMode`](crate::reify::ReifyMode). [`materialize_owl_rl`] is exactly
 /// `ReifyMode::Bridge`; `ReifyMode::DestructureOnly` is the STRICT-OPACITY variant —
@@ -1012,7 +1012,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
     let mut out: FxHashMap<Id, FxHashMap<Id, Vec<Id>>> = FxHashMap::default();
     let mut inc: FxHashMap<Id, FxHashMap<Id, Vec<Id>>> = FxHashMap::default();
     build_adjacency(&all, &need, &mut out, &mut inc);
-    // [SONNET-4.6] sq-qonbz.2 — under `substrate-join`, the `out`/`inc` FxHashMap adjacency
+    // sq-qonbz.2 — under `substrate-join`, the `out`/`inc` FxHashMap adjacency
     // probes are replaced by the persistent `DeltaTable`-backed `DeltaAdj`. The FxHashMaps
     // above are still updated by `commit_serial`/`commit_candidates` (they are maintained but
     // never read — the probes below go through `adj` instead). `adj` is built here from the
@@ -1104,7 +1104,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
             }
             // --- prp-fp / prp-ifp (delta-driven; see the block comment above) --------
             if ax.functional.contains(&p) {
-                // [SONNET-4.6] sq-qonbz.2: under `substrate-join` probe through DeltaAdj
+                // sq-qonbz.2: under `substrate-join` probe through DeltaAdj
                 // (persistent build-side table, keyed on [p, s]); default: plain FxHashMap.
                 #[cfg(not(feature = "substrate-join"))]
                 if let Some(ys) = out.get(&p).and_then(|m| m.get(&s)) {
@@ -1118,7 +1118,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
                 });
             }
             if ax.inv_functional.contains(&p) {
-                // [SONNET-4.6] sq-qonbz.2: under `substrate-join` probe through DeltaAdj
+                // sq-qonbz.2: under `substrate-join` probe through DeltaAdj
                 // (persistent build-side table, keyed on [p, o]); default: plain FxHashMap.
                 #[cfg(not(feature = "substrate-join"))]
                 if let Some(xs) = inc.get(&p).and_then(|m| m.get(&obj)) {
@@ -1140,7 +1140,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
                 // backward: full ⋈ Δgen — a new generator edge extends every existing path
                 // ending at its start (incl. same-round delta paths, already in `inc`).
                 if gen.set.contains(&[s, p, obj]) {
-                    // [SONNET-4.6] sq-qonbz.2: probe DeltaAdj backward table under
+                    // sq-qonbz.2: probe DeltaAdj backward table under
                     // `substrate-join`; plain FxHashMap under default.
                     #[cfg(not(feature = "substrate-join"))]
                     if let Some(ws) = inc.get(&p).and_then(|m| m.get(&s)) {
@@ -1580,7 +1580,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
             m
         };
         t_commit += __t.elapsed().as_secs_f64();
-        // [SONNET-4.6] sq-qonbz.2 — extend DeltaAdj with the newly-committed facts whose
+        // sq-qonbz.2 — extend DeltaAdj with the newly-committed facts whose
         // predicate is in `need`. This mirrors the `or_default().push()` updates that
         // `commit_serial`/`commit_candidates` apply to `out`/`inc` above. Per-round cost is
         // O(|new_delta|) — the same asymptotic cost as the FxHashMap path.
@@ -1600,7 +1600,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
             need =
                 ax.transitive.iter().chain(ax.functional.iter()).chain(ax.inv_functional.iter()).copied().collect();
             build_adjacency(&all, &need, &mut out, &mut inc);
-            // [SONNET-4.6] sq-qonbz.2 — rebuild DeltaAdj from the recanonicalised triple set
+            // sq-qonbz.2 — rebuild DeltaAdj from the recanonicalised triple set
             // (mirrors the `build_adjacency` call above; union-find merge rewrites ids, so the
             // whole index must be rebuilt from scratch — same epoch as the FxHashMap path).
             #[cfg(feature = "substrate-join")]
@@ -1619,7 +1619,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
         } else if new_delta.is_empty() {
             break;
         } else {
-            // [OPUS-4.8] A property/class axiom can be DERIVED during the fixpoint (e.g. rdfs7
+            // A property/class axiom can be DERIVED during the fixpoint (e.g. rdfs7
             // makes `:p rdfs:subPropertyOf owl:sameAs` emit nothing but rdfs9 derives
             // `:p rdf:type owl:SymmetricProperty`, or an axiom predicate arrives via subPropertyOf).
             // The per-fact emitter joins assertions against the property axiom maps (ax.*), which
@@ -1649,7 +1649,7 @@ fn owl_rl_closure(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
                     .copied()
                     .collect();
                 build_adjacency(&all, &need, &mut out, &mut inc);
-                // [SONNET-4.6] sq-qonbz.2 — rebuild DeltaAdj when a new property axiom arrives
+                // sq-qonbz.2 — rebuild DeltaAdj when a new property axiom arrives
                 // (mirrors the `build_adjacency` call above; same epoch as the FxHashMap path).
                 #[cfg(feature = "substrate-join")]
                 adj.rebuild(&all, &need);
@@ -2290,7 +2290,7 @@ mod tests {
         );
     }
 
-    // [SONNET-4.6] sq-y4ll5: direct production-path coverage for prp-ifp and the
+    // sq-y4ll5: direct production-path coverage for prp-ifp and the
     // OWL-RL guard against the excluded ReflexiveObjectProperty feature.
     #[test]
     fn sameas_and_inverse_functional() {
@@ -2989,7 +2989,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-350ms (epic sq-pbz04) — OWL 2 RL COMPLETENESS HARDENING.
+    // sq-350ms (epic sq-pbz04) — OWL 2 RL COMPLETENESS HARDENING.
     //
     // The single-rule unit tests above each fire ONE rule on an already-asserted
     // premise. The four guards below pin the harder MULTI-ROUND interactions
@@ -3107,7 +3107,7 @@ mod tests {
         assert!(set.contains(&[a, p3, b]), "prp-eqp across a 2-link equivalence chain");
     }
 
-    // [OPUS-4.8] sq-350ms — SOUNDNESS guard (the other half of "completeness
+    // sq-350ms — SOUNDNESS guard (the other half of "completeness
     // hardening": adding coverage must never tip the closure into OVER-inference).
     // The conclusions below are the documented NON-RL divergences whose shape
     // is closest to something a careless extra rule might wrongly derive — a
@@ -3119,7 +3119,7 @@ mod tests {
     // pinned here as in-crate soundness guards so the divergence rationale and the
     // code can never silently disagree.)
     //
-    // [SONNET-4.6] sq-qs485 extends the same pattern to two further entries of that
+    // sq-qs485 extends the same pattern to two further entries of that
     // divergence list, chosen because a careless extra rule could plausibly
     // over-derive their conclusions: owl2-rl-rules-ifp-differentFrom (the prp-ifp
     // contrapositive, symmetric to the prp-fp case above) and
@@ -3296,7 +3296,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] Regression for review 1402: an OWL feature predicate introduced via RDFS
+    // Regression for review 1402: an OWL feature predicate introduced via RDFS
     // subPropertyOf entailment (rdfs7) must NOT take the no-feature fast path — the derived
     // owl:sameAs must drive eq-rep substitution, not be emitted as an ordinary triple.
     #[test]
@@ -3325,7 +3325,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] Regression for review 1402: an OWL feature CLASS introduced via RDFS subClassOf
+    // Regression for review 1402: an OWL feature CLASS introduced via RDFS subClassOf
     // entailment (rdfs9) must NOT take a fast path that drops the feature — a subclass of
     // owl:SymmetricProperty must yield symmetric reasoning on its instances.
     #[test]
@@ -3352,7 +3352,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] Guard: directly-asserted monotone features (inverseOf, equivalentClass) must STILL
+    // Guard: directly-asserted monotone features (inverseOf, equivalentClass) must STILL
     // take the monotone fast path — the non-reflexive RDFS-reachability check must not misfire on a
     // feature predicate that is merely *used* (only proper RDFS superproperties count).
     #[test]
@@ -3376,7 +3376,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-wtjol (sq-qcnn): RDF-list helper + targeted clash tests that pin the
+    // sq-wtjol (sq-qcnn): RDF-list helper + targeted clash tests that pin the
     // list-PAIR-enumeration arithmetic in `inconsistencies()` (owl.rs §AllDisjointProperties /
     // §AllDisjointClasses / §AllDifferent). Each assertion is a hand-derived OWL-RL entailment
     // (prp-adp, cax-adc, eq-diff2/3 of the W3C OWL 2 RL/RDF rules), NOT a mere line-exercise:

@@ -124,8 +124,8 @@ pub enum MpcError {
         considered: usize,
     },
     /// **The batched IT-MAC check FAILED** (`σ ≠ 0`) just before a value was about
-    /// to be opened — the catch-everything step of honest-majority
-    /// malicious-with-abort security (design `research/mpc-malicious-security-design.md`
+    /// to be opened — the integrity step of the honest-majority
+    /// IT-MAC tier (tamper-evident with abort, NOT AXIS-1 `Malicious` today) (design `research/mpc-malicious-security-design.md`
     /// §2.5, sq-km34.4 / sq-ka8m). Every authenticated value carries an IT-MAC
     /// `m_x = α·x` under a session-global, secret-shared `[α]` no party knows; the
     /// batched check opens a leakage-free `σ = Σ χ_j·[m_{y_j}] − (Σ χ_j·y_j)·[α]`,

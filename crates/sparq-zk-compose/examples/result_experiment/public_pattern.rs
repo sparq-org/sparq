@@ -1,4 +1,4 @@
-// [OPUS-5.5] beadzkp-15.1.1: synthetic, NONcanonical v1/v4 public-pattern ablation.
+// beadzkp-15.1.1: synthetic, NONcanonical v1/v4 public-pattern ablation.
 //! Pairs the baseline version-one relation with the opt-in version-four relation.
 //!
 //! Both arms consume identical query bytes, released mappings, signed synthetic

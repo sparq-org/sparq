@@ -1,4 +1,4 @@
-// [OPUS-5] sq-wz99x — CROSS-VECTORS for the DUAL-LEAF `xsd:dateTime` / `xsd:date`
+// sq-wz99x — CROSS-VECTORS for the DUAL-LEAF `xsd:dateTime` / `xsd:date`
 //! value lane. The circuit half of the §13 dateTime/date pair (host half:
 //! `sq-we9vs`, `sparq_zk::dual_leaf_datetime::{encode_datetime, encode_date}`),
 //! mirroring the boolean-lane pair's vector shape.

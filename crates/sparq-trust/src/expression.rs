@@ -90,7 +90,7 @@
 //! internally re-audited with **external accredited-cryptographer sign-off
 //! PENDING** (`sq-qhy4`); `sparq-mpc` is honest-majority semi-honest only.
 //!
-//! [FABLE-5] sq-6syab.4 (epic sq-6syab; issue #1592). 🤖 SPARQ agent —
+//! sq-6syab.4 (epic sq-6syab; issue #1592). 🤖 SPARQ agent —
 //! trust-expression holder-side contract evaluation.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};

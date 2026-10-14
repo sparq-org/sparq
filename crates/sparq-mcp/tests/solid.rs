@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-u16eq — end-to-end tests for the pod-backed MCP server (feature
+//! sq-u16eq — end-to-end tests for the pod-backed MCP server (feature
 //! `solid`): LDP resource/container CRUD tools over a real `PodStore` with a real
 //! materialized WAC view, driven through the actual JSON-RPC dispatch core.
 //!
@@ -196,7 +196,7 @@ fn resource_get_rejects_an_unservable_accept_instead_of_coercing() {
     }
 }
 
-// ── [SONNET-4.6] sq-wbsf5: `accept` content negotiation (draft §6.4) ──
+// ── sq-wbsf5: `accept` content negotiation (draft §6.4) ──
 
 #[test]
 fn resource_get_serves_turtle_when_accept_asks_for_it() {
@@ -314,7 +314,7 @@ fn an_unservable_accept_answers_the_same_whether_the_resource_exists_or_not() {
 
 #[test]
 fn resource_put_refuses_a_non_rdf_body_and_names_the_scope_out() {
-    // [SONNET-4.6] sq-wbsf5 — the DECIDED non-RDF story: binary resources are scoped out,
+    // sq-wbsf5 — the DECIDED non-RDF story: binary resources are scoped out,
     // and the refusal says so rather than looking like a missing parser. If a blob path is
     // ever added this test is the one that must be rewritten, deliberately.
     let mut s = server_for(ALICE, true);
@@ -537,7 +537,7 @@ fn query_tool_is_session_scoped() {
     );
 }
 
-/// [SONNET-4.6] sq-8n6iv — the aggregate tools are session-scoped exactly as `query` is.
+/// sq-8n6iv — the aggregate tools are session-scoped exactly as `query` is.
 /// The base server's `stats` counts the WHOLE graph; if the pod server's did, alice's
 /// totals would include bob's `secret/` documents — an aggregate leak that no
 /// per-resource check catches, because no resource was read.
@@ -1211,7 +1211,7 @@ fn initialize_reports_the_pod_server_name() {
     assert!(resp["result"]["protocolVersion"].is_string());
 }
 
-// [SONNET-4.6] sq-bvnqm: the pod server negotiates the protocol version exactly
+// sq-bvnqm: the pod server negotiates the protocol version exactly
 // like the base server — accept a supported proposal, offer the latest otherwise.
 #[test]
 fn pod_initialize_negotiates_the_protocol_version() {
@@ -1232,7 +1232,7 @@ fn pod_initialize_negotiates_the_protocol_version() {
     );
 }
 
-// [OPUS-5] gh #2497: the pod server shares the base server's framing core, so it
+// gh #2497: the pod server shares the base server's framing core, so it
 // receives JSON-RPC 2.0 §6 batches too — the precondition for negotiating 2025-03-26,
 // the one revision that requires them. Authorization is unchanged inside a batch: a
 // batched read of a forbidden document is refused exactly as a single one is.
@@ -1272,7 +1272,7 @@ fn pod_all_notification_batch_gets_no_response() {
 }
 
 // ───────── Class N: the resources surface + notifications (draft §8/§10) ─────────
-// [SONNET-4.6] sq-cmjmr. Load-bearing invariants, each red under the matching mutation:
+// sq-cmjmr. Load-bearing invariants, each red under the matching mutation:
 // - the `resources` capability is declared WITH `subscribe: true`;
 // - `resources/list` shows exactly the documents this session may read;
 // - `resources/subscribe` is authorized and non-disclosing (probe-proof);

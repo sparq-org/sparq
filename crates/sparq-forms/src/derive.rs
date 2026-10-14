@@ -1,5 +1,5 @@
 //! The derivation engine: (data graph, shapes graph, focus node, options) →
-//! [`FormDescription`]. [FABLE-5] sq-lsp7k.1.1
+//! [`FormDescription`]. sq-lsp7k.1.1
 
 use crate::description::{
     Constraints, FormDescription, FormField, FormGroup, FormValue, GroupKind, Mode, ShapeChoice,
@@ -50,7 +50,7 @@ pub(crate) fn applicable(
                 Target::Class(c) | Target::ImplicitClass(c) if data.is_instance_of(focus, c) => {
                     Some(ShapeVia::TargetClass)
                 }
-                // [OPUS-4.8] sq-vfcxv: predicate targets DO drive applicability —
+                // sq-vfcxv: predicate targets DO drive applicability —
                 // the focus node is a subject (resp. object) of the predicate in
                 // the data graph — but rank below the class-based rationales.
                 Target::SubjectsOf(p) if !data.objects(focus, p).is_empty() => {
@@ -70,7 +70,7 @@ pub(crate) fn applicable(
             }
         }
         // dash:applicableToClass outranks the predicate targets, so it is still
-        // consulted when only one of those matched. [OPUS-4.8] sq-vfcxv
+        // consulted when only one of those matched. sq-vfcxv
         if via.is_none_or(|v| via_rank(v) > via_rank(ShapeVia::ApplicableToClass))
             && shapes
                 .objects(&shape.node, &dash("applicableToClass"))
@@ -99,7 +99,7 @@ pub(crate) fn applicable(
 /// Switcher strength of a rationale — LOWER sorts first. An explicit node
 /// target beats a class target, which beats `dash:applicableToClass`, which
 /// beats the predicate targets (`sh:targetSubjectsOf` then
-/// `sh:targetObjectsOf`). [OPUS-4.8] sq-vfcxv
+/// `sh:targetObjectsOf`). sq-vfcxv
 fn via_rank(via: ShapeVia) -> u8 {
     match via {
         ShapeVia::TargetNode => 0,
@@ -160,7 +160,7 @@ fn normalize_form(form: &mut FormDescription, names: &mut std::collections::Hash
             }
             normalize_constraints(&mut f.constraints, names);
             // sh:defaultValue may (degenerately) be a blank node — keep the
-            // deterministic-label contract. [FABLE] sq-lsp7k.1.5
+            // deterministic-label contract. sq-lsp7k.1.5
             if let Some(dv) = &mut f.default_value {
                 normalize_ref(dv, names);
             }
@@ -420,7 +420,7 @@ fn build_field(
         .collect();
 
     // ---- dash presentation flags (additive; absent statements leave the ----
-    // ---- description exactly as before). [FABLE] sq-lsp7k.1.5           ----
+    // ---- description exactly as before). sq-lsp7k.1.5           ----
     let hidden = bool_object(shapes, &prop.node, &dash("hidden"));
     let read_only = bool_object(shapes, &prop.node, &dash("readOnly"));
     let default_value = shapes
@@ -439,7 +439,7 @@ fn build_field(
         order: order_of(shapes, &prop.node),
         required: constraints.min_count.is_some_and(|c| c >= 1),
         multi: constraints.max_count != Some(1),
-        // dash:readOnly true forces read-only even in edit mode. [FABLE]
+        // dash:readOnly true forces read-only even in edit mode.
         editable: opts.mode == Mode::Edit && !read_only,
         hidden,
         default_value,
@@ -502,7 +502,7 @@ fn other_fields(
                 multi: true,
                 editable: false, // off-shape triples are ALWAYS read-only
                 hidden: false,      // presentation flags live on property shapes
-                default_value: None, // [FABLE] sq-lsp7k.1.5
+                default_value: None, // sq-lsp7k.1.5
                 widget: WidgetChoice {
                     editor: None,
                     viewer: viewer_res.selected.clone(),
@@ -621,7 +621,7 @@ fn field_label(shapes: &GraphView, prop: &Shape, path: &Path) -> String {
     render_path(path)
 }
 
-/// [GPT-5.6] Canonical field/result key for a parsed SHACL property path.
+/// Canonical field/result key for a parsed SHACL property path.
 pub(crate) fn render_path(path: &Path) -> String {
     path.to_sparql_property_path()
         .unwrap_or_else(|| path.to_turtle())
@@ -658,7 +658,7 @@ fn literal_object(g: &GraphView, node: &Term, pred: &str) -> Option<String> {
 }
 
 /// `true` iff the node declares `<pred> true` (lexical `true`, matching the
-/// `dash:singleLine` handling in `constraints_of`). [FABLE-5] sq-lsp7k.1.5
+/// `dash:singleLine` handling in `constraints_of`). sq-lsp7k.1.5
 fn bool_object(g: &GraphView, node: &Term, pred: &str) -> bool {
     literal_object(g, node, pred).is_some_and(|v| v == "true")
 }

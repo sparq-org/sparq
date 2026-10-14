@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-7d3dj.34.2.2 — differential streaming-equivalence harness for the
+//! sq-7d3dj.34.2.2 — differential streaming-equivalence harness for the
 //! SELECT-JSON emit core (`exec::eval_select_json_emit`).
 //!
 //! 🤖 SPARQ agent — this is the design record's §10 B2 deliverable

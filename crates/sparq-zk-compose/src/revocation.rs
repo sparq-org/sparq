@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-3e5 + sq-h2v: hidden-index revocation host-side helpers.
+// sq-3e5 + sq-h2v: hidden-index revocation host-side helpers.
 //! Host-side commitment + witness machinery for the hidden-index revocation
 //! proof (sq-3e5 / sq-h2v). The in-circuit relation is
 //! `zk/compose/compose_core/src/revoke.nr`; this module is its Rust mirror:
@@ -25,7 +25,7 @@
 //!   [`StatusListSnapshot::bit`] — fail-closed, mirroring the verifier.
 //!
 //! # Scaling (sq-hwe): sparse builder, dense-identical roots
-//! [OPUS-4.8] sq-hwe: [`merkle_root`] / [`merkle_witness`] are SPARSE — they do
+//! sq-hwe: [`merkle_root`] / [`merkle_witness`] are SPARSE — they do
 //! NOT materialise `2^depth` leaves. A StatusList2021 list is overwhelmingly
 //! uniform (a credential is live = bit unset; the revoked set `S` is tiny), so
 //! the tree is dominated by all-ZERO subtrees in the covered region and all-ONE
@@ -46,7 +46,7 @@
 //! the dense oracle in the unit tests.
 //!
 //! # The sq-6qe / sq-kndw ACCEPTED-SET anchor + FULLY-HIDDEN witness
-//! [OPUS-5] [`AcceptedStatusEntry`] / [`accepted_set_leaf`] / [`accepted_set_root`]
+//! [`AcceptedStatusEntry`] / [`accepted_set_leaf`] / [`accepted_set_root`]
 //! / [`accepted_set_witness`] are the host mirror of the sub-option-A accepted-set
 //! commitment in `research/zk-statuslist-hide-iri-version.md` §3 — the relying
 //! party commits every `(list, version, status_list_root)` triple it currently
@@ -94,7 +94,7 @@ fn leaf(snapshot: &StatusListSnapshot, index: u64) -> Fr {
     Fr::from(u64::from(snapshot.bit(index)))
 }
 
-/// [OPUS-4.8] sq-hwe: precomputed roots of UNIFORM subtrees, one per height. The
+/// sq-hwe: precomputed roots of UNIFORM subtrees, one per height. The
 /// sparse builder folds only the subtrees that contain a non-default leaf; every
 /// other subtree's root is read from here in `O(1)`.
 ///
@@ -127,7 +127,7 @@ impl SubtreeDefaults {
     }
 }
 
-/// [OPUS-4.8] sq-hwe: sparse root of the height-`h` subtree covering leaf indices
+/// sq-hwe: sparse root of the height-`h` subtree covering leaf indices
 /// `[lo, lo + 2^h)`, given the snapshot and the precomputed uniform-subtree roots.
 ///
 /// `set_after` is the first leaf index past the snapshot's covered bits
@@ -175,7 +175,7 @@ fn sparse_subtree_root(
     h2(left, right)
 }
 
-/// [OPUS-4.8] sq-hwe: whether ANY status bit in `[lo, hi)` is set, scanning the
+/// sq-hwe: whether ANY status bit in `[lo, hi)` is set, scanning the
 /// snapshot's bytes (not `bit()`-per-index) and short-circuiting on the first set
 /// bit. Caller guarantees `hi <= 8 * bits.len()` (the covered region), so every
 /// byte touched exists. Used by the sparse builder's all-zero fast path.
@@ -214,7 +214,7 @@ fn any_bit_set(snapshot: &StatusListSnapshot, lo: u64, hi: u64) -> bool {
 /// (the trust anchor the proof's public root is checked against) and what the
 /// PROVER computes over the list it holds.
 ///
-/// [OPUS-4.8] sq-hwe: computed by the SPARSE builder (`sparse_subtree_root`) —
+/// sq-hwe: computed by the SPARSE builder (`sparse_subtree_root`) —
 /// `O(S * depth + depth)` host work / `O(S * depth)` memory for `S` set bits,
 /// INDEPENDENT of `2^depth`, so production depths (2^17+) are supported without a
 /// dense full-size builder. The result is BIT-IDENTICAL to the dense fold (same
@@ -231,7 +231,7 @@ pub fn merkle_root(snapshot: &StatusListSnapshot, depth: u32) -> Option<Fr> {
     Some(sparse_subtree_root(snapshot, &defaults, set_after, 0, depth))
 }
 
-// [GPT-6] Both roots and paths must cover the whole byte-sized snapshot. Checking
+// Both roots and paths must cover the whole byte-sized snapshot. Checking
 // before any hashing also protects accepted-policy and hidden-reference callers.
 fn covered_bits(snapshot: &StatusListSnapshot, depth: u32) -> Option<u64> {
     if depth > 31 {
@@ -241,7 +241,7 @@ fn covered_bits(snapshot: &StatusListSnapshot, depth: u32) -> Option<u64> {
     (bits <= (1u64 << depth)).then_some(bits)
 }
 
-/// [OPUS-4.8] sq-hwe: the ORIGINAL dense `O(2^depth)` Merkle-root builder, retained
+/// sq-hwe: the ORIGINAL dense `O(2^depth)` Merkle-root builder, retained
 /// ONLY as the cross-check ORACLE for [`merkle_root`]'s sparse output in tests. It
 /// materialises all `2^depth` leaves and folds them pairwise, so it is unusable at
 /// production depths — never call it on the hot path. `merkle_root` MUST return a
@@ -285,7 +285,7 @@ pub struct MerkleWitness {
 /// range-bounds the index), `depth > 31`, or the snapshot exceeds the tree's
 /// bit capacity. As for [`merkle_root`], oversized snapshots are never truncated.
 ///
-/// [OPUS-4.8] sq-hwe: SPARSE. The sibling at level `k` is the root of the
+/// sq-hwe: SPARSE. The sibling at level `k` is the root of the
 /// height-`k` subtree hanging off the OTHER side of the path node at that level;
 /// each is computed by `sparse_subtree_root` (which short-circuits uniform
 /// subtrees against the precomputed defaults), so the whole authentication path is
@@ -320,7 +320,7 @@ pub fn merkle_witness(snapshot: &StatusListSnapshot, depth: u32, index: u64) -> 
 /// MUST match `revoke_unset_d{depth}/src/main.nr`: challenge, root,
 /// index_commitment (public); index, bit, blinding, siblings (private).
 ///
-/// [OPUS-4.8] sq-ayv: the member now binds a HIDING index commitment. The
+/// sq-ayv: the member now binds a HIDING index commitment. The
 /// `index_commitment` PUBLIC input is recomputed in-circuit from `index` +
 /// `blinding` and byte-matched by the verifier against the ISSUER-SIGNED
 /// commitment, so the index proven unset is provably the one the issuer committed
@@ -351,7 +351,7 @@ pub fn revoke_prover_toml(
 }
 
 // =====================================================================
-// [OPUS-5] sq-6qe: the ACCEPTED-SET commitment (host side).
+// sq-6qe: the ACCEPTED-SET commitment (host side).
 //
 // The relying party's set of `(status list IRI, version, status-list Merkle root)`
 // triples it currently trusts, committed as ONE Poseidon2 Merkle root. This is the
@@ -368,7 +368,7 @@ pub fn revoke_prover_toml(
 // audited (sq-qhy4).
 // =====================================================================
 
-/// [OPUS-5] sq-6qe: one entry of the relying party's ACCEPTED SET — a
+/// sq-6qe: one entry of the relying party's ACCEPTED SET — a
 /// `(status list IRI, version, status-list Merkle root)` triple it trusts.
 ///
 /// The relying party builds these from its OWN authoritative, freshness-curated
@@ -390,7 +390,7 @@ pub struct AcceptedStatusEntry {
     pub status_list_root: Fr,
 }
 
-/// [OPUS-5] sq-6qe: the accepted-set Merkle LEAF for one entry —
+/// sq-6qe: the accepted-set Merkle LEAF for one entry —
 /// [`sparq_zk::sig::accepted_status_leaf`] over the field-mapped IRI. The host and
 /// the future in-circuit leaf recompute the SAME hash from the same three inputs,
 /// so there is one source of truth and no host/circuit drift.
@@ -430,7 +430,7 @@ fn accepted_leaves(entries: &[AcceptedStatusEntry], set_depth: u32) -> Option<Ve
     Some(entries.iter().map(accepted_set_leaf).collect())
 }
 
-/// [OPUS-5] sq-6qe: the ACCEPTED-SET Merkle root over `entries` at depth
+/// sq-6qe: the ACCEPTED-SET Merkle root over `entries` at depth
 /// `set_depth` — the relying party's committed liveness policy, and the public
 /// input the future fully-hidden revocation proof is bound to.
 ///
@@ -454,7 +454,7 @@ pub fn accepted_set_root(entries: &[AcceptedStatusEntry], set_depth: u32) -> Opt
     )
 }
 
-/// [OPUS-5] sq-6qe: the PROVER's accepted-set membership path for `index` — the
+/// sq-6qe: the PROVER's accepted-set membership path for `index` — the
 /// sibling at each level, BOTTOM-UP (level 0 = leaves), length `set_depth`. Folds
 /// to [`accepted_set_root`] under the circuit's fold, so it is the private witness
 /// the future member consumes alongside the private `(list_id, version,
@@ -475,7 +475,7 @@ pub fn accepted_set_witness(
     )
 }
 
-/// [OPUS-5] sq-kndw: the PROVER's complete private witness for the fully-hidden
+/// sq-kndw: the PROVER's complete private witness for the fully-hidden
 /// revocation member `revoke_hidden_ref_d{depth}_a{set_depth}` — the accepted-set
 /// half (which slot the credential's `(list, version)` occupies, its path, and the
 /// `status_list_root` the leaf binds) plus the status-list half (the leaf bit and
@@ -496,7 +496,7 @@ pub struct HiddenRefWitness {
     pub merkle: MerkleWitness,
 }
 
-/// [OPUS-5] sq-kndw: build the [`HiddenRefWitness`] for `index` in `snapshot`,
+/// sq-kndw: build the [`HiddenRefWitness`] for `index` in `snapshot`,
 /// against the relying party's accepted-set `entries` (which MUST be the canonical,
 /// freshness-curated order the anchor was derived from —
 /// `RevocationPolicy::accepted_entries`).
@@ -539,7 +539,7 @@ pub fn hidden_ref_witness(
     })
 }
 
-/// [OPUS-5] sq-kndw: render the `Prover.toml` body for the
+/// sq-kndw: render the `Prover.toml` body for the
 /// `revoke_hidden_ref_d{depth}_a{set_depth}` member. Order MUST match
 /// `revoke_hidden_ref_d{depth}_a{set_depth}/src/main.nr`:
 ///
@@ -623,7 +623,7 @@ mod tests {
         );
     }
 
-    // [GPT-6] A depth-3 tree covers the entire byte. Its first four leaves
+    // A depth-3 tree covers the entire byte. Its first four leaves
     // [0,1,0,0] retain the hand-built subtree used by the Noir accept tests.
     #[test]
     fn merkle_root_depth3_matches_hand_built() {
@@ -633,7 +633,7 @@ mod tests {
         assert_eq!(merkle_root(&s, 3), Some(h2(left, h2(zero_pair, zero_pair))));
     }
 
-    // [OPUS-4.8] sq-hwe: the SPARSE builder must return a BYTE-IDENTICAL root to
+    // sq-hwe: the SPARSE builder must return a BYTE-IDENTICAL root to
     // the dense oracle across every snapshot shape — uniform-zero, sparse 1s, a
     // snapshot SHORTER than the tree (so the tail leaves read as fail-closed 1s),
     // and a boundary that straddles the covered/padding line mid-byte. This is the
@@ -663,7 +663,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-hwe: the sparse builder handles a PRODUCTION-scale depth
+    // sq-hwe: the sparse builder handles a PRODUCTION-scale depth
     // (2^17 leaves) without materialising them — the whole point of the bead. The
     // dense oracle would allocate 131072 field elements; the sparse builder folds
     // only the cached uniform-subtree defaults plus the single set bit. We assert
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(merkle_witness(&s, depth, 5).unwrap().bit, Fr::from(1u64));
     }
 
-    // [OPUS-4.8] sq-hwe: at a production depth, the sparse witness for an index in
+    // sq-hwe: at a production depth, the sparse witness for an index in
     // the FAIL-CLOSED PADDING region (past the covered bits) still re-folds to the
     // root and carries bit 1 — the padding leaves are genuinely SET, so a holder
     // cannot prove bit-unset for an uncovered slot. Cross-checks the all-ones
@@ -716,7 +716,7 @@ mod tests {
         assert_eq!(node, root, "padding-index witness must still re-fold to the root");
     }
 
-    // [OPUS-4.8] sq-hwe: any_bit_set scans byte ranges and short-circuits; verify
+    // sq-hwe: any_bit_set scans byte ranges and short-circuits; verify
     // it agrees with the per-index `bit()` oracle on awkward sub-byte ranges within
     // the covered region.
     #[test]
@@ -735,7 +735,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-6qe: the real caller never invokes any_bit_set past the covered
+    // sq-6qe: the real caller never invokes any_bit_set past the covered
     // region, but the missing-byte fallback must be FAIL-CLOSED: a range touching a
     // byte beyond `bits` reads as revoked (`1`), matching `bit()`, so the helper
     // reports the region as set (`true`) and never lets the sparse builder
@@ -785,7 +785,7 @@ mod tests {
         assert_eq!(merkle_witness(&s, 3, 8), None); // full snapshot, index beyond tree
     }
 
-    // [GPT-6] The final representable bit binds the root; any appended byte is
+    // The final representable bit binds the root; any appended byte is
     // rejected, even if the requested witness still lies in the old prefix.
     #[test]
     fn status_snapshot_capacity_binds_roots_witnesses_and_legacy_policy() {
@@ -822,7 +822,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
-    // [OPUS-5] sq-6qe: accepted-set commitment (host anchor).
+    // sq-6qe: accepted-set commitment (host anchor).
     // ---------------------------------------------------------------
 
     fn entry(list: &str, version: u64, root: u64) -> AcceptedStatusEntry {
@@ -842,7 +842,7 @@ mod tests {
         ]
     }
 
-    // [OPUS-5] sq-6qe: the host leaf IS `sig::accepted_status_leaf` over the
+    // sq-6qe: the host leaf IS `sig::accepted_status_leaf` over the
     // field-mapped IRI — one source of truth with the future in-circuit leaf. If
     // this drifts, a host-built anchor and a circuit-built path would disagree and
     // every proof would (silently) fail to verify.
@@ -859,7 +859,7 @@ mod tests {
         );
     }
 
-    // [OPUS-5] sq-6qe: the LOAD-BEARING invariant — the prover's membership path
+    // sq-6qe: the LOAD-BEARING invariant — the prover's membership path
     // for every occupied slot re-folds (under the circuit's bottom-up fold, with
     // directions from the index bits) to the published accepted-set root. This is
     // what makes the anchor usable as a public input at all.
@@ -882,7 +882,7 @@ mod tests {
         }
     }
 
-    // [OPUS-5] sq-6qe: the atomic triple binding, observed at the SET level. A
+    // sq-6qe: the atomic triple binding, observed at the SET level. A
     // prover that pairs list a's identity with list b's root — the exact
     // substitution the single-leaf construction exists to prevent — changes the
     // root, so it cannot reproduce the relying party's public anchor. Also pins
@@ -917,7 +917,7 @@ mod tests {
         assert_ne!(accepted_set_root(&other_root, depth), Some(base), "root binds");
     }
 
-    // [OPUS-5] sq-6qe: the canonical LEAF ORDER is load-bearing — the relying
+    // sq-6qe: the canonical LEAF ORDER is load-bearing — the relying
     // party and the prover must commit the same order or the roots disagree.
     // Reordering the same entries yields a different anchor, which is why
     // `RevocationPolicy::accepted_entries` emits the sorted `BTreeMap` order.
@@ -930,7 +930,7 @@ mod tests {
         assert_ne!(accepted_set_root(&reordered, depth), Some(base));
     }
 
-    // [OPUS-5] sq-6qe: fail-closed sizing. An accepted set that does not fit the
+    // sq-6qe: fail-closed sizing. An accepted set that does not fit the
     // depth yields `None` rather than a silently truncated trust anchor, and an
     // implausible depth is refused. An out-of-range witness index is `None` too.
     #[test]
@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(accepted_set_witness(&es, 2, 4), None, "index 4 is out of a 2^2 tree");
     }
 
-    // [OPUS-5] sq-6qe: an EMPTY accepted set still commits (to the all-padding
+    // sq-6qe: an EMPTY accepted set still commits (to the all-padding
     // root) — it is a well-formed anchor that no membership proof can satisfy, so
     // a relying party with no curated snapshots is fail-closed rather than
     // undefined.

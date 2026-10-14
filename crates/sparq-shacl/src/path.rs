@@ -100,7 +100,7 @@ impl Path {
         self.step(g, start, true)
     }
 
-    /// [FABLE-5] (sq-7d3dj.33.4) Compiles this path against `g`'s dictionary:
+    /// (sq-7d3dj.33.4) Compiles this path against `g`'s dictionary:
     /// every predicate IRI is resolved to its id ONCE, so the per-focus-node walk
     /// ([`PathIds::values_ids`]) never re-hashes a predicate string. A predicate
     /// that is invalid or absent from the dictionary compiles to `None` — that
@@ -177,7 +177,7 @@ impl Path {
         }
     }
 
-    /// [OPUS-4.8] Serialises the path as a **SPARQL property-path expression**
+    /// Serialises the path as a **SPARQL property-path expression**
     /// (for `$PATH` pre-binding in SHACL-SPARQL property constraints, §5.2.1):
     /// `<iri>`, `^p`, `p1/p2`, `p1|p2`, `p*`, `p+`, `p?`, fully parenthesised so
     /// it composes safely when textually spliced into a query's BGP. Returns
@@ -213,7 +213,7 @@ impl Path {
     }
 }
 
-/// [FABLE-5] (sq-7d3dj.33.4) The id-level compiled form of a [`Path`]: predicate
+/// (sq-7d3dj.33.4) The id-level compiled form of a [`Path`]: predicate
 /// IRIs pre-resolved to dictionary ids (`None` = invalid/absent → matches
 /// nothing). [`PathIds::values_ids`] mirrors [`Path::values`] step-for-step over
 /// the same permutation scans, so the id walk yields exactly the ids of the
@@ -326,7 +326,7 @@ fn closure(g: &GraphView, start: &Term, inner: &Path, forward: bool, reflexive: 
     out
 }
 
-// [OPUS-4.8] Unit coverage for SHACL property paths (sq-qap0): parsing every
+// Unit coverage for SHACL property paths (sq-qap0): parsing every
 // path form (and its error branches), value-node evaluation (step + closure)
 // with hand-computed expectations, and both serialisations (Turtle path
 // expression + SPARQL property path). path.rs was the lowest-covered file in the
@@ -787,7 +787,7 @@ mod tests {
         );
     }
 
-    /// [FABLE-5] (sq-7d3dj.33.4) The compiled id-level walk must yield EXACTLY the
+    /// (sq-7d3dj.33.4) The compiled id-level walk must yield EXACTLY the
     /// terms of the Term-level walk, in the SAME discovery order (the report-
     /// equivalence the eval fast path rests on), across every path form —
     /// including an absent predicate (compiles to a matches-nothing step) and a

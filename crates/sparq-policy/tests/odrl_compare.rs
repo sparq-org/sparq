@@ -465,24 +465,28 @@ fn tighter_numeric_bound_is_not_claimed() {
 // ---------------------------------------------------------------------------
 // COMPOUND-CONSTRAINT DEGRADATION (the sq-a0zef fail-OPEN guards). [OPUS-4.8] sq-bif.
 //
-// The static analyser does NOT model compound `odrl:LogicalConstraint`s. The existing
-// `Possible`/`Unknown` cases above degrade on an *atomic* constraint the analyser
-// cannot prove total; these pin the distinct **compound-constraint** guards:
+// Since sq-93rgp the analyser DOES reason through a compound `odrl:LogicalConstraint`
+// where the combinator semantics prove the implication (the per-operator rules and the
+// brute-force differential check live in `odrl_compare_compound.rs`). What it must
+// never do is claim a verdict the compound does not prove, and the two cases below are
+// exactly that — a compound the other side gives no premise for:
 //
-//  * a prohibition carrying ANY compound constraint can never be proven to carve out
-//    the WHOLE permission → the conflict is `Possible`, never `Certain` (even though
-//    its atomic+structural footprint matches the permission exactly); and
-//  * an OUTER permission carrying a compound constraint may be strictly narrower than
-//    its atomic+structural footprint suggests → containment degrades to `Unknown`,
-//    never `Contains` (claiming `Contains` would be the fail-OPEN error).
+//  * a prohibition whose compound constraint is NOT entailed by the permission's
+//    constraints cannot be proven to carve out the WHOLE permission → the conflict is
+//    `Possible`, never `Certain` (even though its atomic+structural footprint matches
+//    the permission exactly); and
+//  * an OUTER permission carrying an unentailed compound constraint may be strictly
+//    narrower than its atomic+structural footprint suggests → containment never comes
+//    back `Contains` (claiming `Contains` would be the fail-OPEN error).
 //
 // A regression that dropped either guard would over-claim `Certain`/`Contains`.
 // ---------------------------------------------------------------------------
 
 /// A prohibition whose ONLY refinement is a compound `LogicalConstraint` — its
 /// action/target/assignee match the permission exactly and it carries no *atomic*
-/// constraint, so a naive analyser would call the conflict `Certain`. Because the
-/// compound is not modelled, the verdict honestly degrades to `Possible`.
+/// constraint, so a naive analyser would call the conflict `Certain`. The permission is
+/// unconstrained, so it supplies NO premise the compound could be proven from, and the
+/// verdict honestly degrades to `Possible`.
 #[test]
 fn compound_constrained_prohibition_is_only_possible() {
     let ttl = r#"
@@ -520,8 +524,9 @@ fn compound_constrained_prohibition_is_only_possible() {
 
 /// An OUTER permission whose only refinement is a compound `LogicalConstraint`,
 /// against an unconstrained INNER permission on the same action/target. Structurally
-/// `outer ⊇ inner`, but the unmodelled compound could make `outer` strictly narrower,
-/// so containment is `Unknown` (never `Contains`). The atomic-footprint twin
+/// `outer ⊇ inner`, but the inner side supplies no premise for the compound, which
+/// could make `outer` strictly narrower, so containment is never `Contains`. The
+/// atomic-footprint twin
 /// (`unconstrained_outer_contains_constrained_inner`) returns `Contains`; this is the
 /// compound-guard counterpart.
 #[test]
@@ -553,7 +558,7 @@ fn compound_constrained_outer_makes_containment_unknown() {
     assert_eq!(
         outer.permissions[0].logical_constraints.len(),
         1,
-        "the outer permission carries the compound that drives the Unknown"
+        "the outer permission carries the compound that forbids a Contains verdict"
     );
     assert_ne!(
         contains(&outer, &inner),
@@ -690,7 +695,9 @@ fn definite_verdicts_need_a_proof() {
         contains(&pol(&constrained("count", "lt", "5")), &pol(&constrained("count", "lt", "5"))),
         Containment::Contains
     );
-    // The inner constraint sits inside an `and`: no witness.
+    // The inner constraint sits inside an `and`: no witness — and since sq-93rgp the
+    // `and` premise PROVES the identical atomic outer bound (a satisfied `and` has
+    // every operand satisfied), so this is a definite `Contains`, not an `Unknown`.
     let inner_and = pol(
         "odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
          odrl:constraint [ a odrl:LogicalConstraint ; odrl:and ( \
@@ -698,6 +705,17 @@ fn definite_verdicts_need_a_proof() {
     );
     assert_eq!(
         contains(&pol(&constrained("count", "lt", "5")), &inner_and),
+        Containment::Contains
+    );
+    // A non-identical bound inside the `and` is still not proven: the prover does no
+    // magnitude reasoning, so `count lt 3` does not prove `count lt 5`.
+    let inner_and_tighter = pol(
+        "odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
+         odrl:constraint [ a odrl:LogicalConstraint ; odrl:and ( \
+           [ odrl:leftOperand odrl:count ; odrl:operator odrl:lt ; odrl:rightOperand 3 ] ) ] ]",
+    );
+    assert_eq!(
+        contains(&pol(&constrained("count", "lt", "5")), &inner_and_tighter),
         Containment::Unknown
     );
     // An inner policy whose prohibition voids its permission grants nothing.

@@ -8,7 +8,7 @@
 //! Prints store build/finalize/open, HNSW build, and exact vs HNSW query throughput
 //! on the same 50k×32 random workload as the recall gate (tests/recall.rs).
 //!
-//! [OPUS-4.8] (sq-k5qq) Strictly-additive machine-readable emit: set `SPARQ_VECTORS_JSON`
+//! (sq-k5qq) Strictly-additive machine-readable emit: set `SPARQ_VECTORS_JSON`
 //! to a path and the measurement run ALSO writes the same advisory timings as a stable,
 //! DEPENDENCY-FREE JSON document there — mirroring the `format!`-JSON convention of
 //! `crates/sparq-mpc/examples/mpc_net_bench.rs::cell_json`. This test runs under
@@ -17,14 +17,14 @@
 //! are ADVISORY + NON-CANONICAL (this dev box) and nothing is committed. (No serde dep is
 //! added to the harness; serde_json is a TEST-only dev-dep used by `json_round_trips`.)
 
-// [OPUS-4.8] (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
+// (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
 #![cfg(feature = "approx-ann")]
 
 use sparq_vectors::{nearest_exact, VectorIndex, VectorStore};
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-k5qq) SPARQ_VECTORS_JSON=<path> machine-readable results emit.
+// (sq-k5qq) SPARQ_VECTORS_JSON=<path> machine-readable results emit.
 // Dependency-free `format!`-built JSON, mirroring mpc_net_bench::cell_json. The
 // run prints its usual stderr table unconditionally; the JSON file is written
 // ONLY when the env var is set, so behaviour is byte-identical when it is absent.
@@ -167,7 +167,7 @@ fn throughput_50k() {
         1.0 / per(hnsw)
     );
 
-    // [OPUS-4.8] (sq-k5qq) Strictly-additive: only writes when SPARQ_VECTORS_JSON is set;
+    // (sq-k5qq) Strictly-additive: only writes when SPARQ_VECTORS_JSON is set;
     // the stderr table above is unchanged either way. Same advisory numbers, machine-readable.
     let doc = results_json(
         "sparq-vectors throughput",
@@ -190,7 +190,7 @@ fn throughput_50k() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-k5qq) The dependency-free emit must round-trip through a REAL
+// (sq-k5qq) The dependency-free emit must round-trip through a REAL
 // serde_json parse — this catches a malformed document (e.g. a missing comma).
 // ---------------------------------------------------------------------------
 #[test]

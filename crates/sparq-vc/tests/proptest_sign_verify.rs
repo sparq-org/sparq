@@ -1,5 +1,5 @@
 //! Property tests for functional EdDSA-RDFC-2022 round trips and tamper rejection.
-//! These are spec-conformance checks, not a cryptographic-soundness claim. [GPT-5.6]
+//! These are spec-conformance checks, not a cryptographic-soundness claim.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use proptest::prelude::*;

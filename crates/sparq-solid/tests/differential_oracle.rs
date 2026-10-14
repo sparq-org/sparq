@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t58w.7 — THE differential oracle: a three-way agreement check proving the
+//! sq-t58w.7 — THE differential oracle: a three-way agreement check proving the
 //! engine's WAC/ACP authorization decisions match an INDEPENDENT reference evaluator AND the
 //! hand-written `Expect` decision table, with **zero divergence**.
 //!
@@ -42,7 +42,7 @@ use sparq_solid::{materialize_acp, materialize_wac, AuthIndex, Mode, Session};
 /// The floor for the divergence count — it is and must stay ZERO. A ratchet that only ever
 /// goes UP would be meaningless for a divergence count (the only acceptable value is 0), so
 /// the "floor" printed for grep-parity with the SHACL/geo runners is the hard 0.
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).

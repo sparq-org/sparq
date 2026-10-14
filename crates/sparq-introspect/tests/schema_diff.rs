@@ -15,7 +15,7 @@ fn introspect(data: &str) -> Introspection {
 
 #[test]
 fn reports_exact_schema_drift_and_json() {
-    // [GPT-5.6] Mutation witness for sq-yjemp: deleting either comparison path,
+    // Mutation witness for sq-yjemp: deleting either comparison path,
     // swapping base/new, or using profile-vector order breaks this exact oracle.
     let base = introspect(&format!(
         "<http://example.com/alice> <{RDF_TYPE}> <{PERSON}> .\n\

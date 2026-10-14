@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-tonhr.6 — the vendored shaclc conformance corpus against an
+//! sq-tonhr.6 — the vendored shaclc conformance corpus against an
 //! INDEPENDENT oracle: every `.shaclc` fixture parsed by the generated
 //! parsers must be graph-isomorphic to its `.ttl` side parsed by oxttl.
 //!

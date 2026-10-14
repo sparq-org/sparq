@@ -108,9 +108,9 @@
 //! `MaterializedOwlGraph` routes any base that mentions the reification vocabulary
 //! to its documented Fallback mode (re-materialize per mutation) rather than
 //! teaching the counting modes these rules. See the first-increment PR body (#2135)
-//! for the follow-up list. The second increment ([FABLE-5] sq-afun3) added the
+//! for the follow-up list. The second increment (sq-afun3) added the
 //! strict-opacity [`ReifyMode`] surface (batch only). The third increment
-//! ([OPUS-5] sq-afun3) plumbed that mode through the incremental handle:
+//! (sq-afun3) plumbed that mode through the incremental handle:
 //! [`crate::MaterializedOwlGraph::with_reify_mode`] fixes the mode at construction
 //! and every Fallback re-materialization — the initial one and every mutation's —
 //! runs it, so the type's closure-equals-from-scratch invariant now holds against
@@ -125,7 +125,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts, NO_ID};
 
 /// Which of the bridge rules the reify layer runs — see the opacity section of the
-/// module docs. [FABLE-5] sq-afun3 (second increment of kern/quoted-triple-infer).
+/// module docs. sq-afun3 (second increment of kern/quoted-triple-infer).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ReifyMode {
     /// Both bridge rules (reif-dtr + reif-ctr) to their joint fixpoint — what
@@ -554,7 +554,7 @@ mod tests {
         assert!(triples.contains(&[r, v.reifies, q]));
     }
 
-    /// [FABLE-5] sq-afun3: DestructureOnly recovers exactly the reif-dtr conclusions
+    /// sq-afun3: DestructureOnly recovers exactly the reif-dtr conclusions
     /// and NEVER constructs — the fixture that fires reif-ctr once in Bridge mode
     /// mints nothing in strict mode, and no triple term is ever interned.
     #[test]
@@ -599,7 +599,7 @@ mod tests {
         );
     }
 
-    /// [FABLE-5] sq-afun3: strict mode derives no quotation AT ALL — not even the
+    /// sq-afun3: strict mode derives no quotation AT ALL — not even the
     /// leaf-component depth-1 mint Bridge mode allows on the adversarial-cascade
     /// shape (`r` classically describing its own asserted `(r reifies o)` triple) —
     /// and the fixpoint still terminates and is idempotent.

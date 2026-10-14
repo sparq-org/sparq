@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-32i5) A cheap, strongly-distinguishing **graph fingerprint** embedded in
+//! (sq-32i5) A cheap, strongly-distinguishing **graph fingerprint** embedded in
 //! the `.spqv` / `.spqg` headers so a stale store can never silently return WRONG results.
 //!
 //! # The foot-gun this closes
@@ -29,14 +29,14 @@
 //!      length/count is still rejected. `FxHasher` is used because it is **deterministic with no
 //!      seed** (the same property the core dictionary relies on for its own content hashing), so a
 //!      fingerprint computed at build time on one machine matches one recomputed at open time on
-//!      another. [OPUS-4.8] (sq-32i5) Every hashed input is **fixed-width** — lengths/counts as
+//!      another. (sq-32i5) Every hashed input is **fixed-width** — lengths/counts as
 //!      `u64`, ids as `u32`, tags as `u8`, never `usize` — so the folded byte sequence (and thus
 //!      the hash) is identical on 32-bit wasm32 and 64-bit native; the cross-machine guarantee
 //!      holds by construction. The cost is O(dict_len) to hash each term plus one
 //!      O(dict_len·log dict_len) sort over already-resident term parts — a small fraction of the
 //!      embed/build work that produced the store in the first place.
 //!
-//! # [OPUS-4.8] (sq-xhiv) Why the fold is dict-id-order-INDEPENDENT
+//! # (sq-xhiv) Why the fold is dict-id-order-INDEPENDENT
 //!
 //! `sparq-core` assigns dictionary ids in a **thread-count-dependent** order: the parallel sharded
 //! dict merge sizes its shard count from `rayon::current_num_threads()`, so the *same* logical graph
@@ -58,7 +58,7 @@
 //! dict_len + triple_count are folded alongside it precisely so the common shift cases
 //! (terms added/removed, triples added/removed) are caught structurally even before the hash.
 //!
-//! # [OPUS-4.8] (sq-wlzi) The id-keyed STALENESS CONTRACT — serve via `Graph::open`, never a re-parse
+//! # (sq-wlzi) The id-keyed STALENESS CONTRACT — serve via `Graph::open`, never a re-parse
 //!
 //! A passing [`check_against`] is **necessary but NOT sufficient** for a correct query, and the
 //! sq-xhiv thread-count-stability above is exactly why. The store/index are keyed by **raw dict id**;
@@ -100,7 +100,7 @@ pub const FINGERPRINT_LEN: usize = 24;
 /// term set in a dict-id-order-independent (sorted) order. See the module docs for the exact
 /// inputs and rationale (incl. the sq-xhiv thread-count-stability property).
 ///
-/// [OPUS-4.8] (sq-36ol) Derives `Hash` so a fingerprint can key a per-graph cache (the
+/// (sq-36ol) Derives `Hash` so a fingerprint can key a per-graph cache (the
 /// filtered-ANN `IdMask` cache in `crate::rewrite`): two graphs with the same fingerprint
 /// are treated as the same graph for caching, and any mutation that could change a derived
 /// mask changes the fingerprint (and thus the key), so a stale mask is never served.
@@ -125,7 +125,7 @@ impl Fingerprint {
         let dict = &graph.dict;
         let dict_len = dict.len() as u64;
         let triple_count = graph.len() as u64;
-        // [OPUS-4.8] (sq-xhiv) Hash every real term by its LEXICAL content (id-order-independent),
+        // (sq-xhiv) Hash every real term by its LEXICAL content (id-order-independent),
         // collect the per-term hashes, then sort them so the fold does not depend on which id each
         // term landed on. `dict.iter()` walks ids `1..=len()`; the id itself is deliberately NOT
         // bound here (binding it is exactly what made the old fingerprint thread-count-dependent).
@@ -175,7 +175,7 @@ impl Fingerprint {
         }
     }
 
-    /// [OPUS-4.8] (sq-32i5) Parses a fingerprint from a current-format header block, returning
+    /// (sq-32i5) Parses a fingerprint from a current-format header block, returning
     /// `None` for an **all-zero block**. A v2 artifact finalized *without* binding a graph (no
     /// `with_fingerprint`) writes a zeroed block; decoding that to `Some(Fingerprint{0,0,0})` would
     /// make [`check_against`] report a stale-graph *mismatch* (a "DIFFERENT graph" error) instead of
@@ -202,7 +202,7 @@ impl Fingerprint {
     }
 }
 
-/// [OPUS-4.8] (sq-xhiv) The per-term LEXICAL content hash: a 64-bit FxHash over `parts`' content,
+/// (sq-xhiv) The per-term LEXICAL content hash: a 64-bit FxHash over `parts`' content,
 /// computed so it does NOT depend on any dict-id assignment. For an IRI / literal / blank the content
 /// is already lexical (no id involved). For a **triple term** the child ids ARE thread-count-dependent,
 /// so we do not hash them — we resolve each child to its own lexical content and fold THAT recursively
@@ -226,7 +226,7 @@ const MAX_TRIPLE_DEPTH: u32 = 64;
 /// per variant, so distinct terms cannot alias by concatenation. We do not depend on the core's hash
 /// VALUE (it is private); we only need a self-consistent fold that distinguishes terms here.
 fn fold_parts_lexical(h: &mut rustc_hash::FxHasher, dict: &Dict, parts: &TermParts<'_>, depth: u32) {
-    // [OPUS-4.8] (sq-32i5) All length prefixes are hashed as fixed-width `u64`, NOT `usize`:
+    // (sq-32i5) All length prefixes are hashed as fixed-width `u64`, NOT `usize`:
     // `usize` is 32-bit on wasm32 and 64-bit on native, so `write_usize` would fold a different
     // byte sequence on each and the on-disk fingerprint would mismatch between a store built on
     // 64-bit native and the same graph opened on 32-bit wasm — silently breaking the documented
@@ -263,7 +263,7 @@ fn fold_parts_lexical(h: &mut rustc_hash::FxHasher, dict: &Dict, parts: &TermPar
         }
         TermParts::Triple(ids) => {
             h.write_u8(3);
-            // [OPUS-4.8] (sq-xhiv) Recurse into each child's LEXICAL content, not its raw id: the
+            // (sq-xhiv) Recurse into each child's LEXICAL content, not its raw id: the
             // child id is thread-count-dependent (the exact thing this fingerprint must be invariant
             // to), so folding it would re-introduce the determinism bug at one level of nesting.
             for &child in ids {
@@ -309,7 +309,7 @@ const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
 /// message naming the mismatch so a stale store can never be queried silently.
 pub type CheckResult = Result<(), String>;
 
-/// [OPUS-4.8] (sq-32i5) Identifies which kind of artifact a [`check_against`] call is guarding, so
+/// (sq-32i5) Identifies which kind of artifact a [`check_against`] call is guarding, so
 /// the error text is accurate at both call sites (a `.spqv` [`VectorStore`](crate::store::VectorStore)
 /// and a `.spqg` [`DiskAnnIndex`](crate::diskann::DiskAnnIndex)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -366,7 +366,7 @@ pub fn check_against(
 
 #[cfg(test)]
 mod tests {
-    // [OPUS-4.8] (sq-32i5) fingerprint unit tests: discrimination, round-trip, and the
+    // (sq-32i5) fingerprint unit tests: discrimination, round-trip, and the
     // legacy (None) path. The store/diskann modules cover the end-to-end checked-open behaviour.
     use super::*;
     use sparq_core::Graph;
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn invariant_to_pure_dict_id_permutation() {
-        // [OPUS-4.8] (sq-xhiv) Same TERM SET, different interning order → a pure dict-id shift.
+        // (sq-xhiv) Same TERM SET, different interning order → a pure dict-id shift.
         // The fingerprint folds the term SET in a sorted (id-order-independent) order, so a pure
         // id permutation that does NOT change which terms are present must leave content_hash
         // UNCHANGED. (The old fingerprint bound the id explicitly and so changed here — that was
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn still_detects_a_genuine_term_change() {
-        // [OPUS-4.8] (sq-xhiv) The fold is id-order-independent but NOT change-blind: adding,
+        // (sq-xhiv) The fold is id-order-independent but NOT change-blind: adding,
         // removing, or editing a term changes the term set, so content_hash must change. This is
         // the property that keeps the staleness guard useful after the determinism fix.
         let base = graph(
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn invariant_to_thread_count_via_simulated_id_permutation() {
-        // [OPUS-4.8] (sq-xhiv) Direct regression guard for the thread-count-dependence bug.
+        // (sq-xhiv) Direct regression guard for the thread-count-dependence bug.
         // `RAYON_NUM_THREADS` is read once per process for the GLOBAL pool, so we cannot change
         // it mid-test; instead we drive the SAME parallel sharded merge the loader uses at two
         // explicit thread counts via a scoped rayon pool. The two graphs are the same RDF source,
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn invariant_to_thread_count_with_triple_terms() {
-        // [OPUS-4.8] (sq-xhiv) The triple-term path is the subtle one: a triple term carries its
+        // (sq-xhiv) The triple-term path is the subtle one: a triple term carries its
         // CHILDREN's dict-ids, which are themselves thread-count-dependent, so the fold must resolve
         // the children to their LEXICAL content recursively rather than fold the child ids. This
         // guards that recursion: an RDF-1.2 reification doc loaded at 2 vs 8 threads — incl. a
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn check_against_error_text_names_the_artifact_kind() {
-        // [OPUS-4.8] (sq-32i5) The same routine guards BOTH a `.spqv` store and a `.spqg` index;
+        // (sq-32i5) The same routine guards BOTH a `.spqv` store and a `.spqg` index;
         // the error noun must follow the artifact kind, not hard-code "store" at an index call site.
         let f = Fingerprint::of(&graph(A));
 
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn golden_fingerprint_is_architecture_independent() {
-        // [OPUS-4.8] (sq-32i5, fold updated sq-xhiv) Regression guard against any width/endianness
+        // (sq-32i5, fold updated sq-xhiv) Regression guard against any width/endianness
         // drift in the fingerprint computation. The fingerprint of graph A is fixed by construction:
         //   * lengths/counts are hashed as fixed-width `u64` (never `usize`), so wasm32 (32-bit
         //     usize) and native (64-bit usize) fold the SAME bytes;
@@ -651,7 +651,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] (sq-32i5, value updated sq-xhiv) Golden content hash of graph `A`,
+    /// (sq-32i5, value updated sq-xhiv) Golden content hash of graph `A`,
     /// architecture-independent AND dict-id-order-independent by construction (all hashed inputs are
     /// fixed-width; `FxHasher` is seedless & deterministic; the term set is folded in sorted order).
     /// Produced by running `golden_fingerprint_is_architecture_independent` once.

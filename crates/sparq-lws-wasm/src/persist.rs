@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-6xasp.7: opt-in persistence for the wasm pod — a replayable mutation journal
+// sq-6xasp.7: opt-in persistence for the wasm pod — a replayable mutation journal
 // sitting behind the existing `Store` trait, plus the byte format a JS host hands to `node:fs`
 // or IndexedDB.
 //! Opt-in persistence for the wasm pod: a replayable mutation journal.

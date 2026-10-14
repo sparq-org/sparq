@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-a9cn) Materialised-view / query-result cache tests.
+//! (sq-a9cn) Materialised-view / query-result cache tests.
 //!
 //! Only built under the opt-in `result-cache` feature; the whole file is empty
 //! otherwise so the default `cargo test` is unaffected.
@@ -233,7 +233,7 @@ fn clear_empties() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-bif.12) WRITE-INVALIDATION coverage.
+// (sq-bif.12) WRITE-INVALIDATION coverage.
 //
 // The existing tests above prove the *mechanism* (a version bump misses + reclaims
 // the stale generation). What was missing is the END-TO-END contract over the FOUR

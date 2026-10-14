@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-pi44) Incremental delta-sidecar tests for `VectorStore`: add / remove / update
+//! (sq-pi44) Incremental delta-sidecar tests for `VectorStore`: add / remove / update
 //! against an already-finalized store (no full rebuild), `compact` result-equivalence to a
 //! from-scratch rebuild, and the generation-tie staleness guard.
 //!

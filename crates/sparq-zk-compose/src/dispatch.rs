@@ -97,7 +97,7 @@ impl std::error::Error for DispatchError {}
 /// that committed a value handle (`dual-leaf` / `value-only`). The dual-leaf
 /// FILTER members for the integer (sq-xojl), double, and decimal datatype classes
 /// (sq-2ezsx) are all value-lane members, as is the dateTime/date member
-/// ([OPUS-5] sq-wz99x — ONE member for BOTH lanes; the lane lives in the public
+/// (sq-wz99x — ONE member for BOTH lanes; the lane lives in the public
 /// `datatype_const`, so it needs no separate classification here).
 fn is_value_lane_member(id: &CircuitId) -> bool {
     matches!(
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn dual_leaf_admits_the_double_and_decimal_value_lane_siblings() {
-        // [OPUS-4.8] sq-2ezsx: the double + decimal datatype-class value-lane
+        // sq-2ezsx: the double + decimal datatype-class value-lane
         // members are legal against dual-leaf, exactly like the integer member.
         assert_eq!(
             resolve_circuit(CommitmentMethod::DualLeafV1, &CircuitId::FilterValueDlF64),
@@ -230,7 +230,7 @@ mod tests {
             resolve_circuit(CommitmentMethod::DualLeafV1, &CircuitId::FilterValueDlDecimal),
             Ok(CircuitId::FilterValueDlDecimal)
         );
-        // [OPUS-5] sq-wz99x: the dateTime/date member (ONE member, BOTH lanes).
+        // sq-wz99x: the dateTime/date member (ONE member, BOTH lanes).
         assert_eq!(
             resolve_circuit(
                 CommitmentMethod::DualLeafV1,
@@ -242,9 +242,9 @@ mod tests {
 
     #[test]
     fn string_canonical_rejects_the_double_and_decimal_value_lane_siblings() {
-        // [OPUS-4.8] sq-2ezsx: a string-canonical graph has no value handle, so the
+        // sq-2ezsx: a string-canonical graph has no value handle, so the
         // double + decimal value-lane members are UNPROVABLE against it — fail-closed.
-        // [OPUS-5] sq-wz99x: and the dateTime/date member, for the same reason.
+        // sq-wz99x: and the dateTime/date member, for the same reason.
         for id in [
             CircuitId::FilterValueDlF64,
             CircuitId::FilterValueDlDecimal,
@@ -387,7 +387,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-3kd2g.6: the bounded-depth path member reads the
+    // sq-3kd2g.6: the bounded-depth path member reads the
     // string-canonical leaf (committed term encodings), so it is a STRING-LANE
     // member — legal for `string-canonical` + `dual-leaf`, rejected for the
     // `value-only` research dial (no lexical handle). It is NEVER a value-lane
@@ -418,12 +418,12 @@ mod tests {
         // asserts the guard exists and the current members are correctly classified.
         assert!(is_value_lane_member(&CircuitId::FilterValueDl));
         assert!(!is_identity_op_member(&CircuitId::FilterValueDl));
-        // [OPUS-4.8] sq-2ezsx: the double + decimal siblings are value-lane, not identity.
+        // sq-2ezsx: the double + decimal siblings are value-lane, not identity.
         assert!(is_value_lane_member(&CircuitId::FilterValueDlF64));
         assert!(is_value_lane_member(&CircuitId::FilterValueDlDecimal));
         assert!(!is_identity_op_member(&CircuitId::FilterValueDlF64));
         assert!(!is_identity_op_member(&CircuitId::FilterValueDlDecimal));
-        // [OPUS-5] sq-wz99x: the dateTime/date member is value-lane, not identity.
+        // sq-wz99x: the dateTime/date member is value-lane, not identity.
         assert!(is_value_lane_member(&CircuitId::FilterValueDlDateTime));
         assert!(!is_identity_op_member(&CircuitId::FilterValueDlDateTime));
         assert!(is_identity_op_member(&CircuitId::Scan { k: 1, n: 16, r: 4 }));

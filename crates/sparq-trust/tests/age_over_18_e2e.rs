@@ -18,7 +18,7 @@
 //! statement-type-scoping / no-laundering / key-binding from *design intent* into
 //! *verified property* (mirroring `acp_forged_*_in_acr_document_does_not_grant`).
 //!
-//! [OPUS-4.8] sq-pfae PoC. 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae PoC. 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sparq_trust::admit::{admit, admit_static, PresentedCredential, Session};

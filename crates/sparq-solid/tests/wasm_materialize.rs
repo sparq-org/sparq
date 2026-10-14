@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-7agop — headless wasm32 smoke test of the materializer.
+// sq-7agop — headless wasm32 smoke test of the materializer.
 //
 // `materialize_wac` / `materialize_acp` used to call `std::time::Instant::now()`
 // unconditionally for `stats.millis`. `Instant` is unusable on

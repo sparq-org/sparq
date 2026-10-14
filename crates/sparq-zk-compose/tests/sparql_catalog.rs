@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-1s2.1.2: SPARQL ZK gate-cost catalog ↔ snapshot consistency gate.
 //!
 //! `bench/zk-compose/sparql_feature_catalog.json` is a coverage map AND an

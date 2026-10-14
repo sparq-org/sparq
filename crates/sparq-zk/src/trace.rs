@@ -102,7 +102,7 @@ impl CommittedNamedGraph {
 
 /// RDFC-1.0 issued-identifier map for a graph's content (input label →
 /// canonical `c14nN` label). Single-sourced via the [`sparq_canon`] public API
-/// (same bridge as [`crate::canon`]). [OPUS-4.8] sq-0qip.
+/// (same bridge as [`crate::canon`]). sq-0qip.
 fn issue_label_map(triples: &[Triple]) -> Result<HashMap<String, String>, crate::canon::CanonError> {
     sparq_canon::issue_triples(triples)
 }

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-xor3: WRITE/update-path access-control enforcement.
+//! sq-xor3: WRITE/update-path access-control enforcement.
 //!
 //! Mirrors the read-path matrices (tests/wac.rs, tests/acp.rs) for the write path:
 //! an actor WITH write permission succeeds and the store changes; WITHOUT, the update
@@ -220,7 +220,7 @@ fn unparseable_update_is_an_error() {
     assert!(s.update_as(&sess(Some(ALICE)), "NONSENSE not sparql").is_err());
 }
 
-// --- [OPUS-4.8] sq-biss: PRECISE per-solution variable-GRAPH write checks ------------
+// --- sq-biss: PRECISE per-solution variable-GRAPH write checks ------------
 //
 // The conservative path (variable_graph_target_fails_closed_for_non_owner / clear_all_…)
 // demands write on EVERY store graph for a `GRAPH ?var` slot. These tests cover the
@@ -341,7 +341,7 @@ fn var_graph_empty_binding_is_a_permitted_noop() {
 
 #[test]
 fn var_graph_with_clause_resolves_precisely() {
-    // [OPUS-4.8] sq-cnor: a `WITH`/`USING` re-scope on a variable-GRAPH op is resolved
+    // sq-cnor: a `WITH`/`USING` re-scope on a variable-GRAPH op is resolved
     // PRECISELY (no conservative all-graphs fallback): the write targets are the graphs the
     // apply instantiates under the re-scoped dataset. Every quad here is `GRAPH ?g`-scoped,
     // so the `WITH` default graph never participates; `?g` resolves to exactly the team2
@@ -381,7 +381,7 @@ fn var_graph_with_clause_precise_still_denies_unwritable_binding() {
 
 #[test]
 fn var_graph_with_clause_never_touches_the_auth_view() {
-    // [OPUS-4.8] sq-cnor — the AUTH_GRAPH under-count regression guard at the PRODUCTION
+    // sq-cnor — the AUTH_GRAPH under-count regression guard at the PRODUCTION
     // `check` boundary. `Dataset::build_using(named: None)` (the `WITH` re-scope) keeps EVERY
     // store named graph in the active dataset, INCLUDING the reserved `urn:sparq:auth` view,
     // and `rescope_dataset` keeps it in the precise resolver's set too. On top of that,
@@ -401,7 +401,7 @@ fn var_graph_with_clause_never_touches_the_auth_view() {
     assert_eq!(graph_len(&s, auth), before, "the auth view is untouched");
 }
 
-// --- [OPUS-4.8] sq-3jtd.2: fail-closed-BEFORE-apply — a DENIED update mutates NOTHING ---
+// --- sq-3jtd.2: fail-closed-BEFORE-apply — a DENIED update mutates NOTHING ---
 //
 // The tests above assert per-graph triple COUNTS are unchanged on a deny. This block
 // strengthens that to a WHOLE-STORE canonical-equality check: serialize EVERY graph
@@ -442,7 +442,7 @@ fn store_snapshot(store: &PodStore) -> StoreSnapshot {
             })
             .collect();
         // Equality comparison only needs a deterministic order, not a stable one;
-        // sort_unstable is faster for large snapshots. [OPUS-4.8]
+        // sort_unstable is faster for large snapshots.
         v.sort_unstable();
         v
     }
@@ -450,7 +450,7 @@ fn store_snapshot(store: &PodStore) -> StoreSnapshot {
     for (name, sub) in &store.graph.named {
         out.push((name.to_string(), dump_graph(sub)));
     }
-    // Snapshot is only compared for equality; an unstable sort is faster. [OPUS-4.8]
+    // Snapshot is only compared for equality; an unstable sort is faster.
     out.sort_unstable();
     out
 }
@@ -549,7 +549,7 @@ fn positive_control_fully_authorized_multi_op_body_applies() {
     assert_eq!(graph_len(&s, g2), before2 + 1, "second op applied");
 }
 
-// ─── [FABLE-5] sq-yhlf0: the BUDGETED write path (`update_as_with_budget`) ───────────
+// ─── sq-yhlf0: the BUDGETED write path (`update_as_with_budget`) ───────────
 //
 // The read entry points have taken a `QueryBudget` for a long time; the write path had no
 // budgeted variant at all, so a caller obliged to bound EVERY evaluation it issues (an

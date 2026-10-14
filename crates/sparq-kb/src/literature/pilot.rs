@@ -1,7 +1,7 @@
 //! The **hard-capped, dry-run-first literature pilot loop** — the iteration protocol of
 //! `sq-tzars.9` (epic `sq-tzars`, design records `research/research-kb-program.md` §2.9 +
 //! `research/provenance-driven-genai-kb.md` §4/§6.4), ENFORCED IN CODE, not in prose.
-//! [FABLE-5] 🤖 SPARQ agent — research-KB live ingestion pilot.
+//! 🤖 SPARQ agent — research-KB live ingestion pilot.
 //!
 //! ## The protocol (each rule has a structural enforcement point here)
 //!
@@ -1203,7 +1203,7 @@ pub fn select_uniform_sample(findings: &[FindingRef], target: usize, seed: u64) 
     let mut idx: Vec<usize> = (0..findings.len()).collect();
     // NOTE: no `seed | 1` here — a mixed-congruential LCG accepts any state (including
     // 0), and forcing the low bit would collapse adjacent seeds (42 and 43) onto one
-    // stream (caught by `uniform_sample_is_deterministic_and_bounded`). [FABLE-5]
+    // stream (caught by `uniform_sample_is_deterministic_and_bounded`).
     let mut state = seed;
     let n = target.min(idx.len());
     for i in 0..n {

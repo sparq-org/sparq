@@ -1,4 +1,4 @@
-//! The rebuild-on-boot + reconcile contract (sq-oddt, [OPUS-4.8]).
+//! The rebuild-on-boot + reconcile contract (sq-oddt,).
 //!
 //! `TextIndex` carries no on-disk format; under a stateless-core invariant it is
 //! rebuilt on boot and kept warm by `reconcile`. These tests pin the contract:
@@ -13,7 +13,7 @@
 
 use oxrdf::{Literal, NamedNode, Term};
 use rand::rngs::StdRng;
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{RngExt, SeedableRng};
 use sparq_core::Graph;
 use sparq_text::{Analyzer, TextIndex};
@@ -158,7 +158,7 @@ fn reconcile_equals_rebuilt_across_random_growth() {
 
 #[test]
 fn reconcile_preserves_cjk_analyzer_across_random_growth() {
-    // [GPT-5.6] sq-halqn: reconcile must use the analyzer selected at build time
+    // sq-halqn: reconcile must use the analyzer selected at build time
     // for every appended literal, not silently fall back to Unicode tokenization.
     let mut rng = StdRng::seed_from_u64(0xc1a0_6e5e);
     let mut graph = Graph::load_str(

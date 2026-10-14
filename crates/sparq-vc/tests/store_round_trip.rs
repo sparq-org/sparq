@@ -2,7 +2,7 @@
 //! the offline did:key resolver, and confirm tamper-evidence over the store path.
 //! Exercises [`sparq_vc::sign_graph`] / [`sparq_vc::verify_graph`] against a graph
 //! materialized by `sparq_core::Graph::load_str` (not a hand-built triple slice), so
-//! the canonicalize → hash → Ed25519 path runs over real store IDs. [OPUS-4.8]
+//! the canonicalize → hash → Ed25519 path runs over real store IDs.
 
 use sparq_core::Graph;
 use sparq_vc::{did::DidKeyResolver, sign_graph, verify_graph, ProofConfig, SigningKey, VcError};

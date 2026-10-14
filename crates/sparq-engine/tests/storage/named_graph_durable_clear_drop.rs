@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-glw2) End-to-end DURABILITY test for named-graph CLEAR / DROP through
+//! (sq-glw2) End-to-end DURABILITY test for named-graph CLEAR / DROP through
 //! `update_in_place` on a DIRECTORY-BACKED store: the "204 ⇒ durable across restart" guarantee.
 //!
 //! The pre-fix in-place path emptied a named graph with `entry.1 = empty_graph()` — which on a

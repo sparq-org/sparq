@@ -1,4 +1,4 @@
-//! Direct GeoIndex convenience/error-path coverage. [GPT-5.6] sq-bif.19
+//! Direct GeoIndex convenience/error-path coverage. sq-bif.19
 
 use sparq_core::Graph;
 use sparq_geo::{GeoError, GeoIndex};

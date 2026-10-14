@@ -424,7 +424,7 @@ fn each_blank_term<'a>(t: &'a Term, f: &mut impl FnMut(&'a str)) {
         Term::List(ms) => ms.iter().for_each(|m| each_blank_term(m, f)),
         // Quoted triples are TRANSPARENT structure (like lists): a premise
         // blank inside `<< … >>` is a rule-scoped existential and becomes a
-        // matching variable. [FABLE-5]
+        // matching variable.
         Term::Triple(t) => t.iter().for_each(|m| each_blank_term(m, f)),
         _ => {}
     }
@@ -1097,7 +1097,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             // `<<` opens an RDF-star / RDF 1.2 quoted-triple term — never a valid
             // IRIREF prefix (`<` is excluded inside an IRIREF), so one byte of
-            // lookahead disambiguates. [FABLE-5]
+            // lookahead disambiguates.
             Some(b'<') if self.s.get(self.i + 1) == Some(&b'<') => {
                 if self.strict {
                     return Err("quoted triples are not Turtle 1.1".into());
@@ -1592,7 +1592,7 @@ impl<'a> Parser<'a> {
     /// any N3 term, including variables and nested quoted triples. NOTE: N3
     /// itself has not pinned RDF-star syntax (see GH #2012); this follows the
     /// classic RDF-star reading where `<< s p o >>` IS the triple term — it is
-    /// NOT expanded into RDF 1.2's `rdf:reifies` reifier sugar. [FABLE-5]
+    /// NOT expanded into RDF 1.2's `rdf:reifies` reifier sugar.
     fn read_quoted_triple(&mut self, out: &mut Vec<[Term; 3]>) -> Result<Term, String> {
         self.enter()?;
         self.i += 2; // the caller verified `<<`
@@ -1726,7 +1726,7 @@ fn has_scheme(iri: &str) -> bool {
 /// panicked the `from_utf8` in `read_pname_prefix` (sq-t8z0r randomized-fuzz
 /// finding, GH #1903). Genuine non-ASCII whitespace (NEL / NBSP / U+2028 …) is
 /// not token whitespace in Turtle/N3 anyway, so restricting to ASCII both fixes
-/// the split and matches the spec. [FABLE-5]
+/// the split and matches the spec.
 fn is_ws_byte(b: u8) -> bool {
     b.is_ascii() && (b as char).is_whitespace()
 }
@@ -1747,7 +1747,7 @@ fn utf8_len(b: u8) -> usize {
 mod resolve_iri_tests {
     use super::resolve_iri;
 
-    // [OPUS-4.8] roborev 2318 regression: excess `..` segments must NOT ascend
+    // roborev 2318 regression: excess `..` segments must NOT ascend
     // above the path root and swallow the authority (RFC 3986 §5.2.4 step 2C:
     // a leading `..` against an empty/root output buffer is discarded, never
     // popping past root). The finding claimed `../../../x` against
@@ -1879,7 +1879,7 @@ mod resolve_iri_tests {
     }
 }
 
-// ---- behavioural tests for the public N3 parser surface (sq-jd5s) [OPUS-4.8] ----
+// ---- behavioural tests for the public N3 parser surface (sq-jd5s) ----
 // Drive the `parse` / `parse_with_base` / `parse_turtle_with_base` API and assert on the
 // produced facts/rules and on the error path, exercising the lowest-covered parser branches.
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! [FABLE-5] (#2251) The recall-gated concept-ANN dedup surface: `build_ann` / `knn` /
+//! (#2251) The recall-gated concept-ANN dedup surface: `build_ann` / `knn` /
 //! `dedup`. The load-bearing tests are the two halves of the gate contract — (1) on a
 //! corpus where the exact O(m²) ground truth IS built, the HNSW index measures recall
 //! `>= 0.99` and dedup proceeds; (2) when the measured recall is below the gate, `dedup`

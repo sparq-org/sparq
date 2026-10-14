@@ -1,7 +1,7 @@
 //! Inverse Context Creation (JSON-LD 1.1 API §4.3), IRI Compaction (§7.1),
 //! and Term Selection (§7.2).
 //!
-//! [SONNET-4.6] (sq-90mu3) The compaction-side companions of IRI Expansion
+//! (sq-90mu3) The compaction-side companions of IRI Expansion
 //! (`context::iri`, bead `sq-oy1f.24`). These are pure functions consumed by the
 //! document Compaction Algorithm (§8, bead `sq-oy1f.27`). Build the
 //! `InverseContext` once per compaction call with
@@ -87,7 +87,7 @@ impl ActiveContext {
     /// lexicographically (the spec mandates this iteration order at §4.3 step
     /// 3).
     ///
-    /// [SONNET-4.6] (sq-90mu3)
+    /// (sq-90mu3)
     pub fn inverse_context(&self) -> InverseContext {
         // §4.3 step 1: initialise result.
         let mut result: FxMap<String, BTreeMap<String, TypeLangMap>> = FxMap::default();
@@ -228,7 +228,7 @@ impl ActiveContext {
 /// language/direction" case, handled separately).
 ///
 /// Key format (JSON-LD 1.1 API "Inverse Context Creation", the language-map
-/// entry rules — [FABLE-5] sq-oy1f.27: re-keyed to the REC's exact formats so
+/// entry rules — sq-oy1f.27: re-keyed to the REC's exact formats so
 /// the keys line up with the preferred values IRI Compaction derives from
 /// document values, including the `"_<dir>"` underscore-suffix rule):
 /// - `Set(lang)` + `Set(dir)` → `"<lang-lc>_<dir>"`
@@ -268,7 +268,7 @@ fn language_dir_key(
 /// `type_language` is one of `"@type"`, `"@language"`, `"@any"`, or
 /// `"@reverse"` (the last two are aliases over the respective sub-maps).
 ///
-/// [SONNET-4.6] (sq-90mu3)
+/// (sq-90mu3)
 pub(crate) fn select_term(
     inverse: &InverseContext,
     iri: &str,
@@ -309,7 +309,7 @@ pub(crate) fn select_term(
 /// preference derivation (a graph object prefers `@graph*` containers, and its
 /// `@index` names the graph rather than an index entry).
 ///
-/// [FABLE-5] (sq-oy1f.27)
+/// (sq-oy1f.27)
 fn is_graph_object_shape(j: &Json) -> bool {
     match j {
         Json::Obj(members) => {
@@ -343,7 +343,7 @@ fn is_graph_object_shape(j: &Json) -> bool {
 /// `vocab` indicates vocab-relative compaction; `reverse` marks a
 /// `@reverse` property.
 ///
-/// [SONNET-4.6] (sq-90mu3)
+/// (sq-90mu3)
 pub fn compact_iri(
     ctx: &ActiveContext,
     inverse: &InverseContext,
@@ -366,7 +366,7 @@ pub fn compact_iri(
     // inverse context — derive the container preferences and the type/language lookup
     // from the SHAPE of `value`, then run Term Selection.
     //
-    // [FABLE-5] (sq-oy1f.27) Rewritten spec-faithful for the document-level Compaction
+    // (sq-oy1f.27) Rewritten spec-faithful for the document-level Compaction
     // Algorithm: the prior version pre-dated the document walk and diverged on the
     // load-bearing shapes the W3C compact suite exercises — @index containers were not
     // considered for reverse properties (the spec appends them BEFORE the reverse
@@ -694,11 +694,11 @@ pub fn compact_iri(
     // `iri.strip_prefix(base)` which only handled the literal-prefix case
     // and missed same-directory ("http://ex/a/b" + "http://ex/a/c" → "c"),
     // parent-traversal ("../c"), and query/fragment preservation.
-    // [SONNET-4.6] sq-90mu3 defect fix.
+    // sq-90mu3 defect fix.
     if !vocab {
         if let Some(base) = ctx.base_iri.as_deref() {
             if let Some(relative) = relativize_iri(base, iri) {
-                // [FABLE-5] (sq-oy1f.27) A relative reference with keyword form
+                // (sq-oy1f.27) A relative reference with keyword form
                 // ("@" + ALPHA) would be misread as a keyword where an IRI is
                 // expected — disambiguate with a "./" prefix (W3C compact/0111).
                 if has_keyword_form(&relative) {
@@ -1156,7 +1156,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // Fix 1 regression: §7.1 step 3.3 wrong-key lookup
-    // [SONNET-4.6] sq-90mu3 — old code: ctx.term_definitions.get(iri) where
+    // sq-90mu3 — old code: ctx.term_definitions.get(iri) where
     // iri is the expanded IRI; term_definitions keyed by term NAME, so the
     // lookup returned None when iri ≠ any term name, making the guard vacuous
     // (always extended containers).  The old code is ALSO broken in the
@@ -1222,7 +1222,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // Fix 2: §7.1 step 6 base-relative IRI via relativize_iri
-    // [SONNET-4.6] sq-90mu3 — old code: iri.strip_prefix(base) only worked
+    // sq-90mu3 — old code: iri.strip_prefix(base) only worked
     // for literal-prefix cases.  The new code uses the full RFC 3986
     // relativization that handles same-directory, parent-traversal,
     // query/fragment preservation.

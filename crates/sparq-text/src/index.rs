@@ -34,7 +34,7 @@
 //! token scores as ONE pseudo-term: its expansions' postings are unioned
 //! (term frequencies summed, document frequency = the union's size).
 //!
-//! ## Token positions (opt-in) and phrase queries [OPUS-4.8]
+//! ## Token positions (opt-in) and phrase queries
 //!
 //! By DEFAULT the base postings stay at 8 bytes per (token, doc) pair and no
 //! positions are stored — every existing caller is byte-for-byte unchanged.
@@ -57,7 +57,7 @@
 //! bounded total gap (the `slop`), and RELEVANCE-RANKED — tighter clustering
 //! scores higher (`1 / (1 + gap)`, so adjacency scores 1.0). `phrase_near(q, 0)`
 //! is exactly `phrase(q)` (gap 0 = adjacency), and the hit set grows
-//! monotonically with `slop`. [OPUS-4.8]
+//! monotonically with `slop`.
 //!
 //! ## Incremental maintenance
 //!
@@ -74,7 +74,7 @@
 //! reach for a rebuild only when a *durably*-recompacted base is reopened in a
 //! fresh process (the [`needs_rebuild`](TextIndex::needs_rebuild) case below).
 //!
-//! ## Durability / sharing: rebuild-on-boot + reconcile contract [OPUS-4.8]
+//! ## Durability / sharing: rebuild-on-boot + reconcile contract
 //!
 //! `TextIndex` is **in-memory, per-process, and not serialised** — there is no
 //! on-disk index format and no cross-process sharing. Under a stateless-core
@@ -136,7 +136,7 @@ const B: f32 = 0.75;
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
 
 /// Opt-in positional postings: token -> doc id -> the token's 0-based offsets
-/// in that doc, ascending (see [`TextIndex::positions`]). [OPUS-4.8]
+/// in that doc, ascending (see [`TextIndex::positions`]).
 type Positions = BTreeMap<Box<str>, FxHashMap<Id, Vec<u32>>>;
 
 /// One search hit: the matching literal's dictionary id and its BM25 score.
@@ -148,7 +148,7 @@ pub struct Hit {
     pub score: f32,
 }
 
-/// Corpus statistics for one analyzed index token. [GPT-5.6] sq-rviwn
+/// Corpus statistics for one analyzed index token. sq-rviwn
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TermStats {
     /// Number of indexed documents containing the token.
@@ -160,7 +160,7 @@ pub struct TermStats {
 }
 
 /// The BM25 inverse-document-frequency formula shared by every scoring path.
-/// [GPT-5.6] sq-rviwn
+/// sq-rviwn
 fn bm25_idf(document_count: usize, document_frequency: usize) -> f32 {
     let n = document_count as f32;
     let df = document_frequency as f32;
@@ -194,17 +194,17 @@ pub struct TextIndex {
     /// [`build`](Self::build), [`reconcile`](Self::reconcile), and
     /// [`apply_delta`](Self::apply_delta) to the graph's current `dict.len()`.
     /// Part of the index state, so a rebuilt and an incrementally-maintained
-    /// index over the same graph compare equal on it. [OPUS-4.8]
+    /// index over the same graph compare equal on it.
     indexed_dict_len: usize,
     /// The tokenization strategy this index was built with — used for BOTH
     /// indexing and querying so the two always agree. The default
     /// [`Analyzer::Unicode`] reproduces the historical behaviour exactly;
     /// [`Analyzer::CjkNgram`] is the opt-in CJK character-bigram analyzer. Part
     /// of the index state, so two indexes built with different analyzers are not
-    /// equal. [OPUS-4.8] sq-m3ln
+    /// equal. sq-m3ln
     analyzer: Analyzer,
     /// Bounded deletion-neighbour index, absent from feature-OFF builds.
-    /// [GPT-5.6] sq-lsp7k.14
+    /// sq-lsp7k.14
     #[cfg(feature = "fuzzy")]
     fuzzy: crate::fuzzy::FuzzyTerms,
 }
@@ -242,7 +242,7 @@ impl TextIndex {
     /// [`search`](Self::search) and friends tokenize the query the same way.
     /// No positions; combine with positions via
     /// [`build_with_positions_analyzer`](Self::build_with_positions_analyzer).
-    /// [OPUS-4.8] sq-m3ln
+    /// sq-m3ln
     pub fn build_with_analyzer(graph: &Graph, analyzer: Analyzer) -> TextIndex {
         Self::build_with(graph, false, analyzer)
     }
@@ -253,14 +253,14 @@ impl TextIndex {
     /// AND uses `analyzer` for tokenization. With [`Analyzer::CjkNgram`] a phrase
     /// is over the bigram stream, so `phrase("東京都")` requires the bigrams
     /// `東京` then `京都` consecutive — exactly the original ideograph adjacency.
-    /// [OPUS-4.8] sq-m3ln
+    /// sq-m3ln
     pub fn build_with_positions_analyzer(graph: &Graph, analyzer: Analyzer) -> TextIndex {
         Self::build_with(graph, true, analyzer)
     }
 
     /// An empty index that records token positions and uses `analyzer`, for the
     /// incremental/delta-fed case (the [`with_positions`](Self::with_positions)
-    /// counterpart with an explicit analyzer). [OPUS-4.8] sq-m3ln
+    /// counterpart with an explicit analyzer). sq-m3ln
     pub fn with_positions_analyzer(analyzer: Analyzer) -> TextIndex {
         TextIndex {
             positions: Some(BTreeMap::new()),
@@ -271,7 +271,7 @@ impl TextIndex {
 
     /// An empty index that uses `analyzer` (the `TextIndex::default()`
     /// counterpart with an explicit analyzer), for the delta-fed case without
-    /// positions. [OPUS-4.8] sq-m3ln
+    /// positions. sq-m3ln
     pub fn with_analyzer(analyzer: Analyzer) -> TextIndex {
         TextIndex {
             analyzer,
@@ -279,7 +279,7 @@ impl TextIndex {
         }
     }
 
-    /// The [`Analyzer`] this index was built/seeded with. [OPUS-4.8] sq-m3ln
+    /// The [`Analyzer`] this index was built/seeded with. sq-m3ln
     pub fn analyzer(&self) -> Analyzer {
         self.analyzer
     }
@@ -288,7 +288,6 @@ impl TextIndex {
     /// [`phrase`](Self::phrase) can answer ordered-adjacency queries. Costs an
     /// extra positional map (`u32` offset per indexed token occurrence) on top
     /// of the BM25 tables; reach for it only when phrase search is needed.
-    /// [OPUS-4.8]
     pub fn build_with_positions(graph: &Graph) -> TextIndex {
         Self::build_with(graph, true, Analyzer::Unicode)
     }
@@ -296,7 +295,7 @@ impl TextIndex {
     /// An empty index that records token positions as documents are added
     /// (via [`apply_delta`](Self::apply_delta)) — the position-enabled
     /// counterpart of `TextIndex::default()`, for the incremental/delta-fed
-    /// case. [OPUS-4.8]
+    /// case.
     pub fn with_positions() -> TextIndex {
         TextIndex {
             positions: Some(BTreeMap::new()),
@@ -305,10 +304,10 @@ impl TextIndex {
     }
 
     // Note: `Analyzer::default()` is `Unicode`, so `TextIndex::default()` and
-    // `with_positions()` keep the historical analyzer. [OPUS-4.8] sq-m3ln
+    // `with_positions()` keep the historical analyzer. sq-m3ln
 
     /// Whether this index records token positions (i.e. supports
-    /// [`phrase`](Self::phrase)). [OPUS-4.8]
+    /// [`phrase`](Self::phrase)).
     pub fn has_positions(&self) -> bool {
         self.positions.is_some()
     }
@@ -384,7 +383,7 @@ impl TextIndex {
         self.postings.len()
     }
 
-    /// Number of (token, document) posting pairs. [GPT-5.6] sq-ukr2k
+    /// Number of (token, document) posting pairs. sq-ukr2k
     pub fn total_postings(&self) -> usize {
         self.postings.values().map(|v| v.len()).sum()
     }
@@ -394,7 +393,7 @@ impl TextIndex {
     /// `token` is normalized with this index's [`Analyzer`], exactly as indexed
     /// text is. Input that analyzes to zero or multiple tokens, or whose token
     /// has no postings, returns `None`. Lookup is exact: this method does not
-    /// expand query-prefix syntax such as `*`. [GPT-5.6] sq-rviwn
+    /// expand query-prefix syntax such as `*`. sq-rviwn
     pub fn term_stats(&self, token: &str) -> Option<TermStats> {
         let mut tokens = tokenize_with(token, self.analyzer).into_iter();
         let token = tokens.next()?;
@@ -533,12 +532,12 @@ impl TextIndex {
         // Advance the generation marker to the post-delta dictionary, exactly as
         // a fresh `build` would — the batch may have interned more terms than it
         // indexed (subject/predicate IRIs, non-text objects), so pin to the
-        // graph's current length, not just the literals seen here. [OPUS-4.8]
+        // graph's current length, not just the literals seen here.
         self.indexed_dict_len = graph.dict.len();
     }
 
     // ---- Rebuild-on-boot + reconcile contract --------------------------------------
-    // [OPUS-4.8] sq-oddt. See the module docs for the full contract.
+    // sq-oddt. See the module docs for the full contract.
 
     /// The graph dictionary length (count of interned terms) this index has
     /// indexed up to — the generation marker the reconcile contract pins to.
@@ -546,7 +545,7 @@ impl TextIndex {
     /// [`reconcile`](Self::reconcile), and [`apply_delta`](Self::apply_delta) to
     /// the graph's `dict.len()` at that point. Dictionary ids are dense
     /// (`1..=len`), so this is exactly "every string literal with id ≤ this is
-    /// accounted for". [OPUS-4.8]
+    /// accounted for".
     pub fn indexed_dict_len(&self) -> usize {
         self.indexed_dict_len
     }
@@ -559,7 +558,7 @@ impl TextIndex {
     ///
     /// Pass the SAME graph the index was built/reconciled against. Cross-graph
     /// or post-[`Graph::compact`](sparq_core::Graph::compact) comparisons are
-    /// only meaningful through [`needs_rebuild`](Self::needs_rebuild). [OPUS-4.8]
+    /// only meaningful through [`needs_rebuild`](Self::needs_rebuild).
     pub fn is_consistent_with(&self, graph: &Graph) -> bool {
         self.indexed_dict_len == graph.dict.len()
     }
@@ -574,7 +573,7 @@ impl TextIndex {
     /// dictionary, where the index's dense id→document mapping no longer lines
     /// up. Reconcile is append-only and cannot repair that — call
     /// [`build`](Self::build) (or
-    /// [`build_with_positions`](Self::build_with_positions)) afresh. [OPUS-4.8]
+    /// [`build_with_positions`](Self::build_with_positions)) afresh.
     pub fn needs_rebuild(&self, graph: &Graph) -> bool {
         graph.dict.len() < self.indexed_dict_len
     }
@@ -604,7 +603,7 @@ impl TextIndex {
     /// This cannot arise from in-process
     /// [`Graph::compact`](sparq_core::Graph::compact) (which keeps ids); guard
     /// with [`needs_rebuild`](Self::needs_rebuild) when the index might be
-    /// applied to a reopened/durably-recompacted graph. [OPUS-4.8]
+    /// applied to a reopened/durably-recompacted graph.
     pub fn reconcile(&mut self, graph: &Graph) -> usize {
         let now = graph.dict.len();
         assert!(
@@ -675,7 +674,7 @@ impl TextIndex {
     /// index and are verified with exact Levenshtein distance; the token
     /// dictionary is never scanned at query time. Results are stably ordered
     /// by edit distance ascending, BM25 descending, matched term ascending,
-    /// then dictionary id ascending. [GPT-5.6] sq-lsp7k.14
+    /// then dictionary id ascending. sq-lsp7k.14
     ///
     /// At `max_distance == 0`, this returns exactly the same hit set and BM25
     /// scores as [`search`](Self::search) for the same single-token query.
@@ -752,7 +751,7 @@ impl TextIndex {
     /// document only where `foo` is immediately followed by `bar`; the same
     /// tokens at non-adjacent positions do not match, and order is significant
     /// (`"foo bar"` ≠ `"bar foo"`). Returns the matching literal ids ascending
-    /// (a phrase match is boolean adjacency, not a BM25 ranking). [OPUS-4.8]
+    /// (a phrase match is boolean adjacency, not a BM25 ranking).
     ///
     /// The query is analyzed by the SAME pipeline as the indexed text (UAX #29
     /// segmentation + Unicode casefolding, via [`tokenize`](crate::tokenize::tokenize)), so the phrase
@@ -823,7 +822,6 @@ impl TextIndex {
 
     /// Proximity ("slop") phrase query: literals where the query's tokens occur
     /// IN ORDER within a bounded total gap, RANKED by how tightly they cluster.
-    /// [OPUS-4.8]
     ///
     /// `slop` is the maximum *extra* span the tokens may spread over their
     /// tightest possible (adjacent) packing — the same notion of slop Lucene's
@@ -904,7 +902,7 @@ impl TextIndex {
     /// if the tokens never occur in order there. The gap of an alignment placing
     /// token `k` at `p_k` (strictly increasing) is `(p_{n-1} − p_0) − (n − 1)`.
     /// `lists[k]` is token k's doc->positions map; `driver_i` is the token whose
-    /// docs we are iterating (already known to contain `id`). [OPUS-4.8]
+    /// docs we are iterating (already known to contain `id`).
     fn min_phrase_gap(lists: &[&FxHashMap<Id, Vec<u32>>], driver_i: usize, id: Id) -> Option<u32> {
         // Every token must occur in this doc for any alignment to exist.
         for (k, docs) in lists.iter().enumerate() {

@@ -1,6 +1,6 @@
 //! IRI Expansion (JSON-LD 1.1 API §5.2) and RFC 3986 reference resolution.
 //!
-//! [OPUS-4.8] (sq-oy1f.24) IRI Expansion resolves a term / compact IRI / relative
+//! (sq-oy1f.24) IRI Expansion resolves a term / compact IRI / relative
 //! reference against an [`ActiveContext`], honouring keyword
 //! aliases, `@vocab`, `@base`, and on-demand term creation from a local context. The
 //! compaction-side companions (IRI Compaction, Term Selection, inverse-context
@@ -24,12 +24,12 @@ pub(crate) fn is_blank_node(s: &str) -> bool {
 /// IRI = scheme ":" ihier-part [ "?" iquery ] [ "#" ifragment ]
 /// ```
 ///
-/// [OPUS-5] sq-gzsky — this is the "Processors MUST validate datatype IRIs" obligation
+/// sq-gzsky — this is the "Processors MUST validate datatype IRIs" obligation
 /// behind the `invalid typed value` negative (W3C expand/0123 pins
 /// `"http://example.com/baz z"`, a scheme-valid string carrying a SPACE). Scheme validity
 /// alone accepted it.
 ///
-/// [SONNET-4.6] (PR #4610 review) This grew in three rounds. The first cut was a character
+/// (PR #4610 review) This grew in three rounds. The first cut was a character
 /// *denylist* with no escape validation (`http://example.com/%ZZ` passed); round one made
 /// it a complete code-point allowlist plus `pct-encoded` validation; round two — this one —
 /// makes it the **structural** grammar, so a string that is character-legal but
@@ -412,7 +412,7 @@ impl ActiveContext {
                 if prefix == "_" || suffix.starts_with("//") {
                     return Some(value.to_string());
                 }
-                // [SONNET-4.6] sq-oy1f.45 — a colon in a fragment (e.g. `#Test:2`) does
+                // sq-oy1f.45 — a colon in a fragment (e.g. `#Test:2`) does
                 // NOT mark a compact-IRI prefix; the prefix must be a valid RFC 3986 URI
                 // scheme (ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )).  A non-scheme
                 // prefix (starting with `#`, containing non-scheme chars, etc.) means the
@@ -677,7 +677,7 @@ pub(crate) fn resolve_iri(base: &str, reference: &str) -> String {
 /// - different URI scheme
 /// - different authority (host/port)
 ///
-/// [SONNET-4.6] (sq-90mu3) §7.1 step 6 defect fix: the prior
+/// (sq-90mu3) §7.1 step 6 defect fix: the prior
 /// `iri.strip_prefix(base)` only handled the literal-prefix case
 /// (`http://ex/a/b` → `c` when base is `http://ex/a/b` → ∅); this helper
 /// covers same-directory, child-path, parent-traversal, and
@@ -693,7 +693,7 @@ pub(crate) fn relativize_iri(base: &str, iri: &str) -> Option<String> {
         return None;
     }
 
-    // [FABLE-5] (sq-oy1f.27) Same-document references (RFC 3986 §4.4): when the
+    // (sq-oy1f.27) Same-document references (RFC 3986 §4.4): when the
     // paths agree, prefer a fragment-only reference (queries also agreeing) or a
     // query reference over re-stating the last path segment — the forms the W3C
     // compact suite expects for `#fragment` / `?query` targets.
@@ -790,7 +790,7 @@ mod tests {
         assert!(!is_blank_node("http://x"));
     }
 
-    /// [SONNET-4.6] (PR #4610 review) `pct-encoded = "%" HEXDIG HEXDIG` — a malformed
+    /// (PR #4610 review) `pct-encoded = "%" HEXDIG HEXDIG` — a malformed
     /// escape makes the string a non-IRI, so it must not pass as a datatype IRI. The
     /// original character-denylist check accepted all of these.
     #[test]
@@ -835,7 +835,7 @@ mod tests {
         assert!(!is_absolute_iri("http://example.com/\u{e0001}"));
     }
 
-    /// [SONNET-4.6] (PR #4610 review round 2) `iprivate` is an alternative of `iquery`
+    /// (PR #4610 review round 2) `iprivate` is an alternative of `iquery`
     /// ALONE — `ipchar` admits `ucschar` but not `iprivate`, so a private-use code point is
     /// legal in the query and nowhere else. The round-one code-point check admitted it
     /// everywhere; this is the placement rule the structural grammar adds.
@@ -851,7 +851,7 @@ mod tests {
         assert!(!is_absolute_iri("http://example.com/p?\u{fffff}")); // plane-15 noncharacter
     }
 
-    /// [SONNET-4.6] (PR #4610 review round 2) The cited witnesses: strings built entirely
+    /// (PR #4610 review round 2) The cited witnesses: strings built entirely
     /// from admitted code points whose *component structure* is malformed. `has_only_iri_chars`
     /// accepted every one of these, so `@type` never raised `invalid typed value` for them.
     #[test]
@@ -909,7 +909,7 @@ mod tests {
         assert!(is_absolute_iri("http://example.com/a!$&'()*+,;=:@/b"));
     }
 
-    /// [SONNET-4.6] (PR #4610 review round 2) The documented deviation from a literal
+    /// (PR #4610 review round 2) The documented deviation from a literal
     /// `ipchar` reading, pinned to the W3C case that forces it: `compact/p004` is a
     /// PositiveEvaluationTest mapping `lbracket` to `http://example.org/[` and carrying
     /// `http://example.org/[foo` as a property IRI. Both must pass term-definition
@@ -999,7 +999,7 @@ mod tests {
         );
     }
 
-    // [SONNET-4.6] Issue #3714 — mutation tripwire for the dependency-free RFC
+    // Issue #3714 — mutation tripwire for the dependency-free RFC
     // 3986 implementation. oxiri remains test-only so the crate's zero-mandatory-
     // dependency design is preserved.
     #[test]
@@ -1075,7 +1075,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // relativize_iri — round-trip correctness matrix
-    // [SONNET-4.6] (sq-90mu3) Fix for §7.1 step 6 base-relative compaction.
+    // (sq-90mu3) Fix for §7.1 step 6 base-relative compaction.
     // Each case asserts: resolve_iri(base, relativize_iri(base, iri)) == iri
     // -----------------------------------------------------------------------
 

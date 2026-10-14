@@ -290,7 +290,7 @@ fn same_as_variants_arrive_only_via_the_transparent_bridge() {
     );
 }
 
-/// [FABLE-5] sq-afun3 (second increment): STRICT OPACITY end-to-end.
+/// sq-afun3 (second increment): STRICT OPACITY end-to-end.
 /// `materialize_owl_rl_reify(…, ReifyMode::DestructureOnly)` on the exact sameAs
 /// fixture of `same_as_variants_arrive_only_via_the_transparent_bridge`: the
 /// destructured components and the eq-rep variant TRIPLE still arrive (reif-dtr and
@@ -344,7 +344,7 @@ fn strict_opacity_suppresses_the_bridge_composition() {
     );
 }
 
-/// [FABLE-5] sq-afun3: in strict mode classic-reification data is never surfaced
+/// sq-afun3: in strict mode classic-reification data is never surfaced
 /// as `rdf:reifies` — the `construct_only_for_existing_triples` fixture derives no
 /// reifies triple and mints no triple term, while the destructure direction (and
 /// `rdf:Statement` typing of real reifiers) is unaffected.
@@ -491,7 +491,7 @@ fn incremental_owl_graph_falls_back_and_stays_parity_identical() {
     );
 }
 
-/// [OPUS-5] sq-afun3 (third increment): STRICT OPACITY through the INCREMENTAL handle.
+/// sq-afun3 (third increment): STRICT OPACITY through the INCREMENTAL handle.
 /// `MaterializedOwlGraph::with_reify_mode(…, DestructureOnly)` keeps the mode across
 /// re-materializations, so (a) the closure equals the MATCHING strict batch oracle
 /// initially AND after a mutation, and (b) no triple term is ever minted by

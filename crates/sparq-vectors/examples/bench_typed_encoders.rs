@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-0wo9e.2 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md` §6.B)
+//! sq-0wo9e.2 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md` §6.B)
 //! P1 typed-literal encoder ABLATION harness — **encoder-level, honest, deterministic**.
 //!
 //! # Why this, and NOT a filtered link-prediction (FB15k-237 / WN18RR) MRR run

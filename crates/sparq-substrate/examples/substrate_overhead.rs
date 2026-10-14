@@ -1,7 +1,7 @@
 //! Runnable zero-overhead DELTA harness — the substrate half of the
 //! sparq-engine-systems paper's §8 protocol.
 //!
-//! # [FABLE-5] sq-atjue
+//! # sq-atjue
 //!
 //! Measures each shared substrate kernel (`join` / `numeric` / `compare`) against a
 //! hand-rolled pre-extraction equivalent and emits the house JSON envelope with one

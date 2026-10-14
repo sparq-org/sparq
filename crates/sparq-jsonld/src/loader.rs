@@ -1,6 +1,6 @@
 //! Document loading — the [`DocumentLoader`] trait, **deny-by-default**.
 //!
-//! [OPUS-4.8] (sq-oy1f.23) The pipeline dereferences remote `@context`, `@import`, and
+//! (sq-oy1f.23) The pipeline dereferences remote `@context`, `@import`, and
 //! remote-document references **only** through a [`DocumentLoader`]. The default loader is
 //! [`NoopLoader`], which refuses every load and raises
 //! [`JsonLdErrorCode::LoadingDocumentFailed`]: enabling JSON-LD gives a surface **no ambient

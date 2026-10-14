@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7d3dj.30.1) Pre-execution SPARQL algebra rewrite pass.
+//! (sq-7d3dj.30.1) Pre-execution SPARQL algebra rewrite pass.
 //!
 //! 🤖 SPARQ agent. A pure, **bag-result-equivalent** transform over the parsed
 //! `spargebra` algebra, applied once by [`crate::PreparedQuery::parse`] (and the
@@ -513,7 +513,7 @@ fn certain_vars(p: &GraphPattern) -> FxHashSet<Variable> {
             // and could let the anti-join guard fire unsoundly on a
             // `Filter(!bound(?agg), LeftJoin(A, B))` where `?agg` is an aggregate
             // output inside `B`. Omitting it is a strictly-safe under-approximation.
-            // [OPUS-4.8]
+            //
             let c = certain_vars(inner);
             for v in variables {
                 if c.contains(v) {
@@ -709,7 +709,7 @@ mod tests {
     // wraps the aggregate in an `Extend` that already guards `?total`, so it does
     // not exercise the Group arm — this constructs the raw shape the arm sees).
     // With the buggy loop present `?total` appears in the set and this fails;
-    // with the fix it is absent. [OPUS-4.8]
+    // with the fix it is absent.
     #[test]
     fn certain_vars_group_excludes_aggregate_output() {
         use spargebra::algebra::{AggregateExpression, AggregateFunction};
@@ -751,7 +751,7 @@ mod tests {
     // must leave the plan UNCHANGED (no anti-join). At the surface-SPARQL level
     // `?total` is bound by an `Extend` over the `Group` (spargebra desugaring), so
     // it is declined by the Extend rule regardless of the Group-arm fix; this
-    // pins the observable end-to-end behaviour. [OPUS-4.8]
+    // pins the observable end-to-end behaviour.
     #[test]
     fn antijoin_declines_over_optional_aggregate_subselect() {
         let raw = parse(&format!(

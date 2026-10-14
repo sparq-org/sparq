@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-5lf) Tests for the public cheap-snapshot API `Graph::snapshot()` →
+//! (sq-5lf) Tests for the public cheap-snapshot API `Graph::snapshot()` →
 //! `GraphSnapshot`. The structural-fork MECHANISM (read-merge correctness across a
 //! chain of forked generations) is covered exhaustively in `fork_differential.rs`;
 //! this file pins the snapshot SURFACE the task specifies:

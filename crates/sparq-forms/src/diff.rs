@@ -1,5 +1,5 @@
 //! Pure form-value differencing and SPARQL 1.1 Update rendering.
-//! [GPT-5.6] sq-wn788
+//! sq-wn788
 
 use crate::{derive::render_path, FormDescription, FormField, TermRef};
 use oxrdf::{BaseDirection, BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple};

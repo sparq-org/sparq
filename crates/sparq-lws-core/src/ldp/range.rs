@@ -5,7 +5,7 @@
 //! byte interval(s), decide it is unsatisfiable (416), or decide the header should be ignored and
 //! the full body returned (200). Multipart framing is also pure value logic.
 
-// [GPT-5.6] Multipart parsing and framing extension.
+// Multipart parsing and framing extension.
 /// Boundary used by [`encode_multipart`].
 pub const MULTIPART_BOUNDARY: &str = "sparq-lws-byte-boundary";
 

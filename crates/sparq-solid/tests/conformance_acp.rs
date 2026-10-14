@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3jtd.9 — the ACP **conformance corpus**: a table of independent,
+//! sq-3jtd.9 — the ACP **conformance corpus**: a table of independent,
 //! minimal scenarios, each isolating one Solid ACP-spec construct, run through this
 //! crate's ACP authorization engine (`materialize_acp` + `AuthIndex::accessible`) with
 //! its expected `(agent, client, mode, resource) → allow | deny` decisions asserted.
@@ -9,7 +9,7 @@
 //! differential oracle are out-of-scope / research-open). The harness lets each
 //! scenario fail independently and reports all mismatches at once.
 //!
-//! [OPUS-4.8] sq-t58w.6 — the scenario corpus itself now lives in the shared `tests/common`
+//! sq-t58w.6 — the scenario corpus itself now lives in the shared `tests/common`
 //! module (`common::acp_corpus()`) so a SECOND test target (the differential oracle,
 //! `sq-t58w.7`) can consume the IDENTICAL scenarios without copy-paste. This file is the
 //! corpus's first consumer; the test set + assertions below are unchanged by the move.
@@ -40,7 +40,7 @@ fn acp_conformance_corpus_decision_parity() {
         "ACP conformance mismatch(es) across {} scenarios / {total_decisions} decisions:\n{failures}",
         reports.len(),
     );
-    // [OPUS-4.8] sq-t58w.6 — the RATCHET line. The corpus move into `tests/common`
+    // sq-t58w.6 — the RATCHET line. The corpus move into `tests/common`
     // dropped the stdout summary the `solid-conformance` CI job greps; restore it in
     // the SHACL/geo runner shape (`pass N / fail M (floor F)`) so the belt-and-braces
     // grep gate re-checks the scenario count. `pass` is the count of passing scenarios

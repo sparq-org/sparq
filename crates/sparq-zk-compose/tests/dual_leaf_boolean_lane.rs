@@ -1,4 +1,4 @@
-// [OPUS-5] sq-5xdlk — CROSS-VECTORS for the DUAL-LEAF `xsd:boolean` value lane.
+// sq-5xdlk — CROSS-VECTORS for the DUAL-LEAF `xsd:boolean` value lane.
 //! The circuit half of the boolean-lane pair (host half: `sq-hh7a4`,
 //! `sparq_zk::dual_leaf_boolean::encode_boolean`).
 //!

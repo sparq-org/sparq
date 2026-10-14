@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-q4apb (#2396): the opt-in hosted-web
+//! sq-q4apb (#2396): the opt-in hosted-web
 //! `Store.deriveForm(data, shapes, focus, format, optionsJson)` forms bridge.
 //!
 //! Exposes `sparq-forms`' existing SHACL-to-form derivation
@@ -129,7 +129,7 @@ pub(crate) fn derive_form_json(
 
 #[wasm_bindgen]
 impl Store {
-    /// [SONNET-4.6] sq-q4apb (#2396): derives one complete `FormDescription`
+    /// sq-q4apb (#2396): derives one complete `FormDescription`
     /// (SHACL-to-form, DASH widget scoring) from serialized workspace snapshots —
     /// the hosted-web half of the GUI forms bridge (desktop uses the Tauri
     /// `derive_form` command; `forms-bridge.ts` feature-detects this method).

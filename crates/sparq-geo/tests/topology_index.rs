@@ -7,7 +7,7 @@ use sparq_core::Graph;
 use sparq_geo::{geof, parse_geometry_literal, parse_wkt_literal, GeoGeometry, GeoIndex};
 use std::collections::HashSet;
 
-// [GPT-5.6] sq-jrdds: every fixture geometry's AABB intersects the diamond's
+// sq-jrdds: every fixture geometry's AABB intersects the diamond's
 // AABB, but only the centre and near-axis points are topologically within it.
 const FIXTURE: &str = r#"
     @prefix geo: <http://www.opengis.net/ont/geosparql#> .

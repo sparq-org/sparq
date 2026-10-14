@@ -147,7 +147,7 @@ impl From<super::sparql::BuildError> for SparqError {
 /// ([`SparqClient::delete_meta`]) and containment membership ([`SparqClient::create_child`] /
 /// [`remove_child`](SparqClient::remove_child) / [`list_children`](SparqClient::list_children)) —
 /// SPARQ is authoritative for containment, so POST (mint a child) + the empty-container DELETE check
-/// flow through it, never an S3 LIST. [GPT-5.6] The in-memory implementation exposes its concrete
+/// flow through it, never an S3 LIST. The in-memory implementation exposes its concrete
 /// `usage()` and `quota()` views without imposing that backend-specific model on this trait. M2-next
 /// retains the WAC/ACP ACL-document graphs the (future) access-evaluation step reads.
 #[async_trait]
@@ -324,7 +324,7 @@ pub trait SparqClient: Send + Sync {
 /// double's coarse locking.
 pub struct InMemorySparqClient {
     inner: Mutex<Index>,
-    /// [GPT-5.6] Immutable admission ceiling, enforced under the index lock.
+    /// Immutable admission ceiling, enforced under the index lock.
     limits: InMemoryStoreLimits,
 }
 
@@ -601,7 +601,7 @@ mod tests {
 
     #[tokio::test]
     async fn resource_limit_rejects_new_records_but_allows_replacement() {
-        // [GPT-5.6] Mutation witness: removing `admit_resource` makes the second IRI succeed and
+        // Mutation witness: removing `admit_resource` makes the second IRI succeed and
         // changes usage from the configured one-resource ceiling.
         let limits = InMemoryStoreLimits::new(usize::MAX, 1);
         let index = InMemorySparqClient::with_limits(limits);
@@ -621,7 +621,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn concurrent_metadata_writes_cannot_over_admit_resource_limit() {
-        // [GPT-5.6] Admission and insertion happen under one lock, so racing writers cannot each
+        // Admission and insertion happen under one lock, so racing writers cannot each
         // observe a spare final slot.
         let index = Arc::new(InMemorySparqClient::with_limits(InMemoryStoreLimits::new(
             usize::MAX,

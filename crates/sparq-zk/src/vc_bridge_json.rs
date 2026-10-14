@@ -1,4 +1,4 @@
-// [OPUS-5] sq-txg1y (issue #3234) — follow-up to sq-9c5e.
+// sq-txg1y (issue #3234) — follow-up to sq-9c5e.
 //! **Additive** JSON-LD VC *envelope* entry point layered on top of the RDF-native
 //! [`crate::vc_bridge`] (design `research/zk-configurable-commitment-design.md` §5).
 //!
@@ -489,7 +489,7 @@ mod tests {
     }
 
     /// The P-384 profile reaches the same envelope path, and the curve is still
-    /// resolved from the KEY — nothing in the JSON names it. [OPUS-5] sq-txg1y.
+    /// resolved from the KEY — nothing in the JSON names it. sq-txg1y.
     #[test]
     fn ecdsa_p384_vc_json_verifies_through_the_envelope() {
         use p384::ecdsa::{signature::Signer, Signature, SigningKey};

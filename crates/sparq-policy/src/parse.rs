@@ -15,7 +15,6 @@
 //! `sparq_core::Graph::load_str` accepts (`turtle`, `ntriples`, …). The policy
 //! IRI is whichever subject is `a odrl:Policy`/`Set`/`Offer`/`Agreement`, or —
 //! if none is typed — whichever subject carries `odrl:permission`/`prohibition`.
-//! [OPUS-4.8]
 
 use crate::model::{
     Action, ConflictStrategy, Constraint, ConstraintNode, Duty, LogicalConstraint, LogicalOperator,
@@ -120,7 +119,7 @@ pub fn parse_policy(graph: &Graph) -> Result<ValidatedPolicy, String> {
     // Bulk-load the graph's RDF collection shapes ONCE (cons cells + the member-less
     // rest-only heads), so a multi-valued `odrl:rightOperand ( <a> <b> )` list can be
     // folded into the set encoding — or refused — by every constraint parse below.
-    // [FABLE-5] sq-ueydm.
+    // sq-ueydm.
     let lists = rdf_list_table(graph)?;
     let permissions = rules(graph, "permission", true, &lists)?;
     let prohibitions = rules(graph, "prohibition", false, &lists)?;
@@ -139,7 +138,7 @@ pub fn parse_policy(graph: &Graph) -> Result<ValidatedPolicy, String> {
 
 /// The IRIs this graph identifies as an `odrl:PartyCollection` — retained on the
 /// [`Policy`] so a consumer that FREEZES a rule into an identity-matched head can route
-/// collection-valued heads to a membership-aware path. [SONNET-4.6] sq-rf9uv.
+/// collection-valued heads to a membership-aware path. sq-rf9uv.
 ///
 /// Two independent signals, unioned:
 ///
@@ -178,7 +177,7 @@ fn party_collections(graph: &Graph) -> Result<BTreeSet<String>, String> {
 }
 
 /// Extract the policy's declared `odrl:conflict` conflict-resolution strategy, if any.
-/// [OPUS-4.8] sq-ihqbl.
+/// sq-ihqbl.
 ///
 /// The value is classified via [`ConflictStrategy::from_iri`], so an unrecognised term
 /// is preserved as [`ConflictStrategy::Unknown`] (and later *refused*) rather than
@@ -194,7 +193,7 @@ fn party_collections(graph: &Graph) -> Result<BTreeSet<String>, String> {
 /// so this only ever refuses a graph that declares a non-default strategy, never a benign
 /// deny-overrides one.) We deliberately do **not** tie `?p` to a specific policy node: an
 /// unrelated subject asserting `odrl:conflict` then contributes to the refusal set, which is
-/// strictly the *more* fail-closed direction. [OPUS-4.8] sq-ihqbl.
+/// strictly the *more* fail-closed direction. sq-ihqbl.
 fn policy_conflict(graph: &Graph) -> Result<Option<ConflictStrategy>, String> {
     let res = sparq_engine::query(
         graph,
@@ -364,14 +363,14 @@ fn first_str(m: &BTreeMap<String, Vec<Term>>, key: &str) -> Option<String> {
 /// One RDF collection cons cell (`rdf:first`/`rdf:rest`), keyed in the list table
 /// by its node key. `rest` is the node key of the tail (the next cell, or
 /// `rdf:nil`); `None` when the cell is malformed (an `rdf:first` with no
-/// `rdf:rest`), which the walk reads as end-of-list. [FABLE-5] sq-ueydm.
+/// `rdf:rest`), which the walk reads as end-of-list. sq-ueydm.
 struct ListCell {
     first: Term,
     rest: Option<String>,
     /// The node asserts SEVERAL distinct `rdf:first`/`rdf:rest` pairs (a forked
     /// list). The kept pair stays deterministic, but a well-formedness check must
     /// treat the cell as malformed: honouring one deterministic fork of an
-    /// ambiguous collection could silently drop authored members. [FABLE-5] sq-dkuff.
+    /// ambiguous collection could silently drop authored members. sq-dkuff.
     ambiguous: bool,
 }
 
@@ -379,7 +378,7 @@ struct ListCell {
 /// every well-keyed cons cell, PLUS the member-less HEAD-position nodes that are
 /// collection-*shaped* but carry no `rdf:first`. Both are needed by every
 /// consumer, because a node's absence from `cells` alone does not mean "not a
-/// collection". [FABLE-5] sq-srjuc.
+/// collection". sq-srjuc.
 struct ListTable {
     /// Cons cells keyed by node key (`?n rdf:first ?f`).
     cells: BTreeMap<String, ListCell>,
@@ -388,14 +387,14 @@ struct ListTable {
     /// as an ordinary IRI/blank-node value or operand and silently bypass
     /// collection validation. (A MID-chain rest-only cell is already caught by
     /// [`well_formed_list`]'s dangling-tail check; this set is what catches one in
-    /// HEAD position.) [FABLE-5] sq-dkuff.
+    /// HEAD position.) sq-dkuff.
     rest_only: BTreeMap<String, ()>,
 }
 
 impl ListTable {
     /// Is `key` collection-SHAPED — either a cons cell or a member-less rest-only
     /// node? Both shapes must be validated as a collection rather than read as an
-    /// ordinary value/operand. [FABLE-5] sq-srjuc.
+    /// ordinary value/operand. sq-srjuc.
     fn is_collection_shaped(&self, key: &str) -> bool {
         self.cells.contains_key(key) || self.rest_only.contains_key(key)
     }
@@ -409,7 +408,7 @@ impl ListTable {
 /// pattern as [`logical_constraints_for`]). A malformed cell asserting several
 /// `rdf:first`/`rdf:rest` values keeps its first-bound pair (degenerate, but the
 /// load stays deterministic and terminating) and is flagged `ambiguous`, so every
-/// consumer goes through [`well_formed_list`] and refuses it. [FABLE-5] sq-ueydm.
+/// consumer goes through [`well_formed_list`] and refuses it. sq-ueydm.
 fn rdf_list_table(graph: &Graph) -> Result<ListTable, String> {
     let q = format!(
         "SELECT ?n ?f ?r WHERE {{ \
@@ -429,7 +428,7 @@ fn rdf_list_table(graph: &Graph) -> Result<ListTable, String> {
             .entry(node_key(&n))
             // A SECOND row for the same cell node = a genuinely different
             // `rdf:first`/`rdf:rest` binding (a triple matches at most once) —
-            // mark the fork so well-formedness checks can refuse it. [FABLE-5]
+            // mark the fork so well-formedness checks can refuse it.
             // sq-dkuff.
             .and_modify(|c| c.ambiguous = true)
             .or_insert(ListCell {
@@ -462,7 +461,7 @@ fn rdf_list_table(graph: &Graph) -> Result<ListTable, String> {
 /// tail (an `rdf:rest` pointing at a non-cell that is not `rdf:nil`), a cycle, a
 /// forked (ambiguous) cell, or a member-less rest-only node (`rdf:rest` with no
 /// `rdf:first` — absent from `cells`, so it never walks as a collection).
-/// [FABLE-5] sq-dkuff.
+/// sq-dkuff.
 ///
 /// A *prefix* of a malformed list must never be honoured where the members carry
 /// authorization semantics: dropping an authored member from an `odrl:and` operand
@@ -492,7 +491,7 @@ fn well_formed_list(head_key: &str, lists: &ListTable) -> Option<Vec<Term>> {
 
 /// Is `op` one of the ODRL set-relation operators (`isPartOf`/`isAnyOf`/`isNoneOf`)
 /// that consume the `|`/space/comma set encoding — the only operators a
-/// MULTI-valued `rightOperand` can be faithfully folded for? [FABLE-5] sq-ueydm.
+/// MULTI-valued `rightOperand` can be faithfully folded for? sq-ueydm.
 fn is_set_operator(op: Option<&Term>) -> bool {
     matches!(
         op.and_then(|t| Operator::from_iri(&term_str(t))),
@@ -502,7 +501,7 @@ fn is_set_operator(op: Option<&Term>) -> bool {
 
 /// Fold a constraint's collected `rightOperand` objects — expanding any RDF list
 /// (`rdf:first`/`rdf:rest` chain) into its members — into a single [`Value`].
-/// [FABLE-5] sq-ueydm.
+/// sq-ueydm.
 ///
 /// * **No object** → `None` (the missing-right case: [`build_constraint`] turns it
 ///   into the unsatisfiable guard — fail-closed, as before).
@@ -547,7 +546,7 @@ fn is_set_operator(op: Option<&Term>) -> bool {
 /// That last hazard is exactly why a member-less rest-only head must be refused
 /// rather than read as an ordinary value: as a value it is an unmatchable blank
 /// node, which leaves a prohibition's constraint unsatisfied and lets a sibling
-/// permission grant. [FABLE-5] sq-srjuc.
+/// permission grant. sq-srjuc.
 fn fold_rights(
     op: Option<&Term>,
     rights: &[Term],
@@ -559,7 +558,7 @@ fn fold_rights(
         let key = node_key(r);
         // Collection-SHAPED (a cons cell OR a member-less rest-only node) → it must
         // validate as a collection; a rest-only head is invisible to the cell table,
-        // so testing only `cells` would read it as an ordinary value. [FABLE-5] sq-srjuc.
+        // so testing only `cells` would read it as an ordinary value. sq-srjuc.
         let expanded = if lists.is_collection_shaped(&key) {
             well_formed_list(&key, lists).ok_or_else(|| {
                 format!(
@@ -627,7 +626,7 @@ fn fold_rights(
 /// Accumulator grouping one constraint node's result rows: a multi-valued
 /// `odrl:rightOperand` (several objects, or several rows from the OPTIONAL
 /// combinations) yields SEVERAL rows for ONE constraint node, which are folded
-/// into one constraint — not first-binding-wins. [FABLE-5] sq-ueydm.
+/// into one constraint — not first-binding-wins. sq-ueydm.
 #[derive(Default)]
 struct RawConstraint {
     left: Option<Term>,
@@ -717,7 +716,7 @@ impl RawConstraint {
     /// Fold the accumulated right operands (expanding RDF lists) and build the
     /// [`Constraint`] — anything malformed degrades to the unsatisfiable guard,
     /// except a malformed COLLECTION right operand, which refuses the whole parse
-    /// (`Err`; see [`fold_rights`]). [FABLE-5] sq-srjuc.
+    /// (`Err`; see [`fold_rights`]). sq-srjuc.
     ///
     /// A node with several distinct `leftOperand`/`operator` objects also refuses
     /// the parse (`Err`): degrading it to the unsatisfiable guard would DISABLE a
@@ -757,12 +756,12 @@ impl RawConstraint {
 /// `leftOperand`/`operator`/`rightOperand`) is **skipped here** — it is parsed by
 /// [`logical_constraints_for`] into the rule's `logical_constraints` instead, so it
 /// is *not* mis-read as a structurally-incomplete atomic constraint (which would
-/// wrongly fail the whole rule closed). [OPUS-4.8] sq-a0zef.
+/// wrongly fail the whole rule closed). sq-a0zef.
 ///
 /// A multi-valued `odrl:rightOperand` — several objects (`odrl:rightOperand <a>,
 /// <b>`) or an RDF list (`odrl:rightOperand ( <a> <b> )`) — is folded into the
 /// `|`-separated set encoding via [`fold_rights`] instead of taking the first
-/// binding. [FABLE-5] sq-ueydm.
+/// binding. sq-ueydm.
 fn constraints_for(
     graph: &Graph,
     kind: &str,
@@ -818,7 +817,7 @@ fn constraints_for(
     for (rkey, ckey) in order {
         let raw = acc.remove(&ckey).expect("accumulated above");
         // A compound LogicalConstraint is parsed by logical_constraints_for, not as
-        // a malformed atomic constraint. [OPUS-4.8] sq-a0zef.
+        // a malformed atomic constraint. sq-a0zef.
         if raw.is_logical {
             continue;
         }
@@ -828,10 +827,10 @@ fn constraints_for(
 }
 
 /// Parse the compound `odrl:LogicalConstraint` refinements attached (via
-/// `odrl:constraint`) to each rule of `kind`, keyed by rule node. [OPUS-4.8] sq-a0zef.
+/// `odrl:constraint`) to each rule of `kind`, keyed by rule node. sq-a0zef.
 ///
 /// A parsed `odrl:LogicalConstraint` node's combinator + operand node-keys, before
-/// recursive assembly into a [`LogicalConstraint`]. [OPUS-4.8] sq-a0zef.
+/// recursive assembly into a [`LogicalConstraint`]. sq-a0zef.
 struct LcDef {
     operator: LogicalOperator,
     /// Operand node-keys in graph order (de-duplicated).
@@ -926,7 +925,7 @@ fn logical_constraints_for(
     // (2b) Fold LIST-valued combinator operands (`odrl:or ( <c1> <c2> )`) into their
     // member node keys before assembly; a malformed/degenerate collection REFUSES the
     // whole parse (fail-closed on both rule kinds). HEAD-position rest-only cells come
-    // from the pre-loaded `lists.rest_only` set. [FABLE-5] sq-dkuff.
+    // from the pre-loaded `lists.rest_only` set. sq-dkuff.
     fold_list_operands(&mut lc_defs, &atoms, lists)?;
 
     // (3) The rule → direct-constraint-node map (which of a rule's `odrl:constraint`
@@ -961,7 +960,7 @@ fn logical_constraints_for(
     Ok(out)
 }
 
-/// Fold LIST-valued combinator operands into their member node keys. [FABLE-5] sq-dkuff.
+/// Fold LIST-valued combinator operands into their member node keys. sq-dkuff.
 ///
 /// ODRL examples mostly write a combinator's operands as several objects of the one
 /// property (`odrl:and <c1>, <c2>` — the SolidLab suite's form, handled by the edges
@@ -1068,7 +1067,7 @@ fn fold_list_operands(
 /// Recursively assemble a [`LogicalConstraint`] from the pre-built node tables, with
 /// cycle protection (`active` tracks the ancestor chain). A malformed node — not in the
 /// combinator table and not a known atomic, or part of a cycle — becomes the
-/// unsatisfiable-guard atomic constraint (fail-closed). [OPUS-4.8] sq-a0zef.
+/// unsatisfiable-guard atomic constraint (fail-closed). sq-a0zef.
 fn assemble_logical(
     lc_key: &str,
     lc_defs: &BTreeMap<String, LcDef>,
@@ -1113,7 +1112,7 @@ fn typed_member(t: &Term) -> bool {
 
 /// The unsatisfiable-guard atomic constraint used for a malformed/unknown operand
 /// (a constraint that can never be satisfied — fail-closed). Shared by [`build_constraint`]
-/// and the compound-operand assembler. [OPUS-4.8] sq-a0zef.
+/// and the compound-operand assembler. sq-a0zef.
 fn unsatisfiable_constraint() -> Constraint {
     Constraint {
         left: MALFORMED.to_owned(),
@@ -1177,7 +1176,7 @@ fn refuse_unsupported_rule_heads(graph: &Graph) -> Result<(), String> {
 /// Build a [`Constraint`], turning anything malformed/unknown into an
 /// unsatisfiable guard (fail-closed): the enclosing rule can then never match.
 /// `right` is the already-folded value (see [`fold_rights`]): `None` covers both
-/// a missing right operand and an unfoldable multi-value. [FABLE-5] sq-ueydm.
+/// a missing right operand and an unfoldable multi-value. sq-ueydm.
 fn build_constraint(left: Option<Term>, op: Option<Term>, right: Option<Value>) -> Constraint {
     let (Some(left), Some(op), Some(right)) = (left, op, right) else {
         return unsatisfiable_constraint();

@@ -1,4 +1,4 @@
-//! [OPUS-5] (sq-3f5ay) sparq-side REPLAY-FILE runner — the sparq half of the
+//! (sq-3f5ay) sparq-side REPLAY-FILE runner — the sparq half of the
 //! matched-workload leg of the bounded count-matched-replay RSP protocol
 //! (`research/comparative-benchmarking-everything.md` §5.2).
 //!

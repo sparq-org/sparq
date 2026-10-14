@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-lfmf — headless wasm smoke test of the JS-facing sparq-shacl-wasm API.
+// sq-lfmf — headless wasm smoke test of the JS-facing sparq-shacl-wasm API.
 //
 // The crate's `#[cfg(test)] mod tests` in src/lib.rs runs on the NATIVE target only, so it
 // exercises the sparq-shacl validate + serialiser functions the wrappers delegate to — NOT
@@ -98,7 +98,7 @@ fn malformed_data_is_an_error() {
     );
 }
 
-// [FABLE-5] sq-01xlp: the opt-in `stateful` feature's pre-parsed `ParsedGraph` handle —
+// sq-01xlp: the opt-in `stateful` feature's pre-parsed `ParsedGraph` handle —
 // parse once, validate many times. These drive the REAL wasm exports (including the
 // `JsError`-returning `parse`, which the native suite cannot run) under
 // `wasm-pack test --node --features stateful`.

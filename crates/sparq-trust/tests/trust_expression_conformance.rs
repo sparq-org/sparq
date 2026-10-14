@@ -39,7 +39,7 @@
 //! Behind the default-OFF `expression` feature. Run:
 //! `cargo test -p sparq-trust --features expression --test trust_expression_conformance`.
 //!
-//! [SONNET-4.6] sq-6syab.6 (epic sq-6syab; issue #1592). 🤖 SPARQ agent —
+//! sq-6syab.6 (epic sq-6syab; issue #1592). 🤖 SPARQ agent —
 //! trust-expression conformance runner.
 #![cfg(feature = "expression")]
 

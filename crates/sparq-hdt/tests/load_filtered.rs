@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.24: mutation-witnessed differential coverage for HDT
+//! sq-lsp7k.24: mutation-witnessed differential coverage for HDT
 //! triple-pattern filtering at the one-shot SPO decode seam.
 
 #![cfg(feature = "load-filter")]
@@ -58,7 +58,7 @@ fn predicate_filter_matches_full_load_oracle() {
     assert_eq!(triple_set(&actual), expected);
 }
 
-// [GPT-5.6] sq-obhf1: value-pinned parity and mutation witness for filtered stats.
+// sq-obhf1: value-pinned parity and mutation witness for filtered stats.
 #[test]
 fn filtered_stats_match_filtered_load_and_wildcard_stats() {
     let bytes = load_bytes();

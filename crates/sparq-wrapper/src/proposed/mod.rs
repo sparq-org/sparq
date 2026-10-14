@@ -1,4 +1,4 @@
-// [FABLE-5] sq-1rg2q: namespace for still-unlanded rdfjs/wrapper proposals.
+// sq-1rg2q: namespace for still-unlanded rdfjs/wrapper proposals.
 
 //! Ports of still-unlanded rdfjs/wrapper proposals, each behind its own
 //! default-off `proposed-*` cargo feature.

@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-3dyje.1 — Property-based tests for sparq-substrate's term total-order
+// sq-3dyje.1 — Property-based tests for sparq-substrate's term total-order
 // and numeric tower, exercising the REAL substrate encodings (not a Kani model type).
 //
 // This file widens the sq-sqtk2.4 Kani model-fidelity TCB gap: the 26 Kani harnesses in
@@ -15,7 +15,7 @@
 // arm of `compare_terms`' Numeric branch — proptest immediately shrinks to
 // `(NaN, 0.0)` as the antisymmetry witness.
 
-// [GPT-5.6] sq-vpsap — Pin the fallible Dec order directly, including negative
+// sq-vpsap — Pin the fallible Dec order directly, including negative
 // mantissas whose ordering reverses if an implementation accidentally compares magnitudes.
 #[cfg(feature = "numeric")]
 mod dec_order {

@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-3c00 (HolderPoP hidden-holder-SET anonymity tier): the in-circuit
 //! hidden-holder SET-membership gate — the holder analogue of the hidden-issuer
 //! set-membership (`bind_hidden_issuer_attestations`, sq-z9l), and the

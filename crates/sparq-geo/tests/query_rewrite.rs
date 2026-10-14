@@ -1,5 +1,5 @@
-#![cfg(feature = "geosparql_rewrite")] // [OPUS-4.8] sq-wf9qg: rewrite is now opt-in
-//! [OPUS-4.8] sq-9g58 — the GeoSPARQL query-rewrite extension end-to-end.
+#![cfg(feature = "geosparql_rewrite")] // sq-wf9qg: rewrite is now opt-in
+//! sq-9g58 — the GeoSPARQL query-rewrite extension end-to-end.
 //!
 //! A topology relation PROPERTY pattern (`?f geo:sfWithin ?region`, etc.) is
 //! answered by resolving each feature's default geometry and applying the matching
@@ -189,7 +189,7 @@ ex:a ex:knows ex:b .
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-5ts8 — query-rewrite conformance for the OTHER two OGC
+// sq-5ts8 — query-rewrite conformance for the OTHER two OGC
 // topology-relation families.
 //
 // The OGC `/conf/query-rewrite-extension` conformance class spans all THREE
