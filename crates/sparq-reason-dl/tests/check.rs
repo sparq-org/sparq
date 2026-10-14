@@ -1300,3 +1300,48 @@ fn declared_bottom_data_property_restrictions() {
         ConsistencyVerdict::Inconsistent
     );
 }
+
+/// #4762 review: the bottom properties carry their INTRINSIC kind (⊥ object = object
+/// property, ⊥ data = data property) whether they are used in a restriction or an assertion,
+/// so an incompatible declaration is a refused pun in either triple order — never an
+/// annotation that silently swallows the assertion, never a definitive verdict.
+#[test]
+fn bottom_property_assertions_with_incompatible_declarations_are_refused() {
+    let cases = [
+        ("owl:bottomDataProperty a owl:ObjectProperty .", ":a owl:bottomDataProperty \"v\" ."),
+        ("owl:bottomDataProperty a owl:AnnotationProperty .", ":a owl:bottomDataProperty \"v\" ."),
+        ("owl:bottomObjectProperty a owl:DatatypeProperty .", ":a owl:bottomObjectProperty :b ."),
+        ("owl:bottomObjectProperty a owl:AnnotationProperty .", ":a owl:bottomObjectProperty :b ."),
+    ];
+    for (decl, assertion) in cases {
+        for body in [format!("{} {}", decl, assertion), format!("{} {}", assertion, decl)] {
+            let (v, b) = check(&body);
+            assert!(
+                matches!(v, ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))),
+                "expected an OutOfFragment refusal for {:?}, got {:?}",
+                body,
+                v
+            );
+            assert_eq!(b, Branch::Extraction);
+        }
+    }
+    // Compatible declarations, in either order, still decide the assertion.
+    for (decl, assertion) in [
+        ("owl:bottomDataProperty a owl:DatatypeProperty .", ":a owl:bottomDataProperty \"v\" ."),
+        ("owl:bottomObjectProperty a owl:ObjectProperty .", ":a owl:bottomObjectProperty :b ."),
+    ] {
+        for body in [format!("{} {}", decl, assertion), format!("{} {}", assertion, decl)] {
+            assert_eq!(check(&body).0, ConsistencyVerdict::Inconsistent, "{:?}", body);
+        }
+    }
+    // Inputs without the bottom properties are untouched by the seeding: an ordinary
+    // declared annotation property is still ignored, an ordinary role still asserted.
+    assert_eq!(
+        check(":p a owl:AnnotationProperty . :a :p :b . :a a :A .").0,
+        ConsistencyVerdict::Consistent
+    );
+    assert_eq!(
+        check(":r a owl:ObjectProperty . :a :r :b . :a a owl:Nothing .").0,
+        ConsistencyVerdict::Inconsistent
+    );
+}

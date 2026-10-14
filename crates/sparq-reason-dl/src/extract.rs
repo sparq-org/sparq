@@ -148,8 +148,7 @@ fn extract_with(
     let v = Vocab::intern(dict);
     // [OPUS-4.8] Fix 1 + Fix 3: Index::build now returns Err on a branching list,
     // duplicate backbone value, or cross-type punned declaration.
-    let mut idx = Index::build(triples, &v)?;
-    idx.rewrite_bottom = rewrite_bottom;
+    let idx = Index::build(triples, &v, rewrite_bottom)?;
 
     // [OPUS-4.8] sq-pbz04.4.12 — M4 fail-closed validation:
     // Orphan/cyclic list cells and unconsumed class-expression backbones are NOT inert.
@@ -1548,8 +1547,27 @@ impl Index {
     // [OPUS-4.8] Fix 1 + Fix 3: returns Err on a branching list / duplicate backbone
     // value (different value for same functional-position predicate on same node), or on a
     // cross-type punned declaration. Identical re-assertion (same value) is silently allowed.
-    fn build(triples: &[[Id; 3]], v: &Vocab) -> Result<Index, ExtractError> {
-        let mut idx = Index::default();
+    fn build(triples: &[[Id; 3]], v: &Vocab, rewrite_bottom: bool) -> Result<Index, ExtractError> {
+        let mut idx = Index {
+            rewrite_bottom,
+            ..Index::default()
+        };
+        // #4762: when the empty built-in roles are to be rewritten, seed their INTRINSIC
+        // property types first (`owl:bottomObjectProperty` is an object property,
+        // `owl:bottomDataProperty` a data property), so ANY incompatible declaration or use —
+        // in a restriction or an assertion, in either triple order — lands in
+        // `punned_props` and is refused, rather than being read as an annotation or as the
+        // other property kind. Only the rewriting extraction seeds; the public `extract`
+        // (which refuses the bottom properties outright) and every input that does not
+        // mention them are untouched.
+        if rewrite_bottom {
+            if v.bottom_object_property != NO_ID {
+                idx.object_props.insert(v.bottom_object_property);
+            }
+            if v.bottom_data_property != NO_ID {
+                idx.data_props.insert(v.bottom_data_property);
+            }
+        }
         for &[s, p, o] in triples {
             if p == v.on_property {
                 // owl:onProperty is functional on a restriction node — exactly one value.
