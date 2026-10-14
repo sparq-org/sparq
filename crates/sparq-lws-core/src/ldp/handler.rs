@@ -43,7 +43,7 @@ use crate::authz::wac::{Decision, ReadDecision, WacAuthorizer};
 use crate::authz::wac_allow::wac_allow_header;
 use crate::authz::{mode_for_operation, AccessMode};
 use crate::error::ServerError;
-use crate::ldp::conditional::{self, evaluate as eval_preconditions};
+use crate::ldp::conditional;
 use crate::ldp::content::{
     classify, negotiate_accept_with_profile, parse_to_triples, serialize_triples,
     serialize_triples_negotiated, validate_rdf, RdfFormat,
@@ -641,8 +641,16 @@ impl<S: Store> LdpState<S> {
         // target's real ETag), so it still requires the read-mode. (This closed the V4-over-broad
         // finding: bare `*` was previously 403'd for a Write-without-Read holder, breaking the standard
         // Inrupt `PUT … If-None-Match: *` create pattern for no non-disclosure gain.)
+        // An `If-Unmodified-Since` the write will actually evaluate (no `If-Match`, a valid date)
+        // probes the target's modification time, which is just as much read-side state, so it is
+        // gated the same way.
         let has_etag_conditional = Self::conditional_carries_etag(headers, header::IF_MATCH)
-            || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH);
+            || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH)
+            || conditional::unmodified_since_applies(
+                header_str(headers, header::IF_MATCH),
+                header_str(headers, header::IF_UNMODIFIED_SINCE),
+            )
+            .is_some();
         // The mode that governs reading THIS target's representation: Control for an `.acl`, else Read.
         let read_mode = if crate::authz::is_acl_resource(target_iri) {
             AccessMode::Control
@@ -1179,12 +1187,15 @@ pub async fn put_handler<S: Store>(
     // `negotiate_body`). The stored media type is the (sanitised) declared one.
     let stored_type = validate_writable(&content_type, &body, &target.iri)?;
 
-    // Conditional write: evaluate preconditions against the CURRENT representation's ETag.
+    // Conditional write: evaluate preconditions against the CURRENT representation's ETag and
+    // modification time.
     let current_etag = current.as_ref().map(|m| m.etag.as_str());
-    conditional::require(eval_preconditions(
+    conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
+        header_str(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag,
+        current.as_ref().and_then(|m| m.last_modified),
     ))?;
 
     let parent = parent_container(&target);
@@ -1497,11 +1508,14 @@ pub async fn delete_handler<S: Store>(
         }
     };
 
-    // Conditional delete: honour If-Match / If-None-Match against the current ETag.
-    conditional::require(eval_preconditions(
+    // Conditional delete: honour If-Match / If-Unmodified-Since / If-None-Match against the current
+    // ETag and modification time.
+    conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
+        header_str(&headers, header::IF_UNMODIFIED_SINCE),
         Some(current.etag.as_str()),
+        current.last_modified,
     ))?;
 
     // An AUXILIARY `.acl` resource is NOT a contained child (it is created via `store.write`, never via
@@ -1672,12 +1686,14 @@ pub async fn patch_handler<S: Store>(
         Err(e) => return Err(e),
     };
 
-    // Apply preconditions against the current ETag.
+    // Apply preconditions against the current ETag and modification time.
     let current_etag = current.as_ref().map(|r| r.meta.etag.clone());
-    conditional::require(eval_preconditions(
+    conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
+        header_str(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
+        current.as_ref().and_then(|r| r.meta.last_modified),
     ))?;
 
     // Determine the existing triples + the stored format (default Turtle for a new resource).
@@ -5624,6 +5640,124 @@ mod tests {
             "a Write-without-Read conditional PUT must be the denial code, not 412/2xx: {got:?}"
         );
         assert!(got.etag.is_none(), "a V4 denial must not leak an ETag");
+    }
+
+    #[tokio::test]
+    async fn v4_write_without_read_if_unmodified_since_is_denied() {
+        // An evaluated If-Unmodified-Since probes the target's modification time, so Bob (Write, no
+        // Read) gets the same denial a concrete If-Match gets, whether or not the date would pass.
+        for date in [
+            "Thu, 01 Jan 1970 00:00:00 GMT",
+            "Fri, 31 Dec 9999 23:59:59 GMT",
+        ] {
+            let state = store_bob_write_without_read().await;
+            let mut headers = turtle_headers();
+            headers.insert(header::IF_UNMODIFIED_SINCE, HeaderValue::from_static(date));
+            let got = observe(
+                put_handler(
+                    State(state),
+                    Extension(bob()),
+                    "/alice/c/wonly".parse().unwrap(),
+                    headers,
+                    request_body_bytes(),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(got.status, 403, "{date}: {got:?}");
+        }
+    }
+
+    /// One conditional write to the owner's `/alice/doc` carrying `If-Unmodified-Since: date`.
+    async fn write_if_unmodified_since(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        date: &str,
+    ) -> StatusCode {
+        let headers = |mut h: HeaderMap| {
+            h.insert(
+                header::IF_UNMODIFIED_SINCE,
+                HeaderValue::from_str(date).unwrap(),
+            );
+            h
+        };
+        let (s, t) = (State(state.clone()), Extension(owner_token()));
+        let uri: axum::http::Uri = "/alice/doc".parse().unwrap();
+        let result = match verb {
+            "PUT" => put_handler(s, t, uri, headers(turtle_write_headers()), body_doc()).await,
+            "PATCH" => {
+                let patch = insert_only_patch("https://pod.example/alice/doc#me");
+                patch_handler(s, t, uri, headers(n3_patch_headers()), patch).await
+            }
+            "DELETE" => delete_handler(s, t, uri, headers(HeaderMap::new())).await,
+            _ => unreachable!(),
+        };
+        result.unwrap_or_else(IntoResponse::into_response).status()
+    }
+
+    fn body_doc() -> AxBytes {
+        AxBytes::from(COND_DOC)
+    }
+
+    #[tokio::test]
+    async fn if_unmodified_since_guards_put_patch_and_delete() {
+        // RFC 9110 §13.1.4: a write proceeds only if the target has not changed after the date. The
+        // resource's own Last-Modified passes; a date before it fails with 412 and changes nothing.
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let read = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+            let last_modified = read
+                .headers()
+                .get(header::LAST_MODIFIED)
+                .expect("a plain resource carries Last-Modified")
+                .to_str()
+                .unwrap()
+                .to_string();
+            let etag = etag_of(&read);
+
+            let stale =
+                write_if_unmodified_since(&state, verb, "Thu, 01 Jan 1970 00:00:00 GMT").await;
+            assert_eq!(stale, StatusCode::PRECONDITION_FAILED, "{verb}");
+            let after = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+            assert_eq!(
+                etag_of(&after),
+                etag,
+                "{verb}: a 412 must not change the resource"
+            );
+
+            // A matching If-Match takes precedence: the same stale date is then ignored.
+            let fresh = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let fresh_etag =
+                etag_of(&get_with(&fresh, owner_token(), "/alice/doc", HeaderMap::new()).await);
+            let mut both = HeaderMap::new();
+            both.insert(
+                header::IF_MATCH,
+                HeaderValue::from_str(&fresh_etag).unwrap(),
+            );
+            both.insert(
+                header::IF_UNMODIFIED_SINCE,
+                HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
+            );
+            let delete = delete_handler(
+                State(fresh),
+                Extension(owner_token()),
+                "/alice/doc".parse().unwrap(),
+                both,
+            )
+            .await
+            .unwrap_or_else(IntoResponse::into_response);
+            assert!(delete.status().is_success(), "If-Match takes precedence");
+
+            let current = write_if_unmodified_since(&state, verb, &last_modified).await;
+            assert!(current.is_success(), "{verb} at Last-Modified: {current}");
+        }
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        assert!(
+            write_if_unmodified_since(&state, "PUT", "last week")
+                .await
+                .is_success(),
+            "an invalid date is ignored"
+        );
     }
 
     #[tokio::test]

@@ -64,6 +64,24 @@ pub fn evaluate(
     if_none_match: Option<&str>,
     current: Option<&str>,
 ) -> Precondition {
+    evaluate_write(if_match, if_none_match, None, current, None)
+}
+
+/// [`evaluate`] plus `If-Unmodified-Since` (RFC 9110 §13.1.4), in the §13.2.2 order: `If-Match`
+/// first; `If-Unmodified-Since` only when `If-Match` is ABSENT; then `If-None-Match`.
+///
+/// `last_modified` is the target's recorded modification time (`None` when it does not exist or the
+/// store records none). `If-Unmodified-Since` fails the request with 412 iff the target's
+/// modification time, in whole seconds, is LATER than the header date. It is ignored, as §13.1.4
+/// requires or permits, when `If-Match` is present, when the date is not a valid IMF-fixdate, and
+/// when there is no modification time to compare (including a target that does not exist).
+pub fn evaluate_write(
+    if_match: Option<&str>,
+    if_none_match: Option<&str>,
+    if_unmodified_since: Option<&str>,
+    current: Option<&str>,
+    last_modified: Option<SystemTime>,
+) -> Precondition {
     // --- If-Match: proceed only if the current representation matches one of the listed tags, by
     // STRONG comparison (RFC 9110 §13.1.1) — a weak (`W/`) validator never satisfies If-Match.
     // Writes guard resource STATE, so the comparison is on the state part: a `+<variant>` tag a
@@ -78,6 +96,15 @@ pub fn evaluate(
             None => false,
         };
         if !ok {
+            return Precondition::Failed;
+        }
+    } else if let (Some(date), Some(lm)) = (
+        unmodified_since_applies(if_match, if_unmodified_since),
+        last_modified,
+    ) {
+        // --- If-Unmodified-Since (only without If-Match): the target must not have changed after
+        // the client's date.
+        if system_time_to_unix(lm).is_some_and(|lm_secs| lm_secs > date) {
             return Precondition::Failed;
         }
     }
@@ -176,6 +203,20 @@ pub fn evaluate_read(
     }
 
     ReadPrecondition::Proceed
+}
+
+/// The `If-Unmodified-Since` date, in seconds since the Unix epoch, when a write will actually
+/// evaluate it: `If-Match` is absent and the value is a valid IMF-fixdate. `pub(crate)` so the V4
+/// existence-non-disclosure guard can Read-gate exactly the requests whose outcome would depend on
+/// the target's modification time.
+pub(crate) fn unmodified_since_applies(
+    if_match: Option<&str>,
+    if_unmodified_since: Option<&str>,
+) -> Option<i64> {
+    if if_match.is_some() {
+        return None;
+    }
+    if_unmodified_since.and_then(parse_http_date)
 }
 
 /// Whether a header value is the wildcard `*` (after trimming). `pub(crate)` so the V4
@@ -508,6 +549,51 @@ mod tests {
         // opaque value DOES match (so "none match" fails ⇒ 412 on a mutation).
         let weak = format!("W/{TAG}");
         assert_eq!(evaluate(None, Some(&weak), Some(TAG)), Precondition::Failed);
+    }
+
+    #[test]
+    fn if_unmodified_since_fails_only_when_modified_later() {
+        // 2000s since the epoch.
+        let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
+        let w = |date, lm: Option<u64>| evaluate_write(None, None, date, Some(TAG), lm.map(at));
+        assert_eq!(w(date, Some(3000)), Precondition::Failed);
+        assert_eq!(w(date, Some(2000)), Precondition::Proceed); // equal is "unmodified"
+        assert_eq!(w(date, Some(1000)), Precondition::Proceed);
+        // Sub-second precision below the date's resolution does not count as a later change.
+        let just_after = UNIX_EPOCH + std::time::Duration::from_millis(2_000_900);
+        assert_eq!(
+            evaluate_write(None, None, date, Some(TAG), Some(just_after)),
+            Precondition::Proceed
+        );
+        // Ignored: no modification time, a missing target, an invalid date.
+        assert_eq!(w(date, None), Precondition::Proceed);
+        assert_eq!(
+            evaluate_write(None, None, date, None, None),
+            Precondition::Proceed
+        );
+        assert_eq!(w(Some("yesterday"), Some(3000)), Precondition::Proceed);
+    }
+
+    #[test]
+    fn if_match_takes_precedence_over_if_unmodified_since() {
+        let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
+        // A matching If-Match proceeds even though the target changed after the date.
+        assert_eq!(
+            evaluate_write(Some(TAG), None, date, Some(TAG), Some(at(3000))),
+            Precondition::Proceed
+        );
+        assert_eq!(unmodified_since_applies(Some("*"), date), None);
+        assert_eq!(unmodified_since_applies(None, date), Some(2000));
+        assert_eq!(unmodified_since_applies(None, Some("bad")), None);
+    }
+
+    #[test]
+    fn if_none_match_still_applies_after_if_unmodified_since() {
+        let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
+        assert_eq!(
+            evaluate_write(None, Some("*"), date, Some(TAG), Some(at(1000))),
+            Precondition::Failed
+        );
     }
 
     #[test]
