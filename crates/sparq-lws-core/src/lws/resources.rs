@@ -11965,4 +11965,81 @@ mod tests {
             );
         }
     }
+
+    /// Review finding: the same holds while a change that creates the resource is in flight (it
+    /// holds the lock and has published that nothing was there): a caller refused before the lock
+    /// is answered as on a name where nothing was created, whatever the change has written.
+    #[tokio::test]
+    async fn a_resource_a_change_in_flight_creates_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, data, request as req};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str, constraint: Value| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, carol, eve) = (
+            "https://dave.example/#me",
+            "https://carol.example/#me",
+            "https://eve.example/#me",
+        );
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
+        // Carol may read and modify plain text only, which is what the change has written.
+        let text_only =
+            json!([{"leftOperand": "format", "operator": "eq", "rightOperand": "text/plain"}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read", "modify"]), carol, text_only));
+        let uri = data(&st, "new.txt").await;
+        let held = st.locks.lock(&uri).await.unwrap();
+        let prior = super::super::Prior {
+            existed: Some(false),
+            ..Default::default()
+        };
+        st.locks
+            .changing_from([(uri.clone(), prior)].into_iter().collect());
+        let answer = |method: Method, path: String, h: Vec<(&'static str, &'static str)>, who| {
+            let st = st.clone();
+            async move {
+                let r = req(method, &path, &h, "x");
+                let r = tokio::time::timeout(Duration::from_secs(5), handle(&st, &r, &who))
+                    .await
+                    .expect("refused before the lock");
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                (r.status(), headers, body_of(r).await)
+            }
+        };
+        let callers = [agent(carol), agent(dave), agent(eve), Agent::anonymous()];
+        let requests = [
+            (Method::PATCH, "", vec![("content-type", JSON_PATCH)]),
+            (Method::PATCH, ".meta", vec![("content-type", JSON_PATCH)]),
+            (
+                Method::PUT,
+                "",
+                vec![("content-type", "text/plain"), ("if-match", "\"x\"")],
+            ),
+            (Method::DELETE, "", vec![("if-match", "\"x\"")]),
+        ];
+        for (method, suffix, h) in requests {
+            for who in &callers {
+                let created = format!("/new.txt{suffix}");
+                let never = format!("/never.txt{suffix}");
+                let a = answer(method.clone(), created, h.clone(), who.clone()).await;
+                let b = answer(method.clone(), never, h.clone(), who.clone()).await;
+                assert!(a.0.is_client_error(), "{method} {suffix}: {}", a.0);
+                assert_eq!(a, b, "{method} {suffix} as {:?}", who.subject);
+            }
+        }
+        st.locks.landed(std::slice::from_ref(&uri));
+        drop(held);
+    }
 }
