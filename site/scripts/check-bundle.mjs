@@ -243,11 +243,37 @@ export function findSnapshotLeaks(fingerprint, chunks) {
  */
 export function firstLoadFromHtml(html) {
   const chunks = [];
-  for (const m of html.matchAll(/<script\b[^>]*\bsrc="[^"]*?\/_next\/(static\/chunks\/[^"]+\.js)"/g)) {
-    if (!chunks.includes(m[1])) chunks.push(m[1]);
+  for (const m of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']*)["']/g)) {
+    // Drop any query string or fragment before matching the chunk path.
+    const chunk = m[1].split(/[?#]/)[0].match(/\/_next\/(static\/chunks\/.+\.js)$/)?.[1];
+    if (chunk && !chunks.includes(chunk)) chunks.push(chunk);
   }
   const layoutEnd = chunks.findIndex((c) => /^static\/chunks\/app\/layout-[^/]+\.js$/.test(c));
   return layoutEnd === -1 ? chunks : chunks.slice(layoutEnd + 1);
+}
+
+/**
+ * The HTML-derived first-load set for a guarded route, or an error when the extraction did not
+ * find the route's own page entry (`static/chunks/app/<route>/page[-<hash>].js`). Without that
+ * entry the set is not the page's first load, and an empty or partial set would let the
+ * isolation check pass without checking anything.
+ *
+ * @param {string} html         exported HTML document
+ * @param {string} manifestKey  e.g. "/capabilities/page"
+ * @returns {{ chunks: string[], error: string | null }}
+ */
+export function htmlFirstLoad(html, manifestKey) {
+  const chunks = firstLoadFromHtml(html);
+  const route = manifestKey.replace(/\/page$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const entry = new RegExp(`^static/chunks/app${route}/page(-[^/]+)?\\.js$`);
+  if (chunks.some((c) => entry.test(c))) return { chunks, error: null };
+  return {
+    chunks,
+    error:
+      `FIRST-LOAD: the exported HTML for ${manifestKey} has no script tag for its page entry ` +
+      `(static/chunks/app${manifestKey.replace(/\/page$/, "")}/page-<hash>.js), so its ` +
+      `first-load set cannot be checked.`,
+  };
 }
 
 /** Read + JSON-parse a build manifest, or return null if it does not exist. */
@@ -292,15 +318,21 @@ function main() {
 
   // Next ≤15 wrote the per-route page-entry set to app-build-manifest.json; Next 16 dropped that
   // manifest, so derive the same set from the exported HTML's script tags.
+  const extractErrors = [];
   const app = readJson(join(nextDir, "app-build-manifest.json")) ?? {
     pages: Object.fromEntries(
       GUARDED_ROUTES.filter(({ label }) => htmlByLabel[label] != null).map(
-        ({ manifestKey, label }) => [manifestKey, firstLoadFromHtml(htmlByLabel[label])],
+        ({ manifestKey, label }) => {
+          const { chunks, error } = htmlFirstLoad(htmlByLabel[label], manifestKey);
+          if (error) extractErrors.push(error);
+          return [manifestKey, chunks];
+        },
       ),
     ),
   };
 
   const { errors, summary } = analyzeBundle({ loadable, app, routes, images, htmlByLabel });
+  errors.push(...extractErrors);
 
   // 4. DATA ISOLATION — the server-only benchmark snapshot must not appear in ANY client chunk.
   const snapshot = readJson(join(siteRoot, "src", "data", "benchmarks.generated.json"));

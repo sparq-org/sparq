@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   analyzeBundle,
   firstLoadFromHtml,
+  htmlFirstLoad,
   HEAVY_MODULE_SUFFIXES,
   GUARDED_ROUTES,
 } from "../scripts/check-bundle.mjs";
@@ -204,4 +205,27 @@ test("firstLoadFromHtml flags a heavy chunk statically pulled into the page segm
 test("firstLoadFromHtml with no layout chunk keeps every script chunk", () => {
   const html = SCRIPT("a.js") + SCRIPT("b.js") + SCRIPT("a.js");
   assert.deepEqual(firstLoadFromHtml(html), ["static/chunks/a.js", "static/chunks/b.js"]);
+});
+
+test("htmlFirstLoad refuses HTML with no script tag for the route's page entry", () => {
+  const stylesheetOnly = '<link rel="stylesheet" href="/sparq/_next/static/css/app.css">';
+  assert.match(htmlFirstLoad(stylesheetOnly, "/page").error ?? "", /^FIRST-LOAD: /);
+  const otherPage = SCRIPT("app/layout-abc.js") + SCRIPT("app/try/page-x.js");
+  assert.match(htmlFirstLoad(otherPage, "/capabilities/page").error ?? "", /^FIRST-LOAD: /);
+  const own = SCRIPT("app/layout-abc.js") + SCRIPT("app/capabilities/page-x.js");
+  assert.equal(htmlFirstLoad(own, "/capabilities/page").error, null);
+});
+
+test("firstLoadFromHtml normalises query-bearing script URLs, so a heavy chunk is still caught", () => {
+  const html =
+    '<script src="/sparq/_next/static/chunks/app/layout-abc.js?v=1"></script>' +
+    "<script src='/sparq/_next/static/chunks/heavy-0.js?dpl=abc#x'></script>" +
+    '<script src="/sparq/_next/static/chunks/app/page-x.js?v=1"></script>';
+  const { chunks, error } = htmlFirstLoad(html, "/page");
+  assert.equal(error, null);
+  assert.deepEqual(chunks, ["static/chunks/heavy-0.js", "static/chunks/app/page-x.js"]);
+  const inputs = healthyInputs();
+  inputs.app.pages["/page"] = chunks;
+  const { errors } = analyzeBundle(inputs);
+  assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
 });
