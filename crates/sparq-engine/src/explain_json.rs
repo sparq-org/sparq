@@ -202,9 +202,10 @@ fn write_diagram_label(s: &mut String, label: &str, mermaid: bool) {
                 }
                 s.push_str(if mermaid { "<br/>" } else { "\\n" });
             }
-            '"' | '[' | ']' | '<' | '>' | '&' | '#' | '\\' | '`' | '%' | '{' | '}' if mermaid => {
+            '"' | '[' | ']' | '<' | '>' | '&' | '#' | '\\' | '`' | '%' | '{' | '}' | ':' if mermaid => {
                 // Mermaid decimal entities also protect literal entity prefixes
                 // and backticks, plus directives/comments processed before labels.
+                // Escape colons so `style:` cannot strip entity terminators.
                 let _ = write!(s, "#{};", u32::from(c));
             }
             // Graphviz decodes HTML entities even inside quoted plain-text labels.
@@ -642,7 +643,7 @@ mod tests {
             plan.to_mermaid(),
             concat!(
                 "flowchart TD\n",
-                "  n0[\"#96;Scan #91;#60;http://ex/名#35;x?a=1#38;b=2#62;#93; #34;x#34;#96;",
+                "  n0[\"#96;Scan #91;#60;http#58;//ex/名#35;x?a=1#38;b=2#62;#93; #34;x#34;#96;",
                 "<br/>#92;N #35;quot; #38;quot;<br/>end<br/>tail\"]\n",
             )
         );
@@ -676,10 +677,17 @@ mod tests {
             plan.to_mermaid(),
             concat!(
                 "flowchart TD\n",
-                "  n0[\"#37;#37;#123;init: #123;#34;theme#34;: #34;dark#34;#125;#125;#37;#37;",
-                "<br/>#37;#37; comment<br/>---<br/>config: #123;#125;<br/>---\"]\n",
+                "  n0[\"#37;#37;#123;init#58; #123;#34;theme#34;#58; #34;dark#34;#125;#125;#37;#37;",
+                "<br/>#37;#37; comment<br/>---<br/>config#58; #123;#125;<br/>---\"]\n",
             )
         );
+    }
+
+    #[test]
+    fn diagram_mermaid_style_label_escaping() {
+        let plan = diagram_node("style:x%", vec![]);
+        assert_eq!(plan.to_mermaid(), "flowchart TD\n  n0[\"style#58;x#37;\"]\n");
+        assert_eq!(plan.to_dot(), "digraph Plan {\n  n0[label=\"style:x%\"];\n}\n");
     }
 
     #[test]
