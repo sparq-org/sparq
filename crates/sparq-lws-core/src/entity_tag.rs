@@ -31,26 +31,9 @@ impl<'a> TagList<'a> {
             if i == b.len() {
                 break;
             }
-            let weak = b[i..].starts_with(b"W/");
-            if weak {
-                i += 2;
-            }
-            if b.get(i) != Some(&b'"') {
-                return Err(());
-            }
-            i += 1;
-            let start = i;
-            while i < b.len() && b[i] != b'"' {
-                if !(b[i] == 0x21 || (0x23..=0x7e).contains(&b[i]) || b[i] >= 0x80) {
-                    return Err(());
-                }
-                i += 1;
-            }
-            if i == b.len() {
-                return Err(());
-            }
-            tags.push((weak, &b[start..i]));
-            i += 1;
+            let (tag, end) = tag_at(b, i)?;
+            tags.push(tag);
+            i = end;
             while i < b.len() && matches!(b[i], b' ' | b'\t') {
                 i += 1;
             }
@@ -79,6 +62,41 @@ impl<'a> TagList<'a> {
                 .any(|&(w, t)| t == opaque.as_bytes() && (weak || (!w && !etag_weak))),
         }
     }
+}
+
+/// One entity tag (RFC 9110 §8.8.3), as `(weak, opaque)`, surrounded only by HTTP whitespace: an
+/// `If-Range` value, which is never a list. A comma inside the quoted tag belongs to it; any other
+/// comma, or anything else around the tag, is not one tag.
+pub(crate) fn single(b: &[u8]) -> Option<(bool, &[u8])> {
+    let start = b.iter().position(|c| !matches!(c, b' ' | b'\t'))?;
+    let (tag, end) = tag_at(b, start).ok()?;
+    b[end..]
+        .iter()
+        .all(|c| matches!(c, b' ' | b'\t'))
+        .then_some(tag)
+}
+
+/// The entity tag starting at `b[i]`, and the index just past its closing quote.
+fn tag_at(b: &[u8], mut i: usize) -> Result<((bool, &[u8]), usize), ()> {
+    let weak = b[i..].starts_with(b"W/");
+    if weak {
+        i += 2;
+    }
+    if b.get(i) != Some(&b'"') {
+        return Err(());
+    }
+    i += 1;
+    let start = i;
+    while i < b.len() && b[i] != b'"' {
+        if !(b[i] == 0x21 || (0x23..=0x7e).contains(&b[i]) || b[i] >= 0x80) {
+            return Err(());
+        }
+        i += 1;
+    }
+    if i == b.len() {
+        return Err(());
+    }
+    Ok(((weak, &b[start..i]), i + 1))
 }
 
 /// Every field line of `name`, combined as one comma-separated list (RFC 9110 §5.3), or `None`
@@ -113,6 +131,28 @@ mod tests {
 
     fn listed(header: &str, etag: &str, weak: bool) -> bool {
         TagList::parse(header.as_bytes()).is_ok_and(|l| l.matches(etag, weak))
+    }
+
+    #[test]
+    fn a_single_tag_is_one_tag_and_nothing_else() {
+        assert_eq!(single(b"\"a\""), Some((false, &b"a"[..])));
+        assert_eq!(single(b" \tW/\"a\" "), Some((true, &b"a"[..])));
+        assert_eq!(single(b"\"a,b\""), Some((false, &b"a,b"[..])));
+        assert_eq!(single(b"\"\x80\""), Some((false, &b"\x80"[..])));
+        for not_one in [
+            &b""[..],
+            b" ",
+            b"*",
+            b"\"a\",",
+            b",\"a\"",
+            b"\"a\", \"b\"",
+            b"\"a",
+            b"a",
+            b"\xc2\xa0\"a\"",
+            b"\"a\"\xc2\xa0",
+        ] {
+            assert_eq!(single(not_one), None, "{not_one:?}");
+        }
     }
 
     #[test]

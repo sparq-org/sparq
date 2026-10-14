@@ -869,7 +869,7 @@ fn ranged(req: &LwsRequest, body: Bytes, content_type: &str, etag: &str) -> Resp
     let range = req
         .header(header::RANGE)
         .filter(|_| req.method == Method::GET)
-        .filter(|_| if_range_holds(req.header(header::IF_RANGE), etag));
+        .filter(|_| crate::ldp::conditional::if_range_holds(&req.headers, etag));
     match range.map(|r| parse_range(r, len)) {
         Some(ByteRange::Unsatisfiable) => {
             let mut r = problem(StatusCode::RANGE_NOT_SATISFIABLE, None);
@@ -900,21 +900,6 @@ fn ranged(req: &LwsRequest, body: Bytes, content_type: &str, etag: &str) -> Resp
             r
         }
     }
-}
-
-/// Whether an If-Range precondition lets the Range apply (RFC 9110 section 13.1.5): absent, or a
-/// strong entity tag equal to the current one. A date never does: two versions written within
-/// one second share a Last-Modified, so a date is not a strong validator here, and the whole
-/// representation is served instead.
-fn if_range_holds(if_range: Option<&str>, etag: &str) -> bool {
-    let Some(v) = if_range.map(str::trim) else {
-        return true;
-    };
-    if v.starts_with('"') || v.starts_with("W/") {
-        // A weak tag never matches: the comparison is strong.
-        return !v.starts_with("W/") && !etag.starts_with("W/") && v == etag;
-    }
-    false
 }
 
 /// What a Range header asks of an entity.
@@ -4911,19 +4896,6 @@ mod tests {
     }
 
     #[test]
-    fn if_range() {
-        let date = http_date(1_700_000_000);
-        assert!(if_range_holds(None, "\"a\""));
-        assert!(if_range_holds(Some("\"a\""), "\"a\""));
-        assert!(!if_range_holds(Some("\"b\""), "\"a\""));
-        assert!(!if_range_holds(Some("W/\"a\""), "\"a\""));
-        // Review finding: a date is not a strong validator (two versions can share one), so
-        // even one equal to Last-Modified serves the whole representation.
-        assert!(!if_range_holds(Some(&date), "\"a\""));
-        assert!(!if_range_holds(Some("garbage"), "\"a\""));
-    }
-
-    #[test]
     fn slugs() {
         assert_eq!(
             sanitize_slug(Some("shoppinglist.txt")).as_deref(),
@@ -5143,6 +5115,20 @@ mod tests {
         .await;
         assert_eq!(r.status(), StatusCode::OK);
         assert_eq!(&body_of(r).await[..], b"0123456789");
+        // If-Range names one validator, so a repeated field never lets the Range apply.
+        let r = call(
+            &st,
+            "GET",
+            p,
+            &[
+                ("range", "bytes=2-3"),
+                ("if-range", &etag),
+                ("if-range", &etag),
+            ],
+            "",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK);
     }
 
     #[tokio::test]
