@@ -2376,7 +2376,7 @@ fn match_premise_admitted(
         // `log:includes` may BIND free variables of the object pattern (one
         // binding per match, like EYE); `log:notIncludes` holds iff no match.
         if let Some(op) = scope_op(&pat[1]) {
-            let inner: &[[Term; 3]] = match &pat[2] {
+            let written: &[[Term; 3]] = match &pat[2] {
                 Term::Formula(t) => t,
                 _ => &[],
             };
@@ -2385,8 +2385,7 @@ fn match_premise_admitted(
             for b in bindings {
                 // A pattern reached through a variable was not visible to
                 // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
-                // the same way, failing the run. (Only a pattern written as a formula is
-                // matched; any other object matches as the empty pattern.)
+                // the same way, failing the run.
                 if !matches!(&pat[2], Term::Formula(_)) {
                     if let Term::Var(v) = &pat[2] {
                         if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
@@ -2397,6 +2396,39 @@ fn match_premise_admitted(
                 }
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
+                };
+                // The pattern: the formula written in place, or (GH #6936), with a FORMULA
+                // as the scope, the stored formula a variable is DIRECTLY bound to when it
+                // holds no variable at any depth ([`stored_ground_statements`]). It is
+                // matched as stored, as if written in place: its blank nodes are its own
+                // existentials. Its statements are charged to the round's work allowance
+                // first. Any other object (a chained, open or non-formula value, or an
+                // unbound variable), and every object with the store as the scope, still
+                // matches as the empty pattern: the stratification does not read a
+                // pattern given through a variable (GH #6943).
+                let formula_scope = match &scope_term {
+                    Term::Formula(_) => true,
+                    Term::Lit(v, _, _) => v == "true",
+                    _ => false,
+                };
+                let bound = match &pat[2] {
+                    Term::Var(v) if formula_scope => b.get(v).and_then(|val| match val {
+                        Term::Formula(ts) => stored_ground_statements(ts).map(|n| (ts, n)),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                let inner: &[[Term; 3]] = match bound {
+                    Some((ts, n)) => {
+                        // A spent allowance refuses the run (recorded on it): the premise
+                        // evaluation stops here, with no binding.
+                        if !bw.work.charge(n, &bw.truncated) {
+                            next.clear();
+                            break;
+                        }
+                        ts
+                    }
+                    None => written,
                 };
                 let matches: Vec<Binding> = match scope_term {
                     // log:supports searches the closure in place: no term is built.
@@ -2414,6 +2446,12 @@ fn match_premise_admitted(
                         None => Vec::new(),
                     },
                 };
+                // A containment's existential witnesses (`__w.` bindings of the pattern's
+                // blank nodes) stay inside it: each test gets fresh ones.
+                let mut matches = matches;
+                for nb in &mut matches {
+                    nb.retain(|k, _| !k.starts_with(PATTERN_WILDCARD));
+                }
                 // Every negation passes the gate, whatever it found.
                 if is_not {
                     if negation_gate(bw) && matches.is_empty() {
@@ -3407,6 +3445,52 @@ fn formula_statements(ts: &[[Term; 3]]) -> usize {
         }
     }
     n
+}
+
+/// The statements of the stored formula `ts` and of every formula nested in it, when it
+/// holds no variable at any depth (GH #6936); `None` when it holds one. The walk keeps one
+/// iterator frame per open container, so its scratch grows with the term's depth (already
+/// within the run's term-depth allowance), not with its size, and it takes no call stack
+/// per level.
+fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
+    enum Frame<'a> {
+        Statements(std::slice::Iter<'a, [Term; 3]>),
+        Terms(std::slice::Iter<'a, Term>),
+    }
+    let mut n = ts.len();
+    let mut stack = vec![Frame::Statements(ts.iter())];
+    while let Some(top) = stack.last_mut() {
+        let t = match top {
+            Frame::Statements(it) => match it.next() {
+                Some(st) => {
+                    stack.push(Frame::Terms(st.iter()));
+                    continue;
+                }
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+            Frame::Terms(it) => match it.next() {
+                Some(t) => t,
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+        };
+        match t {
+            Term::Var(_) => return None,
+            Term::Formula(rs) => {
+                n = n.saturating_add(rs.len());
+                stack.push(Frame::Statements(rs.iter()));
+            }
+            Term::List(ms) => stack.push(Frame::Terms(ms.iter())),
+            Term::Triple(tr) => stack.push(Frame::Terms(tr.iter())),
+            _ => {}
+        }
+    }
+    Some(n)
 }
 
 /// The search of [`formula_unify`].

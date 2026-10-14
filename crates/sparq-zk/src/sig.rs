@@ -97,6 +97,22 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 /// `verifiable-credentials-zk` skill). Distinct from the leaf/commitment IVs.
 const SIG_DOMAIN_COMMITMENT: u64 = 0x5a4b_5349_475f_4331; // "ZKSIG_C1"
 
+// The remaining `ZKSIG_*` domain tags, each used by exactly one digest below.
+// They live at module scope (not inside their functions) so the known-answer
+// test `sig_domain_tags_are_pinned_and_pairwise_distinct` can pin every value.
+const SIG_DOMAIN_NONCE: u64 = 0x5a4b_5349_475f_4e31; // "ZKSIG_N1"
+const SIG_DOMAIN_STATUS_REF: u64 = 0x5a4b_5349_475f_5352; // "ZKSIG_SR"
+const SIG_DOMAIN_STATUS_IDX_COMMIT: u64 = 0x5a4b_5349_475f_4943; // "ZKSIG_IC"
+const SIG_DOMAIN_STATUS_REF_COMMIT: u64 = 0x5a4b_5349_475f_5343; // "ZKSIG_SC"
+const SIG_DOMAIN_STATUS_REF_COMMITMENT: u64 = 0x5a4b_5349_475f_5243; // "ZKSIG_RC"
+const SIG_DOMAIN_STATUS_REF_FULL_COMMIT: u64 = 0x5a4b_5349_475f_4643; // "ZKSIG_FC"
+const SIG_DOMAIN_ACCEPTED_STATUS_LEAF: u64 = 0x5a4b_5349_475f_414c; // "ZKSIG_AL"
+const SIG_DOMAIN_STATUS_LIST_IRI: u64 = 0x5a4b_5349_475f_4c49; // "ZKSIG_LI"
+const SIG_DOMAIN_SCHEME_IRI: u64 = 0x5a4b_5349_475f_5349; // "ZKSIG_SI"
+const SIG_DOMAIN_COMMITMENT_SALT_SCHEME: u64 = 0x5a4b_5349_475f_4d32; // "ZKSIG_M2"
+const SIG_DOMAIN_COMMITMENT_STATUS_SCHEME: u64 = 0x5a4b_5349_475f_4d33; // "ZKSIG_M3"
+const SIG_DOMAIN_HOLDER_POP: u64 = 0x5a4b_5349_475f_4850; // "ZKSIG_HP"
+
 /// Which signature scheme an issuer key/signature uses. v1 ships Schnorr over
 /// Baby-JubJub only; the enum is the modularity swap-point (BBS+, SD-JWT-VC,
 /// post-quantum candidates ship as parallel variants).
@@ -534,9 +550,8 @@ impl SecretKey {
 fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     use subtle::{ConditionallySelectable, ConstantTimeEq};
     use zeroize::Zeroizing;
-    // A distinct domain tag from the challenge so the nonce-PRF output can never
-    // collide with / be mistaken for a challenge value.
-    const SIG_DOMAIN_NONCE: u64 = 0x5a4b_5349_475f_4e31; // "ZKSIG_N1"
+    // `SIG_DOMAIN_NONCE` is a distinct domain tag from the challenge's, so the
+    // nonce-PRF output can never collide with / be mistaken for a challenge value.
 
     // Every secret-bearing intermediate (integers, field elements, hash inputs and the
     // sponge state) is held in a `Zeroizing` wrapper, and the conversions between the
@@ -698,7 +713,6 @@ pub fn commitment_message_with_salt(commitment: &Fr, salt: &Fr) -> Fr {
 /// version enter as field elements directly.
 // audit #12: status-list reference digest.
 pub fn status_ref_digest(list_id: &Fr, index: u64, version: u64) -> Fr {
-    const SIG_DOMAIN_STATUS_REF: u64 = 0x5a4b_5349_475f_5352; // "ZKSIG_SR"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_STATUS_REF),
         *list_id,
@@ -731,7 +745,6 @@ pub fn status_ref_digest(list_id: &Fr, index: u64, version: u64) -> Fr {
 /// commitment verify (single source of truth).
 // sq-ayv: hiding index commitment (issuer-signed in place of the clear index).
 pub fn status_index_commitment(index: u64, blinding: &Fr) -> Fr {
-    const SIG_DOMAIN_STATUS_IDX_COMMIT: u64 = 0x5a4b_5349_475f_4943; // "ZKSIG_IC"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_STATUS_IDX_COMMIT),
         Fr::from(index),
@@ -793,7 +806,6 @@ pub fn join_value_commitment(value: &Fr, blinding: &Fr) -> Fr {
 /// checked against the authoritative root.
 // sq-ayv: committed-index status-reference digest.
 pub fn status_ref_commit_digest(list_id: &Fr, index_commitment: &Fr, version: u64) -> Fr {
-    const SIG_DOMAIN_STATUS_REF_COMMIT: u64 = 0x5a4b_5349_475f_5343; // "ZKSIG_SC"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_STATUS_REF_COMMIT),
         *list_id,
@@ -835,7 +847,6 @@ pub fn status_ref_commit_digest(list_id: &Fr, index_commitment: &Fr, version: u6
 // sq-6qe: hiding (list, version) reference commitment.
 // sq-kndw: deferral note retired — the fully-hidden member is compiled.
 pub fn status_ref_commitment(list_id: &Fr, version: u64, ref_blinding: &Fr) -> Fr {
-    const SIG_DOMAIN_STATUS_REF_COMMITMENT: u64 = 0x5a4b_5349_475f_5243; // "ZKSIG_RC"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_STATUS_REF_COMMITMENT),
         *list_id,
@@ -873,7 +884,6 @@ pub fn status_ref_commitment(list_id: &Fr, version: u64, ref_blinding: &Fr) -> F
 // sq-6qe: fully-committed (list+version+index hidden) status-reference digest.
 // sq-kndw: deferral note retired — the fully-hidden path is landed.
 pub fn status_ref_fully_committed_digest(ref_commitment: &Fr, index_commitment: &Fr) -> Fr {
-    const SIG_DOMAIN_STATUS_REF_FULL_COMMIT: u64 = 0x5a4b_5349_475f_4643; // "ZKSIG_FC"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_STATUS_REF_FULL_COMMIT),
         *ref_commitment,
@@ -902,7 +912,6 @@ pub fn status_ref_fully_committed_digest(ref_commitment: &Fr, index_commitment: 
 /// status_list_root], 4)` (the accepted-set analogue of `issuer.nr`'s `key_leaf`).
 // sq-6qe: accepted (list, version, root)-set Merkle leaf.
 pub fn accepted_status_leaf(list_id: &Fr, version: u64, status_list_root: &Fr) -> Fr {
-    const SIG_DOMAIN_ACCEPTED_STATUS_LEAF: u64 = 0x5a4b_5349_475f_414c; // "ZKSIG_AL"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_ACCEPTED_STATUS_LEAF),
         *list_id,
@@ -917,7 +926,6 @@ pub fn accepted_status_leaf(list_id: &Fr, version: u64, status_list_root: &Fr) -
 /// a wrong IRI verify (single source of truth).
 // audit #12.
 pub fn status_list_id_to_field(list_iri: &str) -> Fr {
-    const SIG_DOMAIN_STATUS_LIST_IRI: u64 = 0x5a4b_5349_475f_4c49; // "ZKSIG_LI"
     // Fold the UTF-8 bytes 31 at a time (each chunk fits a BN254 field element
     // headroom-safe) through the sponge, prefixed by the domain tag and the
     // byte length so two IRIs differing only by trailing padding cannot collide.
@@ -968,7 +976,6 @@ pub fn commitment_message_with_status(commitment: &Fr, salt: &Fr, status_ref: &F
 /// tag (`ZKSIG_SI`), so a scheme digest is never interchangeable with a
 /// status-list digest of the same bytes.
 pub fn scheme_iri_to_field(scheme_iri: &str) -> Fr {
-    const SIG_DOMAIN_SCHEME_IRI: u64 = 0x5a4b_5349_475f_5349; // "ZKSIG_SI"
     let bytes = scheme_iri.as_bytes();
     let mut acc: Vec<Fr> = Vec::with_capacity(2 + bytes.len() / 31 + 1);
     acc.push(Fr::from(SIG_DOMAIN_SCHEME_IRI));
@@ -987,7 +994,6 @@ pub fn scheme_iri_to_field(scheme_iri: &str) -> Fr {
 /// the method-independent [`commitment_message_with_salt`]; that message and
 /// [`commitment_message_with_status`] remain the manifest attestation's.
 pub fn commitment_message_with_scheme(commitment: &Fr, salt: &Fr, scheme_digest: &Fr) -> Fr {
-    const SIG_DOMAIN_COMMITMENT_SALT_SCHEME: u64 = 0x5a4b_5349_475f_4d32; // "ZKSIG_M2"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_COMMITMENT_SALT_SCHEME),
         *commitment,
@@ -1006,7 +1012,6 @@ pub fn commitment_message_with_status_and_scheme(
     status_ref: &Fr,
     scheme_digest: &Fr,
 ) -> Fr {
-    const SIG_DOMAIN_COMMITMENT_STATUS_SCHEME: u64 = 0x5a4b_5349_475f_4d33; // "ZKSIG_M3"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_COMMITMENT_STATUS_SCHEME),
         *commitment,
@@ -1173,7 +1178,6 @@ pub fn commitment_message_with_holder(
 // sq-cwq: holder proof-of-possession message (challenge-bound).
 // sq-sg37 (HolderPoP T8): deferral note retired — the binding is enforced.
 pub fn holder_pop_message(challenge: &Fr) -> Fr {
-    const SIG_DOMAIN_HOLDER_POP: u64 = 0x5a4b_5349_475f_4850; // "ZKSIG_HP"
     poseidon2::hash(&[Fr::from(SIG_DOMAIN_HOLDER_POP), *challenge])
 }
 
@@ -2517,5 +2521,105 @@ mod tests {
             Some(CommitmentMethod::StringCanonicalV1),
             "a commitment-method IRI is NOT a signature cryptosuite"
         );
+    }
+
+    /// Every `ZKSIG_*` domain tag in this module, with the ASCII label its value
+    /// spells. `sig_domain_tags_are_pinned_and_pairwise_distinct` checks the
+    /// table; a tag added to the module belongs here too.
+    const ALL_SIG_DOMAIN_TAGS: [(&str, u64, &[u8; 8]); 18] = [
+        ("COMMITMENT", SIG_DOMAIN_COMMITMENT, b"ZKSIG_C1"),
+        ("COMMITMENT_SALT", SIG_DOMAIN_COMMITMENT_SALT, b"ZKSIG_C2"),
+        ("COMMITMENT_STATUS", SIG_DOMAIN_COMMITMENT_STATUS, b"ZKSIG_C3"),
+        ("COMMITMENT_HOLDER", SIG_DOMAIN_COMMITMENT_HOLDER, b"ZKSIG_C4"),
+        ("COMMITMENT_SALT_SCHEME", SIG_DOMAIN_COMMITMENT_SALT_SCHEME, b"ZKSIG_M2"),
+        ("COMMITMENT_STATUS_SCHEME", SIG_DOMAIN_COMMITMENT_STATUS_SCHEME, b"ZKSIG_M3"),
+        ("NONCE", SIG_DOMAIN_NONCE, b"ZKSIG_N1"),
+        ("STATUS_REF", SIG_DOMAIN_STATUS_REF, b"ZKSIG_SR"),
+        ("STATUS_IDX_COMMIT", SIG_DOMAIN_STATUS_IDX_COMMIT, b"ZKSIG_IC"),
+        ("JOIN", SIG_DOMAIN_JOIN, b"ZKSIG_JN"),
+        ("STATUS_REF_COMMIT", SIG_DOMAIN_STATUS_REF_COMMIT, b"ZKSIG_SC"),
+        ("STATUS_REF_COMMITMENT", SIG_DOMAIN_STATUS_REF_COMMITMENT, b"ZKSIG_RC"),
+        ("STATUS_REF_FULL_COMMIT", SIG_DOMAIN_STATUS_REF_FULL_COMMIT, b"ZKSIG_FC"),
+        ("ACCEPTED_STATUS_LEAF", SIG_DOMAIN_ACCEPTED_STATUS_LEAF, b"ZKSIG_AL"),
+        ("STATUS_LIST_IRI", SIG_DOMAIN_STATUS_LIST_IRI, b"ZKSIG_LI"),
+        ("SCHEME_IRI", SIG_DOMAIN_SCHEME_IRI, b"ZKSIG_SI"),
+        ("HOLDER_KEY", SIG_DOMAIN_HOLDER_KEY, b"ZKSIG_HK"),
+        ("HOLDER_POP", SIG_DOMAIN_HOLDER_POP, b"ZKSIG_HP"),
+    ];
+
+    /// Every domain tag is pairwise distinct, and each one's exact value is
+    /// pinned (it is the big-endian `u64` of its 8-byte ASCII label). Equating
+    /// two tags, or changing any tag's value, turns this red.
+    #[test]
+    fn sig_domain_tags_are_pinned_and_pairwise_distinct() {
+        let tags = &ALL_SIG_DOMAIN_TAGS;
+        for (i, (name_a, tag_a, _)) in tags.iter().enumerate() {
+            for (name_b, tag_b, _) in &tags[i + 1..] {
+                assert_ne!(tag_a, tag_b, "domain tags {name_a} and {name_b} are equal");
+            }
+        }
+        for (name, tag, label) in ALL_SIG_DOMAIN_TAGS {
+            assert_eq!(
+                tag,
+                u64::from_be_bytes(*label),
+                "domain tag {name} moved off its pinned label {}",
+                String::from_utf8_lossy(label)
+            );
+        }
+    }
+
+    /// Known-answer digests for the four signed commitment messages: the
+    /// manifest attestation's `ZKSIG_C2` / `ZKSIG_C3` and the registry entry's
+    /// `ZKSIG_M2` / `ZKSIG_M3`, over fixed inputs. A changed tag, a reordered
+    /// slot, or one message routed through another's tag moves a digest.
+    #[test]
+    fn commitment_message_known_answers() {
+        use crate::field::field_to_hex;
+        let commitment = Fr::from(0x1111u64);
+        let salt = Fr::from(0x2222u64);
+        let status_ref = Fr::from(0x3333u64);
+        let scheme_digest = Fr::from(0x4444u64);
+        let c2 = commitment_message_with_salt(&commitment, &salt);
+        let c3 = commitment_message_with_status(&commitment, &salt, &status_ref);
+        let m2 = commitment_message_with_scheme(&commitment, &salt, &scheme_digest);
+        let m3 = commitment_message_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &scheme_digest,
+        );
+        let got = [
+            ("C2", field_to_hex(&c2)),
+            ("C3", field_to_hex(&c3)),
+            ("M2", field_to_hex(&m2)),
+            ("M3", field_to_hex(&m3)),
+        ];
+        let expected = [
+            (
+                "C2",
+                "0x0bbea9f506cbf8e40a9ab608a2b3850d2e4460a15e059d3a03319841f267ec0f",
+            ),
+            (
+                "C3",
+                "0x29d923964da9e0cbb681124f2e22379e474bf155766602cc91496ce28646651c",
+            ),
+            (
+                "M2",
+                "0x190c7a133947d3bb249cc1db6a3f3ec8e626fc1aec1d938aa9bf93040ea88e7a",
+            ),
+            (
+                "M3",
+                "0x2361d10863223581485a6b7d10fa24ce1ae9c391fe3f08d8eb33586571fc6c8b",
+            ),
+        ];
+        for ((kind, g), (_, e)) in got.iter().zip(expected) {
+            assert_eq!(g, e, "{kind} known-answer digest moved");
+        }
+        // The four messages are pairwise distinct over these inputs.
+        for i in 0..got.len() {
+            for j in i + 1..got.len() {
+                assert_ne!(got[i].1, got[j].1, "{} == {}", got[i].0, got[j].0);
+            }
+        }
     }
 }
