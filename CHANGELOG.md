@@ -285,6 +285,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
+  entry with a variable outside a formula, as `insert` already does, instead of adding it
+  to the base.
+
 - **sparq-reason (N3):** a rule whose existential conclusion contains a quoted formula with
   variables (e.g. `{ ?x :p :v } => { _:e :q { ?x :r :v } }`) now fires once per distinct
   binding of those variables. Before, it could fire only once and drop the other bindings'
