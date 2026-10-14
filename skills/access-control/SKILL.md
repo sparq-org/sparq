@@ -198,8 +198,10 @@ Materialize the authorization view from the access-control documents, then enfor
   default-graph pattern with no `USING`/`WITH` is refused. A conditional write needs read
   access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none. The WHERE is
   evaluated once: a `GRAPH ?var` write target is authorized against the graphs that
-  evaluation instantiates, before anything is written. Such an operation must be sent on its
-  own: a multi-operation request that includes one is refused. Every update entry point
+  evaluation instantiates, before anything is written. In a multi-operation request a
+  denial in any operation leaves the store untouched; on a directory-backed store such an
+  operation must still be sent on its own (a multi-operation request that includes one is
+  refused there). Every update entry point
   takes one path: the update runs on a fork, what it actually wrote is authorized against
   the view in force (so a later operation cannot reach a graph an earlier one named), rules
   it leaves are materialized on the fork first (rules that cannot be **refuse the update**),
