@@ -972,8 +972,8 @@ domain-separated, never provably disjoint. The enforceable sharpening is the sam
 ingest, mirrored wherever a witnessed `LANG_CONST` enters a circuit — and until that
 ships, "no committed language tag hashes to `LANG_NONE`" is a **retained assumption**,
 registered as an OPEN audit obligation in §14.3. (The shipped host and Noir constants
-today assert nothing and their doc comments overclaim; captured as follow-up work, not
-fixed by this record.)
+assert nothing; their doc comments state this assumption rather than separation by
+construction, #5263.)
 
 The value slot is worse than probabilistic, which is why it gets an assert and not a
 caveat: its real occupants ARE small field elements, so a `0`/`1` tag collides with
@@ -1050,8 +1050,57 @@ obligations.
 Both §14 rules — the reserved-tag band exclusion on `VALUE_NONE`, and the double lane's
 in-circuit canonical fold together with the residual it leaves to sq-mslu — are registered
 as OPEN external-audit obligations under CR-G8 / sq-qhy4 alongside the rest of this
-record. So is the §14.1 **`LANG_NONE` separation assumption**: unlike `VALUE_NONE`'s
-exclusion it is today *unasserted*, resting on collision-resistance of `blake3_field` over
+record. So is the §14.1 **`LANG_NONE` separation assumption**: like `VALUE_NONE`'s
+exclusion (§14.4) it is today *unasserted*, resting on collision-resistance of `blake3_field` over
 the language-tag domain rather than on a check, and it stays an assumption until the
 fail-closed ingest/circuit assert §14.1 names actually ships. No soundness or privacy
 property is claimed for any of the three, pending the external sign-off.
+
+### 14.4 The shipped `DualLeafV1` host builder (sq-vvfte)
+
+The §11 bead 2 host builder is in `crates/sparq-zk/src/dual_leaf.rs` behind the
+`dual-leaf` cargo feature (off by default): `encode_term_dual`, `encode_triple_dual`,
+`commit_triples_dual` and `commit_graph_dual`. This section records what it ships against
+the decisions above. The circuit-side leaf recompute (`scan.nr` / `join.nr`) and verifier
+dispatch for a `DualLeafV1` graph are not part of it.
+
+**Leaf shapes per term class.** Slot 1 is, for every class, byte-identical to the
+string-canonical scheme's `h_s`, so a `DualLeafV1` graph carries the same term identity
+as the same graph under `StringCanonicalV1`.
+
+| term class | leaf |
+|---|---|
+| IRI | `h3(NO_VALUE, blake3(iri), TYPE_CODE_IRI)` |
+| blank node | `h3(NO_VALUE, h2(salt_G, blake3(label)), TYPE_CODE_BLANK_NODE)` |
+| `xsd:integer` / `xsd:decimal` / `xsd:double` | `h3(h3(VALUE_HOOK, DATATYPE_CONST, LANG_NONE), blake3(N-Triples token), TYPE_CODE_LITERAL)` |
+| `xsd:string`, `rdf:langString`, any other datatype | `h3(h3(VALUE_NONE, blake3(datatype IRI), LANG_CONST), blake3(N-Triples token), TYPE_CODE_LITERAL)` |
+
+`LANG_CONST` is `blake3_field(lang)` for `rdf:langString` and `LANG_NONE` otherwise.
+`xsd:decimal` folds its scale into `DATATYPE_CONST`. RDF 1.2 triple terms are outside
+the committed data model and fail closed, as in `encode.rs`.
+
+**Q1 as shipped.** Literals take the datatype-folded degenerate component of §14.1.
+IRIs and blank nodes take a flat slot-0 `NO_VALUE`, which is the same tag as `VALUE_NONE`
+used unfolded. They have no datatype or language to fold, and `TYPE_CODE` in slot 2
+separates them from literals either way. The shipped tag is `VALUE_NONE = NO_VALUE = 2`.
+That is not the domain-separated `blake3_field` constant §14.1 asks for: `2` lies inside
+the reachable handle band. Distinctness in this build rests on the routing argument
+instead: a hookable `DATATYPE_CONST` never carries a degenerate component, and a
+non-hookable one never carries a real hook. So the §14.1 band exclusion is not yet met,
+and it stays an open audit obligation alongside the `LANG_NONE` assumption (§14.3).
+
+**Fail-closed ingest.** A literal whose datatype is on a hookable lane in this build
+(`xsd:integer`, `xsd:decimal`, `xsd:double`) but whose lexical form that lane's encoder
+rejects is an error for the whole graph commitment (`DualCommitError::Leaf`). It is never
+downgraded onto the string lane, which would be the §6 value-lexical desync. The
+`xsd:boolean` and `xsd:dateTime` / `xsd:date` lanes are not routed yet. Until they are,
+their literals take the degenerate string lane. That stays collision-free because
+`VALUE_NONE` is neither boolean hook and the date lanes fold their epoch scale into a
+`DATATYPE_CONST` that differs from the bare `blake3(iri)` the degenerate component folds.
+
+**A parallel path, not the §3.5 re-base.** The builder reuses RDFC-1.0
+canonicalisation, the canonical leaf order and the per-graph Poseidon2 sponge, and changes
+only the per-term leaf. Nothing in `encode.rs` / `commit.rs` calls it, so the default
+`string-canonical` pipeline and every checked-in vector are byte-unchanged. The one-time
+recommit of §3.5 (§10 Q4) has therefore not happened. It is needed only if `DualLeafV1`
+replaces `StringCanonicalV1` as the default, and that remains a maintainer call.
