@@ -65,6 +65,9 @@ pub struct Extracted {
     /// Empty unless `opts.abox` (the `Classifier::classify` path never populates it).
     #[cfg(feature = "abox")]
     pub abox_extras: AboxExtras,
+    /// Canonical concrete-domain ranges already minted in this extraction.
+    #[cfg(all(feature = "abox", feature = "cdomain"))]
+    pub(crate) range_concepts: FxHashMap<crate::cdomain::NormRange, Concept>,
 }
 
 /// [OPUS-4.8] sq-pbz04.2.8 (`abox`): the E4 ABox axioms the realiser reads off the saturation on
@@ -97,8 +100,8 @@ pub struct AboxKey {
 
 /// [OPUS-4.8] sq-pbz04.2.8 (`abox`): a negative property assertion. An `Object` NPA is a clash iff
 /// the positive `a p b` is ASSERTED or DERIVED (a nominal successor of `{a}` via `p`); a `Data` NPA
-/// is a clash iff the positive `a p v` is ASSERTED (data-property positives are not internalized, so
-/// a derived data positive is an honest incompleteness — never an unsound miss of a clash).
+/// also matches derived exact-numeric point successors under `cdomain`; other data values
+/// match asserted literal terms only.
 #[cfg(feature = "abox")]
 pub enum AboxNpa {
     /// Negative OBJECT property assertion `¬(a p b)`.
@@ -352,6 +355,8 @@ struct Idx {
     // unless the caller asked for ABox internalization (`ExtractOpts::abox`).
     #[cfg(all(feature = "abox", feature = "cdomain"))]
     cd_abox_point: FxHashMap<Id, Concept>,
+    #[cfg(all(feature = "abox", feature = "cdomain"))]
+    cd_range_concepts: FxHashMap<crate::cdomain::NormRange, Concept>,
     #[cfg(feature = "rbox")]
     sub_property: Vec<(Id, Id)>, // (r, s) from rdfs:subPropertyOf — a role inclusion r ⊑ s
     #[cfg(feature = "rbox")]
@@ -479,6 +484,8 @@ pub fn extract(dict: &Dict, triples: &[[Id; 3]], opts: ExtractOpts) -> Extracted
         role_axioms,
         #[cfg(feature = "abox")]
         abox_extras,
+        #[cfg(all(feature = "abox", feature = "cdomain"))]
+        range_concepts: idx.cd_range_concepts,
     }
 }
 
@@ -920,6 +927,7 @@ fn resolve_cdomain(
     #[cfg(feature = "abox")]
     {
         idx.cd_abox_point = out.lit_point;
+        idx.cd_range_concepts = out.range_concepts;
     }
     out.axioms
 }

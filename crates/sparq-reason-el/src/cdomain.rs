@@ -114,6 +114,9 @@ pub(crate) struct Resolved {
     /// literals handed in as `abox_points`; a literal outside the exact numeric tier is ABSENT,
     /// so the caller keeps its fail-closed counted skip.
     pub lit_point: FxHashMap<Id, Concept>,
+    /// Canonical ranges already minted, for non-minting numeric NPA target lookup.
+    #[cfg(feature = "abox")]
+    pub range_concepts: FxHashMap<NormRange, Concept>,
     /// `d ⊑ ⊥` (CR7) and `d1 ⊑ d2` (CR8) over the minted concepts.
     pub axioms: Vec<Normal>,
 }
@@ -145,6 +148,8 @@ pub(crate) fn resolve(
         node_range: FxHashMap::default(),
         node_exists: FxHashMap::default(),
         lit_point: FxHashMap::default(),
+        #[cfg(feature = "abox")]
+        range_concepts: FxHashMap::default(),
         axioms: Vec::new(),
     };
     if ranges.is_empty()
@@ -230,6 +235,10 @@ pub(crate) fn resolve(
         }
     }
     out.axioms = emit(&mint.minted, outers);
+    #[cfg(feature = "abox")]
+    {
+        out.range_concepts = mint.by_key;
+    }
     out
 }
 
@@ -617,7 +626,7 @@ fn facet_value(dict: &Dict, id: Id) -> Option<Dec> {
 /// The POINT range `{v}` of a literal id (`DataHasValue` / singleton `DataOneOf`), or
 /// `None` (defer). An integral value canonicalizes to the `Int` form so `{5}`, `{5.0}`
 /// and the faceted `[5, 5]` all share one concept.
-fn point_value(dict: &Dict, id: Id) -> Option<NormRange> {
+pub(crate) fn point_value(dict: &Dict, id: Id) -> Option<NormRange> {
     let d = facet_value(dict, id)?;
     let (m, s) = dec_norm(d);
     Some(if s == 0 {

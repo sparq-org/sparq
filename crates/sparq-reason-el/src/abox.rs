@@ -26,8 +26,9 @@
 //     successor; data keys on a shared literal TERM (identical terms ⇒ identical values — sound).
 //   * negative property assertions (`owl:NegativePropertyAssertion`) — a clash (whole-ontology
 //     inconsistency) iff the corresponding POSITIVE assertion is asserted or DERIVED. (Object: a
-//     nominal successor of `{a}` via `p`. Data: an asserted `a p "v"` triple — data positives are
-//     not internalized, an honest incompleteness, never an unsound missed clash.)
+//     nominal successor of `{a}` via `p`. Data: an asserted `a p "v"` triple or, with `cdomain`,
+//     an entailed point-range successor matching the exact numeric VALUE of `v`. Other literals
+//     retain term-identity matching against asserted triples.)
 //   * `owl:differentFrom` — read off ONLY from a DERIVED nominal clash (`{a} ⊓ {b} ⊑ ⊥`, e.g. `a : A`,
 //     `b : B`, `A ⊓ B ⊑ ⊥`) or the SYMMETRIC closure of an asserted inequality — never fabricated.
 //     An asserted-or-derived inequality that coincides with a derived `owl:sameAs` is a whole-ontology
@@ -48,10 +49,10 @@
 // `extract::decode_abox` internalizes `a q 5` as `{a} ⊑ ∃q.{5}` over the point range CR9 mints
 // (`{5}` is the SAME concept a TBox `DataHasValue 5` / `DataOneOf 5` / faceted `[5, 5]` resolves
 // to), so CR8 containment carries an asserted VALUE into the TBox's data-range obligations and the
-// typings / inconsistencies below read off it with no change to THIS module. Sound because
-// `a q v` asserts `(a^I, v) ∈ q^I` and `v ∈ {v}^D`. The NPA/key readoffs are UNAFFECTED: both
-// still match data positives against ASSERTED triples (the honest incompleteness noted above),
-// not against the rescued existentials.
+// typings / inconsistencies below read off it. Sound because
+// `a q v` asserts `(a^I, v) ∈ q^I` and `v ∈ {v}^D`. Data NPAs also read off these existentials,
+// including derived-only positives and value-equal numeric spellings. Data keys still match
+// ASSERTED literal terms only; non-exact-numeric derived data positives remain incomplete.
 
 use crate::extract::{self, AboxNpa, ExtractOpts};
 use crate::normal::{Concept, Names, Normal, BOTTOM, TOP};
@@ -184,7 +185,7 @@ pub fn realize(dict: &Dict, triples: &[[Id; 3]]) -> Realization {
     // [OPUS-4.8] sq-pbz04.2.8 (E4): a negative property assertion whose positive is asserted/derived
     // is a whole-ontology clash. Checked only when the base ontology is otherwise consistent (an
     // already-inconsistent ontology is inconsistent regardless).
-    let mut inconsistent = base_inconsistent || npa_clashes(&sat, &ex, triples);
+    let mut inconsistent = base_inconsistent || npa_clashes(dict, &sat, &ex, triples);
 
     let (types, same_as, self_loops, different_from) = if inconsistent {
         // An inconsistent ontology entails everything — surface ONLY the verdict, not a flood.
@@ -221,10 +222,17 @@ pub fn realize(dict: &Dict, triples: &[[Id; 3]]) -> Realization {
 /// positive. An object NPA `¬(a p b)` clashes iff `{b}` is a nominal successor of `{a}` via `p` (the
 /// R-link, which the CR3 internalization of the positive `a p b` — asserted OR derived — populates),
 /// OR the positive triple `[a p b]` is directly asserted. A data NPA `¬(a p "v")` clashes iff the
-/// positive triple `[a p "v"]` is asserted (data positives are not internalized — an honest
-/// incompleteness for a derived data positive, never an unsound missed clash). SOUND: an entailed
-/// positive contradicts the entailed negative, so no model exists.
-fn npa_clashes(sat: &classify::Saturation, ex: &extract::Extracted, triples: &[[Id; 3]]) -> bool {
+/// positive triple `[a p "v"]` is asserted or, under `cdomain`, an entailed successor is subsumed
+/// by the canonical exact-numeric point of `v`. Other literals retain term-identity matching.
+/// SOUND: an entailed positive contradicts the entailed negative, so no model exists.
+fn npa_clashes(
+    dict: &Dict,
+    sat: &classify::Saturation,
+    ex: &extract::Extracted,
+    triples: &[[Id; 3]],
+) -> bool {
+    #[cfg(not(feature = "cdomain"))]
+    let _ = dict;
     ex.abox_extras.npas.iter().any(|npa| match *npa {
         AboxNpa::Object {
             source_dict,
@@ -245,7 +253,35 @@ fn npa_clashes(sat: &classify::Saturation, ex: &extract::Extracted, triples: &[[
             source_dict,
             prop_dict,
             value_dict,
-        } => triples.contains(&[source_dict, prop_dict, value_dict]),
+        } => {
+            if triples.contains(&[source_dict, prop_dict, value_dict]) {
+                return true;
+            }
+            #[cfg(feature = "cdomain")]
+            {
+                let Some(point) = crate::cdomain::point_value(dict, value_dict)
+                    .and_then(|key| ex.range_concepts.get(&key))
+                else {
+                    return false;
+                };
+                let Some(source_c) = ex
+                    .names
+                    .nominals()
+                    .find_map(|(id, c)| (id == source_dict).then_some(c))
+                else {
+                    return false;
+                };
+                ex.names
+                    .role_of(prop_dict)
+                    .and_then(|role| sat.r_succ.get(&role))
+                    .and_then(|by_x| by_x.get(&source_c))
+                    // A successor inside {v} witnesses the positive in every model. A wider
+                    // range merely containing v does not entail that particular value.
+                    .is_some_and(|succ| succ.iter().any(|&c| sat.s[c as usize].contains(point)))
+            }
+            #[cfg(not(feature = "cdomain"))]
+            false
+        }
     })
 }
 
