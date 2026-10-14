@@ -591,7 +591,7 @@ fn compact_element(
     let type_scoped = ctx;
 
     // step 2: scalars (and null) are already in compact form.
-    if is_scalar(element) || is_null(element) {
+    if element.is_scalar() || element.is_null() {
         return Ok(element.clone());
     }
     env.visit()?;
@@ -604,7 +604,7 @@ fn compact_element(
             // Recursion is counted per object; an array directly in an array counts too.
             let _nested = if matches!(item, Json::Arr(_)) { Some(budget::nest()?) } else { None };
             let compacted = compact_element(ctx, active_property, item, read, env)?;
-            if !is_null(&compacted) {
+            if !compacted.is_null() {
                 result.push(compacted);
             }
         }
@@ -636,7 +636,7 @@ fn compact_element(
                 .and_then(|p| cur.active.term_definition(p))
                 .and_then(|d| d.type_mapping())
                 == Some("@json");
-            if is_scalar(&v) || json_mapped {
+            if v.is_scalar() || json_mapped {
                 return Ok(v);
             }
         }
@@ -648,7 +648,7 @@ fn compact_element(
     // step 7: a list object under a @list-container term compacts to its bare items.
     // A bare array reverts no context, so they are read (and compacted) under the
     // incoming one.
-    if is_list_object(element)
+    if element.is_list_object()
         && term_container(&ctx.active, active_property)
             .iter()
             .any(|c| c == "@list")
@@ -660,7 +660,7 @@ fn compact_element(
     // A list object outside a @list-container term (one nested in another list) is read
     // with its items under the enclosing active property, not under @list, so they are
     // compacted that way too (a type coercion on the property applies to them).
-    if is_list_object(element) {
+    if element.is_list_object() {
         let list = element.get("@list").expect("list object");
         let items = match compact_element(cur, active_property, list, Read::Value, env)? {
             items @ Json::Arr(_) => items,
@@ -833,7 +833,7 @@ fn compact_element(
                 || iap == "@list"
                 || !env.options.compact_arrays;
 
-            let item_is_list = is_list_object(item);
+            let item_is_list = item.is_list_object();
             let item_is_graph = is_graph_object(item);
             let list_container = container.iter().any(|c| c == "@list");
             // A plain @index map keys an item (not a graph's nodes) by the item's @index.
@@ -1413,8 +1413,8 @@ fn add_to_container_map(
             |k: &str| item_ctx.active.expand_iri(k, false, true).as_deref() == Some(index_iri.as_str());
         // A list value of the index property is one value, whose items cannot key the map.
         let holds_list = match item.get(&index_iri) {
-            Some(Json::Arr(vals)) => vals.iter().any(is_list_object),
-            Some(v) => is_list_object(v),
+            Some(Json::Arr(vals)) => vals.iter().any(Json::is_list_object),
+            Some(v) => v.is_list_object(),
             None => false,
         };
         let container_key = match &compacted_item {
@@ -1735,25 +1735,6 @@ fn type_strings(j: &Json) -> Vec<&str> {
         Json::Arr(a) => a.iter().filter_map(Json::as_str).collect(),
         _ => Vec::new(),
     }
-}
-
-/// True iff `j` is a JSON `null`.
-fn is_null(j: &Json) -> bool {
-    matches!(j, Json::Raw(r) if r == "null")
-}
-
-/// True iff `j` is a scalar (string, number, or boolean — not `null`).
-fn is_scalar(j: &Json) -> bool {
-    match j {
-        Json::Str(_) => true,
-        Json::Raw(r) => r != "null",
-        _ => false,
-    }
-}
-
-/// True iff `j` is a list object (a map with an `@list` entry).
-fn is_list_object(j: &Json) -> bool {
-    j.is_obj() && j.get("@list").is_some()
 }
 
 /// True iff `j` is a graph object: a map with `@graph` whose other entries are at most
@@ -2232,8 +2213,8 @@ mod tests {
         // Dismantle iteratively: dropping a value this deep recurses too.
         while let Json::Obj(mut m) = doc {
             doc = match m.pop() {
-                Some((_, Json::Arr(mut a))) => a.pop().unwrap_or(Json::Raw("null".into())),
-                _ => Json::Raw("null".into()),
+                Some((_, Json::Arr(mut a))) => a.pop().unwrap_or(Json::null()),
+                _ => Json::null(),
             };
         }
     }

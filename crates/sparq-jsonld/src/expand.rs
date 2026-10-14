@@ -112,7 +112,7 @@ fn expand_element(
 ) -> Result<Option<Json>, JsonLdError> {
     let _nested = crate::context::budget::nest()?;
     // step 1: null expands to null.
-    if is_null(element) {
+    if element.is_null() {
         return Ok(None);
     }
     // step 2: @default active property forces non-frame semantics for this element.
@@ -361,7 +361,7 @@ fn expand_object(
         };
 
         // step 13.10: a @list container wraps a non-list into a list object.
-        if container.iter().any(|c| c == "@list") && !is_list_object(&expanded_value) {
+        if container.iter().any(|c| c == "@list") && !expanded_value.is_list_object() {
             expanded_value = Json::Obj(vec![("@list".to_string(), array_of(expanded_value))]);
         }
         // step 13.11: a bare @graph container wraps each value into a graph object.
@@ -382,7 +382,7 @@ fn expand_object(
             .is_some_and(|td| td.is_reverse());
         if is_reverse {
             for item in as_array(expanded_value) {
-                if is_value_object(&item) || is_list_object(&item) {
+                if item.is_value_object() || item.is_list_object() {
                     return Err(JsonLdError::new(E::InvalidReversePropertyValue));
                 }
                 add_value(reverse_map(result), &expanded_property, item);
@@ -423,7 +423,7 @@ fn expand_object(
         } else {
             active_context
         };
-        for nv in as_array(element.get(&nest_key).cloned().unwrap_or_else(json_null)) {
+        for nv in as_array(element.get(&nest_key).cloned().unwrap_or_else(Json::null)) {
             if !matches!(nv, Json::Obj(_)) || has_key_expanding_to(active_context, &nv, "@value") {
                 return Err(JsonLdError::new(E::InvalidNestValue));
             }
@@ -469,7 +469,7 @@ fn expand_keyword(
                 // `{"@id": null}` for `@ignoreMe`, not an empty node object `{}`.
                 match active_context.expand_iri(s, true, false) {
                     Some(iri) => set_obj(result, "@id", Json::Str(iri)),
-                    None => set_obj(result, "@id", json_null()),
+                    None => set_obj(result, "@id", Json::null()),
                 }
             }
             Json::Arr(items) if frame_expansion => {
@@ -581,7 +581,7 @@ fn expand_keyword(
             // false) and pyld.
             let items = match expanded {
                 Some(j) => as_array(j),
-                None => vec![json_null()],
+                None => vec![Json::null()],
             };
             for item in &items {
                 if !is_node_object(item) {
@@ -596,9 +596,9 @@ fn expand_keyword(
             // step 13.4.7: a @json-typed node keeps its value verbatim.
             if input_is_json {
                 set_obj(result, "@value", value.clone());
-            } else if is_null(value) {
-                set_obj(result, "@value", json_null());
-            } else if is_scalar(value)
+            } else if value.is_null() {
+                set_obj(result, "@value", Json::null());
+            } else if value.is_scalar()
                 || (frame_expansion && matches!(value, Json::Arr(_) | Json::Obj(_)))
             {
                 set_obj(result, "@value", value.clone());
@@ -696,7 +696,7 @@ fn expand_keyword(
                         }
                     } else {
                         for it in as_array(items) {
-                            if is_value_object(&it) || is_list_object(&it) {
+                            if it.is_value_object() || it.is_list_object() {
                                 return Err(JsonLdError::new(E::InvalidReversePropertyValue));
                             }
                             add_value(reverse_map(result), &prop, it);
@@ -752,7 +752,7 @@ fn expand_property_value(
         let mut arr = Vec::new();
         for (lang, lang_value) in sorted_obj(value, ctx.ordered) {
             for item in as_array(lang_value) {
-                if is_null(&item) {
+                if item.is_null() {
                     continue;
                 }
                 let Json::Str(s) = &item else {
@@ -909,11 +909,15 @@ pub(crate) fn expand_value(active_context: &ActiveContext, active_property: &str
     // (W3C expand/0122-out retains `"@id": null`).
     if let Json::Str(s) = value {
         if type_mapping == Some("@id") {
-            let id = active_context.expand_iri(s, true, false).map_or_else(json_null, Json::Str);
+            let id = active_context
+                .expand_iri(s, true, false)
+                .map_or_else(Json::null, Json::Str);
             return Json::Obj(vec![("@id".to_string(), id)]);
         }
         if type_mapping == Some("@vocab") {
-            let id = active_context.expand_iri(s, true, true).map_or_else(json_null, Json::Str);
+            let id = active_context
+                .expand_iri(s, true, true)
+                .map_or_else(Json::null, Json::Str);
             return Json::Obj(vec![("@id".to_string(), id)]);
         }
     }
@@ -1014,7 +1018,7 @@ fn cleanup(
         if !is_json {
             // An empty-array `@value` is a match-none value PATTERN under
             // frameExpansion (kept); outside framing the value object is dropped.
-            if is_null(v) || (!frame_expansion && matches!(v, Json::Arr(a) if a.is_empty())) {
+            if v.is_null() || (!frame_expansion && matches!(v, Json::Arr(a) if a.is_empty())) {
                 return Ok(None);
             }
             if has(&members, "@language")
@@ -1089,25 +1093,6 @@ fn cleanup(
 // ---------------------------------------------------------------------------------------
 // Small helpers over the `Json` AST.
 // ---------------------------------------------------------------------------------------
-
-/// True iff `j` is a JSON `null`.
-fn is_null(j: &Json) -> bool {
-    matches!(j, Json::Raw(r) if r == "null")
-}
-
-/// True iff `j` is a JSON scalar (string, number, or boolean) — i.e. not null, array, or map.
-fn is_scalar(j: &Json) -> bool {
-    match j {
-        Json::Str(_) => true,
-        Json::Raw(r) => r != "null",
-        _ => false,
-    }
-}
-
-/// The `Json` representation of a JSON `null`.
-fn json_null() -> Json {
-    Json::Raw("null".to_string())
-}
 
 /// Consumes `j` into a vector of items: the elements of an array, or `[j]` for a single value.
 fn as_array(j: Json) -> Vec<Json> {
@@ -1315,16 +1300,6 @@ fn reverse_map(members: &mut Vec<(String, Json)>) -> &mut Vec<(String, Json)> {
     }
 }
 
-/// True iff `j` is a value object (a map with an `@value` entry).
-fn is_value_object(j: &Json) -> bool {
-    matches!(j, Json::Obj(_)) && j.get("@value").is_some()
-}
-
-/// True iff `j` is a list object (a map with an `@list` entry).
-fn is_list_object(j: &Json) -> bool {
-    matches!(j, Json::Obj(_)) && j.get("@list").is_some()
-}
-
 /// True iff `j` is a graph object (a map with an `@graph` entry).
 fn is_graph_object(j: &Json) -> bool {
     matches!(j, Json::Obj(_)) && j.get("@graph").is_some()
@@ -1344,19 +1319,6 @@ mod tests {
 
     fn raw(s: &str) -> Json {
         Json::Raw(s.to_string())
-    }
-
-    #[test]
-    fn null_and_scalar_predicates() {
-        assert!(is_null(&raw("null")));
-        assert!(!is_null(&raw("42")));
-        assert!(!is_null(&Json::Str("x".into())));
-        assert!(is_scalar(&Json::Str("x".into())));
-        assert!(is_scalar(&raw("42")));
-        assert!(is_scalar(&raw("true")));
-        assert!(!is_scalar(&raw("null")));
-        assert!(!is_scalar(&Json::Arr(vec![])));
-        assert!(!is_scalar(&Json::obj()));
     }
 
     #[test]
@@ -1430,10 +1392,10 @@ mod tests {
         let list = Json::Obj(vec![("@list".into(), Json::Arr(vec![]))]);
         let graph = Json::Obj(vec![("@graph".into(), Json::Arr(vec![]))]);
         let node = Json::Obj(vec![("@id".into(), Json::Str("http://x".into()))]);
-        assert!(is_value_object(&value) && !is_node_object(&value));
-        assert!(is_list_object(&list) && !is_node_object(&list));
+        assert!(value.is_value_object() && !is_node_object(&value));
+        assert!(list.is_list_object() && !is_node_object(&list));
         assert!(is_graph_object(&graph) && is_node_object(&graph));
-        assert!(is_node_object(&node) && !is_value_object(&node));
+        assert!(is_node_object(&node) && !node.is_value_object());
     }
 
     #[test]
@@ -1477,7 +1439,7 @@ mod tests {
         );
         assert_eq!(
             expand_value(&ac, "id_term", &Json::Str("@notakeyword".into())),
-            Json::Obj(vec![("@id".to_string(), json_null())]),
+            Json::Obj(vec![("@id".to_string(), Json::null())]),
             "a null IRI expansion must remain an explicit null @id",
         );
     }
@@ -1495,7 +1457,7 @@ mod tests {
         );
         assert_eq!(
             expand_value(&ac, "vocab_term", &Json::Str("@notakeyword".into())),
-            Json::Obj(vec![("@id".to_string(), json_null())]),
+            Json::Obj(vec![("@id".to_string(), Json::null())]),
         );
     }
 }
