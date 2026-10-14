@@ -1,0 +1,38 @@
+# string-canonical-plain
+<https://example.org/legacy/string-canonical> <https://sparq.dev/ns/zk#commitment> "0x0000000000000000000000000000000000000000000000000000000000005c01"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical> <https://sparq.dev/ns/zk#commitmentSignature> "2310b8c561779aa0867fea54dbba5b5b2649bc4fbf6cd543fde08e10b6ce192958b303b3e5ac1404c9409bd51bcd7936af01493cd097de2e963a7fe56c50fb03" <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical> <https://sparq.dev/ns/zk#cryptosuite> <https://sparq.dev/ns/zk#poseidon2-schnorr-v1> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical> <https://sparq.dev/ns/zk#issuerPublicKey> "3ff012efddfb4cd9c529ab434c55ac6c3bf6f2a273e567925ce977164d1e28af" <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical> <https://sparq.dev/ns/zk#rdfc10Salt> "0x0000000000000000000000000000000000000000000000000000000000005a17"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical> <https://sparq.dev/ns/zk#scheme> <https://sparq.dev/ns/zk#poseidon2-rdfc10-v1> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical> <https://sparq.dev/ns/zk#status> <https://sparq.dev/ns/zk#active> <urn:sparq:zk> .
+# string-canonical-status
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#commitment> "0x0000000000000000000000000000000000000000000000000000000000005c02"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#commitmentSignature> "b2fa24cd37ee684341903159587a4c6ac606b29e90febf10c37876a3a6f9a6a671c69e17d1b457a4fdddd7041b711e18d4ef07d070ed9fac76f025ef53864c01" <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#cryptosuite> <https://sparq.dev/ns/zk#poseidon2-schnorr-v1> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#issuerPublicKey> "3ff012efddfb4cd9c529ab434c55ac6c3bf6f2a273e567925ce977164d1e28af" <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#rdfc10Salt> "0x0000000000000000000000000000000000000000000000000000000000005a18"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#scheme> <https://sparq.dev/ns/zk#poseidon2-rdfc10-v1> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#status> <https://sparq.dev/ns/zk#active> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#statusList> <https://example.org/legacy/status-list> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#statusListIndex> "3"^^<http://www.w3.org/2001/XMLSchema#nonNegativeInteger> <urn:sparq:zk> .
+<https://example.org/legacy/string-canonical-status> <https://sparq.dev/ns/zk#statusListVersion> "1"^^<http://www.w3.org/2001/XMLSchema#nonNegativeInteger> <urn:sparq:zk> .
+# dual-leaf-v1-plain
+<https://example.org/legacy/dual-leaf-v1> <https://sparq.dev/ns/zk#commitment> "0x000000000000000000000000000000000000000000000000000000000000d101"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1> <https://sparq.dev/ns/zk#commitmentSignature> "93e8c7e8035dcc95aedb54d49a3957a0371220470a75fec38999a8396f8efa2a572510aab788af9ac61ebdd7b3c6905d30daf7b8cf6e63cd290f886d48f59d05" <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1> <https://sparq.dev/ns/zk#cryptosuite> <https://sparq.dev/ns/zk#poseidon2-schnorr-v1> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1> <https://sparq.dev/ns/zk#issuerPublicKey> "3ff012efddfb4cd9c529ab434c55ac6c3bf6f2a273e567925ce977164d1e28af" <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1> <https://sparq.dev/ns/zk#rdfc10Salt> "0x0000000000000000000000000000000000000000000000000000000000005a19"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1> <https://sparq.dev/ns/zk#scheme> <https://sparq.dev/ns/zk#poseidon2-dualleaf-v1> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1> <https://sparq.dev/ns/zk#status> <https://sparq.dev/ns/zk#active> <urn:sparq:zk> .
+# dual-leaf-v1-status
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#commitment> "0x000000000000000000000000000000000000000000000000000000000000d102"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#commitmentSignature> "26d5afff6c07ea4d6649900fa1f7f083940d749bd08443a7c04ac813033a3191fe42037701a448933c8ce772382dc9258eacd3e9992d29d087d42fdf33625a01" <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#cryptosuite> <https://sparq.dev/ns/zk#poseidon2-schnorr-v1> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#issuerPublicKey> "3ff012efddfb4cd9c529ab434c55ac6c3bf6f2a273e567925ce977164d1e28af" <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#rdfc10Salt> "0x0000000000000000000000000000000000000000000000000000000000005a1a"^^<https://sparq.dev/ns/zk#field> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#scheme> <https://sparq.dev/ns/zk#poseidon2-dualleaf-v1> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#status> <https://sparq.dev/ns/zk#active> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#statusList> <https://example.org/legacy/status-list> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#statusListIndex> "4"^^<http://www.w3.org/2001/XMLSchema#nonNegativeInteger> <urn:sparq:zk> .
+<https://example.org/legacy/dual-leaf-v1-status> <https://sparq.dev/ns/zk#statusListVersion> "1"^^<http://www.w3.org/2001/XMLSchema#nonNegativeInteger> <urn:sparq:zk> .

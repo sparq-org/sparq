@@ -45,14 +45,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RegistryEntry::{issued, issued_with_status}(…, method, …, sk)`, which return
   `Result<_, MethodNotSelectable>` and refuse a non-selectable method. `with_method` is removed with
   no replacement builder, so a recorded method cannot be rewritten after construction. The issuer
-  signature now covers the recorded method: a `string-canonical` entry signs the unchanged
-  `sig::commitment_message_with_salt` / `commitment_message_with_status` message (that message is
-  already specific to the string-canonical method by its domain tag), and every other method signs
-  the new `sig::commitment_message_with_scheme` / `commitment_message_with_status_and_scheme`, which
-  bind `sig::scheme_iri_to_field(scheme)`. `verify_commitment_signature{,_with_status}` recompute
-  the message from the recorded scheme, so an entry whose `zk:scheme` was changed after signing
-  fails verification, and an unrecognised scheme fails closed. Existing string-canonical
-  signatures verify unchanged; no other method had shipped signed entries. Retiring V1 in a
+  signature now covers the recorded method, for every method including `string-canonical`:
+  issuance signs the new `sig::commitment_message_with_scheme` /
+  `commitment_message_with_status_and_scheme`, which bind `sig::scheme_iri_to_field(scheme)`,
+  and `verify_commitment_signature{,_with_status}` recompute that message from the recorded
+  scheme, so an entry whose `zk:scheme` was changed after signing fails verification and an
+  unrecognised scheme fails closed. **Breaking:** the method-independent
+  `sig::commitment_message_with_salt` / `commitment_message_with_status` message is accepted for
+  a registry entry only when the entry is pinned in `registry::LEGACY_METHOD_UNBOUND_ENTRIES` by
+  its `RegistryEntry::canonical_digest()` (every recorded field, the scheme included). The
+  inventory lists the signed string-canonical entries in this repository (the two in
+  `crates/sparq-zk/tests/fixtures/legacy_registry/`); no released artifact links the registry
+  issuance code, so there is no opt-in for unpinned entries, and any other entry signed before
+  this change no longer verifies. The manifest attestation path
+  (`verifier`'s issuer-signature check) is a separate message and is unchanged. Retiring V1 in a
   deployed registry stays the operator's choice: an existing entry keeps its method. These host
   entry points take a `commit::MethodUse` (`NewIssuance` is the default and is refused for a V1
   method or constant; `LegacyAlreadyIssued` is the written-down opt-in for re-deriving or

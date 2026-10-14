@@ -979,15 +979,13 @@ pub fn scheme_iri_to_field(scheme_iri: &str) -> Fr {
     poseidon2::hash(&acc)
 }
 
-/// The signed message for a registry entry committed under a method OTHER than
-/// the default `string-canonical` one: [`commitment_message_with_salt`]'s
-/// `(C(G), salt_G)` plus the method's [`scheme_iri_to_field`] digest, under a
-/// distinct domain tag (`ZKSIG_M2`).
-///
-/// A `string-canonical` entry keeps signing [`commitment_message_with_salt`]
-/// unchanged; its domain tag (`ZKSIG_C2`) is what records that method. Because
-/// the two tags differ, an entry signed under one method does not verify under
-/// any other, in either direction (`crate::registry::RegistryEntry`).
+/// The signed message for a registry entry, under every commitment method:
+/// [`commitment_message_with_salt`]'s `(C(G), salt_G)` plus the method's
+/// [`scheme_iri_to_field`] digest, under a distinct domain tag (`ZKSIG_M2`), so
+/// an entry signed under one method does not verify under any other
+/// (`crate::registry::RegistryEntry`). The method-independent
+/// [`commitment_message_with_salt`] is accepted for a registry entry only when
+/// that entry is pinned in `crate::registry::LEGACY_METHOD_UNBOUND_ENTRIES`.
 pub fn commitment_message_with_scheme(commitment: &Fr, salt: &Fr, scheme_digest: &Fr) -> Fr {
     const SIG_DOMAIN_COMMITMENT_SALT_SCHEME: u64 = 0x5a4b_5349_475f_4d32; // "ZKSIG_M2"
     poseidon2::hash(&[
@@ -1001,8 +999,7 @@ pub fn commitment_message_with_scheme(commitment: &Fr, salt: &Fr, scheme_digest:
 /// The status-bound counterpart of [`commitment_message_with_scheme`]:
 /// [`commitment_message_with_status`]'s `(C(G), salt_G, status_ref)` plus the
 /// method's [`scheme_iri_to_field`] digest, under its own domain tag
-/// (`ZKSIG_M3`). A `string-canonical` entry keeps signing
-/// [`commitment_message_with_status`] unchanged.
+/// (`ZKSIG_M3`), signed by every registry entry whatever its method.
 pub fn commitment_message_with_status_and_scheme(
     commitment: &Fr,
     salt: &Fr,

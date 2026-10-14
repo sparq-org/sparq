@@ -1206,10 +1206,11 @@ ASSERTIONS (nothing reads a signature, entry or timestamp to confirm issuance hi
 the version agreement is enforced by the checked prove entry, not by
 `check_lane_member_pairing_for_use` on its own. Nor does any of this retire a recorded V1
 selection; it does make the selection tamper-evident: the registry's `scheme` is set only at
-construction, and the issuer signature covers the recorded method (a `string-canonical` entry
-keeps its long-standing message, whose domain tag already names that method; every other
-method signs a message that binds the scheme IRI), so an entry whose `zk:scheme` changed after
-signing fails verification.
+construction, and the issuer signature covers the recorded method for every method (the
+signed message binds the scheme IRI), so an entry whose `zk:scheme` changed after signing
+fails verification. The earlier method-independent message is accepted only for an entry
+pinned, by a digest over every recorded field, in `registry::LEGACY_METHOD_UNBOUND_ENTRIES`,
+which lists the signed legacy entries in this repository.
 
 **PRECONDITION on (a)–(d), stated plainly.** All of it is HOST-side. The value-lane verifier
 gates (`verifier.rs`'s stage-2 binding edges and `filter_edge_true`) stay CLOSED until the

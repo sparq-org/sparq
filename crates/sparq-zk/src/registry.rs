@@ -115,6 +115,44 @@ pub const ZK_STATUS_ACTIVE: &str = "https://sparq.dev/ns/zk#active";
 pub const ZK_STATUS_REVOKED: &str = "https://sparq.dev/ns/zk#revoked";
 const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 
+/// BLAKE3 key-derivation context of [`RegistryEntry::canonical_digest`].
+const LEGACY_ENTRY_DIGEST_CONTEXT: &str = "sparq-zk 2026 registry entry canonical digest v1";
+
+/// One pinned entry of [`LEGACY_METHOD_UNBOUND_ENTRIES`].
+#[derive(Debug, Clone, Copy)]
+pub struct LegacyEntryPin {
+    /// [`RegistryEntry::canonical_digest`] of the entry exactly as recorded.
+    pub digest: &'static str,
+    /// Where the pinned entry lives in this repository.
+    pub source: &'static str,
+}
+
+/// The `string-canonical` registry entries signed BEFORE the issuer signature
+/// covered the commitment method — over the method-independent
+/// [`crate::sig::commitment_message_with_salt`] /
+/// [`crate::sig::commitment_message_with_status`] — that exist in this
+/// repository. Verification accepts that message for an entry only when the
+/// entry's [`RegistryEntry::canonical_digest`] (every recorded field, the scheme
+/// included) is listed here; every other entry, of any method, verifies only
+/// under the method-bound message. An entry whose recorded `zk:scheme` was
+/// changed has a different digest, so it is not covered.
+///
+/// The inventory lists every such signed entry found in the repository's
+/// fixtures, evidence, site data and test vectors. No released sparq artifact
+/// (the npm package, the CLI binaries) links the registry issuance code, so no
+/// entry outside this repository is expected; there is deliberately no opt-in
+/// for unpinned entries.
+pub const LEGACY_METHOD_UNBOUND_ENTRIES: &[LegacyEntryPin] = &[
+    LegacyEntryPin {
+        digest: "9f316ef687154557098be0cd63f12089cf7f7fc6c84f0993e6c1a050f0e41f68",
+        source: "crates/sparq-zk/tests/fixtures/legacy_registry/base-5e7e008e.nq#string-canonical-plain",
+    },
+    LegacyEntryPin {
+        digest: "7d61f0b5b066e63f815016219e95ff98d6ba09130e1e3543383a973790f92a55",
+        source: "crates/sparq-zk/tests/fixtures/legacy_registry/base-5e7e008e.nq#string-canonical-status",
+    },
+];
+
 /// Q13 convention: the proof graph of document `<D>` is `<D + "?proof">`.
 pub fn proof_graph_name(document: &NamedNode) -> NamedNode {
     NamedNode::new_unchecked(format!("{}?proof", document.as_str()))
@@ -293,40 +331,74 @@ impl RegistryEntry {
         ))
     }
 
-    /// The message this entry's issuer signature covers — salt-bound, and
-    /// status-bound when `status_ref` is given — with the recorded METHOD in it.
-    ///
-    /// A `string-canonical` entry signs the long-standing
-    /// [`crate::sig::commitment_message_with_salt`] /
-    /// [`crate::sig::commitment_message_with_status`] message unchanged, so an
-    /// existing signature and the manifest verifier's message stay byte-identical;
-    /// that message's domain tag is what records the default method. Every other
-    /// method signs [`crate::sig::commitment_message_with_scheme`] /
-    /// [`crate::sig::commitment_message_with_status_and_scheme`], which add the
-    /// [`crate::sig::scheme_iri_to_field`] digest of the scheme IRI under a
-    /// different domain tag. So a signature verifies only under the method it was
-    /// issued with. `None` for a scheme this build does not recognise.
-    fn signed_message(&self, status_ref: Option<&Fr>) -> Option<Fr> {
-        let method = self.method()?;
-        Some(match (method, status_ref) {
-            (crate::commit::CommitmentMethod::StringCanonicalV1, None) => {
-                crate::sig::commitment_message_with_salt(&self.commitment, &self.salt)
+    /// The message an issuer signs for this entry — salt-bound, and status-bound
+    /// when `status_ref` is given — with the recorded METHOD in it, for EVERY
+    /// method including `string-canonical`:
+    /// [`crate::sig::commitment_message_with_scheme`] /
+    /// [`crate::sig::commitment_message_with_status_and_scheme`] over the
+    /// [`crate::sig::scheme_iri_to_field`] digest of the scheme IRI. So a
+    /// signature verifies only under the method it was issued with. `None` for a
+    /// scheme this build does not recognise.
+    fn method_bound_message(&self, status_ref: Option<&Fr>) -> Option<Fr> {
+        let scheme = crate::sig::scheme_iri_to_field(self.method()?.scheme_iri());
+        Some(match status_ref {
+            None => {
+                crate::sig::commitment_message_with_scheme(&self.commitment, &self.salt, &scheme)
             }
-            (crate::commit::CommitmentMethod::StringCanonicalV1, Some(r)) => {
-                crate::sig::commitment_message_with_status(&self.commitment, &self.salt, r)
-            }
-            (m, None) => crate::sig::commitment_message_with_scheme(
-                &self.commitment,
-                &self.salt,
-                &crate::sig::scheme_iri_to_field(m.scheme_iri()),
-            ),
-            (m, Some(r)) => crate::sig::commitment_message_with_status_and_scheme(
+            Some(r) => crate::sig::commitment_message_with_status_and_scheme(
                 &self.commitment,
                 &self.salt,
                 r,
-                &crate::sig::scheme_iri_to_field(m.scheme_iri()),
+                &scheme,
             ),
         })
+    }
+
+    /// The message verification recomputes for this entry. It is the
+    /// method-bound [`Self::method_bound_message`], except for an entry pinned in
+    /// [`LEGACY_METHOD_UNBOUND_ENTRIES`]: those were signed before the signature
+    /// covered the method, over [`crate::sig::commitment_message_with_salt`] /
+    /// [`crate::sig::commitment_message_with_status`], and are accepted under that
+    /// message only while every recorded field, the scheme included, is exactly
+    /// what was pinned.
+    fn verification_message(&self, status_ref: Option<&Fr>) -> Option<Fr> {
+        if self.is_pinned_legacy_entry() {
+            return Some(match status_ref {
+                None => crate::sig::commitment_message_with_salt(&self.commitment, &self.salt),
+                Some(r) => {
+                    crate::sig::commitment_message_with_status(&self.commitment, &self.salt, r)
+                }
+            });
+        }
+        self.method_bound_message(status_ref)
+    }
+
+    /// The canonical digest of every recorded field of this entry: BLAKE3 in
+    /// key-derivation mode over its sorted N-Triples serialisation
+    /// ([`Self::to_triples`]), so it covers the scheme, the signature, the key and
+    /// the status reference alike. Hex, lowercase.
+    pub fn canonical_digest(&self) -> String {
+        let mut lines: Vec<String> = self
+            .to_triples()
+            .iter()
+            .map(|[s, p, o]| format!("{s} {p} {o} .\n"))
+            .collect();
+        lines.sort();
+        let mut h = blake3::Hasher::new_derive_key(LEGACY_ENTRY_DIGEST_CONTEXT);
+        for l in &lines {
+            h.update(l.as_bytes());
+        }
+        h.finalize().to_hex().to_string()
+    }
+
+    /// Whether this entry is a `string-canonical` entry pinned, field for field,
+    /// in [`LEGACY_METHOD_UNBOUND_ENTRIES`].
+    fn is_pinned_legacy_entry(&self) -> bool {
+        if self.scheme.as_str() != ZK_SCHEME_POSEIDON2_RDFC10_V1 {
+            return false;
+        }
+        let d = self.canonical_digest();
+        LEGACY_METHOD_UNBOUND_ENTRIES.iter().any(|e| e.digest == d)
     }
 
     /// The status-reference digest this entry's status-bound signature covers,
@@ -391,7 +463,7 @@ impl RegistryEntry {
         // issuer-attested and salt reuse is detectable verifier-side; the method
         // is in it too. A recognised method always yields a message.
         let m = e
-            .signed_message(None)
+            .method_bound_message(None)
             .expect("a method that passed checked_for_issuance is recognised");
         e.sign_with(&m, sk);
         Ok(e)
@@ -442,7 +514,7 @@ impl RegistryEntry {
         e.status = status;
         let status_ref = e.status_ref().expect("the three status fields were just set");
         let m = e
-            .signed_message(Some(&status_ref))
+            .method_bound_message(Some(&status_ref))
             .expect("a method that passed checked_for_issuance is recognised");
         e.sign_with(&m, sk);
         Ok(e)
@@ -467,7 +539,7 @@ impl RegistryEntry {
         ) else {
             return false;
         };
-        let Some(msg) = self.signed_message(Some(&status_ref)) else {
+        let Some(msg) = self.verification_message(Some(&status_ref)) else {
             return false;
         };
         // sq-1hsl: route through the pluggable OFF-circuit signature
@@ -488,9 +560,10 @@ impl RegistryEntry {
     ///
     /// The recorded METHOD is part of what is verified: the message is
     /// recomputed from the entry's own `zk:scheme`, so an entry whose scheme
-    /// differs from the one it was signed under does not verify. A
-    /// `string-canonical` entry's message is the long-standing salt-bound one;
-    /// every other method's adds the scheme digest under its own domain tag.
+    /// differs from the one it was signed under does not verify. The message is
+    /// the method-bound one for every method; the method-independent salt-bound
+    /// message is accepted only for an entry pinned, field for field, in
+    /// [`LEGACY_METHOD_UNBOUND_ENTRIES`].
     // audit #3.
     pub fn verify_commitment_signature(&self) -> bool {
         let (Some(pk_hex), Some(sig_hex), Some(cs)) =
@@ -500,7 +573,7 @@ impl RegistryEntry {
         };
         // audit #9: issuance via `issued` signs the SALT-BOUND message (with
         // the method in it), so verification recomputes it from the entry.
-        let Some(msg) = self.signed_message(None) else {
+        let Some(msg) = self.verification_message(None) else {
             return false;
         };
         // sq-1hsl: route through the pluggable OFF-circuit signature
@@ -1181,14 +1254,17 @@ mod tests {
         }
     }
 
-    /// Back-compat pin: a `string-canonical` entry signs exactly the salt-bound /
-    /// status-bound message it always has (so existing signatures and the
-    /// manifest verifier's message are unchanged), and every other method signs a
-    /// different one.
+    /// Every method, `string-canonical` included, signs the method-bound
+    /// message: a fresh signature verifies over it and not over the
+    /// method-independent salt-bound / status-bound message.
     #[test]
-    fn the_string_canonical_signed_message_is_unchanged_and_other_methods_differ() {
+    fn every_method_signs_the_method_bound_message() {
         use crate::commit::CommitmentMethod;
-        use crate::sig::{commitment_message_with_salt, commitment_message_with_status, SecretKey};
+        use crate::sig::{
+            commitment_message_with_salt, commitment_message_with_scheme,
+            commitment_message_with_status, commitment_message_with_status_and_scheme,
+            scheme_iri_to_field, SecretKey,
+        };
         let sk = SecretKey::from_seed(78);
         let (c, salt) = (Fr::from(0xfeedu64), salt_from_bytes(&[9u8; 32]));
         let doc = NamedNode::new("https://dmv.example/vc/m-compat").unwrap();
@@ -1201,8 +1277,8 @@ mod tests {
                 e.commitment_signature.as_ref().unwrap(),
             )
         };
-        let status_ref = |e: &RegistryEntry| e.status_ref().unwrap();
         for method in [CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV2] {
+            let scheme = scheme_iri_to_field(method.scheme_iri());
             let plain = RegistryEntry::issued(doc.clone(), c, salt, method, &sk).unwrap();
             let bound = RegistryEntry::issued_with_status(
                 doc.clone(),
@@ -1216,15 +1292,107 @@ mod tests {
                 &sk,
             )
             .unwrap();
-            let legacy_plain = verifies_over(&plain, &commitment_message_with_salt(&c, &salt));
-            let legacy_bound = verifies_over(
+            let r = bound.status_ref().unwrap();
+            assert!(verifies_over(&plain, &commitment_message_with_scheme(&c, &salt, &scheme)));
+            assert!(verifies_over(
                 &bound,
-                &commitment_message_with_status(&c, &salt, &status_ref(&bound)),
-            );
-            let is_default = method == CommitmentMethod::StringCanonicalV1;
-            assert_eq!(legacy_plain, is_default, "{}", method.scheme_iri());
-            assert_eq!(legacy_bound, is_default, "{}", method.scheme_iri());
+                &commitment_message_with_status_and_scheme(&c, &salt, &r, &scheme)
+            ));
+            assert!(!verifies_over(&plain, &commitment_message_with_salt(&c, &salt)));
+            assert!(!verifies_over(&bound, &commitment_message_with_status(&c, &salt, &r)));
         }
+    }
+
+    const LEGACY_FIXTURE_PATH: &str =
+        "crates/sparq-zk/tests/fixtures/legacy_registry/base-5e7e008e.nq";
+    const LEGACY_FIXTURE: &str =
+        include_str!("../tests/fixtures/legacy_registry/base-5e7e008e.nq");
+
+    /// The entries of the base-issuance fixture, by the `# name` line heading
+    /// each block, decoded through [`read_registry`].
+    fn legacy_fixture() -> Vec<(String, RegistryEntry)> {
+        let mut out = Vec::new();
+        for block in LEGACY_FIXTURE.split("# ").filter(|b| !b.trim().is_empty()) {
+            let (name, quads) = block.split_once('\n').unwrap();
+            let g = Graph::load_dataset(quads, "nquads").unwrap();
+            let mut entries = read_registry(&g);
+            assert_eq!(entries.len(), 1, "{name}");
+            out.push((name.trim().to_string(), entries.remove(0)));
+        }
+        assert_eq!(out.len(), 4);
+        out
+    }
+
+    fn legacy_fixture_entry(name: &str) -> RegistryEntry {
+        legacy_fixture().into_iter().find(|(n, _)| n == name).unwrap().1
+    }
+
+    /// The inventory names real entries: every pin's source is a block of the
+    /// fixture whose digest it is, and every `string-canonical` signed entry of
+    /// the fixture is pinned.
+    #[test]
+    fn the_legacy_inventory_pins_exactly_the_in_repo_entries() {
+        let fixture = legacy_fixture();
+        for pin in LEGACY_METHOD_UNBOUND_ENTRIES {
+            let (path, name) = pin.source.split_once('#').unwrap();
+            assert_eq!(path, LEGACY_FIXTURE_PATH);
+            let (_, e) = fixture.iter().find(|(n, _)| n == name).unwrap();
+            assert_eq!(e.canonical_digest(), pin.digest, "{name}");
+        }
+        let pinned_string_canonical = fixture
+            .iter()
+            .filter(|(_, e)| e.scheme().as_str() == ZK_SCHEME_POSEIDON2_RDFC10_V1)
+            .filter(|(_, e)| {
+                LEGACY_METHOD_UNBOUND_ENTRIES.iter().any(|p| p.digest == e.canonical_digest())
+            })
+            .count();
+        assert_eq!(pinned_string_canonical, 2);
+        assert_eq!(LEGACY_METHOD_UNBOUND_ENTRIES.len(), 2);
+    }
+
+    /// An honest pinned entry issued by the pre-method-binding code still
+    /// verifies, plain and status-bound.
+    #[test]
+    fn an_honest_pinned_legacy_entry_still_verifies() {
+        assert!(legacy_fixture_entry("string-canonical-plain").verify_commitment_signature());
+        assert!(legacy_fixture_entry("string-canonical-status")
+            .verify_commitment_signature_with_status());
+    }
+
+    /// A `dual-leaf` v1 entry signed by the pre-method-binding issuance path
+    /// verifies under neither its own scheme nor a `string-canonical` one, and a
+    /// pinned entry stops verifying once any recorded field changes.
+    #[test]
+    fn a_base_issued_v1_entry_relabelled_string_canonical_does_not_verify() {
+        let v1 = legacy_fixture_entry("dual-leaf-v1-plain");
+        let v1s = legacy_fixture_entry("dual-leaf-v1-status");
+        assert!(!v1.verify_commitment_signature());
+        assert!(!v1s.verify_commitment_signature_with_status());
+        let relabelled = with_scheme_rewritten_in_store(&v1, ZK_SCHEME_POSEIDON2_RDFC10_V1);
+        let relabelled_s = with_scheme_rewritten_in_store(&v1s, ZK_SCHEME_POSEIDON2_RDFC10_V1);
+        assert!(!relabelled.verify_commitment_signature());
+        assert!(!relabelled_s.verify_commitment_signature_with_status());
+        // The pinned entries leave the inventory under any change: another
+        // scheme, or another recorded field.
+        let plain = legacy_fixture_entry("string-canonical-plain");
+        let status = legacy_fixture_entry("string-canonical-status");
+        for iri in every_scheme_iri() {
+            let same = iri == ZK_SCHEME_POSEIDON2_RDFC10_V1;
+            assert_eq!(
+                with_scheme_rewritten_in_store(&plain, iri).verify_commitment_signature(),
+                same,
+                "{iri}"
+            );
+            assert_eq!(
+                with_scheme_rewritten_in_store(&status, iri)
+                    .verify_commitment_signature_with_status(),
+                same,
+                "{iri}"
+            );
+        }
+        let mut ingested = plain.clone();
+        ingested.ingested = Some("2026-01-01T00:00:00Z".into());
+        assert!(!ingested.verify_commitment_signature());
     }
 
     #[test]
