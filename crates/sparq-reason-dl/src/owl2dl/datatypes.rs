@@ -1093,7 +1093,8 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
         },
         HexBinary => Value::HexBinary(hex_value(lex)?),
         Base64Binary => Value::Base64Binary(base64_value(lex)?),
-        AnyUri => Value::AnyUri(collapse(lex)),
+        // The lexical mapping is the identity: whitespace is part of the value.
+        AnyUri => Value::AnyUri(lex.to_string()),
         DateTime => Value::DateTime(datetime_value(lex, false)?),
         DateTimeStamp => Value::DateTime(datetime_value(lex, true)?),
         XmlLiteral => Value::XmlLiteral(lex.to_string()),
@@ -1179,6 +1180,15 @@ mod tests {
         let lo = Rational::new(i128::MIN + 1, 2).unwrap();
         assert_eq!(lo.ceil(), (i128::MIN + 2) / 2);
         assert_eq!(lo.floor(), i128::MIN / 2);
+        // A non-integral negative third near the bound: truncation rounds toward zero, so
+        // the floor is one below it, and the order is exact against the neighbours.
+        let third = Rational::new(i128::MIN + 1, 3).unwrap();
+        let q = (i128::MIN + 1) / 3;
+        assert_eq!((third.floor(), third.ceil()), (q - 1, q));
+        assert!(Rational::int(q - 1).unwrap() < third && third < Rational::int(q).unwrap());
+        assert!(lo < third && third < Rational::new(i128::MIN + 1, 4).unwrap());
+        assert!(third < Rational::new(i128::MIN + 2, 3).unwrap());
+        assert_eq!(Rational::new(i128::MAX, -3), Some(third));
         let dec = |s: &str| val(s, "decimal").unwrap();
         assert!(
             dec("-17014118346046923173168730371588410572.7")
@@ -1196,6 +1206,10 @@ mod tests {
             Ok(Value::Base64Binary(b"hi".to_vec()))
         );
         assert_eq!(val("aGk=\n", "base64Binary"), Err(ValueError::IllTyped));
+        // anyURI maps lexical forms to values unchanged, whitespace included.
+        assert_eq!(val(" a ", "anyURI"), Ok(Value::AnyUri(" a ".into())));
+        assert_ne!(val(" a ", "anyURI"), val("a", "anyURI"));
+        assert_ne!(val("a  b", "anyURI"), val("a b", "anyURI"));
         assert_eq!(val("1", "boolean"), val("true", "boolean"));
         assert_eq!(val("yes", "boolean"), Err(ValueError::IllTyped));
         assert_eq!(

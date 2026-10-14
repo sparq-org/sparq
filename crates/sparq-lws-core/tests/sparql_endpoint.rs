@@ -360,6 +360,24 @@ async fn protocol_get_form_post_construct_and_union_default_are_live() {
         unsupported_graph_format.status(),
         StatusCode::NOT_ACCEPTABLE
     );
+    // A zero weight in any spelling, or one that is not a valid qvalue, refuses the only format
+    // the endpoint produces (RFC 9110 section 12.4.2).
+    for refused in [
+        "application/n-triples;q=0.0",
+        "application/n-triples; Q=0.000",
+        "*/*;q=2",
+    ] {
+        let response = harness
+            .request(
+                "POST",
+                "/sparql",
+                Some("application/sparql-query"),
+                Some(refused),
+                Body::from("CONSTRUCT { <urn:a> <urn:p> ?o } WHERE { GRAPH <https://pod.example/a> { <urn:a> <urn:p> ?o } }"),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE, "{refused}");
+    }
 
     let hidden_union_graph = json(
         harness

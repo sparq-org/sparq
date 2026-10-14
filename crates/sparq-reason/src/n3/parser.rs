@@ -145,7 +145,19 @@ pub(crate) fn parse_charged_checked(
     extra: impl IntoIterator<Item = [Term; 3]>,
     allowance: Option<usize>,
 ) -> Result<Parsed, ParseFailure> {
-    parse_charged(src, base, extra, allowance, false)
+    parse_charged(src, base, extra, allowance, false, false)
+}
+
+/// As [`parse_with_extra_checked`], with `facts` IN PLACE OF the document's own facts:
+/// the document contributes only its rules. For a caller that already holds the
+/// document's facts among `facts` (the incremental N3 graph's base, which a `delete`
+/// may have shrunk), so a fact it deleted does not come back from the source text.
+pub(crate) fn parse_rules_with_facts_checked(
+    src: &str,
+    base: &str,
+    facts: impl IntoIterator<Item = [Term; 3]>,
+) -> Result<Parsed, ParseFailure> {
+    parse_charged(src, base, facts, None, false, true)
 }
 
 /// As [`parse_charged_checked`], for a document that becomes a QUOTED FORMULA
@@ -159,7 +171,7 @@ pub(crate) fn parse_quoted_charged_checked(
     base: &str,
     allowance: Option<usize>,
 ) -> Result<Parsed, ParseFailure> {
-    parse_charged(src, base, std::iter::empty(), allowance, true)
+    parse_charged(src, base, std::iter::empty(), allowance, true, false)
 }
 
 fn parse_charged(
@@ -168,6 +180,7 @@ fn parse_charged(
     extra: impl IntoIterator<Item = [Term; 3]>,
     allowance: Option<usize>,
     quoted: bool,
+    replace_facts: bool,
 ) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
     p.left = allowance;
@@ -181,7 +194,7 @@ fn parse_charged(
             p.charge(frame)?;
             p.quants.push(Default::default());
         }
-        let parsed = parse_document(&mut p, base, extra);
+        let parsed = parse_document(&mut p, base, extra, replace_facts);
         if quoted {
             p.quants.pop();
             p.release(frame);
@@ -194,8 +207,19 @@ fn parse_charged(
     })
 }
 
-fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item = [Term; 3]>) -> Result<Parsed, String> {
+/// `replace_facts`: the document's own facts are dropped (its rules are kept) and `extra`
+/// stands in for them ([`parse_rules_with_facts_checked`]).
+fn parse_document(
+    p: &mut Parser<'_>,
+    base: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
+    replace_facts: bool,
+) -> Result<Parsed, String> {
     let mut facts = p.document()?;
+    // The document's own statements come first; with `replace_facts`, those left facts
+    // once the rules are taken out are dropped.
+    let own = if replace_facts { facts.len() } else { 0 };
+    let mut at = 0usize;
     facts.extend(extra);
     let mut rules = Vec::new();
     let mut backward_rules = Vec::new();
@@ -218,8 +242,10 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
         true_growth = true_growth.saturating_add(grown);
     };
     facts.retain_mut(|[s, pred, o]| {
+        let own_fact = at < own;
+        at += 1;
         let Term::Iri(i) = &*pred else {
-            return true;
+            return !own_fact;
         };
         let implies = i == LOG_IMPLIES;
         let implied_by = i == LOG_IMPLIED_BY || i == LOG_IMPLIED_BY_LEGACY;
@@ -251,7 +277,7 @@ fn parse_document(p: &mut Parser<'_>, base: &str, extra: impl IntoIterator<Item 
                 backward_rules.push(Rule { premise: Vec::new(), conclusion: take(s) });
                 legacy += usize::from(i == LOG_IMPLIED_BY_LEGACY);
             }
-            _ => return true,
+            _ => return !own_fact,
         }
         false
     });

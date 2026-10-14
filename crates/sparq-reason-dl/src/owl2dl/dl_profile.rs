@@ -11,8 +11,8 @@
 
 use super::datatypes::{self, builtin, Builtin, Facet};
 use super::model::{
-    AnnotationSubject, AnnotationValue, Axiom, AxiomRecord, ClassExpression, DataRange, EntityKind,
-    Individual, Literal, ObjectProperty, Ontology,
+    AnnotationSubject, AnnotationTarget, AnnotationValue, Axiom, AxiomRecord, ClassExpression,
+    DataRange, EntityKind, Individual, Literal, ObjectProperty, Ontology,
 };
 use super::vocab::{iri_of, Vocab, OWL, RDF, RDFS, XSD};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -479,6 +479,16 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether any annotation may target axiom `ai` (one whose target is any of its input
+    /// triples, an over-approximation of its main triple).
+    fn is_annotated(&self, ai: usize) -> bool {
+        let source = &self.onto.axioms[ai].source;
+        self.onto
+            .annotations
+            .iter()
+            .any(|a| matches!(a.target, AnnotationTarget::Axiom(t) if source.contains(&t)))
+    }
+
     fn sources(&self, axioms: &[usize]) -> Vec<usize> {
         let mut s: Vec<usize> = axioms
             .iter()
@@ -679,71 +689,55 @@ impl<'a> Checker<'a> {
         if !has_chain {
             return;
         }
-        // Mutually reachable properties are equivalent: one element of the order. Collapse
-        // the hierarchy's strongly connected components, so a constraint `S < R` with `S`
-        // equivalent to `R` is a violation, and a cycle through an equivalence class is found.
-        let comp = components(&edges);
-        let rep = |p: ObjectProperty| comp.get(&p).copied().unwrap_or(p);
-        let mut cycle_axioms: Vec<usize> = Vec::new();
-        // The order must extend the strict part of the hierarchy, and S < R iff Inv(S) < R.
-        let mut graph: FxHashMap<ObjectProperty, Vec<(ObjectProperty, Option<usize>)>> =
+        // §11.2 asks for a strict order `<` with (1) `S < R` iff `Inv(S) < R`, (2) `S < R`
+        // only if `R →* S` does not hold in the property hierarchy, and (3) the pairs each
+        // chain axiom needs. Every condition only forbids pairs, so an order exists iff the
+        // least relation meeting (1) and (3), closed under transitivity, is irreflexive and
+        // meets (2). That relation is reachability in the graph below.
+        let mut graph: FxHashMap<ObjectProperty, Vec<(ObjectProperty, usize)>> =
             FxHashMap::default();
-        for (&a, bs) in &edges {
-            for &b in bs {
-                if rep(a) != rep(b) {
-                    graph.entry(rep(a)).or_default().push((rep(b), None));
-                }
-            }
-        }
         for &(s, r, ai) in &less {
             for s in [s, s.inverse()] {
-                if rep(s) == rep(r) {
-                    cycle_axioms.push(ai);
-                } else {
-                    graph.entry(rep(s)).or_default().push((rep(r), Some(ai)));
-                }
+                graph.entry(s).or_default().push((r, ai));
             }
         }
-        for succ in graph.values_mut() {
-            succ.sort();
-            succ.dedup();
-        }
-        // A strict partial order exists iff the constraint graph has no cycle.
-        let mut nodes: Vec<ObjectProperty> = graph.keys().copied().collect();
-        nodes.sort();
-        let mut state: FxHashMap<ObjectProperty, u8> = FxHashMap::default();
-        for start in nodes {
-            if state.get(&start).copied().unwrap_or(0) != 0 {
-                continue;
+        // `R →*` reachability in the hierarchy, computed on demand.
+        let mut below: FxHashMap<ObjectProperty, FxHashSet<ObjectProperty>> = FxHashMap::default();
+        let mut reach_hierarchy = |from: ObjectProperty| -> FxHashSet<ObjectProperty> {
+            below
+                .entry(from)
+                .or_insert_with(|| {
+                    let mut seen = FxHashSet::default();
+                    let mut work = vec![from];
+                    while let Some(x) = work.pop() {
+                        if seen.insert(x) {
+                            work.extend(edges.get(&x).into_iter().flatten().copied());
+                        }
+                    }
+                    seen
+                })
+                .clone()
+        };
+        let mut starts: Vec<ObjectProperty> = graph.keys().copied().collect();
+        starts.sort();
+        let mut cycle_axioms: Vec<usize> = Vec::new();
+        for x in starts {
+            // Everything the least order puts above `x`, with the axioms that put it there.
+            let mut above: FxHashSet<ObjectProperty> = FxHashSet::default();
+            let mut used: Vec<usize> = Vec::new();
+            let mut work: Vec<ObjectProperty> = vec![x];
+            while let Some(m) = work.pop() {
+                for &(y, ai) in graph.get(&m).map(Vec::as_slice).unwrap_or(&[]) {
+                    used.push(ai);
+                    if above.insert(y) {
+                        work.push(y);
+                    }
+                }
             }
-            // Iterative DFS with an explicit stack of (node, next-edge-index).
-            let mut stack: Vec<(ObjectProperty, usize)> = vec![(start, 0)];
-            let mut path_axioms: Vec<Option<usize>> = vec![None];
-            state.insert(start, 1);
-            while let Some((node, ei)) = stack.last().copied() {
-                let succ = graph.get(&node).map(Vec::as_slice).unwrap_or(&[]);
-                if ei >= succ.len() {
-                    state.insert(node, 2);
-                    stack.pop();
-                    path_axioms.pop();
-                    continue;
-                }
-                stack.last_mut().expect("non-empty").1 += 1;
-                let (next, ax) = succ[ei];
-                match state.get(&next).copied().unwrap_or(0) {
-                    0 => {
-                        state.insert(next, 1);
-                        stack.push((next, 0));
-                        path_axioms.push(ax);
-                    }
-                    1 => {
-                        // A cycle: report the chain axioms on it.
-                        let pos = stack.iter().position(|(n, _)| *n == next).unwrap_or(0);
-                        cycle_axioms.extend(path_axioms[pos + 1..].iter().flatten());
-                        cycle_axioms.extend(ax);
-                    }
-                    _ => {}
-                }
+            // Irreflexive, and no `x < y` with `y →* x`.
+            let bad = above.contains(&x) || above.iter().any(|&y| reach_hierarchy(y).contains(&x));
+            if bad {
+                cycle_axioms.extend(used);
             }
         }
         if !cycle_axioms.is_empty() {
@@ -859,18 +853,41 @@ impl<'a> Checker<'a> {
     fn datatypes(&mut self) {
         let mut declared_dt: FxHashSet<Id> = FxHashSet::default();
         let mut definitions: FxHashMap<Id, Vec<usize>> = FxHashMap::default();
+        // Each definition's canonical range, and whether it carries annotations.
+        let mut seen_defs: FxHashMap<Id, Vec<(DataRange, bool)>> = FxHashMap::default();
+        let mut not_checked: Vec<(&'static str, Vec<usize>)> = Vec::new();
         for (ai, rec) in self.onto.axioms.iter().enumerate() {
             match &rec.axiom {
                 Axiom::Declaration(EntityKind::Datatype, id) => {
                     declared_dt.insert(*id);
                 }
-                Axiom::DatatypeDefinition(id, _) => definitions.entry(*id).or_default().push(ai),
+                Axiom::DatatypeDefinition(id, dr) => {
+                    // The axioms form a set under structural equivalence: an unannotated
+                    // repeat of a definition is the same definition. Whether annotated
+                    // definitions with equal ranges are equal depends on their full
+                    // annotation structure, which is not compared: that case is unchecked.
+                    let range = canonical_range(dr);
+                    let annotated = self.is_annotated(ai);
+                    let reps = seen_defs.entry(*id).or_default();
+                    match reps.iter().find(|(r, _)| *r == range) {
+                        Some(&(_, other)) if !annotated && !other => {}
+                        Some(_) => {
+                            not_checked.push((
+                                "structural equality of annotated datatype definitions",
+                                self.onto.axioms[ai].source.clone(),
+                            ));
+                        }
+                        None => {
+                            reps.push((range, annotated));
+                            definitions.entry(*id).or_default().push(ai);
+                        }
+                    }
+                }
                 _ => {}
             }
         }
         // The flag marks a violation an unloaded import could repair.
         let mut found: Vec<(ViolationKind, String, Vec<usize>, bool)> = Vec::new();
-        let mut not_checked: Vec<(&'static str, Vec<usize>)> = Vec::new();
         let xml_literal = format!("{RDF}XMLLiteral");
         // Every literal of the ontology, with the triples it came from.
         let mut literals: Vec<(Literal, &[usize])> = Vec::new();
@@ -1185,7 +1202,9 @@ fn has_cardinality(c: &ClassExpression) -> bool {
     }
 }
 
-fn canonical_range(r: &DataRange) -> DataRange {
+/// `r` with every operand set (union, intersection, enumeration, facets) sorted and
+/// deduplicated: structurally equivalent ranges have equal canonical forms.
+pub(crate) fn canonical_range(r: &DataRange) -> DataRange {
     let set = |xs: &[DataRange]| {
         let mut v: Vec<DataRange> = xs.iter().map(canonical_range).collect();
         v.sort();
@@ -1229,70 +1248,6 @@ fn kind_name(k: EntityKind) -> &'static str {
 
 fn collect_ope(p: &ObjectProperty, f: &mut impl FnMut(Id, EntityKind)) {
     f(p.named(), EntityKind::ObjectProperty);
-}
-
-/// The strongly connected components of `edges`, each node mapped to its component's least
-/// member (Kosaraju, iterative).
-fn components(
-    edges: &FxHashMap<ObjectProperty, Vec<ObjectProperty>>,
-) -> FxHashMap<ObjectProperty, ObjectProperty> {
-    let mut nodes: Vec<ObjectProperty> = edges
-        .iter()
-        .flat_map(|(a, bs)| std::iter::once(*a).chain(bs.iter().copied()))
-        .collect();
-    nodes.sort();
-    nodes.dedup();
-    let mut reverse: FxHashMap<ObjectProperty, Vec<ObjectProperty>> = FxHashMap::default();
-    for (&a, bs) in edges {
-        for &b in bs {
-            reverse.entry(b).or_default().push(a);
-        }
-    }
-    // Pass 1: finishing order.
-    let mut seen: FxHashSet<ObjectProperty> = FxHashSet::default();
-    let mut order: Vec<ObjectProperty> = Vec::with_capacity(nodes.len());
-    for &start in &nodes {
-        if !seen.insert(start) {
-            continue;
-        }
-        let mut stack: Vec<(ObjectProperty, usize)> = vec![(start, 0)];
-        while let Some((n, i)) = stack.last().copied() {
-            let succ = edges.get(&n).map(Vec::as_slice).unwrap_or(&[]);
-            if i < succ.len() {
-                stack.last_mut().expect("non-empty").1 += 1;
-                if seen.insert(succ[i]) {
-                    stack.push((succ[i], 0));
-                }
-            } else {
-                order.push(n);
-                stack.pop();
-            }
-        }
-    }
-    // Pass 2: components on the reverse graph, in reverse finishing order.
-    let mut comp: FxHashMap<ObjectProperty, ObjectProperty> = FxHashMap::default();
-    for &start in order.iter().rev() {
-        if comp.contains_key(&start) {
-            continue;
-        }
-        let mut members = vec![start];
-        comp.insert(start, start);
-        let mut i = 0;
-        while i < members.len() {
-            for &p in reverse.get(&members[i]).map(Vec::as_slice).unwrap_or(&[]) {
-                if let std::collections::hash_map::Entry::Vacant(e) = comp.entry(p) {
-                    e.insert(start);
-                    members.push(p);
-                }
-            }
-            i += 1;
-        }
-        let least = *members.iter().min().expect("non-empty");
-        for m in members {
-            comp.insert(m, least);
-        }
-    }
-    comp
 }
 
 fn collect_ind(i: &Individual, f: &mut impl FnMut(Id, EntityKind)) {

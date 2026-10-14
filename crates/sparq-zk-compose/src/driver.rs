@@ -13,6 +13,8 @@
 //! - `bb verify -p proof -i public_inputs -k vk` exits 0 on success.
 
 use crate::manifest::CircuitId;
+#[cfg(feature = "dual-leaf")]
+use sparq_zk::commit::{CommitmentMethod, MethodUse};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -35,6 +37,12 @@ pub enum DriverError {
         stderr: String,
     },
     Io(std::io::Error),
+    /// The checked value-lane prove entry [`CircuitProver::prove_value_lane`]
+    /// refused its inputs before any subprocess ran — e.g. a FRESH proof under a
+    /// method that is not selectable for new issuance, a lane constant on the
+    /// wrong member, or a non-canonical `FieldHex`.
+    #[cfg(feature = "dual-leaf")]
+    Dispatch(crate::dispatch::DispatchError),
 }
 
 impl std::fmt::Display for DriverError {
@@ -47,6 +55,8 @@ impl std::fmt::Display for DriverError {
                 write!(f, "`{tool}` failed:\n{stderr}")
             }
             DriverError::Io(e) => write!(f, "io error: {e}"),
+            #[cfg(feature = "dual-leaf")]
+            DriverError::Dispatch(e) => write!(f, "dispatch refused the proof: {}", e),
         }
     }
 }
@@ -513,6 +523,12 @@ impl CircuitProver {
     /// Full prove: compile -> witness -> bb prove + write_vk. `out_dir` is a
     /// scratch directory the artifacts are written into.
     ///
+    /// An UNGATED building block, like [`Self::prove_in`] and the
+    /// `gen_witness*` entries: it proves whatever `prover_toml` it is handed on
+    /// the member `id` names, with no method, lane or canonicality check. A
+    /// value-lane proof that should be checked goes through
+    /// `Self::prove_value_lane` instead (`dual-leaf` feature).
+    ///
     /// NOTE: this uses the SHARED (untagged) witness path and so is only safe
     /// single-threaded against a given member; concurrent callers must use
     /// [`Self::prove_in`] with a unique tag.
@@ -539,6 +555,40 @@ impl CircuitProver {
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
         self.prove_package(&id.package(), prover_toml, out_dir, tag)
+    }
+
+    /// The CHECKED value-lane prove entry: prove a typed
+    /// [`crate::value_lane::ValueLaneProof`] committed under `method`, for the
+    /// stated `use_`.
+    ///
+    /// It takes no circuit id and no TOML. The member is derived from the lane
+    /// ([`crate::value_lane::ValueLane::member`], the table the verifier's id
+    /// derivation also reads), and the `Prover.toml` is rendered here by
+    /// [`crate::value_lane::ValueLaneProof::checked_prover_toml`] from the
+    /// validated fields, after the `(method, member, use_)` dispatch, the
+    /// canonical-`FieldHex` check over every written field, the lane↔member
+    /// allow-list and the method/constant version agreement. A refusal is
+    /// [`DriverError::Dispatch`] and precedes any `nargo`/`bb` subprocess and any
+    /// scratch directory.
+    ///
+    /// Re-proving an ALREADY-ISSUED `DualLeafV1` graph passes
+    /// `CommitmentMethod::DualLeafV1` with
+    /// [`MethodUse::LegacyAlreadyIssued`]; a new proof passes
+    /// `CommitmentMethod::DualLeafV2` with [`MethodUse::NewIssuance`].
+    #[cfg(feature = "dual-leaf")]
+    pub fn prove_value_lane(
+        &self,
+        method: CommitmentMethod,
+        use_: MethodUse,
+        challenge: &crate::manifest::FieldHex,
+        proof: &crate::value_lane::ValueLaneProof,
+        out_dir: &Path,
+        tag: &str,
+    ) -> Result<ProofArtifacts, DriverError> {
+        let toml = proof
+            .checked_prover_toml(method, use_, challenge)
+            .map_err(DriverError::Dispatch)?;
+        self.prove_in(&proof.circuit_id(), &toml, out_dir, tag)
     }
 
     // Shares the explicit noir-recursive (ZK) backend with legacy members.

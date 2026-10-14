@@ -494,8 +494,8 @@ mod tests {
 
     #[test]
     fn explain_names_join_order_and_strategy() {
-        // knows (2 rows) is the seed; age joins on ?b via a merge join (both
-        // sides sorted on ?b: POS for knows-object, PSO for age-subject).
+        // knows (2 rows) is the seed; age joins on ?b. POS sorts knows by
+        // object; a merge join also needs PSO to sort age by subject.
         let plan = explain(
             &g(),
             "PREFIX ex: <http://ex/> SELECT ?a ?b ?age WHERE { ?a ex:knows ?b . ?b ex:age ?age }",
@@ -505,8 +505,13 @@ mod tests {
         assert!(plan.contains("BGP [binary join plan: greedy GOO ordering] (2 patterns)"), "{plan}");
         // Join order: the smaller knows pattern seeds the plan...
         assert!(plan.contains("1. scan ?a <http://ex/knows> ?b (est 2 rows, sorted by ?b) [seed: smallest estimate]"), "{plan}");
-        // ...then a merge join on the shared variable with its estimate.
-        assert!(plan.contains("2. merge join on ?b with scan ?b <http://ex/age> ?age (est 3 rows, sorted by ?b)"), "{plan}");
+        // ...then join on the shared variable with its estimate. Compact
+        // indexes (including wasm) omit PSO, so the join must use hashing.
+        if BUILT.contains(&Perm::Pso) {
+            assert!(plan.contains("2. merge join on ?b with scan ?b <http://ex/age> ?age (est 3 rows, sorted by ?b)"), "{plan}");
+        } else {
+            assert!(plan.contains("2. hash join on ?b with scan ?b <http://ex/age> ?age (est 3 rows)"), "{plan}");
+        }
     }
 
     #[test]

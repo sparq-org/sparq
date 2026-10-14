@@ -48,9 +48,10 @@ permissions:
 # One run per ref; a newer run cancels an older one. A pull_request event that will NOT run
 # the bench (PR without the `bench` label, or a different label being added) gets a unique
 # group, so it can never cancel an in-flight labelled bench run.
+# The event is in the key so a scheduled run and a push to main never cancel each other.
 concurrency:
   group: >-
-    bench-${{ github.ref }}${{ github.event_name == 'pull_request'
+    bench-${{ github.event_name }}-${{ github.ref }}${{ github.event_name == 'pull_request'
     && !(contains(github.event.pull_request.labels.*.name, 'bench')
     && (github.event.action != 'labeled' || github.event.label.name == 'bench'))
     && format('-noop-{0}', github.run_id) || '' }}

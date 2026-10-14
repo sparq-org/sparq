@@ -1259,6 +1259,49 @@ fn rejects_singleton_data_unions_and_intersections() {
 }
 
 #[test]
+fn data_operands_are_distinct_by_structure_not_by_node() {
+    // Two blank nodes with the same structure (in any operand order) are one operand.
+    for c in ["unionOf", "intersectionOf"] {
+        let e = err(&with_decls(&format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:{c} ( \
+             [ a rdfs:Datatype ; owl:unionOf ( xsd:integer xsd:string ) ] \
+             [ a rdfs:Datatype ; owl:unionOf ( xsd:string xsd:integer ) ] ) ] ."
+        )));
+        assert_eq!(e.kind, ExtractErrorKind::Malformed, "{c}");
+    }
+    // Different structure stays two operands.
+    let (_, _, o) = ok(&with_decls(
+        ":d rdfs:range [ a rdfs:Datatype ; owl:unionOf ( \
+         [ a rdfs:Datatype ; owl:datatypeComplementOf xsd:integer ] \
+         [ a rdfs:Datatype ; owl:datatypeComplementOf xsd:string ] ) ] .",
+    ));
+    assert!(!o.axioms.is_empty());
+}
+
+#[test]
+fn one_of_kinds_settle_property_kinds_for_long_lists() {
+    // Many undeclared properties ranging over one long enumeration of literals: each is a
+    // data property (the enumeration is read once per node, however many uses ask).
+    let lits: Vec<String> = (0..2000).map(|i| format!("\"v{i}\"")).collect();
+    let mut body = format!("_:e owl:oneOf ( {} ) .\n", lits.join(" "));
+    for i in 0..200 {
+        body.push_str(&format!(":q{i} rdfs:range _:e .\n"));
+    }
+    let (_, _, o) = ok(&with_decls(&body));
+    let ranges = o
+        .axioms
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.axiom,
+                sparq_reason_dl::owl2dl::model::Axiom::DataPropertyRange(..)
+            )
+        })
+        .count();
+    assert_eq!(ranges, 200);
+}
+
+#[test]
 fn operand_distinctness_ignores_set_order() {
     let v = violations(&with_decls(
         "[ owl:unionOf ( :A :B ) ] owl:equivalentClass [ owl:unionOf ( :B :A ) ] .",
@@ -1478,4 +1521,102 @@ fn non_xml_characters_are_ill_typed() {
         let v = violations(&with_decls(&format!(":a :d {lit} .")));
         assert_eq!(v, vec![ViolationKind::IllTypedLiteral], "{lit}");
     }
+}
+
+// ===================== sixth review round =====================
+
+#[test]
+fn n_ary_axiom_nodes_must_be_blank() {
+    let base = ":a a owl:NamedIndividual . :b a owl:NamedIndividual .";
+    for body in [
+        format!("{base} :n a owl:AllDifferent ; owl:members ( :a :b ) ."),
+        format!("{DECLS} :n a owl:AllDisjointClasses ; owl:members ( :A :B ) ."),
+        format!("{DECLS} :n a owl:AllDisjointProperties ; owl:members ( :p :q ) ."),
+        format!("{base} {DECLS} :n a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ; owl:assertionProperty :p ; owl:targetIndividual :b ."),
+    ] {
+        assert_eq!(err(&body).kind, ExtractErrorKind::Malformed, "{body}");
+    }
+}
+
+#[test]
+fn repeated_datatype_definitions_are_one_definition() {
+    let def = "[ a rdfs:Datatype ; owl:datatypeComplementOf xsd:string ]";
+    let v = violations(&format!(
+        ":dt a rdfs:Datatype . :dt owl:equivalentClass {def} . :dt owl:equivalentClass {def} ."
+    ));
+    assert!(v.is_empty(), "{v:?}");
+    // Different ranges are two definitions.
+    let v = violations(":dt a rdfs:Datatype ; owl:equivalentClass xsd:integer, xsd:string .");
+    assert!(
+        v.contains(&ViolationKind::InvalidDatatypeDefinition),
+        "{v:?}"
+    );
+}
+
+#[test]
+fn annotated_repeated_datatype_definitions_are_unchecked() {
+    // Two structurally equal ranges, each annotated: whether the axioms are equal depends
+    // on the whole annotation structure (nested annotations included), which is not
+    // compared, so the verdict is unknown rather than a guess either way.
+    let def = |b: &str| format!("_:{b} a rdfs:Datatype ; owl:datatypeComplementOf xsd:string .");
+    let ann = |b: &str, ax: &str, inner: &str| {
+        format!(
+            "_:{ax} a owl:Axiom ; owl:annotatedSource :dt ; owl:annotatedProperty owl:equivalentClass ; owl:annotatedTarget _:{b} ; rdfs:comment \"c\" . \
+             _:{ax}n a owl:Annotation ; owl:annotatedSource _:{ax} ; owl:annotatedProperty rdfs:comment ; owl:annotatedTarget \"c\" ; rdfs:label \"{inner}\" ."
+        )
+    };
+    let body = format!(
+        ":dt a rdfs:Datatype ; owl:equivalentClass _:b1, _:b2 . {} {} {} {}",
+        def("b1"),
+        def("b2"),
+        ann("b1", "x1", "one"),
+        ann("b2", "x2", "two"),
+    );
+    let r = report(&body);
+    assert!(r.violations.is_empty(), "{:?}", r.violations);
+    assert!(
+        r.unchecked
+            .iter()
+            .any(|u| u.rule.contains("annotated datatype definitions")),
+        "{:?}",
+        r.unchecked
+    );
+    // Annotated on one side only (supporting triples listed first): still unchecked.
+    let body = format!(
+        "{} {} :dt a rdfs:Datatype ; owl:equivalentClass _:b2, _:b1 . {}",
+        def("b2"),
+        def("b1"),
+        ann("b1", "x1", "one"),
+    );
+    let r = report(&body);
+    assert!(r.violations.is_empty(), "{:?}", r.violations);
+    assert!(
+        r.unchecked
+            .iter()
+            .any(|u| u.rule.contains("annotated datatype definitions")),
+        "{:?}",
+        r.unchecked
+    );
+}
+
+#[test]
+fn regularity_does_not_order_hierarchy_edges() {
+    // a∘e ⊑ b and c∘f ⊑ d need a, e < b and c, f < d; b ⊑ c and d ⊑ a forbid only the
+    // reverse pairs. A strict order exists.
+    let decl: String = ["a", "b", "c", "d", "e", "f"]
+        .iter()
+        .map(|p| format!(":{p} a owl:ObjectProperty . "))
+        .collect();
+    let v = violations(&format!(
+        "{decl} :b owl:propertyChainAxiom ( :a :e ) . :d owl:propertyChainAxiom ( :c :f ) . :b rdfs:subPropertyOf :c . :d rdfs:subPropertyOf :a ."
+    ));
+    assert!(v.is_empty(), "{v:?}");
+    // a∘e ⊑ b with b ⊑ a forbids a < b.
+    let v = violations(&format!(
+        "{decl} :b owl:propertyChainAxiom ( :a :e ) . :b rdfs:subPropertyOf :a ."
+    ));
+    assert!(
+        v.contains(&ViolationKind::IrregularPropertyHierarchy),
+        "{v:?}"
+    );
 }

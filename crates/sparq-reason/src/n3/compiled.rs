@@ -300,8 +300,10 @@ pub struct BoundRuleSet<'a> {
 ///
 /// Returns `Err` on a parse failure or on any unsupported construct (backward rules,
 /// unsupported builtins, conclusion existentials, unresolvable builtin inputs,
-/// formula-/list-valued facts, unbound conclusion variables, or `@forAll` in a rule
-/// premise or scoped body pattern).
+/// formula-/list-valued facts, unbound conclusion variables, or an `@forAll` in a rule
+/// premise or scoped body pattern that no engine matches soundly). A rule premise's own
+/// `@forAll` that the text engine matches compiles as a rule that never fires: only a
+/// universal of the store proves it, and a compiled store holds ground ids only.
 ///
 /// # Examples
 ///
@@ -996,6 +998,20 @@ impl Compiler {
             conclusion.push(row);
         }
 
+        // A premise's own universal (GH #6882) is proved only by a store universal, and a
+        // compiled store holds ground ids only (a document fact or conclusion with a
+        // universal is refused above), so the rule never fires: it keeps its place, and
+        // its stratum, as a rule with no premise steps and no conclusion.
+        if super::premise_universals(&rule.premise).is_some() {
+            self.rules.push(CompiledRule {
+                steps: Vec::new(),
+                conclusion: Vec::new(),
+                join_steps: Vec::new(),
+                needs_full: false,
+                n_slots: 0,
+            });
+            return Ok(());
+        }
         self.rules.push(CompiledRule {
             steps,
             conclusion,

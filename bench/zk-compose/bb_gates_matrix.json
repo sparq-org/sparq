@@ -16,9 +16,16 @@
     {
       "key": "dual-leaf",
       "iri": "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1",
+      "production_selectable": false,
+      "removes_inv_vl": true,
+      "note": "The FIRST dual-leaf version, SUPERSEDED by dual-leaf-v2. Still recognised and verifiable, so its value lane stays structurally legal here, but no longer selectable for new issuance: its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, leaving the research/zk-field-native-encoding.md section 14.1 reserved-tag requirement unmet. REMOVES INV-VL (value<->lexical agreement becomes trusted-issuer-honesty; CR-G8 / sq-qhy4). Opt-in (`dual-leaf` feature)."
+    },
+    {
+      "key": "dual-leaf-v2",
+      "iri": "https://sparq.dev/ns/zk#poseidon2-dualleaf-v2",
       "production_selectable": true,
       "removes_inv_vl": true,
-      "note": "The #769 value-optimised method: unlocks the value lane AND keeps term identity (via lexical_component). REMOVES INV-VL (value<->lexical agreement becomes trusted-issuer-honesty; CR-G8 / sq-qhy4). Opt-in (`dual-leaf` feature); host leaf encoding (sq-j506) not yet implemented."
+      "note": "The VERSIONED dual-leaf method, and the dual-leaf version a new issuance selects: value-lane constants derived in BLAKE3 key-derivation mode over a length-framed (datatype, params) pair, a no-value sentinel asserted outside the reachable value-handle band, and a dedicated bit-domain xsd:boolean member (filter_value_dl_bool) that constrains its handle and its bound to {0, 1} in-circuit. Same leaf SHAPE as v1, hence the same legality row. REMOVES INV-VL exactly as v1 does \u2014 the versioning changes constant derivation, not the trust model (CR-G8 / sq-qhy4). Opt-in (`dual-leaf` feature)."
     },
     {
       "key": "value-only",
@@ -40,6 +47,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -54,6 +64,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -72,6 +85,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -86,6 +102,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -104,6 +123,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -118,6 +140,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -136,6 +161,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -150,6 +178,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -168,6 +199,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -182,6 +216,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -200,6 +237,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -216,9 +256,31 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
+        }
+      }
+    },
+    "filter_value_dl_bool": {
+      "circuit_size": 3032,
+      "lane": "value",
+      "configs": {
+        "string-canonical": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
+          "legal": true
+        },
+        "value-only": {
+          "legal": true
         }
       }
     },
@@ -231,6 +293,9 @@
           "reason": "IllegalPair"
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -249,6 +314,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": true
         }
@@ -263,6 +331,9 @@
           "reason": "IllegalPair"
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -281,6 +352,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": true
         }
@@ -294,6 +368,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -312,6 +389,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -326,6 +406,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -344,6 +427,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -358,6 +444,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -376,6 +465,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -390,6 +482,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -408,6 +503,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -422,6 +520,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -440,6 +541,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -456,6 +560,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -470,6 +577,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -490,6 +601,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -504,6 +619,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -524,6 +643,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -538,6 +661,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -558,6 +685,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -572,6 +703,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -592,6 +727,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -606,6 +745,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -626,6 +769,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -640,6 +787,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -660,6 +811,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -674,6 +829,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -694,6 +853,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -708,6 +871,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -728,6 +895,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -742,6 +913,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -762,6 +937,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -776,6 +955,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -796,6 +979,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -810,6 +997,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -830,6 +1021,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -844,6 +1039,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -864,6 +1063,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -878,6 +1081,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -898,6 +1105,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -912,6 +1123,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -932,6 +1147,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -946,6 +1165,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -966,6 +1189,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -980,6 +1207,10 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
           "legal": false,
           "reason": "IllegalPair"
         },
@@ -1000,6 +1231,10 @@
           "legal": false,
           "reason": "IllegalPair"
         },
+        "dual-leaf-v2": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -1014,6 +1249,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -1032,6 +1270,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -1046,6 +1287,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -1064,6 +1308,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -1078,6 +1325,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -1096,6 +1346,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -1110,6 +1363,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -1128,6 +1384,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -1144,6 +1403,9 @@
         "dual-leaf": {
           "legal": true
         },
+        "dual-leaf-v2": {
+          "legal": true
+        },
         "value-only": {
           "legal": false,
           "reason": "IllegalPair"
@@ -1158,6 +1420,9 @@
           "legal": true
         },
         "dual-leaf": {
+          "legal": true
+        },
+        "dual-leaf-v2": {
           "legal": true
         },
         "value-only": {
@@ -1195,13 +1460,18 @@
       "value_lane_member": "filter_value_dl_datetime",
       "value_lane_circuit_size": 3070,
       "value_lane_method": "dual-leaf"
+    },
+    "boolean": {
+      "value_lane_member": "filter_value_dl_bool",
+      "value_lane_circuit_size": 3032,
+      "value_lane_method": "dual-leaf"
     }
   },
   "summary": {
-    "circuits": 69,
-    "methods": 3,
-    "configs": 207,
-    "legal_configs": 106,
-    "illegal_configs": 101
+    "circuits": 70,
+    "methods": 4,
+    "configs": 280,
+    "legal_configs": 146,
+    "illegal_configs": 134
   }
 }

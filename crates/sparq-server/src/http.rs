@@ -408,8 +408,10 @@ pub struct ServerConfig {
     /// writing potentially-sensitive query text to disk / a SIEM. Operators who genuinely need the
     /// raw text opt in explicitly. This is **log-CONTENT redaction, not anonymity**: the log still
     /// records method, path/endpoint, status, a size signal and timing (it would not be a request
-    /// log otherwise). It is also NOT the ZK/MPC privacy story. Inert unless `verbose` is also on
-    /// (no request log => nothing to redact). See [`crate::redact`].
+    /// log otherwise). It is also NOT the ZK/MPC privacy story. The request log exists only with
+    /// `verbose`; the same switch also redacts, in the warning that records it, the detail an error
+    /// withholds from its client when that detail is drawn from the request or the data, wherever
+    /// warnings are logged. See [`crate::redact`].
     pub redact_logs: bool,
     /// (sq-0bxp) **Per-query access audit log** runtime switch (CDMC CD-2 / ISO
     /// 27001 A.8.15 / EU CRA logging). When `true`, every query / update / Graph-Store request
@@ -1363,7 +1365,7 @@ pub fn bind_posture(addr: &SocketAddr, allow_remote: bool, auth: AuthPosture) ->
                  is not open to anonymous access. NOTE: the token is a single shared secret \
                  (not per-user authz) — deliver it over TLS (terminate at a proxy), and front \
                  it with a real authorization layer (a reverse proxy / gateway or sparq-solid) \
-                 for per-user access control. [OPUS-4.8] sq-cxk5: the /subscriptions WebSocket \
+                 for per-user access control. The /subscriptions WebSocket \
                  AND /subscriptions/sse stream (read surfaces) are gated by --auth-token-read \
                  too — browser WS clients pass the token as a 'Sec-WebSocket-Protocol: \
                  bearer.<token>' subprotocol."
@@ -4077,11 +4079,12 @@ async fn facets_endpoint(
     let request = match serde_json::from_slice::<sparq_introspect::FacetRequest>(&body) {
         Ok(request) => request,
         Err(error) => {
-            return sanitized_error(
+            return content_error(
                 StatusCode::BAD_REQUEST,
                 "facet-request-json",
                 "malformed facet request",
                 &error.to_string(),
+                state.config().redact_logs,
             )
         }
     };
@@ -4274,11 +4277,12 @@ async fn tpf_endpoint(
     let pattern = match TriplePattern::parse(subject, predicate, object) {
         Ok(p) => p,
         Err(e) => {
-            return sanitized_error(
+            return content_error(
                 StatusCode::BAD_REQUEST,
                 "tpf-term-parse",
                 "malformed triple pattern term",
                 &e.to_string(),
+                state.config().redact_logs,
             )
         }
     };
@@ -4315,11 +4319,12 @@ async fn tpf_endpoint(
         match crate::tpf::parse_bindings_capped(&raw_values, limits) {
             Ok(b) => b,
             Err(crate::tpf::BindingError::Malformed(e)) => {
-                return sanitized_error(
+                return content_error(
                     StatusCode::BAD_REQUEST,
                     "brtpf-bindings-parse",
                     "malformed brTPF binding set",
                     &e.to_string(),
+                    state.config().redact_logs,
                 )
             }
             Err(crate::tpf::BindingError::TooLarge(m)) => {
@@ -4377,7 +4382,7 @@ async fn tpf_endpoint(
     // covered uniformly (and the match stays exhaustive when the `jsonld` feature is on).
     match serialise_graph_triples(&triples, fmt) {
         Ok(body) => text_response(StatusCode::OK, fmt.content_type(), body, head_only),
-        Err(e) => execution_error(&e),
+        Err(e) => execution_error(&e, state.config().redact_logs),
     }
 }
 
@@ -4426,7 +4431,8 @@ async fn shacl_validate_endpoint(
     };
     // Parse the shapes graph from the body, classified by Content-Type (same matrix as a GSP
     // write body). A no/relative base is fine — shapes graphs name shapes by absolute IRI.
-    let shapes = match parse_shapes_graph(&body, &content_type(&headers)) {
+    let redact = state.config().redact_logs;
+    let shapes = match parse_shapes_graph(&body, &content_type(&headers), redact) {
         Ok(g) => g,
         Err(resp) => return resp,
     };
@@ -4463,27 +4469,29 @@ async fn shacl_validate_endpoint(
 /// same info-leak posture the rest of the surface uses (sq-cz89/sq-j9zs).
 #[cfg(feature = "shacl")]
 #[allow(clippy::result_large_err)]
-fn parse_shapes_graph(body: &Bytes, content_type: &str) -> Result<Graph, Response> {
+fn parse_shapes_graph(body: &Bytes, content_type: &str, redact: bool) -> Result<Graph, Response> {
     match rdf_format_for(content_type) {
         Some(BodyFormat::Core(format)) => {
             let text = std::str::from_utf8(body)
                 .map_err(|_| bad_request("shapes body is not valid UTF-8"))?;
             Graph::load_str(text, format).map_err(|e| {
-                sanitized_error(
+                content_error(
                     StatusCode::BAD_REQUEST,
                     "shacl-shapes-parse",
                     "malformed RDF shapes body",
                     &e,
+                    redact,
                 )
             })
         }
         Some(BodyFormat::RdfXml) => {
             let triples = crate::graph::parse_rdfxml(body, None).map_err(|e| {
-                sanitized_error(
+                content_error(
                     StatusCode::BAD_REQUEST,
                     "shacl-shapes-rdfxml-parse",
                     "malformed RDF/XML shapes body",
                     &e,
+                    redact,
                 )
             })?;
             Ok(sparq_shacl::graph_from_triples(triples))
@@ -4509,16 +4517,9 @@ fn negotiate_shacl_report_turtle(accept: Option<&str>) -> bool {
     // Highest-q wins; JSON is the default when nothing (or a wildcard) is preferred over Turtle.
     let mut turtle_q = f32::NEG_INFINITY;
     let mut json_q = 0.0f32; // the default floor — JSON is always acceptable
-    for part in accept.split(',') {
-        let mut it = part.split(';');
-        let media = it.next().unwrap_or("").trim().to_ascii_lowercase();
-        let mut q = 1.0f32;
-        for param in it {
-            if let Some(v) = param.trim().strip_prefix("q=") {
-                q = v.parse().unwrap_or(1.0);
-            }
-        }
-        match media.as_str() {
+    for range in sparq_core::accept::media_ranges(accept) {
+        let q = range.q;
+        match range.essence.as_str() {
             "text/turtle" | "application/x-turtle" => turtle_q = turtle_q.max(q),
             "application/json" | "application/sparql-results+json" => json_q = json_q.max(q),
             _ => {}
@@ -5996,7 +5997,8 @@ async fn handle_post(
             }
             // sq-z33x: §2.2 UPDATE dataset override — for the url-encoded form encoding
             // the `using-*` params are carried in the FORM BODY (`s`), not the URL query string.
-            let resp = match rewrite_update(u, &update_dataset_override(s)) {
+            let over = update_dataset_override(s);
+            let resp = match rewrite_update(u, &over, state.config().redact_logs) {
                 Ok(rewritten) => run_update(state, rewritten).await,
                 Err(resp) => resp,
             };
@@ -6101,7 +6103,7 @@ async fn handle_post(
         let resp = match std::str::from_utf8(body) {
             // sq-z33x: §2.2 UPDATE dataset override — for the `application/sparql-update`
             // body the `using-*` params are carried in the URL query string (`url_using`).
-            Ok(u) => match rewrite_update(u, url_using) {
+            Ok(u) => match rewrite_update(u, url_using, state.config().redact_logs) {
                 Ok(rewritten) => run_update(state, rewritten).await,
                 Err(resp) => resp,
             },
@@ -6342,12 +6344,14 @@ async fn admin_restore(
         ),
         // A fail-closed import error (corrupt / mismatched / non-artifact): the live store is
         // unchanged. It is a client-supplied-body problem, so a 400. The detail is withheld
-        // from the body (it may quote artifact internals); the operator gets it in the log.
-        Ok(Err(e)) => sanitized_error(
+        // from the body (it may quote artifact internals, the uploaded data's terms among them),
+        // and redacted in the log unless the server logs full requests.
+        Ok(Err(e)) => content_error(
             StatusCode::BAD_REQUEST,
             "restore",
             "restore rejected (corrupt or incompatible backup artifact)",
             &e,
+            state.config().redact_logs,
         ),
         Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, "restore worker panicked"),
     }
@@ -6490,11 +6494,12 @@ async fn run_query_pinned(
         // withhold it from the body (it is caller input, but an info-leak contract regardless)
         // — the operator gets the full parse error in the server log.
         Err(PrepareError::Malformed(msg)) => {
-            return sanitized_error(
+            return content_error(
                 StatusCode::BAD_REQUEST,
                 "query-parse",
                 "malformed query",
                 &msg,
+                state.config().redact_logs,
             )
         }
         // sq-z33x: a `default-graph-uri` / `named-graph-uri` value that is not a valid
@@ -6756,7 +6761,7 @@ async fn run_query_pinned(
                     Ok(triples) => {
                         match serialise_graph_triples(&triples, gfmt) {
                             Ok(body) => text_response(StatusCode::OK, gfmt.content_type(), body, head_only),
-                            Err(e) => execution_error(&e),
+                            Err(e) => execution_error(&e, cfg.redact_logs),
                         }
                     }
                     // CONSTRUCT/DESCRIBE used `make_budget(_, true)` → max_results applied.
@@ -7571,7 +7576,7 @@ async fn stream_select_json(
         // The engine reported completion without emitting anything, or the worker died before
         // the first chunk. Nothing is committed, so this is still an honest 500.
         Ok(Some(StreamItem::Done)) | Ok(None) => {
-            return execution_error("query produced no result stream")
+            return stream_ended("query produced no result stream")
         }
         Err(()) => return timeout_response(config),
     };
@@ -7611,7 +7616,7 @@ async fn stream_select_json(
         // 500 rather than a truncated 200.
         None => match outcome.reason() {
             Some(reason) => engine_error_response(reason, config, true),
-            None => execution_error("streaming query worker ended before completing the result"),
+            None => stream_ended("streaming query worker ended before completing the result"),
         },
         Some(StreamItem::Chunk(second)) => {
             if head_only {
@@ -7949,7 +7954,7 @@ async fn graph_stream_response(
         Ok(None) => {
             return match outcome.reason() {
                 Some(reason) => engine_error_response(reason, config, true),
-                None => execution_error("query produced no result stream"),
+                None => stream_ended("query produced no result stream"),
             }
         }
         Err(()) => return timeout_response(config),
@@ -7964,7 +7969,7 @@ async fn graph_stream_response(
         // answer with the recorded reason (cancel / deadline), or an honest 500 for a panic.
         None if !outcome.is_complete() => match outcome.reason() {
             Some(reason) => engine_error_response(reason, config, true),
-            None => execution_error("streaming query worker ended before completing the result"),
+            None => stream_ended("streaming query worker ended before completing the result"),
         },
         // One chunk only: answer exactly as the buffered path did, Content-Length and all.
         None => {
@@ -8594,9 +8599,9 @@ pub(crate) fn engine_error_response(e: &str, config: &ServerConfig, apply_max_re
     // the marker can never appear.
     #[cfg(feature = "service")]
     if e.contains(sparq_engine::SERVICE_EGRESS_REFUSED_MARKER) {
-        return forbidden_egress(e);
+        return forbidden_egress(e, config.redact_logs);
     }
-    execution_error(e)
+    execution_error(e, config.redact_logs)
 }
 
 /// (sq-ebii) Maps a writer-rejected UPDATE onto HTTP status: a cooperative budget
@@ -8643,11 +8648,12 @@ fn update_rejection_response(e: &str, config: &ServerConfig) -> Response {
     // (sq-cz89/sq-j9zs) A parse/semantic rejection echoes the offending UPDATE
     // token (and, for a `DELETE/INSERT … WHERE`, can quote loaded data); withhold it — the
     // full reason is in the server log.
-    sanitized_error(
+    content_error(
         StatusCode::BAD_REQUEST,
         "update-parse",
         "update failed: invalid SPARQL update",
         e,
+        config.redact_logs,
     )
 }
 
@@ -8902,6 +8908,7 @@ fn body_to_ntriples(
     body: &Bytes,
     content_type: &str,
     base: Option<&str>,
+    redact: bool,
 ) -> Result<String, Response> {
     let format = match rdf_format_for(content_type) {
         Some(f) => f,
@@ -8920,16 +8927,17 @@ fn body_to_ntriples(
             // (e.g. an invalid subject quotes the loaded term) — withhold it; the operator
             // gets the full parse error in the server log.
             let graph = Graph::load_str(text, format).map_err(|e| {
-                sanitized_error(
+                content_error(
                     StatusCode::BAD_REQUEST,
                     "rdf-body-parse",
                     "malformed RDF body",
                     &e,
+                    redact,
                 )
             })?;
             // Re-emit as canonical N-Triples via the engine scan — no private store API needed,
             // and the terms are exactly what `INSERT DATA` will re-intern.
-            nt_dump(&graph, &QueryBudget::default()).map_err(|e| execution_error(&e))
+            nt_dump(&graph, &QueryBudget::default()).map_err(|e| execution_error(&e, redact))
         }
         // sq-rt6v: parse RDF/XML to triples and emit canonical N-Triples directly.
         // `oxrdf`'s Display is canonical N-Triples term syntax, exactly what `INSERT DATA`
@@ -8937,15 +8945,16 @@ fn body_to_ntriples(
         BodyFormat::RdfXml => {
             // (sq-cz89/sq-j9zs) `oxrdfxml` echoes the offending body fragment — withhold it.
             let triples = crate::graph::parse_rdfxml(body, base).map_err(|e| {
-                sanitized_error(
+                content_error(
                     StatusCode::BAD_REQUEST,
                     "rdfxml-body-parse",
                     "malformed RDF/XML body",
                     &e,
+                    redact,
                 )
             })?;
             // N-Triples can encode every parsed triple, so this only fails on a writer bug.
-            crate::graph::triples_to_ntriples(&triples).map_err(|e| execution_error(&e))
+            crate::graph::triples_to_ntriples(&triples).map_err(|e| execution_error(&e, redact))
         }
     }
 }
@@ -9025,11 +9034,12 @@ async fn apply_gsp_update(state: &AppState, update: String, success: StatusCode)
                 // engine detail to the server log. The other UPDATE entry points already go
                 // through `update_rejection_response` → `sanitized_error`; this GSP-write minted-
                 // update branch was the one path that echoed `e` verbatim. Stays a 400.
-                sanitized_error(
+                content_error(
                     StatusCode::BAD_REQUEST,
                     "gsp-write",
                     "graph store write failed: invalid RDF body",
                     &e,
+                    state.config().redact_logs,
                 )
             }
         }
@@ -9051,7 +9061,8 @@ async fn gsp_put(state: &AppState, graph: GraphRef, headers: &HeaderMap, body: &
         Ok(b) => b,
         Err(e) => return e.into_response(),
     };
-    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph)) {
+    let redact = state.config().redact_logs;
+    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph), redact) {
         Ok(nt) => nt,
         Err(resp) => return resp,
     };
@@ -9093,7 +9104,8 @@ async fn gsp_post(
         Ok(b) => b,
         Err(e) => return e.into_response(),
     };
-    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph)) {
+    let redact = state.config().redact_logs;
+    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph), redact) {
         Ok(nt) => nt,
         Err(resp) => return resp,
     };
@@ -9218,7 +9230,7 @@ async fn gsp_patch(
                     named: Vec::new(),
                 },
             };
-            match rewrite_update(update, &over) {
+            match rewrite_update(update, &over, state.config().redact_logs) {
                 // Reuse the shared update path: atomic group-commit, 204 on success, the same
                 // budget/timeout/sanitized-rejection discipline as the /sparql update body.
                 Ok(rewritten) => run_update(state, rewritten).await,
@@ -9276,11 +9288,12 @@ async fn gsp_patch_n3(state: &AppState, graph: GraphRef, body: &Bytes) -> Respon
         // withhold it from the client (the operator gets the detail in the server log) via the
         // same sanitized-error discipline the other body-parse paths use.
         Err(e) => {
-            return sanitized_error(
+            return content_error(
                 StatusCode::BAD_REQUEST,
                 "n3-patch-parse",
                 &e.to_string(),
                 &e.detail(),
+                state.config().redact_logs,
             )
         }
     };
@@ -9385,7 +9398,7 @@ async fn serialise_graph(
         match graph_dump_triples(gen.snapshot(), &graph, &budget) {
             Ok(triples) => match serialise_graph_triples(&triples, gfmt) {
                 Ok(body) => text_response(StatusCode::OK, &ct, body, head_only),
-                Err(e) => execution_error(&e),
+                Err(e) => execution_error(&e, cfg.redact_logs),
             },
             // GSP-read used `make_budget(_, false)` → max_results did NOT apply.
             Err(e) => engine_error_response(&e, &cfg, false),
@@ -9569,13 +9582,14 @@ fn update_dataset_override(raw: &str) -> UsingOverride {
 // clippy: Err is axum's `Response` (the idiomatic handler error, as at `resolve_pin`); boxing it
 // would only desync the call sites that already thread `Response` errors.
 #[allow(clippy::result_large_err)]
-fn rewrite_update(update: &str, over: &UsingOverride) -> Result<String, Response> {
+fn rewrite_update(update: &str, over: &UsingOverride, redact: bool) -> Result<String, Response> {
     apply_update_dataset(update, over).map_err(|e| match e {
-        UpdateDatasetError::Malformed(msg) => sanitized_error(
+        UpdateDatasetError::Malformed(msg) => content_error(
             StatusCode::BAD_REQUEST,
             "update-parse",
             "malformed update",
             &msg,
+            redact,
         ),
         UpdateDatasetError::BadGraphUri(msg) => bad_request(&msg),
         UpdateDatasetError::UsingConflict => bad_request(
@@ -9703,7 +9717,14 @@ fn decode_gzip_bounded(body: &Bytes, config: &ServerConfig) -> Result<Bytes, Dec
         .read_to_end(&mut out)
         // (sq-cz89/sq-j9zs) Carry only the raw decoder detail; `into_response`
         // logs it server-side and returns a generic "malformed gzip body" to the client.
-        .map_err(|e| DecodeError::Malformed(e.to_string()))?;
+        .map_err(|e| {
+            let detail = e.to_string();
+            DecodeError::Malformed(if config.redact_logs {
+                crate::redact::placeholder(&detail)
+            } else {
+                detail
+            })
+        })?;
     if out.len() > ceiling {
         return Err(DecodeError::TooLarge(format!(
             "decompressed body exceeds the server's decompression-ratio cap (compressed {} bytes \
@@ -10067,7 +10088,9 @@ async fn cors_layer(
 /// contain any caller-submitted input, loaded-data fragment, or filesystem path.
 ///
 /// `class` names the error category for the log line so an operator can correlate a generic
-/// client-facing message back to its detailed cause.
+/// client-facing message back to its detailed cause. This is for operator detail (a path, an I/O
+/// error); a detail drawn from the request or the data goes through [`content_error`], which
+/// honours `ServerConfig::redact_logs`.
 fn sanitized_error(status: StatusCode, class: &str, safe_msg: &str, detail: &str) -> Response {
     // Detail (the echoed token / path / input) goes ONLY to the server log, gated behind the
     // operator's opt-in subscriber — never into the response body.
@@ -10075,28 +10098,61 @@ fn sanitized_error(status: StatusCode, class: &str, safe_msg: &str, detail: &str
     json_error(status, safe_msg)
 }
 
+/// [`sanitized_error`] for a detail drawn from the request or the data (a query, a term, a body,
+/// an engine message quoting loaded data): with `redact` (`ServerConfig::redact_logs`, on by
+/// default) the log records only its [`crate::redact::placeholder`], the length and fingerprint
+/// the request log uses. Operator detail (a persist path, an I/O error) stays with
+/// [`sanitized_error`], in full.
+fn content_error(
+    status: StatusCode,
+    class: &str,
+    safe_msg: &str,
+    detail: &str,
+    redact: bool,
+) -> Response {
+    if redact {
+        sanitized_error(status, class, safe_msg, &crate::redact::placeholder(detail))
+    } else {
+        sanitized_error(status, class, safe_msg, detail)
+    }
+}
+
 /// (sq-iu0c) A SERVICE egress refusal → HTTP 403 (Forbidden). The engine `msg`
 /// names the refused host (an info-leak / SSRF-probe oracle), so it is SANITIZED: the client
 /// gets only a stable, generic policy-refusal class message; the host detail goes to the
 /// server log via [`sanitized_error`], the same posture as [`execution_error`].
 #[cfg(feature = "service")]
-fn forbidden_egress(msg: &str) -> Response {
-    sanitized_error(
+fn forbidden_egress(msg: &str, redact: bool) -> Response {
+    // The refused host comes from the query.
+    content_error(
         StatusCode::FORBIDDEN,
         "service-egress-refused",
         "SERVICE federation refused: the requested endpoint is not permitted by the server's egress allowlist",
         msg,
+        redact,
     )
 }
 
-fn execution_error(msg: &str) -> Response {
+fn execution_error(msg: &str, redact: bool) -> Response {
     // Engine error strings can embed term text drawn from the loaded graph — withhold them
-    // from the client; the operator sees the full message in the server log.
-    sanitized_error(
+    // from the client; the server log has them in full only with redaction off.
+    content_error(
         StatusCode::INTERNAL_SERVER_ERROR,
         "query-execution",
         "query execution error",
         msg,
+        redact,
+    )
+}
+
+/// A streaming query that ended without its result: the detail is the server's own, logged in
+/// full.
+fn stream_ended(why: &str) -> Response {
+    sanitized_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "query-execution",
+        "query execution error",
+        why,
     )
 }
 
@@ -11204,6 +11260,101 @@ mod json_error_tests {
 }
 
 #[cfg(test)]
+mod error_detail_log_tests {
+    //! The detail an error withholds from its client, when it is drawn from the request or the
+    //! data, is redacted in the warning that records it too, unless the server logs full requests
+    //! (`ServerConfig::redact_logs` false). Operator detail is logged in full either way.
+    use super::{router, AppState, ServerConfig};
+    use sparq_core::Graph;
+    use std::sync::{Arc, Mutex};
+    use tower::ServiceExt;
+
+    #[derive(Clone, Default)]
+    struct Captured(Arc<Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// What the server logs for a query that does not parse, with redaction on or off.
+    async fn logged(redact_logs: bool) -> String {
+        let out = Captured::default();
+        let writer = out.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        let config = ServerConfig { redact_logs, ..ServerConfig::default() };
+        let state = AppState::with_config(Graph::default(), config);
+        let req = axum::http::Request::builder()
+            .uri("/sparql?query=SELECT%20patient_alice_smith%20WHERE")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = router(state).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
+        let log = String::from_utf8(out.0.lock().unwrap().clone()).unwrap();
+        assert!(log.contains("detail withheld from client"), "no error record: {log}");
+        log
+    }
+
+    /// What `f` logs on this thread.
+    fn captured(f: impl FnOnce()) -> String {
+        let out = Captured::default();
+        let writer = out.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let log = out.0.lock().unwrap().clone();
+        String::from_utf8(log).unwrap()
+    }
+
+    /// The engine's errors are raised on a blocking worker, where nothing of the request's
+    /// context but what is passed along survives: the switch is passed with the detail.
+    #[test]
+    fn content_detail_follows_the_switch_and_operator_detail_never_does() {
+        let secret = "patient_alice_smith";
+        let log = captured(|| {
+            super::execution_error(secret, true);
+        });
+        assert!(!log.contains(secret), "{log}");
+        assert!(log.contains("detail=<redacted len=19 fp="), "{log}");
+        let log = captured(|| {
+            super::execution_error(secret, false);
+        });
+        assert!(log.contains(secret), "{log}");
+        let path = "/srv/persist/mirror: No space left on device";
+        let log = captured(|| {
+            super::sanitized_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "durable-unavailable",
+                "update not durably committed",
+                path,
+            );
+        });
+        assert!(log.contains(path), "operator detail is logged in full: {log}");
+    }
+
+    #[tokio::test]
+    async fn the_detail_is_redacted_unless_full_requests_are_logged() {
+        // The parser's message names where the query went wrong ("expected …").
+        let log = logged(true).await;
+        assert!(!log.contains("expected"), "the redacted log carries the detail: {log}");
+        assert!(log.contains("detail=<redacted len="), "{log}");
+        let log = logged(false).await;
+        assert!(log.contains("expected"), "the full log withholds the detail: {log}");
+    }
+}
+
+#[cfg(test)]
 mod service_allow_config_tests {
     //! The default posture and the ServerConfig <-> engine-entries plumbing. These are
     //! pure (no process-env mutation) so they parallelise; the env-precedence path
@@ -11447,7 +11598,7 @@ mod gsp_helpers_tests {
     fn body_to_ntriples_rejects_an_unsupported_content_type() {
         // A non-RDF Content-Type → 415 Unsupported Media Type, BEFORE any parse is attempted.
         let body = Bytes::from_static(b"{}");
-        let resp = body_to_ntriples(&body, "application/json", None).unwrap_err();
+        let resp = body_to_ntriples(&body, "application/json", None, true).unwrap_err();
         assert_eq!(resp.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 
@@ -11455,14 +11606,14 @@ mod gsp_helpers_tests {
     fn body_to_ntriples_rejects_a_non_utf8_text_body() {
         // A declared text RDF body that is not valid UTF-8 → 400 (the `from_utf8` guard arm).
         let body = Bytes::from_static(b"\xFF\xFE not utf-8");
-        let resp = body_to_ntriples(&body, "text/turtle", None).unwrap_err();
+        let resp = body_to_ntriples(&body, "text/turtle", None, true).unwrap_err();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
     fn body_to_ntriples_roundtrips_valid_turtle_to_canonical_ntriples() {
         let body = Bytes::from_static(b"@prefix ex: <http://ex/> . ex:a ex:p ex:b .");
-        let nt = body_to_ntriples(&body, "text/turtle", None).expect("valid turtle parses");
+        let nt = body_to_ntriples(&body, "text/turtle", None, true).expect("valid turtle parses");
         assert!(nt.contains("<http://ex/a> <http://ex/p> <http://ex/b> ."), "got: {nt}");
     }
 }
@@ -11491,7 +11642,8 @@ mod dataset_override_tests {
     #[test]
     fn rewrite_update_passes_through_when_no_override_is_present() {
         let over = update_dataset_override(""); // empty => is_empty() => verbatim
-        let rewritten = rewrite_update("INSERT DATA { <http://ex/s> <http://ex/p> <http://ex/o> }", &over).unwrap();
+        let update = "INSERT DATA { <http://ex/s> <http://ex/p> <http://ex/o> }";
+        let rewritten = rewrite_update(update, &over, true).unwrap();
         assert_eq!(rewritten, "INSERT DATA { <http://ex/s> <http://ex/p> <http://ex/o> }");
     }
 
@@ -11501,7 +11653,7 @@ mod dataset_override_tests {
         // USING clause. The wrapper maps the UsingConflict to a 400 with the explanatory message.
         let over = update_dataset_override("using-graph-uri=http://ex/a");
         let update = "DELETE { ?s ?p ?o } USING <http://ex/g> WHERE { ?s ?p ?o }";
-        let resp = rewrite_update(update, &over).unwrap_err();
+        let resp = rewrite_update(update, &over, true).unwrap_err();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
@@ -11510,7 +11662,7 @@ mod dataset_override_tests {
         // A non-empty override forces a parse; a malformed update is a 400 (the Malformed arm),
         // with the offending detail withheld from the body (sanitized_error).
         let over = update_dataset_override("using-graph-uri=http://ex/a");
-        let resp = rewrite_update("DELETE WHERE {", &over).unwrap_err();
+        let resp = rewrite_update("DELETE WHERE {", &over, true).unwrap_err();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
@@ -11552,6 +11704,7 @@ mod dataset_override_tests {
         let resp = rewrite_update(
             "INSERT DATA { <http://ex/s> <http://ex/p> <http://ex/o> }",
             &over,
+            true,
         );
         if let Err(r) = resp {
             assert_eq!(
@@ -11611,7 +11764,7 @@ mod pure_helper_unit_tests {
     async fn execution_error_maps_to_500_with_sanitised_body() {
         // The `execution_error` function is the whole-function unit we pin here.
         // It must return 500 and must NOT echo the engine detail into the body.
-        let resp = execution_error("engine internal detail that must not leak");
+        let resp = execution_error("engine internal detail that must not leak", true);
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let body_str = String::from_utf8(body.to_vec()).unwrap();
