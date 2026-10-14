@@ -28,8 +28,9 @@
 //! dereferenced). Those are refused or reported, never guessed.
 
 use super::model::{
-    Axiom, AxiomRecord, ClassExpression, DataRange, EntityKind, ExtractNote, Individual, Literal,
-    ObjectProperty, Ontology,
+    Annotation, AnnotationSubject, AnnotationTarget, AnnotationValue, Axiom, AxiomRecord,
+    ClassExpression, DataRange, EntityKind, ExtractNote, Individual, Literal, ObjectProperty,
+    Ontology,
 };
 use super::vocab::{
     iri_of, is_blank, is_iri, is_literal, is_triple_term, literal_of, render_triple, Vocab, OWL,
@@ -45,6 +46,13 @@ const MAX_DEPTH: usize = 256;
 /// Largest cardinality the mapping accepts. Larger values are refused as unsupported: the
 /// tableau would have to create that many successors.
 pub const MAX_CARDINALITY: u32 = 1_000_000;
+
+/// A decoded expression with its provenance, and its size and height.
+type Cached<T> = ((T, Vec<usize>), usize, usize);
+
+/// The most model nodes and provenance entries extraction builds. A blank node shared by many
+/// axioms is copied into each, so without a bound a small graph could expand without limit.
+pub const MAX_EXPANSION: usize = 8_000_000;
 
 /// Why the mapping refused a graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,8 +137,16 @@ struct Extractor<'a> {
     /// Blank nodes that carry class-expression, data-range, list or other structural
     /// predicates: the axiom pass leaves their triples to the decoders.
     structural: FxHashSet<Id>,
-    class_cache: FxHashMap<Id, (ClassExpression, Vec<usize>)>,
-    range_cache: FxHashMap<Id, (DataRange, Vec<usize>)>,
+    /// The predicates that only occur inside expressions (marking a blank subject structural).
+    structural_preds: FxHashSet<Id>,
+    /// The `_:f xsd:facet value` nodes of `owl:withRestrictions` lists.
+    facet_nodes: FxHashSet<Id>,
+    /// Decoded blank-node expressions with their provenance, size and height, so a node shared
+    /// by several axioms is decoded once and its copies are charged to [`MAX_EXPANSION`].
+    class_cache: FxHashMap<Id, Cached<ClassExpression>>,
+    range_cache: FxHashMap<Id, Cached<DataRange>>,
+    /// Model nodes and provenance entries built so far.
+    expanded: usize,
     visiting: FxHashSet<Id>,
     out: Ontology,
 }
@@ -174,8 +190,11 @@ impl<'a> Extractor<'a> {
             individuals: FxHashSet::default(),
             prop_kinds: FxHashMap::default(),
             structural: FxHashSet::default(),
+            structural_preds: FxHashSet::default(),
+            facet_nodes: FxHashSet::default(),
             class_cache: FxHashMap::default(),
             range_cache: FxHashMap::default(),
+            expanded: 0,
             visiting: FxHashSet::default(),
             out: Ontology::default(),
         };
@@ -326,6 +345,7 @@ impl<'a> Extractor<'a> {
         .into_iter()
         .filter(|&p| p != NO_ID)
         .collect();
+        self.structural_preds = structural_preds.clone();
         let mut structural = FxHashSet::default();
         for t in &self.triples {
             if structural_preds.contains(&t[1]) && is_blank(self.dict, t[0]) {
@@ -347,6 +367,7 @@ impl<'a> Extractor<'a> {
             .map(|t| t[2])
             .collect();
         let mut seen = FxHashSet::default();
+        let mut facet_nodes = FxHashSet::default();
         while let Some(cell) = facet_lists.pop() {
             if !seen.insert(cell) {
                 continue;
@@ -355,6 +376,7 @@ impl<'a> Extractor<'a> {
                 let t = self.triples[i];
                 if t[1] == v.first && is_blank(self.dict, t[2]) {
                     structural.insert(t[2]);
+                    facet_nodes.insert(t[2]);
                 }
                 if t[1] == v.rest {
                     facet_lists.push(t[2]);
@@ -364,6 +386,7 @@ impl<'a> Extractor<'a> {
         // `owl:inverseOf` on a blank subject is an inverse property expression; on an IRI it
         // is an axiom, handled in the axiom pass.
         self.structural = structural;
+        self.facet_nodes = facet_nodes;
     }
 
     // ---------------------------------------------------------------------------------
@@ -372,6 +395,8 @@ impl<'a> Extractor<'a> {
 
     fn declarations(&mut self) -> Result<()> {
         let v = self.v.clone();
+        // Mapping Table 6: a characteristic only object properties have also declares one.
+        let mut implied: Vec<(Id, usize)> = Vec::new();
         for i in 0..self.triples.len() {
             let [s, p, o] = self.triples[i];
             if p != v.ty || !is_iri(self.dict, s) {
@@ -406,6 +431,7 @@ impl<'a> Extractor<'a> {
                     && o != NO_ID
                 {
                     self.add_kind(s, PropKind::Object);
+                    implied.push((s, i));
                 }
                 continue;
             };
@@ -426,6 +452,22 @@ impl<'a> Extractor<'a> {
             self.consume(i);
             let source = self.src(&[i]);
             self.push(Axiom::Declaration(kind, s), source);
+        }
+        let mut declared_op: FxHashSet<Id> = self
+            .out
+            .axioms
+            .iter()
+            .filter_map(|r| match r.axiom {
+                Axiom::Declaration(EntityKind::ObjectProperty, p) => Some(p),
+                _ => None,
+            })
+            .collect();
+        for (p, i) in implied {
+            if declared_op.insert(p) {
+                // Not consumed: the typing triple is also read as the characteristic axiom.
+                let source = self.src(&[i]);
+                self.push(Axiom::Declaration(EntityKind::ObjectProperty, p), source);
+            }
         }
         // The intrinsic kinds of the built-in properties.
         for (p, k) in [
@@ -811,11 +853,12 @@ impl<'a> Extractor<'a> {
         }
         if is_blank(self.dict, node) {
             if let Some((target, i)) = self.sp_one(node, self.v.inverse_of)? {
-                let only = self.by_subject.get(&node).map_or(0, Vec::len) == 1;
-                if !only || !is_iri(self.dict, target) {
+                // The node's other triples are axioms about the inverse (sub-property,
+                // characteristics), read by the axiom pass.
+                if !is_iri(self.dict, target) {
                     return Err(self.err(
                         ExtractErrorKind::Malformed,
-                        "an inverse property expression must be exactly `_:x owl:inverseOf <property>`",
+                        "an inverse property expression must be `_:x owl:inverseOf <property>`",
                         &[i],
                     ));
                 }
@@ -845,6 +888,26 @@ impl<'a> Extractor<'a> {
     // ---------------------------------------------------------------------------------
     // class expressions (Mapping §3.2.4, Table 13)
     // ---------------------------------------------------------------------------------
+
+    /// Charges `size` model nodes to the expansion budget and checks the nesting `height`.
+    fn charge(&mut self, size: usize, height: usize, at: usize) -> Result<()> {
+        self.expanded = self.expanded.saturating_add(size);
+        if self.expanded > MAX_EXPANSION {
+            return Err(self.err(
+                ExtractErrorKind::Unsupported,
+                format!("the ontology expands beyond {MAX_EXPANSION} model nodes"),
+                &[at],
+            ));
+        }
+        if height > MAX_DEPTH {
+            return Err(self.err(
+                ExtractErrorKind::Unsupported,
+                "expression nested too deeply",
+                &[at],
+            ));
+        }
+        Ok(())
+    }
 
     fn class(&mut self, node: Id, at: usize) -> Result<(ClassExpression, Vec<usize>)> {
         self.class_depth(node, at, 0)
@@ -894,8 +957,16 @@ impl<'a> Extractor<'a> {
                 &[at],
             ));
         }
-        if let Some(hit) = self.class_cache.get(&node) {
-            return Ok(hit.clone());
+        if self.range_cache.contains_key(&node) {
+            return Err(self.err(
+                ExtractErrorKind::Ambiguous,
+                "a blank node is read both as a class expression and as a data range",
+                &[at],
+            ));
+        }
+        if let Some((hit, size, height)) = self.class_cache.get(&node).cloned() {
+            self.charge(size, depth + height, at)?;
+            return Ok(hit);
         }
         if depth > MAX_DEPTH {
             return Err(self.err(
@@ -914,7 +985,10 @@ impl<'a> Extractor<'a> {
         let r = self.class_blank(node, at, depth);
         self.visiting.remove(&node);
         let r = r?;
-        self.class_cache.insert(node, r.clone());
+        let (size, height) = class_size(&r.0);
+        self.charge(size + r.1.len(), depth, at)?;
+        self.class_cache
+            .insert(node, (r.clone(), size + r.1.len(), height));
         Ok(r)
     }
 
@@ -962,25 +1036,19 @@ impl<'a> Extractor<'a> {
                 0 | 1 => {
                     let (items, lu) = self.list(o)?;
                     used.extend(lu);
-                    if items.is_empty() {
-                        return Err(self.err(
-                            ExtractErrorKind::Malformed,
-                            "an intersection or union needs at least one member",
-                            &[i],
-                        ));
-                    }
                     let mut members = Vec::with_capacity(items.len());
                     for m in items {
                         let (ce, mu) = self.class_depth(m, i, depth + 1)?;
                         used.extend(mu);
                         members.push(ce);
                     }
-                    if members.len() == 1 {
-                        members.pop().expect("one member")
-                    } else if tag == 0 {
-                        ClassExpression::IntersectionOf(members)
-                    } else {
-                        ClassExpression::UnionOf(members)
+                    // Mapping Table 15: the empty and singleton forms, as for named classes.
+                    match (members.len(), tag == 0) {
+                        (0, true) => ClassExpression::Thing,
+                        (0, false) => ClassExpression::Nothing,
+                        (1, _) => members.pop().expect("one member"),
+                        (_, true) => ClassExpression::IntersectionOf(members),
+                        (_, false) => ClassExpression::UnionOf(members),
                     }
                 }
                 2 => {
@@ -1154,7 +1222,7 @@ impl<'a> Extractor<'a> {
                             &[fi],
                         ))
                     }
-                    None => DataRange::Datatype(self.v.rdfs_literal),
+                    None => DataRange::TopLiteral,
                 };
                 if shape == v.min_cardinality || shape == v.min_qualified_cardinality {
                     ClassExpression::DataMinCardinality(n, dp, dr)
@@ -1251,6 +1319,9 @@ impl<'a> Extractor<'a> {
                     &[at],
                 ));
             }
+            if node == self.v.rdfs_literal {
+                return Ok((DataRange::TopLiteral, Vec::new()));
+            }
             return Ok((DataRange::Datatype(node), Vec::new()));
         }
         if !is_blank(self.dict, node) {
@@ -1260,8 +1331,16 @@ impl<'a> Extractor<'a> {
                 &[at],
             ));
         }
-        if let Some(hit) = self.range_cache.get(&node) {
-            return Ok(hit.clone());
+        if self.class_cache.contains_key(&node) {
+            return Err(self.err(
+                ExtractErrorKind::Ambiguous,
+                "a blank node is read both as a class expression and as a data range",
+                &[at],
+            ));
+        }
+        if let Some((hit, size, height)) = self.range_cache.get(&node).cloned() {
+            self.charge(size, depth + height, at)?;
+            return Ok(hit);
         }
         if depth > MAX_DEPTH {
             return Err(self.err(
@@ -1276,7 +1355,10 @@ impl<'a> Extractor<'a> {
         let r = self.data_range_blank(node, at, depth);
         self.visiting.remove(&node);
         let r = r?;
-        self.range_cache.insert(node, r.clone());
+        let (size, height) = range_size(&r.0);
+        self.charge(size + r.1.len(), depth, at)?;
+        self.range_cache
+            .insert(node, (r.clone(), size + r.1.len(), height));
         Ok(r)
     }
 
@@ -1353,6 +1435,7 @@ impl<'a> Extractor<'a> {
                 let (items, lu) = self.list(o)?;
                 used.extend(lu);
                 let mut lits = Vec::with_capacity(items.len());
+                self.arity(items.len(), 1, "DataOneOf", i)?;
                 for m in items {
                     lits.push(self.literal(m, i)?);
                 }
@@ -1391,6 +1474,7 @@ impl<'a> Extractor<'a> {
                     used.push(ts[0]);
                     facets.push((facet, lit));
                 }
+                self.arity(facets.len(), 1, "DatatypeRestriction", i)?;
                 DataRange::Restriction(o, facets)
             }
         };
@@ -1415,8 +1499,8 @@ impl<'a> Extractor<'a> {
 
     fn axioms(&mut self) -> Result<()> {
         let v = self.v.clone();
-        // Ontology headers: every triple about an owl:Ontology node is an ontology annotation
-        // or an import (Mapping §3.1.1).
+        // Ontology headers (Mapping §3.1.1): the typing, imports, the version IRI and
+        // annotations. Any other triple on the header node is read as an ordinary axiom.
         let headers: Vec<Id> = self
             .triples
             .iter()
@@ -1426,35 +1510,173 @@ impl<'a> Extractor<'a> {
         for h in headers {
             for i in self.by_subject.get(&h).cloned().unwrap_or_default() {
                 let [_, p, o] = self.triples[i];
-                if p == v.imports {
+                if p == v.ty && o == v.ontology {
+                    self.consume(i);
+                } else if p == v.imports {
                     self.out.imports.push(o);
+                    self.consume(i);
+                } else if p == v.version_iri {
+                    self.consume(i);
+                } else if self.is_annotation_predicate(p) {
+                    let value = self.annotation_value(o, i)?;
+                    self.out.annotations.push(Annotation {
+                        target: AnnotationTarget::Ontology(h),
+                        property: p,
+                        value,
+                        source: vec![i],
+                    });
+                    self.consume(i);
                 }
-                self.consume(i);
             }
         }
-        // Reifications: owl:Axiom / owl:Annotation nodes carry only annotations.
-        let reified: Vec<Id> = self
-            .triples
-            .iter()
-            .filter(|t| t[1] == v.ty && (t[2] == v.owl_axiom || t[2] == v.owl_annotation))
-            .map(|t| t[0])
-            .filter(|&s| is_blank(self.dict, s))
+        self.reifications()?;
+        // Typing triples first, so an n-ary axiom or negative assertion node is read from its
+        // `rdf:type` whatever order its triples come in.
+        let order: Vec<usize> = (0..self.triples.len())
+            .filter(|&i| self.triples[i][1] == v.ty)
+            .chain((0..self.triples.len()).filter(|&i| self.triples[i][1] != v.ty))
             .collect();
-        for r in reified {
-            for i in self.by_subject.get(&r).cloned().unwrap_or_default() {
-                self.consume(i);
-            }
-        }
-        for i in 0..self.triples.len() {
+        for i in order {
             if self.consumed[i] {
                 continue;
             }
-            let [s, _, _] = self.triples[i];
-            if self.structural.contains(&s) {
-                // Read by the decoders when (if) an axiom references the node.
+            let [s, p, o] = self.triples[i];
+            let structural_part = self.structural_preds.contains(&p)
+                || (p == v.ty && (o == v.restriction || o == v.rdfs_datatype || o == v.owl_class));
+            if self.facet_nodes.contains(&s) || (self.structural.contains(&s) && structural_part) {
+                // Read by the decoders when (if) an axiom references the node. Other triples
+                // on the node are axioms about the expression (a GCI's `rdfs:subClassOf`, an
+                // inverse property's `rdfs:subPropertyOf`) and are read below.
                 continue;
             }
             self.axiom_triple(i)?;
+        }
+        Ok(())
+    }
+
+    /// `true` for a predicate read as an annotation property.
+    fn is_annotation_predicate(&self, p: Id) -> bool {
+        self.v.is_builtin_annotation_property(p) || self.kinds(p).contains(&PropKind::Annotation)
+    }
+
+    fn annotation_value(&self, o: Id, at: usize) -> Result<AnnotationValue> {
+        if is_iri(self.dict, o) {
+            Ok(AnnotationValue::Iri(o))
+        } else if is_blank(self.dict, o) {
+            Ok(AnnotationValue::Anonymous(o))
+        } else {
+            Ok(AnnotationValue::Literal(self.literal(o, at)?))
+        }
+    }
+
+    /// Axiom and annotation reifications (Mapping §3.2.5, Table 17): an `owl:Axiom` node
+    /// names one triple of the graph and carries its annotations; an `owl:Annotation` node
+    /// names one annotation and carries annotations of it. Anything else on such a node is an
+    /// error.
+    fn reifications(&mut self) -> Result<()> {
+        let v = self.v.clone();
+        let nodes = |ty: Id| -> Vec<(Id, usize)> {
+            self.triples
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t[1] == v.ty && t[2] == ty && ty != NO_ID)
+                .map(|(i, t)| (t[0], i))
+                .collect()
+        };
+        let mut axioms = nodes(v.owl_axiom);
+        let mut nested = nodes(v.owl_annotation);
+        axioms.sort_unstable();
+        nested.sort_unstable();
+        // Annotations read from each reification node: (node, property, value) → index.
+        let mut by_node: FxHashMap<(Id, Id, AnnotationValue), usize> = FxHashMap::default();
+        for (node, ti) in axioms {
+            let (sv, si) = self.required(node, v.annotated_source, ti)?;
+            let (pv, pi) = self.required(node, v.annotated_property, ti)?;
+            let (ov, oi) = self.required(node, v.annotated_target, ti)?;
+            let Some(main) = self.by_subject.get(&sv).and_then(|is| {
+                is.iter()
+                    .copied()
+                    .find(|&j| self.triples[j] == [sv, pv, ov])
+            }) else {
+                return Err(self.err(
+                    ExtractErrorKind::Malformed,
+                    "an owl:Axiom reification names a triple that is not in the graph",
+                    &[ti, si, pi, oi],
+                ));
+            };
+            self.reified_annotations(
+                node,
+                AnnotationTarget::Axiom(main),
+                &[ti, si, pi, oi],
+                &mut by_node,
+            )?;
+        }
+        // Nested annotations may themselves be annotated: resolve to a fixpoint.
+        let mut pending = nested;
+        loop {
+            let before = pending.len();
+            let mut rest = Vec::new();
+            for (node, ti) in pending {
+                let (sv, si) = self.required(node, v.annotated_source, ti)?;
+                let (pv, pi) = self.required(node, v.annotated_property, ti)?;
+                let (ov, oi) = self.required(node, v.annotated_target, ti)?;
+                let value = self.annotation_value(ov, oi)?;
+                match by_node.get(&(sv, pv, value)).copied() {
+                    Some(k) => self.reified_annotations(
+                        node,
+                        AnnotationTarget::Annotation(k),
+                        &[ti, si, pi, oi],
+                        &mut by_node,
+                    )?,
+                    None => rest.push((node, ti)),
+                }
+            }
+            if rest.is_empty() {
+                return Ok(());
+            }
+            if rest.len() == before {
+                let (_, ti) = rest[0];
+                return Err(self.err(
+                    ExtractErrorKind::Malformed,
+                    "an owl:Annotation reification names an annotation that is not in the graph",
+                    &[ti],
+                ));
+            }
+            pending = rest;
+        }
+    }
+
+    fn reified_annotations(
+        &mut self,
+        node: Id,
+        target: AnnotationTarget,
+        header: &[usize],
+        by_node: &mut FxHashMap<(Id, Id, AnnotationValue), usize>,
+    ) -> Result<()> {
+        for &u in header {
+            self.consume(u);
+        }
+        for i in self.by_subject.get(&node).cloned().unwrap_or_default() {
+            if header.contains(&i) {
+                continue;
+            }
+            let [_, p, o] = self.triples[i];
+            if !self.is_annotation_predicate(p) {
+                return Err(self.err(
+                    ExtractErrorKind::Malformed,
+                    "a reification node may only carry annotations",
+                    &[i],
+                ));
+            }
+            let value = self.annotation_value(o, i)?;
+            by_node.insert((node, p, value.clone()), self.out.annotations.len());
+            self.out.annotations.push(Annotation {
+                target,
+                property: p,
+                value,
+                source: vec![i],
+            });
+            self.consume(i);
         }
         Ok(())
     }
@@ -1494,6 +1716,7 @@ impl<'a> Extractor<'a> {
                 used.extend(cu);
                 members.push(c);
             }
+            self.arity(members.len(), 2, "DisjointUnion", i)?;
             self.emit(i, Axiom::DisjointUnion(s, members), [used]);
         } else if p == v.intersection_of || p == v.union_of || p == v.complement_of || p == v.one_of
         {
@@ -1573,6 +1796,7 @@ impl<'a> Extractor<'a> {
                     }
                 }
             }
+            self.arity(ops.len() + dps.len(), 1, "HasKey", i)?;
             self.emit(i, Axiom::HasKey(c, ops, dps), [used]);
         } else if p == v.same_as || p == v.different_from {
             let a = self.individual(s, i)?;
@@ -1715,10 +1939,38 @@ impl<'a> Extractor<'a> {
                 let b = self.data_property(o, i)?;
                 self.emit(i, Axiom::SubDataPropertyOf(a, b), []);
             }
-            // SubAnnotationPropertyOf has no logical meaning.
-            PropKind::Annotation => self.consume(i),
+            PropKind::Annotation => {
+                self.annotation_iris(i)?;
+                self.emit(i, Axiom::SubAnnotationPropertyOf(s, o), []);
+            }
         }
         Ok(())
+    }
+
+    /// Refuses a construct with fewer than `min` operands (Structural Specification arities).
+    fn arity(&self, n: usize, min: usize, construct: &str, at: usize) -> Result<()> {
+        if n < min {
+            return Err(self.err(
+                ExtractErrorKind::Malformed,
+                format!("{construct} needs at least {min} operand(s), found {n}"),
+                &[at],
+            ));
+        }
+        Ok(())
+    }
+
+    /// Annotation-property axioms relate IRIs only.
+    fn annotation_iris(&self, i: usize) -> Result<()> {
+        let [s, _, o] = self.triples[i];
+        if is_iri(self.dict, s) && is_iri(self.dict, o) {
+            Ok(())
+        } else {
+            Err(self.err(
+                ExtractErrorKind::Malformed,
+                "an annotation property axiom relates two IRIs",
+                &[i],
+            ))
+        }
     }
 
     fn domain_range(&mut self, i: usize, is_domain: bool) -> Result<()> {
@@ -1748,8 +2000,15 @@ impl<'a> Extractor<'a> {
                     self.emit(i, Axiom::DataPropertyRange(s, dr), [ru]);
                 }
             }
-            // AnnotationPropertyDomain / Range have no logical meaning.
-            Some(PropKind::Annotation) => self.consume(i),
+            Some(PropKind::Annotation) => {
+                self.annotation_iris(i)?;
+                let ax = if is_domain {
+                    Axiom::AnnotationPropertyDomain(s, o)
+                } else {
+                    Axiom::AnnotationPropertyRange(s, o)
+                };
+                self.emit(i, ax, []);
+            }
             None => {
                 return Err(self.err(
                     ExtractErrorKind::Ambiguous,
@@ -1813,6 +2072,7 @@ impl<'a> Extractor<'a> {
                 used.extend(cu);
                 cs.push(c);
             }
+            self.arity(cs.len(), 2, "AllDisjointClasses", li)?;
             self.only_these(s, i, &used)?;
             self.emit(i, Axiom::DisjointClasses(cs), [used]);
             return Ok(());
@@ -1821,6 +2081,7 @@ impl<'a> Extractor<'a> {
             let (list, li) = self.required(s, v.members, i)?;
             let (items, mut used) = self.list(list)?;
             used.push(li);
+            self.arity(items.len(), 2, "AllDisjointProperties", li)?;
             let data = items
                 .first()
                 .map(|&m| self.kind_of(m, li))
@@ -1864,6 +2125,7 @@ impl<'a> Extractor<'a> {
             for m in items {
                 inds.push(self.individual(m, li)?);
             }
+            self.arity(inds.len(), 2, "AllDifferent", li)?;
             self.only_these(s, i, &used)?;
             self.emit(i, Axiom::DifferentIndividuals(inds), [used]);
             return Ok(());
@@ -1968,7 +2230,13 @@ impl<'a> Extractor<'a> {
         }
         match self.kind_of(p, i)? {
             Some(PropKind::Annotation) => {
-                self.consume(i);
+                let subject = if is_blank(self.dict, s) {
+                    AnnotationSubject::Anonymous(s)
+                } else {
+                    AnnotationSubject::Iri(s)
+                };
+                let value = self.annotation_value(o, i)?;
+                self.emit(i, Axiom::AnnotationAssertion(p, subject, value), []);
             }
             Some(PropKind::Object) => {
                 let a = self.individual(s, i)?;
@@ -2015,4 +2283,51 @@ impl<'a> Extractor<'a> {
             .sort_by(|a, b| a.source.first().cmp(&b.source.first()));
         Ok(self.out)
     }
+}
+
+/// The node count and height of a class expression (bounded by [`MAX_DEPTH`] when built).
+fn class_size(ce: &ClassExpression) -> (usize, usize) {
+    use ClassExpression as C;
+    let kids = |cs: &[ClassExpression]| {
+        cs.iter()
+            .map(class_size)
+            .fold((0, 0), |(n, h), (cn, ch)| (n + cn, h.max(ch)))
+    };
+    let (n, h) = match ce {
+        C::IntersectionOf(cs) | C::UnionOf(cs) => kids(cs),
+        C::ComplementOf(c)
+        | C::SomeValuesFrom(_, c)
+        | C::AllValuesFrom(_, c)
+        | C::MinCardinality(_, _, c)
+        | C::MaxCardinality(_, _, c)
+        | C::ExactCardinality(_, _, c) => class_size(c),
+        C::OneOf(is) => (is.len(), 0),
+        C::DataSomeValuesFrom(_, r)
+        | C::DataAllValuesFrom(_, r)
+        | C::DataMinCardinality(_, _, r)
+        | C::DataMaxCardinality(_, _, r)
+        | C::DataExactCardinality(_, _, r) => range_size(r),
+        C::Class(_)
+        | C::Thing
+        | C::Nothing
+        | C::HasValue(..)
+        | C::HasSelf(_)
+        | C::DataHasValue(..) => (0, 0),
+    };
+    (n + 1, h + 1)
+}
+
+/// The node count and height of a data range.
+fn range_size(dr: &DataRange) -> (usize, usize) {
+    let (n, h) = match dr {
+        DataRange::IntersectionOf(rs) | DataRange::UnionOf(rs) => rs
+            .iter()
+            .map(range_size)
+            .fold((0, 0), |(n, h), (cn, ch)| (n + cn, h.max(ch))),
+        DataRange::ComplementOf(r) => range_size(r),
+        DataRange::OneOf(ls) => (ls.len(), 0),
+        DataRange::Restriction(_, fs) => (fs.len(), 0),
+        DataRange::TopLiteral | DataRange::Datatype(_) => (0, 0),
+    };
+    (n + 1, h + 1)
 }

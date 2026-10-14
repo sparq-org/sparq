@@ -11,8 +11,8 @@
 
 use super::datatypes::{self, builtin, Builtin, Facet};
 use super::model::{
-    Axiom, AxiomRecord, ClassExpression, DataRange, EntityKind, Individual, Literal,
-    ObjectProperty, Ontology,
+    AnnotationSubject, AnnotationValue, Axiom, AxiomRecord, ClassExpression, DataRange, EntityKind,
+    Individual, Literal, ObjectProperty, Ontology,
 };
 use super::vocab::{iri_of, Vocab, OWL, RDF, RDFS, XSD};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -50,6 +50,9 @@ pub enum ViolationKind {
     TopDataPropertyMisuse,
     /// The extractor had to choose a reading (an undeclared predicate read as annotations).
     ExtractionNote,
+    /// An n-ary axiom has fewer distinct operands than it needs (two): the structural
+    /// specification reads its operands as a set, so `EquivalentClasses(A A)` has one.
+    InsufficientOperands,
 }
 
 /// One OWL 2 DL violation.
@@ -76,18 +79,44 @@ impl Violation {
     }
 }
 
-/// The result of the OWL 2 DL profile check.
+/// A global restriction the check did not verify for this ontology. While any remain the
+/// check does not claim the ontology is in OWL 2 DL.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unchecked {
+    /// The restriction, e.g. `"xsd:pattern regular-expression syntax"`.
+    pub rule: &'static str,
+    /// The input triples it applies to (empty for ontology-wide rules).
+    pub source: Vec<usize>,
+}
+
+/// The result of the OWL 2 DL profile check. Fail-closed: [`is_dl`](Self::is_dl) holds only
+/// when no violation was found AND every restriction was checked.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DlProfileReport {
     /// Every violation, in input order.
     pub violations: Vec<Violation>,
+    /// The restrictions that apply to this ontology but were not verified.
+    pub unchecked: Vec<Unchecked>,
 }
 
 impl DlProfileReport {
-    /// `true` when the ontology is in OWL 2 DL.
+    /// `true` when the ontology is shown to be in OWL 2 DL.
     #[must_use]
     pub fn is_dl(&self) -> bool {
-        self.violations.is_empty()
+        self.violations.is_empty() && self.unchecked.is_empty()
+    }
+
+    /// `Some(true)` in OWL 2 DL, `Some(false)` when a violation was found, `None` when no
+    /// violation was found but some restriction was not checked.
+    #[must_use]
+    pub fn verdict(&self) -> Option<bool> {
+        if !self.violations.is_empty() {
+            Some(false)
+        } else if self.unchecked.is_empty() {
+            Some(true)
+        } else {
+            None
+        }
     }
 
     /// The violations that prevent a reasoning verdict.
@@ -105,6 +134,13 @@ pub fn check_dl(dict: &Dict, onto: &Ontology) -> DlProfileReport {
     c.regularity();
     c.anonymous_individuals();
     c.datatypes();
+    c.operand_sets();
+    if !onto.imports.is_empty() {
+        c.unchecked(
+            "the imports closure (owl:imports targets are not loaded)",
+            &[],
+        );
+    }
     for note in &onto.notes {
         c.out.push(Violation {
             kind: ViolationKind::ExtractionNote,
@@ -118,7 +154,18 @@ pub fn check_dl(dict: &Dict, onto: &Ontology) -> DlProfileReport {
             .cmp(&b.source.first())
             .then(a.kind.cmp(&b.kind))
     });
-    DlProfileReport { violations: c.out }
+    let mut unchecked = c.unchecked;
+    unchecked.sort_by(|a, b| {
+        a.source
+            .first()
+            .cmp(&b.source.first())
+            .then(a.rule.cmp(b.rule))
+    });
+    unchecked.dedup();
+    DlProfileReport {
+        violations: c.out,
+        unchecked,
+    }
 }
 
 struct Checker<'a> {
@@ -126,6 +173,7 @@ struct Checker<'a> {
     onto: &'a Ontology,
     v: Vocab,
     out: Vec<Violation>,
+    unchecked: Vec<Unchecked>,
 }
 
 /// An entity use: its kind and the axiom it occurs in.
@@ -138,11 +186,19 @@ impl<'a> Checker<'a> {
             onto,
             v: Vocab::intern(dict),
             out: Vec::new(),
+            unchecked: Vec::new(),
         }
     }
 
     fn name(&self, id: Id) -> String {
         iri_of(self.dict, id).unwrap_or_else(|| super::vocab::render_term(self.dict, id))
+    }
+
+    fn unchecked(&mut self, rule: &'static str, source: &[usize]) {
+        self.unchecked.push(Unchecked {
+            rule,
+            source: source.to_vec(),
+        });
     }
 
     fn report(&mut self, kind: ViolationKind, message: String, source: &[usize]) {
@@ -206,9 +262,55 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        for (&id, ds) in &declared {
-            for &(k, _) in ds {
+        let mut decl_ids: Vec<Id> = declared.keys().copied().collect();
+        decl_ids.sort_unstable();
+        for id in decl_ids {
+            for &(k, ai) in &declared[&id] {
                 seen_kinds.entry(id).or_default().insert(k);
+                // Declaring reserved vocabulary (other than a built-in entity of that kind) is
+                // as illegal as using it.
+                if !self.is_builtin(id, k) && self.is_reserved(id) && !uses.contains_key(&(id, k)) {
+                    let src = self.sources(&[ai]);
+                    self.report(
+                        ViolationKind::ReservedVocabulary,
+                        format!(
+                            "{} is reserved vocabulary declared as a {}",
+                            self.name(id),
+                            kind_name(k)
+                        ),
+                        &src,
+                    );
+                }
+            }
+        }
+        // Ontology and axiom annotations: their properties are annotation properties.
+        for ann in &self.onto.annotations {
+            let (id, k) = (ann.property, EntityKind::AnnotationProperty);
+            seen_kinds.entry(id).or_default().insert(k);
+            if self.is_builtin(id, k) {
+                continue;
+            }
+            let has_decl = declared
+                .get(&id)
+                .is_some_and(|ds| ds.iter().any(|(dk, _)| *dk == k));
+            if self.is_reserved(id) {
+                self.out.push(Violation {
+                    kind: ViolationKind::ReservedVocabulary,
+                    message: format!(
+                        "{} is reserved vocabulary used as an annotation property",
+                        self.name(id)
+                    ),
+                    source: ann.source.clone(),
+                });
+            } else if !has_decl {
+                self.out.push(Violation {
+                    kind: ViolationKind::Undeclared,
+                    message: format!(
+                        "{} is used as an annotation property but not declared",
+                        self.name(id)
+                    ),
+                    source: ann.source.clone(),
+                });
             }
         }
         // Illegal punning.
@@ -271,6 +373,37 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// N-ary axioms need two distinct operands.
+    fn operand_sets(&mut self) {
+        fn distinct<T: PartialEq>(xs: &[T]) -> usize {
+            xs.iter()
+                .enumerate()
+                .filter(|(i, x)| !xs[..*i].contains(x))
+                .count()
+        }
+        for rec in &self.onto.axioms {
+            let n = match &rec.axiom {
+                Axiom::EquivalentClasses(cs) | Axiom::DisjointClasses(cs) => distinct(cs),
+                Axiom::DisjointUnion(_, cs) => distinct(cs),
+                Axiom::EquivalentObjectProperties(ps) | Axiom::DisjointObjectProperties(ps) => {
+                    distinct(ps)
+                }
+                Axiom::EquivalentDataProperties(ps) | Axiom::DisjointDataProperties(ps) => {
+                    distinct(ps)
+                }
+                Axiom::SameIndividual(is) | Axiom::DifferentIndividuals(is) => distinct(is),
+                _ => continue,
+            };
+            if n < 2 {
+                self.out.push(Violation {
+                    kind: ViolationKind::InsufficientOperands,
+                    message: "the axiom needs at least two distinct operands".into(),
+                    source: rec.source.clone(),
+                });
+            }
+        }
+    }
+
     fn sources(&self, axioms: &[usize]) -> Vec<usize> {
         let mut s: Vec<usize> = axioms
             .iter()
@@ -325,9 +458,12 @@ impl<'a> Checker<'a> {
             }
         };
         let mut composite = FxHashSet::default();
-        if self.v.top_object_property != sparq_core::dict::NO_ID {
-            composite.insert(ObjectProperty::Named(self.v.top_object_property));
-            composite.insert(ObjectProperty::Inverse(self.v.top_object_property));
+        // §11.1: both universal object properties are composite.
+        for p in [self.v.top_object_property, self.v.bottom_object_property] {
+            if p != sparq_core::dict::NO_ID {
+                composite.insert(ObjectProperty::Named(p));
+                composite.insert(ObjectProperty::Inverse(p));
+            }
         }
         for rec in &self.onto.axioms {
             match &rec.axiom {
@@ -437,21 +573,6 @@ impl<'a> Checker<'a> {
 
     fn regularity(&mut self) {
         let (edges, _) = self.hierarchy();
-        let reach = |from: ObjectProperty, to: ObjectProperty| -> bool {
-            let mut seen = FxHashSet::default();
-            let mut work = vec![from];
-            while let Some(p) = work.pop() {
-                if p == to {
-                    return true;
-                }
-                if seen.insert(p) {
-                    if let Some(next) = edges.get(&p) {
-                        work.extend(next.iter().copied());
-                    }
-                }
-            }
-            false
-        };
         // The constraints `a < b` the order must satisfy, each with its source axiom.
         let mut less: Vec<(ObjectProperty, ObjectProperty, usize)> = Vec::new();
         let top = self.v.top_object_property;
@@ -483,25 +604,39 @@ impl<'a> Checker<'a> {
         if !has_chain {
             return;
         }
+        // Mutually reachable properties are equivalent: one element of the order. Collapse
+        // the hierarchy's strongly connected components, so a constraint `S < R` with `S`
+        // equivalent to `R` is a violation, and a cycle through an equivalence class is found.
+        let comp = components(&edges);
+        let rep = |p: ObjectProperty| comp.get(&p).copied().unwrap_or(p);
+        let mut cycle_axioms: Vec<usize> = Vec::new();
         // The order must extend the strict part of the hierarchy, and S < R iff Inv(S) < R.
         let mut graph: FxHashMap<ObjectProperty, Vec<(ObjectProperty, Option<usize>)>> =
             FxHashMap::default();
         for (&a, bs) in &edges {
             for &b in bs {
-                if a != b && !reach(b, a) {
-                    graph.entry(a).or_default().push((b, None));
+                if rep(a) != rep(b) {
+                    graph.entry(rep(a)).or_default().push((rep(b), None));
                 }
             }
         }
         for &(s, r, ai) in &less {
-            graph.entry(s).or_default().push((r, Some(ai)));
-            graph.entry(s.inverse()).or_default().push((r, Some(ai)));
+            for s in [s, s.inverse()] {
+                if rep(s) == rep(r) {
+                    cycle_axioms.push(ai);
+                } else {
+                    graph.entry(rep(s)).or_default().push((rep(r), Some(ai)));
+                }
+            }
+        }
+        for succ in graph.values_mut() {
+            succ.sort();
+            succ.dedup();
         }
         // A strict partial order exists iff the constraint graph has no cycle.
         let mut nodes: Vec<ObjectProperty> = graph.keys().copied().collect();
         nodes.sort();
         let mut state: FxHashMap<ObjectProperty, u8> = FxHashMap::default();
-        let mut cycle_axioms: Vec<usize> = Vec::new();
         for start in nodes {
             if state.get(&start).copied().unwrap_or(0) != 0 {
                 continue;
@@ -556,15 +691,19 @@ impl<'a> Checker<'a> {
         // Union-find over anonymous individuals connected by object property assertions; an
         // edge between two already-connected individuals closes a cycle.
         let mut parent: FxHashMap<Id, Id> = FxHashMap::default();
-        fn find(parent: &mut FxHashMap<Id, Id>, x: Id) -> Id {
-            let p = *parent.entry(x).or_insert(x);
-            if p == x {
-                return x;
+        // Iterative, with path halving: a long chain of blank individuals must not recurse.
+        fn find(parent: &mut FxHashMap<Id, Id>, mut x: Id) -> Id {
+            loop {
+                let p = *parent.entry(x).or_insert(x);
+                if p == x {
+                    return x;
+                }
+                let g = *parent.entry(p).or_insert(p);
+                parent.insert(x, g);
+                x = g;
             }
-            let r = find(parent, p);
-            parent.insert(x, r);
-            r
         }
+        let mut size: FxHashMap<Id, usize> = FxHashMap::default();
         let mut seen_edges: FxHashSet<(Id, Id)> = FxHashSet::default();
         let mut cyclic: Vec<Vec<usize>> = Vec::new();
         for rec in &self.onto.axioms {
@@ -583,9 +722,51 @@ impl<'a> Checker<'a> {
                 if ra == rb {
                     cyclic.push(rec.source.clone());
                 } else {
-                    parent.insert(ra, rb);
+                    // Union by size keeps the trees shallow.
+                    let (sa, sb) = (
+                        size.get(&ra).copied().unwrap_or(1),
+                        size.get(&rb).copied().unwrap_or(1),
+                    );
+                    let (small, big) = if sa < sb { (ra, rb) } else { (rb, ra) };
+                    parent.insert(small, big);
+                    size.insert(big, sa + sb);
                 }
             }
+        }
+        // Fail-closed: the forest condition above is the only anonymous-individual
+        // restriction checked; any other use of an anonymous individual leaves the rest of
+        // §11.2 unverified.
+        const RULE: &str = "anonymous-individual restrictions beyond the forest condition (§11.2)";
+        let anon = |i: &Individual| matches!(i, Individual::Anonymous(_));
+        let mut other_uses: Vec<Vec<usize>> = Vec::new();
+        for rec in &self.onto.axioms {
+            let mut hit = match &rec.axiom {
+                Axiom::ObjectPropertyAssertion(_, a, b) => anon(a) != anon(b),
+                Axiom::NegativeObjectPropertyAssertion(_, a, b) => anon(a) || anon(b),
+                Axiom::NegativeDataPropertyAssertion(_, a, _) => anon(a),
+                Axiom::SameIndividual(is) | Axiom::DifferentIndividuals(is) => is.iter().any(anon),
+                Axiom::AnnotationAssertion(_, subject, value) => {
+                    matches!(subject, AnnotationSubject::Anonymous(_))
+                        || matches!(value, AnnotationValue::Anonymous(_))
+                }
+                _ => false,
+            };
+            for_each_class_in_axiom(&rec.axiom, &mut |ce| match ce {
+                ClassExpression::OneOf(is) => hit |= is.iter().any(anon),
+                ClassExpression::HasValue(_, i) => hit |= anon(i),
+                _ => {}
+            });
+            if hit {
+                other_uses.push(rec.source.clone());
+            }
+        }
+        for ann in &self.onto.annotations {
+            if matches!(ann.value, AnnotationValue::Anonymous(_)) {
+                other_uses.push(ann.source.clone());
+            }
+        }
+        for src in other_uses {
+            self.unchecked(RULE, &src);
         }
         for src in cyclic {
             self.report(
@@ -613,44 +794,58 @@ impl<'a> Checker<'a> {
             }
         }
         let mut found: Vec<(ViolationKind, String, Vec<usize>)> = Vec::new();
+        let mut not_checked: Vec<(&'static str, Vec<usize>)> = Vec::new();
+        let xml_literal = format!("{RDF}XMLLiteral");
+        // Every literal of the ontology, with the triples it came from.
+        let mut literals: Vec<(Literal, &[usize])> = Vec::new();
         for rec in &self.onto.axioms {
-            let mut lit = |l: &Literal| {
-                if let Err(e) = datatypes::parse_value(&l.lexical, &l.datatype, l.lang.as_deref()) {
-                    match e {
-                        datatypes::ValueError::IllTyped => found.push((
-                            ViolationKind::IllTypedLiteral,
-                            format!(
-                                "{} is not a valid {} literal",
-                                super::vocab::render_literal(l),
-                                l.datatype
-                            ),
-                            rec.source.clone(),
-                        )),
-                        datatypes::ValueError::UnknownDatatype => {
-                            let known = super::vocab::lookup_iri(self.dict, &l.datatype);
-                            if !declared_dt.contains(&known) {
-                                found.push((
-                                    ViolationKind::UnknownDatatype,
-                                    format!(
-                                        "{} is not in the OWL 2 datatype map and is not declared",
-                                        l.datatype
-                                    ),
-                                    rec.source.clone(),
-                                ));
-                            }
-                        }
-                        datatypes::ValueError::Unsupported => {}
-                    }
-                }
-            };
-            for_each_literal_in_axiom(&rec.axiom, &mut lit);
+            for_each_literal_in_axiom(&rec.axiom, &mut |l| literals.push((l.clone(), &rec.source)));
+        }
+        for ann in &self.onto.annotations {
+            if let AnnotationValue::Literal(l) = &ann.value {
+                literals.push((l.clone(), &ann.source));
+            }
+        }
+        for (l, source) in &literals {
+            if l.datatype == xml_literal {
+                not_checked.push(("rdf:XMLLiteral content", source.to_vec()));
+                continue;
+            }
+            match datatypes::parse_value(&l.lexical, &l.datatype, l.lang.as_deref()) {
+                Ok(_) | Err(datatypes::ValueError::Unsupported) => {}
+                Err(datatypes::ValueError::IllTyped) => found.push((
+                    ViolationKind::IllTypedLiteral,
+                    format!(
+                        "{} is not a valid {} literal",
+                        super::vocab::render_literal(l),
+                        l.datatype
+                    ),
+                    source.to_vec(),
+                )),
+                // §5.7 / §9.4: only datatype-map datatypes have lexical forms; a declared or
+                // defined datatype has an empty lexical space.
+                Err(datatypes::ValueError::UnknownDatatype) => found.push((
+                    ViolationKind::UnknownDatatype,
+                    format!(
+                        "{} is not in the OWL 2 datatype map, so no literal can use it",
+                        l.datatype
+                    ),
+                    source.to_vec(),
+                )),
+            }
+        }
+        for rec in &self.onto.axioms {
             let mut range = |dr: &DataRange| match dr {
                 DataRange::Datatype(id) => {
+                    // §11.2: a datatype outside the map needs exactly one definition.
                     let iri = iri_of(self.dict, *id).unwrap_or_default();
-                    if !datatypes::is_datatype_map_iri(&iri) && !declared_dt.contains(id) {
+                    let defined = definitions.get(id).is_some_and(|d| d.len() == 1);
+                    if !datatypes::is_datatype_map_iri(&iri) && !defined {
                         found.push((
                             ViolationKind::UnknownDatatype,
-                            format!("{iri} is not in the OWL 2 datatype map and is not declared"),
+                            format!(
+                                "{iri} is neither in the OWL 2 datatype map nor defined by exactly one DatatypeDefinition"
+                            ),
                             rec.source.clone(),
                         ));
                     }
@@ -668,7 +863,14 @@ impl<'a> Checker<'a> {
                             (Some(b), Some(facet)) if !b.allowed_facets().contains(&facet) => {
                                 Some(format!("{firi} does not apply to {iri}"))
                             }
-                            (Some(b), Some(facet)) => facet_value_problem(b, facet, value),
+                            (Some(b), Some(facet)) => match facet_value_problem(b, facet, value) {
+                                FacetCheck::Ok => None,
+                                FacetCheck::Bad(m) => Some(m),
+                                FacetCheck::Unchecked(rule) => {
+                                    not_checked.push((rule, rec.source.clone()));
+                                    None
+                                }
+                            },
                         };
                         if let Some(msg) = problem {
                             found.push((ViolationKind::InvalidFacet, msg, rec.source.clone()));
@@ -689,6 +891,12 @@ impl<'a> Checker<'a> {
                 found.push((
                     ViolationKind::InvalidDatatypeDefinition,
                     format!("{iri} is a built-in datatype and cannot be redefined"),
+                    src,
+                ));
+            } else if definitions[id].len() > 1 {
+                found.push((
+                    ViolationKind::InvalidDatatypeDefinition,
+                    format!("{iri} has more than one DatatypeDefinition"),
                     src,
                 ));
             } else if !declared_dt.contains(id) {
@@ -734,32 +942,69 @@ impl<'a> Checker<'a> {
         for (k, m, s) in found {
             self.report(k, m, &s);
         }
+        for (rule, s) in not_checked {
+            self.unchecked(rule, &s);
+        }
     }
 }
 
-fn facet_value_problem(b: Builtin, facet: Facet, value: &Literal) -> Option<String> {
+enum FacetCheck {
+    Ok,
+    Bad(String),
+    Unchecked(&'static str),
+}
+
+fn facet_value_problem(b: Builtin, facet: Facet, value: &Literal) -> FacetCheck {
     let parsed = datatypes::parse_value(&value.lexical, &value.datatype, value.lang.as_deref());
-    let bad = |what: &str| Some(format!("the value of this facet must be {what}"));
+    let bad = |what: &str| FacetCheck::Bad(format!("the value of this facet must be {what}"));
     match facet {
         Facet::Length | Facet::MinLength | Facet::MaxLength => match parsed {
-            Ok(datatypes::Value::Real(r)) if r.0.is_integer() && r.0.num >= 0 => None,
+            Ok(datatypes::Value::Real(r)) if r.0.is_integer() && r.0.num >= 0 => FacetCheck::Ok,
             _ => bad("a non-negative integer"),
         },
         Facet::Pattern => match parsed {
-            Ok(datatypes::Value::String(_)) => None,
+            Ok(datatypes::Value::String(_)) => {
+                FacetCheck::Unchecked("xsd:pattern regular-expression syntax")
+            }
             _ => bad("a string"),
         },
         Facet::LangRange => match parsed {
-            Ok(datatypes::Value::String(_)) => None,
-            _ => bad("a string"),
+            Ok(datatypes::Value::String(r)) if is_language_range(&r) => FacetCheck::Ok,
+            _ => bad("an RFC 4647 language range"),
         },
         Facet::MinInclusive | Facet::MaxInclusive | Facet::MinExclusive | Facet::MaxExclusive => {
             match parsed {
-                Ok(v) if b.families().contains(&v.family()) => None,
+                // In the restricted datatype's own value space: always allowed.
+                Ok(v) if datatypes::in_value_space(&v, b) => FacetCheck::Ok,
+                // owl:real and owl:rational take bounds from their whole family.
+                Ok(v)
+                    if matches!(b, Builtin::OwlReal | Builtin::OwlRational)
+                        && b.families().contains(&v.family()) =>
+                {
+                    FacetCheck::Ok
+                }
+                // Same family, outside the value space (an integer bounded by 0.5): the
+                // facet space of that combination is not checked.
+                Ok(v) if b.families().contains(&v.family()) => FacetCheck::Unchecked(
+                    "the facet space of a bound outside the restricted datatype's value space",
+                ),
                 _ => bad("a value of the restricted datatype's value space"),
             }
         }
     }
+}
+
+/// RFC 4647 §2.2 extended language range: `*` or `(alpha{1,8}|*)(-(alphanum{1,8}|*))*`.
+fn is_language_range(s: &str) -> bool {
+    let mut parts = s.split('-');
+    let first_ok = parts.next().is_some_and(|p| {
+        p == "*" || (!p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphabetic()))
+    });
+    first_ok
+        && parts.all(|p| {
+            p == "*"
+                || (!p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+        })
 }
 
 fn kind_name(k: EntityKind) -> &'static str {
@@ -781,6 +1026,70 @@ fn collect_ope(p: &ObjectProperty, f: &mut impl FnMut(Id, EntityKind)) {
     f(p.named(), EntityKind::ObjectProperty);
 }
 
+/// The strongly connected components of `edges`, each node mapped to its component's least
+/// member (Kosaraju, iterative).
+fn components(
+    edges: &FxHashMap<ObjectProperty, Vec<ObjectProperty>>,
+) -> FxHashMap<ObjectProperty, ObjectProperty> {
+    let mut nodes: Vec<ObjectProperty> = edges
+        .iter()
+        .flat_map(|(a, bs)| std::iter::once(*a).chain(bs.iter().copied()))
+        .collect();
+    nodes.sort();
+    nodes.dedup();
+    let mut reverse: FxHashMap<ObjectProperty, Vec<ObjectProperty>> = FxHashMap::default();
+    for (&a, bs) in edges {
+        for &b in bs {
+            reverse.entry(b).or_default().push(a);
+        }
+    }
+    // Pass 1: finishing order.
+    let mut seen: FxHashSet<ObjectProperty> = FxHashSet::default();
+    let mut order: Vec<ObjectProperty> = Vec::with_capacity(nodes.len());
+    for &start in &nodes {
+        if !seen.insert(start) {
+            continue;
+        }
+        let mut stack: Vec<(ObjectProperty, usize)> = vec![(start, 0)];
+        while let Some((n, i)) = stack.last().copied() {
+            let succ = edges.get(&n).map(Vec::as_slice).unwrap_or(&[]);
+            if i < succ.len() {
+                stack.last_mut().expect("non-empty").1 += 1;
+                if seen.insert(succ[i]) {
+                    stack.push((succ[i], 0));
+                }
+            } else {
+                order.push(n);
+                stack.pop();
+            }
+        }
+    }
+    // Pass 2: components on the reverse graph, in reverse finishing order.
+    let mut comp: FxHashMap<ObjectProperty, ObjectProperty> = FxHashMap::default();
+    for &start in order.iter().rev() {
+        if comp.contains_key(&start) {
+            continue;
+        }
+        let mut members = vec![start];
+        comp.insert(start, start);
+        let mut i = 0;
+        while i < members.len() {
+            for &p in reverse.get(&members[i]).map(Vec::as_slice).unwrap_or(&[]) {
+                if let std::collections::hash_map::Entry::Vacant(e) = comp.entry(p) {
+                    e.insert(start);
+                    members.push(p);
+                }
+            }
+            i += 1;
+        }
+        let least = *members.iter().min().expect("non-empty");
+        for m in members {
+            comp.insert(m, least);
+        }
+    }
+    comp
+}
+
 fn collect_ind(i: &Individual, f: &mut impl FnMut(Id, EntityKind)) {
     if let Individual::Named(id) = i {
         f(*id, EntityKind::NamedIndividual);
@@ -796,7 +1105,7 @@ fn collect_range(dr: &DataRange, f: &mut impl FnMut(Id, EntityKind)) {
             }
         }
         DataRange::ComplementOf(r) => collect_range(r, f),
-        DataRange::OneOf(_) => {}
+        DataRange::OneOf(_) | DataRange::TopLiteral => {}
     }
 }
 
@@ -940,6 +1249,14 @@ pub(crate) fn collect_axiom(ax: &Axiom, f: &mut impl FnMut(Id, EntityKind)) {
             f(*d, EntityKind::DataProperty);
             collect_ind(a, f);
         }
+        // Annotation subjects, values and domains / ranges are plain IRIs, not entities.
+        A::AnnotationAssertion(p, _, _)
+        | A::AnnotationPropertyDomain(p, _)
+        | A::AnnotationPropertyRange(p, _) => f(*p, EntityKind::AnnotationProperty),
+        A::SubAnnotationPropertyOf(p, q) => {
+            f(*p, EntityKind::AnnotationProperty);
+            f(*q, EntityKind::AnnotationProperty);
+        }
     }
 }
 
@@ -1017,9 +1334,9 @@ pub(crate) fn for_each_range_in_axiom(ax: &Axiom, f: &mut impl FnMut(&DataRange)
 /// Calls `f` with every literal in an axiom (assertions, has-value, one-of, facet values).
 pub(crate) fn for_each_literal_in_axiom(ax: &Axiom, f: &mut impl FnMut(&Literal)) {
     match ax {
-        Axiom::DataPropertyAssertion(_, _, l) | Axiom::NegativeDataPropertyAssertion(_, _, l) => {
-            f(l)
-        }
+        Axiom::DataPropertyAssertion(_, _, l)
+        | Axiom::NegativeDataPropertyAssertion(_, _, l)
+        | Axiom::AnnotationAssertion(_, _, AnnotationValue::Literal(l)) => f(l),
         _ => {}
     }
     for_each_class_in_axiom(ax, &mut |ce| {

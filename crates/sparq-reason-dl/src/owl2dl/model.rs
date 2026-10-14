@@ -84,7 +84,10 @@ impl ObjectProperty {
 /// A data range (OWL 2 Structural Specification §7).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DataRange {
-    /// A named datatype (`rdfs:Literal`, a datatype-map datatype, or a user datatype).
+    /// `rdfs:Literal`, the whole data domain: the filler of an unqualified data cardinality,
+    /// or `rdfs:Literal` named in the input.
+    TopLiteral,
+    /// A named datatype (a datatype-map datatype, or a user datatype).
     Datatype(Id),
     /// `DataIntersectionOf`.
     IntersectionOf(Vec<DataRange>),
@@ -232,13 +235,74 @@ pub enum Axiom {
     DataPropertyAssertion(Id, Individual, Literal),
     /// `NegativeDataPropertyAssertion(D a lt)`.
     NegativeDataPropertyAssertion(Id, Individual, Literal),
+    /// `AnnotationAssertion(AP s v)`. No logical meaning; kept so the profile check sees it.
+    AnnotationAssertion(Id, AnnotationSubject, AnnotationValue),
+    /// `SubAnnotationPropertyOf(AP1 AP2)`. No logical meaning.
+    SubAnnotationPropertyOf(Id, Id),
+    /// `AnnotationPropertyDomain(AP U)`. No logical meaning.
+    AnnotationPropertyDomain(Id, Id),
+    /// `AnnotationPropertyRange(AP U)`. No logical meaning.
+    AnnotationPropertyRange(Id, Id),
+}
+
+/// The subject of an annotation assertion (Structural Specification §10.1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AnnotationSubject {
+    /// An IRI.
+    Iri(Id),
+    /// An anonymous individual.
+    Anonymous(Id),
+}
+
+/// The value of an annotation (Structural Specification §10.1).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AnnotationValue {
+    /// An IRI.
+    Iri(Id),
+    /// An anonymous individual.
+    Anonymous(Id),
+    /// A literal.
+    Literal(Literal),
+}
+
+/// What an [`Annotation`] annotates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AnnotationTarget {
+    /// The ontology (an annotation on the `owl:Ontology` header node).
+    Ontology(Id),
+    /// The axiom whose main triple has this input index (an `owl:Axiom` reification).
+    Axiom(usize),
+    /// Another annotation, by index into [`Ontology::annotations`] (an `owl:Annotation`
+    /// reification).
+    Annotation(usize),
+}
+
+/// An ontology or axiom annotation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Annotation {
+    /// What is annotated.
+    pub target: AnnotationTarget,
+    /// The annotation property.
+    pub property: Id,
+    /// The value.
+    pub value: AnnotationValue,
+    /// The input triples it was read from.
+    pub source: Vec<usize>,
 }
 
 impl Axiom {
-    /// `true` for the logical axioms the reasoner reads (everything but declarations).
+    /// `true` for the logical axioms the reasoner reads (everything but declarations and
+    /// annotation axioms).
     #[must_use]
     pub fn is_logical(&self) -> bool {
-        !matches!(self, Axiom::Declaration(..))
+        !matches!(
+            self,
+            Axiom::Declaration(..)
+                | Axiom::AnnotationAssertion(..)
+                | Axiom::SubAnnotationPropertyOf(..)
+                | Axiom::AnnotationPropertyDomain(..)
+                | Axiom::AnnotationPropertyRange(..)
+        )
     }
 
     /// `true` for ABox (assertional) axioms.
@@ -285,6 +349,8 @@ pub struct Ontology {
     pub axioms: Vec<AxiomRecord>,
     /// IRIs of `owl:imports` targets. The extractor does not dereference them.
     pub imports: Vec<Id>,
+    /// Ontology and axiom annotations.
+    pub annotations: Vec<Annotation>,
     /// Readings the extractor chose that the profile check reports.
     pub notes: Vec<ExtractNote>,
 }

@@ -688,11 +688,17 @@ mapping (inverses, cardinalities, nominals, `hasSelf`, chains, keys, datatypes a
 `sameAs`/`differentFrom`, negative assertions, n-ary disjointness) into a typed
 `owl2dl::Ontology`, every axiom carrying the input triple indices it came from. It stays
 fail-closed: a triple it cannot place gives an `ExtractError` naming that triple.
+Annotations are kept too (annotation axioms, plus ontology and reified axiom annotations in
+`Ontology::annotations`), outside the logical axioms.
 `owl2dl::check_dl(&dict, &onto)` runs the OWL 2 DL global restrictions (declarations and
 typing, punning, reserved vocabulary, simple roles, property-hierarchy regularity,
-anonymous-individual cycles, ill-typed literals, facets, datatype definitions) and returns
-a `DlProfileReport`; `blocking()` lists the violations a reasoner must refuse.
-`owl:imports` is recorded in `Ontology::imports`, never dereferenced.
+anonymous-individual forests, operand sets, ill-typed literals, facets, datatype
+definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
+`Some(false)` on a violation, `Some(true)` only when every restriction was checked, and
+`None` when one was not (listed in `unchecked`: `xsd:pattern` syntax, `rdf:XMLLiteral`
+content, an unloaded imports closure, anonymous individuals outside an anonymous forest).
+`blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
+`Ontology::imports`, never dereferenced.
 
 ## Common recipes
 

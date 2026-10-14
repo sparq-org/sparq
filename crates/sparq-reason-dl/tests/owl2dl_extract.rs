@@ -462,7 +462,12 @@ fn rejects_a_stray_triple_on_a_structural_node() {
     let e = err(&with_decls(
         ":A rdfs:subClassOf _:r . _:r a owl:Restriction ; owl:onProperty :p ; owl:someValuesFrom :B ; :p :A .",
     ));
-    assert_eq!(e.kind, ExtractErrorKind::Unparsed);
+    // The stray triple is read as an assertion about the restriction node and refused.
+    assert!(matches!(
+        e.kind,
+        ExtractErrorKind::Unparsed | ExtractErrorKind::Malformed
+    ));
+    assert!(!e.triples.is_empty());
 }
 
 #[test]
@@ -622,4 +627,321 @@ fn profile_violations_name_their_triples() {
     assert_eq!(v.source.len(), 1);
     let [s, _, _] = t[v.source[0]];
     assert_eq!(s, ex(&d, "a"));
+}
+
+// ============================== REVIEW REGRESSIONS ==============================
+
+#[test]
+fn gci_with_an_anonymous_subclass() {
+    let (d, _, o) = ok(&with_decls(
+        "[ a owl:Restriction ; owl:onProperty :p ; owl:someValuesFrom :B ] rdfs:subClassOf :A .
+         [ owl:unionOf ( :A :B ) ] owl:equivalentClass :C .
+         [ owl:complementOf :A ] owl:disjointWith [ owl:complementOf :B ] .",
+    ));
+    let (a, b, c, p) = (ex(&d, "A"), ex(&d, "B"), ex(&d, "C"), ex(&d, "p"));
+    let ax = logical(&o);
+    assert!(ax.contains(&Axiom::SubClassOf(
+        CE::SomeValuesFrom(OP::Named(p), Box::new(CE::Class(b))),
+        CE::Class(a)
+    )));
+    assert!(ax.contains(&Axiom::EquivalentClasses(vec![
+        CE::UnionOf(vec![CE::Class(a), CE::Class(b)]),
+        CE::Class(c)
+    ])));
+    assert!(ax.iter().any(|x| matches!(x, Axiom::DisjointClasses(_))));
+    assert!(check_dl(&d, &o).is_dl());
+}
+
+#[test]
+fn n_ary_and_negative_nodes_in_any_triple_order() {
+    // Typing triples last, as a sorted N-Triples dump or a store scan may give them.
+    let body = "@prefix : <http://ex/> .
+        @prefix owl: <http://www.w3.org/2002/07/owl#> .
+        @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+        :a a owl:NamedIndividual . :b a owl:NamedIndividual . :p a owl:ObjectProperty .
+        _:x owl:distinctMembers ( :a :b ) .
+        _:n owl:sourceIndividual :a . _:n owl:assertionProperty :p . _:n owl:targetIndividual :b .
+        _:x rdf:type owl:AllDifferent .
+        _:n rdf:type owl:NegativePropertyAssertion .";
+    let (d, t) = Graph::parse_to_triples(body, "turtle").expect("parse");
+    let o = extract(&d, &t).unwrap_or_else(|e| panic!("expected accept, got {e}"));
+    let ax = logical(&o);
+    let (a, b, p) = (ex(&d, "a"), ex(&d, "b"), ex(&d, "p"));
+    assert!(ax.contains(&Axiom::DifferentIndividuals(vec![
+        Individual::Named(a),
+        Individual::Named(b)
+    ])));
+    assert!(ax.contains(&Axiom::NegativeObjectPropertyAssertion(
+        OP::Named(p),
+        Individual::Named(a),
+        Individual::Named(b)
+    )));
+}
+
+#[test]
+fn axioms_about_an_inverse_property_expression() {
+    let (d, _, o) = ok(&with_decls(
+        "_:x owl:inverseOf :p . _:x rdfs:subPropertyOf :q . _:x a owl:TransitiveProperty .",
+    ));
+    let (p, q) = (ex(&d, "p"), ex(&d, "q"));
+    let ax = logical(&o);
+    assert!(ax.contains(&Axiom::SubObjectPropertyOf(
+        vec![OP::Inverse(p)],
+        OP::Named(q)
+    )));
+    assert!(ax.contains(&Axiom::TransitiveObjectProperty(OP::Inverse(p))));
+}
+
+#[test]
+fn unqualified_data_cardinality_is_over_rdfs_literal() {
+    let (d, _, o) = ok(&with_decls(
+        ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :d ; owl:minCardinality 1 ] .",
+    ));
+    assert!(logical(&o).contains(&Axiom::SubClassOf(
+        CE::Class(ex(&d, "A")),
+        CE::DataMinCardinality(1, ex(&d, "d"), DR::TopLiteral)
+    )));
+    assert!(check_dl(&d, &o).is_dl());
+}
+
+#[test]
+fn huge_years_are_parsed_without_overflow() {
+    use sparq_reason_dl::owl2dl::datatypes::parse_value;
+    let dt = format!("{XSD}dateTime");
+    for lex in [
+        "999999999999999999-01-01T00:00:00",
+        "-999999999999999999-12-31T23:59:59Z",
+    ] {
+        // Valid, or refused as unsupported; never a panic.
+        let _ = parse_value(lex, &dt, None);
+    }
+}
+
+#[test]
+fn a_long_chain_of_anonymous_individuals_is_checked_iteratively() {
+    let mut body = with_decls("");
+    for i in 0..50_000 {
+        body.push_str(&format!("_:x{i} :p _:x{} .\n", i + 1));
+    }
+    let v = violations(&body);
+    assert!(!v.contains(&ViolationKind::AnonymousIndividualCycle));
+}
+
+// ============================== CROSS-MODEL REVIEW REGRESSIONS ==============================
+
+fn report(body: &str) -> sparq_reason_dl::owl2dl::DlProfileReport {
+    let (d, _, o) = ok(body);
+    check_dl(&d, &o)
+}
+
+#[test]
+fn ontology_header_keeps_logical_triples() {
+    let (d, _, o) = ok(&with_decls(
+        "<http://ex/o> a owl:Ontology , :A ; rdfs:comment \"about\" ; owl:versionIRI <http://ex/o/1> .",
+    ));
+    let onto = ex(&d, "o");
+    assert!(logical(&o).contains(&Axiom::ClassAssertion(
+        CE::Class(ex(&d, "A")),
+        Individual::Named(onto)
+    )));
+    assert_eq!(o.annotations.len(), 1);
+    assert!(matches!(
+        o.annotations[0].target,
+        sparq_reason_dl::owl2dl::model::AnnotationTarget::Ontology(id) if id == onto
+    ));
+}
+
+#[test]
+fn reifications_are_validated_and_kept() {
+    let body = ":A rdfs:subClassOf :B .
+        [ a owl:Axiom ; owl:annotatedSource :A ; owl:annotatedProperty rdfs:subClassOf ;
+          owl:annotatedTarget :B ; rdfs:comment \"why\" ] .";
+    let (d, t, o) = ok(&with_decls(body));
+    assert_eq!(o.annotations.len(), 1);
+    let sparq_reason_dl::owl2dl::model::AnnotationTarget::Axiom(main) = o.annotations[0].target
+    else {
+        panic!("axiom annotation expected");
+    };
+    let sub = iri(&d, "http://www.w3.org/2000/01/rdf-schema#subClassOf");
+    assert_eq!(t[main], [ex(&d, "A"), sub, ex(&d, "B")]);
+    // A reification of a triple that is not in the graph is refused.
+    let e = err(&with_decls(
+        "[ a owl:Axiom ; owl:annotatedSource :A ; owl:annotatedProperty rdfs:subClassOf ;
+          owl:annotatedTarget :C ; rdfs:comment \"why\" ] .",
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    // A logical triple on a reification node is refused, not dropped.
+    let e = err(&with_decls(
+        ":A rdfs:subClassOf :B .
+         _:x a owl:Axiom ; owl:annotatedSource :A ; owl:annotatedProperty rdfs:subClassOf ;
+          owl:annotatedTarget :B ; rdfs:subClassOf :C .",
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+}
+
+#[test]
+fn annotations_are_kept_and_checked() {
+    let (d, _, o) = ok(&with_decls(
+        ":A rdfs:label \"bad\"^^xsd:integer . :ap a owl:AnnotationProperty . :ap rdfs:subPropertyOf :undeclaredAp .",
+    ));
+    let ax = logical(&o);
+    assert!(ax.is_empty(), "annotation axioms are not logical: {ax:?}");
+    assert!(o.axioms.iter().any(|r| matches!(
+        r.axiom,
+        Axiom::SubAnnotationPropertyOf(a, b) if a == ex(&d, "ap") && b == ex(&d, "undeclaredAp")
+    )));
+    let kinds: Vec<ViolationKind> = check_dl(&d, &o).violations.iter().map(|v| v.kind).collect();
+    assert!(kinds.contains(&ViolationKind::IllTypedLiteral));
+    assert!(kinds.contains(&ViolationKind::Undeclared));
+}
+
+#[test]
+fn declaring_reserved_vocabulary_is_a_violation() {
+    let v = violations(&with_decls(
+        "owl:madeUp a owl:Class . xsd:integer a owl:Class .",
+    ));
+    assert_eq!(
+        v.iter()
+            .filter(|k| **k == ViolationKind::ReservedVocabulary)
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn bottom_object_property_is_not_simple() {
+    let v = violations(&with_decls(
+        ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:bottomObjectProperty ; owl:maxCardinality 1 ] .",
+    ));
+    assert!(v.contains(&ViolationKind::NonSimpleProperty));
+}
+
+#[test]
+fn equivalent_properties_cannot_hide_an_irregular_chain() {
+    let v = violations(&with_decls(
+        ":p owl:equivalentProperty :q . :p owl:propertyChainAxiom ( :q :r ) .",
+    ));
+    assert!(v.contains(&ViolationKind::IrregularPropertyHierarchy));
+    // A regular chain over the same hierarchy stays legal.
+    let v = violations(&with_decls(
+        ":p owl:equivalentProperty :q . :p owl:propertyChainAxiom ( :r :r ) .",
+    ));
+    assert!(!v.contains(&ViolationKind::IrregularPropertyHierarchy));
+}
+
+#[test]
+fn user_datatypes_need_exactly_one_definition() {
+    let decl = ":dt a rdfs:Datatype . :d rdfs:range :dt .";
+    assert!(violations(&with_decls(decl)).contains(&ViolationKind::UnknownDatatype));
+    assert!(violations(&with_decls(&format!(
+        "{decl} :dt owl:equivalentClass xsd:integer ."
+    )))
+    .is_empty());
+    let v = violations(&with_decls(&format!(
+        "{decl} :dt owl:equivalentClass xsd:integer . :dt owl:equivalentClass xsd:string ."
+    )));
+    assert!(v.contains(&ViolationKind::InvalidDatatypeDefinition));
+    // A literal of a user datatype has no value.
+    let v = violations(&with_decls(
+        ":dt a rdfs:Datatype . :dt owl:equivalentClass xsd:integer . :x :d \"1\"^^:dt .",
+    ));
+    assert!(v.contains(&ViolationKind::UnknownDatatype));
+}
+
+#[test]
+fn unchecked_restrictions_make_the_verdict_unknown() {
+    let pattern = ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:string ; owl:withRestrictions ( [ xsd:pattern \"[a-z]+\" ] ) ] .";
+    let r = report(&with_decls(pattern));
+    assert_eq!(r.verdict(), None);
+    assert!(!r.is_dl());
+    let r = report(&with_decls(
+        "<http://ex/o> a owl:Ontology ; owl:imports <http://ex/other> .",
+    ));
+    assert_eq!(r.verdict(), None);
+    let r = report(&with_decls(":a :p _:x ."));
+    assert_eq!(r.verdict(), None);
+    let r = report(&with_decls("_:x :p _:y ."));
+    assert_eq!(r.verdict(), Some(true));
+}
+
+#[test]
+fn language_range_facets_are_validated() {
+    let range = |r: &str| {
+        format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype rdf:PlainLiteral ; owl:withRestrictions ( [ rdf:langRange \"{r}\" ] ) ] ."
+        )
+    };
+    assert!(violations(&with_decls(&range("en-*"))).is_empty());
+    assert!(violations(&with_decls(&range("en--gb"))).contains(&ViolationKind::InvalidFacet));
+}
+
+#[test]
+fn characteristics_only_object_properties_have_declare_one() {
+    let (d, _, o) = ok(":p a owl:TransitiveProperty .");
+    assert!(o
+        .axioms
+        .iter()
+        .any(|r| r.axiom == Axiom::Declaration(EntityKind::ObjectProperty, ex(&d, "p"))));
+    assert!(check_dl(&d, &o).is_dl());
+}
+
+#[test]
+fn n_ary_axioms_need_their_operands() {
+    let e = err(&with_decls(":A owl:disjointUnionOf ( :B ) ."));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    let e = err(&with_decls(
+        "[ a owl:AllDisjointClasses ; owl:members ( :A ) ] .",
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    let v = violations(&with_decls(":p owl:equivalentProperty :p ."));
+    assert!(v.contains(&ViolationKind::InsufficientOperands));
+}
+
+#[test]
+fn empty_anonymous_booleans_follow_table_15() {
+    let (d, _, o) = ok(&with_decls(
+        ":A rdfs:subClassOf [ owl:intersectionOf () ] . :B rdfs:subClassOf [ owl:unionOf () ] .",
+    ));
+    let ax = logical(&o);
+    assert!(ax.contains(&Axiom::SubClassOf(CE::Class(ex(&d, "A")), CE::Thing)));
+    assert!(ax.contains(&Axiom::SubClassOf(CE::Class(ex(&d, "B")), CE::Nothing)));
+}
+
+#[test]
+fn a_node_is_a_class_or_a_data_range_not_both() {
+    let e = err(&with_decls(
+        "_:x a owl:Class , rdfs:Datatype ; owl:complementOf :A ; owl:datatypeComplementOf xsd:string .
+         :B rdfs:subClassOf _:x . :d rdfs:range _:x .",
+    ));
+    assert!(matches!(
+        e.kind,
+        ExtractErrorKind::Ambiguous | ExtractErrorKind::Malformed
+    ));
+}
+
+#[test]
+fn rational_order_is_exact() {
+    use sparq_reason_dl::owl2dl::datatypes::{parse_value, Value};
+    let dec = format!("{XSD}decimal");
+    let v = |s: &str| match parse_value(s, &dec, None).unwrap() {
+        Value::Real(r) => r,
+        other => panic!("{other:?}"),
+    };
+    let (a, b) = (v("0.50000000000000000001"), v("0.50000000000000000002"));
+    assert!(a < b);
+    assert!(v("-0.50000000000000000002") < v("-0.50000000000000000001"));
+}
+
+#[test]
+fn base64_and_xml_names_follow_their_grammars() {
+    use sparq_reason_dl::owl2dl::datatypes::parse_value;
+    let b64 = format!("{XSD}base64Binary");
+    assert!(parse_value("QQ==", &b64, None).is_ok());
+    assert!(parse_value("QR==", &b64, None).is_err());
+    assert!(parse_value("QUI=", &b64, None).is_ok());
+    assert!(parse_value("QUJ=", &b64, None).is_err());
+    let nc = format!("{XSD}NCName");
+    // U+0301 (a combining accent) is a NameChar but not alphabetic.
+    assert!(parse_value("e\u{301}", &nc, None).is_ok());
+    assert!(parse_value("\u{301}e", &nc, None).is_err());
 }

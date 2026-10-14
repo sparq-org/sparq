@@ -374,14 +374,33 @@ impl Ord for Rational {
         // Same integer part: compare the fractional parts ra/b and rc/d in [0, 1).
         let ra = self.num - fa * self.den;
         let rc = other.num - fb * other.den;
-        match (ra.checked_mul(other.den), rc.checked_mul(self.den)) {
-            (Some(x), Some(y)) => x.cmp(&y),
-            // Fall back to floating point only on overflow of the cross product, which
-            // needs denominators near 2^63 — far beyond any decimal literal we parse.
-            _ => (ra as f64 / self.den as f64)
-                .partial_cmp(&(rc as f64 / other.den as f64))
-                .unwrap_or(Ordering::Equal),
+        frac_cmp(ra, self.den, rc, other.den)
+    }
+}
+
+/// Exact comparison of `a/b` and `c/d` with `0 ≤ a < b` and `0 ≤ c < d`, by continued
+/// fractions: no product is formed, so nothing overflows.
+fn frac_cmp(mut a: i128, mut b: i128, mut c: i128, mut d: i128) -> Ordering {
+    let mut flipped = false;
+    loop {
+        let out = match (a == 0, c == 0) {
+            (true, true) => Some(Ordering::Equal),
+            (true, false) => Some(Ordering::Less),
+            (false, true) => Some(Ordering::Greater),
+            (false, false) => None,
+        };
+        if let Some(o) = out {
+            return if flipped { o.reverse() } else { o };
         }
+        // a/b vs c/d  ⇔  reversed(b/a vs d/c); compare the integer parts, then recurse on the
+        // fractional remainders.
+        let (qa, qc) = (b / a, d / c);
+        flipped = !flipped;
+        if qa != qc {
+            let o = qa.cmp(&qc);
+            return if flipped { o.reverse() } else { o };
+        }
+        (a, b, c, d) = (b - qa * a, a, d - qc * c, c);
     }
 }
 
@@ -592,12 +611,21 @@ fn double_value(lex: &str) -> Result<f64, ValueError> {
     })
 }
 
+/// XML 1.0 (Fifth Edition) `NameStartChar`.
 fn is_name_start(c: char) -> bool {
-    c.is_alphabetic() || c == '_' || c == ':'
+    matches!(c,
+        ':' | 'A'..='Z' | '_' | 'a'..='z'
+        | '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}'
+        | '\u{370}'..='\u{37D}' | '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}'
+        | '\u{2070}'..='\u{218F}' | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}'
+        | '\u{F900}'..='\u{FDCF}' | '\u{FDF0}'..='\u{FFFD}' | '\u{10000}'..='\u{EFFFF}')
 }
 
+/// XML 1.0 (Fifth Edition) `NameChar`.
 fn is_name_char(c: char) -> bool {
-    is_name_start(c) || c.is_numeric() || matches!(c, '-' | '.' | '\u{B7}')
+    is_name_start(c)
+        || matches!(c,
+            '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }
 
 fn is_language_tag(s: &str) -> bool {
@@ -613,14 +641,7 @@ fn is_language_tag(s: &str) -> bool {
 }
 
 fn hex_value(lex: &str) -> Result<Vec<u8>, ValueError> {
-    let s = collapse(lex);
-    if !s.len().is_multiple_of(2) || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(ValueError::IllTyped);
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|_| ValueError::IllTyped))
-        .collect()
+    sparq_core::hex::decode(&collapse(lex)).ok_or(ValueError::IllTyped)
 }
 
 fn base64_value(lex: &str) -> Result<Vec<u8>, ValueError> {
@@ -647,8 +668,15 @@ fn base64_value(lex: &str) -> Result<Vec<u8>, ValueError> {
             return Err(ValueError::IllTyped);
         }
         let mut n: u32 = 0;
+        let mut lastv = 0;
         for &c in &chunk[..4 - pad] {
-            n = (n << 6) | val(c).ok_or(ValueError::IllTyped)?;
+            lastv = val(c).ok_or(ValueError::IllTyped)?;
+            n = (n << 6) | lastv;
+        }
+        // XSD 1.1 `B64final`: the bits a padded final quad does not use must be zero
+        // (`B04` after `==`, `B16` after `=`).
+        if (pad == 2 && lastv & 0b1111 != 0) || (pad == 1 && lastv & 0b11 != 0) {
+            return Err(ValueError::IllTyped);
         }
         n <<= 6 * pad as u32;
         let b = n.to_be_bytes();
@@ -663,17 +691,6 @@ fn two_digits(s: &str) -> Option<i64> {
     } else {
         None
     }
-}
-
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    // Howard Hinnant's algorithm, proleptic Gregorian, days since 1970-01-01.
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
 }
 
 fn is_leap(y: i64) -> bool {
@@ -764,8 +781,9 @@ fn datetime_value(lex: &str, need_tz: bool) -> Result<DateTimeValue, ValueError>
     {
         return Err(ValueError::IllTyped);
     }
-    let days = days_from_civil(year, month, day);
-    let whole = i128::from(days) * 86_400 + i128::from(hour * 3600 + minute * 60 + sec)
+    // Validated above, so the civil-date precondition holds; i128 keeps every i64 year exact.
+    let days = sparq_core::civil::days_from_civil(year, month as u32, day as u32);
+    let whole = days * 86_400 + i128::from(hour * 3600 + minute * 60 + sec)
         - i128::from(tz.unwrap_or(0)) * 60;
     let frac = decimal_value(&format!(
         "0.{}",

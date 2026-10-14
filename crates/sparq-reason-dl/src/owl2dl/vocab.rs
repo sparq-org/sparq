@@ -88,7 +88,9 @@ vocab! {
     assertion_property = OWL: "assertionProperty",
     target_individual = OWL: "targetIndividual",
     target_value = OWL: "targetValue",
+    annotated_source = OWL: "annotatedSource",
     annotated_property = OWL: "annotatedProperty",
+    annotated_target = OWL: "annotatedTarget",
     // class expressions
     intersection_of = OWL: "intersectionOf",
     union_of = OWL: "unionOf",
@@ -126,6 +128,7 @@ vocab! {
     imports = OWL: "imports",
     // built-in annotation / ontology properties
     version_info = OWL: "versionInfo",
+    version_iri = OWL: "versionIRI",
     prior_version = OWL: "priorVersion",
     backward_compatible_with = OWL: "backwardCompatibleWith",
     incompatible_with = OWL: "incompatibleWith",

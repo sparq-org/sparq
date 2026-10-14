@@ -18,6 +18,6 @@ pub mod extract;
 pub mod model;
 pub(crate) mod vocab;
 
-pub use dl_profile::{check_dl, DlProfileReport, Violation, ViolationKind};
+pub use dl_profile::{check_dl, DlProfileReport, Unchecked, Violation, ViolationKind};
 pub use extract::{extract, ExtractError, ExtractErrorKind};
 pub use model::Ontology;
