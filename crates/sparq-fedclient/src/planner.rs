@@ -345,6 +345,9 @@ pub enum RenderError {
     Iri(String),
     /// A literal that starts with `"` but is not exactly one SPARQL literal.
     Literal(String),
+    /// A `VALUES` row that is not one bound term per variable: a row of the wrong length,
+    /// or a variable where a term is required.
+    Values(String),
 }
 
 impl std::fmt::Display for RenderError {
@@ -353,6 +356,7 @@ impl std::fmt::Display for RenderError {
             RenderError::Var(v) => write!(f, "not a SPARQL variable name: {v:?}"),
             RenderError::Iri(i) => write!(f, "IRI has a character SPARQL forbids: {i:?}"),
             RenderError::Literal(l) => write!(f, "not exactly one SPARQL literal: {l:?}"),
+            RenderError::Values(v) => write!(f, "not a VALUES row of bound terms: {v}"),
         }
     }
 }
@@ -377,11 +381,68 @@ pub(crate) fn render_term(t: &Term) -> Result<String, RenderError> {
         Term::Var(v) => Err(RenderError::Var(v.0.clone())),
         Term::Iri(iri) if is_iriref_body(iri) => Ok(format!("<{iri}>")),
         Term::Iri(iri) => Err(RenderError::Iri(iri.clone())),
-        Term::Literal(lit) if lit.starts_with('"') => parse_sparql_literal(lit)
-            .map(|l| l.to_string())
-            .ok_or_else(|| RenderError::Literal(lit.clone())),
-        Term::Literal(lit) => Ok(oxrdf::Literal::new_simple_literal(lit.as_str()).to_string()),
+        Term::Literal(lit) => {
+            let parsed = if lit.starts_with('"') {
+                parse_sparql_literal(lit)
+            } else {
+                Some(oxrdf::Literal::new_simple_literal(lit.as_str()))
+            };
+            parsed.as_ref().and_then(render_literal).ok_or_else(|| RenderError::Literal(lit.clone()))
+        }
     }
+}
+
+/// Serialise `l` with escapes that SPARQL's code-point preprocessing leaves alone: the lexical
+/// form uses only `ECHAR` escapes (other characters are written as they are), and a value whose
+/// rendering holds a complete `\u`/`\U` code-point escape, which an endpoint would expand
+/// before parsing, is `None`, as is a datatype IRI that is not an `IRIREF`.
+fn render_literal(l: &oxrdf::Literal) -> Option<String> {
+    let mut out = String::with_capacity(l.value().len() + 2);
+    out.push('"');
+    for c in l.value().chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    if has_code_point_escape(&out) {
+        return None;
+    }
+    if let Some(lang) = l.language() {
+        out.push('@');
+        out.push_str(lang);
+        if let Some(direction) = l.direction() {
+            out.push_str(&format!("--{direction}"));
+        }
+    } else if l.datatype() != oxrdf::vocab::xsd::STRING {
+        let dt = l.datatype().as_str();
+        if !is_iriref_body(dt) {
+            return None;
+        }
+        out.push_str(&format!("^^<{dt}>"));
+    }
+    Some(out)
+}
+
+/// Whether `text` holds a complete SPARQL code-point escape (`\u` and four hex digits, or
+/// `\U` and eight), which an endpoint expands before parsing.
+fn has_code_point_escape(text: &str) -> bool {
+    let b = text.as_bytes();
+    (0..b.len()).any(|i| {
+        let width = match (b[i], b.get(i + 1)) {
+            (b'\\', Some(b'u')) => 4,
+            (b'\\', Some(b'U')) => 8,
+            _ => return false,
+        };
+        b.get(i + 2..i + 2 + width).is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit))
+    })
 }
 
 /// Parse `lit` as exactly one SPARQL literal, in any of SPARQL's literal forms (short or long
@@ -424,7 +485,7 @@ fn is_iriref_body(iri: &str) -> bool {
 
 /// SPARQL `VARNAME`: `( PN_CHARS_U | [0-9] ) ( PN_CHARS_U | [0-9] | #xB7 | [#x300-#x36F] |
 /// [#x203F-#x2040] )*`.
-fn is_varname(name: &str) -> bool {
+pub(crate) fn is_varname(name: &str) -> bool {
     fn pn_chars_u_or_digit(c: char) -> bool {
         c == '_'
             || c.is_ascii_alphanumeric()
@@ -759,6 +820,59 @@ mod tests {
         }
     }
 
+    /// SPARQL 1.1 §19.2 code-point escape preprocessing, as a conforming endpoint applies it
+    /// to the query text before parsing.
+    fn preprocess(text: &str) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(i) = rest.find('\\') {
+            out.push_str(&rest[..i]);
+            let tail = &rest[i..];
+            let width = match tail.as_bytes().get(1) {
+                Some(b'u') => 4,
+                Some(b'U') => 8,
+                _ => 0,
+            };
+            let code = tail.get(2..2 + width).filter(|h| width > 0 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+            match code.and_then(|h| char::from_u32(u32::from_str_radix(h, 16).unwrap())) {
+                Some(c) => {
+                    out.push(c);
+                    rest = &tail[2 + width..];
+                }
+                None => {
+                    out.push('\\');
+                    rest = &tail[1..];
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn rendered_literals_survive_code_point_preprocessing() {
+        let cases = [
+            "a\"b\\c\nd\re\tf\u{8}g\u{c}h\u{0}i\u{1}j\u{7F}k",
+            "\\x \\\\ u U",
+            "x\"\"\"\\\"",
+            "é \u{1F600}",
+            // Escape-like text that is not a complete code-point escape is left alone.
+            "\\u12 \\uZZZZ \\U0041 \\u",
+        ];
+        for value in cases {
+            let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(value.into()));
+            let sparql = lower_leaf(&tp).unwrap().sparql;
+            let expanded = preprocess(&sparql);
+            assert_eq!(expanded, sparql, "{value:?}");
+            assert_eq!(parse_back(&expanded).object.to_string(), oxrdf::Literal::new_simple_literal(value).to_string());
+        }
+        // A value that preprocessing would change is refused rather than sent.
+        for value in ["\\u0022", "a\\U0000007Db", "\\\\u0041"] {
+            let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(value.into()));
+            assert!(matches!(lower_leaf(&tp), Err(RenderError::Literal(_))), "{value:?}");
+        }
+    }
+
     #[test]
     fn rendered_terms_parse_back_to_the_same_terms() {
         use oxrdf::{Literal, NamedNode};
@@ -775,6 +889,13 @@ mod tests {
                 Literal::new_typed_literal("q\"} \\", NamedNode::new("http://ex/d").unwrap()).into(),
             ),
             (Term::Literal("\"x\"".into()), Literal::new_simple_literal("x").into()),
+            (
+                Term::Literal("\"hi\"@ar--rtl".into()),
+                Literal::new_directional_language_tagged_literal("hi", "ar", oxrdf::BaseDirection::Rtl)
+                    .unwrap()
+                    .into(),
+            ),
+            (Term::Literal("\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>".into()), Literal::from(1).into()),
             // Long-string forms, which the SPARQL grammar accepts in every literal position.
             (
                 Term::Literal("\"\"\"line 1\nline \"2\" }\"\"\"".into()),
