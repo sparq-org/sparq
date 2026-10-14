@@ -149,8 +149,8 @@ impl RandomnessModel {
 /// [`randomness_model`](Self::randomness_model) is an honest *description* of the
 /// regime, and [`require_deployable`](Self::require_deployable) is the fail-closed
 /// refusal gate — today it refuses EVERY source (see its docs), and wiring it
-/// through the production call sites is itself a follow-on bead (none are wired
-/// yet).
+/// through the production call sites is itself a follow-on bead (no call site is
+/// gated on it yet, although `degree_reduce` already draws through this trait).
 ///
 /// See `research/mpc-distributed-randomness-design.md` for the full design and
 /// the follow-on implementation beads.
@@ -163,6 +163,12 @@ pub trait DistributedRandomness {
     /// a validated dealer-less implementation, none of which ships yet.
     fn randomness_model(&self) -> RandomnessModel;
 
+    /// The number of parties `n` this source deals sharings to.
+    fn parties(&self) -> usize;
+
+    /// The privacy threshold `t`: every sharing this source returns has degree `t`.
+    fn threshold(&self) -> usize;
+
     /// Fail-closed refusal gate: `Err(`[`MpcError::NoBackendSatisfies`]`)` unless
     /// this source's [`randomness_model`](Self::randomness_model) is
     /// [`deployable`](RandomnessModel::deployable). **Necessary, not sufficient**
@@ -172,10 +178,11 @@ pub trait DistributedRandomness {
     /// merely *labels* itself [`RandomnessModel::Prss`]. `Ok` here does NOT
     /// establish mask secrecy or VSS verification; those require a validated
     /// dealer-less implementation behind the acceptance boundary the follow-on
-    /// beads add. No production call site draws through this gate yet — wiring
-    /// the callers (`secure_equal`, `degree_reduce`, the oblivious shuffle) is
-    /// itself a follow-on bead (design record §5). Provided as a default so every
-    /// implementor inherits the same refusal.
+    /// beads add. No production call site is gated on this yet. Wiring the callers
+    /// is in progress (design record §5 item 5): `degree_reduce` draws its
+    /// re-sharings through the seam ([`crate::shamir::degree_reduce_through`]);
+    /// `secure_equal` and the oblivious shuffle still call the dealer directly.
+    /// Provided as a default so every implementor inherits the same refusal.
     fn require_deployable(&self) -> Result<(), MpcError> {
         let model = self.randomness_model();
         if model.deployable() {
@@ -252,6 +259,14 @@ pub trait DistributedRandomness {
 impl DistributedRandomness for ShamirDealer {
     fn randomness_model(&self) -> RandomnessModel {
         RandomnessModel::TrustedDealerSim
+    }
+
+    fn parties(&self) -> usize {
+        ShamirDealer::parties(self)
+    }
+
+    fn threshold(&self) -> usize {
+        ShamirDealer::threshold(self)
     }
 
     fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
@@ -347,6 +362,12 @@ mod tests {
     impl DistributedRandomness for SelfLabelledPrssStub {
         fn randomness_model(&self) -> RandomnessModel {
             RandomnessModel::Prss
+        }
+        fn parties(&self) -> usize {
+            3
+        }
+        fn threshold(&self) -> usize {
+            1
         }
         fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
             Err(MpcError::not_yet("PRSS shared_mask", "sq-yyro follow-on"))
