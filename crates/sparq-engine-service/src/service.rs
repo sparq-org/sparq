@@ -1859,27 +1859,98 @@ impl HttpTransport {
     }
 }
 
-/// ureq [`Resolver`](ureq::unversioned::resolver::Resolver) wrapper that enforces the SSRF egress policy
-/// on the *resolved* addresses (DNS-rebinding-safe). [OPUS-4.8]
-///
-/// It resolves `netloc` with the standard system resolver, drops every address
-/// the [`is_forbidden_ip`] policy refuses (unless the host is on the active
-/// allowlist), and returns only the survivors — so ureq dials only vetted IPs.
-/// If resolution yields nothing but forbidden addresses, it returns a
-/// `PermissionDenied` error rather than an empty set, which surfaces to the
-/// caller as a SERVICE failure (and an empty result under SILENT).
+/// ureq [`Resolver`](ureq::unversioned::resolver::Resolver) wrapper that enforces the SSRF egress
+/// policy on the *resolved* addresses (DNS-rebinding-safe), through [`resolve_vetted`] with the
+/// thread's active SERVICE allowlist and mode. A refusal surfaces to the caller as a SERVICE
+/// failure (and an empty result under SILENT). [OPUS-4.8]
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 #[derive(Debug)]
 struct EgressFilterResolver;
 
-// [OPUS-4.8] sq-g2xs: the ureq-3 `Resolver` trait takes a parsed `&http::Uri` (+ `Config` +
-// timeout) and returns an `ArrayVec<SocketAddr, 16>` rather than ureq-2's `&str` netloc → `Vec`.
-// The SSRF logic is otherwise byte-for-byte the ureq-2 policy: derive `host:port` from the URI
-// authority + scheme default port, key the allowlist by the bare host, resolve, drop every
-// `is_forbidden_ip` address (unless allowlisted), and refuse with a `PermissionDenied` io error
-// (carried as `ureq::Error::Io`, so the `SERVICE_EGRESS_REFUSED_MARKER` survives the wrapping
-// and the kind stays `PermissionDenied` for the egress tests). A refusal is a HARD error (never
-// an empty address set), so ureq cannot fall through to an unguarded dial.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        _config: &ureq::config::Config,
+        _timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        // [OPUS-4.8] (sq-4w18) STRICT (AllowlistOnly) mode — the server's policy — refuses any
+        // host not on the allowlist BEFORE resolving DNS. An empty allowlist = deny ALL SERVICE.
+        let strict = egress_policy::mode() == egress_policy::Mode::AllowlistOnly;
+        resolve_vetted(uri, egress_policy::is_allowed, strict, |refusal| match refusal {
+            EgressRefusal::NoAuthority => format!(
+                "{SERVICE_EGRESS_REFUSED_MARKER}: request URI {uri} has no host authority to vet"
+            ),
+            EgressRefusal::NotAllowlisted { host } => format!(
+                "{SERVICE_EGRESS_REFUSED_MARKER}: host {host:?} is not on the SERVICE allowlist \
+                 (strict allowlist-only policy; add it via --service-allow / SPARQ_SERVICE_ALLOW \
+                 on the server, or with_service_egress_policy in an embedder)"
+            ),
+            EgressRefusal::PrivateOnly { host_port } => format!(
+                "{SERVICE_EGRESS_REFUSED_MARKER}: {host_port} resolves only to private/internal addresses \
+                 (default-deny SSRF policy; allowlist the host via with_service_egress_allow)"
+            ),
+        })
+    }
+}
+
+/// Why [`resolve_vetted`] refused a request; the caller words the error text.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EgressRefusal<'a> {
+    /// The request URI carries no host authority to vet.
+    NoAuthority,
+    /// Strict mode, and the host is not allowlisted: refused before any DNS lookup.
+    NotAllowlisted {
+        /// The bare, lowercased host.
+        host: &'a str,
+    },
+    /// The host is not allowlisted and every address it resolves to is private or internal.
+    PrivateOnly {
+        /// The `host:port` that was resolved.
+        host_port: &'a str,
+    },
+}
+
+/// The SSRF-vetted addresses for a ureq-3 resolver: the one implementation behind the engine's
+/// SERVICE transport and every sparq-fedclient HTTP client. [OPUS-4.8] sq-g2xs / sq-a7jw4.
+///
+/// Derives `host:port` from the URI authority (scheme default port when absent), asks
+/// `allowed(host, port)` whether the bare lowercased host is allowlisted on the port actually
+/// dialled, refuses an unlisted host before resolving when `strict`, then resolves and drops
+/// every [`is_forbidden_ip`] address unless the host is allowlisted. ureq dials only the returned
+/// addresses, so there is no DNS-rebinding re-resolve window. A refusal is a HARD
+/// `PermissionDenied` [`ureq::Error::Io`] carrying `refuse`'s text, never an empty set, so ureq
+/// cannot fall through to an unguarded dial.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+pub fn resolve_vetted(
+    uri: &ureq::http::Uri,
+    allowed: impl FnOnce(&str, u16) -> bool,
+    strict: bool,
+    refuse: impl FnOnce(EgressRefusal<'_>) -> String,
+) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+    use std::net::ToSocketAddrs;
+    let Some((host_port, host, port)) = uri_host_port(uri) else {
+        return Err(egress_refused(refuse(EgressRefusal::NoAuthority)));
+    };
+    let allowed = allowed(&host, port);
+    if !allowed && strict {
+        return Err(egress_refused(refuse(EgressRefusal::NotAllowlisted {
+            host: &host,
+        })));
+    }
+    let resolved = host_port.to_socket_addrs().map_err(ureq::Error::Io)?;
+    let permitted = filter_addrs(resolved, allowed, is_forbidden_ip);
+    if permitted.is_empty() {
+        return Err(egress_refused(refuse(EgressRefusal::PrivateOnly {
+            host_port: &host_port,
+        })));
+    }
+    Ok(permitted)
+}
 
 /// `host:port` (for resolution) + bare host (for the allowlist key, IPv6 brackets stripped,
 /// lowercased) + the numeric `port` (for the port-scoped allowlist check, sq-a7jw4) from a
@@ -1909,7 +1980,7 @@ fn uri_host_port(uri: &ureq::http::Uri) -> Option<(String, String, u16)> {
 }
 
 /// Wrap a refusal reason as a `PermissionDenied` [`ureq::Error::Io`], preserving both the kind
-/// (the egress tests assert on it) and the [`SERVICE_EGRESS_REFUSED_MARKER`] text. [OPUS-4.8].
+/// (the egress tests assert on it) and the reason text. [OPUS-4.8].
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 fn egress_refused(reason: String) -> ureq::Error {
     ureq::Error::Io(std::io::Error::new(
@@ -1918,70 +1989,35 @@ fn egress_refused(reason: String) -> ureq::Error {
     ))
 }
 
+/// The `addrs` that pass the SSRF policy: all of them for an `allowed` host, otherwise those
+/// `forbidden` does not refuse, capped at [`RESOLVED_ADDRS_CAP`] so `push` never overruns the
+/// fixed backing array.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        _config: &ureq::config::Config,
-        _timeout: ureq::unversioned::transport::NextTimeout,
-    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        use std::net::ToSocketAddrs;
-        let (host_port, host, port) = uri_host_port(uri).ok_or_else(|| {
-            egress_refused(format!(
-                "{SERVICE_EGRESS_REFUSED_MARKER}: request URI {uri} has no host authority to vet"
-            ))
-        })?;
-        // [OPUS-4.8] (sq-a7jw4) The allowlist check is port-scoped: a `host:port` entry permits
-        // only that host on that exact port; a bare-host entry still permits every port. `port`
-        // is the authority port that is actually dialled for every resolved address.
-        let allowed = egress_policy::is_allowed(&host, port);
-        // [OPUS-4.8] (sq-4w18) STRICT (AllowlistOnly) mode — the server's policy — refuses any
-        // host not on the allowlist BEFORE resolving DNS, so a host that is not explicitly
-        // permitted never triggers even a lookup. An empty allowlist here = deny ALL SERVICE.
-        if !allowed && egress_policy::mode() == egress_policy::Mode::AllowlistOnly {
-            return Err(egress_refused(format!(
-                "{SERVICE_EGRESS_REFUSED_MARKER}: host {host:?} is not on the SERVICE allowlist \
-                 (strict allowlist-only policy; add it via --service-allow / SPARQ_SERVICE_ALLOW \
-                 on the server, or with_service_egress_policy in an embedder)"
-            )));
-        }
-        let resolved = host_port.to_socket_addrs().map_err(ureq::Error::Io)?;
-        let mut permitted: ureq::unversioned::resolver::ResolvedSocketAddrs = arrayvec_default();
-        // `ResolvedSocketAddrs` is a fixed-capacity `ArrayVec<_, 16>`; cap to its capacity (the
-        // same `MAX_ADDRS` ureq's own resolver uses) so `push` never overruns the backing array.
-        for sa in resolved
-            .filter(|sa| allowed || !is_forbidden_ip(sa.ip()))
-            .take(RESOLVED_ADDRS_CAP)
-        {
-            permitted.push(sa);
-        }
-        if permitted.is_empty() {
-            return Err(egress_refused(format!(
-                "{SERVICE_EGRESS_REFUSED_MARKER}: {host_port} resolves only to private/internal addresses \
-                 (default-deny SSRF policy; allowlist the host via with_service_egress_allow)"
-            )));
-        }
-        Ok(permitted)
+fn filter_addrs(
+    addrs: impl Iterator<Item = std::net::SocketAddr>,
+    allowed: bool,
+    forbidden: fn(std::net::IpAddr) -> bool,
+) -> ureq::unversioned::resolver::ResolvedSocketAddrs {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    // `ArrayVec::from_fn` fills the backing array, but the logical length starts at 0
+    // (the same idiom ureq's `DefaultResolver::empty` uses), so it is genuinely empty.
+    let mut permitted: ureq::unversioned::resolver::ResolvedSocketAddrs =
+        ureq::unversioned::resolver::ArrayVec::from_fn(|_| {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+        });
+    for sa in addrs
+        .filter(|sa| allowed || !forbidden(sa.ip()))
+        .take(RESOLVED_ADDRS_CAP)
+    {
+        permitted.push(sa);
     }
+    permitted
 }
 
 /// Capacity of ureq-3's [`ResolvedSocketAddrs`](ureq::unversioned::resolver::ResolvedSocketAddrs)
 /// (`ArrayVec<SocketAddr, 16>`). Matches ureq's own `MAX_ADDRS`. [OPUS-4.8] sq-g2xs.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 const RESOLVED_ADDRS_CAP: usize = 16;
-
-/// An empty [`ResolvedSocketAddrs`](ureq::unversioned::resolver::ResolvedSocketAddrs) backing
-/// store (a fixed-capacity `ArrayVec`). [OPUS-4.8] sq-g2xs.
-#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-fn arrayvec_default() -> ureq::unversioned::resolver::ResolvedSocketAddrs {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-    // `ArrayVec::from_fn` fills the backing array, but the logical length starts at 0
-    // (the same idiom ureq's `DefaultResolver::empty` uses), so it is genuinely empty.
-    ureq::unversioned::resolver::ArrayVec::from_fn(|_| {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
-    })
-}
 
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 impl HttpTransport {
@@ -4292,6 +4328,111 @@ mod tests {
             let (_netloc, host, port) = super::super::uri_host_port(&uri).unwrap();
             assert_eq!(host, "example.com");
             assert_eq!(port, 9090);
+        }
+
+        /// `host_port` keeps the authority spelling for resolution; the allowlist key is the
+        /// lowercased, bracket-stripped host.
+        #[test]
+        fn allowlist_key_is_lowercased_and_unbracketed() {
+            let uri: ureq::http::Uri = "http://Example.ORG:8080/sparql".parse().unwrap();
+            assert_eq!(
+                super::super::uri_host_port(&uri),
+                Some(("Example.ORG:8080".to_string(), "example.org".to_string(), 8080))
+            );
+            let uri: ureq::http::Uri = "http://[::1]:8053/q".parse().unwrap();
+            assert_eq!(
+                super::super::uri_host_port(&uri),
+                Some(("::1:8053".to_string(), "::1".to_string(), 8053))
+            );
+        }
+    }
+
+    // --- resolve_vetted / filter_addrs (native-only; IP literals, no DNS) -----
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod resolve_vetted_tests {
+        use super::super::{filter_addrs, resolve_vetted, EgressRefusal};
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+        const LOOP: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
+
+        fn always(_: IpAddr) -> bool {
+            true
+        }
+        fn never(_: IpAddr) -> bool {
+            false
+        }
+
+        fn uri(s: &str) -> ureq::http::Uri {
+            s.parse().expect("test URI parses")
+        }
+
+        /// The refusal reason of a `PermissionDenied` io error, or a panic.
+        fn denied(r: Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error>) -> String {
+            match r {
+                Err(ureq::Error::Io(io)) => {
+                    assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
+                    io.to_string()
+                }
+                other => panic!("expected Error::Io(PermissionDenied), got {other:?}"),
+            }
+        }
+
+        /// An allowlisted host keeps an address the classifier forbids (`allowed || !forbidden`).
+        #[test]
+        fn filter_addrs_allowed_bypasses_the_classifier() {
+            let got = filter_addrs([LOOP].into_iter(), true, always);
+            assert_eq!(got[..], [LOOP]);
+        }
+
+        /// Without the allowlist a forbidden address is dropped, and a permitted one kept.
+        #[test]
+        fn filter_addrs_applies_the_classifier_when_not_allowed() {
+            assert!(filter_addrs([LOOP].into_iter(), false, always).is_empty());
+            assert_eq!(filter_addrs([LOOP].into_iter(), false, never)[..], [LOOP]);
+        }
+
+        /// The result never exceeds ureq's fixed resolved-address capacity.
+        #[test]
+        fn filter_addrs_caps_at_the_resolved_capacity() {
+            let many = (0..40u16).map(|p| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), p));
+            assert_eq!(filter_addrs(many, true, never).len(), super::super::RESOLVED_ADDRS_CAP);
+        }
+
+        /// The allowlist callback sees the bare lowercased host and the dialled port.
+        #[test]
+        fn resolve_vetted_passes_host_and_port_to_the_allowlist() {
+            let mut seen = None;
+            let got = resolve_vetted(
+                &uri("http://127.0.0.1:8080/q"),
+                |h, p| {
+                    seen = Some((h.to_string(), p));
+                    true
+                },
+                false,
+                |r| unreachable!("allowlisted loopback must resolve, got {r:?}"),
+            )
+            .expect("allowlisted loopback resolves");
+            assert_eq!(seen, Some(("127.0.0.1".to_string(), 8080)));
+            assert_eq!(got[..], [LOOP]);
+        }
+
+        /// Each refusal is a hard `PermissionDenied` carrying the caller's text for its reason.
+        #[test]
+        fn resolve_vetted_refusals_are_hard_errors() {
+            let text = |r: EgressRefusal<'_>| format!("{r:?}");
+            assert_eq!(
+                denied(resolve_vetted(&uri("/no-authority"), |_, _| true, false, text)),
+                "NoAuthority"
+            );
+            assert_eq!(
+                denied(resolve_vetted(&uri("http://127.0.0.1:8080/"), |_, _| false, true, text)),
+                "NotAllowlisted { host: \"127.0.0.1\" }"
+            );
+            assert_eq!(
+                denied(resolve_vetted(&uri("http://127.0.0.1:8080/"), |_, _| false, false, text)),
+                "PrivateOnly { host_port: \"127.0.0.1:8080\" }"
+            );
         }
     }
 
