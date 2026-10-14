@@ -702,6 +702,64 @@ named reason and unlock path in the deferral ledger: `sparq-conformance/tests/dl
 (`DOCUMENTED_DIVERGENCES`, `DL_DIRECT_ABSTAINED`, `DL_PROFILE_ABSTAINED`) and the design
 record `research/owl2-direct-semantics-scoping.md`.
 
+**Full OWL 2 DL front end (`sparq_reason_dl::owl2dl`, issue #7031, in progress).** The
+ALCH layers above are being extended to OWL 2 DL (SROIQ(D)) by a hypertableau reasoner.
+Its first layer is built: `owl2dl::extract(&dict, &triples)` reads the whole OWL 2 RDF
+mapping (inverses, cardinalities, nominals, `hasSelf`, chains, keys, datatypes and facets,
+`sameAs`/`differentFrom`, negative assertions, n-ary disjointness) into a typed
+`owl2dl::Ontology`, every axiom carrying the input triple indices it came from. It stays
+fail-closed: a triple it cannot place gives an `ExtractError` naming that triple.
+Annotations are kept too (annotation axioms, plus ontology and reified axiom annotations in
+`Ontology::annotations`), outside the logical axioms.
+`owl2dl::check_dl(&dict, &onto)` runs the OWL 2 DL global restrictions (declarations and
+typing, punning, reserved vocabulary, simple roles, property-hierarchy regularity,
+anonymous-individual forests, operand sets, ill-typed literals, facets, datatype
+definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
+`Some(false)` on a violation, `Some(true)` only when every restriction was checked, and
+`None` when one was not (listed in `unchecked`: `xsd:pattern` syntax, `rdf:XMLLiteral`
+content, an unloaded imports closure, anonymous individuals outside an anonymous forest,
+literal values beyond the represented range such as a year past `i64` or a language tag
+that is not well-formed BCP 47, and the facet space of a bound outside the restricted
+datatype's value space, and whether operands with cardinality restrictions are distinct). Cardinalities must be valid non-negative `xsd:nonNegativeInteger` or
+`xsd:integer` literals; others are refused as unsupported. Lexical forms get no
+whitespace normalisation (RDF applies no `whiteSpace` facet), and with unloaded imports
+the violations an import could repair (undeclared entities, unknown datatypes) are
+unchecked rather than definite.
+`blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
+`Ontology::imports`, never dereferenced.
+`owl2dl::check(&dict, &onto, Budget::default())` is the reasoner: a hypertableau (Motik,
+Shearer and Horrocks) over DL-clauses, with pairwise anywhere blocking, merging and
+dependency-directed backjumping. It returns a `DlReport` with the profile report,
+`consistency` (`Consistent`, `Inconsistent`, or `Unknown(reason)`) and, when consistent, a
+`Classification` (unsatisfiable named classes, every entailed named subsumption, and the
+`inferred` ones not asserted; `classification_unknown` says why a consistent ontology has
+none, which happens when the shared classification budget runs out).
+`owl2dl::Reasoner::new(&dict, &onto, budget)` answers single
+`is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
+(`Option<bool>`; `owl:Thing`, `owl:Nothing` and
+classes no axiom mentions included; `None` when an unloaded import could change a negative
+answer). The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`,
+number restrictions up to `MAX_CARDINALITY`; anything else (data properties and
+datatypes, nominals and `hasValue`, other chains, keys, the top and bottom object
+properties) gives `Unknown(OutOfFragment { construct, source })`, a blocking profile
+violation gives `Unknown(NotInDl)`, an exhausted step budget gives
+`Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
+`Unknown(ImportsNotLoaded)` with no classification. It never guesses a verdict. Its answers are checked against
+HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
+`owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
+(`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
+`is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and
+`conjunction_satisfiable(pos, neg, distinct, values)`, which asks whether `distinct`
+pairwise different values exist inside every range of `pos`, outside every range of `neg`
+and outside `values`. Each answer is a `Tri`: `Yes` and `No` are exact (rational bounds
+without rounding, discrete floats with `-0` and `+0` distinct, the ±14:00 rule for
+`xsd:dateTime`, strings of XML characters, and automata for XSD patterns, lengths, basic
+language ranges and BCP 47 tags, `langtag`s only for `rdf:PlainLiteral`), and `Unknown` covers particular `rdf:XMLLiteral`
+values (their XML content is not checked), a facet outside the datatype's facet space
+(including an order bound outside its value space), a value no literal has, data ranges nested more than 64 deep, an XSD pattern this implementation does
+not support (block escapes such as `\p{IsBasicLatin}`, or groups nested more than 64 deep),
+and string searches over a fixed automaton budget (states, edges and automaton bytes).
+
 ## Common recipes
 
 **1. OWL 2 RL closure + inconsistency report.** OWL includes RDFS; run the clash check on the materialized result.
