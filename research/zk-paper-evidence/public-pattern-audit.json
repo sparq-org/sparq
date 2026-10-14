@@ -1,0 +1,823 @@
+{
+  "audited_at": "2026-09-26T15:00:53.131324+00:00",
+  "status": "independently_verified_success",
+  "source": "2aaf459b785a318246fe0e5a71fb15f8944a325f",
+  "tree": "b8147db818bb1f7c50dfb76278baca70d54d8b8a",
+  "selected_paths": 679,
+  "unchanged_locks": 29,
+  "source_comparison": "Before/after equal all 679 independently Git-verified smoke source hashes; clean after",
+  "job_sha256": "338e895be5e5dcbf54bcd60c3086bc013ff7cfc6573444aff534888cd1372321",
+  "completed_at": "2026-09-26T14:58:04.231838+00:00",
+  "steps": [
+    {
+      "name": "bounded20-paired-ablation",
+      "command": [
+        "/home/ubuntu/sparq-zk-runs/vc-rdfc-ca4d74c0751f-attempt2/target/release/examples/result_experiment",
+        "/home/ubuntu/sparq-zk-runs/public-pattern-ablation-2aaf-bounded20/runtime-input.json",
+        "/home/ubuntu/sparq-zk-runs/public-pattern-ablation-2aaf-bounded20/measurement"
+      ],
+      "exit": 0,
+      "expected_exit": 0,
+      "expected_pattern": null,
+      "pass": true,
+      "seconds": 103.16,
+      "log_sha256": "405bc77b158f01475a2f1980353e44b79d71ada37a6e611e6e7f622bdba99c34"
+    }
+  ],
+  "genuine_proofs": 20,
+  "positive_backend_verifications": 20,
+  "warmup_samples": 4,
+  "measured_samples": 16,
+  "tamper_controls": 24,
+  "replay_controls": 20,
+  "runs": [
+    {
+      "ordinal": 1,
+      "role": "warmup",
+      "round": 0,
+      "arm": "baseline_v1",
+      "profile": "k1",
+      "relation_version": 1,
+      "package": "result_v1_k1_n16_p3_r4_f0",
+      "nonce_id": 430001,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.535952507,
+      "verify_seconds_inclusive": 0.801829456,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 2,
+      "role": "warmup",
+      "round": 0,
+      "arm": "public_pattern_v4",
+      "profile": "k1",
+      "relation_version": 4,
+      "package": "result_v4_k1_n16_p3_r4_f0_d10",
+      "nonce_id": 430002,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.493529198,
+      "verify_seconds_inclusive": 0.800287461,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 3,
+      "role": "measurement",
+      "round": 0,
+      "arm": "baseline_v1",
+      "profile": "k1",
+      "relation_version": 1,
+      "package": "result_v1_k1_n16_p3_r4_f0",
+      "nonce_id": 430003,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.575864324,
+      "verify_seconds_inclusive": 0.808552193,
+      "tamper_control_count": 6,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 4,
+      "role": "measurement",
+      "round": 0,
+      "arm": "public_pattern_v4",
+      "profile": "k1",
+      "relation_version": 4,
+      "package": "result_v4_k1_n16_p3_r4_f0_d10",
+      "nonce_id": 430004,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.498884985,
+      "verify_seconds_inclusive": 0.801267403,
+      "tamper_control_count": 6,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 5,
+      "role": "measurement",
+      "round": 1,
+      "arm": "public_pattern_v4",
+      "profile": "k1",
+      "relation_version": 4,
+      "package": "result_v4_k1_n16_p3_r4_f0_d10",
+      "nonce_id": 430005,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.587929351,
+      "verify_seconds_inclusive": 0.791174248,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 6,
+      "role": "measurement",
+      "round": 1,
+      "arm": "baseline_v1",
+      "profile": "k1",
+      "relation_version": 1,
+      "package": "result_v1_k1_n16_p3_r4_f0",
+      "nonce_id": 430006,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.596681141,
+      "verify_seconds_inclusive": 0.813088005,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 7,
+      "role": "measurement",
+      "round": 2,
+      "arm": "baseline_v1",
+      "profile": "k1",
+      "relation_version": 1,
+      "package": "result_v1_k1_n16_p3_r4_f0",
+      "nonce_id": 430007,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.585385199,
+      "verify_seconds_inclusive": 0.806560985,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 8,
+      "role": "measurement",
+      "round": 2,
+      "arm": "public_pattern_v4",
+      "profile": "k1",
+      "relation_version": 4,
+      "package": "result_v4_k1_n16_p3_r4_f0_d10",
+      "nonce_id": 430008,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.494650718,
+      "verify_seconds_inclusive": 0.795206847,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 9,
+      "role": "measurement",
+      "round": 3,
+      "arm": "public_pattern_v4",
+      "profile": "k1",
+      "relation_version": 4,
+      "package": "result_v4_k1_n16_p3_r4_f0_d10",
+      "nonce_id": 430009,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.499878452,
+      "verify_seconds_inclusive": 0.816112779,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 10,
+      "role": "measurement",
+      "round": 3,
+      "arm": "baseline_v1",
+      "profile": "k1",
+      "relation_version": 1,
+      "package": "result_v1_k1_n16_p3_r4_f0",
+      "nonce_id": 430010,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 1,
+        "shared_memberships": 3,
+        "signature_checks": 1,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 2.563431709,
+      "verify_seconds_inclusive": 0.803193339,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 11,
+      "role": "warmup",
+      "round": 0,
+      "arm": "baseline_v1",
+      "profile": "k2",
+      "relation_version": 1,
+      "package": "result_v1_k2_n16_p3_r4_f0",
+      "nonce_id": 430011,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.98165824,
+      "verify_seconds_inclusive": 1.115183804,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 12,
+      "role": "warmup",
+      "round": 0,
+      "arm": "public_pattern_v4",
+      "profile": "k2",
+      "relation_version": 4,
+      "package": "result_v4_k2_n16_p3_r4_f0_d10",
+      "nonce_id": 430012,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.891132649,
+      "verify_seconds_inclusive": 1.103969344,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 13,
+      "role": "measurement",
+      "round": 0,
+      "arm": "baseline_v1",
+      "profile": "k2",
+      "relation_version": 1,
+      "package": "result_v1_k2_n16_p3_r4_f0",
+      "nonce_id": 430013,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.979548347,
+      "verify_seconds_inclusive": 1.10202523,
+      "tamper_control_count": 6,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 14,
+      "role": "measurement",
+      "round": 0,
+      "arm": "public_pattern_v4",
+      "profile": "k2",
+      "relation_version": 4,
+      "package": "result_v4_k2_n16_p3_r4_f0_d10",
+      "nonce_id": 430014,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.891103508,
+      "verify_seconds_inclusive": 1.101179552,
+      "tamper_control_count": 6,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 15,
+      "role": "measurement",
+      "round": 1,
+      "arm": "public_pattern_v4",
+      "profile": "k2",
+      "relation_version": 4,
+      "package": "result_v4_k2_n16_p3_r4_f0_d10",
+      "nonce_id": 430015,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.887871487,
+      "verify_seconds_inclusive": 1.101426916,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 16,
+      "role": "measurement",
+      "round": 1,
+      "arm": "baseline_v1",
+      "profile": "k2",
+      "relation_version": 1,
+      "package": "result_v1_k2_n16_p3_r4_f0",
+      "nonce_id": 430016,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.897831242,
+      "verify_seconds_inclusive": 1.202312236,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 17,
+      "role": "measurement",
+      "round": 2,
+      "arm": "baseline_v1",
+      "profile": "k2",
+      "relation_version": 1,
+      "package": "result_v1_k2_n16_p3_r4_f0",
+      "nonce_id": 430017,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.964798264,
+      "verify_seconds_inclusive": 1.114305121,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 18,
+      "role": "measurement",
+      "round": 2,
+      "arm": "public_pattern_v4",
+      "profile": "k2",
+      "relation_version": 4,
+      "package": "result_v4_k2_n16_p3_r4_f0_d10",
+      "nonce_id": 430018,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.889907556,
+      "verify_seconds_inclusive": 1.101932113,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 19,
+      "role": "measurement",
+      "round": 3,
+      "arm": "public_pattern_v4",
+      "profile": "k2",
+      "relation_version": 4,
+      "package": "result_v4_k2_n16_p3_r4_f0_d10",
+      "nonce_id": 430019,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.888955479,
+      "verify_seconds_inclusive": 1.103786746,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    },
+    {
+      "ordinal": 20,
+      "role": "measurement",
+      "round": 3,
+      "arm": "baseline_v1",
+      "profile": "k2",
+      "relation_version": 1,
+      "package": "result_v1_k2_n16_p3_r4_f0",
+      "nonce_id": 430020,
+      "work": {
+        "optimization": "Optimal",
+        "private_predicates": 0,
+        "public_predicates": 0,
+        "selected_credentials": 2,
+        "shared_memberships": 3,
+        "signature_checks": 2,
+        "witness_uses": 3
+      },
+      "prove_seconds_inclusive": 3.964395577,
+      "verify_seconds_inclusive": 1.117803419,
+      "tamper_control_count": 0,
+      "replay_rejected": true,
+      "proof_bytes": 14656
+    }
+  ],
+  "hardware": {
+    "cpu": "{\n   \"lscpu\": [\n      {\n         \"field\": \"Architecture:\",\n         \"data\": \"x86_64\"\n      },{\n         \"field\": \"CPU op-mode(s):\",\n         \"data\": \"32-bit, 64-bit\"\n      },{\n         \"field\": \"Address sizes:\",\n         \"data\": \"46 bits physical, 48 bits virtual\"\n      },{\n         \"field\": \"Byte Order:\",\n         \"data\": \"Little Endian\"\n      },{\n         \"field\": \"CPU(s):\",\n         \"data\": \"8\"\n      },{\n         \"field\": \"On-line CPU(s) list:\",\n         \"data\": \"0-7\"\n      },{\n         \"field\": \"Vendor ID:\",\n         \"data\": \"GenuineIntel\"\n      },{\n         \"field\": \"Model name:\",\n         \"data\": \"Intel(R) Xeon(R) Platinum 8488C\"\n      },{\n         \"field\": \"CPU family:\",\n         \"data\": \"6\"\n      },{\n         \"field\": \"Model:\",\n         \"data\": \"143\"\n      },{\n         \"field\": \"Thread(s) per core:\",\n         \"data\": \"2\"\n      },{\n         \"field\": \"Core(s) per socket:\",\n         \"data\": \"4\"\n      },{\n         \"field\": \"Socket(s):\",\n         \"data\": \"1\"\n      },{\n         \"field\": \"Stepping:\",\n         \"data\": \"8\"\n      },{\n         \"field\": \"BogoMIPS:\",\n         \"data\": \"4800.00\"\n      },{\n         \"field\": \"Flags:\",\n         \"data\": \"fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq monitor ssse3 fma cx16 pdcm pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch cpuid_fault ssbd ibrs ibpb stibp ibrs_enhanced fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx_vnni avx512_bf16 wbnoinvd ida arat avx512vbmi umip pku ospke waitpkg avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg tme avx512_vpopcntdq rdpid cldemote movdiri movdir64b md_clear serialize amx_bf16 avx512_fp16 amx_tile amx_int8 flush_l1d arch_capabilities\"\n      },{\n         \"field\": \"Hypervisor vendor:\",\n         \"data\": \"KVM\"\n      },{\n         \"field\": \"Virtualization type:\",\n         \"data\": \"full\"\n      },{\n         \"field\": \"L1d cache:\",\n         \"data\": \"192 KiB (4 instances)\"\n      },{\n         \"field\": \"L1i cache:\",\n         \"data\": \"128 KiB (4 instances)\"\n      },{\n         \"field\": \"L2 cache:\",\n         \"data\": \"8 MiB (4 instances)\"\n      },{\n         \"field\": \"L3 cache:\",\n         \"data\": \"105 MiB (1 instance)\"\n      },{\n         \"field\": \"NUMA node(s):\",\n         \"data\": \"1\"\n      },{\n         \"field\": \"NUMA node0 CPU(s):\",\n         \"data\": \"0-7\"\n      },{\n         \"field\": \"Vulnerability Gather data sampling:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Ghostwrite:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Indirect target selection:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Itlb multihit:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability L1tf:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Mds:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Meltdown:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Mmio stale data:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Old microcode:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Reg file data sampling:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Retbleed:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Spec rstack overflow:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Spec store bypass:\",\n         \"data\": \"Mitigation; Speculative Store Bypass disabled via prctl\"\n      },{\n         \"field\": \"Vulnerability Spectre v1:\",\n         \"data\": \"Mitigation; usercopy/swapgs barriers and __user pointer sanitization\"\n      },{\n         \"field\": \"Vulnerability Spectre v2:\",\n         \"data\": \"Mitigation; Enhanced / Automatic IBRS; IBPB conditional; PBRSB-eIBRS SW sequence; BHI BHI_DIS_S\"\n      },{\n         \"field\": \"Vulnerability Srbds:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Tsa:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Tsx async abort:\",\n         \"data\": \"Not affected\"\n      },{\n         \"field\": \"Vulnerability Vmscape:\",\n         \"data\": \"Not affected\"\n      }\n   ]\n}\n",
+    "kernel": "Linux ip-172-31-29-111 7.0.0-1013-aws #13~24.04.1-Ubuntu SMP PREEMPT Sat Sep  5 01:10:01 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux\n",
+    "load_before": "3.89 3.97 3.26 2/246 76534\n",
+    "memory_before": "MemTotal:       32309460 kB\nMemFree:        14867744 kB\nMemAvailable:   24990836 kB\nBuffers:          244420 kB\nCached:          9629032 kB\nSwapCached:            0 kB\nActive:          8435932 kB\nInactive:        7880872 kB\nActive(anon):    6451252 kB\nInactive(anon):    18600 kB\nActive(file):    1984680 kB\nInactive(file):  7862272 kB\nUnevictable:       43872 kB\nMlocked:           27240 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\nZswap:                 0 kB\nZswapped:              0 kB\nDirty:              4320 kB\nWriteback:             0 kB\nAnonPages:       6467036 kB\nMapped:           106140 kB\nShmem:              3008 kB\nKReclaimable:     727292 kB\nSlab:             880920 kB\nSReclaimable:     727292 kB\nSUnreclaim:       153628 kB\nKernelStack:        4168 kB\nPageTables:        21616 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    16154728 kB\nCommitted_AS:    9486648 kB\nVmallocTotal:   34359738367 kB\nVmallocUsed:       16792 kB\nVmallocChunk:          0 kB\nPercpu:             6176 kB\nHardwareCorrupted:     0 kB\nAnonHugePages:         0 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:    403456 kB\nFilePmdMapped:         0 kB\nCmaTotal:              0 kB\nCmaFree:         2601444 kB\nUnaccepted:            0 kB\nBalloon:               0 kB\nHugePages_Total:       0\nHugePages_Free:        0\nHugePages_Rsvd:        0\nHugePages_Surp:        0\nHugepagesize:       2048 kB\nHugetlb:               0 kB\nDirectMap4k:       96688 kB\nDirectMap2M:     4585472 kB\nDirectMap1G:    29360128 kB\n",
+    "limitations": "paired sequential samples under CPUQuota200% MemoryMax8G; no OS cold-cache claim; heavyweight proof and native Cargo locks held; not an exclusive bare-metal run"
+  },
+  "executable": {
+    "path": "/home/ubuntu/sparq-zk-runs/vc-rdfc-ca4d74c0751f-attempt2/target/release/examples/result_experiment",
+    "sha256": "ab01a64d3a82dde9ac2a6758e2a9264fcab9c73cdad9060cd8da413175a88bb3",
+    "bytes": 2396688
+  },
+  "tools": {
+    "nargo": {
+      "path": "/home/ubuntu/sparq-zk-tools/noir-beta21-bb20260324/bin/nargo",
+      "sha256": "0852cd5631ac5ca25f744f25c931e3cff16351d9bcdbfb03cebb48a4494a0fe3",
+      "bytes": 50238760
+    },
+    "bb": {
+      "path": "/home/ubuntu/sparq-zk-tools/noir-beta21-bb20260324/bin/bb",
+      "sha256": "d7621dfb151f55c23fb04bf274f366a6a1e0516b85a3cf0ae9165a9952509793",
+      "bytes": 34415696
+    }
+  },
+  "locks_and_limits": [
+    "sudo",
+    "systemd-run",
+    "--unit=sparq-public-pattern-ablation-2aaf-bounded20",
+    "--uid=ubuntu",
+    "--property=Type=exec",
+    "--property=MemoryMax=8G",
+    "--property=MemorySwapMax=0",
+    "--property=CPUQuota=200%",
+    "--property=TasksMax=1024",
+    "--property=RuntimeMaxSec=3600",
+    "--property=TimeoutStopSec=30s",
+    "--property=KillMode=control-group",
+    "--property=UMask=0077",
+    "--property=StandardOutput=append:/home/ubuntu/sparq-zk-runs/public-pattern-ablation-2aaf-bounded20/service.log",
+    "--property=StandardError=append:/home/ubuntu/sparq-zk-runs/public-pattern-ablation-2aaf-bounded20/service.log",
+    "/usr/bin/flock",
+    "-w",
+    "3000",
+    "/home/ubuntu/sparq-zk-runs/heavy-job.lock",
+    "/usr/bin/flock",
+    "-w",
+    "300",
+    "/home/ubuntu/sparq-zk-runs/vc-native-job.lock",
+    "/usr/bin/python3",
+    "/home/ubuntu/sparq-zk-runs/public-pattern-ablation-2aaf-bounded20/job.py"
+  ],
+  "artifacts": {
+    "measurement/report.json": {
+      "sha256": "df6ffc45ae59b53f67bc741b021be7b328651cd71af55cecb33aae03c16983c7",
+      "bytes": 155013
+    },
+    "measurement/run-1/presentation.json": {
+      "sha256": "97e9364a47457670beb8f0e90fa673084f70d66edd3626638d48eefe003b2140",
+      "bytes": 42353
+    },
+    "measurement/run-1/proof.bin": {
+      "sha256": "4cf372e35804d7cec1192b1a39ae72400c7a2c327bec02de41ea0bcdff18ca75",
+      "bytes": 14656
+    },
+    "measurement/run-1/public.json": {
+      "sha256": "3084894f28fcfd9931b569977d03f37e8003a008f7c85420645fa887f66f4b35",
+      "bytes": 467
+    },
+    "measurement/run-2/presentation.json": {
+      "sha256": "6acb2c1612b0e23867b272abead7920411c86e930ec38b3607a1d37ddb3b8344",
+      "bytes": 42357
+    },
+    "measurement/run-2/proof.bin": {
+      "sha256": "0d37233d7fb4d6d6ab8fe09f3d844425b8a59fb8c5c56b957a1fdcc3c219dcf5",
+      "bytes": 14656
+    },
+    "measurement/run-2/public.json": {
+      "sha256": "50fa6fba668dac9c2f5d0f2eec455bf4a6ab611f81c163c6e0d1933ff2203aea",
+      "bytes": 467
+    },
+    "measurement/run-16/presentation.json": {
+      "sha256": "509d1b2a08ae744e36635a36034b1c207f3efe8d38d7dd4ab690b93bc2c06a8e",
+      "bytes": 42976
+    },
+    "measurement/run-16/proof.bin": {
+      "sha256": "aff610218d2b83077de1167d9049b9c02b4a0b4b9a7176e799e2cef9f22566c4",
+      "bytes": 14656
+    },
+    "measurement/run-16/public.json": {
+      "sha256": "4533e2aa300347231e0050d2523d8bba34a99f1182b7dc71165023b11b91dcef",
+      "bytes": 534
+    },
+    "measurement/run-19/presentation.json": {
+      "sha256": "2222a29bd3e9f5b0890cc0da0d6d872a12c02eeaebf597086f579d07dd13635e",
+      "bytes": 43002
+    },
+    "measurement/run-19/proof.bin": {
+      "sha256": "a679f487505596752dc7926ea2fdcdd982b4b0fa726b0d4d997af669dc739f66",
+      "bytes": 14656
+    },
+    "measurement/run-19/public.json": {
+      "sha256": "b3e1b1595b3d0c5b45fc147928e0ac01e533f3f1c937981f2d868ce954898576",
+      "bytes": 534
+    },
+    "measurement/run-14/presentation.json": {
+      "sha256": "91285d1097debba09af6433c4d34bc2e9136019cdb880bc06177dbb9001ad270",
+      "bytes": 43002
+    },
+    "measurement/run-14/proof.bin": {
+      "sha256": "9034975dc60d5c5fae637403d7409b58b793018cca3fdc44162d2f86755a8509",
+      "bytes": 14656
+    },
+    "measurement/run-14/public.json": {
+      "sha256": "d658c60cbba71d87fcc5c280c9c8528197e66aa239e50374566cac522a61c2cf",
+      "bytes": 534
+    },
+    "measurement/run-9/presentation.json": {
+      "sha256": "aee3d0eff9d11e7364f15cf2d8c9b48f3f1fe219503a174d141d9b5cb75a5f5d",
+      "bytes": 42307
+    },
+    "measurement/run-9/proof.bin": {
+      "sha256": "79c617dbc810da9f64df56d459a36c3b72198ab47227bd6d5cd771a21c9c0d9b",
+      "bytes": 14656
+    },
+    "measurement/run-9/public.json": {
+      "sha256": "4ff678fe3aea3478489b17188a731de00eadeaef88cbf3db0866bae0cc1bf1fc",
+      "bytes": 467
+    },
+    "measurement/run-12/presentation.json": {
+      "sha256": "34d62e7085f436bee9da5aad2e32105c2763e0e0655b126e4006d16552649b8c",
+      "bytes": 43036
+    },
+    "measurement/run-12/proof.bin": {
+      "sha256": "b2f9eb80c1f2dac27cbd26fc3d92b965248c85059c98282833b4e060db0c5876",
+      "bytes": 14656
+    },
+    "measurement/run-12/public.json": {
+      "sha256": "75b0e9ca1cc6972e44f532f61ed59ef0d1920387c256ec2635fa755798fceed8",
+      "bytes": 534
+    },
+    "measurement/run-18/presentation.json": {
+      "sha256": "285a3ac2a2d1ac878a70bacfb62409334557c1f67c8770b135f15277f693db36",
+      "bytes": 43060
+    },
+    "measurement/run-18/proof.bin": {
+      "sha256": "e9331c85eb004790be332ed4334b93592c75845d47bbc50e792320df04eb85f8",
+      "bytes": 14656
+    },
+    "measurement/run-18/public.json": {
+      "sha256": "bf88c1578ba75321815b73c26aec0366735281936e9576c62f319cb21156ef0f",
+      "bytes": 534
+    },
+    "measurement/run-13/presentation.json": {
+      "sha256": "5ddb847c2f8a5ccc017648fa76741aafa350dd90554672ff4b8362d332aacfd6",
+      "bytes": 42915
+    },
+    "measurement/run-13/proof.bin": {
+      "sha256": "8df2a8c465daa501821da2864d119f5969ddeb6519e641c3836254730057d305",
+      "bytes": 14656
+    },
+    "measurement/run-13/public.json": {
+      "sha256": "7b9d952b0c8f58e461a4bcd59834dea4bcbe9089d2502b2f656d5ef863b5f9bb",
+      "bytes": 534
+    },
+    "measurement/run-7/presentation.json": {
+      "sha256": "5e3b2c9db7ec41801ff5f12391a1f8b2865f0f572939fbe1ffca62bdb257ebf6",
+      "bytes": 42429
+    },
+    "measurement/run-7/proof.bin": {
+      "sha256": "92ff462dff3c44a29e15fac4c5082d2e8a192c46f25fd5fba3a8c9e64bbb55a1",
+      "bytes": 14656
+    },
+    "measurement/run-7/public.json": {
+      "sha256": "7c82d1c7606e1517a80d5e74323abbddb87846461698e56668c3c6be2ed8b248",
+      "bytes": 467
+    },
+    "measurement/run-15/presentation.json": {
+      "sha256": "15587b8a2f381821935a0360379b7063c01bd351f2a4c81d9f6abfac341ffe29",
+      "bytes": 42974
+    },
+    "measurement/run-15/proof.bin": {
+      "sha256": "281f9f7a64781f2a24b1de04daecc6cad73c286f39040314a352a98a1a4920e9",
+      "bytes": 14656
+    },
+    "measurement/run-15/public.json": {
+      "sha256": "bfcaefb076cc819d91c4efba40fcefa932d5f553cbaacc872326864d632fe783",
+      "bytes": 534
+    },
+    "measurement/run-5/presentation.json": {
+      "sha256": "27f96462884ee68fbe002e2a9bedfbe2d5b3582985f38946b5ac18d8e47be0a2",
+      "bytes": 42387
+    },
+    "measurement/run-5/proof.bin": {
+      "sha256": "6cbe4be565311fbbcb476b54a1d3475050c8f087496ac64dc1b654e96bc9ac24",
+      "bytes": 14656
+    },
+    "measurement/run-5/public.json": {
+      "sha256": "9eb70512b4298fe94c20b930dc7c9d66a40119734a2f5571a2d7ddf839123bab",
+      "bytes": 467
+    },
+    "measurement/run-3/presentation.json": {
+      "sha256": "f1454b2bf635344537ee8968921f807695dbbd7522dfd3f5514018d2c952976c",
+      "bytes": 42304
+    },
+    "measurement/run-3/proof.bin": {
+      "sha256": "7dd1c86bb4b68aaa0d18ed114c6bfccde7f29f8aef45c81f71c481c4be1ea8e7",
+      "bytes": 14656
+    },
+    "measurement/run-3/public.json": {
+      "sha256": "9ce44716d75f64d05171afc72b6b115b425eef02e752978d94ac3dc2c89765d8",
+      "bytes": 467
+    },
+    "measurement/run-4/presentation.json": {
+      "sha256": "2d1ea560c060c2c3b4c25c2dd849a8d25dcefcc2faca88a51b7b2f81ae8b2a99",
+      "bytes": 42347
+    },
+    "measurement/run-4/proof.bin": {
+      "sha256": "41b4dcc74afbc111c02ab3865a718152598fa977d6713565eb47a3eb9192aff3",
+      "bytes": 14656
+    },
+    "measurement/run-4/public.json": {
+      "sha256": "3eb69ee3ffb29a137497f91750f665405ce5bb0b35ba79dbe152ba18a778ff58",
+      "bytes": 467
+    },
+    "measurement/run-6/presentation.json": {
+      "sha256": "20bc9279987374f60d025ea1a9fd49d90e4b5d308c13fbde3e7615230ce46a8b",
+      "bytes": 42338
+    },
+    "measurement/run-6/proof.bin": {
+      "sha256": "495707235a8e7f7f3c48650d91c5e8b0edf07057519cd38e48d2fbf65ca073fd",
+      "bytes": 14656
+    },
+    "measurement/run-6/public.json": {
+      "sha256": "5413c478f1e9f4126e10edd652227dec82874bfc3293c388a0829667bc407c01",
+      "bytes": 467
+    },
+    "measurement/run-20/presentation.json": {
+      "sha256": "ebfa38b8161eb3c78c0aff4a0a78bf65b095597a49d4cbb08ea84d2dad4e9a19",
+      "bytes": 43032
+    },
+    "measurement/run-20/proof.bin": {
+      "sha256": "95aa90e405d656db47af63e079b0d5e17ee9c81294d973aebe5c3adf478c2740",
+      "bytes": 14656
+    },
+    "measurement/run-20/public.json": {
+      "sha256": "82ae5970d4c53cd05825b50ffb3829c03ca9919958a6062750c3a33c9e6d1267",
+      "bytes": 534
+    },
+    "measurement/run-11/presentation.json": {
+      "sha256": "ce71da16bc09a71c98e600aae7a18ae91d28a40a987c6f8d5c258c8186db2a21",
+      "bytes": 42924
+    },
+    "measurement/run-11/proof.bin": {
+      "sha256": "1393b1de7cc283c09e50a2946f436824eee926b3e4af61b7861be50502099755",
+      "bytes": 14656
+    },
+    "measurement/run-11/public.json": {
+      "sha256": "b1c0658f822e51e6c91d2279405f6bc6964a35f451d7ff40ef600add0aa33513",
+      "bytes": 534
+    },
+    "measurement/run-17/presentation.json": {
+      "sha256": "d0a4446b82890fde2ac6a072e090728daf91c121f7d8de2060a2d5d40666df63",
+      "bytes": 43047
+    },
+    "measurement/run-17/proof.bin": {
+      "sha256": "3ea20395cebd840478aea5047c3adbf169a5f29c1ab29de8ccdf954cd71af42d",
+      "bytes": 14656
+    },
+    "measurement/run-17/public.json": {
+      "sha256": "500f98a438418087317dbc8017cc1e1d55a30d0317761c0a4bc64cc134bfa1d2",
+      "bytes": 534
+    },
+    "measurement/run-10/presentation.json": {
+      "sha256": "6837b95e80b23e3274f40299920e45313af7d9357e0130be5e9ead531d1afc09",
+      "bytes": 42263
+    },
+    "measurement/run-10/proof.bin": {
+      "sha256": "28140c871f33d31cd7d795e3e7bb827237e770c055279a0f1a846b0ac56c8fb4",
+      "bytes": 14656
+    },
+    "measurement/run-10/public.json": {
+      "sha256": "6d40a19e7da9f911b3a64fb59e0b5bbd1e727d80ebd8c88807b7f2c4495625bb",
+      "bytes": 467
+    },
+    "measurement/run-8/presentation.json": {
+      "sha256": "84259bed434ed25088063a62aebdbcbaa52c8ccdb963d149c0b1a3c6fdcf386c",
+      "bytes": 42358
+    },
+    "measurement/run-8/proof.bin": {
+      "sha256": "0e6e9a67f101f923d5b9edc09540f2024c8531892a73ced6c404d6b377e9eac2",
+      "bytes": 14656
+    },
+    "measurement/run-8/public.json": {
+      "sha256": "28629ff9fbcbf00f3d5cefc388446df5dca72c151e0bd51afb27e8b8a1ccb528",
+      "bytes": 467
+    }
+  },
+  "evidence_sha256": {
+    "145826-remaining-retained.json": "0f6fd72d6ea8948bf4dd4277182091b49e7ac9fea1e37e9aed7bf4f5e44e212a",
+    "final-retained-response.json": "21891710e6fbaac895aea3a31a922a0508354caf1f6e12b5836bdfebbd0350be"
+  },
+  "limits": [
+    "NONcanonical bounded synthetic experiment: four measured pairs per K1/K2, no statistical significance or scalability claim.",
+    "Heavy proof lock then native build lock held; no exclusive bare-metal or cold-cache claim. RSS/backend-exclusive internal time unavailable.",
+    "SHA256 recomputed, report BLAKE3 retained without independent recomputation.",
+    "Public disclosure JSON retained; cryptographic public ABI and verifier keys not separately exported.",
+    "Negative backend nonzero-exit ambiguity remains inherited."
+  ]
+}

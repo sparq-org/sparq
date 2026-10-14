@@ -1,0 +1,291 @@
+{
+  "source": "42d13fedff0f42e3cde8ea63ff611408719cd6e7",
+  "verified_source_files": 7081,
+  "source_before_after_equal": true,
+  "clean": true,
+  "all_locks_unchanged": 30,
+  "baseline_source_verification": "6bf prior audit verified all7081 Git blobs; exactly4 permitted test/doc deltas independently compared with42d Git; all other values identical",
+  "steps": {
+    "export-exact-off": {
+      "exit": 0,
+      "test_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_names": []
+    },
+    "export-exact-on": {
+      "exit": 0,
+      "test_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_names": []
+    },
+    "export-authrdf": {
+      "exit": 0,
+      "test_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_names": []
+    },
+    "auth-host-native": {
+      "exit": 0,
+      "test_totals": {
+        "passed": 7,
+        "failed": 0,
+        "ignored": 1
+      },
+      "test_names": [
+        [
+          "fixture_is_the_published_vector_and_the_native_oracle_matches_expectations",
+          "ok"
+        ],
+        [
+          "prove_rejects_invalid_requests_and_credentials_before_any_executor",
+          "ok"
+        ],
+        [
+          "published_witness_encoding_stays_below_the_guest_input_bound",
+          "ok"
+        ],
+        [
+          "separate_guest_pins_are_distinct_and_checked_independently",
+          "ok"
+        ],
+        [
+          "verification_failures_never_consume_the_nonce",
+          "ok"
+        ],
+        [
+          "genuine_authrdf_receipts_verify_declared_cases_and_reject_controls",
+          "ignored, genuine proofs: needs SPARQ_AUTHRDF_PROOF_JOB, a real RISC0_SERVER_PATH and approved guests and pins"
+        ],
+        [
+          "genuine_job_case_selection_is_bounded_known_and_distinct",
+          "ok"
+        ],
+        [
+          "genuine_job_rejects_unknown_fields_and_invalid_seeds",
+          "ok"
+        ]
+      ]
+    },
+    "auth-alltarget-clippy": {
+      "exit": 0,
+      "test_totals": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_names": []
+    },
+    "auth-direct-guest": {
+      "exit": 0,
+      "test_totals": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "test_names": [
+        [
+          "actual_authrdf_guest_evaluates_the_published_vector_under_both_authorities",
+          "ok"
+        ],
+        [
+          "actual_authrdf_guest_rejects_forged_spliced_and_unauthorized_credentials",
+          "ok"
+        ],
+        [
+          "actual_authrdf_guest_rejects_noncanonical_and_foreign_wire_forms",
+          "ok"
+        ],
+        [
+          "actual_exact_guest_rejects_v5_input_and_still_accepts_v3",
+          "ok"
+        ]
+      ]
+    }
+  },
+  "native_test_functions_passed": 7,
+  "genuine_driver_ignored": 1,
+  "direct_sdk_test_functions_passed": 4,
+  "direct_execution_counts_from_executed_loops": {
+    "v5_positive": 10,
+    "v5_relation_guest_abort": 32,
+    "legacy_v3_positive": 1,
+    "legacy_guest_abort_on_v5": 2,
+    "total": 45
+  },
+  "abort_enforcement": "Every rejection must match an entire SDK error-chain entry equal to the exact guest panic; positive control precedes each negative family. Passing source-bound tests enforce this, per-case messages are not printed.",
+  "proofs": 0,
+  "receipts": 0,
+  "artifacts": {
+    "exact-off": {
+      "bytes": 5278700,
+      "sha256": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623"
+    },
+    "exact-on": {
+      "bytes": 5278700,
+      "sha256": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623"
+    },
+    "authrdf-artifact": {
+      "bytes": 5397208,
+      "sha256": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11"
+    }
+  },
+  "pins": {
+    "exact-off": {
+      "sha256": [
+        232,
+        201,
+        182,
+        182,
+        189,
+        67,
+        194,
+        120,
+        154,
+        221,
+        47,
+        203,
+        217,
+        236,
+        24,
+        145,
+        76,
+        44,
+        72,
+        204,
+        220,
+        209,
+        20,
+        158,
+        139,
+        157,
+        234,
+        111,
+        14,
+        118,
+        6,
+        35
+      ],
+      "image_id": [
+        3002199066,
+        1615302721,
+        2039644206,
+        2826525735,
+        178258819,
+        3880799180,
+        3190314515,
+        791784891
+      ]
+    },
+    "exact-on": {
+      "sha256": [
+        232,
+        201,
+        182,
+        182,
+        189,
+        67,
+        194,
+        120,
+        154,
+        221,
+        47,
+        203,
+        217,
+        236,
+        24,
+        145,
+        76,
+        44,
+        72,
+        204,
+        220,
+        209,
+        20,
+        158,
+        139,
+        157,
+        234,
+        111,
+        14,
+        118,
+        6,
+        35
+      ],
+      "image_id": [
+        3002199066,
+        1615302721,
+        2039644206,
+        2826525735,
+        178258819,
+        3880799180,
+        3190314515,
+        791784891
+      ]
+    },
+    "authrdf-artifact": {
+      "sha256": [
+        195,
+        95,
+        94,
+        75,
+        116,
+        22,
+        154,
+        165,
+        27,
+        36,
+        75,
+        143,
+        238,
+        203,
+        12,
+        142,
+        116,
+        98,
+        150,
+        166,
+        170,
+        5,
+        43,
+        232,
+        197,
+        143,
+        1,
+        144,
+        177,
+        177,
+        11,
+        17
+      ],
+      "image_id": [
+        2794517044,
+        4278390001,
+        1088095536,
+        53994879,
+        3259643235,
+        835127579,
+        1589380955,
+        3166477348
+      ]
+    }
+  },
+  "guest_invariance": "42d exact OFF and ON equal controlled6bf/8322 at identical source path",
+  "clippy": "authenticated-rdf alltargets -D warnings PASS",
+  "job_sha256": "03e9c331e2daacbd7ccc22c4649c9c71125d9af3a22d15245f0ffc6940492898",
+  "archive_sha256": "548733f4eec16cd1097710c4fc99868394441f716e13840aa47e22fd90aae606",
+  "limitations": [
+    "No genuine V5 proof yet.",
+    "No arbitrary-build-path reproducibility claim.",
+    "Full workspace/default host regression not run by this bounded gate.",
+    "Peak741236736B observed in progress snapshot only; transient unit unloaded at final retrieval."
+  ]
+}

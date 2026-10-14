@@ -558,6 +558,1431 @@
       "competitors": ["Oxigraph", "QLever", "Virtuoso"],
       "source": "bench/dashboard/competitors.json same_box_comparisons[suite='watdiv'] (git 0ab87b2a) — per-query count_crosscheck.all_agree, computed by scripts/bench/ingest-canonical-competitors.mjs from the raw envelopes at bench/canonical-competitor-results/2026-07-07/",
       "note": "Number of WatDiv queries whose sparq solution COUNT agrees with every independent engine (Oxigraph / QLever / Virtuoso) AND the pinned expected-rows oracle — full agreement, 16/16. Machine-INDEPENDENT (a deterministic answer-equivalence check, not a timing), so environment=canonical. A paper citing this must present it as an answer-equivalence rate, NOT a speed claim. [FABLE-5 sq-hmd7l.28]"
+    },
+    "zkvcq.exact_source_commit": {
+      "value": "4bb63258eee2d446b2ae22f3f334bb8ff6592715",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, hosted campaign)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /source_verification/source_head (frozen independent audit snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/source_verification/source_head" },
+      "note": "[OPUS-5.5 zkp-19] Source head whose hosted CI campaign produced the exact-evaluator receipts. Identity of the evaluated source only; not a security claim (external audit gate sq-qhy4 open)."
+    },
+    "zkvcq.exact_guest_sha256": {
+      "value": "fadf751d8cb91396abd7047a4a138736465e463415e40e7423130c01c5b5bd2a",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, hosted campaign)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /genuine_receipts/guest_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/genuine_receipts/guest_sha256" },
+      "note": "[OPUS-5.5 zkp-19] SHA-256 of the hosted guest ELF all hosted receipts are pinned to. The snapshot records that this is NOT the same guest binary as the separately built EC2 guest; the two are never pooled."
+    },
+    "zkvcq.exact_r0vm_version": {
+      "value": "risc0-r0vm 3.0.6",
+      "unit": "tool-version",
+      "environment": "canonical",
+      "kind": "toolchain-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, hosted campaign)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /toolchains/r0vm_version",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/toolchains/r0vm_version" },
+      "note": "[OPUS-5.5 zkp-19] Prover tool version recorded for the hosted campaign."
+    },
+    "zkvcq.exact_hosted_receipts": {
+      "value": 8,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, hosted campaign)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /proof_count (each receipt inspected as Succinct, Halted(0), empty assumptions, image pin match)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/proof_count" },
+      "note": "[OPUS-5.5 zkp-19] Genuine (non-development-mode) RISC Zero receipts retained from the hosted exact-evaluator campaign, spanning request versions 1-3 and both dataset-authority profiles. The auditor inspected retained receipt objects and pins but did not locally re-run SDK verification. No source (issuer-signature) authentication is part of these relations. Not an external audit (sq-qhy4 open)."
+    },
+    "zkvcq.exact_hosted_model_tests": {
+      "value": 100,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, hosted campaign)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /tests/native_model/passed (cargo test -p sparq-proved-evaluator-model --features graph-results)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/tests/native_model/passed" },
+      "note": "[OPUS-5.5 zkp-19] Native test functions of the bounded exact-evaluator model that passed in the hosted run (zero failed, zero ignored). Test functions, not W3C conformance cases."
+    },
+    "zkvcq.exact_hosted_host_tests": {
+      "value": 49,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, hosted campaign)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /tests/host_actual_guest_and_proofs/passed (cargo test -p sparq-proved-evaluator -- --test-threads=1)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/tests/host_actual_guest_and_proofs/passed" },
+      "note": "[OPUS-5.5 zkp-19] Host test functions (actual guest plus genuine-proof functions) that passed in the hosted run."
+    },
+    "zkvcq.exact_hosted_ignored": {
+      "value": 2,
+      "unit": "ignored-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, hosted campaign)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /tests/host_actual_guest_and_proofs/ignored (named in /tests/explicitly_ignored)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/tests/host_actual_guest_and_proofs/ignored" },
+      "note": "[OPUS-5.5 zkp-19] Host test functions explicitly ignored in the hosted run (the two engine-replay proof functions). Reported so that ignored work is never read as executed."
+    },
+    "zkvcq.exact_replay_cases": {
+      "value": 319,
+      "unit": "typed-replay-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, native replay)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /original_native_replay/cases",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/original_native_replay/cases" },
+      "note": "[OPUS-5.5 zkp-19] Distinct typed cases in the original native replay corpus; each is replayed against three request-version backends under two authority profiles. Native execution only, no proofs."
+    },
+    "zkvcq.exact_replay_jobs": {
+      "value": 1914,
+      "unit": "native-replay-jobs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, native replay)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /original_native_replay/jobs (all_records_passed=true; job input/outcome hashes checked)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/original_native_replay/jobs" },
+      "note": "[OPUS-5.5 zkp-19] Native replay jobs whose recorded input and outcome hashes the audit checked and whose outcomes matched expectation. Native evaluation only (zero proofs); the snapshot also records that not every backend profile is complete. Not a W3C SPARQL conformance result."
+    },
+    "zkvcq.exact_replay_expected_positive": {
+      "value": 1528,
+      "unit": "native-replay-jobs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, native replay)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /original_native_replay/expected_positive",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/original_native_replay/expected_positive" },
+      "note": "[OPUS-5.5 zkp-19] Replay jobs expected (and observed) to be accepted."
+    },
+    "zkvcq.exact_replay_expected_negative": {
+      "value": 386,
+      "unit": "native-replay-jobs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, native replay)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /original_native_replay/expected_negative",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/original_native_replay/expected_negative" },
+      "note": "[OPUS-5.5 zkp-19] Replay jobs expected (and observed) to be rejected, i.e. deliberate unsupported or invalid inputs."
+    },
+    "zkvcq.exact_replay_proofs": {
+      "value": 0,
+      "unit": "proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (exact evaluator, native replay)",
+      "source": "research/zk-paper-evidence/hosted-exact-query-audit.json /original_native_replay/proofs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/hosted-exact-query-audit.json", "pointer": "/original_native_replay/proofs" },
+      "note": "[OPUS-5.5 zkp-19] Proofs produced by the native replay: none. Cited so the replay count is never read as proved cases."
+    },
+    "zkvcq.adapter_source_commit": {
+      "value": "872c219ca18c6cc978d2f5c705f020e8c69748a6",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /source_checks/vcq/head",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/source_checks/vcq/head" },
+      "note": "[OPUS-5.5 zkp-19] Frozen source to which the adapter receipts are attributed. Separate from the hosted exact-evaluator source; counts from the two campaigns are never summed."
+    },
+    "zkvcq.adapter_guest_sha256": {
+      "value": "61aad9d6985304d99c34c4624aab078a2fa61e30f97775be233c4d5933a4e674",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/remote_rehashed_guest_pin_prover/guest/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/remote_rehashed_guest_pin_prover/guest/sha256" },
+      "note": "[OPUS-5.5 zkp-19] SHA-256 of the EC2-built guest the adapter receipts are pinned to (re-hashed by the auditor). Differs from the hosted guest."
+    },
+    "zkvcq.adapter_receipts": {
+      "value": 7,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/genuine_receipts" },
+      "note": "[OPUS-5.5 zkp-19] Genuine receipts produced through the protocol adapter: six protocol-accepted SELECT-bag/ASK/CONSTRUCT cases across two authority profiles plus one genuine receipt the protocol rejected at its row bound. All with source evidence None, status NotRequested, bearer holder. Not an external audit."
+    },
+    "zkvcq.adapter_accepted": {
+      "value": 6,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/protocol_accepted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/protocol_accepted" },
+      "note": "[OPUS-5.5 zkp-19] Adapter receipts accepted by the protocol verifier."
+    },
+    "zkvcq.adapter_row_bound_rejected": {
+      "value": 1,
+      "unit": "protocol-rejected-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/protocol_row_capacity_rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/protocol_row_capacity_rejected" },
+      "note": "[OPUS-5.5 zkp-19] Genuine receipt whose result exceeded the contract row bound and was rejected by the protocol verifier: a genuine proof is necessary but not sufficient for acceptance."
+    },
+    "zkvcq.adapter_controls": {
+      "value": 81,
+      "unit": "control-records",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_records (inventory in /vcq/control_inventory)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_records" },
+      "note": "[OPUS-5.5 zkp-19] Retained adversarial and lifecycle control records attached to the six accepted adapter receipts. Stores are in-memory test doubles, not durable production stores."
+    },
+    "zkvcq.ctl_changed_query_same_form": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/changed_query_same_form",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/changed_query_same_form" },
+      "note": "[OPUS-5.5 zkp-19] Control class: a different query of the same result form presented with the receipt."
+    },
+    "zkvcq.ctl_wrong_descriptor_digest": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/wrong_descriptor_digest",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/wrong_descriptor_digest" },
+      "note": "[OPUS-5.5 zkp-19] Control class: method descriptor digest not matching the verifier registry."
+    },
+    "zkvcq.ctl_altered_journal_result": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/altered_journal_result",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/altered_journal_result" },
+      "note": "[OPUS-5.5 zkp-19] Control class: result bytes altered relative to the proved journal."
+    },
+    "zkvcq.ctl_wrong_challenge": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/wrong_challenge",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/wrong_challenge" },
+      "note": "[OPUS-5.5 zkp-19] Control class: presentation bound to a different challenge."
+    },
+    "zkvcq.ctl_wrong_verifier_audience": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/wrong_verifier_audience",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/wrong_verifier_audience" },
+      "note": "[OPUS-5.5 zkp-19] Control class: presentation addressed to another verifier."
+    },
+    "zkvcq.ctl_changed_stored_audience": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/changed_stored_audience_matching_supplied",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/changed_stored_audience_matching_supplied" },
+      "note": "[OPUS-5.5 zkp-19] Control class: stored request audience changed so that it matches the supplied (substituted) audience."
+    },
+    "zkvcq.ctl_expired": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/expired",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/expired" },
+      "note": "[OPUS-5.5 zkp-19] Control class: verification after the request validity window."
+    },
+    "zkvcq.ctl_not_yet_valid": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/not_yet_valid",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/not_yet_valid" },
+      "note": "[OPUS-5.5 zkp-19] Control class: verification before the request validity window."
+    },
+    "zkvcq.ctl_changed_window": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/changed_window_containing_now",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/changed_window_containing_now" },
+      "note": "[OPUS-5.5 zkp-19] Control class: a substituted validity window that still contains the current time."
+    },
+    "zkvcq.ctl_scope_holder_to_agreed": {
+      "value": 3, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/scope_substitution_holder_to_agreed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/scope_substitution_holder_to_agreed" },
+      "note": "[OPUS-5.5 zkp-19] Control class: a HolderDeclared proof presented against a VerifierAgreed request."
+    },
+    "zkvcq.ctl_scope_agreed_to_holder": {
+      "value": 3, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/scope_substitution_agreed_to_holder",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/scope_substitution_agreed_to_holder" },
+      "note": "[OPUS-5.5 zkp-19] Control class: a VerifierAgreed proof presented against a HolderDeclared request."
+    },
+    "zkvcq.ctl_wrong_agreed_anchor": {
+      "value": 3, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/wrong_agreed_anchor",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/wrong_agreed_anchor" },
+      "note": "[OPUS-5.5 zkp-19] Control class: a VerifierAgreed proof over a dataset commitment other than the verifier's agreed anchor."
+    },
+    "zkvcq.ctl_replay_same_store": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/replay_same_store",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/replay_same_store" },
+      "note": "[OPUS-5.5 zkp-19] Control class: second presentation of an already consumed challenge against the same store."
+    },
+    "zkvcq.ctl_concurrent_verifications": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/concurrent_verifications",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/concurrent_verifications" },
+      "note": "[OPUS-5.5 zkp-19] Control class: concurrent verification attempts on one challenge (single consumption expected)."
+    },
+    "zkvcq.ctl_broken_store": {
+      "value": 6, "unit": "control-records", "environment": "canonical", "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter controls)",
+      "source": "research/zk-paper-evidence/vcq-adapter-audit.json /vcq/control_inventory/broken_store",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-adapter-audit.json", "pointer": "/vcq/control_inventory/broken_store" },
+      "note": "[OPUS-5.5 zkp-19] Control class: challenge store failure (fail-closed behaviour expected)."
+    },
+    "zkvcq.pp_source_commit": {
+      "value": "2aaf459b785a318246fe0e5a71fb15f8944a325f",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /source",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Source commit of the public-pattern (V4) relation and paired ablation harness."
+    },
+    "zkvcq.pp_genuine_proofs": {
+      "value": 20,
+      "unit": "genuine-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /counts/genuine_proofs (audit: public-pattern-audit.json /genuine_proofs)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/counts/genuine_proofs" },
+      "note": "[OPUS-5.5 zkp-19] Genuine Noir/UltraHonk proofs (baseline V1 and public-pattern V4 arms, K1/K2 capacity profiles, warmups included) each followed by a successful backend verification."
+    },
+    "zkvcq.pp_positive_verifications": {
+      "value": 20,
+      "unit": "successful-verifications",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-audit.json /positive_backend_verifications",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-audit.json", "pointer": "/positive_backend_verifications" },
+      "note": "[OPUS-5.5 zkp-19] Successful backend verifications of the genuine proofs."
+    },
+    "zkvcq.pp_measured_samples": {
+      "value": 16,
+      "unit": "measured-samples",
+      "environment": "canonical",
+      "kind": "design-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /counts/measured_samples",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/counts/measured_samples" },
+      "note": "[OPUS-5.5 zkp-19] Measured (non-warmup) samples in the development pilot. A count of the experimental design, not a timing."
+    },
+    "zkvcq.pp_warmups": {
+      "value": 4,
+      "unit": "warmup-samples",
+      "environment": "canonical",
+      "kind": "design-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /counts/excluded_warmup_samples",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/counts/excluded_warmup_samples" },
+      "note": "[OPUS-5.5 zkp-19] Warmup samples excluded from all summaries."
+    },
+    "zkvcq.pp_measured_pairs": {
+      "value": 8,
+      "unit": "paired-rounds",
+      "environment": "canonical",
+      "kind": "design-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /counts/measured_pairs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/counts/measured_pairs" },
+      "note": "[OPUS-5.5 zkp-19] Baseline/V4 measured pairs (alternating order) across the K1 and K2 profiles."
+    },
+    "zkvcq.pp_n_per_cell": {
+      "value": 4,
+      "unit": "samples-per-arm-profile",
+      "environment": "canonical",
+      "kind": "design-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/0/n (identical n in all four groups)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/0/n" },
+      "note": "[OPUS-5.5 zkp-19] Measured samples per arm and capacity profile. Too few for any significance claim."
+    },
+    "zkvcq.pp_tamper_controls": {
+      "value": 24,
+      "unit": "tamper-controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /counts/tamper_controls",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/counts/tamper_controls" },
+      "note": "[OPUS-5.5 zkp-19] Tamper controls run in the pilot; all rejected per the audited runs."
+    },
+    "zkvcq.pp_replay_controls": {
+      "value": 20,
+      "unit": "replay-controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /counts/replay_controls",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/counts/replay_controls" },
+      "note": "[OPUS-5.5 zkp-19] Replay controls run in the pilot (one per proof); all rejected per the audited runs."
+    },
+    "zkvcq.pp_proof_bytes": {
+      "value": 14656,
+      "unit": "bytes",
+      "environment": "canonical",
+      "kind": "artifact-size",
+      "family": "contract-bound SPARQL-over-VC proofs (public-pattern relation)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /proof_bytes",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/proof_bytes" },
+      "note": "[OPUS-5.5 zkp-19] Size of the proof payload, identical for every pilot run and both arms. NOT the full presentation size, which this harness did not measure as a separate quantity."
+    },
+    "zkvcq.post_restore_head": {
+      "value": "872c219ca18c6cc978d2f5c705f020e8c69748a6",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter, post-restore continuation)",
+      "source": "research/zk-paper-evidence/vcq-post-restore-audit.json /head (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-post-restore-audit.json", "pointer": "/head" },
+      "note": "[OPUS-5.5 zkp-19] Source of the later, separate post-restore continuation of the adapter campaign (same source as the adapter receipts). It closes the two skipped post-restore gates; the original failed mutation-wrapper result is preserved unchanged."
+    },
+    "zkvcq.post_restore_row_bound_passed": {
+      "value": 1,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter, post-restore continuation)",
+      "source": "research/zk-paper-evidence/vcq-post-restore-audit.json /actual_gates/retained_row_bound_verify_only/passed (failed and ignored recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-post-restore-audit.json", "pointer": "/actual_gates/retained_row_bound_verify_only/passed" },
+      "note": "[OPUS-5.5 zkp-19] Verify-only replay of the retained row-bound presentation after restore; the host all-target Clippy with warnings denied also passed. Verification of a retained receipt, not a new proof."
+    },
+    "zkvcq.post_restore_new_proofs": {
+      "value": 0,
+      "unit": "proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (protocol adapter, post-restore continuation)",
+      "source": "research/zk-paper-evidence/vcq-post-restore-audit.json /new_proofs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/vcq-post-restore-audit.json", "pointer": "/new_proofs" },
+      "note": "[OPUS-5.5 zkp-19] Proofs generated by the post-restore continuation: none. Cited so the continuation is never read as additional receipts."
+    },
+    "zkvcq.v5_source_commit": {
+      "value": "8322a6ff4acd7cff074cd91131111a52dee46953",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /source_head (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/source_head" },
+      "note": "[OPUS-5.5 zkp-19] Source of the earlier scoped native model run of the authenticated extension. That run was native execution only: no guest execution, no proof, no full-workspace gate, no security audit. Later guest and adapter gates and the two later proof attempts at other sources are separate records (zkvcq.v5g_*, zkvcq.v5p_*, zkvcq.vcqa_*, zkvcq.vcqg_*); their counts are never added to this run's."
+    },
+    "zkvcq.v5_auth_tests_passed": {
+      "value": 115,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /native_tests/authenticated-rdf/passed (failed and ignored recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/native_tests/authenticated-rdf/passed" },
+      "note": "[OPUS-5.5 zkp-19] Model test functions passing with the authenticated-rdf feature: the new integration and unit functions plus existing functions that also run under graph-results. Overlaps the other configurations; never summed with them."
+    },
+    "zkvcq.v5_default_off_tests_passed": {
+      "value": 4,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /native_tests/default-off/passed (failed and ignored recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/native_tests/default-off/passed" },
+      "note": "[OPUS-5.5 zkp-19] Model test functions passing with default features off. Overlapping configuration; never summed."
+    },
+    "zkvcq.v5_graph_results_tests_passed": {
+      "value": 101,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /native_tests/graph-results/passed (failed and ignored recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/native_tests/graph-results/passed" },
+      "note": "[OPUS-5.5 zkp-19] Model test functions passing with the graph-results feature at the V5 source. Overlapping configuration; never summed. Distinct from the hosted-campaign model count at a different source."
+    },
+    "zkvcq.v5_new_integration_tests": {
+      "value": 13,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /new_authenticated_tests/integration",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/new_authenticated_tests/integration" },
+      "note": "[OPUS-5.5 zkp-19] New authenticated-RDF integration test functions (tests/authenticated_rdf.rs), included in the authenticated-rdf passing count."
+    },
+    "zkvcq.v5_new_unit_tests": {
+      "value": 1,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /new_authenticated_tests/unit",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/new_authenticated_tests/unit" },
+      "note": "[OPUS-5.5 zkp-19] New authenticated-RDF unit test function, included in the authenticated-rdf passing count."
+    },
+    "zkvcq.v5_guest_executions": {
+      "value": 0,
+      "unit": "guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /scope/guest_executions",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/scope/guest_executions" },
+      "note": "[OPUS-5.5 zkp-19] Guest executions in the earlier V5 native run (zkvcq.v5_source_commit): none. Historical record of that run only, not a current total; the later scoped guest gate (zkvcq.v5g_source_commit) is recorded separately (zkvcq.v5g_direct_executions)."
+    },
+    "zkvcq.v5_proofs": {
+      "value": 0,
+      "unit": "proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, native model)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-native-audit.json /scope/proofs (scope also records full_workspace_gate=false, security_audit=false)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-native-audit.json", "pointer": "/scope/proofs" },
+      "note": "[OPUS-5.5 zkp-19] Genuine V5 proofs in the earlier native run (zkvcq.v5_source_commit): none. Historical record of that run only, not a current total; later gates and attempts are separate records (zkvcq.v5g_proofs, zkvcq.v5p_proofs_completed, zkvcq.vcqa_genuine_proofs, zkvcq.vcqg_genuine_receipts). One later genuine receipt covers a single synthetic case; general conventional-credential authentication inside exact proofs remains open."
+    },
+    "zkvcq.v5g_source_commit": {
+      "value": "42d13fedff0f42e3cde8ea63ff611408719cd6e7",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /source (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Frozen source of the scoped V5 guest-build and direct-execution gate. Scoped gate only: no proof, no receipt, no full-workspace gate, no security audit. Distinct from the earlier native run (zkvcq.v5_source_commit); counts are never added."
+    },
+    "zkvcq.v5g_source_files_verified": {
+      "value": 7081,
+      "unit": "source-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /verified_source_files",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/verified_source_files" },
+      "note": "[OPUS-5.5 zkp-19] Source files verified against the Git blobs of the gate source, equal before and after the run."
+    },
+    "zkvcq.v5g_locks_unchanged": {
+      "value": 30,
+      "unit": "lock-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /all_locks_unchanged",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/all_locks_unchanged" },
+      "note": "[OPUS-5.5 zkp-19] Cargo lock files recorded unchanged across the gate."
+    },
+    "zkvcq.v5g_native_tests_passed": {
+      "value": 7,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /native_test_functions_passed (failed recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/native_test_functions_passed" },
+      "note": "[OPUS-5.5 zkp-19] Host-side native test functions of the V5 prover/verifier harness passing in this gate. Not the earlier model-test count (zkvcq.v5_auth_tests_passed) and never added to it."
+    },
+    "zkvcq.v5g_genuine_driver_ignored": {
+      "value": 1,
+      "unit": "ignored-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /genuine_driver_ignored",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/genuine_driver_ignored" },
+      "note": "[OPUS-5.5 zkp-19] The genuine-proof driver compiled but was explicitly ignored in this gate; it is not counted as executed."
+    },
+    "zkvcq.v5g_direct_sdk_tests_passed": {
+      "value": 4,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_sdk_test_functions_passed (failed recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_sdk_test_functions_passed" },
+      "note": "[OPUS-5.5 zkp-19] Test functions that execute the actual built guests directly through the zkVM SDK executor, without proving."
+    },
+    "zkvcq.v5g_direct_v5_positive": {
+      "value": 10,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/v5_positive",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/v5_positive" },
+      "note": "[OPUS-5.5 zkp-19] Positive direct executions of the V5 guest on the published fixture. Execution without proof; no receipt."
+    },
+    "zkvcq.v5g_direct_v5_aborts": {
+      "value": 32,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/v5_relation_guest_abort",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/v5_relation_guest_abort" },
+      "note": "[OPUS-5.5 zkp-19] Negative direct executions in which the V5 guest aborted with the exact expected guest panic (forged, spliced, unauthorized, noncanonical and foreign-wire inputs). A guest abort, not a verifier rejection of a receipt."
+    },
+    "zkvcq.v5g_direct_legacy_positive": {
+      "value": 1,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/legacy_v3_positive",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/legacy_v3_positive" },
+      "note": "[OPUS-5.5 zkp-19] Positive direct execution of the exact (V3) guest, showing it still accepts its own request version."
+    },
+    "zkvcq.v5g_direct_legacy_aborts": {
+      "value": 2,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/legacy_guest_abort_on_v5",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/legacy_guest_abort_on_v5" },
+      "note": "[OPUS-5.5 zkp-19] Cross-version direct executions in which the exact (V3) guest aborted on V5 input."
+    },
+    "zkvcq.v5g_direct_executions": {
+      "value": 45,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /direct_execution_counts_from_executed_loops/total",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/direct_execution_counts_from_executed_loops/total" },
+      "note": "[OPUS-5.5 zkp-19] Total direct guest executions in this gate (the snapshot's own total of the four executed-loop counts). Executions without proof; not receipts."
+    },
+    "zkvcq.v5g_proofs": {
+      "value": 0,
+      "unit": "proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /proofs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/proofs" },
+      "note": "[OPUS-5.5 zkp-19] Proofs generated by the guest gate: none. Record of that gate only, not a current total (see zkvcq.vcqg_genuine_receipts for the later separate run)."
+    },
+    "zkvcq.v5g_receipts": {
+      "value": 0,
+      "unit": "receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/receipts" },
+      "note": "[OPUS-5.5 zkp-19] Receipts generated by the guest gate: none. Record of that gate only, not a current total."
+    },
+    "zkvcq.v5g_guest_sha256": {
+      "value": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /artifacts/authrdf-artifact/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/artifacts/authrdf-artifact/sha256" },
+      "note": "[OPUS-5.5 zkp-19] SHA-256 of the separate V5 guest artifact built and pinned by the gate. Identity at a fixed build path and toolchain only; no arbitrary-build-path reproducibility is claimed."
+    },
+    "zkvcq.v5g_exact_off_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /artifacts/exact-off/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/artifacts/exact-off/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the authenticated feature off. The snapshot records equality with a controlled baseline built at the identical absolute path; an earlier cross-path comparison failed and is retained separately. Not the hosted or EC2 receipt guests."
+    },
+    "zkvcq.v5g_exact_on_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, guest gate)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json /artifacts/exact-on/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-guest-audit.json", "pointer": "/artifacts/exact-on/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the authenticated feature on; equal to the feature-off bytes at the same build path."
+    },
+    "zkvcq.v5p_source_commit": {
+      "value": "42d13fedff0f42e3cde8ea63ff611408719cd6e7",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /source (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Source of the first bounded genuine V5 proof attempt. INCOMPLETE: the bounded command timed out; retained as an unsuccessful result, not a semantic rejection and not evidence about soundness."
+    },
+    "zkvcq.v5p_proofs_planned": {
+      "value": 1,
+      "unit": "genuine-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /genuine_proofs_planned",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/genuine_proofs_planned" },
+      "note": "[OPUS-5.5 zkp-19] Genuine proofs the attempt planned: one declared case (select-bag-verifier-agreed) on the published fixture."
+    },
+    "zkvcq.v5p_proofs_completed": {
+      "value": 0,
+      "unit": "genuine-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /genuine_proofs_completed (receipt_present=false)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/genuine_proofs_completed" },
+      "note": "[OPUS-5.5 zkp-19] Genuine proofs completed by this first low-level attempt: none; the attempt left no receipt and no presentation. Record of that attempt only; the later separate adapter-level run at another source is zkvcq.vcqg_genuine_receipts and does not complete or amend this record."
+    },
+    "zkvcq.v5p_controls_planned": {
+      "value": 17,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /controls_planned",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/controls_planned" },
+      "note": "[OPUS-5.5 zkp-19] Negative controls the attempt planned against its receipt; none could run without a receipt."
+    },
+    "zkvcq.v5p_controls_completed": {
+      "value": 0,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /controls_completed",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/controls_completed" },
+      "note": "[OPUS-5.5 zkp-19] Negative controls completed by this first attempt: none. Record of that attempt only (the later run's controls are zkvcq.vcqg_controls)."
+    },
+    "zkvcq.v5p_guest_sha256": {
+      "value": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (authenticated extension V5, first genuine-proof attempt)",
+      "source": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json /accepted_pins/authrdf/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-rdf-proof-timeout.json", "pointer": "/accepted_pins/authrdf/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Pinned V5 guest artifact the attempt accepted; the same bytes as the guest gate."
+    },
+    "zkvcq.vcqa_source_commit": {
+      "value": "7fe889557afcf1497769c1360ef53348980a7bae",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /source (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Frozen source of the generic V5 VCQ adapter's scoped native gate. That gate ran native host tests and lint only: no proof, no direct guest execution, no adapter receipt. A later separate genuine single-case run at the same source is recorded as zkvcq.vcqg_*; the method is still not offered as available for its full declared tuple set."
+    },
+    "zkvcq.vcqa_source_files_verified": {
+      "value": 7085,
+      "unit": "source-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /source_files_verified_against_git",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/source_files_verified_against_git" },
+      "note": "[OPUS-5.5 zkp-19] Source files verified against Git at the adapter source."
+    },
+    "zkvcq.vcqa_locks_unchanged": {
+      "value": 30,
+      "unit": "lock-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /cargo_locks_verified_unchanged",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/cargo_locks_verified_unchanged" },
+      "note": "[OPUS-5.5 zkp-19] Cargo lock files recorded unchanged across the adapter gate."
+    },
+    "zkvcq.vcqa_distinct_tests_passed": {
+      "value": 44,
+      "unit": "distinct-passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/distinct_passed_test_functions_by_binary_family (failed recorded as zero)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/distinct_passed_test_functions_by_binary_family" },
+      "note": "[OPUS-5.5 zkp-19] Distinct passing test functions under the authenticated-adapter feature: new adapter unit, integration and job-parser functions, existing low-level V5 functions and legacy V3 adapter functions. The legacy functions also passed again under the legacy-only feature; those repeats are executions, not additional distinct functions, and are not counted here."
+    },
+    "zkvcq.vcqa_new_unit_tests": {
+      "value": 4,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/new_adapter_unit",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/new_adapter_unit" },
+      "note": "[OPUS-5.5 zkp-19] New authenticated-adapter unit test functions, included in the distinct count."
+    },
+    "zkvcq.vcqa_new_integration_tests": {
+      "value": 15,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/new_adapter_integration",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/new_adapter_integration" },
+      "note": "[OPUS-5.5 zkp-19] New authenticated-adapter integration test functions, included in the distinct count."
+    },
+    "zkvcq.vcqa_new_job_parser_tests": {
+      "value": 3,
+      "unit": "new-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/new_genuine_driver_native",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/new_genuine_driver_native" },
+      "note": "[OPUS-5.5 zkp-19] New native job-parser and policy-substitution functions of the genuine-proof driver; the genuine-proof driver itself stayed ignored."
+    },
+    "zkvcq.vcqa_existing_v5_tests": {
+      "value": 5,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/existing_lowlevel_v5",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/existing_lowlevel_v5" },
+      "note": "[OPUS-5.5 zkp-19] Existing low-level V5 native functions re-run under the adapter feature, included in the distinct count."
+    },
+    "zkvcq.vcqa_legacy_tests": {
+      "value": 17,
+      "unit": "passing-test-functions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/legacy_vcq_unit_and_integration_in_new_feature",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/legacy_vcq_unit_and_integration_in_new_feature" },
+      "note": "[OPUS-5.5 zkp-19] Legacy V3 adapter unit and integration functions passing under the new feature, included once in the distinct count."
+    },
+    "zkvcq.vcqa_genuine_proofs": {
+      "value": 0,
+      "unit": "proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/genuine_proofs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/genuine_proofs" },
+      "note": "[OPUS-5.5 zkp-19] Genuine proofs in the adapter's native gate: none (its genuine-proof driver compiled but stayed ignored). Record of that gate only, not a current total; the later separate single-case run is zkvcq.vcqg_genuine_receipts."
+    },
+    "zkvcq.vcqa_direct_executions": {
+      "value": 0,
+      "unit": "direct-guest-executions",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /counts/direct_guest_executions",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/counts/direct_guest_executions" },
+      "note": "[OPUS-5.5 zkp-19] Direct guest executions in the adapter's native gate: none. Record of that gate only."
+    },
+    "zkvcq.vcqa_guest_sha256": {
+      "value": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /artifact_hashes/authrdf-artifact/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/artifact_hashes/authrdf-artifact/sha256" },
+      "note": "[OPUS-5.5 zkp-19] V5 guest bytes exported at the adapter source: the same approved artifact as the guest gate, at a fixed build path and toolchain only."
+    },
+    "zkvcq.vcqa_exact_off_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /artifact_hashes/exact-off/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/artifact_hashes/exact-off/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the adapter feature off, at the fixed build path."
+    },
+    "zkvcq.vcqa_exact_on_sha256": {
+      "value": "e8c9b6b6bd43c2789add2fcbd9ec18914c2c48ccdcd1149e8b9dea6f0e760623",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, native gate)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-native-audit.json /artifact_hashes/exact-on/sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-native-audit.json", "pointer": "/artifact_hashes/exact-on/sha256" },
+      "note": "[OPUS-5.5 zkp-19] Exact (V3) guest bytes with the adapter feature on; equal to the feature-off bytes at the fixed build path."
+    },
+    "zkvcq.vcqg_source_commit": {
+      "value": "7fe889557afcf1497769c1360ef53348980a7bae",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /source (frozen independent audit snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/source" },
+      "note": "[OPUS-5.5 zkp-19] Frozen source of the one separately bounded genuine run of the generic authenticated (V5) VCQ adapter. Same source as the adapter's native gate (zkvcq.vcqa_source_commit) but a separate run; distinct from the earlier low-level proof attempt that timed out at another source (zkvcq.v5p_source_commit). Counts are never added across these records. Not an external audit (sq-qhy4 open)."
+    },
+    "zkvcq.vcqg_source_files_verified": {
+      "value": 7085,
+      "unit": "source-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /source_files (source_before_after_identical=true, source_matches_local_git_archive=true)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/source_files" },
+      "note": "[OPUS-5.5 zkp-19] Source files the independent audit verified for this run, identical before and after it and matching a local Git archive of the source."
+    },
+    "zkvcq.vcqg_source_unchanged": {
+      "value": true,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /source_before_after_identical",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/source_before_after_identical" },
+      "note": "[OPUS-5.5 zkp-19] The audited source tree was identical before and after the run."
+    },
+    "zkvcq.vcqg_case": {
+      "value": "select-bag-verifier-agreed",
+      "unit": "declared-case",
+      "environment": "canonical",
+      "kind": "case-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /case",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/case" },
+      "note": "[OPUS-5.5 zkp-19] The single declared case proved: bag SELECT under a verifier-agreed anchor over one synthetic public W3C eddsa-rdfc-2022 test vector."
+    },
+    "zkvcq.vcqg_all_cases_run": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /all_defined_cases_run",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/all_defined_cases_run" },
+      "note": "[OPUS-5.5 zkp-19] The run did NOT cover the adapter's other declared cases (other forms, holder-declared authority, row bound). Cited so the single receipt is never read as coverage of the declared tuple set."
+    },
+    "zkvcq.vcqg_genuine_receipts": {
+      "value": 1,
+      "unit": "genuine-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /genuine_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/genuine_receipts" },
+      "note": "[OPUS-5.5 zkp-19] Genuine (development mode disabled) RISC Zero receipt produced by this run for its one declared case. The only authenticated-source exact receipt on record; never added to the hosted or EC2 exact-evaluator receipt counts. Not an external audit (sq-qhy4 open)."
+    },
+    "zkvcq.vcqg_protocol_accepted": {
+      "value": 1,
+      "unit": "protocol-accepted-receipts",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /protocol_accepted_receipts",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/protocol_accepted_receipts" },
+      "note": "[OPUS-5.5 zkp-19] Receipts of this run accepted by the adapter's protocol verifier."
+    },
+    "zkvcq.vcqg_receipt_inner": {
+      "value": "Succinct",
+      "unit": "receipt-kind",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /receipt/inner",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/receipt/inner" },
+      "note": "[OPUS-5.5 zkp-19] Inner receipt kind of the retained receipt."
+    },
+    "zkvcq.vcqg_exit_code": {
+      "value": "Halted(0)",
+      "unit": "guest-exit-code",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /receipt/exit_code",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/receipt/exit_code" },
+      "note": "[OPUS-5.5 zkp-19] Guest exit code recorded in the retained receipt."
+    },
+    "zkvcq.vcqg_dev_mode": {
+      "value": false,
+      "unit": "boolean-audit-check",
+      "environment": "canonical",
+      "kind": "audited-flag",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /receipt/dev_mode",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/receipt/dev_mode" },
+      "note": "[OPUS-5.5 zkp-19] Development mode was disabled for the proof and its SDK verification."
+    },
+    "zkvcq.vcqg_receipt_sha256": {
+      "value": "1e24b3af5dfd186054040f694135c235def3f28183b8a459df51c8208be50810",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /receipt/receipt_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/receipt/receipt_sha256" },
+      "note": "[OPUS-5.5 zkp-19] SHA-256 of the retained receipt, re-hashed by the independent audit."
+    },
+    "zkvcq.vcqg_journal_sha256": {
+      "value": "d68246c1c14c18927bf09e00db62e1c45921ba07463f165de255acd7d39a94b1",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /receipt/journal_sha256",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/receipt/journal_sha256" },
+      "note": "[OPUS-5.5 zkp-19] SHA-256 of the retained journal."
+    },
+    "zkvcq.vcqg_guest_sha256": {
+      "value": "c35f5e4b74169aa51b244b8feecb0c8e746296a6aa052be8c58f0190b1b10b11",
+      "unit": "sha256",
+      "environment": "canonical",
+      "kind": "artifact-identity",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /receipt/artifact_sha256 (pin image identifier and digest in /receipt/pin)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/receipt/artifact_sha256" },
+      "note": "[OPUS-5.5 zkp-19] V5 guest artifact the receipt is pinned to: the same bytes as the V5 guest recorded by the guest gate and the adapter's native gate (zkvcq.v5g_guest_sha256, zkvcq.vcqa_guest_sha256), at a fixed build path and toolchain. Distinct from the hosted and EC2 exact-evaluator guests and from the exact (V3) guest used only in the cross-image control."
+    },
+    "zkvcq.vcqg_result_variable": {
+      "value": "name",
+      "unit": "sparql-variable",
+      "environment": "canonical",
+      "kind": "expected-result-term",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /expected_result/Select/variables/0",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/expected_result/Select/variables/0" },
+      "note": "[OPUS-5.5 zkp-19] Projected variable of the expected bag SELECT result."
+    },
+    "zkvcq.vcqg_result_row1": {
+      "value": "\"Alumni Credential\"",
+      "unit": "rdf-term",
+      "environment": "canonical",
+      "kind": "expected-result-term",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /expected_result/Select/rows/0/0",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/expected_result/Select/rows/0/0" },
+      "note": "[OPUS-5.5 zkp-19] First row of the expected bag result (order Bag)."
+    },
+    "zkvcq.vcqg_result_row2": {
+      "value": "\"Alumni Credential\"",
+      "unit": "rdf-term",
+      "environment": "canonical",
+      "kind": "expected-result-term",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /expected_result/Select/rows/1/0",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/expected_result/Select/rows/1/0" },
+      "note": "[OPUS-5.5 zkp-19] Second row of the expected bag result, identical to the first: the bag keeps the duplicate."
+    },
+    "zkvcq.vcqg_controls": {
+      "value": 28,
+      "unit": "controls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /control_count (per-control class and code in /controls)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/control_count" },
+      "note": "[OPUS-5.5 zkp-19] Controls run against the single genuine receipt: binding controls (session, descriptor, journal, fake receipt, scope, anchor, salt, verifier-policy substitutions, cross-image splice) plus replay, broken-store and concurrent-consumption challenge controls. Stores are in-memory test doubles, not production durability or concurrency certification. Never added to the EC2 adapter's control records."
+    },
+    "zkvcq.vcqg_binding_store_calls": {
+      "value": 0,
+      "unit": "challenge-store-calls",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /binding_controls_store_calls",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/binding_controls_store_calls" },
+      "note": "[OPUS-5.5 zkp-19] Challenge-store calls made by the binding controls, each of which the frozen test asserts with its exact class, stage and code: none, so no rejected presentation consumed the challenge."
+    },
+    "zkvcq.vcqg_concurrent_accepted": {
+      "value": 1,
+      "unit": "accepted-verifications",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /controls/27/accepted (control concurrent_verifications)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/controls/27/accepted" },
+      "note": "[OPUS-5.5 zkp-19] Concurrent verifications of one challenge that were accepted (single consumption expected)."
+    },
+    "zkvcq.vcqg_concurrent_replayed": {
+      "value": 1,
+      "unit": "replayed-verifications",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /controls/27/replayed (control concurrent_verifications)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/controls/27/replayed" },
+      "note": "[OPUS-5.5 zkp-19] Concurrent verifications of the same challenge reported as replayed."
+    },
+    "zkvcq.vcqg_archive_verified_files": {
+      "value": 26,
+      "unit": "retained-files",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "contract-bound SPARQL-over-VC proofs (generic authenticated VCQ adapter, genuine single-case run)",
+      "source": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json /artifact_archive/verified_files",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/authenticated-vcq-genuine-audit.json", "pointer": "/artifact_archive/verified_files" },
+      "note": "[OPUS-5.5 zkp-19] Retained terminal-evidence files whose bytes the independent audit verified. The audit launched no verification process of its own; it checked retained bytes, source and execution provenance and the recorded assertions."
+    },
+    "zkvcq.nc_source_commit": {
+      "value": "fcb7ad829124b5573ae81bbb1c05b04f27186c2a",
+      "unit": "git-commit",
+      "environment": "canonical",
+      "kind": "source-identity",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /head (frozen snapshot; SHA-256 bound in research/zk-paper-evidence/provenance.json)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/head" },
+      "note": "[OPUS-5.5 zkp-19] Source of the hosted native-composition run. Experimental, unaudited; public-BGP proofs only, not exact SPARQL; no Noir linkage."
+    },
+    "zkvcq.nc_distinct_proofs": {
+      "value": 540,
+      "unit": "distinct-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /finite/distinct_proofs",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/finite/distinct_proofs" },
+      "note": "[OPUS-5.5 zkp-19] Distinct native public-BGP proofs in the declared finite domain: required-policy positives plus weaker-policy proofs rejected by the required verifier. NOT full exact SPARQL proofs; never summed with any other campaign. The artifact checker did not rerun cryptography."
+    },
+    "zkvcq.nc_distinct_nonces": {
+      "value": 540,
+      "unit": "distinct-nonces",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /finite/distinct_nonces",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/finite/distinct_nonces" },
+      "note": "[OPUS-5.5 zkp-19] Distinct nonces across the finite-domain proofs."
+    },
+    "zkvcq.nc_required_accepted": {
+      "value": 72,
+      "unit": "accepted-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /finite/counts/required_accepted",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/finite/counts/required_accepted" },
+      "note": "[OPUS-5.5 zkp-19] Finite-domain proofs accepted by the required verifier policy."
+    },
+    "zkvcq.nc_weaker_rejected": {
+      "value": 468,
+      "unit": "rejected-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /finite/counts/weaker_verified_required_rejected",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/finite/counts/weaker_verified_required_rejected" },
+      "note": "[OPUS-5.5 zkp-19] Proofs independently verified under a weaker policy and rejected by the required verifier (actual verifier negatives, distinct from admission exclusions)."
+    },
+    "zkvcq.nc_empty_graph_admission": {
+      "value": 36,
+      "unit": "admission-only-cells",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /finite/counts/empty_graph_admission",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/finite/counts/empty_graph_admission" },
+      "note": "[OPUS-5.5 zkp-19] Empty-graph cells refused at admission; no proof produced."
+    },
+    "zkvcq.nc_other_exclusions": {
+      "value": 80,
+      "unit": "excluded-cases",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /finite/explicit_other_exclusions",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/finite/explicit_other_exclusions" },
+      "note": "[OPUS-5.5 zkp-19] Other explicitly excluded cases in the declared domain; no proof produced."
+    },
+    "zkvcq.nc_cli_proofs": {
+      "value": 1,
+      "unit": "retained-proofs",
+      "environment": "canonical",
+      "kind": "audited-count",
+      "family": "native-RDF composition experiment (BBS+/LegoGroth16)",
+      "source": "research/zk-paper-evidence/native-rdf-composition-audit.json /cli_proof/retained_proof_count (typed rejections in /cli_proof/typed_rejections)",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/native-rdf-composition-audit.json", "pointer": "/cli_proof/retained_proof_count" },
+      "note": "[OPUS-5.5 zkp-19] Separate retained command-line proof with issuer, query, result, nonce, replay, revocation and status-epoch rejection controls. Proofs made inside native test functions are not enumerated."
+    },
+    "zkvcq.pilot_k1_v1_prove_median": {
+      "value": 2.5806247615, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/0/descriptive_seconds/prove_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/0/descriptive_seconds/prove_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K1 baseline V1: median inclusive prove API time over four measured samples. Indicative development measurement on a shared EC2 guest; never a headline."
+    },
+    "zkvcq.pilot_k1_v1_prove_min": {
+      "value": 2.563431709, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/0/descriptive_seconds/prove_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/0/descriptive_seconds/prove_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K1 baseline V1: minimum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k1_v1_prove_max": {
+      "value": 2.596681141, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/0/descriptive_seconds/prove_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/0/descriptive_seconds/prove_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K1 baseline V1: maximum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k1_v1_verify_median": {
+      "value": 0.807556589, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/0/descriptive_seconds/verify_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/0/descriptive_seconds/verify_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K1 baseline V1: median inclusive verify API time. Indicative."
+    },
+    "zkvcq.pilot_k1_v1_verify_min": {
+      "value": 0.803193339, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/0/descriptive_seconds/verify_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/0/descriptive_seconds/verify_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K1 baseline V1: minimum inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k1_v1_verify_max": {
+      "value": 0.813088005, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/0/descriptive_seconds/verify_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/0/descriptive_seconds/verify_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K1 baseline V1: maximum inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k1_v4_prove_median": {
+      "value": 2.4993817185, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/1/descriptive_seconds/prove_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/1/descriptive_seconds/prove_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K1 public-pattern V4: median inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k1_v4_prove_min": {
+      "value": 2.494650718, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/1/descriptive_seconds/prove_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/1/descriptive_seconds/prove_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K1 public-pattern V4: minimum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k1_v4_prove_max": {
+      "value": 2.587929351, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/1/descriptive_seconds/prove_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/1/descriptive_seconds/prove_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K1 public-pattern V4: maximum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k1_v4_verify_median": {
+      "value": 0.798237125, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/1/descriptive_seconds/verify_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/1/descriptive_seconds/verify_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K1 public-pattern V4: median inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k1_v4_verify_min": {
+      "value": 0.791174248, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/1/descriptive_seconds/verify_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/1/descriptive_seconds/verify_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K1 public-pattern V4: minimum inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k1_v4_verify_max": {
+      "value": 0.816112779, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/1/descriptive_seconds/verify_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/1/descriptive_seconds/verify_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K1 public-pattern V4: maximum inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k2_v1_prove_median": {
+      "value": 3.9645969205, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/2/descriptive_seconds/prove_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/2/descriptive_seconds/prove_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K2 baseline V1: median inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k2_v1_prove_min": {
+      "value": 3.897831242, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/2/descriptive_seconds/prove_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/2/descriptive_seconds/prove_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K2 baseline V1: minimum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k2_v1_prove_max": {
+      "value": 3.979548347, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/2/descriptive_seconds/prove_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/2/descriptive_seconds/prove_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K2 baseline V1: maximum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k2_v1_verify_median": {
+      "value": 1.1160542699999998, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/2/descriptive_seconds/verify_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/2/descriptive_seconds/verify_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K2 baseline V1: median inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k2_v1_verify_min": {
+      "value": 1.10202523, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/2/descriptive_seconds/verify_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/2/descriptive_seconds/verify_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K2 baseline V1: minimum inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k2_v1_verify_max": {
+      "value": 1.202312236, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/2/descriptive_seconds/verify_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/2/descriptive_seconds/verify_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K2 baseline V1: maximum inclusive verify time (the widest single deviation in the pilot). Indicative."
+    },
+    "zkvcq.pilot_k2_v4_prove_median": {
+      "value": 3.8894315175, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/3/descriptive_seconds/prove_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/3/descriptive_seconds/prove_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K2 public-pattern V4: median inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k2_v4_prove_min": {
+      "value": 3.887871487, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/3/descriptive_seconds/prove_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/3/descriptive_seconds/prove_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K2 public-pattern V4: minimum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k2_v4_prove_max": {
+      "value": 3.891103508, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/3/descriptive_seconds/prove_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/3/descriptive_seconds/prove_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K2 public-pattern V4: maximum inclusive prove time. Indicative."
+    },
+    "zkvcq.pilot_k2_v4_verify_median": {
+      "value": 1.1016795145, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/3/descriptive_seconds/verify_inclusive_seconds/median",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/3/descriptive_seconds/verify_inclusive_seconds/median" },
+      "note": "[OPUS-5.5 zkp-19] K2 public-pattern V4: median inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k2_v4_verify_min": {
+      "value": 1.101179552, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/3/descriptive_seconds/verify_inclusive_seconds/min",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/3/descriptive_seconds/verify_inclusive_seconds/min" },
+      "note": "[OPUS-5.5 zkp-19] K2 public-pattern V4: minimum inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_k2_v4_verify_max": {
+      "value": 1.103786746, "unit": "seconds-inclusive", "environment": "indicative", "kind": "development-pilot-descriptive",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /groups/3/descriptive_seconds/verify_inclusive_seconds/max",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/groups/3/descriptive_seconds/verify_inclusive_seconds/max" },
+      "note": "[OPUS-5.5 zkp-19] K2 public-pattern V4: maximum inclusive verify time. Indicative."
+    },
+    "zkvcq.pilot_pair1_prove_diff": {
+      "value": -0.07697933899999976, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/0/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/0/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 0 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair2_prove_diff": {
+      "value": -0.008751789999999815, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/1/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/1/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 1 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair3_prove_diff": {
+      "value": -0.09073448100000014, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/2/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/2/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 2 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair4_prove_diff": {
+      "value": -0.06355325700000014, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/3/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/3/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 3 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair5_prove_diff": {
+      "value": -0.08844483900000011, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/4/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/4/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 0 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair6_prove_diff": {
+      "value": -0.009959755000000126, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/5/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/5/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 1 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair7_prove_diff": {
+      "value": -0.0748907080000003, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/6/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/6/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 2 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair8_prove_diff": {
+      "value": -0.07544009800000007, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/7/difference_seconds/prove_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/7/difference_seconds/prove_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 3 paired inclusive prove difference. Indicative."
+    },
+    "zkvcq.pilot_pair1_verify_diff": {
+      "value": -0.007284790000000041, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/0/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/0/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 0 paired inclusive verify difference. Indicative."
+    },
+    "zkvcq.pilot_pair2_verify_diff": {
+      "value": -0.021913756999999978, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/1/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/1/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 1 paired inclusive verify difference. Indicative."
+    },
+    "zkvcq.pilot_pair3_verify_diff": {
+      "value": -0.011354137999999958, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/2/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/2/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 2 paired inclusive verify difference. Indicative."
+    },
+    "zkvcq.pilot_pair4_verify_diff": {
+      "value": 0.012919440000000004, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/3/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/3/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K1 round 3 paired inclusive verify difference (positive: V4 slower in this pair). Indicative."
+    },
+    "zkvcq.pilot_pair5_verify_diff": {
+      "value": -0.0008456779999999053, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/4/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/4/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 0 paired inclusive verify difference. Indicative."
+    },
+    "zkvcq.pilot_pair6_verify_diff": {
+      "value": -0.10088531999999995, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/5/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/5/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 1 paired inclusive verify difference (driven by the slowest baseline sample). Indicative."
+    },
+    "zkvcq.pilot_pair7_verify_diff": {
+      "value": -0.012373007999999963, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/6/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/6/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 2 paired inclusive verify difference. Indicative."
+    },
+    "zkvcq.pilot_pair8_verify_diff": {
+      "value": -0.01401667299999998, "unit": "seconds-difference (V4 minus V1)", "environment": "indicative", "kind": "development-pilot-paired-difference",
+      "family": "public-pattern development pilot (EC2, CPUQuota 200%)",
+      "source": "research/zk-paper-evidence/public-pattern-pilot.json /paired_differences/7/difference_seconds/verify_inclusive_seconds",
+      "binding": { "kind": "json-pointer", "file": "research/zk-paper-evidence/public-pattern-pilot.json", "pointer": "/paired_differences/7/difference_seconds/verify_inclusive_seconds" },
+      "note": "[OPUS-5.5 zkp-19] K2 round 3 paired inclusive verify difference. Indicative."
     }
   }
 }
