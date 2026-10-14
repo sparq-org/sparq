@@ -564,6 +564,16 @@ fn write_needs_modify_and_delete_in_one_policy() {
         .expect("attach");
     assert!(!holds(&modify, &bob, N2, Mode::Write), "split across policies");
 
+    // Both rules in one policy: Write, and Append through it with no `odrl:append`.
+    let ttl = format!(
+        "@prefix odrl: <{ODRL}> .\n<urn:pol/p> a odrl:Set ; \
+         odrl:permission [ odrl:action odrl:modify ] , [ odrl:action odrl:delete ] .\n"
+    );
+    let mut both = store();
+    both.attach_odrl_policy(parse_policy_str(&ttl, "turtle").expect("parses"))
+        .expect("attach");
+    assert!(holds(&both, &bob, N2, Mode::Write) && holds(&both, &bob, N2, Mode::Append));
+
     let mut append = store();
     append.attach_odrl_policy(policy("permission", "append", "", None, None).expect("policy"))
         .expect("attach");
