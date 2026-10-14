@@ -1057,7 +1057,7 @@ pub fn in_value_space(v: &Value, b: Builtin) -> bool {
         (Token, Value::String(s)) => collapse(s) == *s,
         (Language, Value::String(s)) => is_language_tag(s),
         (PlainLiteral, Value::LangString(_, t)) => {
-            super::data_ranges::is_lang_tag(t, true) == Some(true)
+            super::data_ranges::is_lang_tag(&t.to_ascii_lowercase(), true) == Some(true)
         }
         (NmToken, Value::String(s)) => !s.is_empty() && s.chars().all(is_name_char),
         (Name | NcName, Value::String(s)) => {
@@ -1111,6 +1111,11 @@ mod tests {
         assert!(in_value_space(
             &tagged("i-klingon").unwrap(),
             Builtin::LangString
+        ));
+        // Tags compare case-insensitively, as in `data_ranges::contains`.
+        assert!(in_value_space(
+            &tagged("EN-GB").unwrap(),
+            Builtin::PlainLiteral
         ));
     }
 
