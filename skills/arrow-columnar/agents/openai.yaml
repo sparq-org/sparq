@@ -1,4 +1,4 @@
-# [GPT-5.6] UI metadata for the sparq Arrow/Parquet usage skill.
+# UI metadata for the sparq Arrow/Parquet usage skill.
 interface:
   display_name: "Arrow Columnar Interop"
   short_description: "Export SPARQL results with Arrow and Parquet"

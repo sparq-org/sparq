@@ -37,7 +37,7 @@ operator's**. It deliberately maps *what the code can touch*, not an idealised d
 | **Compressed RDF (gzip/zstd/bzip2)** | fused decompress → parse | `sparq-core` fused-decompress ingest | Same as above (just compressed on the wire/disk) | **Operator** |
 | **SPARQL query text** | HTTP `/sparql` (GET/POST), CLI, WASM | `sparq-server` `http.rs`; `spargebra` parse | Query *predicates/filters* can embed personal data (e.g. an email literal in a `FILTER`) | Caller supplies; engine evaluates |
 | **SPARQL UPDATE (`INSERT`/`DELETE`/`LOAD`)** | HTTP `/sparql` write, CLI | `sparq-engine/src/update.rs` | Writes personal data into the store; `LOAD <url>` pulls a remote document | **Operator** gates writes (auth/solid) |
-| **`SERVICE` federation fetch** | outbound to a remote endpoint | `sparq-engine/src/service.rs` (feature-gated) | Could *exfiltrate* a sub-query / pull remote personal data — **deny-all by default** (SSRF/exfil guard) | **Operator** sets the allowlist |
+| **`SERVICE` federation fetch** | outbound to a remote endpoint | `sparq-engine-service/src/service.rs` (feature-gated) | Could *exfiltrate* a sub-query / pull remote personal data — **deny-all by default** (SSRF/exfil guard) | **Operator** sets the allowlist |
 | **On-disk index (mmap)** | load a persisted store | `sparq-core` mmap loader (boundary B5) | The persisted dataset re-enters memory; a *tampered* file is a memory-safety risk (covered by `compliance/memsafety/`) | **Operator** controls the file |
 
 ## 2 — Data at rest (STORAGE)

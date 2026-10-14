@@ -20,14 +20,17 @@ There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
    the Rust API you call directly; it is where document-form conversion lives.
 2. **The engine's RDF-first writer matrix** — `sparq_engine::serialize::*` behind the
    `serialize-rdf` feature. sparq always holds RDF, so the CLI / server / wasm surfaces
-   currently serialise **from a `Graph`** through this writer (see
-   `skills/data-formats/SKILL.md`, recipe 6). Wiring the surfaces onto the native
-   pipeline is a later, tracked step (bead `sq-oy1f.41`) — until it lands, "what the CLI
-   emits" and "what `sparq_jsonld::compact` produces" are different code, so this skill
-   says which is which for every surface.
+   serialise **from a `Graph`** through this writer (see
+   `skills/data-formats/SKILL.md`, recipe 6). The engine-serialize cutover (bead
+   `sq-oy1f.41`) has joined the two paths for the **full-algorithm** forms:
+   `graph_to_jsonld_compact` / `graph_to_jsonld_framed` are now thin `from_rdf ∘ compact` /
+   `from_rdf ∘ frame` adapters over the native pipeline, so "what the CLI emits" for
+   `jsonld-compact` and "what `sparq_jsonld::compact` produces" are the same code. The
+   `JsonLdForm::{Expanded, Flattened, Compacted}` writer (the prefix-only `@context` form) is
+   still the engine's own, so this skill says which is which for every surface.
 
-> This document was verified against the source on branch `main` (2026-07-13,
-> ``). Every function, flag, and conformance number below exists today; where a
+> This document was re-verified against the source on branch `main` on 2026-10-14.
+> Every function, flag, and conformance number below exists today; where a
 > form is *not* exposed on a surface, it is called out as planned, not implied.
 
 ## Native pipeline — the `sparq-jsonld` crate
@@ -38,7 +41,9 @@ its own** — it is always compiled when a crate depends on it, so there is no
 "jsonld-off" build of *this* crate; the opt-in gating lives in the consumers (below).
 
 The value type is the crate's own tiny `Json` AST (no `serde_json`). Parse with
-`Json::parse(&str)`, render with `value.write(&mut String)`.
+`Json::parse(&str)`, render with `value.write(&mut String)`. `Json::parse` rejects arrays
+and objects nested deeper than `json::MAX_DEPTH` with a `JsonParseError`, so the recursive
+walks over a parsed value stay within the stack.
 
 ### The four operations
 
@@ -84,6 +89,14 @@ If you already hold the expanded form, skip re-expansion with the `_expanded` va
 `flatten_expanded(&expanded) -> Json` (infallible), `compact::compact_expanded(&expanded,
 &context, &options, &loader)`, and `frame::frame_expanded(&expanded_input,
 &expanded_frame, &options, &frame_options)`.
+
+`frame::frame` is also split into its two halves, so a caller can hold or inspect the framed
+expanded form before compacting it: `frame::frame_match(input, frame_doc, options,
+frame_options, loader)` returns the framed **expanded** output, and
+`frame::compact_framed(&framed, &context, options, frame_options, loader)` compacts it. When the
+input is already `from_rdf` output, `frame::frame_match_from_rdf(from_rdf, frame_doc, options,
+frame_options, loader)` takes it by value and regroups its graph map directly instead of
+re-expanding and re-running node map generation, keeping its blank-node labels.
 
 ### End-to-end composition
 
@@ -155,9 +168,9 @@ assert_eq!(err.code(), JsonLdErrorCode::LoadingDocumentFailed);
 
 ## Surfaces — which form each one exposes
 
-The native pipeline is not yet wired to the surfaces (`sq-oy1f.41`); the surface columns
-below serialise **from a `Graph`** through the engine's RDF-first writer, except where
-noted. Source of truth: `research/jsonld-interop-matrix.md`.
+Every surface below serialises **from a `Graph`** through the engine's RDF-first writer, except
+where noted; for the full-Compaction and Framing forms that writer is itself an adapter over the
+native pipeline (`sq-oy1f.41`, above). Source of truth: `research/jsonld-interop-matrix.md`.
 
 ### Native CLI (`sparq-cli`, `jsonld` default-on)
 
