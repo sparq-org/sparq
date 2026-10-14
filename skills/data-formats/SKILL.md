@@ -340,6 +340,10 @@ sparq_core::Graph::build_external(reader, "ntriples", Path::new("/data/idx"), 16
 let g = sparq_core::Graph::open(Path::new("/data/idx"))?;   // query with indexes memory-mapped
 ```
 
+`g.is_directory_backed()` is `true` for a graph opened this way, or one holding a named graph
+opened this way (updates are written through to the directory), and `false` for a wholly
+in-memory graph or without the `mmap` feature.
+
 **5. Cheap snapshot for serving (one mutable master + immutable readers per commit).**
 `snapshot()` Arc-shares the base indexes/dictionary — it copies neither, and later
 mutation of the master is invisible to the snapshot:

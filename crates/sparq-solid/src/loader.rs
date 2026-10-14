@@ -210,7 +210,15 @@ pub(crate) fn assemble_facts(
         if iri.starts_with(RESERVED_PREFIX) {
             continue;
         }
-        if iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX) {
+        let control_of = iri.strip_suffix(ACL_SUFFIX).or_else(|| iri.strip_suffix(ACR_SUFFIX));
+        // A bare `scheme://` names no authority, so it is not a container of any pod
+        // root, and neither it nor its control document takes part in the auth view.
+        // (The parent rule's textual scrape of `https://pod.ex/` yields `https://`;
+        // [`parent_iri`] already stops at the authority root.)
+        if is_authority_less(control_of.unwrap_or(iri)) {
+            continue;
+        }
+        if control_of.is_some() {
             if iri.ends_with(suffix) {
                 control_graphs.push((iri, sub));
             }
@@ -478,6 +486,16 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
     }
 }
 
+/// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
+/// root. The `://` must follow the scheme itself (an opaque IRI such as
+/// `urn:example:x://` does not match).
+fn is_authority_less(iri: &str) -> bool {
+    let Some(scheme) = iri.strip_suffix("://") else { return false };
+    let mut chars = scheme.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
 /// Solid slash-semantics parent of an IRI (None at/above the authority root).
 pub(crate) fn parent_iri(iri: &str) -> Option<&str> {
     let scheme_end = iri.find("://").map(|i| i + 3)?;
@@ -716,6 +734,12 @@ mod tests {
         assert_eq!(parent_iri("https://pod.ex/a/b/"), Some("https://pod.ex/a/"));
         assert_eq!(parent_iri("https://pod.ex/a/"), Some("https://pod.ex/"));
         assert_eq!(parent_iri("https://pod.ex/"), None);
+        assert!(super::is_authority_less("https://"));
+        assert!(!super::is_authority_less("https://pod.ex/"));
+        assert!(!super::is_authority_less("file:///pod/"));
+        assert!(!super::is_authority_less("urn:x:y"));
+        assert!(!super::is_authority_less("urn:example:resource://"));
+        assert!(super::is_authority_less("HTTPS://"));
     }
 
     #[test]

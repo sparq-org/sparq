@@ -3678,6 +3678,17 @@ impl Graph {
         swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))
     }
 
+    /// Whether this graph, or any named graph under it, is backed by a directory (opened with
+    /// [`open`](Self::open)), so updates to it are written through to disk. Always `false`
+    /// without the `mmap` feature.
+    pub fn is_directory_backed(&self) -> bool {
+        #[cfg(feature = "mmap")]
+        if self.wal.is_some() || self.txn.is_some() {
+            return true;
+        }
+        self.named.iter().any(|(_, sub)| sub.is_directory_backed())
+    }
+
     /// [OPUS-4.8] (sq-ft7u) The directory this graph is durably backed by (its `--persist` dir),
     /// or `None` for an in-memory graph. The companion to [`restore_into_durable`](Self::restore_into_durable):
     /// a caller doing an in-place durable restore reads the backing dir, then closes the WAL
@@ -10415,6 +10426,25 @@ mod tests {
         static CTR: AtomicU64 = AtomicU64::new(0);
         let n = CTR.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("sparq_txn_{tag}_{}_{n}", std::process::id()))
+    }
+
+    /// A graph is directory-backed when it, or any named graph under it, was opened from a
+    /// directory: an in-memory graph holding such a named graph counts too.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn directory_backing_covers_named_graphs() {
+        let dir = txn_tmp_dir("backed");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "ntriples")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::load_str("", "ntriples").unwrap();
+        assert!(!g.is_directory_backed());
+        assert!(Graph::open(&dir).unwrap().is_directory_backed());
+        g.named.push((named("child"), Graph::open(&dir).unwrap()));
+        assert!(g.is_directory_backed(), "a durable named graph makes the dataset durable");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// [OPUS-4.8] (sq-ycle) The named-graph term used by the journal tests.
