@@ -230,7 +230,7 @@ impl SpillRun {
         match self {
             SpillRun::Memory(v) => v.clone(),
             SpillRun::File(path) => {
-                let f = std::fs::File::open(path).expect("[OPUS-4.8] sq-vf7q: spill run readable");
+                let f = std::fs::File::open(path).expect("sq-vf7q: spill run readable");
                 BufReader::new(f)
                     .lines()
                     .map(|l| Tuple::decode(&l.expect("spill line")))
@@ -375,11 +375,10 @@ impl StreamJoin {
                     if from_left { "l" } else { "r" },
                     seq
                 ));
-                let f =
-                    std::fs::File::create(&path).expect("[OPUS-4.8] sq-vf7q: spill run creatable");
+                let f = std::fs::File::create(&path).expect("sq-vf7q: spill run creatable");
                 let mut w = BufWriter::new(f);
                 for t in &bucket {
-                    writeln!(w, "{}", t.encode()).expect("[OPUS-4.8] sq-vf7q: spill write");
+                    writeln!(w, "{}", t.encode()).expect("sq-vf7q: spill write");
                 }
                 w.flush().expect("spill flush");
                 SpillRun::File(path)

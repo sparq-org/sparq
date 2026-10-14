@@ -150,7 +150,8 @@ impl RandomnessModel {
 /// regime, and [`require_deployable`](Self::require_deployable) is the fail-closed
 /// refusal gate — today it refuses EVERY source (see its docs), and wiring it
 /// through the production call sites is itself a follow-on bead (no call site is
-/// gated on it yet, although `degree_reduce` already draws through this trait).
+/// gated on it yet, although `degree_reduce`, the hidden-value equality path and
+/// the whole comparison chain already draw through this trait).
 ///
 /// See `research/mpc-distributed-randomness-design.md` for the full design and
 /// the follow-on implementation beads.
@@ -179,9 +180,11 @@ pub trait DistributedRandomness {
     /// establish mask secrecy or VSS verification; those require a validated
     /// dealer-less implementation behind the acceptance boundary the follow-on
     /// beads add. No production call site is gated on this yet. Wiring the callers
-    /// is in progress (design record §5 item 5): `degree_reduce` draws its
-    /// re-sharings through the seam ([`crate::shamir::degree_reduce_through`]);
-    /// `secure_equal` and the oblivious shuffle still call the dealer directly.
+    /// is in progress (design record §5 item 5): `degree_reduce`
+    /// ([`crate::shamir::degree_reduce_through`]), the hidden-value equality path
+    /// ([`crate::join::HiddenValueJoin`]) and the [`crate::compare`] chain draw
+    /// through the seam; the oblivious shuffle, the authenticated (IT-MAC) twins
+    /// and the remaining input-dealing paths still call the dealer directly.
     /// Provided as a default so every implementor inherits the same refusal.
     fn require_deployable(&self) -> Result<(), MpcError> {
         let model = self.randomness_model();
