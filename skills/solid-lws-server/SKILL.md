@@ -551,7 +551,11 @@ What the server exposes, all discoverable from the storage description
   (a partial PUT) is refused with `400`.
 - A `Link` target that is not a URI reference is refused with `400`; entity tags in
   `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
-  nothing.
+  nothing. A write whose precondition compares the target's state (a tag in `If-Match` or
+  `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
+  and on a conditional `POST` Read on the container whose listing it compares (an access request's
+  listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
+  outcome would have been. A bare `*` asks only whether the target exists and needs no Read.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link

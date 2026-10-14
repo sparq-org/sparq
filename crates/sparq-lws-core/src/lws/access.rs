@@ -1100,7 +1100,11 @@ pub async fn handle<S: Store + 'static>(
                 if let Some(refused) = unavailable() {
                     return refused;
                 }
-                // A conditional create is evaluated against the listing.
+                // A conditional create is evaluated against the listing, which only the owner
+                // may read: anyone else is refused rather than told how it compares.
+                if !owner && super::resources::compares_state(&req.headers, true) {
+                    return state.deny(agent);
+                }
                 let held =
                     match super::records::service_preconditions(state, req, &container, |get| {
                         listing(state, get, grants)
@@ -2003,6 +2007,67 @@ mod tests {
             d["inbox"] = json!(i);
         }
         d.to_string()
+    }
+
+    /// Only the owner may read the requests listing, so only the owner is told how a tag
+    /// compares with it: anyone else's conditional request naming one is refused, matched or not.
+    #[tokio::test]
+    async fn a_requester_is_not_told_how_the_listing_compares() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let as_ = |who: &str| Agent {
+            subject: Some(who.into()),
+            client: None,
+        };
+        let (owner, someone) = (
+            as_("https://owner.example/#me"),
+            as_("https://r.example/#me"),
+        );
+        let tag = handle(
+            &state,
+            &test_store::request(Method::GET, REQUESTS_PATH, &[], ""),
+            &owner,
+        )
+        .await
+        .headers()[header::ETAG]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let post = |who: Agent, h: (&'static str, String)| {
+            let state = state.clone();
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    REQUESTS_PATH,
+                    &[("content-type", LWS_JSON), (h.0, &h.1)],
+                    &access_doc("AccessRequest", "https://a/", None),
+                );
+                handle(&state, &req, &who).await.status()
+            }
+        };
+        for h in [
+            ("if-match", tag.clone()),
+            ("if-match", "\"other\"".to_string()),
+            ("if-none-match", tag.clone()),
+        ] {
+            assert_eq!(
+                post(someone.clone(), h.clone()).await,
+                StatusCode::FORBIDDEN,
+                "{h:?}"
+            );
+        }
+        assert_eq!(
+            post(owner.clone(), ("if-match", "\"other\"".into())).await,
+            StatusCode::PRECONDITION_FAILED
+        );
+        // `*` asks only whether the container exists.
+        assert_eq!(
+            post(someone, ("if-match", "*".into())).await,
+            StatusCode::CREATED
+        );
     }
 
     #[tokio::test]
