@@ -278,6 +278,52 @@ pub trait DistributedRandomness {
     ///   permutation of the input at all, so a deviating party can corrupt or
     ///   reorder entries undetected. Semi-honest only; the consumer-side
     ///   `checked_oblivious_shuffle` adds a SHAPE check and nothing more.
+    ///
+    /// ## An implementor MAY require degree-`t` entries — the caller's obligation
+    ///
+    /// A shuffle that only moves whole entries never reads a share, so it is
+    /// **degree-agnostic**: [`ShamirDealer`]'s switch-network implementation
+    /// relabels share-vectors and carries any degree through untouched. A shuffle
+    /// that *recombines* — converting each element between sharings, as a
+    /// dealer-less source must — interpolates from `t+1` points, which is only
+    /// faithful at degree `<= t`; handed a degree-`2t` element it would return a
+    /// well-formed degree-`t` sharing of a DIFFERENT secret, which no later
+    /// reconstruction could detect.
+    ///
+    /// So an implementor is entitled to require that every element of every entry
+    /// be a degree-`<= t` sharing on the canonical points, and to refuse with
+    /// [`MpcError::Protocol`] otherwise — [`crate::prss::PrssRandomness`] does
+    /// exactly that. A caller holding degree-`2t` elements (the oblivious output
+    /// stage's `selector · real_tag` products) must **degree-reduce them first**
+    /// (`crate::shamir::degree_reduce_through`) before shuffling through a
+    /// recombining source. Which sources recombine is not something a generic
+    /// caller can inspect, so the safe discipline is: shuffle degree-`t` columns.
+    ///
+    /// ## The returned shares may be FRESH — do not rely on share identity
+    ///
+    /// What this method preserves is the **reconstructed values** and their
+    /// per-entry binding, not the share vectors themselves. A switch-network
+    /// implementor hands back the very same `Share`s in a new order, but a
+    /// recombining one returns **fresh sharings** of the permuted values — new
+    /// masking polynomials, so every `y` differs even though the entry
+    /// reconstructs to the same tuple. A caller must therefore never match an
+    /// output entry to an input entry by share equality, cache a share across the
+    /// call, or assume the output is a sub-multiset of the input's share vectors.
+    /// (Fresh sharings are a feature, not a wart: re-randomising is what keeps a
+    /// resharing shuffle's output unlinkable to its input.)
+    ///
+    /// ## Ordered delivery is a TRANSPORT obligation, not enforced here
+    ///
+    /// This crate is an in-process simulation, so "sending" a resharing is a
+    /// function call and the loop that produces them is invisible. A real
+    /// deployment runs the same construction over private channels, and there the
+    /// per-round resharing batches MUST be emitted in **output-position order**:
+    /// exposing a source index or a per-element counter alongside each batch, or
+    /// emitting them in input order so the timing tracks it, hands the adversary
+    /// the very permutation the shuffle exists to hide. Nothing in this crate
+    /// enforces that today — there is no wire format for it yet — so it is an
+    /// obligation on the network / transport layer when that lands, recorded here
+    /// so it is not discovered later.
     fn oblivious_shuffle(
         &mut self,
         col: SecretColumn,
@@ -436,6 +482,12 @@ pub(crate) fn checked_shared_nonzero_mask(
 /// width multiset is compared order-independently precisely because a shuffle is
 /// *expected* to re-order entries; a source that returned the input unchanged, or
 /// returned entries built from unrelated shares of the right widths, passes.
+///
+/// It deliberately compares WIDTHS and not shares: a recombining source returns
+/// **fresh sharings** of the permuted values (see
+/// [`DistributedRandomness::oblivious_shuffle`]), so every `y` legitimately
+/// differs from the input's. Only the reconstructed values and their per-entry
+/// binding are preserved across the call, and neither is checked here.
 pub(crate) fn checked_oblivious_shuffle(
     source: &mut dyn DistributedRandomness,
     col: SecretColumn,

@@ -292,6 +292,27 @@ pub fn oblivious_set_output(
 /// consistency guarantee, and no verification that the source actually permuted
 /// anything. A source that cannot share a value it was handed (PRSS today) makes
 /// this fail closed with that source's own error.
+///
+/// ## The tag column is degree `2t` — what that means for a recombining source
+///
+/// Step 3's `tag_out = sel · real_tag` is a [`shamir::mul_shares_raw`] product, so
+/// the tag element of every packed entry is a degree-`2t` sharing while the
+/// payload limbs are degree `t`: the column handed to the shuffle is
+/// MIXED-degree. That is fine for a switch-network source, which only moves whole
+/// entries and never reads a share
+/// ([`DistributedRandomness::oblivious_shuffle`] documents the distinction), and
+/// it is why the dealer path opens the tags at `2 * t` in step 5.
+///
+/// A source that shuffles by RECOMBINING — as a dealer-less one must — requires
+/// degree-`<= t` elements and refuses this column
+/// ([`crate::prss::PrssRandomness`]). Routing the output stage through such a
+/// source therefore needs the tags degree-reduced through the seam
+/// ([`shamir::degree_reduce_through`]) before the shuffle, with step 5's open
+/// moved to degree `t` to match. That path is **unreachable today** — the only
+/// dealer-less source refuses `vss_own_input`, so this function already fails
+/// closed on the selector sharing long before the shuffle — and it is a tracked
+/// follow-up for when dealer-less VSS lands. The dealer path is deliberately left
+/// un-reduced: adding a reduction there would change what the simulation draws.
 pub(crate) fn oblivious_set_output_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,

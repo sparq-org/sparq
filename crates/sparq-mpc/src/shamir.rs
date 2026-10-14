@@ -1268,6 +1268,20 @@ pub(crate) fn eval_poly(coeffs: &[Fp], x: Fp) -> Fp {
 /// linear map (sq-dvuc). The points must be distinct and nonzero; the caller
 /// guarantees this (party indices are `1..=n`). RNG-free / public. `[OPUS-4.8]`
 pub(crate) fn lagrange_zero_weights(xs: &[u64]) -> Vec<Fp> {
+    lagrange_weights_at(xs, Fp::zero())
+}
+
+/// [`lagrange_zero_weights`] at an arbitrary target `z`: the public scalars `λ_i`
+/// with `P(z) = Σ_i λ_i · P(x_i)` for any polynomial `P` of degree `< xs.len()`
+/// sampled at `xs`. `λ_i = Π_{j≠i} (z − x_j)/(x_i − x_j)`.
+///
+/// `z = 0` recovers the recombination weights; a `z` outside `xs` is how a caller
+/// EXTRAPOLATES the interpolant of `xs` to another point — which is what
+/// [`crate::prss::PrssRandomness`]'s degree check does to decide whether the
+/// remaining party points lie on the degree-`t` polynomial the first `t+1` define.
+/// The points must be distinct (party indices are `1..=n`); nonzero is required
+/// only for the `z = 0` use. RNG-free / public.
+pub(crate) fn lagrange_weights_at(xs: &[u64], z: Fp) -> Vec<Fp> {
     xs.iter()
         .enumerate()
         .map(|(i, &xi_raw)| {
@@ -1279,7 +1293,7 @@ pub(crate) fn lagrange_zero_weights(xs: &[u64]) -> Vec<Fp> {
                     continue;
                 }
                 let xj = Fp::new(xj_raw);
-                num = num.mul(xj.neg()); // (0 − x_j)
+                num = num.mul(z.sub(xj)); // (z − x_j)
                 den = den.mul(xi.sub(xj)); // (x_i − x_j)
             }
             num.mul(den.inv())
