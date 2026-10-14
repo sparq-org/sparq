@@ -108,7 +108,7 @@ pub struct JoinKeys {
 impl JoinKeys {
     /// The left-side key column indices, in `key_cols` order.
     ///
-    /// **Single-column fast path ([OPUS-4.8] sq-4r8uy).** The overwhelmingly
+    /// **Single-column fast path (sq-4r8uy).** The overwhelmingly
     /// common join is on ONE variable (`key_cols.len() == 1`). For it, building the
     /// [`Key`] by iterating the heap `key_cols` `Vec` and running the general
     /// `SmallVec::from_iter` collect machinery costs measurably more than a direct
@@ -133,7 +133,7 @@ impl JoinKeys {
     /// keys are equal exactly when the join columns are equal.
     ///
     /// Carries the same single-column fast path as [`left_key`](JoinKeys::left_key)
-    /// ([OPUS-4.8] sq-4r8uy) — for `key_cols.len() == 1` it pushes exactly the one
+    /// (sq-4r8uy) — for `key_cols.len() == 1` it pushes exactly the one
     /// projected right-side id via `single_key` rather than running the general
     /// `iter().collect()`. The single-column result is IDENTICAL to the general
     /// path, so a build key and a probe key still compare equal exactly when the
@@ -148,7 +148,7 @@ impl JoinKeys {
 }
 
 /// Build a one-element [`Key`] holding exactly `id` — the single-column key fast
-/// path ([OPUS-4.8] sq-4r8uy).
+/// path (sq-4r8uy).
 ///
 /// This is byte-identical to `[id].into_iter().collect::<Key>()` (a length-1
 /// [`Key`], the id in slot 0, inline — the `[Id; 2]` inline width holds one id with
@@ -166,7 +166,7 @@ fn single_key(id: Id) -> Key {
 
 /// Equality predicate used by the raw hash-table probe.
 ///
-/// [FABLE-5] #3644: `SmallVec`'s general slice equality may lower to an outlined
+/// #3644: `SmallVec`'s general slice equality may lower to an outlined
 /// `bcmp` even for the dominant one-id join key. Keep that shape as a scalar
 /// comparison and retain the exact prior equality operation for every other key
 /// width.
@@ -220,7 +220,7 @@ pub const JOIN_PARTS: usize = 64;
 /// identical to the explicit [`key_hash`] computation so the precomputed hash hits the
 /// correct bucket every time.
 ///
-/// [SONNET-4.6] sq-7d3dj.19
+/// sq-7d3dj.19
 pub type JoinTable = HashMap<Key, Posting, FxBuildHasher>;
 
 /// Sorted **merge join** of two relations already sorted on a single shared key
@@ -326,7 +326,7 @@ pub fn build_partitioned(build: &[Row], keys: &JoinKeys, parts: &[u8]) -> Vec<Jo
 /// serial [`JoinTable`] or `JOIN_PARTS` radix partitions; `probe_only` are the probe
 /// columns appended after the build row.
 ///
-/// **Single-hash optimisation ([SONNET-4.6] sq-7d3dj.19):** the join key is hashed
+/// **Single-hash optimisation (sq-7d3dj.19):** the join key is hashed
 /// ONCE via [`key_hash`]; the hash bits select the radix partition and
 /// `raw_entry().from_hash` performs the table lookup without a second internal
 /// re-hash. `out.reserve(matches.len())` allocates for all matches in one call —
@@ -342,7 +342,7 @@ pub fn probe_emit(
     out: &mut Vec<Row>,
 ) {
     let key: Key = keys.right_key(prow);
-    // [SONNET-4.6] sq-7d3dj.19: hash ONCE — partition selection and raw_entry lookup
+    // sq-7d3dj.19: hash ONCE — partition selection and raw_entry lookup
     // share this value; no second internal re-hash on the partitioned probe path.
     let h = key_hash(&key);
     let table = probe_table(tables, h);
@@ -351,7 +351,7 @@ pub fn probe_emit(
     };
     // Reserve exact match count — one allocation for the entire key group.
     // Batch-emission contract (sq-pntvh M4): materialise after reserve, not per match.
-    // [SONNET-4.6] sq-7d3dj.19
+    // sq-7d3dj.19
     out.reserve(matches.len());
     for &bi in matches {
         let mut combined = build[bi].clone();
@@ -373,7 +373,7 @@ pub fn probe_emit(
 /// partition and drives `raw_entry().from_hash` — the partitioned probe path pays
 /// exactly one hash operation, identical to the serial path.
 ///
-/// [SONNET-4.6] sq-7d3dj.19
+/// sq-7d3dj.19
 #[inline]
 pub fn probe_gather_indices(
     prow: &Row,
@@ -431,7 +431,6 @@ pub fn bind_combine(result_rows: &[Row], ris: &[usize], new_vals: &[Id], out: &m
 /// Rows are appended in slice order, including duplicates; existing output is kept.
 /// Like [`bind_combine`], this only combines id tuples. The caller owns scanning,
 /// filtering and budget checks. No index vector is needed for the group.
-/// [GPT-6-ASTRA]
 #[inline]
 pub fn bind_combine_rows(result_rows: &[Row], new_vals: &[Id], out: &mut Vec<Row>) {
     for row in result_rows {
@@ -439,7 +438,7 @@ pub fn bind_combine_rows(result_rows: &[Row], new_vals: &[Id], out: &mut Vec<Row
     }
 }
 
-// [GPT-6-ASTRA] Indexed and contiguous groups share the same row construction.
+// Indexed and contiguous groups share the same row construction.
 #[inline]
 fn bind_emit(row: &Row, new_vals: &[Id], out: &mut Vec<Row>) {
     let mut combined = row.clone();
@@ -573,7 +572,7 @@ struct Leapfrog {
     /// For k=3 (the dominant triangle/clique case), `search_k3` loads all three
     /// entries as stack-local copies at entry so the hot loop never reads this field.
     ///
-    /// [SONNET-4.6] sq-7d3dj.20
+    /// sq-7d3dj.20
     order: SmallVec<[usize; 8]>,
     p: usize,
     ended: bool,
@@ -599,7 +598,7 @@ impl Leapfrog {
 
     /// Advance the leapfrog state to the next common value across all participants.
     ///
-    /// Three micro-optimisations ([SONNET-4.6] sq-7d3dj.20):
+    /// Three micro-optimisations (sq-7d3dj.20):
     ///
     /// (a) **Branchless wrap**: `p` only advances by 1 per iteration, so
     ///     `(p + 1) % k` becomes `p += 1; if p == k { p = 0 }` — compiles to a
@@ -653,12 +652,12 @@ impl Leapfrog {
     /// `%` ops present in the generic path.
     ///
     /// Only called from [`search`](Leapfrog::search) when `order.len() == 3`.
-    /// [SONNET-4.6] sq-7d3dj.20
+    /// sq-7d3dj.20
     #[inline]
     fn search_k3(&mut self, iters: &mut [TrieIter]) {
         debug_assert_eq!(self.order.len(), 3);
         // Load all three order entries as stack-locals — hot loop never touches
-        // self.order again. [SONNET-4.6] sq-7d3dj.20
+        // self.order again. sq-7d3dj.20
         let o = [self.order[0], self.order[1], self.order[2]];
         loop {
             // Predecessor in {0, 1, 2}: 0 → 2, else p − 1.
@@ -686,14 +685,14 @@ impl Leapfrog {
     #[inline]
     fn next(&mut self, iters: &mut [TrieIter]) {
         let k = self.order.len();
-        // (b) Hoist: resolve order[p] once. [SONNET-4.6] sq-7d3dj.20
+        // (b) Hoist: resolve order[p] once. sq-7d3dj.20
         let cur_idx = self.order[self.p];
         iters[cur_idx].next();
         if iters[cur_idx].at_end() {
             self.ended = true;
             return;
         }
-        // (a) Branchless wrap: advance p one step mod k. [SONNET-4.6] sq-7d3dj.20
+        // (a) Branchless wrap: advance p one step mod k. sq-7d3dj.20
         self.p += 1;
         if self.p == k {
             self.p = 0;
@@ -785,7 +784,7 @@ pub fn any_unbound(rows: &[Row], cols: &[usize]) -> bool {
 /// §3 (decision R1) and §4 (the seam shape) for the design rationale and the
 /// byte-identity guarantee.
 ///
-/// [SONNET-4.6] sq-qonbz.1
+/// sq-qonbz.1
 pub mod delta {
     use super::{Budget, JoinKeys};
     use crate::rows::{Key, Posting, Row};
@@ -813,7 +812,7 @@ pub mod delta {
     ///
     /// Available only with the `join` Cargo feature (which implies `rows`).
     ///
-    /// [SONNET-4.6] sq-qonbz.1
+    /// sq-qonbz.1
     pub struct DeltaTable {
         /// Row arena — build-side rows stored in insertion order.
         arena: Vec<Row>,
@@ -1218,7 +1217,7 @@ pub mod delta {
 
         #[test]
         fn probe_emit_budget_cooperative_cancel_with_control() {
-            // [HAIKU-4.5] sq-qonbz.6
+            // sq-qonbz.6
             // Test Budget-driven cooperative cancellation mid-enumeration, spanning
             // multiple budget checks (one per probe row). Asserts truncation vs. a
             // NoBudget control run to verify deterministic emission order.
@@ -1412,7 +1411,7 @@ mod tests {
         assert_eq!(out, vec![row(&[1, 10, 99]), row(&[3, 30, 99])]);
     }
 
-    // [GPT-6-ASTRA] Exercise empty, interior and full slices, repeated rows, wide
+    // Exercise empty, interior and full slices, repeated rows, wide
     // rows and projections, and append-to-existing-output semantics.
     #[test]
     fn bind_combine_rows_matches_indexed_groups_and_tuple_concatenation() {
@@ -1436,7 +1435,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-qcnn.12 — DIRECT unit tests over the join kernels' descriptor projection,
+    // sq-qcnn.12 — DIRECT unit tests over the join kernels' descriptor projection,
     // the radix-partitioned hash build/probe path, the budget-truncation branches, the
     // merge-join advance arms, and the solution-compatibility helpers. Each asserts EXACT
     // output rows / counts so a mutation of the branch or index logic goes red.
@@ -1462,7 +1461,7 @@ mod tests {
 
     #[test]
     fn probe_key_eq_is_identical_to_key_equality_for_all_key_widths() {
-        // [FABLE-5] #3644: deterministic randomized differential covering the scalar
+        // #3644: deterministic randomized differential covering the scalar
         // one-id branch and the unchanged general fallback, including spilled keys.
         let mut state = 0x9e37_79b9_u32;
         let mut keys = Vec::new();
@@ -1651,14 +1650,14 @@ mod tests {
         assert!(!any_unbound(&full, &[0, 1, 2])); // all bound
     }
 
-    // [SONNET-4.6] sq-7d3dj.20 — DIRECT tests for the monomorphized k=3 path.
+    // sq-7d3dj.20 — DIRECT tests for the monomorphized k=3 path.
 
     #[test]
     fn lftj_k3_three_way_intersection() {
         // 3-way set intersection: R(x) ∧ S(x) ∧ T(x).
         // All three tries participate at level 0 (k=3), exercising the monomorphized
         // search_k3 path directly. Results must match the manual intersection.
-        // [SONNET-4.6] sq-7d3dj.20
+        // sq-7d3dj.20
         let r = Trie { tuples: vec![vec![1], vec![2], vec![3], vec![5], vec![7]] };
         let s = Trie { tuples: vec![vec![2], vec![3], vec![5], vec![6], vec![8]] };
         let t = Trie { tuples: vec![vec![1], vec![3], vec![5], vec![7], vec![9]] };
@@ -1675,7 +1674,7 @@ mod tests {
 
     #[test]
     fn lftj_k3_intersection_empty_when_no_common_value() {
-        // k=3 path: empty intersection. [SONNET-4.6] sq-7d3dj.20
+        // k=3 path: empty intersection. sq-7d3dj.20
         let r = Trie { tuples: vec![vec![1], vec![2]] };
         let s = Trie { tuples: vec![vec![3], vec![4]] };
         let t = Trie { tuples: vec![vec![5], vec![6]] };
@@ -1691,7 +1690,7 @@ mod tests {
     fn lftj_k3_intersection_result_equivalent_to_k2_pair_intersection() {
         // Invariant: 3-way intersection equals the pairwise intersection computed
         // sequentially. Verifies the k=3 path is semantically equivalent to the
-        // generic path. [SONNET-4.6] sq-7d3dj.20
+        // generic path. sq-7d3dj.20
         let vals_r: Vec<u32> = (0..20).filter(|x| x % 2 == 0).collect(); // even
         let vals_s: Vec<u32> = (0..20).filter(|x| x % 3 == 0).collect(); // multiples of 3
         let vals_t: Vec<u32> = (0..20).filter(|x| x % 4 == 0).collect(); // multiples of 4
@@ -1718,7 +1717,7 @@ mod tests {
         assert_eq!(out_sorted, exp_sorted, "k=3 result must match sequential pairwise intersection");
     }
 
-    // [SONNET-4.6] sq-qcnn.40 — targeted tests killing the surviving mutants from
+    // sq-qcnn.40 — targeted tests killing the surviving mutants from
     // nightly run 28776460517. Each asserts an EXACT value or outcome so a mutation
     // of the key/hash/trie logic goes red.
 
@@ -1810,13 +1809,13 @@ mod tests {
         assert_eq!(out, vec![row(&[10])], "k=4 intersection must find the single common value");
     }
 
-    // [SONNET-4.6] sq-7d3dj.19 — DIRECT tests for `probe_gather_indices` (M4 batch-emission
+    // sq-7d3dj.19 — DIRECT tests for `probe_gather_indices` (M4 batch-emission
     // contract) and the single-hash optimisation in `probe_emit`.
 
     #[test]
     fn probe_gather_indices_serial_table_finds_matching_build_indices() {
         // Serial table (len == 1): probe_gather_indices must return the correct build-row indices.
-        // [SONNET-4.6] sq-7d3dj.19
+        // sq-7d3dj.19
         let build = vec![row(&[1, 10]), row(&[2, 20]), row(&[1, 11])];
         let keys = JoinKeys { key_cols: vec![(0, 0)], right_only: vec![] };
         let tables = vec![build_table(&build, &keys)];
@@ -1841,7 +1840,7 @@ mod tests {
     #[test]
     fn probe_gather_indices_partitioned_table_finds_matching_build_indices() {
         // Partitioned table (len == JOIN_PARTS): exercises the radix branch and raw_entry lookup.
-        // [SONNET-4.6] sq-7d3dj.19
+        // sq-7d3dj.19
         let build = vec![row(&[10, 100]), row(&[20, 200]), row(&[10, 101])];
         let keys = JoinKeys { key_cols: vec![(0, 0)], right_only: vec![] };
         let parts: Vec<u8> = build
@@ -1861,7 +1860,7 @@ mod tests {
         // Load-bearing invariant: probe_gather_indices must collect exactly the build indices
         // that probe_emit materialises. Verifies the M4 batch-emission contract: the morsel
         // pipeline can gather indices via probe_gather_indices and materialise the same rows.
-        // [SONNET-4.6] sq-7d3dj.19
+        // sq-7d3dj.19
         let build = vec![
             row(&[3, 30]),
             row(&[1, 10]),
@@ -1903,7 +1902,7 @@ mod tests {
     fn probe_emit_reserve_is_exact_for_high_fanout() {
         // Confirms the batch-reservation: for a key with N build matches, out.capacity()
         // increases by exactly N after probe_emit (no over-allocation on a hot start).
-        // This is the deterministic alloc-count proof for the optimization. [SONNET-4.6] sq-7d3dj.19
+        // This is the deterministic alloc-count proof for the optimization. sq-7d3dj.19
         let mut build = Vec::new();
         for i in 0..20u32 {
             build.push(row(&[7, i])); // 20 build rows all share key=7
@@ -1922,7 +1921,7 @@ mod tests {
         assert_eq!(cap_before, 0, "output was empty before probe_emit");
     }
 
-    // [OPUS-4.8] sq-4r8uy — the SINGLE-COLUMN JoinKeys key fast path. `left_key`/`right_key`
+    // sq-4r8uy — the SINGLE-COLUMN JoinKeys key fast path. `left_key`/`right_key`
     // special-case `key_cols.len() == 1` (the dominant join arity) to a direct one-element
     // `Key::push` (`single_key`) instead of the general `iter().collect()`. The HARD invariant
     // is byte-identity with the general path — same length, same ids, same order — so a

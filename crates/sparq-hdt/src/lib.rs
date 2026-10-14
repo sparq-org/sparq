@@ -1,8 +1,8 @@
-// [OPUS-4.8] sq-jxl0: single-source the crate overview from README.md so crates.io
+// sq-jxl0: single-source the crate overview from README.md so crates.io
 // (package.readme) and the docs.rs front page render identical content. The README's
 // quickstart fence is a `no_run` doctest (it opens a `.hdt` file that need not exist).
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use sparq_core::dict::{Dict, Id};
 use sparq_core::Graph;
@@ -13,19 +13,19 @@ use hdt::{Hdt, IdKind};
 use std::io::BufRead;
 use std::path::Path;
 
-// [OPUS-4.8] Direct sparq-side decoder (plan levers H1–H4): one-shot SPO scan that
+// Direct sparq-side decoder (plan levers H1–H4): one-shot SPO scan that
 // skips the upstream `TriplesBitmap` query machinery (wavelet matrix + OP-index +
 // rank/select) sparq never uses on a bulk load. This is the default decode path;
 // `graph_from_hdt` (below) is kept as the upstream-backed differential oracle and
 // for callers that already hold an `Hdt` (e.g. to also query its header).
 mod decode;
 pub use decode::graph_from_reader;
-// [OPUS-4.8] (sq-q6a1) Measurement-only: per-stage timed decode for bench/parse's
+// (sq-q6a1) Measurement-only: per-stage timed decode for bench/parse's
 // 3-way HDT split. Identical decode path; the production `graph_from_reader` times
 // nothing.
 pub use decode::{graph_from_reader_timed, StageTimings};
 
-// [OPUS-4.8] sq-2te / sq-ashy: HDT write support (sparq `Graph` -> `.hdt`). Opt-in
+// sq-2te / sq-ashy: HDT write support (sparq `Graph` -> `.hdt`). Opt-in
 // via the `write` feature (it pulls the wrapped crate's `sophia` feature for the
 // section builders/writers). `save` (write.rs) encodes the FourSectDict PFC +
 // BitmapTriples sections DIRECTLY from sparq's in-memory dict + triples via
@@ -115,7 +115,7 @@ const MAGIC_PREFIX_LEN: usize = 4;
 /// Reads up to [`MAGIC_PREFIX_LEN`] bytes off the front of `reader` into an owned
 /// buffer and classifies the container by its magic bytes.
 ///
-/// [OPUS-4.8] roborev 2272: a streaming [`BufRead`] may legally return fewer
+/// roborev 2272: a streaming [`BufRead`] may legally return fewer
 /// bytes than requested per `fill_buf()` — even a single byte — so peeking the
 /// buffer once (`buf.len() >= N`) can misclassify a real gzip/zstd/bzip2 stream
 /// as bare HDT and fail the load. We instead drain a fixed-size prefix robustly
@@ -159,7 +159,7 @@ fn with_hdt_stream<T>(
     reader: impl BufRead,
     f: impl FnOnce(&mut dyn BufRead) -> Result<T, Error>,
 ) -> Result<T, Error> {
-    // [OPUS-4.8] roborev 2272: consume a fixed magic-byte prefix robustly, then
+    // roborev 2272: consume a fixed magic-byte prefix robustly, then
     // chain it back so the decoder/HDT reader sees the full, unmodified stream —
     // both the compressed and the bare-HDT path. `Read::chain` re-prepends the
     // owned prefix; we wrap the chain in a `BufReader` to satisfy the `BufRead`
@@ -213,7 +213,7 @@ pub fn load(path: impl AsRef<Path>) -> Result<Graph, Error> {
 /// cookie, or the gzip magic of a compressed container (decompressed
 /// transparently, as in [`load`]).
 pub fn load_reader<R: BufRead>(reader: R) -> Result<Graph, Error> {
-    // [OPUS-4.8] Default path is the direct decoder (H1–H4): it never builds the
+    // Default path is the direct decoder (H1–H4): it never builds the
     // upstream wavelet matrix / OP-index that a one-shot SPO load throws away.
     with_hdt_stream(reader, |r| decode::graph_from_reader(r))
 }
@@ -332,7 +332,7 @@ pub fn stats_reader<R: BufRead>(reader: R) -> Result<HdtStats, Error> {
     with_hdt_stream(reader, |r| decode::stats_from_reader(r))
 }
 
-// [GPT-5.6] sq-obhf1: filtered count parity with `load_reader_filtered`.
+// sq-obhf1: filtered count parity with `load_reader_filtered`.
 /// Counts triples matching `pattern` without constructing a result [`Graph`].
 ///
 /// Matching uses the same one-shot SPO walk and resolved [`TriplePattern`] as
@@ -483,7 +483,7 @@ mod tests {
     use super::*;
     use std::error::Error as _;
 
-    /// [OPUS-4.8] sq-cafc: the public [`Error`] type's `Display` and `source()` are part of
+    /// sq-cafc: the public [`Error`] type's `Display` and `source()` are part of
     /// the crate's error contract (callers print and chain these) but were never asserted.
     /// Each of the three variants must render its documented prefix, and `source()` must
     /// expose the wrapped cause for the I/O variant and report `None` for the leaf `Term`
@@ -563,7 +563,7 @@ mod tests {
         // Malformed entries are reported, not panicked on.
         assert!(intern_hdt_term(&mut dict, "\"open").is_err());
         assert!(intern_hdt_term(&mut dict, "\"x\"^^<>").is_err());
-        // [OPUS-4.8] sq-bif: the BARE (bracket-less) empty datatype `"x"^^` is the
+        // sq-bif: the BARE (bracket-less) empty datatype `"x"^^` is the
         // distinct sibling of the bracketed-empty `"x"^^<>` above: the `strip_prefix('<')`
         // does NOT fire, so `dt` is the empty string straight from `^^`, and the
         // `dt.is_empty()` guard must still reject it (an empty datatype IRI is never a
@@ -577,7 +577,7 @@ mod tests {
         assert!(intern_hdt_term(&mut dict, "").is_err());
     }
 
-    // [OPUS-4.8] roborev 2272 regression: a `BufRead` that hands back exactly
+    // roborev 2272 regression: a `BufRead` that hands back exactly
     // ONE byte per `fill_buf()`/`read()` (a legal streaming reader) must not
     // defeat magic-byte container detection, and the consumed prefix must be
     // chained back so the downstream reader sees the full, unmodified stream.

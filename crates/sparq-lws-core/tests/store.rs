@@ -51,7 +51,7 @@ async fn write_then_read_round_trips_bytes_and_content_type() {
 
 #[tokio::test]
 async fn bounded_store_reports_usage_and_refuses_bytes_beyond_quota() {
-    // [GPT-5.6] Mutation witness: removing the aggregate-byte admission check makes the second write
+    // Mutation witness: removing the aggregate-byte admission check makes the second write
     // succeed, so both the error and unchanged usage assertions fail.
     let limits = InMemoryStoreLimits::new(5, 4);
     let s = CompositeStore::in_memory_with_limits(limits);

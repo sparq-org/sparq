@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.37: pin absent-term and excluded-predicate signature contracts.
+// sq-bif.37: pin absent-term and excluded-predicate signature contracts.
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;

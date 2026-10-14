@@ -29,7 +29,7 @@
 //!    monotone reading of *hand-authored* `pkg:confidence` estimates; it is **not** a
 //!    calibrated probability. No "calibrated confidence" is claimed here, and none should
 //!    be, until a reliability-diagram measurement on calibrated confidences exists
-//!    (design §5 Phase 2 / §0 honesty rule). [OPUS-4.8]
+//!    (design §5 Phase 2 / §0 honesty rule).
 //! 3. **Fail-closed.** A subject with no provenance contributes the *weakest* assurance
 //!    (`Missing`) and no confidence — it can only pull the answer toward abstention, never
 //!    toward over-confidence. Over a no-provenance graph the honest default is to hedge
@@ -459,7 +459,7 @@ ex:bare a pkg:Finding ;
     /// The DOCUMENTED degenerate-config invariant: an out-of-order `low_band > high_band`
     /// does not panic but COLLAPSES the `Medium` band to empty — every confidence is then
     /// `High` (>= high_band) or `Low` (< low_band), and `High` wins the `>=` check first.
-    /// Asserts that no value maps to `Medium` under the inverted thresholds. [OPUS-4.8]
+    /// Asserts that no value maps to `Medium` under the inverted thresholds.
     #[test]
     fn band_for_inverted_thresholds_collapses_medium() {
         let cfg = QualifyConfig {
@@ -484,7 +484,7 @@ ex:bare a pkg:Finding ;
 
     /// `min_confidence` floor at the EXACT boundary: confidence == floor does NOT abstain
     /// (the floor is "strictly below"); a hair under it does. Locks the `< floor` predicate
-    /// against an accidental `<=`. [OPUS-4.8]
+    /// against an accidental `<=`.
     #[test]
     fn abstention_floor_is_strict_less_than() {
         let g = graph();

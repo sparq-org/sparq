@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ushvx (epic sq-my8wd) — in-process SERVICE-federation test harness.
+//! sq-ushvx (epic sq-my8wd) — in-process SERVICE-federation test harness.
 //!
 //! This is the **federation keystone** for the SERVICE / HTTP-protocol conformance
 //! program (design record `research/service-federation-conformance.md`, Option C): a
@@ -68,12 +68,12 @@ impl LoopbackEndpoint {
     /// fixture stays ergonomic in `#[test]` code.
     pub fn serve(graph: Graph) -> Self {
         // The default loopback server uses the stock `AppState` (no descriptor / opt-in
-        // surfaces). [OPUS-4.8] sq-1uuxz: the SD/GSP lane needs the `federation-descriptors`
+        // surfaces). sq-1uuxz: the SD/GSP lane needs the `federation-descriptors`
         // runtime flag turned on, so it builds its own `AppState` via `serve_with`.
         Self::serve_with(move || AppState::new(graph))
     }
 
-    /// [OPUS-4.8] sq-1uuxz: stand up the loopback server over a CALLER-BUILT [`AppState`], so a
+    /// sq-1uuxz: stand up the loopback server over a CALLER-BUILT [`AppState`], so a
     /// lane can opt into a server config the stock [`serve`](Self::serve) does not (e.g. the
     /// `federation-descriptors` runtime flag the Service-Description lane requires). `make_app`
     /// is run ON the server thread (it constructs the `AppState` — which holds the `Graph` — there,

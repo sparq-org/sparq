@@ -8,7 +8,7 @@
 //! Gated on the `store` feature (the whole file). Executed by a dedicated
 //! `feature-matrix.yml` leg (`sparq-trust (store)`) — see that workflow.
 //!
-//! [OPUS-4.8] sq-pfae.5. 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae.5. 🤖 SPARQ agent — trust-graph authorisation PoC.
 #![cfg(feature = "store")]
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};

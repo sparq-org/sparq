@@ -59,7 +59,7 @@ impl<'g> GraphView<'g> {
             .collect()
     }
 
-    // ---- id-level twins ([FABLE-5] sq-7d3dj.33.4) --------------------------------
+    // ---- id-level twins (sq-7d3dj.33.4) --------------------------------
     // The Term-level lookups above pay a dictionary hash of every bound term PLUS an
     // `oxrdf::Term` materialisation per matched row on EVERY call — the profiled hot
     // cost of core-constraint validation (find_iri/hash_iri + Term alloc churn per
@@ -98,7 +98,7 @@ impl<'g> GraphView<'g> {
     }
 
     /// `(predicate, object)` id pairs of triples with subject `s` — id twin of
-    /// [`Self::predicate_objects`] (`sh:closed`), same row order. [FABLE-5] (sq-j9hls)
+    /// [`Self::predicate_objects`] (`sh:closed`), same row order. (sq-j9hls)
     pub(crate) fn predicate_objects_ids(&self, s: Id) -> Vec<(Id, Id)> {
         let scan = self.g.store.scan(&[Some(s), None, None]);
         scan.rows
@@ -205,7 +205,7 @@ impl<'g> GraphView<'g> {
         out
     }
 
-    /// [OPUS-4.8] (sq-vg3y) The members of `head` iff it is a WELL-FORMED SHACL
+    /// (sq-vg3y) The members of `head` iff it is a WELL-FORMED SHACL
     /// list (SHACL §1.4 "SHACL Lists"), else `None`. A SHACL list is `rdf:nil`
     /// (with no `rdf:first`/`rdf:rest` — empty list), or a node with EXACTLY ONE
     /// `rdf:first`, EXACTLY ONE `rdf:rest` that is itself a SHACL list, and that
@@ -317,7 +317,7 @@ pub(crate) fn dedup(items: impl IntoIterator<Item = Term>) -> Vec<Term> {
 
 /// Order-preserving dedup over ids — the id twin of [`dedup`]. Ids and terms are
 /// in bijection (the dictionary is injective), so deduplicating ids keeps exactly
-/// the elements (and order) the Term-level dedup would. [FABLE-5] (sq-7d3dj.33.4)
+/// the elements (and order) the Term-level dedup would. (sq-7d3dj.33.4)
 pub(crate) fn dedup_ids(items: impl IntoIterator<Item = Id>) -> Vec<Id> {
     let mut seen: rustc_hash::FxHashSet<Id> = rustc_hash::FxHashSet::default();
     let mut out = Vec::new();
@@ -329,7 +329,7 @@ pub(crate) fn dedup_ids(items: impl IntoIterator<Item = Id>) -> Vec<Id> {
     out
 }
 
-// [OPUS-4.8] (sq-bif) Direct unit coverage for the public `GraphView` read-view.
+// (sq-bif) Direct unit coverage for the public `GraphView` read-view.
 // The W3C-suite harness drives `view.object`/`view.list` indirectly, but the
 // edge-case branches of this term-level API — the invalid-IRI guards, the
 // cycle-safe lenient `list` vs the strict `list_strict` (which must REJECT a

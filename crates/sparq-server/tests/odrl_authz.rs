@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-lrtc3.1 + sq-3mu76 — e2e integration tests for the OPT-IN ODRL lane on
+//! sq-lrtc3.1 + sq-3mu76 — e2e integration tests for the OPT-IN ODRL lane on
 //! `POST /authz/query` and (sq-3mu76, §4) the advisory `POST /authz/decide` /
 //! `POST /authz/wac-allow` endpoints (the `odrl-authz` cargo feature; the whole file no-ops
 //! without it).
@@ -324,7 +324,7 @@ async fn lane_refusals_are_4xx_fail_closed() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. [FABLE-5] sq-3mu76 — the lane on the ADVISORY endpoints (`/authz/decide`,
+// 4. sq-3mu76 — the lane on the ADVISORY endpoints (`/authz/decide`,
 //    `/authz/wac-allow`): a prohibition is never reported past; read-scoped
 //    advertisement; the query lane's refusal matrix.
 // ---------------------------------------------------------------------------
@@ -505,7 +505,7 @@ async fn wac_allow_is_read_scoped_and_never_advertises_a_prohibited_read() {
     assert_eq!(resp.status(), 403);
 }
 
-/// [FABLE-5] sq-3mu76 — the trust dispatch decides over its OWN store and would bypass the
+/// sq-3mu76 — the trust dispatch decides over its OWN store and would bypass the
 /// ODRL lane; the combination is refused up front rather than silently dropping a prohibition.
 #[cfg(feature = "solid-authz-trust")]
 #[tokio::test]
@@ -558,7 +558,7 @@ async fn lane_is_dormant_without_odrl_in_the_dataset() {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-snopa.8 — the stateful lane REFUSES an ODRL-carrying server store.
+// sq-snopa.8 — the stateful lane REFUSES an ODRL-carrying server store.
 //
 // The ODRL lane reads the request-body dataset; `"source":"server"` carries none. If the
 // server's OWN store held ODRL rules and the stateful lane simply ignored them, a PROHIBITION

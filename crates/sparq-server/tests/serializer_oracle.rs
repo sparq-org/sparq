@@ -1,4 +1,4 @@
-//! [OPUS-4.8] Differential **serializer oracle** for the SPARQL Results XML / CSV / TSV
+//! Differential **serializer oracle** for the SPARQL Results XML / CSV / TSV
 //! writers in `sparq_server::results` (`select_to_xml` / `select_to_csv` / `select_to_tsv`).
 //!
 //! ## Why this exists (the gap it closes)

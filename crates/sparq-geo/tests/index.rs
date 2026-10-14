@@ -2,7 +2,7 @@
 
 use geo_types::Point;
 use oxrdf::Term;
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{rngs::StdRng, RngExt, SeedableRng};
 use sparq_core::Graph;
 use sparq_geo::{geof, parse_wkt_literal, GeoIndex};
@@ -269,7 +269,7 @@ fn assert_matches_fresh_build(index: &GeoIndex, graph: &Graph) {
     };
     assert_eq!(snapshot(index), snapshot(&fresh));
     assert_eq!(index.len(), fresh.len());
-    // [OPUS-4.8] sq-7jt80: the id-level indexed universe maintained across the
+    // sq-7jt80: the id-level indexed universe maintained across the
     // delta must equal a fresh build's — proving apply_delta keeps `literal_ids`
     // consistent (a stale id-set would be an answer-safety bug in the pushdown's
     // fast path). Both are keyed on the SAME graph's dict, so the freshness token

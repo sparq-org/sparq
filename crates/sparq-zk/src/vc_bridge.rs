@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! Off-circuit W3C Verifiable-Credential ingest bridge (sq-9c5e, design
 //! `research/zk-configurable-commitment-design.md` §5).
 //!
@@ -52,7 +52,7 @@
 //!   document into that RDF is the ADDITIVE, layered-on-top job of
 //!   [`crate::vc_bridge_json`] (sq-txg1y); nothing here parses JSON.
 //!
-//! # The two `ecdsa-rdfc-2019` curve profiles (sq-txg1y) [OPUS-5]
+//! # The two `ecdsa-rdfc-2019` curve profiles (sq-txg1y)
 //! W3C *Data Integrity ECDSA Cryptosuites v1.0* gives the **one** cryptosuite
 //! token `ecdsa-rdfc-2019` **two** profiles, selected by the issuer key's curve —
 //! and the hash changes with it (§3.1 *ECDSA Algorithms*):
@@ -198,30 +198,30 @@ pub enum VcBridgeError {
     Commit(CommitError),
     /// The credential graph is empty (nothing to commit).
     EmptyCredential,
-    /// [OPUS-5] sq-txg1y — the JSON envelope layer ([`crate::vc_bridge_json`])
+    /// sq-txg1y — the JSON envelope layer ([`crate::vc_bridge_json`])
     /// could not decompose the document into a DI-secured VC: bad JSON, a missing
     /// or non-object `proof`, a proof set/chain, a missing `cryptosuite` /
     /// `verificationMethod` / `proofValue`, or a `proofValue` that is not a
     /// decodable `z` (base58-btc) multibase. Carries the specific reason.
     MalformedVcJson(String),
-    /// [OPUS-5] sq-txg1y — expanding the JSON-LD document to RDF failed. The
+    /// sq-txg1y — expanding the JSON-LD document to RDF failed. The
     /// commonest cause by far is a remote `@context` the caller did not supply:
     /// the bridge performs NO network access, so an unlisted context URL is
     /// refused (by name, in this message) rather than fetched.
     JsonLdExpansion(String),
-    /// [OPUS-5] sq-u5y1f — a **selective-disclosure** suite (`bbs-2023` /
+    /// sq-u5y1f — a **selective-disclosure** suite (`bbs-2023` /
     /// `ecdsa-sd-2023`) was presented to [`crate::vc_bridge_sd`] but no host
     /// verifier able to check it was supplied (none at all, or one whose
     /// [`crate::vc_bridge_sd::SelectiveDisclosureVerifier::supports`] said no).
     /// sparq implements NO selective-disclosure verifier, so this is the DEFAULT
     /// outcome for those suites. Carries the offending token.
     SelectiveDisclosureUnavailable(String),
-    /// [OPUS-5] sq-u5y1f — the host-supplied selective-disclosure verifier
+    /// sq-u5y1f — the host-supplied selective-disclosure verifier
     /// REJECTED the derived proof. Carries that verifier's verbatim reason; the
     /// decision is the host's, not sparq's (which is why it is a distinct variant
     /// from [`VcBridgeError::VerificationFailed`], the in-repo `rdfc` outcome).
     SelectiveDisclosureRejected(String),
-    /// [OPUS-5] sq-txg1y — the JSON-LD expansion produced quads outside the
+    /// sq-txg1y — the JSON-LD expansion produced quads outside the
     /// default graph. Refused rather than flattened, because flattening would
     /// change the canonical N-Quads the Data-Integrity hash covers.
     NamedGraphUnsupported,
@@ -230,7 +230,7 @@ pub enum VcBridgeError {
 impl std::fmt::Display for VcBridgeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // [OPUS-4.8] positional format args (CodeQL rust/unused-variable).
+            // positional format args (CodeQL rust/unused-variable).
             VcBridgeError::UnsupportedCryptosuite(t) => {
                 write!(f, "unsupported source cryptosuite: {}", t)
             }
@@ -347,7 +347,7 @@ pub fn hash_data_from_triples(
 /// The **SHA-384** twin of [`hash_data_from_triples`] — the `ecdsa-rdfc-2019`
 /// **P-384** profile's 96-byte `hashData` (`SHA-384(proofConfig) ||
 /// SHA-384(document)`, W3C vc-di-ecdsa §3.1 / §A.3). Same canonicalization, same
-/// proof-config-first concatenation order; only the digest widens. [OPUS-5] sq-txg1y.
+/// proof-config-first concatenation order; only the digest widens. sq-txg1y.
 pub fn hash_data_from_triples_sha384(
     credential: &[Triple],
     proof_config: &[Triple],
@@ -400,7 +400,7 @@ fn verify_ecdsa_p256(
 /// Verify an ECDSA-P384 (`ecdsa-rdfc-2019`, **P-384 / SHA-384** profile — W3C
 /// vc-di-ecdsa §A.3) signature over the 96-byte `hash_data`. Fail-closed: an SEC1
 /// public key (compressed 49B or uncompressed 97B) and a 96-byte fixed-width
-/// `(r,s)` signature are required. PUBLIC data only. [OPUS-5] sq-txg1y.
+/// `(r,s)` signature are required. PUBLIC data only. sq-txg1y.
 ///
 /// NOTE (the profile's whole point): `p384`'s `Verifier::verify` digests the raw
 /// message with **SHA-384** before the curve operation, matching the suite's
@@ -873,7 +873,7 @@ mod tests {
     }
 
     // --- ECDSA P-384 (ecdsa-rdfc-2019, SHA-384 profile): the REAL verify path ----
-    // [OPUS-5] sq-txg1y.
+    // sq-txg1y.
 
     #[test]
     fn ecdsa_p384_real_proof_verifies_and_ingests() {

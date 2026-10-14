@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-xa15c (#1248 items 1+2) — DIRECT unit coverage of the in-process
+//! sq-xa15c (#1248 items 1+2) — DIRECT unit coverage of the in-process
 //! embedding-seam data-path facade ([`sparq_serve::embed`]).
 //!
 //! The companion `embed_seam.rs` proves the generation-ring concurrency wrapper

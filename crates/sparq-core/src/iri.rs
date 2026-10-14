@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7d3dj.18) 🤖 SPARQ agent — a prefix-memoized IRI-validation fast path that
+//! (sq-7d3dj.18) 🤖 SPARQ agent — a prefix-memoized IRI-validation fast path that
 //! sits *in front of* the full [`oxiri`] RFC-3987 automaton in the ingest lane.
 //!
 //! # Why
@@ -34,7 +34,7 @@
 //! memo's contents: the memo is a pure cache of *already-validated* prefixes, so its state
 //! (or staleness across unrelated parses) can only change *speed*, never the answer.
 
-/// [OPUS-4.8] (sq-7d3dj.18) True iff `b` is an ASCII byte that is valid in **every** position
+/// (sq-7d3dj.18) True iff `b` is an ASCII byte that is valid in **every** position
 /// of an IRI *after* the authority-terminating `/` — i.e. the intersection of the classes
 /// legal in `ipath-abempty`, `iquery`, and `ifragment` that needs no context to accept.
 ///
@@ -64,7 +64,7 @@ pub const fn is_safe_suffix_byte(b: u8) -> bool {
 }
 
 /// Position-independent lookup table for [`is_safe_suffix_byte`], so the suffix pre-scan is a
-/// branch-light one-pass load per byte (autovectorizable). [OPUS-4.8]
+/// branch-light one-pass load per byte (autovectorizable).
 const SUFFIX_SAFE: [bool; 256] = {
     let mut t = [false; 256];
     let mut i = 0usize;
@@ -77,7 +77,7 @@ const SUFFIX_SAFE: [bool; 256] = {
 
 /// True iff **every** byte of `suffix` is [`is_safe_suffix_byte`] — one vectorizable pass.
 ///
-/// An empty suffix is safe (a memoized `scheme://authority/` is itself a valid IRI). [OPUS-4.8]
+/// An empty suffix is safe (a memoized `scheme://authority/` is itself a valid IRI).
 #[inline]
 #[must_use]
 fn suffix_all_safe(suffix: &[u8]) -> bool {
@@ -92,7 +92,7 @@ fn suffix_all_safe(suffix: &[u8]) -> bool {
 /// *(ALPHA / DIGIT / "+" / "-" / ".")`) contains no `:` and the FIRST `:` is the scheme
 /// separator. Returns `None` for the non-`//` forms (`urn:…`, `mailto:…`) and for an authority
 /// not terminated by a `/` (`http://ex`, `http://ex?q`) — there is no path-prefix to reuse, so
-/// those simply never seed the memo. [OPUS-4.8]
+/// those simply never seed the memo.
 #[inline]
 #[must_use]
 fn scheme_authority_prefix_len(s: &str) -> Option<usize> {
@@ -117,10 +117,10 @@ fn scheme_authority_prefix_len(s: &str) -> Option<usize> {
 
 /// Default number of `scheme://authority/` prefixes an [`IriPrefixMemo`] remembers. Real dumps
 /// reuse only a handful of prefixes, so a small ring captures the win while a miss costs one
-/// short `starts_with` per entry. [OPUS-4.8]
+/// short `starts_with` per entry.
 pub const DEFAULT_MEMO_CAPACITY: usize = 8;
 
-/// [OPUS-4.8] (sq-7d3dj.18) A bounded ring of recently `oxiri`-validated `scheme://authority/`
+/// (sq-7d3dj.18) A bounded ring of recently `oxiri`-validated `scheme://authority/`
 /// prefixes, used to shortcut re-validation of IRIs that share a validated prefix.
 ///
 /// Construct with [`IriPrefixMemo::new`] (or [`IriPrefixMemo::with_capacity`]) and call
@@ -149,19 +149,19 @@ impl IriPrefixMemo {
 
     /// A memo that remembers the last `cap` validated prefixes (a `cap` of 0 disables the
     /// prefix memo — [`validate`](Self::validate) then always falls back to `oxiri`, which
-    /// is still correct, just unaccelerated). [OPUS-4.8]
+    /// is still correct, just unaccelerated).
     #[must_use]
     pub fn with_capacity(cap: usize) -> Self {
         Self { prefixes: Vec::with_capacity(cap), cap }
     }
 
-    /// Number of memoized prefixes currently held (for tests/introspection). [OPUS-4.8]
+    /// Number of memoized prefixes currently held (for tests/introspection).
     #[must_use]
     pub fn len(&self) -> usize {
         self.prefixes.len()
     }
 
-    /// Whether the memo currently holds no prefixes. [OPUS-4.8]
+    /// Whether the memo currently holds no prefixes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.prefixes.is_empty()
@@ -171,7 +171,7 @@ impl IriPrefixMemo {
     /// is a valid absolute IRI. A `false` result means "unknown — ask `oxiri`", NOT "invalid".
     ///
     /// Soundness (`fast_accept(s)` ⇒ `oxiri` accepts `s`) is the differential-fuzz gate's
-    /// load-bearing assertion. [OPUS-4.8]
+    /// load-bearing assertion.
     #[must_use]
     fn fast_accept(&self, s: &str) -> bool {
         let sb = s.as_bytes();
@@ -185,7 +185,7 @@ impl IriPrefixMemo {
     }
 
     /// Seed the ring from a string `oxiri` has just accepted (extract & remember its
-    /// `scheme://authority/` prefix; FIFO-evict the oldest at capacity; no duplicates). [OPUS-4.8]
+    /// `scheme://authority/` prefix; FIFO-evict the oldest at capacity; no duplicates).
     fn record(&mut self, s: &str) {
         if self.cap == 0 {
             return;
@@ -205,7 +205,7 @@ impl IriPrefixMemo {
     /// `oxiri::Iri::parse(s).is_ok()` accepts.
     ///
     /// Tries the memoized fast path first; on a miss, runs the full `oxiri` automaton and, when
-    /// it accepts, seeds the ring so future IRIs sharing that prefix take the fast path. [OPUS-4.8]
+    /// it accepts, seeds the ring so future IRIs sharing that prefix take the fast path.
     #[must_use]
     pub fn validate(&mut self, s: &str) -> bool {
         if self.fast_accept(s) {
@@ -222,7 +222,7 @@ impl IriPrefixMemo {
 
 /// Validate `s` as an absolute IRI (RFC-3987) — a convenience for one-shot callers that
 /// validate a single IRI and keep no state. Calls the `oxiri` automaton DIRECTLY (no memo
-/// fast path). Accepts exactly `oxiri::Iri::parse(s).is_ok()`. [OPUS-4.8]
+/// fast path). Accepts exactly `oxiri::Iri::parse(s).is_ok()`.
 #[must_use]
 pub fn is_valid_iri(s: &str) -> bool {
     // This one-shot entry point does NOT run the prefix-memo fast path or the ASCII suffix
@@ -319,7 +319,7 @@ mod tests {
 
     /// A committed adversarial corpus — unicode boundaries, percent-encoding, empty authority,
     /// IPv6 literals, bad schemes, and `iunreserved`/`iprivate` edges — replayed deterministically
-    /// every run alongside the generated cases. [OPUS-4.8]
+    /// every run alongside the generated cases.
     const ADVERSARIAL_CORPUS: &[&str] = &[
         // valid, common
         "http://example.org/foo",
@@ -382,7 +382,7 @@ mod tests {
     ];
 
     /// Deterministic, allocation-cheap xorshift64* PRNG (no external `rand` dependency, so the
-    /// fuzz gate replays byte-identically per PR). [OPUS-4.8]
+    /// fuzz gate replays byte-identically per PR).
     struct Rng(u64);
     impl Rng {
         fn next_u64(&mut self) -> u64 {

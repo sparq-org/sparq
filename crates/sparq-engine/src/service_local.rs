@@ -1,5 +1,5 @@
 //! Local (in-process) rows-returning `SERVICE` handlers — the table-function seam.
-//! [OPUS-5] (sq-lsp7k.2.2)
+//! (sq-lsp7k.2.2)
 //!
 //! The [`FunctionRegistry`](crate::FunctionRegistry) extension seam is *scalar*: terms
 //! in, ONE term out. Some extensions cannot be expressed that way — a lookup that

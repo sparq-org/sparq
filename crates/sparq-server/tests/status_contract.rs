@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-r5bv, gh-50) **Contract test for the stable HTTP error/status contract.**
+//! (sq-r5bv, gh-50) **Contract test for the stable HTTP error/status contract.**
 //!
 //! Asserts the consumer-facing transient-vs-permanent classification documented in
 //! `src/status_contract.rs` against the REAL hardened router: for each condition a client
@@ -220,7 +220,7 @@ async fn unknown_route_is_permanent_404() {
     let status = resp.status().as_u16();
     assert_eq!(status, 404);
     assert!(!is_transient(status));
-    // [OPUS-4.8] (sq-pj6u) The unmatched-route 404 carries the SAME structured envelope as
+    // (sq-pj6u) The unmatched-route 404 carries the SAME structured envelope as
     // every other error, now with the CATEGORISED `not found` message (was the bare empty
     // `{"error":""}`). It must NOT echo the requested path — leak-free.
     let body = resp.text().await.unwrap();
@@ -308,7 +308,7 @@ async fn result_row_cap_is_permanent_413_honest_refusal() {
     );
 }
 
-/// [OPUS-4.8] (sq-s5is) The byte-accounted working-set cap (`--max-query-bytes`) is the
+/// (sq-s5is) The byte-accounted working-set cap (`--max-query-bytes`) is the
 /// same PERMANENT honest `413` class as the row cap — a 413 (not a 5xx / not a truncation),
 /// and its body carries the documented `byte limit` sentinel naming the byte knob.
 #[tokio::test]
@@ -338,7 +338,7 @@ async fn result_byte_cap_is_permanent_413_honest_refusal() {
     );
 }
 
-/// [OPUS-4.8] (sq-s5is) Counterpart: a generous byte cap that the working set does NOT
+/// (sq-s5is) Counterpart: a generous byte cap that the working set does NOT
 /// exceed must answer the query normally (200) — the cap refuses only genuine overflow.
 #[tokio::test]
 async fn result_under_byte_cap_succeeds() {
@@ -476,7 +476,7 @@ async fn all_error_bodies_are_sanitized_json() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-iu0c) PERMANENT-but-distinct class: a blocked SERVICE egress is a 403
+// (sq-iu0c) PERMANENT-but-distinct class: a blocked SERVICE egress is a 403
 // POLICY refusal, NOT the 500 a server-fault execution error gives. A retry classifier must
 // see a permanent 403 (ask the operator to allowlist the host), never a transient 5xx.
 // ---------------------------------------------------------------------------

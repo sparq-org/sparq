@@ -1,6 +1,6 @@
 //! SPARQL window functions (sq-5qz9) — a NON-STANDARD, OPT-IN extension.
 //!
-//! [OPUS-4.8] **There is no W3C-REC syntax for SPARQL window functions.** SPARQL
+//! **There is no W3C-REC syntax for SPARQL window functions.** SPARQL
 //! 1.1 has no `OVER (PARTITION BY … ORDER BY …)` clause, and no SPARQL-community
 //! SEP defines one. Engines that offer windowing (Stardog's `WINDOW`/`OVER`,
 //! AnzoGraph, GraphDB's ranking extensions) each invent their own surface. So
@@ -37,17 +37,17 @@
 //!   or AFTER (`Lead`) the current row in the window `ORDER BY` order. `n` defaults
 //!   to `1`; a source row outside the partition yields the supplied `default`
 //!   (unbound when none is given). These are POSITIONAL functions — they ignore any
-//!   [`WindowFrame`]. [OPUS-4.8] (sq-hqhc)
+//!   [`WindowFrame`]. (sq-hqhc)
 //! * [`WindowFunction::Ntile`] — `NTILE(n)`: the 1-based bucket number when the
 //!   ordered partition is split into `n` near-equal buckets (the first `size % n`
 //!   buckets take one extra row). `n` must be `>= 1`. Also ignores any frame.
-//!   [OPUS-4.8] (sq-hqhc)
+//!   (sq-hqhc)
 //!
 //! Each appends one new bound column (`new_var`) to every row; the row order of
 //! the input `QueryResult` is preserved (window functions are computed, not a
 //! re-sort).
 //!
-//! ## Window frames (`ROWS` / `RANGE`)  [OPUS-4.8] (sq-imj8)
+//! ## Window frames (`ROWS` / `RANGE`)  (sq-imj8)
 //!
 //! A [`WindowFrame`] narrows the set of rows an [`WindowFunction::Aggregate`]
 //! folds over, per current row, in the window `ORDER BY` ordering. Two frame
@@ -140,20 +140,20 @@ pub enum WindowFunction {
     /// `LAG(?of[, offset[, default]])` — the value of column `of` from the row
     /// `offset` positions BEFORE the current row, in the window `ORDER BY` order.
     /// `offset` defaults to `1`. When the source row falls outside the partition
-    /// the result is `default` (unbound when no default is given). [OPUS-4.8] (sq-hqhc)
+    /// the result is `default` (unbound when no default is given). (sq-hqhc)
     Lag { of: Variable, offset: u64, default: Option<Term> },
     /// `LEAD(?of[, offset[, default]])` — as [`Self::Lag`] but `offset` positions
-    /// AFTER the current row. [OPUS-4.8] (sq-hqhc)
+    /// AFTER the current row. (sq-hqhc)
     Lead { of: Variable, offset: u64, default: Option<Term> },
     /// `NTILE(n)` — the 1-based bucket number (`1..=n`) when the ordered partition
     /// is split into `n` buckets as evenly as possible (earlier buckets take the
     /// extra row when the partition size is not a multiple of `n`). `n` must be
-    /// `>= 1` (a `0` bucket count is rejected by [`apply_window`]). [OPUS-4.8] (sq-hqhc)
+    /// `>= 1` (a `0` bucket count is rejected by [`apply_window`]). (sq-hqhc)
     Ntile { buckets: u64 },
 }
 
 /// The unit of a window [`WindowFrame`]: physical row offsets (`ROWS`) or the
-/// logical, peer-based `RANGE`. See the module docs.  [OPUS-4.8] (sq-imj8)
+/// logical, peer-based `RANGE`. See the module docs.  (sq-imj8)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameUnit {
     /// `ROWS` — bounds count rows by physical position in the ordered partition.
@@ -164,7 +164,7 @@ pub enum FrameUnit {
 }
 
 /// One end of a window [`WindowFrame`], in the window `ORDER BY` ordering.
-/// [OPUS-4.8] (sq-imj8)
+/// (sq-imj8)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameBound {
     /// `UNBOUNDED PRECEDING` — the first row of the partition.
@@ -185,7 +185,7 @@ pub enum FrameBound {
 /// (`BETWEEN start AND end`). The frame narrows the rows an
 /// [`WindowFunction::Aggregate`] folds over, per current row; ranking functions
 /// ignore it. `None` for [`WindowSpec::frame`] ≡ the whole partition (the SQL
-/// default for an aggregate).  [OPUS-4.8] (sq-imj8)
+/// default for an aggregate).  (sq-imj8)
 ///
 /// A frame is well-formed iff `start` does not begin AFTER `end` in the ordering
 /// (e.g. `UNBOUNDED FOLLOWING` may not be a `start`, `UNBOUNDED PRECEDING` may not
@@ -221,7 +221,7 @@ pub struct WindowSpec {
     pub function: WindowFunction,
     /// An explicit window frame for an [`WindowFunction::Aggregate`] (`None` ≡ the
     /// whole partition, the SQL default). Ignored for the ranking functions.
-    /// [OPUS-4.8] (sq-imj8)
+    /// (sq-imj8)
     pub frame: Option<WindowFrame>,
     /// The new variable the computed window value is bound to.
     pub new_var: Variable,
@@ -253,7 +253,7 @@ pub fn apply_window(result: &QueryResult, spec: &WindowSpec) -> Result<QueryResu
         }
     }
     // NTILE(0) is undefined (you cannot split into zero buckets); reject up front.
-    // [OPUS-4.8] (sq-hqhc)
+    // (sq-hqhc)
     if let WindowFunction::Ntile { buckets: 0 } = spec.function {
         return Err("window: NTILE requires a bucket count >= 1".into());
     }
@@ -380,7 +380,7 @@ fn compute_partition(
         }
         // LAG / LEAD: offset the current ordered position by ±`offset`; out of the
         // partition ⇒ the supplied default (unbound if none). The frame is ignored
-        // (SQL: an offset function takes no frame). [OPUS-4.8] (sq-hqhc)
+        // (SQL: an offset function takes no frame). (sq-hqhc)
         WindowFunction::Lag { of, offset, default } => {
             eval_offset(result, of, ordered, values, |pos| pos.checked_sub(*offset as i128), default);
         }
@@ -389,7 +389,7 @@ fn compute_partition(
         }
         // NTILE(n): split the ordered partition into `n` near-equal buckets; the
         // first `size % n` buckets get one extra row. The frame is ignored.
-        // [OPUS-4.8] (sq-hqhc)
+        // (sq-hqhc)
         WindowFunction::Ntile { buckets } => {
             let n = *buckets;
             // `buckets == 0` is validated away in `apply_window`; guard anyway.
@@ -416,7 +416,7 @@ fn compute_partition(
 /// Shared LAG/LEAD body: for each ordered position `pos`, read column `of` from the
 /// row at `src(pos)` (a position-offset closure) and write it into `values` at the
 /// current row's input index; an out-of-partition source yields `default` (which may
-/// be unbound). [OPUS-4.8] (sq-hqhc)
+/// be unbound). (sq-hqhc)
 fn eval_offset(
     result: &QueryResult,
     of: &Variable,
@@ -443,7 +443,7 @@ fn eval_offset(
 /// Validates a window frame for an aggregate: well-formedness (a `start` may not
 /// be `UNBOUNDED FOLLOWING`, an `end` may not be `UNBOUNDED PRECEDING`) and the
 /// `RANGE` restriction (no numeric `N PRECEDING`/`N FOLLOWING` offset under
-/// `RANGE`).  [OPUS-4.8] (sq-imj8)
+/// `RANGE`).  (sq-imj8)
 fn validate_frame(frame: &WindowFrame) -> Result<(), String> {
     if matches!(frame.start, FrameBound::UnboundedFollowing) {
         return Err("window frame: start bound may not be UNBOUNDED FOLLOWING".into());
@@ -466,7 +466,7 @@ fn validate_frame(frame: &WindowFrame) -> Result<(), String> {
 /// The inclusive ordered-position interval `[lo, hi]` of the frame for the row at
 /// ordered position `pos`. `lo > hi` ⇒ an empty frame. For `RANGE` a `CURRENT ROW`
 /// bound extends to the current row's whole PEER group (per the `start`/`end`
-/// side); for `ROWS` a `CURRENT ROW` bound is `pos` itself.  [OPUS-4.8] (sq-imj8)
+/// side); for `ROWS` a `CURRENT ROW` bound is `pos` itself.  (sq-imj8)
 fn frame_bounds(
     frame: &WindowFrame,
     pos: usize,
@@ -808,7 +808,7 @@ mod tests {
         assert!(apply_window(&sample(), &spec).is_err());
     }
 
-    // ---- window frames (ROWS / RANGE) — sq-imj8 [OPUS-4.8] ----
+    // ---- window frames (ROWS / RANGE) — sq-imj8 ----
 
     /// A single partition with distinct, ascending values so frame offsets are
     /// unambiguous: (?k) = 10, 20, 20, 40 in input (and ORDER BY ?k) order.
@@ -950,7 +950,7 @@ mod tests {
         assert_eq!(val(&out, 3, 1), int(4).to_string());
     }
 
-    // ---- offset / positional functions: LAG / LEAD / NTILE — sq-hqhc [OPUS-4.8] ----
+    // ---- offset / positional functions: LAG / LEAD / NTILE — sq-hqhc ----
 
     /// `(?emp ?sales)` in one partition: a=10, b=20, c=30, d=40 in input order.
     fn seq2() -> QueryResult {

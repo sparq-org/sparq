@@ -1,5 +1,5 @@
 #![cfg(feature = "http3")]
-//! [GPT-5.6] sq-oprna.3/.5: production HTTP/3 wiring and cross-protocol conformance.
+//! sq-oprna.3/.5: production HTTP/3 wiring and cross-protocol conformance.
 
 use std::{
     error::Error,
@@ -23,7 +23,7 @@ type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
 const RESULTS_JSON: &str = "application/sparql-results+json";
 
-// [GPT-5.6] sq-oprna.5: compare the transport-neutral response contract, not incidental headers.
+// sq-oprna.5: compare the transport-neutral response contract, not incidental headers.
 #[derive(Debug, PartialEq, Eq)]
 struct ResponseSnapshot {
     status: u16,
@@ -175,7 +175,7 @@ async fn h1_request(
     })
 }
 
-// [GPT-5.6] sq-oprna.6: the combined http2+http3 build reuses the PEM pair for TLS TCP;
+// sq-oprna.6: the combined http2+http3 build reuses the PEM pair for TLS TCP;
 // http3 alone and runtime-off listeners stay cleartext. Force h1 so this remains the h1↔h3
 // parity oracle in both configurations.
 fn tcp_client(addr: SocketAddr, tls: bool) -> TestResult<(reqwest::Client, String)> {
@@ -230,7 +230,7 @@ async fn h3_response_matrix_matches_h1_and_websocket_falls_back() -> TestResult 
     let (http, tcp_base) = tcp_client(tcp_addr, cfg!(feature = "http2"))?;
     let readiness_url = format!("{tcp_base}/health");
     let expected_alt_svc = format!("h3=\":{}\"; ma=86400", udp_addr.port());
-    // [SONNET-4.6] The Alt-Svc header is installed only after the QUIC endpoint
+    // The Alt-Svc header is installed only after the QUIC endpoint
     // is bound, so it is the readiness condition needed by this test.
     let mut health = None;
     let mut last_probe_failure = None;

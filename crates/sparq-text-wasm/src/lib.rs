@@ -1,5 +1,5 @@
 //! sparq-text-wasm: the sparq **full-text search** layer compiled to WebAssembly —
-//! the tier-b "W-text" bundle ([OPUS-4.8] sq-jbe6).
+//! the tier-b "W-text" bundle (sq-jbe6).
 //!
 //! This is a SEPARATE, lazy-loaded bundle from the lean `sparq-wasm` triplestore bundle.
 //! It exposes the owned BM25 inverted index + the `text:` magic predicates of
@@ -38,7 +38,7 @@
 //! // Index footprint (the bundle's memory risk), as JSON:
 //! const stats = JSON.parse(TextSearch.indexStats(data, "ntriples"));
 //! ```
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-jbe6: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-jbe6: crate has zero `unsafe`
 
 use sparq_core::Graph;
 use sparq_text::{query_text, TextIndex};

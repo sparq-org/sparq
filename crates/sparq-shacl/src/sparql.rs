@@ -47,7 +47,7 @@ fn parse_prepared(text: &str) -> Option<PreparedQuery> {
 }
 
 thread_local! {
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Per-thread monotonic count of `sh:sparql`
+    /// (sq-7d3dj.33.1) Per-thread monotonic count of `sh:sparql`
     /// constraint query executions (one per `sparq_engine::query_prepared` call the
     /// SHACL-SPARQL path makes). The per-focus-node path runs one query PER focus
     /// node — O(N_focus); the batched path ([`PreparedSparql::evaluate_batch`]) runs
@@ -60,20 +60,20 @@ thread_local! {
     static SPARQL_EXEC_COUNT: Cell<u64> = const { Cell::new(0) };
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) Bumps the calling thread's `sh:sparql`
+/// (sq-7d3dj.33.1) Bumps the calling thread's `sh:sparql`
 /// query-execution counter by one (called at each engine query the path runs).
 fn bump_exec_count() {
     SPARQL_EXEC_COUNT.with(|c| c.set(c.get() + 1));
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) Read the calling thread's `sh:sparql`
+/// (sq-7d3dj.33.1) Read the calling thread's `sh:sparql`
 /// query-execution counter (see [`SPARQL_EXEC_COUNT`]). Monotonic; snapshot before
 /// and after a [`crate::validate`] call on the same thread and take the delta.
 pub(crate) fn exec_count() -> u64 {
     SPARQL_EXEC_COUNT.with(Cell::get)
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) The maximum number of focus nodes injected into a
+/// (sq-7d3dj.33.1) The maximum number of focus nodes injected into a
 /// single batched `VALUES ?this { … }` execution. Very large focus sets are
 /// chunked so query plans stay sane; chunking never changes the result set (the
 /// VALUES table partitions cleanly by `?this`, and results are grouped by `?this`
@@ -86,13 +86,13 @@ const FOCUS_BATCH_CHUNK: usize = 10_000;
 /// property shape) `$PATH` this way.
 pub(crate) type Binding<'a> = (&'a str, &'a Term);
 
-/// [OPUS-4.8] (sq-0mjfd) The variable a `sh:sparql` constraint query always has
+/// (sq-0mjfd) The variable a `sh:sparql` constraint query always has
 /// pre-bound: `$this` (the focus node). A SPARQL-based constraint COMPONENT
 /// validator additionally pre-binds `$value` and each parameter — see
 /// [`check_pre_binding`], which takes the pre-bound name set.
 const PRE_BOUND_THIS: &[&str] = &["this"];
 
-/// [OPUS-4.8] (sq-0mjfd) A SHACL-SPARQL **pre-binding violation**: a `sh:sparql`
+/// (sq-0mjfd) A SHACL-SPARQL **pre-binding violation**: a `sh:sparql`
 /// constraint query uses a construct for which SHACL pre-binding of `$this` is not
 /// defined (W3C SHACL §5.2.1 NOTE "pre-binding"), so a conformant processor MUST
 /// signal a *failure* rather than validate. Surfaced through
@@ -141,7 +141,7 @@ impl PreBindingViolation {
             PreBindingViolation::Service => {
                 "a SERVICE clause cannot be evaluated under SHACL pre-binding".to_string()
             }
-            // [OPUS-4.8] positional format args (rust/unused-variable CodeQL FP).
+            // positional format args (rust/unused-variable CodeQL FP).
             PreBindingViolation::SubSelectDropsPreBound(v) => format!(
                 "a sub-SELECT re-scopes the pre-bound variable ?{} (it must be explicitly projected)",
                 v
@@ -160,7 +160,7 @@ impl PreBindingViolation {
 pub(crate) struct PreparedSparql {
     /// The parsed `sh:select` algebra (prefixes already resolved at parse time).
     query: PreparedQuery,
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Whether all focus nodes may be validated in ONE
+    /// (sq-7d3dj.33.1) Whether all focus nodes may be validated in ONE
     /// batched `VALUES ?this { … }` execution (see [`Self::evaluate_batch`]). Batching
     /// is result-equivalent to the per-focus path for the pre-binding-legal subset the
     /// crate already enforces (no `MINUS` / author `VALUES` / `SERVICE`; a sub-`SELECT`
@@ -183,7 +183,7 @@ impl PreparedSparql {
     ///     rules ([`PreBindingViolation`]). A conformant processor MUST signal a
     ///     *failure* for such a constraint (the `mf:result sht:Failure` shacl12
     ///     entries), so this is propagated to a strict-validation failure outcome
-    ///     rather than silently skipped. [OPUS-4.8] (sq-0mjfd)
+    ///     rather than silently skipped. (sq-0mjfd)
     ///
     /// `SELECT *` is accepted at the TOP level (every in-scope variable, including
     /// `$this`, is a result variable); a `SELECT *` *sub-select*, by contrast,
@@ -199,7 +199,7 @@ impl PreparedSparql {
         let Query::Select { pattern, .. } = query.query() else {
             return Ok(None);
         };
-        // [OPUS-4.8] (sq-0mjfd) Reject a query whose pre-binding of `$this` is
+        // (sq-0mjfd) Reject a query whose pre-binding of `$this` is
         // unsound (MINUS / VALUES / SERVICE / a sub-SELECT that drops `$this` /
         // a BIND re-binding it). The check runs on the RAW author query, BEFORE
         // any pre-binding VALUES injection, so an author-written VALUES is caught.
@@ -216,7 +216,7 @@ impl PreparedSparql {
         Ok(Some(PreparedSparql { query, batchable }))
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Whether this constraint may be evaluated for all
+    /// (sq-7d3dj.33.1) Whether this constraint may be evaluated for all
     /// focus nodes in ONE batched execution (see the `batchable` field). A `false`
     /// keeps the per-focus [`Self::evaluate`] path (still correct, just not sped up).
     pub(crate) fn is_batchable(&self) -> bool {
@@ -262,7 +262,7 @@ impl PreparedSparql {
         }
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Runs the constraint for ALL `foci` in ONE batched
+    /// (sq-7d3dj.33.1) Runs the constraint for ALL `foci` in ONE batched
     /// execution: injects a single `VALUES ?this { <f1> <f2> … }` (chunked at
     /// [`FOCUS_BATCH_CHUNK`]), executes once per chunk, then GROUPS the solution rows
     /// by their `?this` binding to build the per-focus results. This is the O(1)-query
@@ -330,7 +330,7 @@ impl PreparedSparql {
     }
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) Maps one executed solution `row` to the per-solution
+/// (sq-7d3dj.33.1) Maps one executed solution `row` to the per-solution
 /// [`ResultFields`] (SHACL §5.2.2). Shared by [`PreparedSparql::evaluate`] (single
 /// focus) and [`PreparedSparql::evaluate_batch`] (grouped by `?this`) so both
 /// produce byte-for-byte identical reports; `focus` is the loop focus / the row's
@@ -379,7 +379,7 @@ fn row_to_fields(
     }
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) `true` iff the query is safe to evaluate for all focus
+/// (sq-7d3dj.33.1) `true` iff the query is safe to evaluate for all focus
 /// nodes in ONE batched `VALUES ?this` execution (the multi-row VALUES joined into
 /// the WHERE, results grouped by `?this` afterwards). Unsafe when a TOP-level
 /// solution modifier applies GLOBALLY across foci instead of per-focus:
@@ -423,7 +423,7 @@ pub(crate) struct ResultFields {
     pub default_message: String,
 }
 
-/// [OPUS-4.8] (sq-rnkdh) A parsed SHACL 1.2 **SPARQL-based node expression**
+/// (sq-rnkdh) A parsed SHACL 1.2 **SPARQL-based node expression**
 /// (`sh:select` / `sh:sparqlExpr`, SHACL 1.2 §"SPARQL-based Node Expressions"):
 /// a SELECT query that, run with `$this` pre-bound to a focus node, yields the
 /// output nodes as the bindings of its FIRST result variable. Used by the
@@ -478,14 +478,14 @@ impl PreparedSelectExpr {
         Self::run(data, self.query.with_query(bound))
     }
 
-    /// [OPUS-4.8] (sq-rnkdh) Evaluates the expression as a **target** query — with
+    /// (sq-rnkdh) Evaluates the expression as a **target** query — with
     /// no `$this` pre-binding (a target SELECT computes the focus nodes itself) —
     /// returning the bindings of the FIRST result variable as the focus-node set.
     pub(crate) fn eval_target(&self, data: &sparq_core::Graph) -> Vec<Term> {
         Self::run(data, self.query.clone())
     }
 
-    /// [SONNET-4.6] (sq-7d3dj.33.5) Batch-evaluates the node expression for ALL
+    /// (sq-7d3dj.33.5) Batch-evaluates the node expression for ALL
     /// `foci` in ONE batched execution: injects a single `VALUES ?this { <f1> … }`
     /// (chunked at [`FOCUS_BATCH_CHUNK`]), executes once per chunk, then GROUPS the
     /// first-result-variable bindings by `?this` to build the per-focus value-node
@@ -554,7 +554,7 @@ impl PreparedSelectExpr {
     }
 }
 
-/// [OPUS-4.8] (sq-0mjfd) Walks a SHACL-SPARQL constraint/validator WHERE algebra
+/// (sq-0mjfd) Walks a SHACL-SPARQL constraint/validator WHERE algebra
 /// and returns `Err` for the first construct that makes pre-binding of the
 /// `pre_bound` variables unsound (W3C SHACL §5.2.1 NOTE "pre-binding"). `in_scope`
 /// holds the pre-bound names still in scope along this branch; a sub-`SELECT` that
@@ -659,7 +659,7 @@ fn pre_bind_values(bindings: &[Binding]) -> Option<GraphPattern> {
     })
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) Builds the MULTI-row `VALUES (?name) { (v1) (v2) … }`
+/// (sq-7d3dj.33.1) Builds the MULTI-row `VALUES (?name) { (v1) (v2) … }`
 /// table that pre-binds `name` to EACH term in `foci` (one row per focus), for the
 /// batched `sh:sparql` path. Single column, N rows — as opposed to
 /// [`pre_bind_values`]'s single-row/N-column shape. Returns `None` if any focus is
@@ -676,7 +676,7 @@ fn pre_bind_values_multi(name: &str, foci: &[&Term]) -> Option<GraphPattern> {
     })
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) Pre-binds `name` to EVERY term in `foci` at once by
+/// (sq-7d3dj.33.1) Pre-binds `name` to EVERY term in `foci` at once by
 /// injecting the multi-row `VALUES` from [`pre_bind_values_multi`] through the SAME
 /// [`inject_values`] push-down the single-focus [`pre_bind_select`] uses, so the
 /// batched query is the per-focus query unioned over foci. `name` is added to the
@@ -775,7 +775,7 @@ fn values_var_names(values: &GraphPattern) -> Vec<&str> {
 /// query is laid out (no textual prepend). SHACL §6.3 pre-binding semantics
 /// (substitute the variable's value everywhere it occurs).
 ///
-/// [OPUS-4.8] (sq-mue75) The descent now follows EVERY scope a pre-bound variable
+/// (sq-mue75) The descent now follows EVERY scope a pre-bound variable
 /// can reach, not just one chain, so the binding constrains the whole pattern
 /// (the shacl12 `sparql/pre-binding` 002/005/007 entries):
 ///   * single-child wrappers (`Filter` / `Extend` / `OrderBy` / `Group` /
@@ -857,14 +857,14 @@ fn push_values_down(pattern: &GraphPattern, values: &GraphPattern) -> GraphPatte
             left: Box::new(push_values_down(left, values)),
             right: right.clone(),
         },
-        // [OPUS-4.8] (sq-mue75) UNION: each branch is an independent scope; push
+        // (sq-mue75) UNION: each branch is an independent scope; push
         // the pre-binding into BOTH so a variable used only inside one branch's
         // FILTER is bound there (shacl12 sparql/pre-binding-002).
         GraphPattern::Union { left, right } => GraphPattern::Union {
             left: Box::new(push_values_down(left, values)),
             right: Box::new(push_values_down(right, values)),
         },
-        // [OPUS-4.8] (sq-mue75) JOIN: push into BOTH siblings so a sibling block
+        // (sq-mue75) JOIN: push into BOTH siblings so a sibling block
         // that wraps a FILTER over an empty inner still sees the binding (shacl12
         // sparql/pre-binding-005). Joining the single-row VALUES into a sibling
         // that does not mention the variable is idempotent (a cross product with
@@ -885,7 +885,7 @@ fn push_values_down(pattern: &GraphPattern, values: &GraphPattern) -> GraphPatte
             left: Box::new(push_values_down(left, values)),
             right: Box::new(push_values_down(right, values)),
         },
-        // [OPUS-4.8] (sq-mue75) sub-SELECT projection: a pre-bound variable stays
+        // (sq-mue75) sub-SELECT projection: a pre-bound variable stays
         // in scope inside the sub-select ONLY if it is explicitly projected, so
         // descend through the Project (and keep it projected) in that case; else
         // join the VALUES ABOVE the sub-select (fall through to the leaf arm).
@@ -1049,7 +1049,7 @@ fn substitute(template: &str, vars: &[String], row: &[Option<Term>]) -> String {
 }
 
 // =============================================================================
-// [OPUS-4.8] SHACL §6 — SPARQL-based constraint COMPONENTS (sq-sm2).
+// SHACL §6 — SPARQL-based constraint COMPONENTS (sq-sm2).
 //
 // A `sh:ConstraintComponent` declares parameters (`sh:parameter` → `sh:path`)
 // and a validator (`sh:validator` / `sh:nodeValidator` / `sh:propertyValidator`)
@@ -1084,7 +1084,7 @@ impl PreparedValidator {
     }
 }
 
-/// [OPUS-4.8] (sq-0mjfd) Checks a SPARQL-based constraint-COMPONENT validator's
+/// (sq-0mjfd) Checks a SPARQL-based constraint-COMPONENT validator's
 /// query text for a pre-binding violation (§6.3 pre-binds `$this`, `$value` and
 /// each parameter `pre_bound`). Returns `Ok(())` when sound or when the text does
 /// not parse / is not an ASK/SELECT (those are handled leniently elsewhere), and
@@ -1205,7 +1205,7 @@ pub(crate) fn select_validate(
 }
 
 // =============================================================================
-// [OPUS-4.8] 🤖 SPARQ agent — sq-qcnn.1 (epic sq-qcnn test-quality program).
+// 🤖 SPARQ agent — sq-qcnn.1 (epic sq-qcnn test-quality program).
 //
 // Correctness coverage for the DARK branches of the SHACL-SPARQL pre-binding
 // (`sh:sparql` §5.2 and the §6 component validators): the deep-algebra arms of
@@ -1457,7 +1457,7 @@ mod tests {
         }
     }
 
-    // --- [OPUS-4.8] (sq-mue75) push_values_down: the new multi-scope arms --------
+    // --- (sq-mue75) push_values_down: the new multi-scope arms --------
     //
     // UNION / sibling-JOIN / sub-SELECT projection. Each pre-bound variable must
     // reach EVERY scope it can appear in (shacl12 sparql/pre-binding-002/005/007),
@@ -1617,7 +1617,7 @@ mod tests {
 
     #[test]
     fn push_values_down_through_graph_block() {
-        // [OPUS-4.8] (sq-mue75) A GRAPH block keeps the outer pre-bound variable in
+        // (sq-mue75) A GRAPH block keeps the outer pre-bound variable in
         // scope; the pre-binding descends into its inner.
         let inner = GraphPattern::Graph {
             name: spargebra::term::NamedNodePattern::NamedNode(
@@ -1904,7 +1904,7 @@ mod tests {
             deactivated: false,
             prepared: None,
         };
-        // [OPUS-4.8] (sq-0mjfd) build now returns Result<Option<_>, _>: a non-SELECT
+        // (sq-0mjfd) build now returns Result<Option<_>, _>: a non-SELECT
         // / unparsable query is `Ok(None)` (skip), not `Err` (a pre-binding failure).
         assert!(matches!(PreparedSparql::build(&ask), Ok(None)));
         // Unparsable -> Ok(None).
@@ -2077,7 +2077,7 @@ mod tests {
 
     #[test]
     fn prepared_sparql_build_rejects_service_at_build_time() {
-        // [OPUS-4.8] (sq-0mjfd) The §5.2 `sh:sparql` path: a SERVICE clause is a
+        // (sq-0mjfd) The §5.2 `sh:sparql` path: a SERVICE clause is a
         // SHACL-SPARQL pre-binding violation (pre-binding into a federated block is
         // undefined), so `build` now REJECTS it up front (an `Err` failure outcome,
         // shacl12 unsupported-sparql-003) rather than deferring to a runtime error.
@@ -2313,7 +2313,7 @@ mod tests {
         );
     }
 
-    // --- [OPUS-4.8] (sq-rnkdh) SHACL 1.2 SPARQL-based node expressions ---------
+    // --- (sq-rnkdh) SHACL 1.2 SPARQL-based node expressions ---------
 
     const EXPR_DATA: &str = r#"
         @prefix ex: <http://example.org/> .
@@ -2380,7 +2380,7 @@ mod tests {
         assert_eq!(nodes, vec![iri("http://example.org/bob")]);
     }
 
-    // --- [SONNET-4.6] (sq-7d3dj.33.5) PreparedSelectExpr::eval_batch ---------------
+    // --- (sq-7d3dj.33.5) PreparedSelectExpr::eval_batch ---------------
     //
     // Three tests covering the batched node-expression path:
     //   * anti-vacuity: 4 foci → exactly 1 execution, correct per-focus grouping.
@@ -2397,7 +2397,7 @@ mod tests {
 
     #[test]
     fn eval_batch_groups_output_nodes_by_focus_and_fires_once() {
-        // [SONNET-4.6] (sq-7d3dj.33.5) 4 foci → exactly ONE query execution (not 4);
+        // (sq-7d3dj.33.5) 4 foci → exactly ONE query execution (not 4);
         // each focus's output-node set is correct.
         let data = graph(BATCH_DATA);
         let expr = PreparedSelectExpr::build_select(
@@ -2437,7 +2437,7 @@ mod tests {
 
     #[test]
     fn eval_batch_result_equals_per_focus_eval() {
-        // [SONNET-4.6] (sq-7d3dj.33.5) eval_batch must produce the same value-node
+        // (sq-7d3dj.33.5) eval_batch must produce the same value-node
         // sets as calling eval() once per focus node.
         let data = graph(BATCH_DATA);
         let expr = PreparedSelectExpr::build_select(
@@ -2465,7 +2465,7 @@ mod tests {
 
     #[test]
     fn eval_batch_skips_blank_node_foci() {
-        // [SONNET-4.6] (sq-7d3dj.33.5) A blank-node focus cannot appear in VALUES
+        // (sq-7d3dj.33.5) A blank-node focus cannot appear in VALUES
         // syntax; eval_batch must omit it from the result map (not panic or error).
         let data = graph(BATCH_DATA);
         let expr = PreparedSelectExpr::build_select(
@@ -2485,7 +2485,7 @@ mod tests {
         assert!(grouped.contains_key(&iri_focus));
     }
 
-    // --- [OPUS-4.8] (sq-0mjfd) SHACL-SPARQL pre-binding rejection (sht:Failure) --
+    // --- (sq-0mjfd) SHACL-SPARQL pre-binding rejection (sht:Failure) --
 
     /// Parse a top-level SELECT and run the `$this` pre-binding check on its WHERE,
     /// descending through the top-level result `Project` exactly as `build` does.
@@ -2645,7 +2645,7 @@ mod tests {
         );
     }
 
-    // --- [OPUS-4.8] (sq-7d3dj.33.1) focus-node batching ----------------------
+    // --- (sq-7d3dj.33.1) focus-node batching ----------------------
 
     fn top_pattern(q: &str) -> GraphPattern {
         match SparqlParser::new().parse_query(q).unwrap() {

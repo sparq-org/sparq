@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7hx6, epic sq-3183) Tests for the filtered-ANN **pre-filter vs post-filter cost
+//! (sq-7hx6, epic sq-3183) Tests for the filtered-ANN **pre-filter vs post-filter cost
 //! model** — the public `CostModel` / `nearest_filtered_costed` / `postfilter_exact` seam.
 //!
 //! What is proven here:

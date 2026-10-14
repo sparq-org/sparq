@@ -117,7 +117,13 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   the encrypted parent; `open_object` / `SealedObject::open` verify the whole tree
   and reassemble. `ObjectLayout` shapes it (`chunk_size`/`arity`), `ObjectLimits`
   bounds an untrusted block set, and `SealedObject::merkle_root`/`commit_id` is
-  the root block's digest.
+  the root block's digest. For reproducible wire vectors,
+  `seal_object_deterministic(k_read, ctx, object, plaintext, layout, block_material)`
+  accepts a callback `FnMut(u64) -> (BlockId, [u8; 24])`: it receives each chunk
+  index once (leaves first, internal nodes bottom-up, root index 0 last) and
+  supplies its explicit id and nonce. The result is still root-first. Supply
+  distinct block ids and never reuse a nonce under the same derived block key
+  for different plaintexts; use the randomized APIs for production.
 - **`epoch`** — `EpochTransition` (`sign`/`verify`, monotonic-epoch check,
   `HistoryPolicy::{ForwardOnly, HistoryRekeyed}`) — the revocation mechanism.
 

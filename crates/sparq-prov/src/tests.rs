@@ -1,4 +1,4 @@
-//! Unit tests for the CONSTRUCT → PROV-O lineage path. [OPUS-4.8] sq-ntcg.
+//! Unit tests for the CONSTRUCT → PROV-O lineage path. sq-ntcg.
 
 use super::*;
 use oxrdf::vocab::xsd;
@@ -76,7 +76,7 @@ fn construct_derivation_emits_core_prov_shape() {
     assert!(lines.iter().any(|l| l.contains("#endedAtTime>")));
 }
 
-/// [GPT-5.6] sq-cg237: the direct accessor preserves configured order and agrees with
+/// sq-cg237: the direct accessor preserves configured order and agrees with
 /// every `prov:used` edge materialised for the derivation activity.
 #[test]
 fn construct_used_inputs_are_exposed_in_order_and_materialised() {
@@ -128,7 +128,7 @@ fn prov_graph_is_valid_rdf_and_round_trips() {
     assert_eq!(parsed.len(), d.prov_graph().len());
 }
 
-/// [GPT-5.6] sq-ijw35: the Derivation Turtle method preserves every provenance
+/// sq-ijw35: the Derivation Turtle method preserves every provenance
 /// triple, and the generation edge uses the registered prefix.
 #[test]
 fn prov_turtle_round_trips_the_exact_derivation_graph() {
@@ -231,7 +231,7 @@ fn rejects_non_graph_queries() {
 }
 
 // ── sq-bif.4: correctness-suite additions — gaps in the CONSTRUCT/datetime/config
-// surface (uncovered branches + edge cases). [OPUS-4.8] ──────────────────────────
+// surface (uncovered branches + edge cases). ──────────────────────────
 
 /// `ProvConfig::with_inputs` is the documented constructor for the common "name the
 /// source dataset(s)" case; exercise it directly (not only via the README doc-test) and
@@ -386,14 +386,14 @@ fn datetime_literal_truncates_subsecond_precision() {
     assert_eq!(datetime_literal(base).value(), "2023-11-14T22:13:20Z");
 }
 
-// ── sq-qcnn.20: mutation-kill tests — assert EXACT provenance CONTENTS, not counts. [OPUS-4.8]
+// ── sq-qcnn.20: mutation-kill tests — assert EXACT provenance CONTENTS, not counts.
 
 /// The FNV-1a hash driving `mint()` must use XOR-then-multiply (`h ^= b`), not bit-OR
 /// (`h |= b`). The two operations produce different hash values because XOR can CLEAR bits
 /// that were previously set, whereas OR can only set them. A mutation replacing `^=` with
 /// `|=` produces a completely different 64-bit hash, yielding a different minted IRI.
 /// This test pins the EXACT minted activity/entity IRI for a known (fixed-clock) derivation
-/// so any change to the hash constant or operation is immediately caught. [OPUS-4.8]
+/// so any change to the hash constant or operation is immediately caught.
 #[test]
 fn minted_iri_has_exact_known_value() {
     // Fixed clock: UNIX_EPOCH + 1_700_000_000 s = 2023-11-14T22:13:20Z.
@@ -420,12 +420,12 @@ fn minted_iri_has_exact_known_value() {
     assert_eq!(d.triples().len(), 2, "CONSTRUCT should produce two triples");
 }
 
-// ── sq-qcnn.39: mutation-kill tests — exact prov_graph triple counts for CONSTRUCT. [SONNET-4.6]
+// ── sq-qcnn.39: mutation-kill tests — exact prov_graph triple counts for CONSTRUCT.
 
 /// `Derivation::prov_graph()` for a CONSTRUCT with 1 used input and no agent must emit
 /// exactly 9 triples: 2 type, 2 timing, rdfs:label, prov:value, wasGeneratedBy, used,
 /// wasDerivedFrom. Pinning the count kills mutations that drop any `push()` call.
-/// [SONNET-4.6] sq-qcnn.39
+/// sq-qcnn.39
 #[test]
 fn construct_prov_graph_exact_triple_count() {
     let q = "PREFIX ex: <http://ex/> CONSTRUCT { ?s ex:years ?a } WHERE { ?s ex:age ?a }";
@@ -440,7 +440,7 @@ fn construct_prov_graph_exact_triple_count() {
 
 /// With an agent configured, one extra `wasAssociatedWith` triple is added, so the
 /// count is 10 (9 + 1). Confirms the agent branch emits exactly one triple.
-/// [SONNET-4.6] sq-qcnn.39
+/// sq-qcnn.39
 #[test]
 fn construct_prov_graph_with_agent_exact_triple_count() {
     let config = ProvConfig {

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-yca1) Manifest-driven runner for the **SHACL 1.2** core test
+//! (sq-yca1) Manifest-driven runner for the **SHACL 1.2** core test
 //! suite's `node/` `sht:Validate` entries
 //! (`shacl12-test-suite/tests/core/node/...`).
 //!
@@ -9,7 +9,7 @@
 //! **plus** the SHACL-1.2-only core constraints `sh:memberShape`,
 //! `sh:uniqueMembers`, `sh:{max,min}ListLength`, `sh:uniqueValuesFor`, the
 //! `sh:closed sh:ByTypes` close-by-types mode, and the disjunctive list spellings
-//! of `sh:datatype` / `sh:nodeKind`. [OPUS-4.8] (sq-vg3y) all of those are now
+//! of `sh:datatype` / `sh:nodeKind`. (sq-vg3y) all of those are now
 //! implemented on the Core path and compared strictly; the only thing this
 //! harness still SKIPs is `sh:nodeByExpression` when `shacl-af` is off.
 //!
@@ -65,7 +65,7 @@ const SH: &str = "http://www.w3.org/ns/shacl#";
 /// implement. An entry whose shapes use any of these is recorded as SKIP rather
 /// than FAIL.
 ///
-/// [OPUS-4.8] (sq-vg3y) The SHACL-1.2-only core/node constraints
+/// (sq-vg3y) The SHACL-1.2-only core/node constraints
 /// (`sh:memberShape`, `sh:uniqueMembers`, `sh:{max,min}ListLength`,
 /// `sh:uniqueValuesFor`) are now implemented on the Core path, so this set is
 /// EMPTY. The only feature-dependent absence left is `sh:nodeByExpression`
@@ -92,7 +92,7 @@ fn unimplemented() -> Vec<String> {
 /// `nodeByExpression-001` (which is then a SKIP). A regression below this fails
 /// the build; raising it is a deliberate bump.
 ///
-/// [OPUS-4.8] (sq-vg3y) Bumped 32 → 44: the twelve formerly-SKIPed SHACL-1.2-only
+/// (sq-vg3y) Bumped 32 → 44: the twelve formerly-SKIPed SHACL-1.2-only
 /// core/node entries (`closed-003/004`, `datatype-003`, `nodeKind-002`,
 /// `memberShape-001`, `uniqueMembers-001`, `{max,min}ListLength-001`,
 /// `uniqueValuesFor-001..004`) are now implemented and PASS.
@@ -322,7 +322,7 @@ fn run_entry(
 /// The reason (if any) the shapes graph uses a constraint **form** this build
 /// does not implement — identifying an entry to SKIP.
 ///
-/// [OPUS-4.8] (sq-vg3y) This now reduces to a single case: an
+/// (sq-vg3y) This now reduces to a single case: an
 /// unimplemented-constraint *predicate* (the [`unimplemented`] set), which after
 /// sq-vg3y contains ONLY `sh:nodeByExpression` and ONLY when `shacl-af` is off.
 /// The previously-SKIPed *forms* of implemented predicates — `sh:closed

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-6vshe.9 — federation + isolated-feature harness.
+//! sq-6vshe.9 — federation + isolated-feature harness.
 //! Consolidates SERVICE-federation and txn/result-cache opt-in tests into a
 //! single link unit.
 //!
@@ -10,7 +10,7 @@ mod service_bound_join;
 mod service_federation;
 #[path = "federation_features/service_stream_bounded.rs"]
 mod service_stream_bounded;
-// [OPUS-5] sq-lsp7k.2.2 — LOCAL rows-returning SERVICE handlers (`service-local`).
+// sq-lsp7k.2.2 — LOCAL rows-returning SERVICE handlers (`service-local`).
 #[path = "federation_features/service_local.rs"]
 mod service_local;
 #[path = "federation_features/mvcc_txn.rs"]

@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-wxxkk: generated incremental-completion delta histories.
+//! sq-wxxkk: generated incremental-completion delta histories.
 
 use oxrdf::{Literal, NamedNode, Term};
 use proptest::prelude::*;

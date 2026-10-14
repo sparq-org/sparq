@@ -1,4 +1,4 @@
-//! [GPT-6] Canonical signed-i64 planning, separate from unsigned verification.
+//! Canonical signed-i64 planning, separate from unsigned verification.
 //!
 //! This is prover-local planning, not a proof or credential authentication. The
 //! private inner query uses order-preserving biased bounds, and cannot be passed

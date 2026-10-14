@@ -25,7 +25,7 @@ struct MockApplier {
     /// Artificial per-fork cost, for the reader-stall stress (simulates the
     /// O(graph) fork of the production applier).
     fork_delay: Duration,
-    /// [OPUS-4.8] (sq-vpx4) Injected durable-write failures: when > 0, `seal`
+    /// (sq-vpx4) Injected durable-write failures: when > 0, `seal`
     /// fails (returns `Err`) and decrements — modelling a transient `ENOSPC`/I/O
     /// error on a `--persist` mirror that later clears. Lets a test drive the
     /// "writer survives a seal failure, the batch is refused, a later batch after
@@ -34,7 +34,7 @@ struct MockApplier {
     /// Counts the seals the writer actually attempted (success or failure), so a
     /// test can assert the writer kept running and re-attempted after a refusal.
     seals: Arc<AtomicUsize>,
-    /// [OPUS-4.8] (sq-x32t) Records the committed-update count SEEN by each `maintain`
+    /// (sq-x32t) Records the committed-update count SEEN by each `maintain`
     /// call (proving maintenance is sequenced AFTER the preceding batch); `len()` is a
     /// run-count. When `maintain_fails` > 0, `maintain` returns `Err` once (writer must
     /// stay alive).
@@ -43,7 +43,7 @@ struct MockApplier {
     /// The applier's own count of committed updates (advanced in `seal`), so `maintain`
     /// can record how many it observed.
     committed: usize,
-    /// [OPUS-4.8] (sq-ft7u) Restore control. When `restore_durable_supported` is true the mock
+    /// (sq-ft7u) Restore control. When `restore_durable_supported` is true the mock
     /// models a DURABLE applier: `restore_durable` records the committed-update count it observed
     /// (proving FIFO sequencing) and returns the `fresh` snapshot to publish — unless
     /// `restore_fails` > 0, in which case it fails once (consuming one), modelling a crash-safe
@@ -70,7 +70,7 @@ impl MockApplier {
         }
     }
 
-    /// [OPUS-4.8] (sq-ft7u) A mock modelling a DURABLE applier (one whose `--persist` store can be
+    /// (sq-ft7u) A mock modelling a DURABLE applier (one whose `--persist` store can be
     /// restored through), sharing the restore observation/fault handles with the test so it can
     /// verify the restore is sequenced after preceding updates, publishes a new generation, and
     /// survives an injected restore failure.
@@ -93,7 +93,7 @@ impl MockApplier {
         }
     }
 
-    /// [OPUS-4.8] (sq-x32t) A mock sharing the maintenance observation/fault handles with
+    /// (sq-x32t) A mock sharing the maintenance observation/fault handles with
     /// the test, so the test can verify maintenance ordering and failure-survival.
     fn with_maintain_control(
         forks: &Arc<AtomicUsize>,
@@ -114,7 +114,7 @@ impl MockApplier {
         }
     }
 
-    /// [OPUS-4.8] (sq-vpx4) Build a mock sharing the seal-failure and seal-count
+    /// (sq-vpx4) Build a mock sharing the seal-failure and seal-count
     /// handles with the test, so the test can arm transient durable-write failures
     /// and observe that the writer survived them and re-attempted later.
     fn with_seal_control(
@@ -164,20 +164,20 @@ impl ApplyUpdates for MockApplier {
 
     fn seal(&mut self, working: Log) -> Result<Log, String> {
         self.seals.fetch_add(1, Ordering::SeqCst);
-        // [OPUS-4.8] (sq-vpx4) Transient durable-write failure injection: consume one
+        // (sq-vpx4) Transient durable-write failure injection: consume one
         // armed failure (if any) and refuse the batch. The writer must NOT publish and
         // must NOT panic — it fails the submitters with `Unavailable` and keeps running.
         if self.seal_fails.load(Ordering::SeqCst) > 0 {
             self.seal_fails.fetch_sub(1, Ordering::SeqCst);
             return Err("injected transient durable-write error (ENOSPC)".into());
         }
-        // [OPUS-4.8] (sq-x32t) Track how many updates have been committed so a later
+        // (sq-x32t) Track how many updates have been committed so a later
         // `maintain` can prove it observed the preceding batch (FIFO sequencing).
         self.committed = working.len();
         Ok(working)
     }
 
-    /// [OPUS-4.8] (sq-x32t) Records the committed-update count it observed (so the test can
+    /// (sq-x32t) Records the committed-update count it observed (so the test can
     /// assert maintenance ran AFTER the preceding updates), and fails once if armed (the
     /// writer must survive and keep serving later maintenance/updates).
     fn maintain(&mut self) -> Result<(), String> {
@@ -189,7 +189,7 @@ impl ApplyUpdates for MockApplier {
         Ok(())
     }
 
-    /// [OPUS-4.8] (sq-ft7u) An IN-MEMORY applier delegates to the trait DEFAULT (no durable store
+    /// (sq-ft7u) An IN-MEMORY applier delegates to the trait DEFAULT (no durable store
     /// → an error). A DURABLE applier (built via `with_restore_control`) records the committed-
     /// update count it observed — proving the restore ran AFTER the preceding batch (FIFO) — and
     /// returns the `fresh` snapshot for the writer to publish, unless an injected failure is armed
@@ -212,7 +212,7 @@ impl ApplyUpdates for MockApplier {
     }
 }
 
-/// [OPUS-4.8] (sq-ft7u) A trivial applier used ONLY to reach the trait's DEFAULT `restore_durable`
+/// (sq-ft7u) A trivial applier used ONLY to reach the trait's DEFAULT `restore_durable`
 /// (the in-memory-server path that errors because there is no durable store to write through).
 struct DefaultRestoreApplier;
 impl ApplyUpdates for DefaultRestoreApplier {
@@ -486,7 +486,7 @@ fn window_timing_approximately_honored() {
     );
 }
 
-/// [OPUS-4.8] (sq-p7kk5) ADAPTIVE group-commit: a serial client does NOT wait the window.
+/// (sq-p7kk5) ADAPTIVE group-commit: a serial client does NOT wait the window.
 /// The counterpart to `window_timing_approximately_honored` — with `adaptive_commit: true`
 /// the SAME lone update against a 10 s window acks in engine-time (the writer drains the
 /// empty backlog and commits immediately), never holding the batch open for the window.
@@ -529,7 +529,7 @@ fn adaptive_commit_does_not_wait_the_window_for_a_serial_client() {
     );
 }
 
-/// [OPUS-4.8] (sq-p7kk5) ADAPTIVE group-commit preserves batching of a QUEUED backlog:
+/// (sq-p7kk5) ADAPTIVE group-commit preserves batching of a QUEUED backlog:
 /// updates already sitting in the queue when the writer wakes are all drained into ONE
 /// generation (one fork/seal/publish), so group-commit amortisation under concurrency is
 /// NOT lost — adaptive mode only skips the timed WAIT, it still batches what has arrived.
@@ -737,7 +737,7 @@ fn readers_never_stall_while_writer_commits() {
     }
 }
 
-/// [OPUS-4.8] (sq-vpx4) A TRANSIENT durable-write error (one armed seal failure that
+/// (sq-vpx4) A TRANSIENT durable-write error (one armed seal failure that
 /// then clears) must REFUSE the in-flight write with `WriteError::Unavailable` (a
 /// retryable 503-class outcome) WITHOUT killing the writer thread, WITHOUT publishing,
 /// and WITHOUT acking 2xx — and a SUBSEQUENT write after recovery must succeed and
@@ -803,7 +803,7 @@ fn transient_seal_failure_refuses_then_recovers() {
     );
 }
 
-/// [OPUS-4.8] (sq-vpx4) Per-submitter failure semantics when `seal` fails on a MIXED
+/// (sq-vpx4) Per-submitter failure semantics when `seal` fails on a MIXED
 /// batch: one update is rejected during `apply` (a deterministic 400-class error) and one
 /// applies cleanly (pending durable commit). The seal then fails. The rejected submitter
 /// must keep its ORIGINAL `Rejected` reason (NOT laundered into a retryable 503), while the
@@ -869,7 +869,7 @@ fn seal_failure_keeps_apply_rejection_distinct_from_unavailable() {
     );
 }
 
-/// [OPUS-4.8] (sq-vpx4) A PERSISTENT durable-write error → every write is refused with
+/// (sq-vpx4) A PERSISTENT durable-write error → every write is refused with
 /// `Unavailable` (no panic, no publish), the writer stays alive across all of them, and
 /// reads keep being served from the last published snapshot the whole time (degraded
 /// read-only mode). When durability finally recovers, writes resume.
@@ -914,7 +914,7 @@ fn persistent_seal_failure_refuses_repeatedly_reads_survive() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-x32t) Out-of-band MAINTENANCE (admin WAL compaction/vacuum) sequencing.
+// (sq-x32t) Out-of-band MAINTENANCE (admin WAL compaction/vacuum) sequencing.
 // ---------------------------------------------------------------------------
 
 /// `Writer::maintain` runs the applier's maintenance op on the writer thread, STRICTLY AFTER the
@@ -1011,7 +1011,7 @@ fn maintain_failure_keeps_writer_alive() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ft7u) Writer::restore — the out-of-band durable-restore op routed through the
+// (sq-ft7u) Writer::restore — the out-of-band durable-restore op routed through the
 // single writer thread (the durable-write-through primitive sparq-server's /admin/restore?persist
 // and --restore-persist sit on top of). Behavioural coverage against the mock applier:
 //   - the IN-MEMORY applier (no durable store) reaches the trait DEFAULT restore_durable -> Err,
@@ -1168,7 +1168,7 @@ fn restore_failure_keeps_writer_alive_and_store_intact() {
 }
 
 // ---------------------------------------------------------------------------
-// [FABLE-5] (sq-bdaw5) Commit hook: the per-publish observation seam that lets a
+// (sq-bdaw5) Commit hook: the per-publish observation seam that lets a
 // change-stream recorder ride the writer thread instead of serialising submitters.
 // ---------------------------------------------------------------------------
 

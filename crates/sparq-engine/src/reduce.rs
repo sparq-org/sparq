@@ -1,4 +1,4 @@
-//! Columnar aggregate reducer kernels for the M4 Phase 4 seam (`sq-pntvh.4`). [SONNET-4.6]
+//! Columnar aggregate reducer kernels for the M4 Phase 4 seam (`sq-pntvh.4`).
 //!
 //! These operate over gathered per-group id slices (all-inline-integer gate):
 //! exact integer arithmetic, gather-free value decoding via the inline encoding.
@@ -23,7 +23,7 @@ pub(crate) const INLINE_MAX_I64: i64 = (1_u64 << 30) as i64 - 1;
 /// arbitrarily many times across rows — so the i128 sum can exceed `i64::MAX`. The
 /// caller (`columnar_aggregate`) guards the narrowing with [`narrow_sum_to_i64`] and
 /// declines to the scalar path on overflow, ensuring no silent truncation in release
-/// builds. [SONNET-4.6]
+/// builds.
 pub(crate) fn reduce_sum(ids: &[Id]) -> Option<i128> {
     let mut acc: i128 = 0;
     for &id in ids {
@@ -42,7 +42,7 @@ pub(crate) fn reduce_sum(ids: &[Id]) -> Option<i128> {
 /// `columnar_aggregate` calls this instead of `sum_i128 as i64` (which silently
 /// wraps in release builds). On `None` the caller declines to the scalar path, which
 /// promotes through `Num::Double` — the same value and datatype the scalar
-/// `sum_values` / `Num::Int::checked_add` fall-through produces. [SONNET-4.6]
+/// `sum_values` / `Num::Int::checked_add` fall-through produces.
 ///
 /// Extracted as a separate `pub(crate)` function so the overflow-decline invariant
 /// is unit-testable without constructing a group large enough to overflow i64 at the
@@ -190,7 +190,7 @@ mod tests {
     }
 
     /// T3b: `narrow_sum_to_i64` declines (returns `None`) for values exceeding `i64::MAX`
-    /// and succeeds for values within range. [SONNET-4.6]
+    /// and succeeds for values within range.
     ///
     /// Mutation proof: restoring `as i64` gives `Some(-9223372036854775808)` for
     /// `just_over`, so the `assert_eq!(…, None)` fails — the guard compiles out on
@@ -235,7 +235,7 @@ mod tests {
     }
 }
 
-// [SONNET-4.6] (sq-sqtk2.3) Kani result-equivalence harnesses for the columnar reducer
+// (sq-sqtk2.3) Kani result-equivalence harnesses for the columnar reducer
 // kernels (SUM/COUNT/MIN/MAX + narrow). Each harness checks that the REAL implementation
 // function (reduce_sum / reduce_count / reduce_min_id / reduce_max_id / narrow_sum_to_i64)
 // equals an INDEPENDENT in-harness reference written as a plain scalar fold — the reference
@@ -251,7 +251,7 @@ mod tests {
 //   * Slice length: 0..=MAX_SLICE = 8 (the same element count per probe, not per-group row
 //     count at query time — production groups can be larger; 8 is a pragmatic Kani bound,
 //     not a completeness claim: behavior beyond this length is not model-checked — for
-//     example, reduce_sum's i128 accumulation can exceed i64::MAX at large cardinality). [SONNET-4.6]
+//     example, reduce_sum's i128 accumulation can exceed i64::MAX at large cardinality).
 //   * reduce_sum / reduce_min_id / reduce_max_id: each element value is fully symbolic in
 //     [0, INLINE_MAX_I64] (= [0, 2^30 - 1]); the id encoding is id = INLINE_BASE + value.
 //   * reduce_count: each element is fully symbolic over the entire u32 domain (no assume on
@@ -277,7 +277,7 @@ mod kani_proofs {
     /// Maximum slice length for the bounded proofs. CBMC symbolic exploration is exponential
     /// in slice length, so 8 is chosen as a pragmatic bound; properties are verified
     /// exhaustively up to this length and extrapolated by induction beyond it, but
-    /// behavior beyond MAX_SLICE is not model-checked. [SONNET-4.6]
+    /// behavior beyond MAX_SLICE is not model-checked.
     const MAX_SLICE: usize = 8;
 
     /// Build a symbolic Vec of `len` inline ids, each constrained to
@@ -432,7 +432,7 @@ mod kani_proofs {
     ///      the equivalence harnesses silently proving the reducers ≡ a reference over only
     ///      the short slices the bound still admits.
     ///
-    /// Cost: one small harness at the same `unwind(12)` the reducer harnesses use. [OPUS-4.8]
+    /// Cost: one small harness at the same `unwind(12)` the reducer harnesses use.
     #[kani::proof]
     #[kani::unwind(12)]
     fn domain_reducer_slice_is_adversarial_and_survives_the_bound() {

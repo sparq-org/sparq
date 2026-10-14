@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-3ul2n.3: the opt-in `Store::loadBytes` / `Store::loadBytesWithBase`
+//! sq-3ul2n.3: the opt-in `Store::loadBytes` / `Store::loadBytesWithBase`
 //! byte-ingest bindings.
 //!
 //! Every ingest today crosses the wasm boundary as a JS **string**: a document
@@ -52,7 +52,7 @@ fn decode_utf8(data: &[u8]) -> Result<&str, JsError> {
 
 #[wasm_bindgen]
 impl Store {
-    /// [FABLE-5] sq-3ul2n.3: like [`load`](Self::load) but ingests **raw bytes** (a JS
+    /// sq-3ul2n.3: like [`load`](Self::load) but ingests **raw bytes** (a JS
     /// `Uint8Array`) instead of a JS string, skipping the UTF-16 string round-trip.
     ///
     /// Pass the `Uint8Array` you already hold — e.g. `new Uint8Array(await
@@ -74,7 +74,7 @@ impl Store {
         Ok(Store { graph })
     }
 
-    /// [FABLE-5] sq-3ul2n.3: the byte-ingest counterpart to
+    /// sq-3ul2n.3: the byte-ingest counterpart to
     /// [`loadWithBase`](Self::load_with_base) — ingests raw bytes (a `Uint8Array`) and
     /// resolves the document's RELATIVE IRIs against `base`.
     ///

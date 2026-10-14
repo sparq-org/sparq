@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-p6yb7 — DL-Lite_R consistency-check ORACLE tests: hand-built DL-Lite_R KBs in
+//! sq-p6yb7 — DL-Lite_R consistency-check ORACLE tests: hand-built DL-Lite_R KBs in
 //! readable Turtle, each with a HAND-DERIVED expected verdict (the differential oracle the bead's
 //! acceptance test names). The soundness/completeness argument lives in `src/consistency.rs`;
 //! these cases pin its behaviour on both sides of every boundary:

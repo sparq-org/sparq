@@ -13,11 +13,11 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# [OPUS-4.8] sq-t5bne: crate-local README so crates.io (package.readme) matches the docs.rs
+# sq-t5bne: crate-local README so crates.io (package.readme) matches the docs.rs
 # front page (lib.rs include_str!("../README.md")) — same content on both registries.
 readme = "README.md"
 
-# [OPUS-4.8] sq-t5bne: build docs.rs with all features so the rewriter items render.
+# sq-t5bne: build docs.rs with all features so the rewriter items render.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -45,7 +45,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # opt in twice (dep + feature) to engage rewriting. No default features.
 default = []
 
-# [OPUS-4.8] sq-t5bne (Phase Q1): the PerfectRef rewriting pass (DL-Lite_R TBox extraction +
+# sq-t5bne (Phase Q1): the PerfectRef rewriting pass (DL-Lite_R TBox extraction +
 # rewrite/reduce saturation + UCQ emission). EXPERIMENTAL: oracle-tested against a hand-checked
 # DL-Lite oracle, NOT graduated to a conformance floor (tree-witness + UCQ-containment
 # minimisation are the deferred production path — separate bead). OFF by default so a bare
@@ -53,7 +53,7 @@ default = []
 # reuses spargebra + oxrdf + rustc-hash.
 experimental = []
 
-# [FABLE-5] sq-p6yb7 (design record research/owl2-ql-cq-gate-broadening.md §8): DL-Lite_R KB
+# sq-p6yb7 (design record research/owl2-ql-cq-gate-broadening.md §8): DL-Lite_R KB
 # CONSISTENCY CHECKING by violation-query composition — for each captured negative inclusion
 # (owl:disjointWith / owl:propertyDisjointWith, see `TBox::neg_incl`) compose the boolean
 # violation CQ, rewrite it with the EXISTING PerfectRef machinery (hence the `experimental`
@@ -78,7 +78,7 @@ rustc-hash.workspace = true
 oxttl.workspace = true
 sparq-core = { path = "../sparq-core" }
 sparq-engine = { path = "../sparq-engine" }
-# [SONNET-4.6] sq-wxaas: the OWL 2 RL materialise-then-query BASELINE for the QL-track Q1
+# sq-wxaas: the OWL 2 RL materialise-then-query BASELINE for the QL-track Q1
 # acceptance oracle (`tests/rl_baseline_differential.rs`). TEST-ONLY — the rewriter itself never
 # touches the materialiser (FO-rewritability is precisely the point), so this stays a
 # dev-dependency and adds nothing to the shipped dep graph. No cycle: sparq-reason depends only
@@ -90,7 +90,7 @@ sparq-reason = { path = "../sparq-reason", default-features = false }
 # which passes no `--features`, runs zero of them). The `opt-in sparq-reason-ql (experimental)`
 # feature-matrix leg is the ONLY thing that executes them in CI.
 
-# [OPUS-4.8] sq-t5bne: the QL-rewrite micro-benchmark calls the `experimental`-gated `rewrite`
+# sq-t5bne: the QL-rewrite micro-benchmark calls the `experimental`-gated `rewrite`
 # API, so it only builds with the feature on. `required-features` keeps a default
 # `cargo build --all-targets` (which passes no features) from trying to compile it and failing on
 # the missing import — mirrors sparq-reason-el's `hasse_bench`. It is the crate's registered G1
@@ -99,12 +99,12 @@ sparq-reason = { path = "../sparq-reason", default-features = false }
 name = "ql_rewrite_bench"
 required-features = ["experimental"]
 
-# [GPT-5.6] sq-mg1wx: hermetic rewrite-then-execute correctness/measurement harness.
+# sq-mg1wx: hermetic rewrite-then-execute correctness/measurement harness.
 [[example]]
 name = "ql_endtoend_bench"
 required-features = ["experimental"]
 
-# [SONNET-4.6] sq-hmd7l.9: the sparq leg of the NPD/Requiem rewriting comparison vs Ontop
+# sq-hmd7l.9: the sparq leg of the NPD/Requiem rewriting comparison vs Ontop
 # (scripts/bench/reason-ql-same-box.sh). Calls the gated `rewrite`/`rewrite_production` API,
 # so `required-features` keeps the default (feature-less) `cargo build --all-targets` green.
 # `test = true` (the sparq-jsonld `jsonld_conformance` precedent) so the witness-gate

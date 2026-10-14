@@ -1,6 +1,6 @@
 //! The minimal, dependency-free JSON value model (`Json` AST).
 //!
-//! [OPUS-4.8] (sq-oy1f.23) Moved **verbatim** out of `sparq-engine`'s JSON-LD writer
+//! (sq-oy1f.23) Moved **verbatim** out of `sparq-engine`'s JSON-LD writer
 //! (`serialize/compact.rs`) so the whole document-level JSON-LD 1.1 pipeline can share one
 //! JSON value type without pulling in `serde_json`. The move is behaviour-neutral: the
 //! engine re-exports this type at its old path (`sparq_engine::serialize::compact::Json`,
@@ -157,7 +157,7 @@ impl Json {
         }
     }
 
-    /// Parses a JSON text into a [`Json`] value. [OPUS-4.8] (sq-oy1f.24) A minimal,
+    /// Parses a JSON text into a [`Json`] value. (sq-oy1f.24) A minimal,
     /// dependency-free recursive-descent parser used to read remote `@context` and
     /// `@import` documents retrieved through a [`DocumentLoader`](crate::loader::DocumentLoader).
     ///
@@ -267,7 +267,7 @@ impl Parser<'_> {
     }
 
     fn parse_number(&mut self) -> Result<Json, JsonParseError> {
-        // [OPUS-4.8] (sq-oy1f.24) Enforce the RFC 8259 number grammar strictly:
+        // (sq-oy1f.24) Enforce the RFC 8259 number grammar strictly:
         //   number = [ "-" ] int [ frac ] [ exp ]
         //   int    = "0" / ( digit1-9 *DIGIT )   (no leading zeros)
         //   frac   = "." 1*DIGIT                 (a "." requires a digit)
@@ -343,14 +343,14 @@ impl Parser<'_> {
                         _ => return Err(self.error("invalid escape")),
                     }
                 }
-                // [OPUS-4.8] (sq-oy1f.24) RFC 8259 forbids raw control characters
+                // (sq-oy1f.24) RFC 8259 forbids raw control characters
                 // (U+0000..=U+001F) inside a string; they must be escaped. Reject them so a
                 // malformed remote `@context`/`@import` document is not treated as valid.
                 Some(b) if b < 0x20 => {
                     return Err(self.error("unescaped control character in string"));
                 }
                 Some(_) => {
-                    // [FABLE-5] (sq-hmd7l.42) Copy the maximal run of plain bytes (no
+                    // (sq-hmd7l.42) Copy the maximal run of plain bytes (no
                     // quote, no backslash, no control character) in one step, validating
                     // UTF-8 once per run. The previous per-character path ran
                     // `str::from_utf8` over the WHOLE remaining input for every character
@@ -684,7 +684,7 @@ mod tests {
         assert!(Json::parse("\"\\uD83D\"").is_err());
     }
 
-    /// [FABLE-5] (sq-hmd7l.42) The run-copying string fast path: plain runs (including
+    /// (sq-hmd7l.42) The run-copying string fast path: plain runs (including
     /// multi-byte UTF-8) interleaved with escapes and terminators must decode exactly as
     /// the old per-character path did, and invalid UTF-8 must still be reported at the
     /// first invalid byte.

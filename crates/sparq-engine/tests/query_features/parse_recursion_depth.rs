@@ -1,4 +1,4 @@
-//! [OPUS-4.8] Engine-level regression for the SPARQL parse-depth bound
+//! Engine-level regression for the SPARQL parse-depth bound
 //! (bead sq-1ukn, cert gap ASVS-G4 / ASVS V5.5.2; threat-model boundary B2,
 //! T-PARSE-DoS).
 //!

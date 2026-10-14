@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-py8h.1 — bounded property-path over DISCLOSED global-IRI keys.
+// sq-py8h.1 — bounded property-path over DISCLOSED global-IRI keys.
 //! Bounded-length SPARQL property paths over **disclosed global-IRI keys**
 //! (the crypto-free, "headline federation" regime).
 //!
@@ -169,7 +169,7 @@ impl PathForm {
 }
 
 /// Maximum number of fixed-length BGP chains a single bounded repetition may
-/// unroll to before we refuse the path with [`MpcError::Protocol`]. `[OPUS-4.8]`
+/// unroll to before we refuse the path with [`MpcError::Protocol`]. ``
 ///
 /// A repetition `(step){m,k}` over an `a`-way alternation unrolls to
 /// `Σ_{ℓ=m..=k} a^ℓ` fixed chains (design §2.4). That sum is **exponential in `k`**
@@ -194,7 +194,7 @@ pub const MAX_UNROLL_CHAINS: u64 = 1 << 20; // 1_048_576
 /// reflexive identity arm, which is NOT a chain — it is handled separately — so it
 /// contributes nothing here). Returns `None` on `u64` overflow so the caller can
 /// reject the path with a controlled error instead of risking a wrapping/huge
-/// allocation. `[OPUS-4.8]`
+/// allocation. ``
 fn projected_chain_count(alternatives: usize, min: usize, max: usize) -> Option<u64> {
     let a = alternatives as u64;
     let mut total: u64 = 0;
@@ -431,7 +431,7 @@ fn eval_repetition(
     // over-cap path with a controlled `MpcError::Protocol` *before* generating or
     // evaluating any chain — otherwise a large public `{m,k}`/alternation is a
     // CPU/memory DoS (huge `Vec` growth, or a `usize` overflow in a `with_capacity`)
-    // on this public API surface. `[OPUS-4.8]`
+    // on this public API surface. ``
     let projected = projected_chain_count(rep.step.alternatives.len(), rep.min, rep.max);
     match projected {
         Some(count) if count <= MAX_UNROLL_CHAINS => {}

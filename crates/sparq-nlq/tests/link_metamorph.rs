@@ -1,6 +1,6 @@
 //! Metamorphic laws for the deterministic, model-free lexical entity linker.
 //!
-//! [GPT-5.6] sq-588cl
+//! sq-588cl
 
 use std::collections::BTreeSet;
 

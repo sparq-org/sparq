@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-zak4f: the structured `shapes` MCP tool — a **no-LLM**, schema-grounded
+//! sq-zak4f: the structured `shapes` MCP tool — a **no-LLM**, schema-grounded
 //! description of "what predicates are valid when my subject is of type `X`", for a CLIENT
 //! LLM to ground NL→SPARQL on.
 //!

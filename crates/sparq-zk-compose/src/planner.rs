@@ -1,6 +1,6 @@
 //! Plans disclosures and selects private witnesses for positive query answers.
 //!
-//! [GPT-6] This module is a host planner, not a proof verifier. It selects one
+//! This module is a host planner, not a proof verifier. It selects one
 //! successful witness for every released DISTINCT row (or a true ASK), without
 //! claiming that the released set includes every possible answer. Authentication,
 //! membership, hidden equality, and hidden FILTER obligations remain for a proof
@@ -112,7 +112,7 @@ impl DisclosureQuery {
         Self::parse_numeric(sparql, NumericProfile::Unsigned)
     }
 
-    // [GPT-6] Signed bounds use a private typed wrapper; unsigned admission is unchanged.
+    // Signed bounds use a private typed wrapper; unsigned admission is unchanged.
     fn parse_numeric(sparql: &str, numeric: NumericProfile) -> Result<Self, PlanError> {
         if sparql.len() > MAX_DISCLOSURE_QUERY_BYTES {
             return Err(PlanError::LimitExceeded("query text bytes"));
@@ -576,7 +576,7 @@ pub fn plan_disclosure(
 
 /// Selects witnesses after a backend restricts eligible candidate triples.
 ///
-/// [GPT-6] `admit` receives the pattern index, original credential/leaf reference
+/// `admit` receives the pattern index, original credential/leaf reference
 /// and candidate triple. Returning false only removes a candidate; it cannot
 /// waive query matching, FILTER, join, projection or resource checks. This is
 /// prover-local eligibility, never a verifier trust or authentication decision.

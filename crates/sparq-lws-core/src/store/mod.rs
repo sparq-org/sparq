@@ -513,7 +513,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     }
 }
 
-// [GPT-5.6] The concrete wasm/dev-store pair exposes one combined limits and usage view without
+// The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.

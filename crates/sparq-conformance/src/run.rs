@@ -673,7 +673,7 @@ pub fn run_update_test(entry: &TestEntry) -> Status {
         .iter()
         .map(|(g, _)| g.clone())
         .collect();
-    // [OPUS-4.8] roborev 1646: `LOAD <file://…>` is refused by default. The conformance suite
+    // roborev 1646: `LOAD <file://…>` is refused by default. The conformance suite
     // is a TRUSTED local run, so allowlist the request file's directory (where the W3C update
     // tests keep the data files they LOAD) as the LOAD base.
     let load_base: PathBuf = request_path

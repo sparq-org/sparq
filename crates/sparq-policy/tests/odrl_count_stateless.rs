@@ -1,5 +1,5 @@
 //! Default-feature (`count-enforcement` OFF) `odrl:count` evaluation tests.
-//! [OPUS-4.8] sq-bif.7.
+//! sq-bif.7.
 //!
 //! `odrl:count` enforcement comes in two layers (see crates/sparq-policy/src/lib.rs):
 //!   - DEFAULT (this file): the *stateless* numeric constraint it always was — the

@@ -1,5 +1,4 @@
 //! Acceptance test for the bounded-heap ORDER BY optimisation (sq-7d3dj.30.2).
-//! [SONNET-4.6]
 //!
 //! Invariant: `ORDER BY … LIMIT k OFFSET o` produces BYTE-IDENTICAL rows to
 //! `ORDER BY …` (full sort) followed by a manual slice `[o..o+k]`, for every
@@ -66,7 +65,7 @@ fn oracle(g: &Graph, base_query: &str, offset: usize, limit: usize) -> Vec<Vec<O
 /// in exec.rs `order_bindings` (`a.1.cmp(&c.1)` → `c.1.cmp(&a.1)`) makes the
 /// top-k path select the OPPOSITE end of the tie group, so `got != exp` and the
 /// test goes RED. Verified by temporarily reversing the tiebreak in the
-/// worktree (RED) and restoring it (GREEN). [OPUS-4.8] sq-7d3dj.30.2
+/// worktree (RED) and restoring it (GREEN). sq-7d3dj.30.2
 ///
 /// Every (offset, limit) below keeps `cap = offset + limit < n` so the
 /// bounded-selection (top-k) path is actually exercised (when `cap >= n` the
@@ -104,7 +103,7 @@ fn duplicate_keys() {
 /// LIMIT 0 is legal SPARQL and is exercised by the W3C conformance suite. The
 /// budget `cap = offset + 0 = 0` reaches the bounded-selection path with k = 0;
 /// `select_nth_unstable_by(k - 1)` would underflow to `usize::MAX` and abort the
-/// process (SIGABRT, exit 134). Regression guard for that crash. [OPUS-4.8]
+/// process (SIGABRT, exit 134). Regression guard for that crash.
 #[test]
 fn limit_zero() {
     let mut ttl = String::new();
@@ -125,7 +124,7 @@ fn limit_zero() {
 
 /// ORDER BY … LIMIT k over a pattern that matches NOTHING: n = 0. The
 /// bounded-selection path must not call `select_nth_unstable_by` on an empty
-/// slice (which panics). Regression guard. [OPUS-4.8]
+/// slice (which panics). Regression guard.
 #[test]
 fn empty_input() {
     // Graph has data, but the query pattern matches no rows.
@@ -142,7 +141,7 @@ fn empty_input() {
 /// OFFSET so large that the row budget `cap = offset + limit >= n`: the code
 /// MUST fall through to the full stable sort (`use_topk` false / `k >= n`) — a
 /// bounded `select_nth_unstable_by(nth)` with `nth >= len` would panic.
-/// Result must still equal the full-sort oracle. [OPUS-4.8]
+/// Result must still equal the full-sort oracle.
 #[test]
 fn offset_budget_ge_n() {
     let n = 8usize;

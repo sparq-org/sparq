@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-nzcb (W-rsp): the tier-b WASM bundle for sparq-rsp.
+# sq-nzcb (W-rsp): the tier-b WASM bundle for sparq-rsp.
 #
 # A SEPARATE, lazy-loaded bundle (not folded into the lean `sparq-wasm` bundle): it
 # carries the windowed RSP-QL stream processor (`sparq-rsp`) — sliding/tumbling time
@@ -42,7 +42,7 @@ wasm-bindgen = "0.2"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [dev-dependencies]
-# [OPUS-4.8] sq-nzcb — headless wasm test harness, mirroring sparq-wasm / sparq-reason-wasm:
+# sq-nzcb — headless wasm test harness, mirroring sparq-wasm / sparq-reason-wasm:
 # exercises the #[wasm_bindgen] JS-facing API in a REAL wasm runtime via `wasm-pack test
 # --node`. Dev-only: it must NOT enter the non-dev wasm graph.
 wasm-bindgen-test = "0.3"
@@ -50,7 +50,7 @@ wasm-bindgen-test = "0.3"
 [package.metadata.wasm-pack.profile.release]
 # Optimise the wasm for size (the bundle is small, but keep parity with the other bundles).
 wasm-opt = ["-Oz"]
-# [SONNET-4.6] sq-7d3dj.15 — `js build:rsp-wasm` now passes `--profile release-wasm`
+# sq-7d3dj.15 — `js build:rsp-wasm` now passes `--profile release-wasm`
 # (NOT `--release`). wasm-pack only recognises the built-in `dev`/`profiling`/`release` profile
 # keys; the above `release` block is IGNORED for `--profile release-wasm` and wasm-opt uses its
 # default `-O` instead. The size win comes from the cargo `release-wasm` profile (opt-level "z"

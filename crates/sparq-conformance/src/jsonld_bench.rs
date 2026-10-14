@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-hmd7l.15 — shared JSON-LD comparison helpers for the W3C
+//! sq-hmd7l.15 — shared JSON-LD comparison helpers for the W3C
 //! conformance lane (`tests/jsonld_suite/`) and the comparative-benchmark
 //! harness (`bench/jsonld/`, the `bench_jsonld` example).
 //!
@@ -19,7 +19,7 @@ use serde_json::Value;
 
 // ── JSON-LD document-level equality comparator ──────────────────────────────
 //
-// [SONNET-4.6] sq-kk1mq — the comparator for the native expand() oracle.
+// sq-kk1mq — the comparator for the native expand() oracle.
 //
 // Semantics (PINNED IN CODE per sq-kk1mq):
 //   • Object key order: insignificant.  Two objects are equal iff they have the
@@ -33,7 +33,7 @@ use serde_json::Value;
 //     structured-sequence construct; all other arrays are bags.
 //   • Numbers: integral (i64/u64-representable) compared exactly so integers
 //     ≥ 2^53 remain distinct; non-integral (either side is a JSON float) fall
-//     back to f64, so `1` ≡ `1.0`.  [SONNET-4.6] sq-kk1mq numeric-guard.
+//     back to f64, so `1` ≡ `1.0`.  sq-kk1mq numeric-guard.
 //   • Strings, booleans, null: exact equality.
 //
 // Why document-level rather than RDF-level?  The expansion algorithm operates
@@ -65,7 +65,7 @@ enum Arrays {
 /// Returns `true` iff `a` and `b` are equal under the JSON-LD comparison rules
 /// described in the module-level comment.
 ///
-/// [SONNET-4.6] sq-kk1mq
+/// sq-kk1mq
 pub fn json_ld_equal(a: &Value, b: &Value) -> bool {
     json_ld_equal_inner(a, b, Arrays::Unordered)
 }
@@ -76,7 +76,7 @@ fn json_ld_equal_inner(a: &Value, b: &Value, arrays: Arrays) -> bool {
         (Value::Null, Value::Null) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Number(x), Value::Number(y)) => {
-            // JSON-LD numeric equality [SONNET-4.6] sq-kk1mq numeric-guard:
+            // JSON-LD numeric equality sq-kk1mq numeric-guard:
             // • Both i64-representable: compare exactly so integers ≥ 2^53 are
             //   not wrongly collapsed by f64 rounding
             //   (e.g. 9007199254740992 ≢ 9007199254740993 must remain distinct).
@@ -263,7 +263,7 @@ pub fn jsonld_to_canonical_dataset(doc: &str, base: &str) -> Result<Dataset, Str
     Ok(ds)
 }
 
-/// [OPUS-4.8] sq-3uos5 (moved from `tests/jsonld_suite/common.rs`, sq-hmd7l.15) —
+/// sq-3uos5 (moved from `tests/jsonld_suite/common.rs`, sq-hmd7l.15) —
 /// read a context document and extract the caller `@context` value as the
 /// engine writer's `JsonLdValue`. The wrapping file holds `{"@context": …}`;
 /// sparq's `graph_to_jsonld_compact` expects the INNER value (the
@@ -305,7 +305,7 @@ pub fn dataset_to_nquads(ds: &Dataset) -> String {
     let mut out = String::new();
     for q in ds.iter() {
         let owned: Quad = q.into_owned();
-        // [OPUS-4.8] positional format arg (avoids the CodeQL rust/unused-variable
+        // positional format arg (avoids the CodeQL rust/unused-variable
         // false positive on inline-captured identifiers).
         out.push_str(&format!("{} .\n", owned));
     }
@@ -537,7 +537,7 @@ mod tests {
     /// Large integers ≥ 2^53 that are distinct as i64 must not be collapsed by f64
     /// rounding.  Under the old f64-only path 9007199254740992 and 9007199254740993
     /// round to the same f64 and would be wrongly equal.  The numeric-guard fix
-    /// [SONNET-4.6] sq-kk1mq compares integral values exactly via i64/u64.
+    /// sq-kk1mq compares integral values exactly via i64/u64.
     #[test]
     fn large_integer_numeric_guard() {
         // 2^53 and 2^53+1 are distinct i64 values but collapse to the same f64.

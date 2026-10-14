@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-e5atd (epic sq-pbz04) — the D-entailment (datatype / value-space)
+//! sq-e5atd (epic sq-pbz04) — the D-entailment (datatype / value-space)
 //! conformance lane, wired as a RATCHETED gate that mirrors the SPARQL / SHACL /
 //! GeoSPARQL / Solid / JSON-LD ratchets in this crate (crate-local `cargo test` +
 //! a pinned pass-count FLOOR that may only RISE, registered in the central
@@ -44,7 +44,7 @@
 //! `scripts/fetch-inference-suites.sh` into the gitignored `tests/w3c/rdf-tests/`;
 //! when absent the runner SKIPS so a fresh offline checkout stays green.
 
-// [OPUS-4.8] When the lane feature is OFF the runner is a single self-SKIP test so
+// When the lane feature is OFF the runner is a single self-SKIP test so
 // the default + `--workspace` builds neither link the D materializer nor go red on
 // a fresh checkout. (cfg gate, not a runtime branch, so zero D-entailment code
 // compiles in the default state — the lean-core invariant.)
@@ -112,7 +112,7 @@ mod gated {
             }
         }
 
-        // [OPUS-4.8] The CI ratchet greps this exact `TOTAL d-entail` line (pass
+        // The CI ratchet greps this exact `TOTAL d-entail` line (pass
         // count in field $3), mirroring the JSON-LD lane's `TOTAL <cat>` shape.
         // Positional `format!`/`println!` args (not inline `{pass}`) per the CodeQL
         // `rust/unused-variable` false-positive guard in the shared agent contract.
@@ -137,7 +137,7 @@ mod gated {
         );
     }
 
-    // ── [FABLE-5] sq-pbz04.6.4 — the crate-local D VALUE-SPACE MATRIX arm ────────────
+    // ── sq-pbz04.6.4 — the crate-local D VALUE-SPACE MATRIX arm ────────────
     //
     // A sparq-EXTENSION ratchet, tallied SEPARATELY from the W3C `D_ENTAIL_FLOOR` above
     // (mirroring the OWL 2 QL certain-answer-oracle precedent, program honesty rule 4:

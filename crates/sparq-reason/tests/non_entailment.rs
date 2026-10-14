@@ -1,4 +1,4 @@
-//! ALWAYS-ON per-regime NON-entailment unit set (no fixture needed). [OPUS-4.8]
+//! ALWAYS-ON per-regime NON-entailment unit set (no fixture needed).
 //!
 //! The reason suite is strong on POSITIVE coverage (incremental == from-scratch
 //! property tests, the EYE differential, the W3C inference ratchet) but the

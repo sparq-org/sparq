@@ -1,7 +1,7 @@
 //! The MCP server: configuration, the in-memory graph it serves, and the
 //! transport-agnostic JSON-RPC dispatch core.
 //!
-//! [OPUS-4.8] (sq-0z43i, gh #909) [`McpServer::handle_message`] is the single
+//! (sq-0z43i, gh #909) [`McpServer::handle_message`] is the single
 //! entry point: it takes one raw JSON-RPC message string and returns the raw
 //! response string (or `None` for a notification). The stdio transport in the
 //! `transport` module (feature `stdio`) is a thin loop around it; the round-trip
@@ -25,7 +25,7 @@ use crate::tools;
 
 /// The newest MCP protocol revision this server implements — the version offered in
 /// the `initialize` result when the client proposes an unsupported (or no) revision,
-/// per the MCP versioning rules. [SONNET-4.6] sq-bvnqm
+/// per the MCP versioning rules. sq-bvnqm
 pub const PROTOCOL_VERSION: &str = "2025-11-25";
 
 /// Every published MCP protocol revision this server can speak, newest first
@@ -37,10 +37,10 @@ pub const PROTOCOL_VERSION: &str = "2025-11-25";
 /// valid under the JSON Schema 2020-12 dialect that 2025-11-25 makes the default.
 ///
 /// 2025-03-26 is the one revision that REQUIRES receiving JSON-RPC batches (added
-/// there, removed again in 2025-06-18). [OPUS-5] (gh #2497) [`McpServer::handle_message`]
+/// there, removed again in 2025-06-18). (gh #2497) [`McpServer::handle_message`]
 /// now accepts a top-level batch array in both dispatch cores, so the revision is claimed here
 /// rather than declined; before that it was deliberately absent because claiming it
-/// would have overstated conformance. [SONNET-4.6] sq-bvnqm
+/// would have overstated conformance. sq-bvnqm
 pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
     &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
@@ -48,7 +48,7 @@ pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] =
 /// client's proposed `protocolVersion` when it is one we support, otherwise respond
 /// with our latest ([`PROTOCOL_VERSION`]) — the client then decides whether to
 /// continue or disconnect. A missing or non-string proposal gets the latest too.
-/// [SONNET-4.6] sq-bvnqm
+/// sq-bvnqm
 pub(crate) fn negotiate_protocol_version(params: &Value) -> &'static str {
     params
         .get("protocolVersion")
@@ -109,7 +109,7 @@ pub struct ServerConfig {
     /// driving [`McpServer::handle_message`] with its own transport must cap the
     /// request itself. (gh #6051)
     pub max_request_bytes: Option<usize>,
-    /// [FABLE-5] (sq-lsp7k.10, feature `templates`) The named parameterized templates this
+    /// (sq-lsp7k.10, feature `templates`) The named parameterized templates this
     /// server exposes through the `template_list` / `template_invoke` tools. Registered by
     /// the embedder as ALREADY-VALIDATED [`sparq_engine::templates::Template`]s (parse +
     /// declared-parameter validation happen at construction, fail-closed), so every listed
@@ -132,7 +132,7 @@ impl Default for ServerConfig {
             max_rows: Some(1_000_000),
             server_name: "sparq-mcp".to_string(),
             max_request_bytes: Some(DEFAULT_MAX_REQUEST_BYTES),
-            // [FABLE-5] sq-lsp7k.10: no templates unless the embedder registers them.
+            // sq-lsp7k.10: no templates unless the embedder registers them.
             #[cfg(feature = "templates")]
             templates: Vec::new(),
         }
@@ -147,7 +147,7 @@ impl Default for ServerConfig {
 pub struct McpServer {
     graph: Graph,
     config: ServerConfig,
-    /// [FABLE-5] (sq-lsp7k.10, feature `text`) The lazily-built BM25 literal index behind
+    /// (sq-lsp7k.10, feature `text`) The lazily-built BM25 literal index behind
     /// the `text_search` tool. `None` until the first search; reconciled incrementally
     /// (`O(new dictionary terms)`) before every search so it stays current across
     /// `update` / `template_invoke` mutations without a per-call rebuild.
@@ -214,7 +214,7 @@ impl McpServer {
     /// all, an empty array is answered with a single (non-array) `INVALID_REQUEST` error,
     /// and a malformed element gets its own null-id error without voiding the rest of the
     /// batch — the JSON-RPC 2.0 §6 contract the MCP 2025-03-26 revision requires.
-    /// [OPUS-5] gh #2497
+    /// gh #2497
     pub fn handle_message(&mut self, raw: &str) -> Option<String> {
         handle_raw(raw, |req| self.dispatch(req))
     }
@@ -229,7 +229,7 @@ impl McpServer {
             "ping" => Ok(json!({})),
             "tools/list" => Ok(self.tools_list_result()),
             "tools/call" => self.tools_call(&req.params),
-            // [SONNET-4.6] sq-sjey1: the read-only resources + prompts surfaces.
+            // sq-sjey1: the read-only resources + prompts surfaces.
             "resources/list" => Ok(self.resources_list()),
             "resources/read" => self.resources_read(&req.params),
             "prompts/list" => Ok(self.prompts_list()),
@@ -244,7 +244,7 @@ impl McpServer {
     /// The `initialize` handshake result: the negotiated protocol version, server
     /// info, and the declared capabilities.
     ///
-    /// [SONNET-4.6] sq-sjey1: `resources` and `prompts` join `tools`. Both sub-capability
+    /// sq-sjey1: `resources` and `prompts` join `tools`. Both sub-capability
     /// flags are declared FALSE and mean it: this server never pushes an unsolicited
     /// `listChanged` notification, and it implements no `resources/subscribe` (the pod
     /// server — feature `solid` — is the one that does, and declares `subscribe: true`
@@ -275,7 +275,7 @@ impl McpServer {
     }
 
     /// `resources/list`: the dataset descriptor, the default graph, and one entry per
-    /// named graph. See [`crate::resources`]. [SONNET-4.6] sq-sjey1
+    /// named graph. See [`crate::resources`]. sq-sjey1
     fn resources_list(&self) -> Value {
         json!({ "resources": resources::descriptors(&self.graph) })
     }
@@ -286,7 +286,7 @@ impl McpServer {
     /// A URI this server does not serve is MCP's `RESOURCE_NOT_FOUND`; a served resource
     /// that could not be materialised (a tripped budget) is an INTERNAL error, because
     /// reporting it as "not found" would assert something false about the dataset.
-    /// [SONNET-4.6] sq-sjey1
+    /// sq-sjey1
     fn resources_read(&self, params: &Value) -> Result<Value, RpcError> {
         let uri = params.get("uri").and_then(Value::as_str).ok_or_else(|| {
             RpcError::new(INVALID_PARAMS, "resources/read requires a string `uri`")
@@ -305,7 +305,7 @@ impl McpServer {
     }
 
     /// `prompts/list`: the static canned-query prompt catalog. See [`crate::prompts`].
-    /// [SONNET-4.6] sq-sjey1
+    /// sq-sjey1
     fn prompts_list(&self) -> Value {
         let prompts: Vec<Value> = prompts::PROMPTS.iter().map(|p| p.to_json()).collect();
         json!({ "prompts": prompts })
@@ -314,7 +314,7 @@ impl McpServer {
     /// `prompts/get`: render one prompt into the MCP `messages` shape. An unknown prompt
     /// name and an unusable argument are both `INVALID_PARAMS`, as the MCP prompts spec
     /// prescribes — a prompt is never rendered around an argument that failed validation.
-    /// [SONNET-4.6] sq-sjey1
+    /// sq-sjey1
     fn prompts_get(&self, params: &Value) -> Result<Value, RpcError> {
         let name = params
             .get("name")
@@ -433,7 +433,7 @@ impl McpServer {
 
     /// `shapes`: the data-grounded shape (valid predicates + datatypes + cardinalities)
     /// of one class IRI, as structured JSON for a client LLM to ground NL→SPARQL on. No
-    /// server-side model — reuses the introspection schema miner. [OPUS-4.8] sq-zak4f
+    /// server-side model — reuses the introspection schema miner. sq-zak4f
     fn tool_shapes(&self, args: &Value) -> Result<String, String> {
         let class_iri = arg_str(args, "class")?;
         let ix = Introspection::build(&self.graph);
@@ -443,7 +443,7 @@ impl McpServer {
 
     /// `ask` (feature `nlq`): server-side NL→SPARQL→execute via sparq-nlq. Degrades
     /// cleanly — returns a clear "not configured" tool error when no LLM backend is set,
-    /// never a fabricated answer or a panic. [OPUS-4.8] sq-jxjgr
+    /// never a fabricated answer or a panic. sq-jxjgr
     #[cfg(feature = "nlq")]
     fn tool_ask(&self, args: &Value) -> Result<String, String> {
         let question = arg_str(args, "question")?;
@@ -452,7 +452,7 @@ impl McpServer {
 
     /// `nl_query` (feature `nlq`): server-side NL→SPARQL **translation** via sparq-nlq —
     /// the query is validated but never executed, so it takes no [`QueryBudget`]. Degrades
-    /// cleanly on the same "not configured" path as `ask`. [SONNET-4.6] sq-sj1f9
+    /// cleanly on the same "not configured" path as `ask`. sq-sj1f9
     #[cfg(feature = "nlq")]
     fn tool_nl_query(&self, args: &Value) -> Result<String, String> {
         let question = arg_str(args, "question")?;
@@ -473,7 +473,7 @@ impl McpServer {
         Ok(serde_json::to_string_pretty(&stats).unwrap_or_else(|_| stats.to_string()))
     }
 
-    /// [GPT-5.6] sq-cekgj: `classes`, class profiles ranked by instance count.
+    /// sq-cekgj: `classes`, class profiles ranked by instance count.
     fn tool_classes(&self) -> Result<String, String> {
         let ix = Introspection::build(&self.graph);
         let mut profiles = ix.classes;
@@ -496,7 +496,7 @@ impl McpServer {
         Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
     }
 
-    /// [GPT-5.6] sq-kx5b0: `prefixes`, namespace declarations ranked by term count.
+    /// sq-kx5b0: `prefixes`, namespace declarations ranked by term count.
     fn tool_prefixes(&self) -> Result<String, String> {
         let ix = Introspection::build(&self.graph);
         let distinct_prefixes = ix.vocabularies.distinct;
@@ -543,7 +543,7 @@ impl McpServer {
 
     /// `template_list` (feature `templates`): the registered named-template definitions
     /// as JSON — name / kind / text / declared typed parameters / description — so an
-    /// agent can ground a `template_invoke` call. [FABLE-5] sq-lsp7k.10
+    /// agent can ground a `template_invoke` call. sq-lsp7k.10
     #[cfg(feature = "templates")]
     fn tool_template_list(&self) -> Result<String, String> {
         let defs: Vec<Value> = self.config.templates.iter().map(|t| t.to_json()).collect();
@@ -557,7 +557,7 @@ impl McpServer {
     /// JSON shape that does not match the declared type is a tool error, never a guess.
     /// An UPDATE template additionally requires `allow_update` — exactly the raw
     /// `update` tool's gate, so the template layer never widens write access.
-    /// [FABLE-5] sq-lsp7k.10
+    /// sq-lsp7k.10
     #[cfg(feature = "templates")]
     fn tool_template_invoke(&mut self, args: &Value) -> Result<String, String> {
         let name = arg_str(args, "name")?;
@@ -594,7 +594,7 @@ impl McpServer {
     /// literals via `sparq-text`. The index is built lazily on first use and reconciled
     /// incrementally (`O(new dictionary terms)`) before every search, so it stays current
     /// after `update` / `template_invoke` mutations. Returns ranked hits as JSON —
-    /// each the matching literal (N-Triples form) plus its BM25 score. [FABLE-5]
+    /// each the matching literal (N-Triples form) plus its BM25 score.
     /// sq-lsp7k.10
     #[cfg(feature = "text")]
     fn tool_text_search(&mut self, args: &Value) -> Result<String, String> {
@@ -642,7 +642,7 @@ impl McpServer {
     }
 
     /// `validate` (feature `shacl`): parse a caller-owned shapes graph and run the
-    /// existing SHACL validator over a shared borrow of the served data. [GPT-5.6]
+    /// existing SHACL validator over a shared borrow of the served data.
     #[cfg(feature = "shacl")]
     fn tool_validate(&self, args: &Value) -> Result<String, String> {
         let source = arg_str(args, "shapes")?;
@@ -692,7 +692,7 @@ impl McpServer {
     /// shapes graph (the same parsing path as `validate`), derive the form with
     /// `sparq_forms::derive_form` over a shared borrow of the served data, and
     /// return its `FormDescription` JSON VERBATIM (no key reshaping — agents and
-    /// renderers consume the one canonical contract). [FABLE-5] sq-lsp7k.1.6
+    /// renderers consume the one canonical contract). sq-lsp7k.1.6
     #[cfg(feature = "shacl")]
     fn tool_describe_form(&self, args: &Value) -> Result<String, String> {
         let focus = parse_focus_term(arg_str(args, "focus")?)?;
@@ -740,7 +740,7 @@ impl McpServer {
 
 /// Parse a `describe_form` focus argument: `_:label` denotes a blank node, anything
 /// else must be a valid IRI (literals cannot be SHACL focus nodes for a form).
-/// [FABLE-5] sq-lsp7k.1.6
+/// sq-lsp7k.1.6
 #[cfg(feature = "shacl")]
 fn parse_focus_term(focus: &str) -> Result<oxrdf::Term, String> {
     if let Some(label) = focus.strip_prefix("_:") {
@@ -836,7 +836,7 @@ where
 /// `SolidMcpServer::handle_message`: take one raw JSON-RPC message — a single request
 /// object **or a top-level batch array** — and route each request through `dispatch`.
 ///
-/// [OPUS-5] (gh #2497) Batch *receipt* is the one thing the MCP **2025-03-26** revision
+/// (gh #2497) Batch *receipt* is the one thing the MCP **2025-03-26** revision
 /// requires that the other revisions do not (batching was added there and removed again
 /// in 2025-06-18), so it is what lets `2025-03-26` sit in
 /// [`SUPPORTED_PROTOCOL_VERSIONS`]. Per JSON-RPC 2.0 §6:

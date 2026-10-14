@@ -1,6 +1,6 @@
 //! Cross-commit **byte-stability pin** for the `kge` trainer/eval stack.
 //!
-//! [FABLE-5] (Kern PR-1, quoted-terms visibility): prints a deterministic 128-bit digest over the
+//! (Kern PR-1, quoted-terms visibility): prints a deterministic 128-bit digest over the
 //! canonical little-endian bytes of `(epoch_loss, entity_emb, rel_emb, metrics-as-f64s)` for the
 //! three pre-existing **quote-free** synthetic slices (gUFO, relational, provenance) at pinned
 //! seeds `{1, 2, 3}`, under every preset default (in particular `TermScope::IriBlank`, the

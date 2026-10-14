@@ -3,7 +3,7 @@
 //! KGE trainer consumes (provenance-driven GenAI-KB **Phase 4**, design
 //! `research/provenance-driven-genai-kb.md` §USE-1 / §5 Phase 4, epic `sq-2489d`).
 //!
-//! [OPUS-4.8] sq-2489d.4. This **mirrors `crate::shacl_priors`** (the P2 SHACL/OWL prior
+//! sq-2489d.4. This **mirrors `crate::shacl_priors`** (the P2 SHACL/OWL prior
 //! extractor): a small, **read-only** reader keyed by graph term ids that consumes only
 //! `sparq-core`'s public id-scan API. It does **not** redefine the provenance model — it
 //! consumes the same `pkg:confidence` / `pkg:assurance` / `prov:wasDerivedFrom` terms the
@@ -81,7 +81,7 @@ pub const PKG_DISCOVERED_FROM: &str = "https://sparq.dev/ns/pkg#discoveredFrom";
 /// `rdf:reifies` — the RDF 1.2 reifier → triple-term edge (`:r rdf:reifies <<( s p o )>>`). The
 /// reifier `:r` is an ordinary entity, so its own `pkg:confidence` / `pkg:assurance` /
 /// `prov:wasDerivedFrom` annotations are provenance about **the statement**, which is what the
-/// design's per-triple `w(t)` is defined over. [OPUS-5] sq-w2af4.
+/// design's per-triple `w(t)` is defined over. sq-w2af4.
 pub const RDF_REIFIES: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies";
 /// `rdf:subject` — RDF 1.1 standard reification, the plain-RDF spelling of the same
 /// statement → provenance mapping (`:st rdf:subject :s ; rdf:predicate :p ; rdf:object :o`).
@@ -156,7 +156,7 @@ pub struct ProvenanceWeights {
     /// ids that themselves carry provenance. Reifiers with no annotation of their own are dropped
     /// here (they say nothing), so a non-empty entry always means real per-statement provenance.
     /// Empty on any graph without reification — the head fallback then covers every triple.
-    /// [OPUS-5] sq-w2af4.
+    /// sq-w2af4.
     statement: FxHashMap<[Id; 3], Vec<Id>>,
     config: WeightConfig,
 }
@@ -286,7 +286,7 @@ impl ProvenanceWeights {
     /// whose reifier is itself annotated. `0` ⇒ no per-statement signal exists and every `w(t)`
     /// comes from the head fallback, so any *within-subject* weighting (e.g. pooling one node's
     /// edges) is an exact no-op. Read this before claiming a pooling result is provenance-driven.
-    /// [OPUS-5] sq-w2af4.
+    /// sq-w2af4.
     pub fn annotated_statements(&self) -> usize {
         self.statement.len()
     }
@@ -374,7 +374,7 @@ impl ProvenanceWeights {
     }
 
     // ---- integration point 2: confidence-weighted structural-sketch pooling -------------------
-    // [OPUS-4.8] sq-oy9ya (design §USE-1 point 2), per-triple keying [OPUS-5] sq-w2af4. When a node
+    // sq-oy9ya (design §USE-1 point 2), per-triple keying sq-w2af4. When a node
     // has MULTIPLE values for a multi-valued predicate (a characteristic set / structural sketch),
     // the standard pooling is a uniform mean of the value contributions. This pools by the
     // contributing ASSERTION's own `w(t)` instead, so a fact the graph reifies as low-assurance
@@ -446,7 +446,7 @@ impl ProvenanceWeights {
     }
 
     // ---- integration point 3 (producer): per-Block default fusion weight ----------------------
-    // [OPUS-4.8] sq-oy9ya (design §USE-1 point 3). The query-time per-`Block` fusion weight is an
+    // sq-oy9ya (design §USE-1 point 3). The query-time per-`Block` fusion weight is an
     // AGGREGATE of the provenance of the edges that fed the block. `block_weight` computes that
     // aggregate; the caller attaches it to a `Block` via `Block::with_weight` and the existing
     // `fuse_rrf_weighted`/`fuse_scores` path consumes it.
@@ -476,7 +476,7 @@ impl ProvenanceWeights {
 
     /// [`weight_for_subject`](Self::weight_for_subject) gated by `mode`: `1.0` under
     /// [`WeightMode::Uniform`], the provenance weight under [`WeightMode::Provenance`]. The
-    /// mode-aware form the pooler and the block-weight aggregator share. [OPUS-4.8]
+    /// mode-aware form the pooler and the block-weight aggregator share.
     pub fn weight_for_subject_under(&self, h: Id, mode: WeightMode) -> f32 {
         match mode {
             WeightMode::Uniform => 1.0,
@@ -485,7 +485,7 @@ impl ProvenanceWeights {
     }
 
     // ---- integration point 3 (WIRING): graph → per-block weights on a real SchemaHeader --------
-    // [OPUS-5] sq-w2af4. sq-oy9ya landed the `block_weight` aggregate and the `Block::weight`
+    // sq-w2af4. sq-oy9ya landed the `block_weight` aggregate and the `Block::weight`
     // field but left the caller that JOINS them unwritten, so nothing in-tree ever produced a
     // weighted header. These two methods are that caller: they derive each block's weight from the
     // graph itself (the subjects of the predicate that feeds the block) and hand back a
@@ -528,7 +528,7 @@ impl ProvenanceWeights {
     /// mentions `predicate`, and always under [`WeightMode::Uniform`] — so a node the modality does
     /// not describe is never penalised, and the ablation-off arm is the unweighted default. The
     /// result is in `(0, 1]`, a valid [`fuse_rrf_weighted`](crate::fuse_rrf_weighted) weight.
-    /// [OPUS-5] sq-w2af4.
+    /// sq-w2af4.
     pub fn node_block_weight(
         &self,
         graph: &Graph,
@@ -639,7 +639,7 @@ mod tests {
 
     // A PKG-shaped fixture mirroring the real pkg.ttl predicate set so the reader exercises the
     // REAL id-scan path, not a mock. Three facts: high-assurance Proven (alice), mid-assurance
-    // Claimed with a so-so source (bob), and a bare fact with NO provenance (carol). [OPUS-4.8]
+    // Claimed with a so-so source (bob), and a bare fact with NO provenance (carol).
     const PKG: &str = r#"
 @prefix pkg:  <https://sparq.dev/ns/pkg#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
@@ -971,7 +971,7 @@ ex:r2 rdf:reifies <<( ex:a ex:rel ex:b )>> ; pkg:confidence "0.3" .
 
     #[test]
     fn predicate_block_weight_aggregates_the_predicate_subjects() {
-        // [OPUS-5] `ex:knows` is asserted by alice (w=0.9), bob (w=0.28) and carol (no provenance,
+        // `ex:knows` is asserted by alice (w=0.9), bob (w=0.28) and carol (no provenance,
         // w=1.0), so the block that predicate feeds weighs the mean of the three.
         let g = graph();
         let pw = ProvenanceWeights::mine(&g);
@@ -989,7 +989,7 @@ ex:r2 rdf:reifies <<( ex:a ex:rel ex:b )>> ; pkg:confidence "0.3" .
         assert_eq!(pw.predicate_block_weight(&g, "http://ex/absent", WeightMode::Provenance), 1.0);
     }
 
-    /// [OPUS-5] sq-w2af4 — the PER-NODE half of point 3: each node's modality weight is derived
+    /// sq-w2af4 — the PER-NODE half of point 3: each node's modality weight is derived
     /// from **that node's own** incident edges and from nothing else.
     #[test]
     fn node_block_weight_reads_only_that_nodes_incident_edges() {

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t58w.6 — the WAC parity corpus, extracted verbatim from
+//! sq-t58w.6 — the WAC parity corpus, extracted verbatim from
 //! `conformance_wac.rs` so a second test target can consume the IDENTICAL scenarios.
 //! No scenario, emitted `.acl` shape, or expected decision is changed by the move.
 //!
@@ -223,7 +223,7 @@ fn control_governs_acl_document() -> WacScenario {
         .expect(Expect::agent(BOB).read(acl_doc).is(Decision::Deny))
 }
 
-/// [GPT-5.6] sq-61uvs: an ACL document is never an ordinary descendant for
+/// sq-61uvs: an ACL document is never an ordinary descendant for
 /// `acl:default` inheritance. Only Control on the governed resource exposes it.
 fn acl_document_control_gate_blocks_default_and_anonymous() -> WacScenario {
     let container = "https://pod.example/control/";

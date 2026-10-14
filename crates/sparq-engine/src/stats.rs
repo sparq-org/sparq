@@ -17,7 +17,7 @@ const MAGIC: &[u8; 8] = b"SPQSTAT1";
 const FILE_NAME: &str = "stats.bin";
 const DEFAULT_BUCKETS: usize = 64;
 
-// [SONNET-4.6] Keep the nested accumulator readable and clippy-clean.
+// Keep the nested accumulator readable and clippy-clean.
 type ValueFrequencies = (BTreeMap<Id, u64>, BTreeMap<Id, u64>);
 
 /// One deterministic equi-depth value-histogram bucket.

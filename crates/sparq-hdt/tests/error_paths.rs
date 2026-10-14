@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-bif.17: fail-closed coverage for every strict prefix of a valid
+//! sq-bif.17: fail-closed coverage for every strict prefix of a valid
 //! in-memory HDT archive through both public reader entry points.
 
 use std::io::{Cursor, ErrorKind};

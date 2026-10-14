@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.23: direct coverage for provenance configuration and accessors.
+// sq-bif.23: direct coverage for provenance configuration and accessors.
 
 use std::time::{Duration, SystemTime};
 

@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! Commutativity-batch correctness (Wave A2 §6.5; litreview A §A.2(c)).
 //!
 //! `CommitGranularity::CommuteGroup` splits a window's batch into maximal runs of
@@ -79,7 +79,7 @@ fn serial_result(updates: &[(&str, &str)]) -> usize {
     for (upd, _) in updates {
         let mut w = applier.fork(&g).unwrap();
         applier.apply(&mut w, &(*upd).to_string()).unwrap();
-        g = applier.seal(w).unwrap(); // [OPUS-4.8] (sq-vpx4) seal is now fallible (in-memory: never Err)
+        g = applier.seal(w).unwrap(); // (sq-vpx4) seal is now fallible (in-memory: never Err)
     }
     total_quads(&g)
 }

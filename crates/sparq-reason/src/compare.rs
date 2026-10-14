@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-pbz04.1.2 (epic sq-pbz04.1, substrate seam 3) — the reasoner-side adoption
+//! sq-pbz04.1.2 (epic sq-pbz04.1, substrate seam 3) — the reasoner-side adoption
 //! of the SHARED SPARQL term total order: `sparq_substrate::compare::compare_terms` driven
 //! by a [`CompareTerm`] implementation for the reasoner's own term representation, a
 //! `sparq-core` dictionary [`Id`] resolved against its [`Dict`] ([`IdTerm`]).
@@ -207,7 +207,7 @@ fn num_of_parts(value: &str, datatype: &str) -> Option<Num> {
 /// The numeric relational comparison for `strict_cmp` — delegates to
 /// `Num::cmp_relational` (the shared substrate function, sq-v5evr): exact via the
 /// `Dec` fixed-point tower when both operands have an exact tier (int/decimal), else
-/// by `f64` value (float/double). NaN → `None` (SPARQL type error). [OPUS-4.8] sq-v5evr
+/// by `f64` value (float/double). NaN → `None` (SPARQL type error). sq-v5evr
 #[inline]
 fn num_compare(a: Num, b: Num) -> Option<Ordering> {
     a.cmp_relational(b)
@@ -268,7 +268,7 @@ impl CompareTerm for IdTerm<'_> {
 
     #[inline]
     fn literal_kind(&self) -> LiteralKind {
-        // [FABLE-5] sq-wjl8i / sq-74oy4: the kind-first rank — mirrors the engine's
+        // sq-wjl8i / sq-74oy4: the kind-first rank — mirrors the engine's
         // `Value::literal_kind` exactly: Numeric tracks the `as_f64` membership, now
         // DATATYPE-AWARE (a lexical ill-formed FOR its datatype like "1.5"^^xsd:integer is
         // NOT numeric and sorts as Other/lexical, matching `of_literal`); ill-formed
@@ -311,7 +311,7 @@ impl CompareTerm for IdTerm<'_> {
             (Num(Some(a)), Num(Some(b))) => num_compare(a, b),
             (Str(a), Str(b)) => Some(a.cmp(b)),
             (Bool(Some(a)), Bool(Some(b))) => Some(a.cmp(&b)),
-            // [SONNET-4.6] sq-2k5py: the TOTAL timeline order, mirroring the engine's
+            // sq-2k5py: the TOTAL timeline order, mirroring the engine's
             // `CompareTerm::strict_cmp` (which extends `value_compare_strict` the same way).
             // `ExactTimeline::compare`'s indeterminate mixed-timezone window would drop the pair to
             // `compare_terms`' lexical fallback INSIDE the DateTime/Date kind, which is
@@ -460,7 +460,7 @@ mod tests {
         assert_eq!(compare_ids(&d, nan, ninf), Ordering::Less);
     }
 
-    /// [FABLE-5] sq-wjl8i: cross-KIND literal pairs rank by `LiteralKind` (numeric <
+    /// sq-wjl8i: cross-KIND literal pairs rank by `LiteralKind` (numeric <
     /// boolean < dateTime < date < string < lang < other), never by the lexical form —
     /// the digit-inversion triple `10 / "11" / 2` that was intransitive under the
     /// lexical fallback is consistent under the rank. And the mixed exact-vs-double tie
@@ -668,7 +668,7 @@ mod tests {
     /// Direct pin of `num_compare` → `Num::cmp_relational` (sq-v5evr): verifies the
     /// delegation produces the expected relational semantics — exact for int/dec pairs,
     /// f64 promotion for mixed/inexact, and `None` for NaN (SPARQL type error).
-    /// [OPUS-4.8] sq-v5evr
+    /// sq-v5evr
     #[test]
     fn num_compare_delegates_to_substrate_cmp_relational() {
         use std::cmp::Ordering::*;

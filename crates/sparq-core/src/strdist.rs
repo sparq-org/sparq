@@ -8,7 +8,7 @@
 /// This deliberately narrow API uses two rolling rows. Local names are short, so
 /// the quadratic cost is trivial; allocation is limited to those rows and the
 /// character buffers.
-/// [SONNET-4.6] sq-lxw27, gh-3694
+/// sq-lxw27, gh-3694
 pub fn edit_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();

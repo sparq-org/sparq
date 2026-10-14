@@ -1,4 +1,4 @@
-//! The DASH widget-scoring registry. [FABLE-5] sq-lsp7k.1.1
+//! The DASH widget-scoring registry. sq-lsp7k.1.1
 //!
 //! Widget auto-selection follows the DASH form-generation contract
 //! (`datashapes.org/forms`): each registered widget scores its suitability for
@@ -549,7 +549,7 @@ fn blank_node_viewer(ctx: &WidgetContext) -> Suitability {
     Suitability::Unsuitable
 }
 
-// [FABLE-5] sq-lsp7k.1.1: one test per documented scoring-table row — an
+// sq-lsp7k.1.1: one test per documented scoring-table row — an
 // implementation drift from the table flips the exact asserted number red.
 #[cfg(test)]
 mod tests {

@@ -13,14 +13,14 @@
 //! throughput table). Out-of-core persistent ANN (DiskANN-style) is the recorded
 //! follow-up for 10M+ stores.
 //!
-//! [OPUS-4.8] (sq-ip3a) **The HNSW index (`VectorIndex`) is gated behind the opt-in
+//! (sq-ip3a) **The HNSW index (`VectorIndex`) is gated behind the opt-in
 //! `approx-ann` feature** — it is the only thing here that pulls the third-party
 //! `instant-distance` crate, so with `approx-ann` OFF the default build carries the exact
 //! brute-force searchers ([`nearest_exact`], [`nearest_term_exact`]) and NO heavy ANN
 //! dependency. Approximate search is APPROXIMATE: its recall is `< 1.0` (measured against
 //! [`nearest_exact`], the ground truth) — only the exact path is answer-exact.
 //!
-//! [SONNET-4.6] (sq-jo6ty) **Per-query `ef_search` (`nearest_with_ef`)**: `instant-distance`
+//! (sq-jo6ty) **Per-query `ef_search` (`nearest_with_ef`)**: `instant-distance`
 //! encodes `ef_search` into `HnswMap` at build time and does not expose a per-search
 //! override. `VectorIndex` therefore caches the L2-normalised `NPoint` vectors and builds
 //! a secondary map on first use of each new `ef_search` value (`ef_construction` and `seed`
@@ -30,7 +30,7 @@
 //! at `ef=16`, then 100 at `ef=32`, pay one extra build per ef level, not one per query.
 //! `nearest_with_ef(q, k, ef)` where `ef == build_ef_search` is free (uses the primary map).
 //!
-//! [SONNET-4.6] (sq-ey95c) The secondary path holds NO lock while it searches: a cache hit
+//! (sq-ey95c) The secondary path holds NO lock while it searches: a cache hit
 //! takes a *read* guard, clones the `Arc<HnswMap<…>>` handle out, drops the guard, and searches
 //! the map unlocked — so any number of threads can query the same (or different) ef level in
 //! parallel. The lazy build likewise runs outside the lock; the write guard is taken only for
@@ -118,7 +118,7 @@ pub fn nearest_exact_with_meta(
 /// results and maps neighbor ids back to [`Term`]s. Empty if the term is absent from
 /// the dictionary or has no vector.
 ///
-/// [OPUS-4.8] (sq-32i5) This does NOT verify `store` matches `graph` — a store keyed by a
+/// (sq-32i5) This does NOT verify `store` matches `graph` — a store keyed by a
 /// stale graph generation silently mis-resolves `term`. Use
 /// [`nearest_term_exact_checked`] (or call [`VectorStore::check_graph`] once) to make a
 /// mismatch a hard error.
@@ -138,7 +138,7 @@ pub fn nearest_term_exact(
         .collect()
 }
 
-/// [SONNET-4.6] (sq-tb9p0) **Answer-exact top-`k` with the deterministic boundary tie-break**
+/// (sq-tb9p0) **Answer-exact top-`k` with the deterministic boundary tie-break**
 /// (spec assertion VG-TIE-1 of `site/specs/sparql-vector-genai.typ`): when candidates tie on
 /// score at the k boundary (the k-th best and the next-best scores are equal), result-set
 /// *membership* is decided by the candidates' **canonical N-Triples serialisation**, admitted in
@@ -191,7 +191,7 @@ pub fn nearest_exact_tiebreak(
     select_top_k_tiebreak(graph, scored, k)
 }
 
-/// [SONNET-4.6] The VG-TIE-1 embeddable-domain guard: resolves `id` and returns its [`Term`] iff
+/// The VG-TIE-1 embeddable-domain guard: resolves `id` and returns its [`Term`] iff
 /// its N-Triples tie-break key is fixed by the term alone — an IRI, a literal (the spec's
 /// mainline embeddable domain), or a **ground** triple term (the RDF 1.2 estate sparq
 /// additionally embeds; its `<<( … )>>` serialisation is likewise pinned by the grammar) — else
@@ -223,7 +223,7 @@ fn tiebreak_domain_term(graph: &Graph, id: Id) -> Result<Term, String> {
     }
 }
 
-/// [SONNET-4.6] The VG-TIE-1 boundary-membership rule applied to an already
+/// The VG-TIE-1 boundary-membership rule applied to an already
 /// score-descending-sorted **complete** candidate ranking: candidates strictly above the k
 /// boundary are admitted unconditionally; a score tie straddling the boundary is admitted in
 /// ascending N-Triples codepoint order until `k` results are reached. Shared by
@@ -282,7 +282,7 @@ pub(crate) fn select_top_k_tiebreak(
     Ok(out)
 }
 
-/// [OPUS-4.8] (sq-32i5) [`nearest_term_exact`] with the staleness check: returns `Err` if
+/// (sq-32i5) [`nearest_term_exact`] with the staleness check: returns `Err` if
 /// `store` was built against a different graph generation than `graph` (which would otherwise
 /// return silently-wrong neighbours), else `Ok` with the neighbours.
 pub fn nearest_term_exact_checked(
@@ -296,9 +296,9 @@ pub fn nearest_term_exact_checked(
 }
 
 /// HNSW construction/search parameters (passed through to `instant-distance`).
-/// [OPUS-4.8] (sq-ip3a) `approx-ann` only.
+/// (sq-ip3a) `approx-ann` only.
 ///
-/// [OPUS-4.8] (sq-ose80) **`ef_construction` is the dominant BUILD-time knob.** The
+/// (sq-ose80) **`ef_construction` is the dominant BUILD-time knob.** The
 /// `instant-distance` graph build is already `rayon`-parallel (per-layer
 /// `into_par_iter`); its cost is dominated by the greedy distance search each insert runs,
 /// and that search's beam width IS `ef_construction`. Roughly halving `ef_construction`
@@ -328,7 +328,7 @@ impl Default for HnswConfig {
 
 #[cfg(feature = "approx-ann")]
 impl HnswConfig {
-    /// [OPUS-4.8] (sq-ose80) A **faster-build** preset: same `ef_search` and `seed` as the
+    /// (sq-ose80) A **faster-build** preset: same `ef_search` and `seed` as the
     /// [`Default`], but a lower `ef_construction` (40 vs 100) so the graph build runs
     /// markedly faster at scale.
     ///
@@ -350,7 +350,7 @@ impl HnswConfig {
         HnswConfig { ef_construction: 40, ..HnswConfig::default() }
     }
 
-    /// [OPUS-4.8] (sq-ose80) A **higher-recall** preset: same `ef_search` and `seed` as the
+    /// (sq-ose80) A **higher-recall** preset: same `ef_search` and `seed` as the
     /// [`Default`], but a wider `ef_construction` (200 vs 100) for a denser graph. This is the
     /// opposite trade to [`fast_build`](Self::fast_build): a wider construction beam links more
     /// back-neighbours, so recall rises, at a proportionally longer build. Prefer it for a
@@ -364,7 +364,7 @@ impl HnswConfig {
 /// A normalized point in the HNSW graph. Euclidean distance over unit vectors is
 /// rank-equivalent to cosine; see the module docs.
 ///
-/// [FABLE-5] (sq-jk7w7) The vector data is behind an `Arc<[f32]>` so that `Clone` — which
+/// (sq-jk7w7) The vector data is behind an `Arc<[f32]>` so that `Clone` — which
 /// `instant_distance::Point` requires, and which [`VectorIndex::build_with`] relies on to
 /// retain the point set for lazy per-`ef_search` secondary maps — is a refcount bump, not a
 /// deep copy. Before this, `build_with` deep-cloned the whole normalised point set into the
@@ -374,7 +374,7 @@ impl HnswConfig {
 /// build speed and determinism are unchanged.
 #[cfg(feature = "approx-ann")]
 #[derive(Clone)]
-// [FABLE-5] (#2251) `pub(crate)`: the recall-gated concept-dedup module (`dedup.rs`, same
+// (#2251) `pub(crate)`: the recall-gated concept-dedup module (`dedup.rs`, same
 // `approx-ann` feature) builds its HNSW over the identical Arc-backed normalised point type so
 // exact/HNSW/concept scores all stay directly comparable — not exported outside the crate.
 pub(crate) struct NPoint(pub(crate) Arc<[f32]>);
@@ -382,7 +382,7 @@ pub(crate) struct NPoint(pub(crate) Arc<[f32]>);
 #[cfg(feature = "approx-ann")]
 impl Point for NPoint {
     fn distance(&self, other: &Self) -> f32 {
-        // [OPUS-4.8] (sq-lfo84) The HNSW build + search call this millions of times — it is the
+        // (sq-lfo84) The HNSW build + search call this millions of times — it is the
         // dominant cost of both. Dispatch to the explicit NEON/AVX2 kernel (scalar fallback where
         // the vector ISA is absent), which measurably cuts build time and lifts QPS vs the previous
         // scalar-only loop. `instant-distance` wants the true Euclidean distance, so we `sqrt` the
@@ -397,7 +397,7 @@ impl Point for NPoint {
 
 /// L2-normalizes `v`; `None` for an all-zero vector (no direction). Stored vectors are
 /// never zero ([`VectorStore::put`] rejects them), so `None` only arises for queries.
-/// [FABLE-5] (sq-jk7w7) Returns the shared-ownership `Arc<[f32]>` form [`NPoint`] wraps.
+/// (sq-jk7w7) Returns the shared-ownership `Arc<[f32]>` form [`NPoint`] wraps.
 #[cfg(feature = "approx-ann")]
 pub(crate) fn normalized(v: &[f32]) -> Option<Arc<[f32]>> {
     let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -408,11 +408,11 @@ pub(crate) fn normalized(v: &[f32]) -> Option<Arc<[f32]>> {
 /// where [`nearest_exact`]'s full scan is too slow. Build once per store generation
 /// (rebuilt on open — see the module docs on persistence).
 ///
-/// [OPUS-4.8] (sq-ip3a) **APPROXIMATE** — recall `< 1.0`, gated behind the opt-in
+/// (sq-ip3a) **APPROXIMATE** — recall `< 1.0`, gated behind the opt-in
 /// `approx-ann` feature (the only thing that pulls `instant-distance`). For answer-exact
 /// search use [`nearest_exact`]; this trades recall for speed at scale.
 ///
-/// [SONNET-4.6] (sq-jo6ty) Exposes `nearest_with_ef` for per-query `ef_search` sweeps
+/// (sq-jo6ty) Exposes `nearest_with_ef` for per-query `ef_search` sweeps
 /// (e.g. to build a recall–QPS Pareto curve at multiple ef levels without rebuilding the
 /// whole store). The primary map (built at `HnswConfig::ef_search`) is used for
 /// `nearest` and for `nearest_with_ef` when `ef == build_ef_search`. A secondary per-ef
@@ -429,7 +429,7 @@ pub struct VectorIndex {
     seed: u64,
     /// L2-normalised points and their dict ids — retained so that secondary maps for different
     /// `ef_search` values can be built from the same normalised vectors (no store re-scan).
-    /// [FABLE-5] (sq-jk7w7) Each [`NPoint`] is `Arc`-backed, so this retention (and every
+    /// (sq-jk7w7) Each [`NPoint`] is `Arc`-backed, so this retention (and every
     /// secondary-map build) SHARES the primary map's vector allocations — the per-index cost is
     /// one pointer-sized `Vec` per map, not a second copy of the float data.
     points: Vec<NPoint>,
@@ -437,7 +437,7 @@ pub struct VectorIndex {
     /// Lazily-built secondary maps keyed by `ef_search`. Populated on the first
     /// `nearest_with_ef` call at a new ef level; thereafter the cached map is reused.
     ///
-    /// [SONNET-4.6] (sq-ey95c) An `RwLock` over `Arc`-handled maps rather than a
+    /// (sq-ey95c) An `RwLock` over `Arc`-handled maps rather than a
     /// `Mutex<HashMap<_, HnswMap<…>>>`: the `Arc` lets a hit clone the handle out from under a
     /// *read* guard and search with NO lock held, so concurrent queries at the same ef level run
     /// in parallel instead of serialising on the cache. A once-built map is never mutated, so
@@ -456,7 +456,7 @@ impl VectorIndex {
 
     /// Builds the index with the given [`HnswConfig`].
     ///
-    /// [FABLE-5] (sq-jk7w7) Peak memory is ONE copy of the L2-normalised point set plus
+    /// (sq-jk7w7) Peak memory is ONE copy of the L2-normalised point set plus
     /// pointer-sized bookkeeping: the internal `NPoint` is `Arc`-backed, so the `points.clone()` handed to
     /// the primary map shares the float allocations with the retained `self.points` (used for
     /// lazy per-`ef_search` secondary maps) instead of deep-copying them. Previously that clone
@@ -469,7 +469,7 @@ impl VectorIndex {
             points.push(NPoint(n));
             values.push(id);
         }
-        // [FABLE-5] (sq-jk7w7) Cheap: clones Vecs of `Arc` handles + ids, NOT the vector data.
+        // (sq-jk7w7) Cheap: clones Vecs of `Arc` handles + ids, NOT the vector data.
         let map = Builder::default()
             .ef_search(cfg.ef_search)
             .ef_construction(cfg.ef_construction)
@@ -504,7 +504,7 @@ impl VectorIndex {
 
     /// Approximate top-`k` ids with a **per-query** `ef_search` beam width.
     ///
-    /// [SONNET-4.6] (sq-jo6ty) This is the recall–QPS sweep entry point: the caller can
+    /// (sq-jo6ty) This is the recall–QPS sweep entry point: the caller can
     /// vary `ef_search` across queries to trace the recall–throughput Pareto frontier
     /// without rebuilding the index. The `ef_search` value controls the candidate beam at
     /// query time — a larger beam visits more neighbours and improves recall at the cost of
@@ -521,7 +521,7 @@ impl VectorIndex {
     /// reuse the cached map. All secondary maps are built from the same `ef_construction`,
     /// `seed`, and normalised point set as the primary map.
     ///
-    /// [SONNET-4.6] (sq-ey95c) **Not bit-reproducible across builds.** Measured on this crate's
+    /// (sq-ey95c) **Not bit-reproducible across builds.** Measured on this crate's
     /// 5 000 × 32 test corpus, two `build_with` calls with an identical store and identical
     /// `HnswConfig` (`seed` included) disagree on a small fraction of queries at low `ef`:
     /// `instant-distance` builds the graph rayon-parallel, and the seed does not pin the
@@ -529,7 +529,7 @@ impl VectorIndex {
     /// level is built and cached exactly once), but two indices over the same data may differ.
     /// Compare against the same index, not a rebuilt one.
     ///
-    /// [SONNET-4.6] (sq-ey95c) **Concurrency**: the secondary path holds no lock while it
+    /// (sq-ey95c) **Concurrency**: the secondary path holds no lock while it
     /// searches, so any number of threads may query the same ef level in parallel; only the
     /// cache lookup/insert is synchronised. The method takes `&self` and is safe to call from
     /// many threads at once.
@@ -541,7 +541,7 @@ impl VectorIndex {
         let Some(q) = normalized(query) else { return Vec::new() };
         let q = NPoint(q);
         let mut search = Search::default();
-        // [SONNET-4.6] (sq-jo6ty) Short-circuit: the build-time ef → primary map (zero overhead).
+        // (sq-jo6ty) Short-circuit: the build-time ef → primary map (zero overhead).
         if ef_search == self.ef_search_default {
             return self
                 .map
@@ -550,7 +550,7 @@ impl VectorIndex {
                 .map(|item| (*item.value, 1.0 - item.distance * item.distance / 2.0))
                 .collect();
         }
-        // [SONNET-4.6] (sq-ey95c) Non-default ef: resolve the secondary map to an owned `Arc`
+        // (sq-ey95c) Non-default ef: resolve the secondary map to an owned `Arc`
         // handle, then search with NO lock held. Both guards below are scoped so the (expensive)
         // build and the (hot) search happen outside them — concurrent queries at the same ef
         // level share a read guard and then run fully in parallel.
@@ -561,7 +561,7 @@ impl VectorIndex {
             .collect()
     }
 
-    /// [SONNET-4.6] (sq-ey95c) Returns the cached secondary map for a non-default `ef_search`,
+    /// (sq-ey95c) Returns the cached secondary map for a non-default `ef_search`,
     /// building it on first use. Neither the lookup nor the insert keeps a guard alive past the
     /// statement that takes it, so the caller searches the returned handle lock-free.
     ///
@@ -622,7 +622,7 @@ impl VectorIndex {
             .collect()
     }
 
-    /// [OPUS-4.8] (sq-1wc1) **Predicate-constrained (filtered) top-`k`** over the HNSW index:
+    /// (sq-1wc1) **Predicate-constrained (filtered) top-`k`** over the HNSW index:
     /// returns only neighbours whose id the `mask` permits (the candidate id-set a SPARQL BGP
     /// selects). `instant-distance`'s adjacency is **not exposed**, so — unlike
     /// [`DiskAnnIndex::nearest_filtered`](crate::DiskAnnIndex::nearest_filtered), which can do
@@ -642,7 +642,7 @@ impl VectorIndex {
         crate::filter::nearest_exact_filtered(store, query, mask, k)
     }
 
-    /// [OPUS-4.8] (sq-32i5) [`nearest_term`](Self::nearest_term) with the staleness check: returns
+    /// (sq-32i5) [`nearest_term`](Self::nearest_term) with the staleness check: returns
     /// `Err` if `store` was built against a different graph generation than `graph` (which would
     /// otherwise return silently-wrong neighbours), else `Ok` with the neighbours. The HNSW index
     /// is rebuilt from `store` on open, so checking the store covers the index too.
@@ -660,7 +660,7 @@ impl VectorIndex {
 
 #[cfg(test)]
 mod tests {
-    // [OPUS-4.8] Default-feature unit gate for the `cosine` primitive that the exact searcher, the
+    // Default-feature unit gate for the `cosine` primitive that the exact searcher, the
     // filtered pre-filter and the quantizers all rank with. The integration tests use it transitively
     // for ranking but never pin its documented numeric contract directly — these do, so a regression
     // in the zero-vector guard (which would emit a NaN instead of 0.0 and silently break every
@@ -709,7 +709,7 @@ mod tests {
         cosine(&[1.0, 0.0, 0.0], &[1.0, 0.0]);
     }
 
-    // [SONNET-4.6] (sq-tb9p0) Direct unit gate for the VG-TIE-1 boundary tie-break: membership at
+    // (sq-tb9p0) Direct unit gate for the VG-TIE-1 boundary tie-break: membership at
     // a score tie on the k boundary is decided by ascending N-Triples codepoint order of the
     // candidates' serialised terms, NOT by dictionary-id order (which is deterministic within one
     // build but not reproducible across implementations).
@@ -805,7 +805,7 @@ mod tests {
             assert!(hits.iter().all(|&(id, _)| id != top), "the excluded seed must not appear");
         }
 
-        // [SONNET-4.6] (#2445 review) The embeddable-domain guard: the VG-TIE-1 key is only
+        // (#2445 review) The embeddable-domain guard: the VG-TIE-1 key is only
         // stable for IRIs and literals — a blank-node label is document-local, so a blank-node
         // candidate must be REJECTED (fail-closed `Err`), never ranked, wherever its term (not
         // its score alone) decides membership: in the boundary tie group, admitted strictly
@@ -883,7 +883,7 @@ mod tests {
         }
     }
 
-    // [FABLE-5] (sq-jk7w7) Peak-memory contract of `build_with`: the point set handed to the
+    // (sq-jk7w7) Peak-memory contract of `build_with`: the point set handed to the
     // HNSW map must SHARE allocations with the retained `points` (for lazy per-ef secondary
     // maps), never deep-copy them — the deep copy doubled build peak memory (~512 MB extra at
     // 1M×128d). `Arc::strong_count` observes the sharing directly, so reintroducing a deep

@@ -46,7 +46,7 @@ use std::sync::Arc;
 /// A [`GeoIndex`] wrapped as a [`SpatialProvider`] for the engine's spatial
 /// FILTER pushdown. Cheap to share (`Arc` it once, reuse across queries/threads);
 /// rebuild / [`GeoIndex::apply_delta`] the inner index on data change and wrap
-/// afresh. [OPUS-4.8]
+/// afresh.
 pub struct GeoIndexProvider {
     index: GeoIndex,
     /// The set of geometry LITERALS the index holds — the universe it is
@@ -62,7 +62,7 @@ pub struct GeoIndexProvider {
     /// map to those terms for the caller's dict) is delegated to
     /// [`GeoIndex::indexed_ids_for`]. Rebuilding / `apply_delta`-ing the inner
     /// index requires wrapping afresh (per this type's contract), so this is
-    /// correct for the provider's lifetime. [OPUS-4.8]
+    /// correct for the provider's lifetime.
     indexed_ids: Arc<FxHashSet<Id>>,
 }
 
@@ -133,11 +133,11 @@ impl SpatialProvider for GeoIndexProvider {
         // cheap cached `Arc` is cloned; on any mismatch (`None`) the engine uses
         // the per-row `is_indexed` fallback. The `Arc`'s CONTENT equals the ids of
         // the terms `is_indexed` reports, so the engine's id-level and per-row
-        // checks return the SAME keep/drop verdict. [OPUS-4.8]
+        // checks return the SAME keep/drop verdict.
         self.index.indexed_ids_for(dict_ptr).map(|_| Arc::clone(&self.indexed_ids))
     }
 
-    /// [FABLE-5] (sq-lk3aw.4) EXACT certification for a constant-region containment
+    /// (sq-lk3aw.4) EXACT certification for a constant-region containment
     /// scan: serves `geof:sfWithin(?g, REGION)` / `geof:sfContains(REGION, ?g)` from
     /// the opt-in topology index ([`GeoIndex::within_region_literals`] — an R-tree
     /// AABB window scan refined by a prepared-region DE-9IM relate), whose result is
@@ -166,7 +166,7 @@ impl SpatialProvider for GeoIndexProvider {
 
 #[cfg(test)]
 mod tests {
-    // [OPUS-4.8] sq-9g58 coverage: the provider's decline paths — the cases
+    // sq-9g58 coverage: the provider's decline paths — the cases
     // where the index CANNOT serve a candidate superset and must hand the query
     // back to the exact post-hoc `geof:` FILTER (returning `None`). These are
     // load-bearing for ANSWER-SAFETY: a wrong (non-`None`) answer here would

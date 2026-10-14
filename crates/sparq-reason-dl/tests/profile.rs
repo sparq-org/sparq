@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-pbz04.4.2 — integration tests for the L2 syntactic OWL 2 EL/QL/RL
+// sq-pbz04.4.2 — integration tests for the L2 syntactic OWL 2 EL/QL/RL
 // profile-membership checker.
 //
 // 🤖 SPARQ agent. Tests use the STRUCTURAL model directly (no RDF parsing), building
@@ -778,7 +778,7 @@ fn rl_reject_union_arity_one_in_sub_ce() {
 
 #[test]
 fn ql_accept_some_thing_as_super_ce() {
-    // [SONNET-4.6] sq-pbz04.4.2 — TDD: written RED first, then production fixed.
+    // sq-pbz04.4.2 — TDD: written RED first, then production fixed.
     // QL §3.2.3 superObjectSomeValuesFrom := ∃R.Class; Class ∋ owl:Thing (OWL 2 Syntax §5.1).
     let mut onto = Ontology::new();
     onto.axioms.push(Axiom::SubClassOf {
@@ -803,7 +803,7 @@ fn ql_accept_some_thing_as_super_ce() {
 
 #[test]
 fn ql_accept_some_nothing_as_super_ce() {
-    // [SONNET-4.6] sq-pbz04.4.2 — TDD: written RED first, then production fixed.
+    // sq-pbz04.4.2 — TDD: written RED first, then production fixed.
     // QL §3.2.3 superObjectSomeValuesFrom := ∃R.Class; Class ∋ owl:Nothing (OWL 2 Syntax §5.1).
     let mut onto = Ontology::new();
     onto.axioms.push(Axiom::SubClassOf {
@@ -828,7 +828,7 @@ fn ql_accept_some_nothing_as_super_ce() {
 
 #[test]
 fn ql_accept_property_domain_some_thing() {
-    // [SONNET-4.6] sq-pbz04.4.2 — TDD: written RED first, then production fixed.
+    // sq-pbz04.4.2 — TDD: written RED first, then production fixed.
     // QL §3.2.5 domain := superCE; ∃S.⊤ is a valid QL super-CE per §3.2.3.
     let s: u32 = 11;
     let mut onto = Ontology::new();
@@ -846,7 +846,7 @@ fn ql_accept_property_domain_some_thing() {
 }
 
 // -------------------------------------------------------------------------------------------
-// Opt-in transitive roles ([GPT-5.6] sq-zfwzq, feature `dl_transitive`)
+// Opt-in transitive roles (sq-zfwzq, feature `dl_transitive`)
 // -------------------------------------------------------------------------------------------
 
 /// TransitiveObjectProperty per the W3C profile grammars: IN EL (§2), NOT in QL (§3 —

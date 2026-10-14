@@ -1,6 +1,6 @@
 //! N3 / Turtle parser edge + error paths — the lowest-covered module in sparq-reason.
 //!
-//! 🤖 SPARQ agent — sq-qcnn test-quality slice [OPUS-4.8].
+//! 🤖 SPARQ agent — sq-qcnn test-quality slice.
 //!
 //! Drives the public parser API (`parse`, `parse_with_base`, `parse_turtle_with_base`) over the
 //! genuinely-dark branches: quantifiers, `@keywords`, the `is…of` / `has` / `<-` predicate
@@ -396,7 +396,7 @@ fn type_keyword_a_expands_to_rdf_type() {
 
 // ---------- multibyte pname bytes (sq-t8z0r fuzz regression, GH #1903) ----------
 //
-// 🤖 SPARQ agent [FABLE-5]. The randomized fuzz lane (parse_rif_n3) found the
+// 🤖 SPARQ agent. The randomized fuzz lane (parse_rif_n3) found the
 // byte-wise lexer splitting a UTF-8 character in half: continuation bytes 0x85 /
 // 0xA0 read as U+0085 NEL / U+00A0 NBSP through `(byte as char).is_whitespace()`,
 // stopping a pname scan MID-character, and the subsequent

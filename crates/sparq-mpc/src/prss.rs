@@ -1,4 +1,4 @@
-// [OPUS-5] sq-yyro follow-on (issue #3531): the PRSS correlated-randomness
+// sq-yyro follow-on (issue #3531): the PRSS correlated-randomness
 // SOURCE behind `crate::randomness::DistributedRandomness` — replicated-PRF seed
 // setup + the `Σ_A PRF(k_A, ctr)·f_A` degree-`t` generator. Small-`n`
 // honest-majority only; fails closed where the `C(n, t)` seed count is

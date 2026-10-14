@@ -180,7 +180,12 @@ curl -i -X POST \
 `GET` and `HEAD` read resources. `PUT` creates or replaces, `POST` mints a
 collision-resistant child IRI below a container, `PATCH` accepts supported
 Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
-container. Use `If-Match` and `If-None-Match` for conditional mutations.
+container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
+conditional mutations. `If-Unmodified-Since` is ignored when `If-Match` is
+present, when the date is not a valid HTTP-date (IMF-fixdate, RFC 850 or
+asctime), and for containers, whose listing can change without moving their
+recorded time. As with a concrete ETag validator, a
+writer without Read on the target is refused rather than told the outcome.
 Container reads include generated `ldp:contains` triples.
 
 Use a trailing slash for containers. A resource and container cannot coexist at

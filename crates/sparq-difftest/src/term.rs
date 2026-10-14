@@ -1,5 +1,5 @@
 //! The neutral term model and the two comparison regimes (strict RDF equality; value-canonical
-//! keying). Engine-independent. [OPUS-4.8] sq-qcnn.4
+//! keying). Engine-independent. sq-qcnn.4
 
 use crate::numeric::{canonical_numeric_string, parse_numeric};
 use crate::temporal::{parse_datetime, parse_duration};

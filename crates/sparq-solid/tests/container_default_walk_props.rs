@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-gwayp — pins the container-`default` walk contract of
+//! sq-gwayp — pins the container-`default` walk contract of
 //! [`PodStore::resolve_acl`] against the depth-4 `wac_fixture()` pod, through the PUBLIC
 //! API only (read-only w.r.t. `src/`):
 //!

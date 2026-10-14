@@ -1,6 +1,6 @@
-//! [OPUS-4.8] sq-yk6or (epic sq-pbz04, THE SUBSTRATE PAYOFF) — drive the SHARED
+//! sq-yk6or (epic sq-pbz04, THE SUBSTRATE PAYOFF) — drive the SHARED
 //! [`sparq_substrate::join`] hash-join kernels for the RDFS single-pass predicate join
-//! (rdfs2 / rdfs3 / rdfs7) and — [FABLE-5] sq-pbz04.1.1 — the `rdf:type`/rdfs9
+//! (rdfs2 / rdfs3 / rdfs7) and — sq-pbz04.1.1 — the `rdf:type`/rdfs9
 //! subclass-typing join, in place of the hand-rolled [`FxHashMap`](rustc_hash::FxHashMap)
 //! adjacency probes in [`crate::rdfs::emit_consequences`].
 //!
@@ -36,7 +36,7 @@
 //! path — only the join machinery differs. Verified byte-for-byte by
 //! [`crate::rdfs::tests`]' equivalence test over both paths.
 //!
-//! # Disposition of the residual branches ([FABLE-5] sq-pbz04.1.1)
+//! # Disposition of the residual branches (sq-pbz04.1.1)
 //!
 //! sq-yk6or left two `emit_consequences` branches hand-rolled, lumping them together as a
 //! "non-uniform combine". The per-branch disposition splits them:
@@ -98,7 +98,7 @@ fn schema_rows(map: &rustc_hash::FxHashMap<Id, Vec<Id>>) -> Vec<Row> {
 /// schema relation's key — the predicate for rdfs2/3/7, the class for rdfs9) equi-joins the
 /// given probe column. `right_only` is empty because this module reshapes the combined row
 /// itself (the conclusion is a fixed permutation, not a column append), matching the
-/// engine's layout-adapter pattern. [FABLE-5] sq-pbz04.1.1: generalised from the
+/// engine's layout-adapter pattern. sq-pbz04.1.1: generalised from the
 /// predicate-only (col 1) form so the rdfs9 sweep can key on the object column (col 2) —
 /// the key orientation is plain index data to the kernel.
 fn keys_probing(probe_col: usize) -> JoinKeys {
@@ -144,7 +144,7 @@ pub(crate) fn sweep_predicate_join(
     probe_into(&probe, &keys, &rng_rows, &rng_tables, out, |b, p| [p[2], ty, b[1]]);
 }
 
-/// [FABLE-5] sq-pbz04.1.1 — the substrate-driven equivalent of the `rdf:type`/rdfs9 branch
+/// sq-pbz04.1.1 — the substrate-driven equivalent of the `rdf:type`/rdfs9 branch
 /// of [`crate::rdfs::emit_consequences`] over the type-assertion partition:
 /// `(s, rdf:type, o), (o, subClassOf*, d) ⊢ (s, rdf:type, d)`. Builds ONE shared
 /// [`sjoin::build_table`] over the saturated subclass closure (`sc_closure` as `[c, d]`

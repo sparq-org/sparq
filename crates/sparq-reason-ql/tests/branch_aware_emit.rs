@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-sg542 (epic sq-pbz04.3 / sq-6tykl):
+// sq-sg542 (epic sq-pbz04.3 / sq-6tykl):
 // Integration tests for the BRANCH-AWARE emitter — per-branch FILTER/VALUES emission for a
 // multi-branch UCQ. These shapes (`?x :p1|:p2 ?y FILTER(?x != :Bad)` after the #1671 alternation
 // desugaring, a hand-written `{ … FILTER } UNION { … FILTER }`, per-branch VALUES) were previously
@@ -400,7 +400,7 @@ mod gated {
     #[test]
     fn recursive_path_with_filter_still_rejected() {
         // A RECURSIVE path is rejected at the gate BEFORE any emitter concern — even with a
-        // distinguished-only FILTER. The branch-aware emitter does not weaken this. [OPUS-4.8]
+        // distinguished-only FILTER. The branch-aware emitter does not weaken this.
         let query = q(&format!("{PRE} SELECT ?x WHERE {{ ?x :r+ ?y FILTER(?x != :bad) }}"));
         let err = rewrite(&query, &[]).unwrap_err();
         assert!(

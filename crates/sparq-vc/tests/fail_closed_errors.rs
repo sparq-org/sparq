@@ -1,6 +1,6 @@
 //! Public verification and `did:web` resolution reject malformed inputs with the
 //! documented error variants. These are authentication/error-behavior checks, not
-//! broader cryptographic-soundness claims. [GPT-5.6]
+//! broader cryptographic-soundness claims.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sparq_vc::{

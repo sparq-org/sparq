@@ -1,4 +1,4 @@
-//! SERVICE federation egress allowlist — server integration. [OPUS-4.8] (sq-4w18)
+//! SERVICE federation egress allowlist — server integration. (sq-4w18)
 //!
 //! Runs only with `cargo test -p sparq-server --features service`. Boots the real axum
 //! server in-process and drives `/sparql` with a `SERVICE <iri>` clause, asserting the
@@ -11,7 +11,7 @@
 //!     joins the remote solution;
 //!   * `SERVICE SILENT` under the deny posture yields the join identity (the query
 //!     succeeds with the surrounding bindings intact, no network call);
-//!   * [OPUS-4.8] sq-a7jw4 — a PORT-SCOPED entry (`127.0.0.1:<ephemeral>`) permits exactly
+//!   * sq-a7jw4 — a PORT-SCOPED entry (`127.0.0.1:<ephemeral>`) permits exactly
 //!     that endpoint, and REJECTS the same loopback host on a different port (403, no dial).
 #![cfg(feature = "service")]
 
@@ -29,7 +29,7 @@ const DATA: &str = "@prefix ex: <http://ex/> . ex:alice a ex:Person . ex:bob a e
 /// A one-shot loopback HTTP endpoint returning a canned SPARQL-Results-JSON body to the
 /// first `n` requests, then exiting.
 ///
-/// [OPUS-4.8] sq-4w18: returns `(url, accepts)` where `accepts` is a channel that fires
+/// sq-4w18: returns `(url, accepts)` where `accepts` is a channel that fires
 /// once for every connection the listener actually `accept()`s. A deny-posture test can
 /// therefore PROVE the egress filter refused before any socket was opened — by asserting
 /// nothing arrives on `accepts` within a window — rather than relying on a request count
@@ -82,7 +82,7 @@ fn remote_body() -> String {
 
 #[tokio::test]
 async fn empty_allowlist_refuses_service_before_any_network_call() {
-    // [OPUS-4.8] sq-4w18: the fake remote stays LIVE and ready to accept one connection
+    // sq-4w18: the fake remote stays LIVE and ready to accept one connection
     // (n == 1). Under the strict deny posture the engine refuses the host before DNS
     // resolution, so the server must never dial it — we PROVE that by asserting nothing
     // is ever `accept()`ed on the live listener (see the `accepts` channel below). A
@@ -105,7 +105,7 @@ async fn empty_allowlist_refuses_service_before_any_network_call() {
         .send()
         .await
         .unwrap();
-    // [OPUS-4.8] (sq-iu0c) A non-SILENT SERVICE blocked by the egress allowlist is a POLICY
+    // (sq-iu0c) A non-SILENT SERVICE blocked by the egress allowlist is a POLICY
     // refusal, not a server fault — the server maps the engine's egress-refusal marker to an
     // honest 403 (Forbidden), distinct from the 500 a genuine execution error gives. The
     // egress/allowlist detail names the refused host, so the server SANITIZES it (see
@@ -166,7 +166,7 @@ async fn allowlisted_loopback_host_reaches_the_endpoint() {
 
 #[tokio::test]
 async fn port_scoped_allowlist_permits_exact_endpoint() {
-    // [OPUS-4.8] sq-a7jw4: the in-process loopback SERVICE federation use case — permit
+    // sq-a7jw4: the in-process loopback SERVICE federation use case — permit
     // EXACTLY `127.0.0.1:<ephemeral>` (the mock endpoint's bound port), and it is reached.
     let (remote, _accepts) = serve(remote_body(), 1);
     let host = remote.trim_start_matches("http://").trim_end_matches('/'); // 127.0.0.1:<port>
@@ -192,7 +192,7 @@ async fn port_scoped_allowlist_permits_exact_endpoint() {
 
 #[tokio::test]
 async fn port_scoped_allowlist_rejects_same_host_other_port() {
-    // [OPUS-4.8] sq-a7jw4: the security property — a `127.0.0.1:<portA>` entry must REJECT
+    // sq-a7jw4: the security property — a `127.0.0.1:<portA>` entry must REJECT
     // the SAME loopback host on a DIFFERENT port. We allowlist one ephemeral port but the
     // SERVICE IRI targets a *second*, live loopback endpoint on another port; the server must
     // refuse it (403) BEFORE dialling, proven by the live listener accepting nothing.
@@ -241,7 +241,7 @@ async fn port_scoped_allowlist_rejects_same_host_other_port() {
 
 #[tokio::test]
 async fn silent_service_under_deny_yields_identity() {
-    // [OPUS-4.8] sq-4w18: live listener (n == 1) so a regression that dials would hit a
+    // sq-4w18: live listener (n == 1) so a regression that dials would hit a
     // real accept, plus a SHORT query timeout so such a regression cannot hang CI on the
     // 30s default. (SILENT swallows the refusal either way, but the timeout bounds it.)
     let (remote, _accepts) = serve(remote_body(), 1);

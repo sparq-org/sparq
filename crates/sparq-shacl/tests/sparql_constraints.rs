@@ -1,4 +1,4 @@
-//! [OPUS-4.8] SHACL-SPARQL (`sh:sparql`, W3C SHACL §5.2) integration tests.
+//! SHACL-SPARQL (`sh:sparql`, W3C SHACL §5.2) integration tests.
 //!
 //! These exercise the high-value, well-defined part of SHACL-SPARQL: an
 //! `sh:sparql` constraint whose `sh:select` is run per focus node with `$this`

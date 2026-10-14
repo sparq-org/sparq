@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-d3d8 (epic sq-3183): OPT-IN federation discovery descriptors.
+//! sq-d3d8 (epic sq-3183): OPT-IN federation discovery descriptors.
 //!
 //! Two read-only RDF documents that make a `sparq-server` instance a *discoverable*
 //! federation node:
@@ -55,7 +55,7 @@ const SD_SPARQL11_QUERY: &str = "http://www.w3.org/ns/sparql-service-description
 /// `sd:SPARQL11Update` — the SPARQL 1.1 Update language the protocol's write path executes.
 const SD_SPARQL11_UPDATE: &str = "http://www.w3.org/ns/sparql-service-description#SPARQL11Update";
 
-/// [OPUS-4.8] sq-2msb (gh-917): the SPARQL 1.2 Service Description (ED) version-agnostic
+/// sq-2msb (gh-917): the SPARQL 1.2 Service Description (ED) version-agnostic
 /// language terms. SPARQL 1.2 SD splits the old "language AND version" `sd:Language`
 /// individuals (`sd:SPARQL11Query`/`sd:SPARQL11Update`) so that `sd:Language` now names only
 /// the LANGUAGE (`sd:SPARQLQuery`/`sd:SPARQLUpdate`) and the VERSION moves to a separate
@@ -64,16 +64,16 @@ const SD_SPARQL11_UPDATE: &str = "http://www.w3.org/ns/sparql-service-descriptio
 /// 1.2-aware client also reads the version posture. See
 /// <https://w3c.github.io/sparql-service-description/spec/> §Versioning.
 const SD_SPARQL_QUERY: &str = "http://www.w3.org/ns/sparql-service-description#SPARQLQuery";
-/// [OPUS-4.8] sq-2msb: the SPARQL 1.2 SD version-agnostic Update language term.
+/// sq-2msb: the SPARQL 1.2 SD version-agnostic Update language term.
 const SD_SPARQL_UPDATE: &str = "http://www.w3.org/ns/sparql-service-description#SPARQLUpdate";
 
-/// [OPUS-4.8] sq-2msb (gh-917): the SPARQL language-version individuals in the `sparql:`
+/// sq-2msb (gh-917): the SPARQL language-version individuals in the `sparql:`
 /// namespace (`http://www.w3.org/ns/sparql#`), advertised via `sd:supportedVersion`. These are
 /// the version IRIs the SPARQL 1.2 SD (ED) defines: `version-1.0`, `version-1.1`,
 /// `version-1.2-basic` (SPARQL 1.2 Query with RDF 1.2 BASIC conformance) and `version-1.2` (full
 /// RDF 1.2 conformance). See [`Capabilities::sparql_versions`] for the emitted labels.
 const SPARQL_VERSION_1_0: &str = "http://www.w3.org/ns/sparql#version-1.0";
-/// [OPUS-4.8] sq-2msb: `sparql:version-1.1`.
+/// sq-2msb: `sparql:version-1.1`.
 const SPARQL_VERSION_1_1: &str = "http://www.w3.org/ns/sparql#version-1.1";
 /// The SPARQL language versions advertised via `sd:supportedVersion`, in ascending order.
 ///
@@ -83,7 +83,7 @@ const SPARQL_VERSION_1_1: &str = "http://www.w3.org/ns/sparql#version-1.1";
 /// announcements. Advertise 1.2 again only once those semantics follow the announced version.
 pub const CONFORMANCE_VERIFIED_VERSIONS: &[&str] = &[SPARQL_VERSION_1_0, SPARQL_VERSION_1_1];
 
-/// [OPUS-4.8] sq-qfcb: `sd:BasicFederatedQuery` — the SPARQL 1.1 Federated Query feature
+/// sq-qfcb: `sd:BasicFederatedQuery` — the SPARQL 1.1 Federated Query feature
 /// (the `SERVICE` clause). Advertised ONLY when the server is built with the `service`
 /// cargo feature (the engine's `SERVICE` evaluation is compiled in); without it a `SERVICE`
 /// clause errors at execution, so advertising the feature would be a fiction. See
@@ -91,7 +91,7 @@ pub const CONFORMANCE_VERIFIED_VERSIONS: &[&str] = &[SPARQL_VERSION_1_0, SPARQL_
 const SD_BASIC_FEDERATED_QUERY: &str =
     "http://www.w3.org/ns/sparql-service-description#BasicFederatedQuery";
 
-/// [OPUS-4.8] sq-yyy3 (follow-up to sq-ntcg/#267): the sparq W3C-PROV-O **data-lineage**
+/// sq-yyy3 (follow-up to sq-ntcg/#267): the sparq W3C-PROV-O **data-lineage**
 /// capability IRI — advertised via `sd:feature` ONLY when [`Capabilities::provenance`] is set,
 /// i.e. when this node genuinely captures + serves PROV-O lineage for the data it derives
 /// (`CONSTRUCT` / SPARQL-Update / reasoner-materialization, the `sparq-prov` surface). It is a
@@ -120,7 +120,7 @@ const SD_RESULT_FORMATS: &[&str] = &[
     "http://www.w3.org/ns/formats/RDF_XML",
 ];
 
-/// [OPUS-4.8] sq-qfcb: the W3C media-type IRIs for the RDF serialisations the server can
+/// sq-qfcb: the W3C media-type IRIs for the RDF serialisations the server can
 /// PARSE on the way IN — the Graph-Store-Protocol write surface and `LOAD` accept these.
 /// Advertised via `sd:inputFormat`. The server parses Turtle / N-Triples / RDF-XML (the same
 /// three [`crate::negotiate::GraphFormat`]s it serialises), so input and result RDF formats
@@ -178,7 +178,7 @@ fn serialise(triples: &[Triple], fmt: GraphFormat) -> Result<(&'static str, Stri
         GraphFormat::NTriples => crate::graph::triples_to_ntriples(triples)?,
         GraphFormat::Turtle => crate::graph::triples_to_turtle(triples)?,
         GraphFormat::RdfXml => crate::graph::triples_to_rdfxml(triples)?,
-        // [OPUS-4.8] sq-oy1f.1: a descriptor may be requested as JSON-LD too (only matchable
+        // sq-oy1f.1: a descriptor may be requested as JSON-LD too (only matchable
         // when the `jsonld` feature is on; the variant does not exist otherwise).
         #[cfg(feature = "jsonld")]
         GraphFormat::JsonLd => crate::graph::triples_to_jsonld(triples),
@@ -224,7 +224,7 @@ pub fn void_descriptor(
     Ok(Descriptor { content_type, body })
 }
 
-/// [OPUS-4.8] sq-qfcb: the server's ACTUAL, build-and-config-determined capabilities, so the
+/// sq-qfcb: the server's ACTUAL, build-and-config-determined capabilities, so the
 /// Service Description advertises exactly what this binary can do — never a hard-coded fiction.
 ///
 /// Every field reflects a genuine capability the running server has:
@@ -250,12 +250,12 @@ pub struct Capabilities {
     pub federated_query: bool,
     /// `sd:extensionFunction` IRIs — exactly the functions the engine has registered.
     pub extension_functions: Vec<String>,
-    /// [OPUS-4.8] sq-yyy3: advertise `sd:feature <http://sparq.dev/ns/prov#lineage>` — this node
+    /// sq-yyy3: advertise `sd:feature <http://sparq.dev/ns/prov#lineage>` — this node
     /// captures + serves W3C PROV-O data-lineage for the data it derives (the `sparq-prov`
     /// surface). FALSE unless the node genuinely serves lineage, so the advertisement is never a
     /// fiction. The advertised feature IRI is `<http://sparq.dev/ns/prov#lineage>`.
     pub provenance: bool,
-    /// [OPUS-4.8] sq-2msb (gh-917): the `sparql:version-*` IRIs to advertise via
+    /// sq-2msb (gh-917): the `sparql:version-*` IRIs to advertise via
     /// `sd:supportedVersion` — the SPARQL language VERSIONS this build conformance-verifies.
     ///
     /// HONESTY GATE (load-bearing): there is NO `sparql12`/`rdf12` cargo feature — SPARQL 1.2
@@ -273,7 +273,7 @@ pub struct Capabilities {
     pub sparql_versions: Vec<String>,
 }
 
-/// [OPUS-4.8] sq-optl: one named graph of the served dataset, for the Service Description's
+/// sq-optl: one named graph of the served dataset, for the Service Description's
 /// `sd:namedGraph` enumeration. `name` is the graph's IRI (the value that may be used in a
 /// `FROM NAMED` / `GRAPH <name>` clause — `sd:name`); `triples` is its triple count, surfaced
 /// as a `void:triples` on the graph's `sd:Graph` description so a federation client can size a
@@ -286,7 +286,7 @@ pub struct NamedGraphDesc {
     pub triples: usize,
 }
 
-/// [OPUS-4.8] sq-optl: enumerate the served dataset's named graphs for the Service Description.
+/// sq-optl: enumerate the served dataset's named graphs for the Service Description.
 ///
 /// Returns one [`NamedGraphDesc`] per named graph whose name is an IRI, SORTED by name so the
 /// emitted SD is deterministic (independent of insertion / storage order). Blank-node and
@@ -389,7 +389,7 @@ fn sd_ntriples(
 
     // ---- Supported query language(s). SPARQL 1.1 Query is always supported; SPARQL 1.1
     // Update is advertised only when an anonymous client can actually run one (no write gate).
-    // [OPUS-4.8] sq-2msb: we advertise BOTH the legacy "language+version" `sd:SPARQL11Query`/
+    // sq-2msb: we advertise BOTH the legacy "language+version" `sd:SPARQL11Query`/
     // `sd:SPARQL11Update` terms AND the SPARQL 1.2 SD version-AGNOSTIC `sd:SPARQLQuery`/
     // `sd:SPARQLUpdate` terms — a 1.1-only client recognises the legacy ones, a 1.2-aware client
     // recognises the version-agnostic ones and reads the precise version off `sd:supportedVersion`
@@ -422,7 +422,7 @@ fn sd_ntriples(
         );
     }
 
-    // ---- [OPUS-4.8] sq-2msb (gh-917): supported SPARQL language VERSIONS. SPARQL 1.2 SD moves
+    // ---- sq-2msb (gh-917): supported SPARQL language VERSIONS. SPARQL 1.2 SD moves
     // version negotiation off `sd:Language` onto `sd:supportedVersion <sparql:version-X>`. We
     // emit EXACTLY the versions this build conformance-verifies (`caps.sparql_versions`, sourced
     // from the documented constant in `service_capabilities`), so a 1.2-aware federation client
@@ -452,7 +452,7 @@ fn sd_ntriples(
         );
     }
 
-    // [OPUS-4.8] sq-yyy3: the sparq PROV-O data-lineage extension feature — advertised only when
+    // sq-yyy3: the sparq PROV-O data-lineage extension feature — advertised only when
     // this node genuinely captures + serves lineage (the `sparq-prov` surface). Like
     // BasicFederatedQuery it is a genuine, build/config-determined capability, never a fiction.
     if caps.provenance {
@@ -488,7 +488,7 @@ fn sd_ntriples(
     let _ = writeln!(out, "{g} <{RDF_TYPE}> <{VOID_NS}Dataset> .");
     let _ = writeln!(out, "{svc} <{DCTERMS_NS}source> {} .", iri(dataset_iri));
 
-    // ---- [OPUS-4.8] sq-optl: the dataset's NAMED graphs. `sd:Dataset` is a subclass of
+    // ---- sq-optl: the dataset's NAMED graphs. `sd:Dataset` is a subclass of
     // `sd:GraphCollection`, so its named graphs are linked with `sd:namedGraph`, each an
     // `sd:NamedGraph` carrying its `sd:name` (the `FROM NAMED`-referenceable IRI) and an
     // `sd:graph` `sd:Graph` description with the per-graph `void:triples` count. `named_graphs`
@@ -549,7 +549,7 @@ mod tests {
 
     #[test]
     fn void_descriptor_carries_characteristic_set_stats() {
-        // [OPUS-4.8] sq-mr32 (federation A3/Z2): the served VoID must now also carry the
+        // sq-mr32 (federation A3/Z2): the served VoID must now also carry the
         // characteristic-set source statistics (sparq `scs:` extension), in valid RDF.
         // N-Triples first (exact predicate IRIs), then Turtle (must re-parse).
         let nt = void_descriptor(
@@ -698,7 +698,7 @@ mod tests {
 
     #[test]
     fn sd_update_language_is_conditional() {
-        // [OPUS-4.8] sq-qfcb: SPARQL11Update is advertised only when the server reports the
+        // sq-qfcb: SPARQL11Update is advertised only when the server reports the
         // update capability — never when an anonymous client cannot run an update.
         let read_only = service_description(
             "http://host/sparql",
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn sd_federated_query_and_extension_functions_only_when_present() {
-        // [OPUS-4.8] sq-qfcb: BasicFederatedQuery and extension functions are advertised
+        // sq-qfcb: BasicFederatedQuery and extension functions are advertised
         // ONLY when the capability is genuinely present — honesty, not aspiration.
         let absent = service_description(
             "http://host/sparql",
@@ -799,7 +799,7 @@ mod tests {
 
     #[test]
     fn sd_provenance_feature_only_when_present() {
-        // [OPUS-4.8] sq-yyy3: the PROV-O lineage feature IRI is advertised ONLY when the node
+        // sq-yyy3: the PROV-O lineage feature IRI is advertised ONLY when the node
         // reports the provenance capability — honesty, not aspiration (like BasicFederatedQuery).
         let absent = service_description(
             "http://host/sparql",
@@ -845,7 +845,7 @@ mod tests {
 
     #[test]
     fn sd_supported_version_only_when_set() {
-        // [OPUS-4.8] sq-2msb (gh-917): the load-bearing invariant — `sd:supportedVersion` is
+        // sq-2msb (gh-917): the load-bearing invariant — `sd:supportedVersion` is
         // emitted IFF `Capabilities::sparql_versions` is non-empty (the honesty gate). The
         // version-agnostic SPARQL 1.2 language term `sd:SPARQLQuery` is always present (Query is
         // always evaluable); the legacy `sd:SPARQL11Query` stays too (1.1-client back-compat).
@@ -939,7 +939,7 @@ mod tests {
 
     #[test]
     fn sd_update_emits_version_agnostic_language_term() {
-        // [OPUS-4.8] sq-2msb: when anonymous Update is possible, BOTH the legacy sd:SPARQL11Update
+        // sq-2msb: when anonymous Update is possible, BOTH the legacy sd:SPARQL11Update
         // and the 1.2-SD version-agnostic sd:SPARQLUpdate are advertised; when it is not, NEITHER
         // is (the same anonymous-write gate as before, extended to the new term).
         let writable = service_description(
@@ -998,17 +998,17 @@ mod tests {
                     "http://www.opengis.net/def/function/geosparql/distance".to_string(),
                     "http://www.opengis.net/def/function/geosparql/buffer".to_string(),
                 ],
-                // [OPUS-4.8] sq-yyy3: richest profile also advertises PROV-O lineage, so the
+                // sq-yyy3: richest profile also advertises PROV-O lineage, so the
                 // extra sd:feature triple is exercised through the Turtle re-parse too.
                 provenance: true,
-                // [OPUS-4.8] sq-2msb: richest profile also advertises the full version posture, so
+                // sq-2msb: richest profile also advertises the full version posture, so
                 // the sd:supportedVersion triple shape is exercised through the Turtle re-parse.
                 sparql_versions: CONFORMANCE_VERIFIED_VERSIONS
                     .iter()
                     .map(|v| (*v).to_string())
                     .collect(),
             },
-            // [OPUS-4.8] sq-optl: include named graphs so the namedGraph triple shape
+            // sq-optl: include named graphs so the namedGraph triple shape
             // (blank-node NamedGraph + Graph + void:triples literal) is exercised in Turtle too.
             &[
                 NamedGraphDesc {
@@ -1032,7 +1032,7 @@ mod tests {
         assert!(n >= 3, "SD should have several triples, got {n}");
     }
 
-    /// [OPUS-4.8] sq-optl: a graph with two IRI-named graphs, for the enumeration tests. Uses
+    /// sq-optl: a graph with two IRI-named graphs, for the enumeration tests. Uses
     /// `load_dataset` (NOT `load_str`) — only the dataset loader preserves named graphs as
     /// separate sub-graphs; `load_str` collapses every quad into the default graph.
     fn graph_with_named() -> Graph {

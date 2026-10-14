@@ -1,7 +1,7 @@
 //! Compact causal summaries: a version-vector `clock` plus a sparse dot
 //! `cloud` (research §4.1, proposal `CRDT-CTX-1`).
 //!
-//! [FABLE-5] The same representation serves two namespaces that must never be
+//! The same representation serves two namespaces that must never be
 //! mixed: **data** causal contexts (over quad-addition [`Dot`]s) and
 //! **envelope-identity** journal frontiers (over `(origin, sequence)`
 //! identities). The invariant maintained everywhere is *normalisation*:

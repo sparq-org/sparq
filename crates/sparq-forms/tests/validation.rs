@@ -1,4 +1,4 @@
-//! [GPT-5.6] Live-validation coverage for `derive_form_validated` (sq-lsp7k.1.3).
+//! Live-validation coverage for `derive_form_validated` (sq-lsp7k.1.3).
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;

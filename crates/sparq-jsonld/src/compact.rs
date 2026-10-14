@@ -1,6 +1,6 @@
 //! Compaction Algorithm (JSON-LD 1.1 API §7) — document-level, over expanded input.
 //!
-//! [FABLE-5] (sq-oy1f.27) The W3C **Compaction Algorithm** and **Value Compaction**
+//! (sq-oy1f.27) The W3C **Compaction Algorithm** and **Value Compaction**
 //! (spec "Compaction Algorithms", <https://www.w3.org/TR/json-ld11-api/#compaction-algorithms>),
 //! running over the *expanded document* with a real
 //! [`ActiveContext`] — rather than as a bespoke inverse of
@@ -66,7 +66,7 @@ use std::sync::Arc;
 /// API). Returns the first spec [`JsonLdError`] raised by expansion, context processing,
 /// or compaction.
 ///
-/// [FABLE-5] (sq-oy1f.27)
+/// (sq-oy1f.27)
 pub fn compact(
     input: &Json,
     context: &Json,
@@ -93,7 +93,7 @@ fn compact_inner(
 /// caller `context` is embedded under `@context` unless it is empty (`null`, `{}`, or
 /// `[]`).
 ///
-/// [FABLE-5] (sq-oy1f.27)
+/// (sq-oy1f.27)
 pub fn compact_expanded(
     expanded: &Json,
     context: &Json,

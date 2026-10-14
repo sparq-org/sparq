@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-vczh2, epic sq-2m6zm) The `terse <terse-query>` subcommand end-to-end.
+//! (sq-vczh2, epic sq-2m6zm) The `terse <terse-query>` subcommand end-to-end.
 //!
 //! Spawns the *built* `sparq-cli` binary (via `CARGO_BIN_EXE_sparq-cli`, the same mechanism as
 //! `dump_cli.rs` / `hdt_cli.rs`). The `terse` subcommand lives behind the opt-in `terse` feature,

@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-jwdwi — raw push-parser stress at token and UTF-8 boundaries.
+//! sq-jwdwi — raw push-parser stress at token and UTF-8 boundaries.
 
 const BASE: &str = "http://example.org/push-boundaries/";
 

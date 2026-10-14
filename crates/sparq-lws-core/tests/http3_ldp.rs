@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-oprna.2, sq-oprna.5
+// sq-oprna.2, sq-oprna.5
 //! HTTP/3 integration coverage for the Solid/LDP server's default-off `http3` feature.
 //!
 //! The test serves one production `build_router_with_overload` router over both the existing TLS
@@ -44,7 +44,7 @@ const CA_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test-
 const RESOURCE_BODY: &str =
     "<https://pod.example/pub#me> <http://xmlns.com/foaf/0.1/name> \"Alice\" .";
 
-// [GPT-5.6] sq-oprna.5: the invariant deliberately excludes transport-only headers such as Alt-Svc.
+// sq-oprna.5: the invariant deliberately excludes transport-only headers such as Alt-Svc.
 #[derive(Debug, PartialEq, Eq)]
 struct ResponseSnapshot {
     status: StatusCode,

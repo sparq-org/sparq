@@ -15,7 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] Render README.md as the docs.rs front page (lib.rs uses include_str!),
+# Render README.md as the docs.rs front page (lib.rs uses include_str!),
 # build with all features so the `provider` API surface is documented, and expose the
 # `docsrs` cfg for any `#[cfg_attr(docsrs, doc(cfg(...)))]` feature gating.
 [package.metadata.docs.rs]
@@ -31,7 +31,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-# [OPUS-4.8] sq-0wo9e.1 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §5.A/§2):
+# sq-0wo9e.1 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §5.A/§2):
 # the P0 structure-aware-vectorisation PREPROCESSING + SAMPLING-LOGIC layer. OPT-IN and OFF by
 # default. It is the ONLY feature that pulls `sparq-reason` + `sparq-introspect` into this crate's
 # graph, so the default `sparq-vectors` build (and the core query path) carry ZERO structure-prep
@@ -44,7 +44,7 @@ default = []
 # It TRAINS NOTHING (sparq-vectors has no KGE training path — embeddings are out-of-process) and
 # serves no exact answer; the trainer that consumes these negatives is a tracked follow-up.
 structure = ["dep:sparq-reason", "dep:sparq-introspect"]
-# [OPUS-4.8] sq-0wo9e.8 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §P6 +
+# sq-0wo9e.8 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §P6 +
 # sq-0wo9e.8): the MEASUREMENT FOUNDATION on top of the P0 structure-prep layer — a THIN in-tree
 # shallow-KGE trainer (DistMult) that CONSUMES the P0 closure + type-constrained NegativeSampler to
 # produce embeddings, plus the P6 EVAL HARNESS (standard FILTERED link-prediction MRR/Hits@k, the
@@ -55,7 +55,7 @@ structure = ["dep:sparq-reason", "dep:sparq-introspect"]
 # carry ZERO trainer/eval code and gain no new deps. It TRAINS a research-grade model only to
 # MEASURE the priors — it makes no accuracy claim and serves no exact answer.
 kge = ["structure"]
-# [OPUS-4.8] sq-mztg8.1 (epic sq-mztg8, design research/fo-llm-bridge.md §2.3/§3.3/§6 Phase 3):
+# sq-mztg8.1 (epic sq-mztg8, design research/fo-llm-bridge.md §2.3/§3.3/§6 Phase 3):
 # the READ-PATH URI-HIDING "compose" step + a closed NL→NL A/B fidelity/cost harness (`compose.rs`).
 # OPT-IN and OFF by default; it IMPLIES `structure` so it reuses the `verbalize` label machinery and
 # adds NO new dependency (it consumes only oxrdf + sparq-core's public read API). With it OFF the
@@ -65,7 +65,7 @@ kge = ["structure"]
 # (no API key on the work box) and registered as such in bench/EXPERIMENTS.md. It serves no exact
 # answer and makes no accuracy claim.
 compose = ["structure"]
-# [OPUS-4.8] sq-0wo9e.3 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §2 + §7):
+# sq-0wo9e.3 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §2 + §7):
 # P2 — the SHACL/OWL PRIOR EXTRACTOR (`shacl_priors.rs`). Reads enum (`sh:in`) / datatype
 # (`sh:datatype`) / cardinality (`sh:min,maxCount`, `owl:FunctionalProperty`) priors out of a parsed
 # `sparq-shacl` shapes model (read-only — no SHACL changes) into the codebook + pooling layout the
@@ -75,7 +75,7 @@ compose = ["structure"]
 # enum CODEBOOK encoder and the QUDT UNIT normaliser themselves ship under `structure` (pure, no
 # SHACL dep); only the *reader* that mines them from shapes needs sparq-shacl.
 structure-shacl = ["structure", "dep:sparq-shacl"]
-# [OPUS-4.8] sq-0wo9e.6 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §5 (B) +
+# sq-0wo9e.6 (epic sq-0wo9e, design research/structure-aware-vectorisation.md §5 (B) +
 # §6.A): P5 — the NEURO-SYMBOLIC propose(neural)-then-verify(deductive) grounding pipeline
 # (`verify.rs`). The neural PROPOSE side reuses the in-crate vector ANN (a candidate GENERATOR,
 # recall only — no soundness); the deductive VERIFY side is the SOUNDNESS GATE: a vector-proposed
@@ -89,7 +89,7 @@ structure-shacl = ["structure", "dep:sparq-shacl"]
 # ZERO pipeline code. It serves no exact answer and makes NO accuracy claim — the value is the
 # pipeline + its on/off ablation (recall is empirical, EC2-gated, never asserted here).
 neuro-symbolic = ["structure-shacl"]
-# [OPUS-4.8] sq-1wc1: predicate-constrained (filtered) ANN — the RDF-native vector
+# sq-1wc1: predicate-constrained (filtered) ANN — the RDF-native vector
 # differentiator. A SPARQL BGP carves out a candidate dict-id set (the "visit mask") and the
 # nearest-neighbour search returns only neighbours inside it. OPT-IN and OFF by default; it is a
 # LEAN feature — it adds NO new dependency (the mask reuses the in-tree `rustc-hash` set) and pulls
@@ -99,7 +99,7 @@ neuro-symbolic = ["structure-shacl"]
 # engine-side automatic BGP → mask wiring (a filtered form of the `vec:` predicate) is wired in
 # `rewrite.rs` and activates when this composes with `vec-predicate` (sq-bvmd, follow-up to sq-1wc1).
 filtered-ann = []
-# [FABLE-5] sq-lhcot.1 (GenAI review gap 1; spec estate sq-rvgr2.4): the `.spqv` v3 EMBEDDING
+# sq-lhcot.1 (GenAI review gap 1; spec estate sq-rvgr2.4): the `.spqv` v3 EMBEDDING
 # PROVENANCE record — model id / model+content version / metric / normalization / dimension /
 # verbalization regime — plus the mandatory compatibility REJECTION (an incompatible query embedder
 # is a hard error, not silently-wrong neighbours). OPT-IN and OFF by default; a LEAN feature — it
@@ -113,12 +113,12 @@ filtered-ann = []
 # pending the cross-implementation profile #1746 — the KERN boundary), so this ships the core v3
 # record without privileging any encoder.
 spqv-provenance = []
-# [GPT-5.6] sq-lsp7k.25: opaque per-vector UTF-8 metadata persisted inside `.spqv` and returned
+# sq-lsp7k.25: opaque per-vector UTF-8 metadata persisted inside `.spqv` and returned
 # beside exact-search hits. OPT-IN and OFF by default; a LEAN feature with no new dependency.
 # Ordinary `put` stores keep writing the existing v2/v3 formats byte-for-byte; the v4 metadata
 # block is selected only after `put_with_meta` records at least one tag.
 metadata-sidecar = []
-# [OPUS-4.8] sq-pi44: incremental add / remove / update of vectors against an already-finalized
+# sq-pi44: incremental add / remove / update of vectors against an already-finalized
 # store via an in-RAM DELTA SIDECAR (+ `compact` to fold it back into a fresh base), so a single
 # graph change no longer forces a full re-embed + file rebuild. OPT-IN and OFF by default; a LEAN
 # feature — it adds NO new dependency (the append map + tombstone set reuse the in-tree
@@ -129,7 +129,7 @@ metadata-sidecar = []
 # only (lost on handle drop; `compact` is the durability path) — a persisted on-disk delta sidecar
 # is a tracked follow-up.
 delta = []
-# [OPUS-4.8] sq-ip3a (epic sq-3183, follow-up to sq-7hx6): the **approximate** ANN backend.
+# sq-ip3a (epic sq-3183, follow-up to sq-7hx6): the **approximate** ANN backend.
 # OPT-IN and OFF by default — this is the feature that pulls the heavy HNSW crate
 # (`instant-distance`) into the dependency graph. With it OFF the default `sparq-vectors` build
 # carries ZERO approximate-index code and NO heavy ANN dependency: only the exact brute-force
@@ -140,7 +140,7 @@ delta = []
 # Approximate results are APPROXIMATE — recall < 1.0; the recall floor is asserted by a test, NOT
 # claimed as exactness (see backend.rs + tests/overfetch.rs).
 approx-ann = ["dep:instant-distance"]
-# [OPUS-4.8] sq-k6ex (epic sq-3183): the `vec:` magic predicates — vector KNN
+# sq-k6ex (epic sq-3183): the `vec:` magic predicates — vector KNN
 # search expressed INSIDE plain SPARQL, mirroring sparq-text's `text:` rewrite.
 # OPT-IN and OFF by default: only this feature pulls `sparq-engine` (+ spargebra)
 # into this crate's dependency graph, so the default `sparq-vectors` build — and the
@@ -153,7 +153,7 @@ vec-predicate = ["dep:sparq-engine", "dep:spargebra"]
 # is supplied by the CALLER (a `Transport` impl over their HTTP client of choice);
 # this crate never opens a socket. Pulls in serde_json for request/response bodies.
 provider = ["dep:serde_json"]
-# [OPUS-4.8] `embeddings` ships a CONCRETE reqwest blocking `Transport` + an
+# `embeddings` ships a CONCRETE reqwest blocking `Transport` + an
 # env-driven constructor so the crate works against a real /v1/embeddings endpoint
 # WITHOUT caller glue (sq-fg9y). Mirrors sparq-nlq's `live` feature: blocking reqwest,
 # rustls-tls, key/base-url/model from env, a hard request timeout. OFF by default — the
@@ -170,12 +170,12 @@ rustc-hash.workspace = true
 # HNSW (pure Rust, minimal deps, maintained). Evaluated against hnsw_rs 0.3 (heavier
 # dependency tree: anndists/simd feature plumbing); instant-distance is the smaller,
 # cleaner fit for an in-RAM index rebuilt from the mmap'd store on open.
-# [OPUS-4.8] sq-ip3a: OPTIONAL + gated behind `approx-ann` (off by default) so the heavy ANN
+# sq-ip3a: OPTIONAL + gated behind `approx-ann` (off by default) so the heavy ANN
 # crate does NOT enter the default build — the lean-core constraint. Exact search and the
 # hand-rolled on-disk Vamana graph need no third-party ANN dependency.
 instant-distance = { workspace = true, optional = true }
 serde_json = { version = "1", optional = true }
-# [OPUS-4.8] sq-k6ex: the `vec:` magic-predicate rewrite executes through the engine's
+# sq-k6ex: the `vec:` magic-predicate rewrite executes through the engine's
 # prepared-query seam (`PreparedQuery: From<spargebra::Query>`). Both deps are OPTIONAL
 # and ONLY pulled in by the `vec-predicate` feature — the default build (and anything
 # that does not opt in) never compiles the engine, so `sparq-core`/`sparq-engine` stay
@@ -183,12 +183,12 @@ serde_json = { version = "1", optional = true }
 # the parsed algebra; it is already in the workspace tree via sparq-engine.
 sparq-engine = { path = "../sparq-engine", version = "0.1.6", optional = true }
 spargebra = { workspace = true, optional = true }
-# [OPUS-4.8] Concrete HTTP transport for the non-default `embeddings` feature only.
+# Concrete HTTP transport for the non-default `embeddings` feature only.
 # Blocking by design (the embed call is synchronous and this crate must not drag an
 # async runtime into the tree) — mirrors sparq-nlq's `live` reqwest dependency exactly.
 # rustls-tls so there is no system-OpenSSL build dependency.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
-# [OPUS-4.8] sq-0wo9e.1: the closure-before-vectorise step + the type-constraint extractor for the
+# sq-0wo9e.1: the closure-before-vectorise step + the type-constraint extractor for the
 # `structure` feature only. Both are OPTIONAL and ONLY pulled in by `structure`, so the default
 # build (and anything not opting in) never compiles them — `sparq-vectors` stays a pure
 # storage+ANN crate by default and the lean-core constraint holds. `sparq-reason` materialises the
@@ -196,13 +196,13 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # mines declared + observed domain/range. Neither pulls the engine.
 sparq-reason = { path = "../sparq-reason", version = "0.1.6", optional = true }
 sparq-introspect = { path = "../sparq-introspect", version = "0.1.6", optional = true }
-# [OPUS-4.8] sq-0wo9e.3: the P2 SHACL/OWL prior extractor reads a parsed shapes model. OPTIONAL and
+# sq-0wo9e.3: the P2 SHACL/OWL prior extractor reads a parsed shapes model. OPTIONAL and
 # ONLY pulled in by `structure-shacl`, so the default build (and the lean `structure` feature) never
 # compile it — `sparq-vectors` stays free of any SHACL/engine dependency unless this reader is opted
 # in. sparq-shacl is itself an opt-in crate that nothing in the workspace depends on by default.
 sparq-shacl = { path = "../sparq-shacl", version = "0.1.6", optional = true }
 
-# [FABLE-5] sq-98c: memmap2 is NATIVE-ONLY — target-gated out of every wasm32 build so the
+# sq-98c: memmap2 is NATIVE-ONLY — target-gated out of every wasm32 build so the
 # crate compiles to wasm without a memory-map dependency. This is a TARGET cfg rather than a
 # cargo feature ON PURPOSE: cargo features are additive (enabling one can never REMOVE a
 # dependency), and the workspace's wasm crates already prefer `cfg(target_arch = "wasm32")`
@@ -216,11 +216,11 @@ memmap2.workspace = true
 # oxrdf pulls `rand`/getrandom (blank-node ids). On wasm there is no OS RNG, so select
 # getrandom's browser backend (crypto.getRandomValues). The matching
 # `--cfg getrandom_backend="wasm_js"` is set in the workspace .cargo/config.toml — exactly
-# as the shipped wasm bundle crates (sparq-wasm / sparq-introspect / …) do. [FABLE-5]
+# as the shipped wasm bundle crates (sparq-wasm / sparq-introspect / …) do.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
-# [OPUS-4.8] sq-88c6: DEV-only. The `hybrid_search` example/tests fuse this crate's ANN
+# sq-88c6: DEV-only. The `hybrid_search` example/tests fuse this crate's ANN
 # (`VectorIndex::nearest_term`) with `sparq-sim`'s structural similarity
 # (`Sim::most_similar`) by `Term`. The fusion helper itself is generic over retriever
 # closures, so the LIBRARY stays decoupled — `sparq-sim` is a test/example dependency
@@ -228,7 +228,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 [dev-dependencies]
 proptest = "1"
 sparq-sim = { path = "../sparq-sim" }
-# [OPUS-4.8] sq-wlzi: DEV-only. The id-keyed-staleness-contract test (tests/staleness_contract.rs)
+# sq-wlzi: DEV-only. The id-keyed-staleness-contract test (tests/staleness_contract.rs)
 # demonstrates the SOUND serving path — persist the build graph with `Graph::save`, reopen it with
 # `Graph::open` (which mmaps the FROZEN dict id order), and query the id-keyed store against THAT —
 # vs the re-parse trap (`Graph::load_str` at a different RAYON_NUM_THREADS reshuffles the dict ids,
@@ -237,13 +237,13 @@ sparq-sim = { path = "../sparq-sim" }
 # a dev-dependency feature is local to this crate's test/example/bench targets and never propagates
 # to downstream consumers of `sparq-vectors`.
 sparq-core = { path = "../sparq-core", version = "0.1.6", features = ["mmap"] }
-# [OPUS-4.8] sq-xhiv: DEV-only. The fingerprint thread-count-stability regression tests drive the
+# sq-xhiv: DEV-only. The fingerprint thread-count-stability regression tests drive the
 # SAME parallel sharded dict merge the loader uses at two explicit thread counts via a scoped rayon
 # pool (`RAYON_NUM_THREADS` is read once per process, so it cannot be varied mid-test). rayon is NOT
 # a library dependency of this crate — it stays a test-only dependency and never enters the published
 # graph; the fingerprint itself depends only on sparq-core's public read API.
 rayon = { workspace = true }
-# [OPUS-4.8] (sq-k5qq) DEV-only: the throughput/diskann harnesses emit an optional,
+# (sq-k5qq) DEV-only: the throughput/diskann harnesses emit an optional,
 # strictly-additive `SPARQ_VECTORS_JSON=<path>` results document (dependency-free
 # `format!`-built JSON — no serde in the harness itself); this dev-dep parses that emit
 # back so the round-trip test catches a malformed document. `serde_json` is ALSO an
@@ -251,26 +251,26 @@ rayon = { workspace = true }
 # available to the test targets in BOTH feature states, independent of those features.
 serde_json = "1"
 
-# [GPT-5.6] sq-lyf31: the codebook algebra property test exercises the opt-in
+# sq-lyf31: the codebook algebra property test exercises the opt-in
 # structure surface, so Cargo must skip that integration target in lean builds.
 [[test]]
 name = "proptest_quant"
 required-features = ["structure"]
 
-# [OPUS-4.8] sq-ip3a: the bench example measures HNSW (`VectorIndex`) recall/build, so it needs the
+# sq-ip3a: the bench example measures HNSW (`VectorIndex`) recall/build, so it needs the
 # approximate backend. Gating it on `approx-ann` keeps `cargo build --all-targets` (default features)
 # green when the heavy ANN crate is out of the build.
 [[example]]
 name = "bench_vectors"
 required-features = ["approx-ann"]
 
-# [SONNET-4.6] sq-z2z18: the SIFT1M ef_search sweep uses `VectorIndex` + `HnswConfig`, so it needs
+# sq-z2z18: the SIFT1M ef_search sweep uses `VectorIndex` + `HnswConfig`, so it needs
 # `approx-ann`. Gating it keeps `cargo build --all-targets` (default features) green.
 [[example]]
 name = "sift_ef_sweep"
 required-features = ["approx-ann"]
 
-# [SONNET-4.6] sq-pm6i2 (follow-up sq-ose80.2): the BUILD-TIME-ONLY HNSW scaling harness times
+# sq-pm6i2 (follow-up sq-ose80.2): the BUILD-TIME-ONLY HNSW scaling harness times
 # `VectorIndex::build_with` at the shipped `HnswConfig` presets, so it needs `approx-ann`. Gating it
 # keeps `cargo build --all-targets` (default features) green when the heavy ANN crate is out of the
 # build. It measures build wall-clock ONLY — no recall, no QPS, no oracle — so it adds no gate and
@@ -279,13 +279,13 @@ required-features = ["approx-ann"]
 name = "hnsw_build_scaling"
 required-features = ["approx-ann"]
 
-# [GPT-5.6] sq-0ut5x: the internal matched-recall build Pareto harness compares HNSW with the
+# sq-0ut5x: the internal matched-recall build Pareto harness compares HNSW with the
 # always-available DiskANN/PQ implementations, so only the HNSW side needs this opt-in feature.
 [[example]]
 name = "pareto_bench"
 required-features = ["approx-ann"]
 
-# [OPUS-4.8] sq-dwdm: the site /surface/vector capture harness exercises the `vec:`
+# sq-dwdm: the site /surface/vector capture harness exercises the `vec:`
 # magic predicate (query_vec), so it needs `vec-predicate`. Registering the requirement
 # keeps `cargo build --all-targets` (default features) green when the feature is out of
 # the build — the example body is `#![cfg(feature = "vec-predicate")]`, so without the
@@ -295,14 +295,14 @@ required-features = ["approx-ann"]
 name = "capture_surface_vector"
 required-features = ["vec-predicate"]
 
-# [OPUS-4.8] sq-0wo9e.8: the P0 ablation runner exercises the `kge` trainer + eval harness, so it
+# sq-0wo9e.8: the P0 ablation runner exercises the `kge` trainer + eval harness, so it
 # needs `kge`. Registering the requirement keeps `cargo build --all-targets` (default features) green
 # when the feature is out of the build — the example body is gated behind `#[cfg(feature = "kge")]`.
 [[example]]
 name = "kge_ablation"
 required-features = ["kge"]
 
-# [FABLE-5] Kern PR-1 (quoted-terms visibility): the cross-commit byte-stability pin prints a
+# Kern PR-1 (quoted-terms visibility): the cross-commit byte-stability pin prints a
 # deterministic digest of the flag-off trainer/eval outputs on the quote-free slices, so a reviewer
 # can diff merge-base vs PR head and confirm the baselines are byte-identical. Needs `kge`; the body
 # is gated behind `#[cfg(feature = "kge")]` so `cargo build --all-targets` (default features) stays green.
@@ -310,7 +310,7 @@ required-features = ["kge"]
 name = "kge_pin"
 required-features = ["kge"]
 
-# [OPUS-4.8] sq-0wo9e.2 (epic sq-0wo9e): the P1 typed-encoder ablation harness uses the
+# sq-0wo9e.2 (epic sq-0wo9e): the P1 typed-encoder ablation harness uses the
 # `structure`-gated `encode` module, so it needs the `structure` feature. Registering the
 # requirement keeps `cargo build --all-targets` (default features) green when the feature is out of
 # the build (the body would otherwise fail to resolve `sparq_vectors::encode`). It is an
@@ -319,7 +319,7 @@ required-features = ["kge"]
 name = "bench_typed_encoders"
 required-features = ["structure"]
 
-# [OPUS-4.8] sq-mztg8.1 (epic sq-mztg8): the closed NL→NL URI-hiding A/B harness uses the
+# sq-mztg8.1 (epic sq-mztg8): the closed NL→NL URI-hiding A/B harness uses the
 # `compose`-gated `compose` module, so it needs the `compose` feature. Registering the requirement
 # keeps `cargo build --all-targets` (default features) green when the feature is out of the build
 # (the body would otherwise fail to resolve `sparq_vectors::compose`). It is a model-free
@@ -329,7 +329,7 @@ required-features = ["structure"]
 name = "compose_ab"
 required-features = ["compose"]
 
-# [OPUS-4.8] sq-3pb7f (epic sq-mztg8): the K4 question-battery generator uses the same
+# sq-3pb7f (epic sq-mztg8): the K4 question-battery generator uses the same
 # `compose`-gated `compose` module (it renders answer-row bindings under both views), so it needs
 # the `compose` feature. Registering the requirement keeps `cargo build --all-targets` (and the
 # feature legs that do NOT enable `compose` — vec-predicate/provider, filtered-ann, kge) green when
@@ -340,7 +340,7 @@ required-features = ["compose"]
 name = "compose_k4"
 required-features = ["compose"]
 
-# [OPUS-4.8] sq-hkud (epic sq-toze, gap MS-G4) — register the `kani` cfg so the
+# sq-hkud (epic sq-toze, gap MS-G4) — register the `kani` cfg so the
 # `#[cfg(kani)]` bounded-proof harness in `store.rs` does not trip `-D warnings`
 # (unexpected_cfgs) on the NORMAL build. `cargo kani` sets this cfg itself when it
 # model-checks; under a plain `cargo build`/`clippy`/`test` the cfg is simply off and the

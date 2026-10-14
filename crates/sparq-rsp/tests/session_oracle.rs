@@ -1,6 +1,6 @@
 #![cfg(feature = "session_windows")]
 
-// [GPT-5.6] sq-zckkq: deterministic, hand-derived session-window oracle.
+// sq-zckkq: deterministic, hand-derived session-window oracle.
 
 use oxrdf::{NamedNode, Term};
 use sparq_rsp::{ContinuousQuery, Window, WindowResult, WindowSpec, WindowedStream, R2S};

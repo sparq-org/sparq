@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-dwdm — capture harness for the /surface/vector site page.
+//! sq-dwdm — capture harness for the /surface/vector site page.
 //!
 //! Prints the EXACT, deterministic output of the real sparq-vectors pipeline so the
 //! site page (site/src/lib/vector.ts) can paste it BYTE-FOR-BYTE rather than fabricate

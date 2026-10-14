@@ -1,4 +1,4 @@
-// [GPT-5.6] (sq-wruhj) Mutation-witnessed RDF writer/parser round-trip properties.
+// (sq-wruhj) Mutation-witnessed RDF writer/parser round-trip properties.
 #![cfg(all(feature = "serialize-rdf", feature = "streaming-serialization"))]
 
 use std::collections::{BTreeSet, HashMap};
@@ -176,7 +176,7 @@ fn default_only(graph: &Graph) -> Graph {
     Graph::load_str(&graph_to_turtle(graph), "turtle").expect("writer emitted invalid Turtle")
 }
 
-// [GPT-5.6] (sq-zd6hq) Exercise the slice-level writers in addition to their graph wrappers.
+// (sq-zd6hq) Exercise the slice-level writers in addition to their graph wrappers.
 fn graph_triples(graph: &Graph) -> Vec<Triple> {
     graph
         .iter_ids()

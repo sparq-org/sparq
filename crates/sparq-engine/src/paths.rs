@@ -18,7 +18,7 @@ pub enum PathMode {
 
 /// Defines the directed edge relation used for path enumeration.
 ///
-/// [GPT-5.6] `sq-lsp7k.3.3`: pattern relations are materialized once, then
+/// `sq-lsp7k.3.3`: pattern relations are materialized once, then
 /// consumed by the same deterministic T1 enumerator as predicate relations.
 #[derive(Clone, Debug)]
 pub enum Via {
@@ -31,7 +31,7 @@ pub enum Via {
 
 /// Selects the candidate nodes at one end of a path.
 ///
-/// [SONNET-4.6] `sq-lsp7k.3`: endpoint patterns are materialized once into a
+/// `sq-lsp7k.3`: endpoint patterns are materialized once into a
 /// deterministic id set, then drive the same enumerator as a fixed node.
 #[derive(Clone, Debug)]
 pub enum Endpoint {

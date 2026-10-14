@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-lk3aw.4) End-to-end EXACT-candidate spatial pushdown: the real
+//! (sq-lk3aw.4) End-to-end EXACT-candidate spatial pushdown: the real
 //! `GeoIndexProvider::candidates_exact` (topology_index) certifying a constant-region
 //! `geof:sfWithin` / `geof:sfContains` to the engine, which skips the residual DE-9IM
 //! FILTER for certified rows. The `topology_index` feature enables the engine's

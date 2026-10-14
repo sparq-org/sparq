@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-bfjr0: metamorphic graph-algorithm invariants over generated RDF graphs.
+//! sq-bfjr0: metamorphic graph-algorithm invariants over generated RDF graphs.
 
 use std::collections::BTreeSet;
 

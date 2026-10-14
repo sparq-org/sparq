@@ -1,6 +1,6 @@
 //! **Cross-engine differential oracle** — the same query and data on two or more
 //! engines, results compared with sparq-difftest's engine-independent comparators.
-//! [FABLE-5] sq-gum8.6
+//! sq-gum8.6
 //!
 //! Unlike TLP/NoREC (which need only one engine's *internal* consistency), the
 //! differential oracle needs an agreement standard across engines. That standard is
@@ -32,7 +32,7 @@
 //!   engine (or to spec latitude) before it enters the found-bug ledger with an
 //!   upstream issue link.
 //!
-//! # `ORDER BY` differential mode [OPUS-5] sq-gum8.12
+//! # `ORDER BY` differential mode sq-gum8.12
 //!
 //! [`check_differential`] deliberately throws the row order away, so it cannot see an
 //! ordering bug at all: an engine that sorts wrongly returns the same *bag* and passes.
@@ -84,7 +84,7 @@ use crate::verdict::{EngineFailure, FailureKind, OracleKind, Verdict, Violation}
 
 /// An `ORDER BY` query plus the sort-variable list its comparison must use — returned
 /// together so precondition 2 of the ordered mode cannot be violated by drift.
-/// [OPUS-5] sq-gum8.12
+/// sq-gum8.12
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderedQuery {
     /// `SELECT * WHERE { P FILTER( c ) } ORDER BY ?a ?b …`.

@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-sxm — runnable harness for the (security model × N × query class)
+// sq-sxm — runnable harness for the (security model × N × query class)
 // MPC benchmark matrix, IN-PROCESS counting tier (Tier 1). Emits the deterministic
 // modelled communication (bytes/party, rounds, multiplications) + the per-cell
 // ACTUAL security guarantee, as both a human table and the structured JSON schema.

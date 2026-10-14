@@ -1,4 +1,4 @@
-// [OPUS-5] sq-rsd3v.6 (#3265): owl:sameAs equality reasoning -- the host mirror
+// sq-rsd3v.6 (#3265): owl:sameAs equality reasoning -- the host mirror
 // of the in-circuit union-find canonicalisation gadget
 // (`zk/compose/compose_core/src/sameas.nr`). Epic sq-rsd3v; parent #2616.
 //! `owl:sameAs` canonicalisation: the union-find canon table, its witness

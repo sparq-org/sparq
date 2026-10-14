@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-384j — Tested library quickstart, embedded into the docs guide.
+//! sq-384j — Tested library quickstart, embedded into the docs guide.
 //!
 //! This is the canonical "use sparq as a library" example. The region between the
 //! `ANCHOR: quickstart` / `ANCHOR_END: quickstart` markers is single-sourced into

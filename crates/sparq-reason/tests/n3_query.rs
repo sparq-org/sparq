@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-xqchl.1 (GH #3144) — the EYE `--query` filter: every INSTANTIATED conclusion of
+//! sq-xqchl.1 (GH #3144) — the EYE `--query` filter: every INSTANTIATED conclusion of
 //! a query document's forward rules over the deductive closure of the data document.
 //!
 //! The load-bearing invariant is that the query premise is evaluated by the SAME matcher the

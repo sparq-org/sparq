@@ -1,4 +1,4 @@
-//! [GPT-5.6] (sq-abhuq) Mutation witnesses for opt-in response compression.
+//! (sq-abhuq) Mutation witnesses for opt-in response compression.
 
 #![cfg(all(feature = "server", feature = "response-compression"))]
 

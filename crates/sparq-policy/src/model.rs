@@ -12,7 +12,6 @@
 //! `leftOperand`/`operator`/`rightOperand` constraints; `Offer`/`Agreement`
 //! policy subtypes are parsed identically to `Set` (the subtype affects
 //! contracting, not single-node evaluation).
-//! [OPUS-4.8]
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -35,7 +34,7 @@ pub struct Policy {
     /// `odrl:prohibition` rules — each, if matched, forbids access (overrides).
     pub prohibitions: Vec<Rule>,
     /// The declared `odrl:conflict` conflict-resolution [`ConflictStrategy`], if the
-    /// policy names one. `None` means the policy left it unset. [OPUS-4.8] sq-ihqbl.
+    /// policy names one. `None` means the policy left it unset. sq-ihqbl.
     ///
     /// **The bridge implements exactly one strategy — `odrl:prohibit` (deny-overrides).**
     /// A strategy this engine cannot faithfully honour (`odrl:perm`, an `odrl:invalid`
@@ -43,7 +42,7 @@ pub struct Policy {
     /// silently mis-applied — see [`crate::conflict_admissibility`].
     pub conflict: Option<ConflictStrategy>,
     /// The IRIs this policy document identifies as an **`odrl:PartyCollection`** —
-    /// collection IDENTITY, carried independently of any member list. [SONNET-4.6]
+    /// collection IDENTITY, carried independently of any member list.
     /// sq-rf9uv.
     ///
     /// Populated by [`crate::parse_policy`] from the policy graph itself: every subject
@@ -66,7 +65,7 @@ pub struct Policy {
 
 /// The ODRL `odrl:conflict` conflict-resolution strategy (an `odrl:ConflictTerm`)
 /// declared on a [`Policy`] to resolve a permission/prohibition conflict.
-/// [OPUS-4.8] sq-ihqbl.
+/// sq-ihqbl.
 ///
 /// Per the [ODRL 2.2 Information Model](https://www.w3.org/TR/odrl-model/#conflict) the
 /// property takes one of three terms; sparq's bridge implements only `odrl:prohibit`
@@ -98,7 +97,7 @@ impl ConflictStrategy {
     /// Parse an `odrl:conflict` value IRI into a [`ConflictStrategy`]. The three ODRL
     /// `ConflictTerm`s (`odrl:prohibit`/`odrl:perm`/`odrl:invalid`) map to their variant;
     /// anything else becomes [`ConflictStrategy::Unknown`] (carrying the raw IRI) so an
-    /// unrecognised strategy is refused, never silently dropped. [OPUS-4.8] sq-ihqbl.
+    /// unrecognised strategy is refused, never silently dropped. sq-ihqbl.
     pub fn from_iri(iri: &str) -> ConflictStrategy {
         match iri.strip_prefix(ODRL_NS) {
             Some("prohibit") => ConflictStrategy::Prohibit,
@@ -131,7 +130,7 @@ pub struct Rule {
     /// rule to be *satisfied* (logical AND, per the ODRL default `odrl:and`).
     pub constraints: Vec<Constraint>,
     /// Compound `odrl:LogicalConstraint` refinements (`odrl:and` / `odrl:or` /
-    /// `odrl:xone` over a *set* of sub-constraints — [OPUS-4.8] sq-a0zef). A rule's
+    /// `odrl:xone` over a *set* of sub-constraints — sq-a0zef). A rule's
     /// atomic [`constraints`](Rule::constraints) **and** its `logical_constraints`
     /// are ALL ANDed together: the rule is satisfied only when every atomic
     /// constraint holds AND every logical constraint holds. Empty for a rule whose
@@ -152,7 +151,7 @@ pub struct Rule {
 /// **that the ODRL 2.2 action hierarchy places under `use`** (`odrl:includedIn`).
 /// All other actions match by exact IRI equality in this base case.
 ///
-/// **The `use` umbrella reconciliation ([OPUS-4.8] sq-euhr3).** sparq-policy
+/// **The `use` umbrella reconciliation (sq-euhr3).** sparq-policy
 /// previously treated `odrl:use` as subsuming *every* action; the SolidLab ODRL Test
 /// Suite (and the ODRL 2.2 vocabulary) is more precise — `use` includes its proper
 /// sub-actions (`read`, `display`, `print`, `modify`, `delete`, … — 39 actions are
@@ -176,7 +175,7 @@ impl Action {
     /// True iff this action permits a request for `requested`: exact-IRI match, or
     /// this action is the `odrl:use` umbrella and `requested` is **included in `use`**
     /// under the ODRL 2.2 action hierarchy (i.e. `requested` is not in the disjoint
-    /// `odrl:transfer` ownership subtree). [OPUS-4.8] sq-euhr3.
+    /// `odrl:transfer` ownership subtree). sq-euhr3.
     ///
     /// The transfer subtree (`odrl:sell`, `odrl:give`, `odrl:transfer`) is the one
     /// well-defined top-level branch the ODRL vocabulary places *outside* `use`, so it
@@ -194,7 +193,7 @@ impl Action {
 /// Whether `action_iri` is in the ODRL 2.2 ownership-`transfer` subtree — the one
 /// top-level action branch the vocabulary places *outside* `odrl:use`. These actions
 /// are `odrl:includedIn odrl:transfer` (or are `odrl:transfer` itself), so a `use`
-/// permission does **not** subsume them. [OPUS-4.8] sq-euhr3.
+/// permission does **not** subsume them. sq-euhr3.
 ///
 /// The transfer subtree is finite and closed in ODRL 2.2: `transfer` plus its
 /// included actions `sell` and `give`. Encoded as an explicit set so the `use`
@@ -232,7 +231,7 @@ pub struct Constraint {
 }
 
 /// A compound `odrl:LogicalConstraint` — a logical combinator (`odrl:and` /
-/// `odrl:or` / `odrl:xone`) over a *set* of sub-[`Constraint`]s. [OPUS-4.8] sq-a0zef.
+/// `odrl:or` / `odrl:xone`) over a *set* of sub-[`Constraint`]s. sq-a0zef.
 ///
 /// ODRL expresses a compound constraint as an `odrl:LogicalConstraint` node whose
 /// `odrl:and` / `odrl:or` / `odrl:xone` property points at a *refining set* of
@@ -265,7 +264,7 @@ pub struct LogicalConstraint {
 }
 
 /// One operand of a [`LogicalConstraint`] — either an atomic [`Constraint`] or a nested
-/// compound [`LogicalConstraint`]. [OPUS-4.8] sq-a0zef.
+/// compound [`LogicalConstraint`]. sq-a0zef.
 ///
 /// This makes compound constraints arbitrarily nestable (an `odrl:or` of `odrl:and`s,
 /// etc.) while keeping the *atomic* [`Constraint`] type — used pervasively by the
@@ -279,7 +278,7 @@ pub enum ConstraintNode {
 }
 
 /// The logical combinator of an [`odrl:LogicalConstraint`](LogicalConstraint).
-/// [OPUS-4.8] sq-a0zef.
+/// sq-a0zef.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LogicalOperator {
     /// `odrl:and` — conjunction: every operand must hold.
@@ -325,7 +324,7 @@ pub enum Operator {
     /// right-operand set, OR — for the taxonomic dimensions `odrl:purpose` and
     /// `odrl:spatial` — **transitively part-of** a named value under the subsumption
     /// closure the request supplies (the DPV-purpose taxonomy / spatial region *tree*
-    /// case — see `Request::with_purpose_subsumption`). [OPUS-4.8] sq-z3ve / sq-wukl.
+    /// case — see `Request::with_purpose_subsumption`). sq-z3ve / sq-wukl.
     IsPartOf,
     /// `odrl:isA` — the request value IS the right operand (a type/identity
     /// membership check, treated as equality here).
@@ -335,7 +334,7 @@ pub enum Operator {
     /// operator](https://www.w3.org/TR/odrl-vocab/#term-isAnyOf): the left operand
     /// is *any of* the right-operand values). The right operand uses the same
     /// `|`/space/comma-separated set encoding as [`Operator::IsPartOf`].
-    /// [FABLE-5] sq-uaz85.
+    /// sq-uaz85.
     IsAnyOf,
     /// `odrl:isNoneOf` — the request value equals **none** of the members of the
     /// right-operand set (the [ODRL 2.2
@@ -344,7 +343,7 @@ pub enum Operator {
     /// request with **no** evidence for the dimension is *unprovable*, never
     /// silently satisfied, and a numeric/dateTime operand (no faithful lexical set
     /// form to negate) is not satisfied either — see [`crate::evaluate`].
-    /// [FABLE-5] sq-uaz85.
+    /// sq-uaz85.
     IsNoneOf,
 }
 

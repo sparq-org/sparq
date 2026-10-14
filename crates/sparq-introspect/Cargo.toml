@@ -15,7 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
 # front page and every feature-gated item (`federation-descriptors`) render on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
@@ -23,10 +23,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-# [GPT-5.6] sq-lsp7k.29: numeric range/histogram facet summaries are opt-in so
+# sq-lsp7k.29: numeric range/histogram facet summaries are opt-in so
 # the crate's existing facet response and work stay byte-for-byte unchanged by default.
 numeric-facets = []
-# [GPT-5.6] sq-yjemp: structured schema drift is additive and default-OFF; the
+# sq-yjemp: structured schema drift is additive and default-OFF; the
 # existing introspection build and output remain unchanged unless requested.
 schema-diff = []
 
@@ -42,7 +42,7 @@ schema-diff = []
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
 #
-# [FABLE-5] sq-lxkr1: `default-features = false` HERE, with defaults re-enabled only for
+# sq-lxkr1: `default-features = false` HERE, with defaults re-enabled only for
 # non-wasm targets below. Cargo unions features across every declaration that applies to a
 # build, so the previous shape (defaults here + a wasm-only `default-features = false`
 # override) was a no-op: wasm still got sparq-core's default `parallel` feature (rayon).
@@ -55,7 +55,7 @@ rustc-hash.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# [OPUS-4.8] sq-aq5: wasm-safety. The whole crate is sorted scans over sparq-core's public
+# sq-aq5: wasm-safety. The whole crate is sorted scans over sparq-core's public
 # read API — no threads, no syscalls, no wall clock — so it must compile and RUN on
 # `wasm32-unknown-unknown` (tier-b browser surface for in-tab schema cards). On wasm we
 # take sparq-core WITHOUT default features: the only default feature is `parallel` (rayon,
@@ -63,7 +63,7 @@ serde_json = "1"
 # already-built indexes — so dropping it keeps the wasm graph lean (no rayon) and matches
 # the bundle crates' pattern. `Graph::load_str` (used by the smoke test) is not
 # `parallel`-gated; it falls back to the sequential loader when the feature is off.
-# [FABLE-5] sq-lxkr1: sparq-core's default features are restored for NATIVE builds here
+# sq-lxkr1: sparq-core's default features are restored for NATIVE builds here
 # (the base [dependencies] declaration is default-features = false so the wasm graph
 # stays lean — see the note there).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -85,7 +85,7 @@ oxttl.workspace = true
 # `cargo package -p sparq-introspect` resolve an as-yet unpublished engine from crates.io.
 sparq-engine = { path = "../sparq-engine" }
 
-# [OPUS-4.8] sq-aq5 — headless wasm smoke test (`tests/wasm.rs`), mirroring the shipped
+# sq-aq5 — headless wasm smoke test (`tests/wasm.rs`), mirroring the shipped
 # wasm bundle crates: exercises the real introspection pipeline (build + to_json +
 # to_text_summary + to_void(_with_cs) + characteristic_set_ids) in a GENUINE wasm32
 # runtime via `wasm-pack test --node`. Dev-only; never enters a non-dev graph.

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-a9cn) Opt-in materialised-view / query-result cache.
+//! (sq-a9cn) Opt-in materialised-view / query-result cache.
 //!
 //! A SPARQL endpoint that serves the *same* read query repeatedly against a graph
 //! that changes only occasionally (the common operational pattern — dashboards,

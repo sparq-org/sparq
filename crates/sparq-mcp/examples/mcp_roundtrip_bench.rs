@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-0z43i, gh #909) Dispatch-overhead measurement for `sparq-mcp`:
+//! (sq-0z43i, gh #909) Dispatch-overhead measurement for `sparq-mcp`:
 //! the cost the MCP layer ADDS around the engine — JSON-RPC parse, tool dispatch,
 //! and result wrapping — isolated from engine compute by running over a small
 //! in-memory graph where the underlying query is trivial.

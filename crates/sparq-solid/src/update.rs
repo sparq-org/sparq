@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-xor3: the WRITE/update path enforcement (design doc §4.4 / §7 item 6).
+//! sq-xor3: the WRITE/update path enforcement (design doc §4.4 / §7 item 6).
 //!
 //! The read path ([`crate::PodStore::query_as`]) restricts a query to the session's
 //! `auth:read` graph set. This module is its write-path mirror: before a SPARQL Update

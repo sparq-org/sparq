@@ -1,5 +1,5 @@
 //! The solution-**multiset** comparator and the `ORDER BY` sort-key-equivalence-class comparator,
-//! over the neutral `{var → term}` model. Engine-independent. [OPUS-4.8] sq-qcnn.4
+//! over the neutral `{var → term}` model. Engine-independent. sq-qcnn.4
 //!
 //! A SPARQL `SELECT` result is a **bag** of solution mappings (`DISTINCT` is not implicit, so
 //! duplicates are significant): the un-ordered comparison is exact **multiset equality**, keyed by the

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-pntvh.1) M4 **Phase 1**: the vectorized differential BYTE-IDENTITY
+//! (sq-pntvh.1) M4 **Phase 1**: the vectorized differential BYTE-IDENTITY
 //! harness — the acceptance gate every later vector-at-a-time (M4) phase leans on
 //! (`research/vector-at-a-time-m4.md` §3.2, §5.1, §6 Phase 1).
 //!
@@ -263,12 +263,12 @@ fn unfiltered_scan_order_is_deterministic() {
 // (shape-check decline). Note: the SPARQL parser combines `FILTER A FILTER B` within one
 // group graph pattern into a single `AND` expression, so the "double-filter trick" does
 // not produce a simple sargable residual — shape-check declines cover non-sargable
-// expressions instead. [SONNET-4.6]
+// expressions instead.
 
 /// T1 (sq-pntvh.5): end-to-end non-vacuity (Seam B / columnar_aggregate) — a
 /// whole-dataset SUM on >= VEC_MIN_BATCH (256) inline rows engages the columnar path
 /// (`chunks_built >= 1`) and produces JSON byte-identical to the budget-armed scalar path
-/// (I3 decline forces scalar fallback). [SONNET-4.6]
+/// (I3 decline forces scalar fallback).
 #[test]
 fn t1_eligible_dispatch_engages_columnar_and_is_byte_identical_to_scalar() {
     use sparq_engine::{query_json_with_budget, reset_stats, stats_snapshot, QueryBudget};
@@ -322,7 +322,7 @@ fn t1_eligible_dispatch_engages_columnar_and_is_byte_identical_to_scalar() {
 /// recorded for:
 /// (a) sub-threshold aggregate (< VEC_MIN_BATCH rows);
 /// (b) non-sargable FILTER shape (REGEX / AND expressions decline via shape check).
-/// In both cases the scalar path produces a correct result. [SONNET-4.6]
+/// In both cases the scalar path produces a correct result.
 #[test]
 fn t2_decline_paths_record_decline_and_produce_correct_result() {
     use sparq_engine::{reset_stats, stats_snapshot};
@@ -378,7 +378,7 @@ fn t2_decline_paths_record_decline_and_produce_correct_result() {
 
 /// T3 (sq-pntvh.5): ZK composition — when a ZK trace recorder is armed, the columnar
 /// seam declines (I2: ZK-decline fires before the morsel loop) so the proof recorder
-/// receives the complete operator inputs via the scalar path. [SONNET-4.6]
+/// receives the complete operator inputs via the scalar path.
 #[cfg(feature = "zk")]
 #[test]
 fn t3_zk_trace_armed_forces_scalar_path() {
@@ -413,7 +413,7 @@ fn t3_zk_trace_armed_forces_scalar_path() {
 
 /// T4 (sq-pntvh.5): budget parity — a budget-armed query (I3 decline => scalar) produces
 /// JSON BYTE-IDENTICAL to the no-budget (columnar) result, confirming the two execution
-/// paths are equivalent on the same input. [SONNET-4.6]
+/// paths are equivalent on the same input.
 #[test]
 fn t4_budget_parity_columnar_and_scalar_are_byte_identical() {
     use sparq_engine::{query_json_with_budget, reset_stats, stats_snapshot, QueryBudget};

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-y5ew5) Acceptance tests for the **hybrid tri-mask FILTER kernel**
+//! (sq-y5ew5) Acceptance tests for the **hybrid tri-mask FILTER kernel**
 //! (`src/chunk_select.rs`), Phase 3b of the M4 vector-at-a-time plan.
 //!
 //! These tests satisfy the four acceptance criteria specified in
@@ -82,7 +82,6 @@ fn mixed_column_graph() -> sparq_core::Graph {
 /// (tie/unknown lanes delegated to scalar) — proving both halves of the hybrid ran.
 ///
 /// The scalar reference is produced by budget-arming (I3 decline forces scalar fallback).
-/// [SONNET-4.6]
 #[test]
 fn t1_mixed_column_both_populations_probe() {
     let g = mixed_column_graph();
@@ -138,7 +137,7 @@ fn t1_mixed_column_both_populations_probe() {
 // ==== T2: tie-exactness witness ===================================================
 
 /// T2 (sq-y5ew5): end-to-end decimal tie-exactness witness + the `sq-lr2ii` guard
-/// interaction (reconciled after merging main). [FABLE-5]
+/// interaction (reconciled after merging main).
 ///
 /// The witness is the decimal `"0.99999999999999995"^^xsd:decimal` (= 1 − 5×10⁻¹⁷):
 ///
@@ -170,7 +169,7 @@ fn t1_mixed_column_both_populations_probe() {
 /// survives FILTER(?fval < 1) and the result is **byte-identical** to the scalar reference
 /// (result-equivalence across the guard); (3) `chunks_built == 0` — the `sq-lr2ii` /
 /// `sig_digits` high-precision-decimal guard declines the sargable/vectorized path for this
-/// graph, so the exact scalar path handles it. [OPUS-4.8] [FABLE-5]
+/// graph, so the exact scalar path handles it.
 #[test]
 fn t2_tie_exactness_decimal_witness() {
     let mut nt = String::new();
@@ -201,7 +200,7 @@ fn t2_tie_exactness_decimal_witness() {
     // Tie precondition: the stored lexical must decode to f64 1.0 (same as the constant).
     // If this ever regresses the witness becomes a confident lane (f64 < 1.0), and
     // rows_delegated > 0 below would no longer prove the delegate path fired.
-    // Verified once statically (verify_t2 snippet) and here at runtime. [OPUS-4.8]
+    // Verified once statically (verify_t2 snippet) and here at runtime.
     let witness_f64: f64 = "0.99999999999999995"
         .parse()
         .expect("T2 TIE-PRECONDITION: witness decimal must parse to f64");
@@ -249,7 +248,7 @@ fn t2_tie_exactness_decimal_witness() {
     // `extract_sargable` returns `None` and the vectorized seam DECLINES before it runs. The
     // exact scalar path handles the FILTER instead; the byte-identity + witness-survival
     // assertions above prove that is result-correct. The tie CLASSIFICATION kernel is pinned
-    // directly by `tie_exactness_2_to_53_classified_as_tie` in `chunk_select.rs`. [FABLE-5]
+    // directly by `tie_exactness_2_to_53_classified_as_tie` in `chunk_select.rs`.
     assert_eq!(
         snap.chunks_built, 0,
         "T2: the `sq-lr2ii`/`sig_digits` high-precision-decimal guard must DECLINE the \
@@ -263,7 +262,6 @@ fn t2_tie_exactness_decimal_witness() {
 
 /// T3 (sq-y5ew5): all five comparison operators × boundary constants over a mixed column.
 /// Each sub-case asserts byte-identity of the hybrid result vs the scalar reference.
-/// [SONNET-4.6]
 #[test]
 fn t3_operator_sweep_mixed_column() {
     let g = mixed_column_graph();
@@ -314,7 +312,7 @@ fn t3_operator_sweep_mixed_column() {
 // ==== T4: invariants (zk-armed, NaN-constant, non-sargable declines) =============
 
 /// T4a (sq-y5ew5): zk-armed ⇒ `chunks_built == 0` + byte-identical to scalar.
-/// The I2 decline must fire before the tri-mask runs. [SONNET-4.6]
+/// The I2 decline must fire before the tri-mask runs.
 #[cfg(feature = "zk")]
 #[test]
 fn t4a_zk_armed_forces_scalar_path() {
@@ -358,7 +356,6 @@ fn t4a_zk_armed_forces_scalar_path() {
 
 /// T4b (sq-y5ew5): a non-sargable FILTER shape declines with `chunks_built == 0`.
 /// REGEX is not a numeric comparison, so `extract_sargable` returns None → shape decline.
-/// [SONNET-4.6]
 #[test]
 fn t4b_non_sargable_declines() {
     let g = inline_ages_graph(400);
@@ -384,7 +381,6 @@ fn t4b_non_sargable_declines() {
 }
 
 /// T4c (sq-y5ew5): a sub-threshold batch (< VEC_MIN_BATCH rows) declines columnar.
-/// [SONNET-4.6]
 #[test]
 fn t4c_sub_threshold_batch_declines() {
     // 5 rows < VEC_MIN_BATCH=256 → VEC_MIN_BATCH decline.
@@ -417,7 +413,7 @@ fn t4c_sub_threshold_batch_declines() {
 /// T5 (sq-y5ew5): end-to-end integration smoke — the query path under the `vectorized`
 /// feature produces a valid SPARQL-JSON result over a standard integer-column graph.
 /// This is the simplest non-vacuous check that the feature-gated code path is wired
-/// correctly. (The both-feature-states CI legs assert this independently.) [SONNET-4.6]
+/// correctly. (The both-feature-states CI legs assert this independently.)
 #[test]
 fn t5_integration_smoke_vectorized_on() {
     // BIND-derived ?fage forces a residual FILTER (not pushed into the scan),
