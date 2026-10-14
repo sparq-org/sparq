@@ -363,6 +363,34 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose --test gate_count --test sparql_catalog -- --test-threads=1
 
+      # sq-j506 follow-up: the `dual-leaf` feature is OFF by default, so the lane
+      # suites in crates/sparq-zk-compose/tests/ (`#![cfg(feature = "dual-leaf")]`)
+      # compile to NOTHING in every other lane — a lane test could regress with no red
+      # check anywhere. They are cheap (no proving; the in-circuit cases shell out to
+      # `nargo execute` only, and self-skip without the toolchain, which is on PATH
+      # here), so run them in this lane, which already builds these crates. They run
+      # ONLY when this workflow runs at all — the pull_request / push `paths:` filter
+      # above restricts that to crates/sparq-zk*/**, zk/compose/** (and this file), so
+      # these steps add NO runner load to an unrelated PR.
+      - name: Run the dual-leaf lane suites (default-off feature, toolchain on PATH)
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          cargo test -p sparq-zk-compose --features dual-leaf \
+            --test dual_leaf_v2_lanes \
+            --test dual_leaf_boolean_lane \
+            --test dual_leaf_datetime_lane \
+            -- --test-threads=1
+
+      # The Noir unit tests of the compose member crate. The step below runs the
+      # per-module `result*::` suites for the additive result contract; this one runs
+      # the WHOLE `sparq_zk_compose_core` package, so a member's own `#[test]`s (the
+      # bit-domain boolean member's among them) cannot sit unrun. Compile + execute
+      # only — no `bb prove`.
+      - name: Run the Noir unit tests of the compose member crate (nargo test)
+        if: steps.changes.outputs.zk == 'true'
+        working-directory: zk/compose
+        run: nargo test --package sparq_zk_compose_core
+
       # The load-bearing step: run EVERY `#[ignore]`d test in the ZK crates. With the
       # toolchain on PATH the forge tests do a REAL bb prove and assert every forgery is
       # REJECTED (and the positive controls verify); the empirical bb anchors re-validate

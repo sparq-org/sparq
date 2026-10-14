@@ -44,7 +44,7 @@
         "filter_f64_raw",
         "filter_value_dl"
       ],
-      "members": 32
+      "members": 33
     },
     "credential": {
       "families": [
@@ -2215,6 +2215,13 @@
       ],
       "members": [
         {
+          "member": "filter_value_dl_bool",
+          "params": {
+            "datatype": "bool"
+          },
+          "circuit_size": 3032
+        },
+        {
           "member": "filter_value_dl_datetime",
           "params": {
             "datatype": "datetime"
@@ -2243,7 +2250,7 @@
           "circuit_size": 3033
         }
       ],
-      "min_circuit_size": 3033,
+      "min_circuit_size": 3032,
       "max_circuit_size": 4502,
       "scaling": [],
       "invariances": []
@@ -2420,8 +2427,8 @@
   },
   "summary": {
     "families": 18,
-    "members": 69,
-    "snapshot_members": 69,
+    "members": 70,
+    "snapshot_members": 70,
     "scaling_pairs": 77,
     "invariance_facts": 3
   }
