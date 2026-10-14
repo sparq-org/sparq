@@ -1523,8 +1523,10 @@ fn tc_pairs(pairs: &FxHashSet<(Id, Id)>) -> FxHashSet<(Id, Id)> {
 //   layer's local fixpoint, is one round of a `ClosureRounds` allowance. A term refused
 //   for its size, or a spent allowance, reaches the cut checkpoint as
 //   `FullRebuild::Refused`, and the graph rebuilds through the batch engine under the same
-//   limits (which refuses, failing the graph closed, or — near a round or fact boundary,
-//   where the two schedules differ — returns its closure). tests/
+//   limits (which refuses, failing the graph closed, or — near a round, fact or join-row
+//   boundary, where the two schedules differ — returns its closure). Each wave and layer
+//   round also gets a `JoinWork` allowance (`max_join_rows`, GH #6938) that `n3_fire` and
+//   the guard check charge per binding row and per firing. tests/
 //   incremental_n3_closure_limits.rs checks the two agree at every term-size limit it
 //   sweeps, through construction, insert and delete.
 
@@ -1797,6 +1799,8 @@ struct N3Cx<'a> {
     /// The graph's cut record ([`crate::n3::bounded::Truncation`]). Kept apart from
     /// `unsupported`: a cut changes no result, so it never switches the evaluation path.
     cuts: &'a crate::n3::bounded::Truncation,
+    /// The round's join-work allowance ([`bounded::JoinWork`]), refused on `cuts`.
+    work: &'a bounded::JoinWork,
 }
 
 impl N3Cx<'_> {
@@ -1865,14 +1869,18 @@ fn n3_unify_atom(pat: &[N3Term; 3], fact: &[N3Term; 3], b: &NB) -> Option<NB> {
 
 /// Does the guard's inner conjunction match anywhere in the guard scope (under `b`; inner
 /// free variables are wildcards, bindings never leak — the engine's notIncludes semantics)?
-fn n3_guard_matches(inner: &[[N3Term; 3]], idx: &N3Index, b: &NB) -> bool {
+fn n3_guard_matches(inner: &[[N3Term; 3]], cx: &N3Cx, b: &NB) -> bool {
     let mut binds = vec![b.clone()];
     for pat in inner {
         let mut next = Vec::new();
         for bb in &binds {
             let (s, o) = (n3_apply(&pat[0], bb), n3_apply(&pat[2], bb));
-            for f in idx.candidates(&s, &pat[1], &o) {
+            for f in cx.guards.candidates(&s, &pat[1], &o) {
                 if let Some(nb) = n3_unify_atom(pat, &f, bb) {
+                    // A spent allowance refuses the run; the guard's answer is then moot.
+                    if !cx.work.charge(1, cx.cuts) {
+                        return false;
+                    }
                     next.push(nb);
                 }
             }
@@ -2041,6 +2049,9 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                 let mut next = Vec::new();
                 for b in &binds {
                     if let Some(nb) = n3_unify_atom(pat, f, b) {
+                        if !cx.work.charge(1, cx.cuts) {
+                            return Vec::new();
+                        }
                         next.push(nb);
                     }
                 }
@@ -2110,6 +2121,10 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                     let (s, o) = (n3_apply(&pat[0], b), n3_apply(&pat[2], b));
                     for f in cx.atom_candidates(&s, &pat[1], &o, phase) {
                         if let Some(nb) = n3_unify_atom(pat, &f, b) {
+                            // Each row is charged before it is kept, as the text engine does.
+                            if !cx.work.charge(1, cx.cuts) {
+                                return Vec::new();
+                            }
                             next.push(nb);
                         }
                     }
@@ -2128,9 +2143,13 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                 n3_term_vars(o, &mut bound);
             }
             N3Atom::Guard { inner } => {
-                binds.retain(|b| !n3_guard_matches(inner, cx.guards, b));
+                binds.retain(|b| !n3_guard_matches(inner, cx, b));
             }
         }
+    }
+    // The firings [`n3_emit`] instantiates, charged before any is built.
+    if !cx.work.charge(binds.len().saturating_mul(rule.conclusions.len()), cx.cuts) {
+        return Vec::new();
     }
     binds
 }
@@ -2628,10 +2647,15 @@ impl MaterializedN3Graph {
     /// under equal round or fact limits the graph can hold a closure that a from-scratch
     /// batch run near the boundary would refuse.
     ///
-    /// [`ClosureLimits`](crate::n3::ClosureLimits) bounds derived term size, rounds and
-    /// distinct facts. It does not bound the intermediate join work within a round (the
-    /// binding rows of a premise join, or how many times rules fire) on any engine, batch
-    /// or incremental, so memory is not bounded overall (GH #6938).
+    /// The counting path charges `max_join_rows` (GH #6938) as the batch engine does:
+    /// each binding row a plain atom, seed or guard clause produces, before it is stored,
+    /// and each conclusion a rule fires, once its premise is evaluated. Each wave, and each
+    /// round of a layer's local fixpoint, gets the allowance afresh. Its waves are not the
+    /// batch engine's rounds, so the two charge different amounts for the same facts.
+    /// Past the allowance the graph rebuilds through the batch engine, so the graph never
+    /// refuses a closure that the batch engine accepts. A mutation whose wave fits is
+    /// kept even when a from-scratch batch round over the new facts would pass the
+    /// allowance.
     ///
     /// # Errors
     ///
@@ -2900,6 +2924,7 @@ impl MaterializedN3Graph {
         let unsupported = Cell::new(false);
         let cuts = self.cuts.clone();
         let mut rounds = bounded::ClosureRounds::forward(&cuts);
+        let work = bounded::JoinWork::forward(&cuts);
         while !pending.is_empty() {
             let mut pend_set: FxHashSet<[N3Term; 3]> = pending.iter().cloned().collect();
             for f in &pending {
@@ -2912,6 +2937,7 @@ impl MaterializedN3Graph {
             // Charged with the wave in the index, so the closure a propagation publishes
             // (its last wave included) never holds more than the fact allowance.
             rounds.round(self.index.all.len(), &cuts)?;
+            work.round();
             let mut next: Vec<[N3Term; 3]> = Vec::new();
             let mut queued: FxHashSet<[N3Term; 3]> = FxHashSet::default();
             // 1. Recursive layers (dependency order), recomputed when touched. This runs
@@ -2998,6 +3024,7 @@ impl MaterializedN3Graph {
                     delta: Some((&pend_set, inserting)),
                     unsupported: &unsupported,
                     cuts: &cuts,
+                    work: &work,
                 };
                 for rule in &compiled.counted {
                     for atom in &rule.atoms {
@@ -3099,8 +3126,11 @@ impl MaterializedN3Graph {
         // Facts the local fixpoint holds that the closure does not (yet): with the
         // closure's own, what the closure would hold.
         let mut grown = 0usize;
+        // Each local round's own join-work allowance, apart from the enclosing wave's.
+        let work = bounded::JoinWork::forward(&cuts);
         while !pending.is_empty() {
             rounds.round(self.index.all.len().saturating_add(grown), &cuts)?;
+            work.round();
             let mut emissions = Vec::new();
             {
                 let cx = N3Cx {
@@ -3109,6 +3139,7 @@ impl MaterializedN3Graph {
                     delta: None,
                     unsupported,
                     cuts: &cuts,
+                    work: &work,
                 };
                 for rule in &def.rules {
                     for atom in &rule.atoms {
