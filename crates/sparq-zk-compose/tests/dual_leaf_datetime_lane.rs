@@ -42,12 +42,13 @@ use oxrdf::{Literal, NamedNode};
 use sparq_zk::commit::CommitmentMethod;
 use sparq_zk::dual_leaf::{DualLeafComponents, DualLeafError, LANG_NONE};
 use sparq_zk::dual_leaf_datetime::{encode_date, encode_datetime, XSD_DATE, XSD_DATE_TIME};
+use sparq_zk::commit::MethodUse;
 use sparq_zk::encode::TYPE_CODE_LITERAL;
 use sparq_zk::field::{field_from_hex_str, field_to_hex, Fr};
 use sparq_zk::poseidon2;
 use sparq_zk_compose::build::{
     build_filter_value_dl_date, build_filter_value_dl_datetime, signed_epoch_verdict,
-    BuiltFilterValueDlDateTime,
+    BuildValueDlV1Error, BuiltFilterValueDlDateTime,
 };
 use sparq_zk_compose::dispatch::{resolve_circuit, DispatchError};
 use sparq_zk_compose::manifest::{
@@ -200,6 +201,7 @@ fn builder_witnesses_rebind_to_the_committed_operand_enc() {
                 &dt_lit("2001-09-09T01:46:40Z"),
                 FilterOp::Ge,
                 &dt_lit("1970-01-01T00:00:00Z"),
+                MethodUse::LegacyAlreadyIssued,
             )
             .unwrap(),
             fr(&datetime_datatype_const()),
@@ -210,6 +212,7 @@ fn builder_witnesses_rebind_to_the_committed_operand_enc() {
                 &dt_lit("1969-12-31T23:59:59.5Z"),
                 FilterOp::Lt,
                 &dt_lit("1970-01-01T00:00:00Z"),
+                MethodUse::LegacyAlreadyIssued,
             )
             .unwrap(),
             fr(&datetime_datatype_const()),
@@ -220,12 +223,13 @@ fn builder_witnesses_rebind_to_the_committed_operand_enc() {
                 &dt_lit("1970-01-01T00:00:00Z"),
                 FilterOp::Eq,
                 &dt_lit("1970-01-01T00:00:00Z"),
+                MethodUse::LegacyAlreadyIssued,
             )
             .unwrap(),
             fr(&datetime_datatype_const()),
         ),
         (
-            build_filter_value_dl_date(&date_lit("1969-12-31Z"), FilterOp::Lt, &date_lit("1970-01-01Z"))
+            build_filter_value_dl_date(&date_lit("1969-12-31Z"), FilterOp::Lt, &date_lit("1970-01-01Z"), MethodUse::LegacyAlreadyIssued)
                 .unwrap(),
             fr(&date_datatype_const()),
         ),
@@ -256,7 +260,9 @@ fn the_epoch_is_never_witnessed_as_negative_zero() {
         &dt_lit("1970-01-01T00:00:00Z"),
         FilterOp::Eq,
         &dt_lit("1970-01-01T00:00:00Z"),
-    )
+    
+                MethodUse::LegacyAlreadyIssued,
+            )
     .unwrap();
     assert!(!built.value_neg, "a zero magnitude must report non-negative");
     assert_eq!(fr(&built.value_hook_scaled), Fr::from(0u64));
@@ -383,7 +389,9 @@ fn cross_precision_operands_are_ordered_by_the_one_member() {
         &dt_lit("2020-06-01T12:00:00Z"),
         FilterOp::Lt,
         &dt_lit("2020-06-01T12:00:00.5Z"),
-    )
+    
+                MethodUse::LegacyAlreadyIssued,
+            )
     .unwrap();
     let p = unpack(&built.inputs);
     assert!(p.expected, "T12:00:00Z is 500 ms BEFORE T12:00:00.5Z");
@@ -409,7 +417,7 @@ fn builder_discloses_the_honest_verdict_for_every_op() {
     ] {
         for op in ALL_OPS {
             let built =
-                build_filter_value_dl_datetime(&dt_lit(value), op, &dt_lit(bound)).unwrap();
+                build_filter_value_dl_datetime(&dt_lit(value), op, &dt_lit(bound), MethodUse::LegacyAlreadyIssued).unwrap();
             let p = unpack(&built.inputs);
             let want = signed_epoch_verdict(
                 built.value_neg,
@@ -447,23 +455,23 @@ fn non_canonical_lexicals_are_fail_closed_on_both_operands() {
     ] {
         assert!(
             matches!(
-                build_filter_value_dl_datetime(&dt_lit(bad), FilterOp::Lt, &ok),
-                Err(DualLeafError::NonCanonicalValue(_))
+                build_filter_value_dl_datetime(&dt_lit(bad), FilterOp::Lt, &ok, MethodUse::LegacyAlreadyIssued),
+                Err(BuildValueDlV1Error::Encode(DualLeafError::NonCanonicalValue(_)))
             ),
             "hidden operand {bad:?} must be fail-closed"
         );
         assert!(
             matches!(
-                build_filter_value_dl_datetime(&ok, FilterOp::Lt, &dt_lit(bad)),
-                Err(DualLeafError::NonCanonicalValue(_))
+                build_filter_value_dl_datetime(&ok, FilterOp::Lt, &dt_lit(bad), MethodUse::LegacyAlreadyIssued),
+                Err(BuildValueDlV1Error::Encode(DualLeafError::NonCanonicalValue(_)))
             ),
             "FILTER bound {bad:?} must be fail-closed"
         );
     }
     // Bare dates too — same §13.2 reason.
     assert!(matches!(
-        build_filter_value_dl_date(&date_lit("2020-01-01"), FilterOp::Lt, &date_lit("2021-01-01Z")),
-        Err(DualLeafError::NonCanonicalValue(_))
+        build_filter_value_dl_date(&date_lit("2020-01-01"), FilterOp::Lt, &date_lit("2021-01-01Z"), MethodUse::LegacyAlreadyIssued),
+        Err(BuildValueDlV1Error::Encode(DualLeafError::NonCanonicalValue(_)))
     ));
 }
 
@@ -476,25 +484,28 @@ fn cross_lane_operands_are_structurally_inexpressible() {
         build_filter_value_dl_datetime(
             &date_lit("2020-01-01Z"),
             FilterOp::Lt,
-            &dt_lit("2020-01-01T00:00:00Z")
+            &dt_lit("2020-01-01T00:00:00Z"),
+            MethodUse::LegacyAlreadyIssued,
         ),
-        Err(DualLeafError::NotValueLane(_))
+        Err(BuildValueDlV1Error::Encode(DualLeafError::NotValueLane(_)))
     ));
     assert!(matches!(
         build_filter_value_dl_datetime(
             &dt_lit("2020-01-01T00:00:00Z"),
             FilterOp::Lt,
-            &date_lit("2020-01-01Z")
+            &date_lit("2020-01-01Z"),
+            MethodUse::LegacyAlreadyIssued,
         ),
-        Err(DualLeafError::NotValueLane(_))
+        Err(BuildValueDlV1Error::Encode(DualLeafError::NotValueLane(_)))
     ));
     assert!(matches!(
         build_filter_value_dl_date(
             &date_lit("2020-01-01Z"),
             FilterOp::Lt,
-            &dt_lit("2020-01-01T00:00:00Z")
+            &dt_lit("2020-01-01T00:00:00Z"),
+            MethodUse::LegacyAlreadyIssued,
         ),
-        Err(DualLeafError::NotValueLane(_))
+        Err(BuildValueDlV1Error::Encode(DualLeafError::NotValueLane(_)))
     ));
 }
 
@@ -531,7 +542,9 @@ fn prover_toml_matches_the_member_main_declaration_order() {
         &dt_lit("1969-12-31T23:59:59.5Z"),
         FilterOp::Lt,
         &dt_lit("1970-01-01T00:00:00Z"),
-    )
+    
+                MethodUse::LegacyAlreadyIssued,
+            )
     .unwrap();
     let p = unpack(&built.inputs);
     let toml = filter_value_dl_datetime_prover_toml(
@@ -545,6 +558,25 @@ fn prover_toml_matches_the_member_main_declaration_order() {
         built.value_neg,
         &built.value_hook_scaled,
         &built.lexical_component,
+        MethodUse::LegacyAlreadyIssued,
+    )
+    .expect("the V1 dateTime lane constant rides its member under the legacy use");
+    // The LOCAL renderer the in-circuit vectors use emits those same bytes, so
+    // routing them around the host boundary cannot silently change the witness.
+    assert_eq!(
+        toml,
+        raw_datetime_toml(
+            &FieldHex("0x01".to_string()),
+            p.operand_enc,
+            p.op.code(),
+            p.bound_neg,
+            p.bound_scaled_epoch,
+            p.datatype_const,
+            p.expected,
+            built.value_neg,
+            &built.value_hook_scaled,
+            &built.lexical_component,
+        )
     );
     let lines: Vec<&str> = toml.lines().collect();
     assert!(lines[0].starts_with("challenge = "));
@@ -570,6 +602,7 @@ fn both_lanes_round_trip_on_the_shared_wire_tag() {
                 &dt_lit("2020-01-01T00:00:00Z"),
                 FilterOp::Ge,
                 &dt_lit("2019-01-01T00:00:00Z"),
+                MethodUse::LegacyAlreadyIssued,
             )
             .unwrap(),
             datetime_datatype_const(),
@@ -579,6 +612,7 @@ fn both_lanes_round_trip_on_the_shared_wire_tag() {
                 &date_lit("2020-01-01Z"),
                 FilterOp::Ge,
                 &date_lit("2019-01-01Z"),
+                MethodUse::LegacyAlreadyIssued,
             )
             .unwrap(),
             date_datatype_const(),
@@ -599,6 +633,45 @@ fn both_lanes_round_trip_on_the_shared_wire_tag() {
 // =========================================================================
 // 7. IN-CIRCUIT vectors — real witness solving. Skip cleanly with no toolchain.
 // =========================================================================
+
+/// The dateTime member's `Prover.toml` layout, rendered LOCALLY.
+///
+/// The library renderer now refuses a `(member, datatype_const)` pairing the lane
+/// table does not allow, which is the host boundary this suite also tests. The
+/// IN-CIRCUIT vectors below must be able to hand the member a pairing that
+/// boundary refuses — that is how they measure what the RELATION does — so they
+/// render the bytes here. The field order is the member `main`'s, and
+/// `prover_toml_matches_the_member_main_declaration_order` pins the library
+/// renderer's own bytes for an ALLOWED pairing.
+#[allow(clippy::too_many_arguments)]
+fn raw_datetime_toml(
+    challenge: &FieldHex,
+    operand_enc: &FieldHex,
+    op: u32,
+    bound_neg: bool,
+    bound_scaled_epoch: u64,
+    datatype_const: &FieldHex,
+    expected: bool,
+    value_neg: bool,
+    value_hook_scaled: &FieldHex,
+    lexical_component: &FieldHex,
+) -> String {
+    format!(
+        "challenge = \"{}\"\noperand_enc = \"{}\"\nop = \"{}\"\nbound_neg = {}\n\
+         bound_scaled_epoch = \"{}\"\ndatatype_const = \"{}\"\nexpected = {}\n\
+         value_neg = {}\nvalue_hook_scaled = \"{}\"\nlexical_component = \"{}\"\n",
+        challenge.0,
+        operand_enc.0,
+        op,
+        bound_neg,
+        bound_scaled_epoch,
+        datatype_const.0,
+        expected,
+        value_neg,
+        value_hook_scaled.0,
+        lexical_component.0,
+    )
+}
 
 fn toolchain_available() -> bool {
     std::process::Command::new("nargo")
@@ -623,7 +696,7 @@ fn member_accepts(
     value_hook_scaled: &FieldHex,
     lexical_component: &FieldHex,
 ) -> bool {
-    let toml = filter_value_dl_datetime_prover_toml(
+    let toml = raw_datetime_toml(
         &FieldHex("0x01".to_string()),
         operand_enc,
         op.code(),
@@ -676,7 +749,9 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
         &dt_lit("2001-09-09T01:46:40Z"),
         FilterOp::Ge,
         &dt_lit("1970-01-02T00:00:00Z"),
-    )
+    
+                MethodUse::LegacyAlreadyIssued,
+            )
     .unwrap();
     assert!(unpack(&post.inputs).expected);
     assert!(
@@ -689,7 +764,9 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
         &dt_lit("1969-12-31T23:59:59.5Z"),
         FilterOp::Lt,
         &dt_lit("1970-01-01T00:00:00Z"),
-    )
+    
+                MethodUse::LegacyAlreadyIssued,
+            )
     .unwrap();
     assert!(pre.value_neg && unpack(&pre.inputs).expected);
     assert!(
@@ -739,7 +816,9 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
         &date_lit("1970-01-02Z"),
         FilterOp::Eq,
         &date_lit("1970-01-02Z"),
-    )
+    
+                MethodUse::LegacyAlreadyIssued,
+            )
     .unwrap();
     let dp = unpack(&date.inputs);
     let instant: DualLeafComponents = encode_datetime(&dt_lit("1970-01-02T00:00:00Z")).unwrap();
@@ -782,4 +861,53 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
         ),
         "an xsd:dateTime leaf must be unprovable under the xsd:date datatype_const"
     );
+}
+
+/// Both V1 temporal builders are behind the issuance boundary: a FRESH build is
+/// refused because the lane constant they pin is a `DualLeafV1` one, while the
+/// legacy use builds. The refusal is distinguishable from the encoder's own
+/// fail-closed rejection of a non-canonical literal.
+#[test]
+fn a_fresh_build_is_refused_on_both_temporal_lanes() {
+    let dt = build_filter_value_dl_datetime(
+        &dt_lit("2020-01-01T00:00:00Z"),
+        FilterOp::Ge,
+        &dt_lit("2019-01-01T00:00:00Z"),
+        MethodUse::NewIssuance,
+    );
+    match dt {
+        Err(BuildValueDlV1Error::Pairing(DispatchError::LegacyLaneConstForIssuance {
+            ref lane,
+            ..
+        })) => assert!(lane.contains("dateTime"), "{}", lane),
+        other => panic!("expected the legacy-constant refusal, got {:?}", other),
+    }
+    let date = build_filter_value_dl_date(
+        &date_lit("2020-01-01Z"),
+        FilterOp::Ge,
+        &date_lit("2019-01-01Z"),
+        MethodUse::NewIssuance,
+    );
+    match date {
+        Err(BuildValueDlV1Error::Pairing(DispatchError::LegacyLaneConstForIssuance {
+            ref lane,
+            ..
+        })) => assert!(lane.contains("date"), "{}", lane),
+        other => panic!("expected the legacy-constant refusal, got {:?}", other),
+    }
+    // The legacy use still builds, so already-issued V1 graphs keep working.
+    assert!(build_filter_value_dl_datetime(
+        &dt_lit("2020-01-01T00:00:00Z"),
+        FilterOp::Ge,
+        &dt_lit("2019-01-01T00:00:00Z"),
+        MethodUse::LegacyAlreadyIssued,
+    )
+    .is_ok());
+    assert!(build_filter_value_dl_date(
+        &date_lit("2020-01-01Z"),
+        FilterOp::Ge,
+        &date_lit("2019-01-01Z"),
+        MethodUse::LegacyAlreadyIssued,
+    )
+    .is_ok());
 }

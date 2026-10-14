@@ -92,7 +92,7 @@ an empty crate.
    order-driven reference executor. Mid-operator adaptivity + live source failover are
    deferred (beaded under epic sq-3183).
 
-[OPUS-4.8] sq-a35t / sq-vf7q / sq-7s4z / sq-gxx7 — flagged for Fable re-review."#
+sq-a35t / sq-vf7q / sq-7s4z / sq-gxx7 — flagged for Fable re-review."#
 )]
 // Default (fedplan OFF) build: a concise, link-free crate doc. None of the per-phase modules /
 // re-exported items linked above exist in this build, so the doc is plain text + code spans
@@ -114,7 +114,7 @@ engine build and the WASM artifact are byte-identical with or without `sparq-fed
 adaptive re-planning (`AdaptiveExecutor`) is behind the further `adaptive-replan` feature
 (which implies `fedplan`).
 
-[OPUS-4.8] sq-a35t / sq-vf7q / sq-7s4z / sq-gxx7 — flagged for Fable re-review."#
+sq-a35t / sq-vf7q / sq-7s4z / sq-gxx7 — flagged for Fable re-review."#
 )]
 #![forbid(unsafe_code)]
 // sq-a35t: crate has zero `unsafe`.
