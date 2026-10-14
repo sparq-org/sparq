@@ -48,7 +48,7 @@
 use crate::source::{FragBinding, FragTerm};
 
 /// The 4-byte magic prefixing a binary brTPF binding block: ASCII `"bTPF"`. Lets a reader
-/// reject a buffer that is not a binding block before interpreting any length..
+/// reject a buffer that is not a binding block before interpreting any length.
 pub const BINARY_MAGIC: [u8; 4] = *b"bTPF";
 
 /// The binary wire format version (the byte after [`BINARY_MAGIC`]). Bumped on any
@@ -72,7 +72,7 @@ const KIND_BLANK: u8 = 1;
 const KIND_LITERAL: u8 = 2;
 
 /// A failure decoding a binary brTPF binding block. Every variant is a *clean* error — a
-/// malformed or truncated buffer never panics and never reads out of bounds..
+/// malformed or truncated buffer never panics and never reads out of bounds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WireError {
     /// The buffer was shorter than the fixed header, or a length field pointed past the

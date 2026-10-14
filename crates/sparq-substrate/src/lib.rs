@@ -32,7 +32,7 @@
 // so a wholesale `Value` relocation would be non-neutral and sprawling — the correct seam moves
 // the ALGORITHM, leaving `Value` engine-resident; see the deferred-remainder note in the PR).
 //
-// sq-v5evr (un-parked,): the VALUE-SPACE RELATIONAL COMPARE — the XPath
+// sq-v5evr (un-parked): the VALUE-SPACE RELATIONAL COMPARE — the XPath
 // `op:numeric-less-than`/`op:numeric-equal` semantics, where NaN is incomparable (`None`)
 // and same-tier pairs compare exactly via the `Dec` tower — has been added to the `numeric`
 // module as `Num::cmp_relational`. This is the correct comparison for SPARQL `<`/`>`/`=`

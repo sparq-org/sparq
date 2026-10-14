@@ -1,4 +1,4 @@
-//! The rebuild-on-boot + reconcile contract (sq-oddt,).
+//! The rebuild-on-boot + reconcile contract (sq-oddt).
 //!
 //! `TextIndex` carries no on-disk format; under a stateless-core invariant it is
 //! rebuilt on boot and kept warm by `reconcile`. These tests pin the contract:
