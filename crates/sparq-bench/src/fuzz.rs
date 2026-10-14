@@ -73,7 +73,7 @@ use crate::neutral::{neutral_solution, neutral_triple};
 // the file re-enables the strict differential for that class, so the JSON — not this
 // code — is the source of truth for WHAT is adjudicated (the code only carries the
 // per-class detectors). A missing/unreadable/malformed file runs STRICT (toward
-// flagging, never toward skipping).
+// flagging, never toward skipping). [FABLE-5]
 
 struct DivergenceAllowlist {
     /// sq-eibog: cross-family literal `=`/`!=` type errors (Oxigraph is lenient;
@@ -182,7 +182,7 @@ impl Rng {
 /// (xsd:int / xsd:decimal / negative / non-canonical integer / string) → the
 /// range-pruning guard must fall back to a full scan and still be correct.
 ///
-/// sq-qcnn.6 — the TYPED-LITERAL columns (`ex:when` / `ex:day` / `ex:dur` /
+/// [SONNET-4.6] sq-qcnn.6 — the TYPED-LITERAL columns (`ex:when` / `ex:day` / `ex:dur` /
 /// `ex:flag` / `ex:huge` / `ex:dbl`) extend the data generator past the numeric-and-string
 /// space the columns above cover, into the datatype families where the two engines'
 /// STORES legitimately disagree about the lexical they hand back. That disagreement is the
@@ -941,7 +941,7 @@ fn gen_query(rng: &mut Rng, category: &str) -> String {
 
 /// Oxigraph's solution CARDINALITY, for the count differential. `SELECT` only.
 ///
-/// sq-qcnn.5: the non-`SELECT` arms deliberately REFUSE rather than return a count.
+/// [OPUS-5] sq-qcnn.5: the non-`SELECT` arms deliberately REFUSE rather than return a count.
 /// They used to read `Boolean(_) => 1` and `Graph(g) => g.count()`, which made an `ASK`
 /// oracle doubly blind (`false` and `true` are both "one") and reduced a `CONSTRUCT` to a
 /// triple tally that cannot see a graph landing on the wrong triples. `run` dispatches those
@@ -1270,7 +1270,7 @@ fn spec_filter_count(store: &Store, q: &str) -> Option<usize> {
 /// with an IRI on the other. The current generator emits no blank nodes and Oxigraph
 /// shares sparq's identity reading of non-literal `=`/`!=`, so this cannot fire
 /// today; it exists so generator/oracle growth (or an Oxigraph behaviour change)
-/// surfaces as an ADJUDICATED skip-with-count instead of a false positive.
+/// surfaces as an ADJUDICATED skip-with-count instead of a false positive. [FABLE-5]
 fn is_bnode_iri_inequality(store: &Store, q: &str) -> bool {
     use oxigraph::model::Term;
     let Some(f) = parse_eq_filter(q) else {
@@ -1829,7 +1829,7 @@ pub fn run(seed_start: u64, count: u64, category: &str) {
     let mut adjudicated_bnode_iri = 0u64;
     let mut full_mismatch = 0u64;
     let mut count_mismatch = 0u64;
-    // sq-qcnn.5: ONE COUNTER PER `Compared` VARIANT. These outcomes are not
+    // [OPUS-5] sq-qcnn.5: ONE COUNTER PER `Compared` VARIANT. These outcomes are not
     // interchangeable — a row-choice skip is a case that is not value-differential-testable at
     // all, a triage outcome is an answer nobody compared, and the four compared kinds say WHICH
     // oracle ran — so a run that quietly stopped comparing values shows up as a number rather
@@ -1926,11 +1926,11 @@ pub fn run(seed_start: u64, count: u64, category: &str) {
             continue;
         }
 
-        // sq-qcnn.5: the RESULT FORM decides which comparison is SOUND, so it is
+        // [OPUS-5] sq-qcnn.5: the RESULT FORM decides which comparison is SOUND, so it is
         // dispatched FIRST. `ASK` and `CONSTRUCT`/`DESCRIBE` are compared by VALUE — the
         // boolean itself, the canonical triple set — and never enter the cardinality flow,
         // where an `ASK` would collapse to "one row" whatever it answered and a graph to a
-        // triple tally. sq-qcnn.6 landed the generator side: the `ask` and
+        // triple tally. [SONNET-4.6] sq-qcnn.6 landed the generator side: the `ask` and
         // `construct` categories now emit those two forms, so this dispatch is live rather
         // than merely wired, and `expected_form` (in the tests) pins which category reaches
         // which comparator.
@@ -2103,7 +2103,7 @@ pub fn run(seed_start: u64, count: u64, category: &str) {
         }
     }
 
-    // sq-qcnn.5: one field per `Compared` variant, so the log records WHICH
+    // [OPUS-5] sq-qcnn.5: one field per `Compared` variant, so the log records WHICH
     // value-level oracle ran on how many cases — not merely that "bindings" were checked.
     let value_compared =
         compared_multiset + compared_ordered + compared_iso + compared_ask + compared_graph;
@@ -2447,7 +2447,7 @@ ex:n4 ex:val "s2" .
 
     /// The COMMITTED allowlist (bench/differential-divergences.json) must parse and
     /// enable exactly the adjudicated classes — pins the JSON ids ⟷ this comparator's
-    /// detectors so neither can drift silently (sq-0iqzw).
+    /// detectors so neither can drift silently (sq-0iqzw). [FABLE-5]
     #[test]
     fn committed_allowlist_enables_exactly_the_adjudicated_classes() {
         let path = concat!(
@@ -2545,7 +2545,7 @@ ex:n4 ex:val "s2" .
     /// makes on `query_form` before choosing a comparator. Written as data rather than
     /// derived from a generated query, so a category that CHANGED form (and so changed
     /// which oracle judges it) fails `generator_invariants_hold_for_every_category`
-    /// instead of silently moving to another comparator. sq-qcnn.6
+    /// instead of silently moving to another comparator. [SONNET-4.6] sq-qcnn.6
     fn expected_form(cat: &str) -> Form {
         match cat {
             "ask" => Form::Ask,
@@ -2685,7 +2685,7 @@ ex:n4 ex:val "s2" .
                          this query\n{q}"
                     );
                 }
-                // sq-qcnn.5: `ORDER BY` is no longer confined to the `order`
+                // [OPUS-5] sq-qcnn.5: `ORDER BY` is no longer confined to the `order`
                 // category — `compare_select` derives the sort-key equivalence classes from
                 // the clause itself. What must hold instead is that `order_by_vars` MODELS
                 // every clause the generator emits: an unmodelled clause silently downgrades
@@ -2696,7 +2696,7 @@ ex:n4 ex:val "s2" .
                     "category {cat}: `order_by_vars` does not model this ORDER BY, so the \
                      case would silently lose its ORDER oracle\n{q}"
                 );
-                // sq-qcnn.6: the RESULT FORM decides which comparator judges
+                // [SONNET-4.6] sq-qcnn.6: the RESULT FORM decides which comparator judges
                 // the case (`run` dispatches on `query_form` before the cardinality flow),
                 // so each category must keep emitting the form `expected_form` records for
                 // it. A category that drifted — an `ask` shape that came out a `SELECT`,
@@ -3071,7 +3071,7 @@ ex:n0 ex:age 10 . ex:n1 ex:age 20 . ex:n2 ex:age 30 .
     /// A graph with chains (`ex:p`), a value column and names — enough for the
     /// path / aggregate / subquery / values / bind shapes to bind real rows.
     ///
-    /// sq-qcnn.6: it also carries at least one literal from each typed family the
+    /// [SONNET-4.6] sq-qcnn.6: it also carries at least one literal from each typed family the
     /// generator emits, including the lexicals Oxigraph re-canonicalises on load
     /// (`"1"^^xsd:boolean`, `"1.5E3"^^xsd:double`) and the specials, so the `typed`
     /// category is value-compared against real rows here rather than against an
@@ -3355,7 +3355,7 @@ ex:n2 ex:dbl "NaN"^^xsd:double . ex:n3 ex:dbl "1.5E3"^^xsd:double .
         );
     }
 
-    /// A window's TOTALITY must be read off the result HEADER, never off the
+    /// [SONNET-4.6] A window's TOTALITY must be read off the result HEADER, never off the
     /// bindings of the ALREADY-SLICED rows.
     ///
     /// A projected variable unbound in every SURVIVING row has vanished from those rows — even
@@ -3472,7 +3472,7 @@ ex:n2 ex:dbl "NaN"^^xsd:double . ex:n3 ex:dbl "1.5E3"^^xsd:double .
         assert!(compare_answers(&sparq, &swapped, by_a_s_a).is_err());
     }
 
-    /// A HEADER-only disagreement is a MISMATCH, not a pass and not a skip.
+    /// [SONNET-4.6] A HEADER-only disagreement is a MISMATCH, not a pass and not a skip.
     ///
     /// A projected-but-unbound variable exists ONLY in the result header — `rows` records bound
     /// pairs — so an engine that omits (or invents) a projected variable can produce row maps
@@ -3548,7 +3548,7 @@ ex:n2 ex:dbl "NaN"^^xsd:double . ex:n3 ex:dbl "1.5E3"^^xsd:double .
                 let mut rng = Rng::new(seed);
                 let _ = gen_graph(&mut rng); // keep the generator's draw sequence
                 let q = gen_query(&mut rng, cat);
-                // sq-qcnn.6: the non-`SELECT` forms have no cardinality flow
+                // [SONNET-4.6] sq-qcnn.6: the non-`SELECT` forms have no cardinality flow
                 // to gate on — they are value-compared directly by `run`, so they are
                 // value-compared directly here.
                 match expected_form(cat) {
@@ -3604,7 +3604,7 @@ ex:n2 ex:dbl "NaN"^^xsd:double . ex:n3 ex:dbl "1.5E3"^^xsd:double .
         }
     }
 
-    /// sq-qcnn.5: a blank-node answer is no longer routed to a bare triage bucket —
+    /// [OPUS-5] sq-qcnn.5: a blank-node answer is no longer routed to a bare triage bucket —
     /// it is COMPARED, up to blank-node ISOMORPHISM (RDFC-1.0 canonical labelling via
     /// `sparq-difftest`), because bnode labels are engine-local and only a bijection is well
     /// defined. Both directions are pinned: agreeing answers with DIFFERENT labels must
