@@ -769,41 +769,8 @@ fn store_error(e: ServerError) -> Response {
 
 // ---- content negotiation ----
 
-/// One media range of an Accept header.
-struct Range {
-    essence: String,
-    q: f32,
-    profile: Option<String>,
-}
-
-fn parse_accept(accept: &str) -> Vec<Range> {
-    accept
-        .split(',')
-        .filter_map(|part| {
-            let mut pieces = part.split(';');
-            let essence = pieces.next()?.trim().to_ascii_lowercase();
-            if essence.is_empty() {
-                return None;
-            }
-            let mut q = 1.0;
-            let mut profile = None;
-            for p in pieces {
-                if let Some((k, v)) = p.split_once('=') {
-                    let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"'));
-                    if k == "q" {
-                        q = v.parse().unwrap_or(0.0);
-                    } else if k == "profile" {
-                        profile = Some(v.to_string());
-                    }
-                }
-            }
-            Some(Range {
-                essence,
-                q,
-                profile,
-            })
-        })
-        .collect()
+fn parse_accept(accept: &str) -> Vec<crate::accept::MediaRange<'_>> {
+    crate::accept::media_ranges(accept).collect()
 }
 
 /// The best of `offered` for `accept` (earlier offers win ties); the first offer when Accept is
@@ -813,22 +780,14 @@ pub(super) fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String
         return offered.first().map(|s| s.to_string());
     };
     let ranges = parse_accept(accept);
-    let mut best: Option<(f32, usize, usize)> = None; // (q, specificity, offer index)
+    let mut best: Option<(f32, u8, usize)> = None; // (q, specificity, offer index)
     for (i, offer) in offered.iter().enumerate() {
-        let (otype, _) = offer.split_once('/').unwrap_or((offer, ""));
-        let mut q_for: Option<(f32, usize)> = None;
+        let mut q_for: Option<(f32, u8)> = None;
         for r in &ranges {
-            let spec = if r.essence == *offer {
-                3
-            } else if r.essence == format!("{otype}/*") {
-                2
-            } else if r.essence == "*/*" {
-                1
-            } else {
-                0
-            };
-            if spec > 0 && q_for.is_none_or(|(_, s)| spec > s) {
-                q_for = Some((r.q, spec));
+            if let Some(spec) = r.specificity(offer) {
+                if q_for.is_none_or(|(_, s)| spec > s) {
+                    q_for = Some((r.q, spec));
+                }
             }
         }
         if let Some((q, spec)) = q_for {
@@ -853,7 +812,7 @@ pub(crate) fn negotiate_container(accept: Option<&str>) -> Option<String> {
     if let Some(a) = accept {
         if parse_accept(a)
             .iter()
-            .any(|r| r.essence == LD_JSON && r.profile.as_deref() == Some(LWS_CONTEXT) && r.q > 0.0)
+            .any(|r| r.essence == LD_JSON && r.param("profile") == Some(LWS_CONTEXT) && r.q > 0.0)
         {
             return Some(ld_json_lws_profile());
         }

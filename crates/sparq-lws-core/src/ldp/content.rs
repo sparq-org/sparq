@@ -528,25 +528,14 @@ pub fn negotiate_accept_with_profile(
         *slot = Some(slot.unwrap_or(0.0).max(q));
     }
 
-    for part in raw.split(',') {
-        let mut it = part.split(';');
-        let media = it.next().unwrap_or("").trim().to_ascii_lowercase();
-        // Parse the parameters: an optional q-value (default 1.0; clamp to [0,1]; a malformed q is
-        // treated as 0 — RFC 7231 §5.3.1, an unparseable weight is not "accepted") and an optional
-        // `profile` (media-type parameter names are case-insensitive; the IRI value is not).
-        let mut q: f32 = 1.0;
-        let mut profile: Option<JsonLdProfileParam> = None;
-        for param in it {
-            let Some((name, value)) = param.split_once('=') else {
-                continue;
-            };
-            match name.trim().to_ascii_lowercase().as_str() {
-                "q" => q = value.trim().parse::<f32>().unwrap_or(0.0).clamp(0.0, 1.0),
-                "profile" => profile = JsonLdProfileParam::from_param_value(value),
-                _ => {}
-            }
-        }
-        match media.as_str() {
+    for range in crate::accept::media_ranges(raw) {
+        // The shared grammar gives the weight (a malformed one is 0, never "accepted") and the
+        // `profile` parameter (its name is case-insensitive; the IRI value is not).
+        let q = range.q;
+        let profile = range
+            .param("profile")
+            .and_then(JsonLdProfileParam::from_param_value);
+        match range.essence.as_str() {
             "text/*" => bump(&mut q_text_star, q),
             "application/*" => bump(&mut q_app_star, q),
             "*/*" => bump(&mut q_any, q),
