@@ -85,8 +85,9 @@ pub enum CommitmentMethod {
     /// (iii) `dual-leaf` (`zk:poseidon2-dualleaf-v1`): a value handle AND a
     /// lexical-identity hash in one leaf. **REMOVES INV-VL** (value<->lexical
     /// agreement becomes trusted-issuer-honesty, #769 accepted at research grade;
-    /// CR-G8 / sq-qhy4). Config-only here; the leaf encoding is sq-j506 (NOT
-    /// implemented).
+    /// CR-G8 / sq-qhy4). SUPERSEDED by [`Self::DualLeafV2`] for new issuance and
+    /// so no longer production-selectable, but recognised and verifiable. Host
+    /// encoding: `crate::dual_leaf` (the `dual-leaf` feature).
     DualLeafV1,
     /// (iii-b) `dual-leaf` **v2** (`zk:poseidon2-dualleaf-v2`): the VERSIONED
     /// dual-leaf scheme — value-lane constants derived in BLAKE3's
