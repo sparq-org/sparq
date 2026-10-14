@@ -59,7 +59,7 @@
 //! `sparq-policy`'s `secprop-leftoperands`, `sparq-zk`'s `secprop-annotations`), so
 //! their lean default builds are byte-unchanged.
 //!
-//! [OPUS-5] sq-3705 (extracted from `sparq-trust::secprop`, bead sq-5oru9, epic
+//! sq-3705 (extracted from `sparq-trust::secprop`, bead sq-5oru9, epic
 //! sq-0dksu). 🤖 SPARQ agent — security-properties ontology.
 
 /// The `sec-prop:` namespace base (the vendored ZKP-SPARQL namespace this extends —

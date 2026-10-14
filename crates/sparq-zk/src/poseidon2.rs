@@ -196,7 +196,7 @@ mod tests {
         assert_ne!(a, c, "length must enter the IV");
     }
 
-    // [OPUS-4.8] sq-qcnn.25: the empty-input branch. An empty input still runs the
+    // sq-qcnn.25: the empty-input branch. An empty input still runs the
     // final permutation (`(in_len == 0) | (in_len % RATE != 0)`), so the digest is
     // the permuted state[0], NOT the pre-permutation zero. Deterministic + distinct
     // from a single explicit zero element (which carries a different length IV).

@@ -1,4 +1,4 @@
-// [OPUS-4.8] Shared value types crossing the MPC module boundaries (M0).
+// Shared value types crossing the MPC module boundaries (M0).
 //! Shared, crypto-free value types used across the MPC module boundaries.
 //!
 //! Architecture refs: §4.1 (parties — holders are identified), §4.3 step 3
@@ -118,7 +118,7 @@ pub enum MpcError {
     /// dishonest-majority-malicious request over the SPARQL pipeline returns this,
     /// never a downgraded answer. `requirement` is the human-readable requirement
     /// that could not be met; `considered` is how many backends were inspected and
-    /// rejected. `[OPUS-4.8]`
+    /// rejected.
     NoBackendSatisfies {
         requirement: String,
         considered: usize,
@@ -151,7 +151,6 @@ pub enum MpcError {
     /// over-determination check, which needs `n > 2t+1` redundancy): this check
     /// works at the MINIMAL `n = 2t+1` because soundness comes from the *secret*
     /// `α`, not from codeword redundancy. `detail` describes the batch that failed.
-    /// `[OPUS-4.8]`
     MacCheckFailed { detail: String },
 }
 
