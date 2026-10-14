@@ -1604,15 +1604,18 @@ mod tests {
             .collect()
     }
 
-    /// **Exact** degree check with NO error correction: interpolate through the
-    /// first `degree+1` shares and require EVERY share to lie on that polynomial;
-    /// return `P(0)`.
+    /// **Exact** consistency check with NO error correction: interpolate through
+    /// the first `degree+1` shares and require EVERY share to lie on that
+    /// polynomial; return `P(0)`.
+    ///
+    /// This pins degree **<= `degree`**, not *exactly* `degree`: a lower-degree
+    /// sharing lies on its own degree-`degree` interpolant and is accepted. To pin
+    /// FULL degree `d`, pair `exact_open(_, d).is_ok()` with
+    /// `exact_open(_, d - 1).is_err()`, as `open_column` does.
     ///
     /// Deliberately NOT `ShamirBackend::reconstruct`, which is the robust open: it
-    /// CORRECTS up to `e` tampered shares and accepts a sharing of degree *below*
-    /// `t`, so it would pass a sharing this crate's own rounds must never produce.
-    /// A test that wants "the output is exactly a degree-`t` sharing of `v`" needs
-    /// this.
+    /// CORRECTS up to `e` tampered shares, so it would pass a tampered or
+    /// wrong-degree sharing this crate's own rounds must never produce.
     fn exact_open(shares: &[Share], degree: usize) -> Result<Fp, String> {
         let base: Vec<u64> = shares[..degree + 1].iter().map(|sh| sh.x).collect();
         let at = |z: Fp| -> Fp {
@@ -1633,9 +1636,11 @@ mod tests {
     }
 
     /// Reconstruct a column back to its cleartext rows, asserting on the way that
-    /// every element is EXACTLY a consistent degree-`t` sharing ([`exact_open`]) —
-    /// a round that produced a wrong-degree, lower-degree or inconsistent sharing
-    /// fails here rather than returning a plausible number.
+    /// every element is a consistent sharing of degree exactly `t` — consistent at
+    /// `t` via [`exact_open`], and NOT consistent at `t - 1`, which is what rules
+    /// a degree-collapsing round out. A round that produced a wrong-degree,
+    /// lower-degree or inconsistent sharing fails here rather than returning a
+    /// plausible number.
     fn open_column(
         backend: &ShamirBackend,
         col: &crate::oblivious::SecretColumn,
@@ -1648,9 +1653,18 @@ mod tests {
             .map(|(j, entry)| {
                 (0..elements)
                     .map(|e| {
-                        exact_open(&entry[e * n..(e + 1) * n], t)
+                        let el = &entry[e * n..(e + 1) * n];
+                        let v = exact_open(el, t)
                             .unwrap_or_else(|why| panic!("entry {j} element {e}: {why}"))
-                            .value()
+                            .value();
+                        // Consistent at t is only half of "degree t": a sharing of
+                        // degree BELOW t is consistent at t too, and a round that
+                        // collapsed the degree would slip through.
+                        assert!(
+                            t == 0 || exact_open(el, t - 1).is_err(),
+                            "entry {j} element {e}: degree is below t = {t}, not exactly t"
+                        );
+                        v
                     })
                     .collect()
             })
@@ -2445,44 +2459,137 @@ mod tests {
         }
     }
 
-    /// The degree refusal must name the POSITION and nothing else: a share value,
-    /// or the interpolant's value at the offending point, is secret-shared data
-    /// and must not reach a log. At `n = 3`, `t = 1` either number plus one
+    /// The degree refusal must name the POSITION and nothing else. Two kinds of
+    /// number are forbidden: any SHARE of the column, and the INTERPOLANT's value
+    /// at any redundant point (the other side of the comparison that fails). Both
+    /// are secret-shared data; at `n = 3`, `t = 1` either one plus a single
     /// party's own share reconstructs the secret.
     #[test]
     fn the_degree_refusal_leaks_no_share_value() {
-        let n = 3;
-        let secret_a = 123_456_789u64;
-        let secret_b = 987_654_321u64;
-        let backend = ShamirBackend::new_seeded(n, 0x5E0A).unwrap();
-        let mut dealer = backend.dealer();
-        let a = dealer.share(Fp::new(secret_a));
-        let b = dealer.share(Fp::new(secret_b));
-        let product = crate::shamir::mul_shares_raw(&a, &b).unwrap();
-        let good = dealer.share(Fp::new(7));
-        let forbidden: BTreeSet<u64> = product
-            .iter()
-            .chain(&a)
-            .chain(&b)
-            .chain(&good)
-            .map(|sh| sh.y.value())
-            .chain([secret_a, secret_b])
-            .collect();
-
-        let mut source = PrssRandomness::with_seeded_setup(n, 5).unwrap();
-        let Err(MpcError::Protocol(msg)) = source.oblivious_shuffle(vec![good, product]) else {
-            panic!("the degree-2t column must be refused");
-        };
-        // The message names the position, which the caller needs.
-        assert!(
-            msg.contains("entry 1") && msg.contains("element 0"),
-            "{msg}"
-        );
-        for value in forbidden {
+        for n in [3usize, 5, 7] {
+            let t = (n - 1) / 2;
+            let secret_a = 123_456_789u64;
+            let secret_b = 987_654_321u64;
+            let backend = ShamirBackend::new_seeded(n, 0x5E0A).unwrap();
+            let mut dealer = backend.dealer();
+            let a = dealer.share(Fp::new(secret_a));
+            let b = dealer.share(Fp::new(secret_b));
+            // Degree 2t <= n - 1, so it IS a consistent sharing on the n points -
+            // just of the wrong degree, which is exactly the hazard.
+            let product = crate::shamir::mul_shares_raw(&a, &b).unwrap();
+            let good = dealer.share(Fp::new(7));
+            let mut forbidden: BTreeSet<u64> = product
+                .iter()
+                .chain(&a)
+                .chain(&b)
+                .chain(&good)
+                .map(|sh| sh.y.value())
+                .chain([secret_a, secret_b, secret_a.wrapping_mul(secret_b)])
+                .collect();
+            // The interpolant through the first t+1 shares, evaluated at every
+            // redundant point: these are the values the check extrapolates and
+            // compares against, and printing one of them leaks just as much.
+            let base: Vec<u64> = (1..=t as u64 + 1).collect();
+            for x in (t + 2)..=n {
+                let weights = lagrange_weights_at(&base, Fp::new(x as u64));
+                let extrapolated = weights
+                    .iter()
+                    .zip(&product)
+                    .fold(Fp::zero(), |acc, (w, sh)| acc.add(w.mul(sh.y)));
+                forbidden.insert(extrapolated.value());
+            }
+            // Every forbidden number is wide, so `contains` cannot match it by
+            // accident inside an index or a threshold the message legitimately
+            // carries (the fixtures are seeded, so this is deterministic).
             assert!(
-                !msg.contains(&value.to_string()),
-                "the refusal leaked a share value ({value}): {msg}"
+                forbidden.iter().all(|v| *v > 1_000_000),
+                "n = {n}: a forbidden value is too small to test by substring"
             );
+
+            let mut source = PrssRandomness::with_seeded_setup(n, 5).unwrap();
+            let Err(MpcError::Protocol(msg)) = source.oblivious_shuffle(vec![good, product]) else {
+                panic!("n = {n}: the degree-2t column must be refused");
+            };
+            // The message names the position, which the caller needs.
+            assert!(msg.contains("entry 1"), "n = {n}: {msg}");
+            assert!(msg.contains("element 0"), "n = {n}: {msg}");
+            for value in forbidden {
+                assert!(
+                    !msg.contains(&value.to_string()),
+                    "n = {n}: the refusal leaked a secret value ({value}): {msg}"
+                );
+                assert!(
+                    !msg.contains(&format!("{:x}", value)),
+                    "n = {n}: the refusal leaked a secret value in hex ({:x}): {msg}",
+                    value
+                );
+            }
+        }
+    }
+
+    /// No member of `A` may take part in round `a`: the recombiners are `S_A`'s
+    /// `t+1` lowest members, and a party in `A` (which does not hold `k_A`) must
+    /// contribute nothing. Checked PER ROUND against the private keys, because the
+    /// final column only reflects the last round's recombiners - so a round that
+    /// recombines over the wrong parties is invisible end-to-end.
+    ///
+    /// Flipping a bit of a party's own resharing key must change round `a`'s output
+    /// exactly when that party is a recombiner. This sees a round that bypasses
+    /// `recombination_group`, which the group helper's own unit test cannot.
+    #[test]
+    fn no_member_of_a_takes_part_in_its_own_round() {
+        for n in [3usize, 4, 5, 6] {
+            let backend = ShamirBackend::new_seeded(n, 0x5E0B).unwrap();
+            let rows: Vec<Vec<u64>> = (0..4).map(|k| vec![100 + k]).collect();
+            let reference = PrssRandomness::with_seeded_setup(n, 9).unwrap();
+            for a in 0..reference.seeds.len() {
+                let set = reference.seeds[a].set.clone();
+                // Round `a` alone, with one party's private resharing key flipped.
+                // The RAW shares, not the opened values: resharing randomness
+                // cancels on reconstruction, so only the share vectors can show
+                // whose key was used.
+                let round_with = |flip: Option<usize>| -> Vec<u64> {
+                    let mut source = PrssRandomness::with_seeded_setup(n, 9).unwrap();
+                    if let Some(party) = flip {
+                        source.private_keys[party][0] ^= 1;
+                    }
+                    let col = shared_column(&backend, &rows);
+                    let out = source
+                        .resharing_round(a, rows.len(), 1, &col)
+                        .expect("one round over a clean degree-t column");
+                    // The round must still deliver the values it was given.
+                    assert_eq!(
+                        sorted(open_column(&backend, &out, 1)),
+                        sorted(rows.clone()),
+                        "n = {n}: a single round must permute, not alter, the values"
+                    );
+                    out.iter().flatten().map(|sh| sh.y.value()).collect()
+                };
+                let base = round_with(None);
+                let recombiners = reference.recombination_group(a);
+                for party in 1..=n as u64 {
+                    let flipped = round_with(Some(party as usize - 1));
+                    if set.contains(&party) {
+                        assert_eq!(
+                            flipped, base,
+                            "n = {n}, A = {set:?}: party {party} is in A but took part in round A"
+                        );
+                    }
+                    if recombiners.contains(&party) {
+                        assert_ne!(
+                            flipped, base,
+                            "n = {n}, A = {set:?}: recombiner {party} did not mask with its OWN key"
+                        );
+                    }
+                }
+                // ...and the round really did depend on somebody outside A.
+                assert!(
+                    (1..=n as u64)
+                        .filter(|p| !set.contains(p))
+                        .any(|p| round_with(Some(p as usize - 1)) != base),
+                    "n = {n}, A = {set:?}: no party outside A took part"
+                );
+            }
         }
     }
 
