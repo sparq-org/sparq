@@ -1574,7 +1574,9 @@ fn build_store_with_admitted(
         client: req.client.clone(),
         issuer: req.issuer.clone(),
         now: req.now.clone(),
-        view: req.view,
+        // The model is the request's own: inferred from its dataset before any fact is added,
+        // so an admitted fact never switches it.
+        view: Some(req.view.unwrap_or_else(|| infer_view(&req.dataset))),
     };
     build_store(&augmented_req)
 }
@@ -2178,6 +2180,52 @@ mod tests {
         let body = Bytes::from(r#"{"dataset":"","view":"nonsense"}"#);
         let err = parse_request(&body).unwrap_err();
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// An admitted fact whose subject's document is named like an access-control resource
+    /// leaves a WAC request's inferred model in place.
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn admitted_facts_keep_the_requests_model() {
+        let acl = "https://pod.ex/.acl";
+        let dataset = format!(
+            "<{acl}#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{acl}> .\n\
+             <{acl}#r> <http://www.w3.org/ns/auth/acl#agent> <https://bob.ex/card#me> <{acl}> .\n\
+             <{acl}#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <{acl}> .\n\
+             <{acl}#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <{acl}> .\n\
+             <https://pod.ex/doc#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/doc> .\n"
+        );
+        let body = Bytes::from(
+            serde_json::json!({
+                "dataset": dataset,
+                "session": {"agent": "https://bob.ex/card#me"},
+            })
+            .to_string(),
+        );
+        let req = parse_request(&body).unwrap();
+        assert_eq!(req.view, None, "the model is inferred");
+        let fact = sparq_trust::AdmittedFact {
+            triple: oxrdf::Triple::new(
+                oxrdf::NamedNode::new("https://pod.ex/g.acr#team").unwrap(),
+                oxrdf::NamedNode::new("http://www.w3.org/2006/vcard/ns#hasMember").unwrap(),
+                oxrdf::NamedNode::new("https://bob.ex/card#me").unwrap(),
+            ),
+            issuer: oxrdf::NamedNode::new("https://issuer.ex/").unwrap(),
+        };
+        let store = super::build_store_with_admitted(
+            &req,
+            &[fact],
+            "https://pod.ex/doc",
+            &serde_json::Value::Null,
+        )
+        .unwrap_or_else(|_| panic!("the store builds"));
+        let session = req.session();
+        assert!(
+            store
+                .decide(&session, "https://pod.ex/doc", sparq_solid::Mode::Read)
+                .allow,
+            "the WAC rules still decide"
+        );
     }
 
     #[test]
