@@ -47,6 +47,33 @@ const ADULT_TBOX: &str = r#"
 "#;
 
 #[test]
+fn npa_data_only_source_derived_positive_is_inconsistent() {
+    // Every individual is in owl:Thing, including a source mentioned only in an NPA.
+    // Thing ⊑ ∃p.{5} therefore entails p(a, 5) without any separate assertion about a.
+    let (dict, triples) = parse(&format!(
+        "{PRE}
+         owl:Thing rdfs:subClassOf [ owl:onProperty :p ; owl:hasValue 5 ] .
+         [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+           owl:assertionProperty :p ; owl:targetValue 5 ] ."
+    ));
+    let r = realize(&dict, &triples);
+    assert!(r.is_inconsistent());
+    assert!(r.type_assertions().is_empty());
+}
+
+#[test]
+fn npa_data_only_source_without_derived_positive_is_consistent() {
+    // A can be empty, so A ⊑ ∃p.{5} does not force p(a, 5) for this NPA-only source.
+    let (dict, triples) = parse(&format!(
+        "{PRE}
+         :A rdfs:subClassOf [ owl:onProperty :p ; owl:hasValue 5 ] .
+         [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+           owl:assertionProperty :p ; owl:targetValue 5 ] ."
+    ));
+    assert!(!realize(&dict, &triples).is_inconsistent());
+}
+
+#[test]
 fn npa_data_derived_point_is_inconsistent() {
     // No positive data triple is asserted: a : A and A ⊑ ∃p.{5} entail p(a, 5).
     for filler in [
