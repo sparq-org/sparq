@@ -22,8 +22,33 @@ def module(test_id: str) -> str:
     return "notifications/webhook" if path.startswith("notifications/") else path.split("/")[0]
 
 
+# Touchstone's outcomes (harness-core results/Outcome.java).
+OUTCOMES = {"passed", "failed", "cantTell", "inapplicable", "untested"}
+
+
+def malformed(tests) -> list:
+    """Why `tests` is not a list of uniquely identified results, each with a known outcome."""
+    if not isinstance(tests, list):
+        return ["the report's tests are not a list"]
+    out, seen = [], set()
+    for t in tests:
+        if not (isinstance(t, dict) and isinstance(t.get("id"), str) and isinstance(t.get("level"), str)):
+            out.append(f"  malformed result: {t!r}")
+        elif t.get("outcome") not in OUTCOMES:
+            out.append(f"  unknown outcome {t.get('outcome')!r}: {t['id']}")
+        elif t["id"] in seen:
+            out.append(f"  duplicate result: {t['id']}")
+        else:
+            seen.add(t["id"])
+    return out
+
+
 def check(tests: list, floor_doc: dict) -> tuple:
-    """Whether `tests` (a report's) hold `floor_doc` (floor.json's), and the lines to print."""
+    """Whether `tests` (a report's) hold `floor_doc` (floor.json's), and the lines to print. A
+    report that is not well formed (see `malformed`) holds nothing."""
+    bad = malformed(tests)
+    if bad:
+        return False, bad
     floor, supported = floor_doc["passed"], set(floor_doc.get("supported", []))
     ok, out = True, []
     passed, total = Counter(), Counter()
@@ -77,6 +102,22 @@ def self_test():
     # An unrelated failure is not hidden by the probe.
     assert not run("inapplicable", other="failed")
     assert not run("passed", other="failed")
+    # A report counts each test once, with a known outcome: a repeated probe cannot stand in
+    # for an unrelated failure, and a malformed result fails the check.
+    def tests_with(*extra):
+        base = [{"id": f"core/a#{i}", "outcome": "passed", "level": "MUST"} for i in "xy"]
+        return base + list(extra)
+    inapp = {"id": probe, "outcome": "inapplicable", "level": "MUST"}
+    failed = {"id": "core/a#z", "outcome": "failed", "level": "MUST"}
+    assert not check(tests_with(failed, inapp, dict(inapp)), floor_doc)[0]
+    assert not check(tests_with({"id": "core/a#x", "outcome": "passed", "level": "MUST"}, inapp), floor_doc)[0]
+    for odd in ({"id": "core/a#z", "outcome": "ok", "level": "MUST"},
+                {"id": "core/a#z", "outcome": "passed"},
+                {"id": 7, "outcome": "passed", "level": "MUST"},
+                "core/a#z"):
+        assert not check(tests_with(odd, inapp), floor_doc)[0], odd
+    assert not check({"core/a#x": "passed"}, floor_doc)[0]
+    assert check(tests_with({"id": "core/a#z", "outcome": "passed", "level": "MUST"}, inapp), floor_doc)[0]
     # Without the probe listed, a module is held to its plain pass count.
     assert not check([{"id": "core/a#x", "outcome": "passed", "level": "MUST"}], {"passed": {"core": 2}})[0]
     print("check-floor self-test passed")
