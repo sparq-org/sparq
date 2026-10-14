@@ -1559,8 +1559,15 @@ async fn create<S: Store + 'static>(
             && l.param("rel")
                 .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
     });
-    let base_name = sanitize_slug(req.header("slug"))
-        .unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
+    // A `Slug` is a hint the server may ignore, and does for a writer that may not list the
+    // container: the name it would get (the slug, or the slug numbered past one taken) would
+    // say which members the container has.
+    let slug = match req.header("slug") {
+        Some(slug) if state.allowed(Action::Read, parent, agent).await => sanitize_slug(Some(slug)),
+        _ => None,
+    };
+    let base_name =
+        slug.unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     // The container's lock is held shared from the choice of a free name through the create and
     // the new member's creator metadata. Shared, because creates in one container do not need to
     // exclude each other: what keeps two POSTs with one Slug from both taking a name is the new
@@ -6664,6 +6671,21 @@ mod tests {
             let status = send(dave.clone(), method, path, vec![("if-match", "*".into())]).await;
             assert!(status.is_success(), "{method} {status}");
         }
+        // A `Slug` names the member only for a writer that may list the container: the name
+        // would otherwise say whether one by that name is there.
+        let named = |who: Agent| {
+            let (st, root) = (st.clone(), root.clone());
+            async move {
+                let h = [("slug", "taken"), ("content-type", "text/plain")];
+                let r = create(&st, &request("POST", "/", &h, "x"), &who, &root).await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                path_of(&hdr(&r, "location")).to_string()
+            }
+        };
+        assert_eq!(named(bob.clone()).await, "/taken");
+        assert_eq!(named(bob).await, "/taken-2");
+        let name = named(dave).await;
+        assert!(!name.starts_with("/taken"), "{name}");
     }
 
     #[tokio::test]

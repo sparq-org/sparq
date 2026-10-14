@@ -564,7 +564,13 @@ What the server exposes, all discoverable from the storage description
   nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
   root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
-  that may read the result; a linkset `PUT`'s `204` carries none.
+  that may read the resource; a linkset `PUT`'s `204` carries none. Nor is such a writer told
+  anything a write keeps from before: a `PUT` without `Content-Type` (which would keep the stored
+  type), a `PATCH` whose outcome depends on the content, and a write that the stored links, types
+  or content would refuse are all refused as a write without Modify is. A `Slug` names a new
+  member only for a writer that may read the container; anyone else's member gets a name the
+  server chooses, so the name says nothing about which members are there. A subscriber's
+  subscription listing, and its `ETag`, change only with its own subscriptions.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
