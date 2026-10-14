@@ -278,7 +278,8 @@ impl Builtin {
 // exact rationals
 // -------------------------------------------------------------------------------------------
 
-/// An exact rational `num / den` with `den > 0` and `gcd(num, den) == 1`.
+/// An exact rational `num / den` with `den > 0`, `gcd(num, den) == 1` and
+/// `num != i128::MIN` (so negation, floor, ceiling and comparison never overflow).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Rational {
     /// Numerator.
@@ -299,10 +300,11 @@ fn gcd(mut a: i128, mut b: i128) -> i128 {
 }
 
 impl Rational {
-    /// `num / den`, normalised; `None` when `den == 0`.
+    /// `num / den`, normalised; `None` when `den == 0` or either part is `i128::MIN` (outside
+    /// the represented range).
     #[must_use]
     pub fn new(num: i128, den: i128) -> Option<Rational> {
-        if den == 0 {
+        if den == 0 || num == i128::MIN || den == i128::MIN {
             return None;
         }
         let g = gcd(num, den).max(1);
@@ -314,10 +316,10 @@ impl Rational {
         Some(Rational { num: n, den: d })
     }
 
-    /// The integer `n`.
+    /// The integer `n`; `None` for `i128::MIN` (outside the represented range).
     #[must_use]
-    pub fn int(n: i128) -> Rational {
-        Rational { num: n, den: 1 }
+    pub fn int(n: i128) -> Option<Rational> {
+        (n != i128::MIN).then_some(Rational { num: n, den: 1 })
     }
 
     /// `true` when the value is an integer.
@@ -349,12 +351,8 @@ impl Rational {
     /// The smallest integer `≥ self`.
     #[must_use]
     pub fn ceil(&self) -> i128 {
-        let f = self.floor();
-        if f * self.den == self.num {
-            f
-        } else {
-            f + 1
-        }
+        // `num != i128::MIN`, so `-num` and the negated quotient are in range.
+        -(-self.num).div_euclid(self.den)
     }
 }
 
@@ -372,8 +370,8 @@ impl Ord for Rational {
             return fa.cmp(&fb);
         }
         // Same integer part: compare the fractional parts ra/b and rc/d in [0, 1).
-        let ra = self.num - fa * self.den;
-        let rc = other.num - fb * other.den;
+        let ra = self.num.rem_euclid(self.den);
+        let rc = other.num.rem_euclid(other.den);
         frac_cmp(ra, self.den, rc, other.den)
     }
 }
@@ -400,7 +398,7 @@ fn frac_cmp(mut a: i128, mut b: i128, mut c: i128, mut d: i128) -> Ordering {
             let o = qa.cmp(&qc);
             return if flipped { o.reverse() } else { o };
         }
-        (a, b, c, d) = (b - qa * a, a, d - qc * c, c);
+        (a, b, c, d) = (b % a, a, d % c, c);
     }
 }
 
@@ -641,6 +639,11 @@ fn is_name_char(c: char) -> bool {
             '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }
 
+/// XML 1.0 (Fifth Edition) `Char`.
+fn is_xml_char(c: char) -> bool {
+    matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..)
+}
+
 fn is_language_tag(s: &str) -> bool {
     // [a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*
     let mut parts = s.split('-');
@@ -651,6 +654,87 @@ fn is_language_tag(s: &str) -> bool {
         return false;
     }
     parts.all(|p| !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// A language tag of a plain literal, lower-cased. A tag outside `[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*`
+/// is ill-typed; one inside it that is not a well-formed BCP 47 `langtag` or `privateuse` tag
+/// (RFC 5646 §2.1, e.g. a grandfathered tag) is reported as unsupported, so a check that
+/// depends on it answers Unknown.
+fn lang_tag(tag: &str) -> Result<String, ValueError> {
+    if !is_language_tag(tag) {
+        return Err(ValueError::IllTyped);
+    }
+    if !is_bcp47(tag) {
+        return Err(ValueError::Unsupported);
+    }
+    Ok(tag.to_ascii_lowercase())
+}
+
+/// RFC 5646 §2.1 well-formedness for `langtag` and `privateuse` (grandfathered tags excluded).
+fn is_bcp47(tag: &str) -> bool {
+    let alpha = |s: &str, lo: usize, hi: usize| {
+        (lo..=hi).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphabetic())
+    };
+    let alnum = |s: &str, lo: usize, hi: usize| {
+        (lo..=hi).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
+    };
+    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    let parts: Vec<&str> = tag.split('-').collect();
+    let private = |rest: &[&str]| !rest.is_empty() && rest.iter().all(|p| alnum(p, 1, 8));
+    if parts[0].eq_ignore_ascii_case("x") {
+        return private(&parts[1..]);
+    }
+    let mut i = 0;
+    // language = 2*3ALPHA ["-" extlang] / 4ALPHA / 5*8ALPHA
+    let lang = parts[0];
+    if !alpha(lang, 2, 8) {
+        return false;
+    }
+    i += 1;
+    if lang.len() <= 3 {
+        // extlang = 3ALPHA *2("-" 3ALPHA)
+        let mut n = 0;
+        while n < 3 && i < parts.len() && alpha(parts[i], 3, 3) {
+            i += 1;
+            n += 1;
+        }
+    }
+    if i < parts.len() && alpha(parts[i], 4, 4) {
+        i += 1; // script
+    }
+    if i < parts.len() && (alpha(parts[i], 2, 2) || digits(parts[i], 3)) {
+        i += 1; // region
+    }
+    // variant = 5*8alphanum / (DIGIT 3alphanum)
+    while i < parts.len()
+        && (alnum(parts[i], 5, 8)
+            || (parts[i].len() == 4
+                && parts[i].as_bytes()[0].is_ascii_digit()
+                && alnum(parts[i], 4, 4)))
+    {
+        i += 1;
+    }
+    // extension = singleton 1*("-" (2*8alphanum)), singleton = alphanum except x
+    let mut singletons: Vec<u8> = Vec::new();
+    while i < parts.len() && parts[i].len() == 1 && !parts[i].eq_ignore_ascii_case("x") {
+        let c = parts[i].as_bytes()[0].to_ascii_lowercase();
+        if !c.is_ascii_alphanumeric() || singletons.contains(&c) {
+            return false;
+        }
+        singletons.push(c);
+        i += 1;
+        let start = i;
+        while i < parts.len() && alnum(parts[i], 2, 8) {
+            i += 1;
+        }
+        if i == start {
+            return false;
+        }
+    }
+    if i < parts.len() && parts[i].eq_ignore_ascii_case("x") {
+        return private(&parts[i + 1..]);
+    }
+    i == parts.len()
 }
 
 fn hex_value(lex: &str) -> Result<Vec<u8>, ValueError> {
@@ -733,7 +817,16 @@ fn datetime_value(lex: &str, need_tz: bool) -> Result<DateTimeValue, ValueError>
     {
         return Err(ValueError::IllTyped);
     }
-    let mut year: i64 = ys.parse().map_err(|_| ValueError::Unsupported)?;
+    // A year beyond i64 is not represented, but the rest of the form is still validated
+    // first (with a stand-in year of the same leap-ness: 10000 is a multiple of 400), so an
+    // ill-typed literal is never reported as merely unsupported.
+    let (mut year, too_big) = match ys.parse::<i64>() {
+        Ok(y) => (y, false),
+        Err(_) => (
+            10_000 + ys[ys.len() - 4..].parse::<i64>().unwrap_or(0),
+            true,
+        ),
+    };
     if neg {
         year = -year;
     }
@@ -797,6 +890,9 @@ fn datetime_value(lex: &str, need_tz: bool) -> Result<DateTimeValue, ValueError>
         || (hour > 23 && !(hour == 24 && minute == 0 && sec == 0 && frac_zero))
     {
         return Err(ValueError::IllTyped);
+    }
+    if too_big {
+        return Err(ValueError::Unsupported);
     }
     // Validated above, so the civil-date precondition holds; i128 keeps every i64 year exact.
     let days = sparq_core::civil::days_from_civil(year, month as u32, day as u32);
@@ -880,18 +976,24 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
     if lang.is_some() && b != LangString {
         return Err(ValueError::IllTyped);
     }
+    // Every lexical space of the datatype map is a set of XML 1.0 `Char` strings.
+    if !lex.chars().all(is_xml_char) {
+        return Err(ValueError::IllTyped);
+    }
     Ok(match b {
         // rdfs:Literal and owl:real have no lexical space of their own (OWL 2 §4.1).
         RdfsLiteral | OwlReal => return Err(ValueError::IllTyped),
         OwlRational => {
+            // OWL 2 §4.1: `numerator '/' denominator`, the denominator an unsigned positive
+            // integer, with no whitespace inside the collapsed form.
             let s = collapse(lex);
             let (n, d) = s.split_once('/').ok_or(ValueError::IllTyped)?;
-            let n = integer_value(n)?;
-            if d.starts_with(['+', '-']) {
+            if s.contains(' ') || d.is_empty() || !d.bytes().all(|b| b.is_ascii_digit()) {
                 return Err(ValueError::IllTyped);
             }
+            let n = integer_value(n)?;
             let d = integer_value(d)?;
-            if d == 0 {
+            if d <= 0 {
                 return Err(ValueError::IllTyped);
             }
             Value::Real(RationalKey(
@@ -905,7 +1007,9 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
             if lo.is_some_and(|lo| n < lo) || hi.is_some_and(|hi| n > hi) {
                 return Err(ValueError::IllTyped);
             }
-            Value::Real(RationalKey(Rational::int(n)))
+            Value::Real(RationalKey(
+                Rational::int(n).ok_or(ValueError::Unsupported)?,
+            ))
         }
         Double => {
             let d = double_value(lex)?;
@@ -927,17 +1031,13 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
             let (text, tag) = lex.rsplit_once('@').ok_or(ValueError::IllTyped)?;
             if tag.is_empty() {
                 Value::String(text.to_string())
-            } else if is_language_tag(tag) {
-                Value::LangString(text.to_string(), tag.to_ascii_lowercase())
             } else {
-                return Err(ValueError::IllTyped);
+                Value::LangString(text.to_string(), lang_tag(tag)?)
             }
         }
         LangString => match lang {
-            Some(l) if is_language_tag(l) => {
-                Value::LangString(lex.to_string(), l.to_ascii_lowercase())
-            }
-            _ => return Err(ValueError::IllTyped),
+            Some(l) => Value::LangString(lex.to_string(), lang_tag(l)?),
+            None => return Err(ValueError::IllTyped),
         },
         String => Value::String(lex.to_string()),
         NormalizedString => Value::String(replace_ws(lex)),
@@ -1048,7 +1148,19 @@ mod tests {
         assert!(!third.is_decimal());
         assert_eq!(Rational::new(-7, 2).unwrap().floor(), -4);
         assert_eq!(Rational::new(-7, 2).unwrap().ceil(), -3);
-        assert_eq!(Rational::new(6, -3).unwrap(), Rational::int(-2));
+        assert_eq!(Rational::new(6, -3), Rational::int(-2));
+        // i128::MIN is outside the represented range; everything near it stays exact.
+        assert_eq!(Rational::new(i128::MIN, 1), None);
+        assert_eq!(Rational::new(1, i128::MIN), None);
+        assert_eq!(Rational::int(i128::MIN), None);
+        let lo = Rational::new(i128::MIN + 1, 2).unwrap();
+        assert_eq!(lo.ceil(), (i128::MIN + 2) / 2);
+        assert_eq!(lo.floor(), i128::MIN / 2);
+        let dec = |s: &str| val(s, "decimal").unwrap();
+        assert!(
+            dec("-17014118346046923173168730371588410572.7")
+                < dec("-17014118346046923173168730371588410572.5")
+        );
     }
 
     #[test]

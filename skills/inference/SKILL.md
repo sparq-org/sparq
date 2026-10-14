@@ -696,7 +696,11 @@ anonymous-individual forests, operand sets, ill-typed literals, facets, datatype
 definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
 `Some(false)` on a violation, `Some(true)` only when every restriction was checked, and
 `None` when one was not (listed in `unchecked`: `xsd:pattern` syntax, `rdf:XMLLiteral`
-content, an unloaded imports closure, anonymous individuals outside an anonymous forest).
+content, an unloaded imports closure, anonymous individuals outside an anonymous forest,
+literal values beyond the represented range such as a year past `i64` or a language tag
+that is not well-formed BCP 47, and the facet space of a bound outside the restricted
+datatype's value space). Cardinalities must be valid non-negative `xsd:nonNegativeInteger` or
+`xsd:integer` literals; others are refused as unsupported.
 `blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
 `Ontology::imports`, never dereferenced.
 `owl2dl::check(&dict, &onto, Budget::default())` is the reasoner: a hypertableau (Motik,

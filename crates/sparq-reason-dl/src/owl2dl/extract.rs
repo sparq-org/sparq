@@ -33,8 +33,8 @@ use super::model::{
     Ontology,
 };
 use super::vocab::{
-    iri_of, is_blank, is_iri, is_literal, is_triple_term, literal_of, render_triple, Vocab, OWL,
-    RDF, RDFS, XSD,
+    iri_of, is_blank, is_iri, is_literal, is_triple_term, literal_of, render_term, render_triple,
+    Vocab, OWL, RDF, RDFS, XSD,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id, NO_ID};
@@ -53,8 +53,9 @@ type Cached<T> = ((T, Vec<usize>), usize, usize);
 
 /// The most model nodes and provenance entries extraction may copy from blank nodes shared
 /// by several axioms. Each copy is a fresh expression, so without a bound a small graph
-/// could expand without limit; decoding a node the first time is not charged, as its size is
-/// bounded by its own triples.
+/// could expand without limit. Decoding a blank node the first time is not charged beyond
+/// its lists: each RDF list is charged from its second read on, so a first decode is bounded
+/// by its own triples plus the charged list copies.
 pub const MAX_EXPANSION: usize = 8_000_000;
 
 /// Why the mapping refused a graph.
@@ -63,14 +64,14 @@ pub enum ExtractErrorKind {
     /// A triple no OWL 2 mapping rule reads.
     Unparsed,
     /// A structure that is recognisably OWL but ill-formed: a broken list, a restriction with
-    /// two fillers, a cardinality that is not a non-negative integer, a literal where an
-    /// individual is required, and so on.
+    /// two fillers, a literal where an individual is required, and so on.
     Malformed,
     /// A property whose kind (object, data or annotation) cannot be settled: declared as two
     /// kinds, or undeclared with no use that decides it.
     Ambiguous,
     /// Valid RDF that this mapping deliberately refuses (n-ary data restrictions, RDF 1.2
-    /// triple terms, cardinalities above [`MAX_CARDINALITY`]).
+    /// triple terms, cardinalities above [`MAX_CARDINALITY`] or not written as a valid
+    /// `xsd:nonNegativeInteger` literal).
     Unsupported,
 }
 
@@ -148,9 +149,20 @@ struct Extractor<'a> {
     /// by several axioms is decoded once and its copies are charged to [`MAX_EXPANSION`].
     class_cache: FxHashMap<Id, Cached<ClassExpression>>,
     range_cache: FxHashMap<Id, Cached<DataRange>>,
+    /// Heads of the RDF lists read so far; reading one again copies it and is charged.
+    lists_read: FxHashSet<Id>,
+    /// The head of the list each list cell read so far belongs to.
+    cell_owner: FxHashMap<Id, Id>,
     /// Model nodes and provenance entries built so far.
     expanded: usize,
     visiting: FxHashSet<Id>,
+    /// Annotations by (annotated node, property, value) → index into
+    /// [`Ontology::annotations`], for `owl:Annotation` reifications to name.
+    ann_index: FxHashMap<(Id, Id, AnnotationValue), usize>,
+    /// The main triple of every emitted axiom (the triple an `owl:Axiom` reification names).
+    mains: FxHashSet<usize>,
+    /// `owl:Axiom` reifications: (the triple named, the reification's typing triple).
+    reified: Vec<(usize, usize)>,
     out: Ontology,
 }
 
@@ -197,8 +209,13 @@ impl<'a> Extractor<'a> {
             facet_nodes: FxHashSet::default(),
             class_cache: FxHashMap::default(),
             range_cache: FxHashMap::default(),
+            lists_read: FxHashSet::default(),
+            cell_owner: FxHashMap::default(),
             expanded: 0,
             visiting: FxHashSet::default(),
+            ann_index: FxHashMap::default(),
+            mains: FxHashSet::default(),
+            reified: Vec::new(),
             out: Ontology::default(),
         };
         x.mark_structural();
@@ -410,6 +427,9 @@ impl<'a> Extractor<'a> {
                 // so a class typed only this way is undeclared.
                 self.classes.insert(s);
                 self.consume(i);
+                if o == v.deprecated_class {
+                    self.deprecated(s, i);
+                }
                 continue;
             }
             let kind = if o == v.owl_class {
@@ -455,6 +475,7 @@ impl<'a> Extractor<'a> {
                 }
             }
             self.consume(i);
+            self.mains.insert(i);
             let source = self.src(&[i]);
             self.push(Axiom::Declaration(kind, s), source);
         }
@@ -713,6 +734,17 @@ impl<'a> Extractor<'a> {
         if self.v.is_builtin_annotation_property(p) {
             return true;
         }
+        // Structural Specification §9.6: assertions may use the built-in object properties
+        // and the bottom data property. An `owl:topDataProperty` assertion stays unread.
+        if [
+            self.v.top_object_property,
+            self.v.bottom_object_property,
+            self.v.bottom_data_property,
+        ]
+        .contains(&p)
+        {
+            return true;
+        }
         // The reserved vocabularies are never user properties.
         !(iri.starts_with(OWL) || iri.starts_with(RDF) || iri.starts_with(RDFS))
             && !(iri.starts_with(XSD) && super::datatypes::is_facet_iri(&iri))
@@ -763,6 +795,22 @@ impl<'a> Extractor<'a> {
     /// Reads and consumes an RDF list.
     fn list(&mut self, head: Id) -> Result<(Vec<Id>, Vec<usize>)> {
         let (items, used) = self.peek_list(head)?;
+        // Two lists that share a tail cell are not two well-formed sequences (Mapping §3.1).
+        for &u in &used {
+            let cell = self.triples[u][0];
+            if *self.cell_owner.entry(cell).or_insert(head) != head {
+                return Err(self.err(
+                    ExtractErrorKind::Malformed,
+                    "two RDF lists share a tail",
+                    &[u],
+                ));
+            }
+        }
+        if !self.lists_read.insert(head) {
+            // A list shared by several expressions is copied into each of them.
+            let at = used.first().copied().unwrap_or(0);
+            self.charge(items.len() + used.len(), 0, at)?;
+        }
         for &i in &used {
             self.consume(i);
         }
@@ -798,31 +846,34 @@ impl<'a> Extractor<'a> {
     }
 
     fn cardinality(&self, node: Id, at: usize) -> Result<u32> {
+        // Mapping Table 13 writes cardinalities as `"n"^^xsd:nonNegativeInteger`. `xsd:integer`
+        // is also read, as that is how Turtle and N-Triples abbreviate a bare `2`; the value
+        // must be valid for its datatype and non-negative. Any other datatype or lexical form
+        // is not read: the graph is refused as unsupported rather than guessed at.
         let lit = self.literal(node, at)?;
-        let integer_like = lit.datatype == format!("{XSD}nonNegativeInteger")
-            || lit.datatype == format!("{XSD}integer")
-            || lit.datatype == format!("{XSD}positiveInteger")
-            || lit.datatype == format!("{XSD}int")
-            || lit.datatype == format!("{XSD}long")
-            || lit.datatype == format!("{XSD}short")
-            || lit.datatype == format!("{XSD}unsignedInt")
-            || lit.datatype == format!("{XSD}unsignedLong");
-        let parsed = super::datatypes::parse_integer(&lit.lexical);
-        match (integer_like, parsed) {
-            (true, Some(n)) if n >= 0 => {
-                if n > i128::from(MAX_CARDINALITY) {
-                    Err(self.err(
-                        ExtractErrorKind::Unsupported,
-                        format!("cardinality {n} is above the supported maximum {MAX_CARDINALITY}"),
-                        &[at],
-                    ))
-                } else {
-                    Ok(n as u32)
+        let n = if (lit.datatype == format!("{XSD}nonNegativeInteger")
+            || lit.datatype == format!("{XSD}integer"))
+            && lit.lang.is_none()
+        {
+            match super::datatypes::parse_value(&lit.lexical, &lit.datatype, None) {
+                Ok(super::datatypes::Value::Real(r)) if r.0.is_integer() && r.0.num >= 0 => {
+                    Some(r.0.num)
                 }
+                _ => None,
             }
-            _ => Err(self.err(
-                ExtractErrorKind::Malformed,
-                "a cardinality must be a non-negative integer literal",
+        } else {
+            None
+        };
+        match n {
+            Some(n) if n <= i128::from(MAX_CARDINALITY) => Ok(n as u32),
+            Some(n) => Err(self.err(
+                ExtractErrorKind::Unsupported,
+                format!("cardinality {n} is above the supported maximum {MAX_CARDINALITY}"),
+                &[at],
+            )),
+            None => Err(self.err(
+                ExtractErrorKind::Unsupported,
+                "a cardinality must be a valid non-negative xsd:nonNegativeInteger or xsd:integer literal",
                 &[at],
             )),
         }
@@ -967,9 +1018,10 @@ impl<'a> Extractor<'a> {
                 &[at],
             ));
         }
-        if let Some((hit, size, height)) = self.class_cache.get(&node).cloned() {
+        if let Some(&(_, size, height)) = self.class_cache.get(&node) {
+            // Charge before copying, so an over-budget copy is never made.
             self.charge(size, depth + height, at)?;
-            return Ok(hit);
+            return Ok(self.class_cache[&node].0.clone());
         }
         if depth > MAX_DEPTH {
             return Err(self.err(
@@ -1342,9 +1394,10 @@ impl<'a> Extractor<'a> {
                 &[at],
             ));
         }
-        if let Some((hit, size, height)) = self.range_cache.get(&node).cloned() {
+        if let Some(&(_, size, height)) = self.range_cache.get(&node) {
+            // Charge before copying, so an over-budget copy is never made.
             self.charge(size, depth + height, at)?;
-            return Ok(hit);
+            return Ok(self.range_cache[&node].0.clone());
         }
         if depth > MAX_DEPTH {
             return Err(self.err(
@@ -1410,10 +1463,12 @@ impl<'a> Extractor<'a> {
             0 | 1 => {
                 let (items, lu) = self.list(o)?;
                 used.extend(lu);
-                if items.is_empty() {
+                // Unlike classes (Mapping Table 15), data ranges have no empty or singleton
+                // form: DataIntersectionOf and DataUnionOf take at least two operands.
+                if items.len() < 2 {
                     return Err(self.err(
                         ExtractErrorKind::Malformed,
-                        "a data intersection or union needs at least one member",
+                        "a data intersection or union needs at least two members",
                         &[i],
                     ));
                 }
@@ -1423,9 +1478,7 @@ impl<'a> Extractor<'a> {
                     used.extend(ru);
                     members.push(r);
                 }
-                if members.len() == 1 {
-                    members.pop().expect("one member")
-                } else if tag == 0 {
+                if tag == 0 {
                     DataRange::IntersectionOf(members)
                 } else {
                     DataRange::UnionOf(members)
@@ -1512,22 +1565,60 @@ impl<'a> Extractor<'a> {
             .filter(|t| t[1] == v.ty && t[2] == v.ontology)
             .map(|t| t[0])
             .collect();
-        // Annotations by (annotated node, property, value) → index, so an `owl:Annotation`
-        // reification can name an ontology annotation or another reified annotation.
-        let mut by_node: FxHashMap<(Id, Id, AnnotationValue), usize> = FxHashMap::default();
+        // Mapping §3.1.1 / Structural Specification §3.1: at most one header, at most one
+        // version IRI, and a version IRI only on a named ontology.
+        if headers.len() > 1 {
+            let at: Vec<usize> = (0..self.triples.len())
+                .filter(|&i| self.triples[i][1] == v.ty && self.triples[i][2] == v.ontology)
+                .collect();
+            return Err(self.err(
+                ExtractErrorKind::Malformed,
+                "the graph has more than one ontology header",
+                &at,
+            ));
+        }
         for h in headers {
+            if is_iri(self.dict, h) {
+                self.out.iri = Some(h);
+            }
+            let versions = self.sp(h, v.version_iri);
+            if versions.len() > 1 || (!versions.is_empty() && !is_iri(self.dict, h)) {
+                return Err(self.err(
+                    ExtractErrorKind::Malformed,
+                    "an ontology header has more than one version IRI, or a version IRI without an ontology IRI",
+                    &versions,
+                ));
+            }
             for i in self.by_subject.get(&h).cloned().unwrap_or_default() {
                 let [_, p, o] = self.triples[i];
                 if p == v.ty && o == v.ontology {
+                    self.out.header_source.extend(self.src(&[i]));
                     self.consume(i);
                 } else if p == v.imports {
+                    if !is_iri(self.dict, o) {
+                        return Err(self.err(
+                            ExtractErrorKind::Malformed,
+                            "owl:imports must name an IRI",
+                            &[i],
+                        ));
+                    }
                     self.out.imports.push(o);
                     self.consume(i);
                 } else if p == v.version_iri {
+                    if !is_iri(self.dict, o) {
+                        return Err(self.err(
+                            ExtractErrorKind::Malformed,
+                            "owl:versionIRI must be an IRI",
+                            &[i],
+                        ));
+                    }
+                    self.out.version_iri = Some(o);
+                    self.out.header_source.extend(self.src(&[i]));
                     self.consume(i);
                 } else if self.is_annotation_predicate(p) {
                     let value = self.annotation_value(o, i)?;
-                    by_node.insert((h, p, value.clone()), self.out.annotations.len());
+                    self.ann_index
+                        .insert((h, p, value.clone()), self.out.annotations.len());
                     self.out.annotations.push(Annotation {
                         target: AnnotationTarget::Ontology(h),
                         property: p,
@@ -1538,7 +1629,8 @@ impl<'a> Extractor<'a> {
                 }
             }
         }
-        self.reifications(&mut by_node)?;
+        let nested = self.reifications()?;
+        let nested_nodes: FxHashSet<Id> = nested.iter().map(|&(n, _)| n).collect();
         // Typing triples first, so an n-ary axiom or negative assertion node is read from its
         // `rdf:type` whatever order its triples come in.
         let order: Vec<usize> = (0..self.triples.len())
@@ -1552,6 +1644,10 @@ impl<'a> Extractor<'a> {
             let [s, p, o] = self.triples[i];
             let structural_part = self.structural_preds.contains(&p)
                 || (p == v.ty && (o == v.restriction || o == v.rdfs_datatype || o == v.owl_class));
+            if nested_nodes.contains(&s) {
+                // An `owl:Annotation` node: read with its target, after the axioms.
+                continue;
+            }
             if self.facet_nodes.contains(&s) || (self.structural.contains(&s) && structural_part) {
                 // Read by the decoders when (if) an axiom references the node. Other triples
                 // on the node are axioms about the expression (a GCI's `rdfs:subClassOf`, an
@@ -1560,7 +1656,16 @@ impl<'a> Extractor<'a> {
             }
             self.axiom_triple(i)?;
         }
-        Ok(())
+        // Mapping Table 17: an `owl:Axiom` reification annotates an axiom, so the triple it
+        // names must be the main triple of an axiom that was read.
+        if let Some(&(_, ti)) = self.reified.iter().find(|(m, _)| !self.mains.contains(m)) {
+            return Err(self.err(
+                ExtractErrorKind::Malformed,
+                "an owl:Axiom reification names a triple that is not the main triple of an axiom",
+                &[ti],
+            ));
+        }
+        self.nested_annotations(nested)
     }
 
     /// `true` for a predicate read as an annotation property.
@@ -1582,10 +1687,7 @@ impl<'a> Extractor<'a> {
     /// names one triple of the graph and carries its annotations; an `owl:Annotation` node
     /// names one annotation and carries annotations of it. Anything else on such a node is an
     /// error.
-    fn reifications(
-        &mut self,
-        by_node: &mut FxHashMap<(Id, Id, AnnotationValue), usize>,
-    ) -> Result<()> {
+    fn reifications(&mut self) -> Result<Vec<(Id, usize)>> {
         let v = self.v.clone();
         let nodes = |ty: Id| -> Vec<(Id, usize)> {
             self.triples
@@ -1614,15 +1716,21 @@ impl<'a> Extractor<'a> {
                     &[ti, si, pi, oi],
                 ));
             };
+            self.reified.push((main, ti));
             self.reified_annotations(
                 node,
                 AnnotationTarget::Axiom(self.original[main]),
                 &[ti, si, pi, oi],
-                by_node,
             )?;
         }
-        // Nested annotations may themselves be annotated: resolve to a fixpoint.
-        let mut pending = nested;
+        Ok(nested)
+    }
+
+    /// `owl:Annotation` reifications, once every other annotation is read: each names an
+    /// annotation (of the ontology, of an axiom, or another reified one) or an annotation
+    /// assertion, and may itself be annotated, so they are resolved to a fixpoint.
+    fn nested_annotations(&mut self, mut pending: Vec<(Id, usize)>) -> Result<()> {
+        let v = self.v.clone();
         loop {
             let before = pending.len();
             let mut rest = Vec::new();
@@ -1631,14 +1739,14 @@ impl<'a> Extractor<'a> {
                 let (pv, pi) = self.required(node, v.annotated_property, ti)?;
                 let (ov, oi) = self.required(node, v.annotated_target, ti)?;
                 let value = self.annotation_value(ov, oi)?;
-                match by_node.get(&(sv, pv, value)).copied() {
-                    Some(k) => self.reified_annotations(
-                        node,
-                        AnnotationTarget::Annotation(k),
-                        &[ti, si, pi, oi],
-                        by_node,
-                    )?,
-                    None => rest.push((node, ti)),
+                let header = [ti, si, pi, oi];
+                if let Some(k) = self.ann_index.get(&(sv, pv, value)).copied() {
+                    self.reified_annotations(node, AnnotationTarget::Annotation(k), &header)?;
+                } else if let Some(j) = self.annotation_assertion(sv, pv, ov) {
+                    let target = AnnotationTarget::Axiom(self.original[j]);
+                    self.reified_annotations(node, target, &header)?;
+                } else {
+                    rest.push((node, ti));
                 }
             }
             if rest.is_empty() {
@@ -1656,12 +1764,22 @@ impl<'a> Extractor<'a> {
         }
     }
 
+    /// The triple `s p o` when it was read as an annotation assertion axiom.
+    fn annotation_assertion(&self, s: Id, p: Id, o: Id) -> Option<usize> {
+        let j = self
+            .by_subject
+            .get(&s)?
+            .iter()
+            .copied()
+            .find(|&j| self.triples[j] == [s, p, o])?;
+        (self.mains.contains(&j) && self.is_annotation_predicate(p)).then_some(j)
+    }
+
     fn reified_annotations(
         &mut self,
         node: Id,
         target: AnnotationTarget,
         header: &[usize],
-        by_node: &mut FxHashMap<(Id, Id, AnnotationValue), usize>,
     ) -> Result<()> {
         for &u in header {
             self.consume(u);
@@ -1679,7 +1797,8 @@ impl<'a> Extractor<'a> {
                 ));
             }
             let value = self.annotation_value(o, i)?;
-            by_node.insert((node, p, value.clone()), self.out.annotations.len());
+            self.ann_index
+                .insert((node, p, value.clone()), self.out.annotations.len());
             self.out.annotations.push(Annotation {
                 target,
                 property: p,
@@ -1834,6 +1953,7 @@ impl<'a> Extractor<'a> {
 
     /// Records an axiom read from triple `i` plus the triples in `parts`, consuming them all.
     fn emit<const N: usize>(&mut self, i: usize, axiom: Axiom, parts: [Vec<usize>; N]) {
+        self.mains.insert(i);
         let mut local = vec![i];
         for part in parts {
             local.extend(part);
@@ -1843,6 +1963,36 @@ impl<'a> Extractor<'a> {
         }
         let source = self.src(&local);
         self.push(axiom, source);
+    }
+
+    /// Mapping Table 5: `x rdf:type owl:DeprecatedClass` / `owl:DeprecatedProperty` stands for
+    /// the annotation `x owl:deprecated "true"^^xsd:boolean`. The annotation property needs a
+    /// dict id; when the dict lacks `owl:deprecated` the annotation is reported in a note.
+    fn deprecated(&mut self, s: Id, i: usize) {
+        let p = self.v.owl_deprecated;
+        if p == NO_ID {
+            self.consume(i);
+            let source = self.src(&[i]);
+            self.out.notes.push(ExtractNote {
+                message: format!(
+                    "{} is deprecated, but owl:deprecated is not in the dictionary, so the annotation is not represented",
+                    render_term(self.dict, s)
+                ),
+                source,
+            });
+            return;
+        }
+        let subject = if is_blank(self.dict, s) {
+            AnnotationSubject::Anonymous(s)
+        } else {
+            AnnotationSubject::Iri(s)
+        };
+        let value = AnnotationValue::Literal(Literal {
+            lexical: "true".into(),
+            datatype: format!("{XSD}boolean"),
+            lang: None,
+        });
+        self.emit(i, Axiom::AnnotationAssertion(p, subject, value), []);
     }
 
     fn named_class_definition(&mut self, i: usize) -> Result<()> {
@@ -1900,6 +2050,7 @@ impl<'a> Extractor<'a> {
         for &u in &used {
             self.consume(u);
         }
+        self.mains.insert(i);
         let source = self.src(&used);
         self.push(
             Axiom::EquivalentClasses(vec![ClassExpression::Class(s), def]),
@@ -2143,12 +2294,12 @@ impl<'a> Extractor<'a> {
         if o != NO_ID && o == v.negative_property_assertion {
             return self.negative_assertion(i);
         }
+        if o != NO_ID && o == v.deprecated_property {
+            self.deprecated(s, i);
+            return Ok(());
+        }
         // Ignorable typings.
-        if o == v.rdf_property
-            || o == v.deprecated_property
-            || o == v.rdf_list
-            || (o == v.owl_class && is_blank(self.dict, s))
-        {
+        if o == v.rdf_property || o == v.rdf_list || (o == v.owl_class && is_blank(self.dict, s)) {
             self.consume(i);
             return Ok(());
         }
@@ -2179,6 +2330,8 @@ impl<'a> Extractor<'a> {
             let [_, p, o] = self.triples[j];
             if self.is_annotation_predicate(p) {
                 let value = self.annotation_value(o, j)?;
+                self.ann_index
+                    .insert((s, p, value.clone()), self.out.annotations.len());
                 self.out.annotations.push(Annotation {
                     target: AnnotationTarget::Axiom(self.original[typing]),
                     property: p,

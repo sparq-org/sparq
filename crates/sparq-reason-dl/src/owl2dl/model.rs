@@ -82,7 +82,7 @@ impl ObjectProperty {
 }
 
 /// A data range (OWL 2 Structural Specification §7).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DataRange {
     /// `rdfs:Literal`, the whole data domain: the filler of an unqualified data cardinality,
     /// or `rdfs:Literal` named in the input.
@@ -104,7 +104,7 @@ pub enum DataRange {
 /// A class expression (OWL 2 Structural Specification §8). Unqualified cardinality
 /// restrictions carry `owl:Thing` (object) or `rdfs:Literal` (data) as their filler, as the
 /// specification defines them.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ClassExpression {
     /// A named class.
     Class(Id),
@@ -347,6 +347,12 @@ pub struct ExtractNote {
 pub struct Ontology {
     /// Every axiom, in a deterministic order (the order of the first triple of each axiom).
     pub axioms: Vec<AxiomRecord>,
+    /// The ontology IRI (`None` for an anonymous ontology or a graph without a header).
+    pub iri: Option<Id>,
+    /// The version IRI, if the header gives one.
+    pub version_iri: Option<Id>,
+    /// The input triples of the ontology header (typing and version IRI).
+    pub header_source: Vec<usize>,
     /// IRIs of `owl:imports` targets. The extractor does not dereference them.
     pub imports: Vec<Id>,
     /// Ontology and axiom annotations.

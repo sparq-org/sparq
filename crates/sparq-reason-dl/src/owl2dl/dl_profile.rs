@@ -233,8 +233,14 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let src = self.sources(axioms);
-            // An unknown `xsd:` datatype is reported by the datatype pass.
-            if self.is_reserved(id) && kind != EntityKind::Datatype {
+            // A reserved IRI cannot be defined as a datatype. Merely using one outside the
+            // datatype map (`xsd:date`) is reported once, by the datatype pass.
+            let reserved = self.is_reserved(id)
+                && (kind != EntityKind::Datatype
+                    || axioms.iter().any(|&ai| {
+                        matches!(self.onto.axioms[ai].axiom, Axiom::DatatypeDefinition(d, _) if d == id)
+                    }));
+            if reserved {
                 self.report(
                     ViolationKind::ReservedVocabulary,
                     format!(
@@ -281,6 +287,19 @@ impl<'a> Checker<'a> {
                         &src,
                     );
                 }
+            }
+        }
+        // The ontology IRI and version IRI cannot be reserved vocabulary.
+        for id in [self.onto.iri, self.onto.version_iri].into_iter().flatten() {
+            if self.is_reserved(id) {
+                self.out.push(Violation {
+                    kind: ViolationKind::ReservedVocabulary,
+                    message: format!(
+                        "{} is reserved vocabulary used as an ontology IRI",
+                        self.name(id)
+                    ),
+                    source: self.onto.header_source.clone(),
+                });
             }
         }
         // Ontology and axiom annotations: their properties are annotation properties.
@@ -376,16 +395,24 @@ impl<'a> Checker<'a> {
 
     /// N-ary axioms need two distinct operands.
     fn operand_sets(&mut self) {
+        /// The number of distinct operands, capped at 2 (all the check needs).
         fn distinct<T: PartialEq>(xs: &[T]) -> usize {
-            xs.iter()
-                .enumerate()
-                .filter(|(i, x)| !xs[..*i].contains(x))
-                .count()
+            match xs.first() {
+                None => 0,
+                Some(x0) if xs.iter().any(|x| x != x0) => 2,
+                Some(_) => 1,
+            }
         }
         for rec in &self.onto.axioms {
             let n = match &rec.axiom {
-                Axiom::EquivalentClasses(cs) | Axiom::DisjointClasses(cs) => distinct(cs),
-                Axiom::DisjointUnion(_, cs) => distinct(cs),
+                // Operands are compared as structures, where the order inside a set-valued
+                // constructor (`UnionOf(A B)` vs `UnionOf(B A)`) does not count.
+                Axiom::EquivalentClasses(cs) | Axiom::DisjointClasses(cs) => {
+                    distinct(&cs.iter().map(canonical_class).collect::<Vec<_>>())
+                }
+                Axiom::DisjointUnion(_, cs) => {
+                    distinct(&cs.iter().map(canonical_class).collect::<Vec<_>>())
+                }
                 Axiom::EquivalentObjectProperties(ps) | Axiom::DisjointObjectProperties(ps) => {
                     distinct(ps)
                 }
@@ -813,7 +840,15 @@ impl<'a> Checker<'a> {
                 continue;
             }
             match datatypes::parse_value(&l.lexical, &l.datatype, l.lang.as_deref()) {
-                Ok(_) | Err(datatypes::ValueError::Unsupported) => {}
+                Ok(_) => {}
+                // The lexical form may be valid, but its value is beyond what is represented,
+                // so its validity is not established.
+                Err(datatypes::ValueError::Unsupported) => {
+                    not_checked.push((
+                        "literal values beyond the represented range",
+                        source.to_vec(),
+                    ));
+                }
                 Err(datatypes::ValueError::IllTyped) => found.push((
                     ViolationKind::IllTypedLiteral,
                     format!(
@@ -881,6 +916,29 @@ impl<'a> Checker<'a> {
                 _ => {}
             };
             for_each_range_in_axiom(&rec.axiom, &mut range);
+        }
+        // §11.2: a declared datatype outside the map needs exactly one definition too, even
+        // when no data range uses it.
+        let mut declared: Vec<Id> = declared_dt.iter().copied().collect();
+        declared.sort_unstable();
+        for id in declared {
+            let iri = iri_of(self.dict, id).unwrap_or_default();
+            if !datatypes::is_datatype_map_iri(&iri) && !definitions.contains_key(&id) {
+                let src: Vec<usize> = self
+                    .onto
+                    .axioms
+                    .iter()
+                    .filter(|r| r.axiom == Axiom::Declaration(EntityKind::Datatype, id))
+                    .flat_map(|r| r.source.iter().copied())
+                    .collect();
+                found.push((
+                    ViolationKind::UnknownDatatype,
+                    format!(
+                        "{iri} is neither in the OWL 2 datatype map nor defined by exactly one DatatypeDefinition"
+                    ),
+                    src,
+                ));
+            }
         }
         // Datatype definitions.
         let mut ids: Vec<Id> = definitions.keys().copied().collect();
@@ -958,6 +1016,9 @@ enum FacetCheck {
 fn facet_value_problem(b: Builtin, facet: Facet, value: &Literal) -> FacetCheck {
     let parsed = datatypes::parse_value(&value.lexical, &value.datatype, value.lang.as_deref());
     let bad = |what: &str| FacetCheck::Bad(format!("the value of this facet must be {what}"));
+    if parsed == Err(datatypes::ValueError::Unsupported) {
+        return FacetCheck::Unchecked("literal values beyond the represented range");
+    }
     match facet {
         Facet::Length | Facet::MinLength | Facet::MaxLength => match parsed {
             Ok(datatypes::Value::Real(r)) if r.0.is_integer() && r.0.num >= 0 => FacetCheck::Ok,
@@ -995,17 +1056,78 @@ fn facet_value_problem(b: Builtin, facet: Facet, value: &Literal) -> FacetCheck 
     }
 }
 
-/// RFC 4647 §2.2 extended language range: `*` or `(alpha{1,8}|*)(-(alphanum{1,8}|*))*`.
+/// RFC 4647 §2.1 basic language range: `"*"`, or `1*8ALPHA *("-" 1*8alphanum)`. OWL 2 uses
+/// basic ranges only; extended ranges (`en-*`) are not in the facet space.
 fn is_language_range(s: &str) -> bool {
+    if s == "*" {
+        return true;
+    }
     let mut parts = s.split('-');
-    let first_ok = parts.next().is_some_and(|p| {
-        p == "*" || (!p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphabetic()))
-    });
-    first_ok
-        && parts.all(|p| {
-            p == "*"
-                || (!p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
-        })
+    parts.next().is_some_and(|p| {
+        !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphabetic())
+    }) && parts
+        .all(|p| !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// `c` with the operands of every set-valued constructor sorted and de-duplicated, so two
+/// expressions are structurally equal exactly when their canonical forms are equal.
+fn canonical_class(c: &ClassExpression) -> ClassExpression {
+    use ClassExpression as C;
+    let set = |xs: &[ClassExpression]| {
+        let mut v: Vec<ClassExpression> = xs.iter().map(canonical_class).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    match c {
+        C::IntersectionOf(xs) => C::IntersectionOf(set(xs)),
+        C::UnionOf(xs) => C::UnionOf(set(xs)),
+        C::OneOf(is) => {
+            let mut v = is.clone();
+            v.sort();
+            v.dedup();
+            C::OneOf(v)
+        }
+        C::ComplementOf(x) => C::ComplementOf(Box::new(canonical_class(x))),
+        C::SomeValuesFrom(p, x) => C::SomeValuesFrom(*p, Box::new(canonical_class(x))),
+        C::AllValuesFrom(p, x) => C::AllValuesFrom(*p, Box::new(canonical_class(x))),
+        C::MinCardinality(n, p, x) => C::MinCardinality(*n, *p, Box::new(canonical_class(x))),
+        C::MaxCardinality(n, p, x) => C::MaxCardinality(*n, *p, Box::new(canonical_class(x))),
+        C::ExactCardinality(n, p, x) => C::ExactCardinality(*n, *p, Box::new(canonical_class(x))),
+        C::DataSomeValuesFrom(p, r) => C::DataSomeValuesFrom(*p, canonical_range(r)),
+        C::DataAllValuesFrom(p, r) => C::DataAllValuesFrom(*p, canonical_range(r)),
+        C::DataMinCardinality(n, p, r) => C::DataMinCardinality(*n, *p, canonical_range(r)),
+        C::DataMaxCardinality(n, p, r) => C::DataMaxCardinality(*n, *p, canonical_range(r)),
+        C::DataExactCardinality(n, p, r) => C::DataExactCardinality(*n, *p, canonical_range(r)),
+        other => other.clone(),
+    }
+}
+
+fn canonical_range(r: &DataRange) -> DataRange {
+    let set = |xs: &[DataRange]| {
+        let mut v: Vec<DataRange> = xs.iter().map(canonical_range).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    match r {
+        DataRange::IntersectionOf(xs) => DataRange::IntersectionOf(set(xs)),
+        DataRange::UnionOf(xs) => DataRange::UnionOf(set(xs)),
+        DataRange::ComplementOf(x) => DataRange::ComplementOf(Box::new(canonical_range(x))),
+        DataRange::OneOf(ls) => {
+            let mut v = ls.clone();
+            v.sort();
+            v.dedup();
+            DataRange::OneOf(v)
+        }
+        DataRange::Restriction(d, fs) => {
+            let mut v = fs.clone();
+            v.sort();
+            v.dedup();
+            DataRange::Restriction(*d, v)
+        }
+        other => other.clone(),
+    }
 }
 
 fn kind_name(k: EntityKind) -> &'static str {
