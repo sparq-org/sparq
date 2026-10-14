@@ -273,7 +273,8 @@ pub async fn identity_gate_middleware<S: Store>(
         let method = req.method().clone();
         let path = req.uri().path().to_owned();
         let accept = header_string(&req, header::ACCEPT);
-        let if_none_match = header_string(&req, header::IF_NONE_MATCH);
+        let if_none_match =
+            crate::entity_tag::field(req.headers(), header::IF_NONE_MATCH).map(|v| v.into_owned());
         drop(req);
         return serve_identity_request(
             &state,
@@ -322,7 +323,7 @@ async fn serve_identity_request<S: Store>(
     method: &Method,
     path: &str,
     accept: Option<&str>,
-    if_none_match: Option<&str>,
+    if_none_match: Option<&[u8]>,
 ) -> Response {
     // Method gate FIRST: the surface is GET/HEAD-only. Every other method — including OPTIONS and
     // every write — is 405 with the honest Allow set. (A browser GET of an id-doc is a "simple"
@@ -455,15 +456,10 @@ fn method_not_allowed() -> Response {
     resp
 }
 
-/// Whether an `If-None-Match` header value matches `etag` (`*`, or any listed entity-tag, weak
-/// prefixes tolerated) — the 304 branch of the id-doc read.
-fn if_none_match_hits(raw: Option<&str>, etag: &str) -> bool {
-    let Some(raw) = raw else {
-        return false;
-    };
-    raw.split(',').map(str::trim).any(|candidate| {
-        candidate == "*" || candidate == etag || candidate.strip_prefix("W/") == Some(etag)
-    })
+/// Whether an `If-None-Match` field value (every line combined) matches `etag` by weak
+/// comparison, read by the crate's one entity-tag parser — the 304 branch of the id-doc read.
+fn if_none_match_hits(raw: Option<&[u8]>, etag: &str) -> bool {
+    conditional::evaluate_read(raw, None, etag, None) == conditional::ReadPrecondition::NotModified
 }
 
 #[cfg(test)]
@@ -579,9 +575,9 @@ mod tests {
             "the two representations must have distinct tags"
         );
         // The If-None-Match matcher agrees: the Turtle tag hits Turtle but NOT the JSON-LD tag.
-        assert!(if_none_match_hits(Some(&turtle), &turtle));
-        assert!(!if_none_match_hits(Some(&turtle), &jsonld));
-        assert!(if_none_match_hits(Some(&jsonld), &jsonld));
+        assert!(if_none_match_hits(Some(turtle.as_bytes()), &turtle));
+        assert!(!if_none_match_hits(Some(turtle.as_bytes()), &jsonld));
+        assert!(if_none_match_hits(Some(jsonld.as_bytes()), &jsonld));
     }
 
     #[test]
