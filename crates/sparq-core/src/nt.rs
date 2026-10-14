@@ -182,8 +182,7 @@ fn graph_key(b: &[u8], i: usize) -> Result<GraphKey, String> {
     match b.get(i) {
         Some(b'<') => {
             let (start, end, esc, _next) = scan_iri(b, i).map_err(as_nquads_err)?;
-            let s = decode(&b[start..end], esc).map_err(as_nquads_err)?;
-            check_absolute(&s, i).map_err(as_nquads_err)?;
+            let s = iri_text(&b[start..end], esc, i).map_err(as_nquads_err)?;
             Ok(GraphKey::Iri(s.into_owned()))
         }
         Some(b'_') => {
@@ -831,6 +830,33 @@ fn decode<'a>(raw: &'a [u8], esc: bool) -> Result<Cow<'a, str>, String> {
     }
 }
 
+/// The decoded text of an `IRIREF` body scanned by [`scan_iri`] at `at`, validated the way
+/// every IRI position (subject, predicate, object, datatype, graph) needs. [`scan_iri`] already
+/// rejects a forbidden raw byte, but a `\u` / `\U` escape can decode to one, so an escaped IRI
+/// is re-checked after decoding (W3C `nt-syntax-bad-uri-02`/`-03`); the IRI must be absolute,
+/// and under the opt-in `iri-fast` feature it is also validated against RFC 3987.
+#[inline]
+fn iri_text<'a>(raw: &'a [u8], esc: bool, at: usize) -> Result<Cow<'a, str>, String> {
+    let s = if esc {
+        Cow::Owned(unescape_iri(str_of(raw), at)?)
+    } else {
+        Cow::Borrowed(str_of(raw))
+    };
+    check_absolute(&s, at)?;
+    // (sq-7d3dj.18) When the opt-in `iri-fast` feature is on, validate every IRIREF
+    // against RFC-3987 (fast path in front of `oxiri`) so the byte-level loader rejects the
+    // malformed IRIs the serial oxttl path already rejects — reaching conformance parity at
+    // fast-path cost. OFF by default: the loader keeps its current unvalidated-fast behaviour.
+    #[cfg(feature = "iri-fast")]
+    {
+        let valid = IRI_MEMO.with(|m| m.borrow_mut().validate(&s));
+        if !valid {
+            return Err(format!("N-Triples: invalid IRI <{}> at byte {}", s, at));
+        }
+    }
+    Ok(s)
+}
+
 // (sq-7d3dj.18) Per-thread `scheme://authority/` prefix memo for the opt-in IRI
 // validation fast path. A thread-local is sound under the rayon chunk-parallel loader — each
 // worker keeps its own ring — and needs no clearing between parses: every memoized prefix was
@@ -844,19 +870,7 @@ thread_local! {
 
 fn iri(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     let (start, end, esc, next) = scan_iri(b, i)?;
-    let s = decode(&b[start..end], esc)?;
-    check_absolute(&s, i)?;
-    // (sq-7d3dj.18) When the opt-in `iri-fast` feature is on, validate every IRIREF
-    // against RFC-3987 (fast path in front of `oxiri`) so the byte-level loader rejects the
-    // malformed IRIs the serial oxttl path already rejects — reaching conformance parity at
-    // fast-path cost. OFF by default: the loader keeps its current unvalidated-fast behaviour.
-    #[cfg(feature = "iri-fast")]
-    {
-        let valid = IRI_MEMO.with(|m| m.borrow_mut().validate(&s));
-        if !valid {
-            return Err(format!("N-Triples: invalid IRI <{}> at byte {}", s, i));
-        }
-    }
+    let s = iri_text(&b[start..end], esc, i)?;
     Ok((dict.intern_iri(&s), next))
 }
 
@@ -987,8 +1001,7 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
                 return Err(format!("N-Triples: bad datatype at byte {open}"));
             }
             let (dstart, dend, desc, next) = scan_iri(b, open)?;
-            let dt = decode(&b[dstart..dend], desc)?;
-            check_absolute(&dt, open)?;
+            let dt = iri_text(&b[dstart..dend], desc, open)?;
             // A language-tagged string needs its tag (W3C `ntriples-langdir-bad-3` / `-5`).
             if dt == RDF_LANG_STRING || dt == RDF_DIR_LANG_STRING {
                 return Err(format!(
@@ -1030,6 +1043,21 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
         // simple literal -> xsd:string
         _ => Ok((dict.intern_lit(&value, XSD_STRING, None), after)),
     }
+}
+
+/// [`unescape`] for an escaped `IRIREF` body, refusing a decoded character the IRIREF
+/// production forbids. Kept out of line: escaped IRIs are the rare case.
+#[cold]
+#[inline(never)]
+fn unescape_iri(raw: &str, at: usize) -> Result<String, String> {
+    let s = unescape(raw)?;
+    if s.bytes().any(|c| IRI_CLASS[c as usize] != 0) {
+        return Err(format!(
+            "N-Triples: invalid escaped IRI character in <{}> at byte {}",
+            s, at
+        ));
+    }
+    Ok(s)
 }
 
 /// Decodes N-Triples ECHAR (`\t \b \n \r \f \" \' \\`) and UCHAR (`\uXXXX`, `\UXXXXXXXX`).
@@ -2139,5 +2167,78 @@ mod tests {
         );
         assert_eq!(buckets[0].1.term(buckets[0].2[0][2]), Term::Literal(Literal::new_simple_literal("é")));
         assert_eq!(buckets[1].1.term(buckets[1].2[0][0]), Term::BlankNode(BlankNode::new_unchecked("é")));
+    }
+
+    /// A `\u` / `\U` escape that decodes to a character the IRIREF production forbids
+    /// (`` [#x00-#x20<>"{}|^`\] ``) is rejected in every IRI position, as the serial oxttl
+    /// parser rejects it; an escape decoding to an allowed character is still accepted.
+    #[test]
+    fn escaped_forbidden_iri_characters_are_rejected_in_every_position() {
+        let escapes = [
+            "\\u0020",
+            "\\u003C",
+            "\\u003E",
+            "\\u0022",
+            "\\u007B",
+            "\\u007D",
+            "\\u007C",
+            "\\u005E",
+            "\\u0060",
+            "\\u005C",
+            "\\u0001",
+            "\\U00000020",
+        ];
+        for esc in escapes {
+            let bad = format!("http://ex/a{esc}b");
+            let docs = [
+                ("subject", format!("<{bad}> <http://ex/p> <http://ex/o> .\n")),
+                ("predicate", format!("<http://ex/s> <{bad}> <http://ex/o> .\n")),
+                ("object", format!("<http://ex/s> <http://ex/p> <{bad}> .\n")),
+                ("datatype", format!("<http://ex/s> <http://ex/p> \"v\"^^<{bad}> .\n")),
+                (
+                    "triple-term object",
+                    format!("<http://ex/s> <http://ex/p> <<( <http://ex/a> <http://ex/b> <{bad}> )>> .\n"),
+                ),
+            ];
+            for (pos, doc) in docs {
+                let mut d = Dict::new();
+                assert!(
+                    parse_chunk(doc.as_bytes(), &mut d).is_err(),
+                    "{esc} in the {pos} IRI must be rejected: {doc}"
+                );
+                assert!(
+                    oxttl::NTriplesParser::new()
+                        .for_slice(doc.as_bytes())
+                        .any(|r| r.is_err()),
+                    "oxttl rejects {esc} in the {pos} IRI too: {doc}"
+                );
+            }
+            #[cfg(feature = "parallel")]
+            {
+                let quad = format!("<http://ex/s> <http://ex/p> <http://ex/o> <{bad}> .\n");
+                assert!(
+                    quad_graph_keys(quad.as_bytes()).is_err(),
+                    "{esc} in the graph IRI must be rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn escaped_allowed_iri_characters_are_accepted_and_decoded() {
+        let doc = b"<http://ex/s\\u00E9> <http://ex/p> \"v\"^^<http://ex/dt\\u0041\\U0001D504> .\n";
+        let mut d = Dict::new();
+        let triples = parse_chunk(doc, &mut d).expect("escaped allowed characters parse");
+        assert_eq!(
+            d.term(triples[0][0]),
+            Term::NamedNode(NamedNode::new_unchecked("http://ex/s\u{E9}"))
+        );
+        assert_eq!(
+            d.term(triples[0][2]),
+            Term::Literal(Literal::new_typed_literal(
+                "v",
+                NamedNode::new_unchecked("http://ex/dtA\u{1D504}")
+            ))
+        );
     }
 }
