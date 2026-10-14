@@ -23,8 +23,10 @@
 //! Turtle 1.2 output can carry triple terms that N3 cannot express, so an `Accept: text/n3` read
 //! falls back to Turtle like any other unproducible type.
 
+use std::collections::HashMap;
+
 use oxjsonld::{JsonLdParser, JsonLdSerializer};
-use oxrdf::{GraphNameRef, QuadRef, Triple};
+use oxrdf::{BlankNode, GraphNameRef, NamedOrBlankNode, QuadRef, Term, Triple};
 use oxttl::{
     NQuadsParser, NQuadsSerializer, NTriplesParser, NTriplesSerializer, TurtleParser,
     TurtleSerializer,
@@ -95,6 +97,38 @@ pub fn classify(content_type: Option<&str>) -> Result<RdfFormat, ServerError> {
 /// retained — SPARQ is the authoritative triple store; the blob store keeps the bytes verbatim.
 pub fn validate_rdf(format: RdfFormat, body: &[u8], base_iri: &str) -> Result<usize, ServerError> {
     Ok(parse_to_triples(format, body, base_iri)?.len())
+}
+
+/// Relabel every blank node in `triples` `b0`, `b1`, … in order of first appearance (subject before
+/// object, nested RDF 1.2 triple terms included).
+///
+/// A parser invents fresh labels for anonymous blank nodes (`[ … ]`, collections) on every parse, so
+/// re-serialising the same stored bytes twice would otherwise give different bytes. A read that
+/// re-serialises a stored document runs its triples through this first, so one stored state always
+/// renders to one byte sequence under one strong validator. Only for output: relabelling two
+/// separately parsed documents this way would make their blank nodes collide.
+pub fn label_blank_nodes_by_position(triples: &mut [Triple]) {
+    fn relabel(node: &mut BlankNode, labels: &mut HashMap<String, BlankNode>) {
+        let next = labels.len();
+        let label = labels
+            .entry(node.as_str().to_owned())
+            .or_insert_with(|| BlankNode::new_unchecked(format!("b{next}")));
+        *node = label.clone();
+    }
+    fn visit(triple: &mut Triple, labels: &mut HashMap<String, BlankNode>) {
+        if let NamedOrBlankNode::BlankNode(node) = &mut triple.subject {
+            relabel(node, labels);
+        }
+        match &mut triple.object {
+            Term::BlankNode(node) => relabel(node, labels),
+            Term::Triple(inner) => visit(inner, labels),
+            Term::NamedNode(_) | Term::Literal(_) => {}
+        }
+    }
+    let mut labels = HashMap::new();
+    for triple in triples {
+        visit(triple, &mut labels);
+    }
 }
 
 /// Parse `body` (in `format`) into its default-graph triples, resolving relative IRIs against
@@ -938,5 +972,24 @@ mod tests {
         let ttl = serialize_triples(RdfFormat::Turtle, &triples).unwrap();
         let reparsed = parse_to_triples(RdfFormat::Turtle, &ttl, IRI).unwrap();
         assert_eq!(reparsed, triples);
+    }
+
+    #[test]
+    fn blank_nodes_are_labelled_by_first_appearance() {
+        const DOC: &str =
+            "<http://a> <http://p> [ <http://q> [ <http://r> 1 ] ] . _:x <http://p> _:x .";
+        let parse = || parse_to_triples(RdfFormat::Turtle, DOC.as_bytes(), IRI).unwrap();
+        let (mut one, mut two) = (parse(), parse());
+        label_blank_nodes_by_position(&mut one);
+        label_blank_nodes_by_position(&mut two);
+        assert_eq!(one, two, "two parses label alike");
+        let text =
+            String::from_utf8(serialize_triples(RdfFormat::NTriples, &one).unwrap()).unwrap();
+        for label in ["_:b0", "_:b1", "_:b2"] {
+            assert!(text.contains(label), "{label} in {text}");
+        }
+        // Distinct blank nodes stay distinct, and one node keeps one label.
+        assert!(!text.contains("_:b3"));
+        assert!(text.contains("_:b2 <http://p> _:b2 ."), "{text}");
     }
 }
