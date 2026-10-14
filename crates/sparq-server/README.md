@@ -74,10 +74,7 @@ By default: **no auth, loopback-only.** Hardening is opt-in but honest where it 
 - **SERVICE federation** is OFF in the default build; with `--features service` it is **default-DENY-all** (egress allowlist enforced before any socket, on the resolved IP — DNS-rebinding-safe). DoS guards on by default (query timeout, body cap, concurrency shed, 20× gzip-ratio cap, panic→`500`); **no rate limit** — add one in the gateway.
 - **Request-log redaction (ON by default with `--verbose`)** — a `GET /sparql?query=…` URL can
   carry PII, so the query string becomes a length + non-reversible fingerprint
-  (`--log-full-requests` opts out). An error's detail drawn from the request or the data (a
-  query or a term a parse error quotes, an engine message quoting data) is logged the same way,
-  wherever warnings are logged (`--verbose`, or `--audit-log`); operator detail (a path, an I/O error) is logged in full.
-  **Honest boundary:** this is log-CONTENT redaction, **not**
+  (`--log-full-requests` opts out); so is an error's detail drawn from the request or the data, wherever warnings are logged (operator detail is logged in full). **Honest boundary:** this is log-CONTENT redaction, **not**
   anonymity (method/path/status/size/timing are still recorded), and **not** the ZK/MPC privacy
   story (what a *remote party* learns from a *computation*) — purely operator-log hygiene. <!-- privacy-claims-allow: negated/historical mention — explicitly states this is NOT the ZK/MPC privacy story -->
 - Hardening headers (`nosniff`, CSP, `DENY`, `no-referrer`) are always on; **CORS is OFF by
