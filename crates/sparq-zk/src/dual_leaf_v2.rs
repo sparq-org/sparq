@@ -4,9 +4,11 @@
 //! OPT-IN, behind the `dual-leaf` cargo feature (OFF by default), exactly like
 //! [`crate::dual_leaf`]. The default `string-canonical` pipeline
 //! (`encode.rs`/`commit.rs`) is byte-unchanged, and **every `DualLeafV1`
-//! function, constant and vector in [`crate::dual_leaf`] is unchanged** — V2 is
-//! added alongside it and reuses V1's canonical-lexical parsers verbatim, so the
-//! two versions can never disagree about which lexical forms are committable.
+//! constant, vector and public function in [`crate::dual_leaf`] is unchanged** —
+//! V2 is added alongside it and reuses V1's canonical-lexical parsers verbatim
+//! (three of which widened from private to `pub(crate)` for that reuse, with no
+//! behaviour change), so the two versions can never disagree about which lexical
+//! forms are committable.
 //!
 //! # What V2 changes, and why (`research/zk-field-native-encoding.md` §14.1)
 //!
@@ -86,8 +88,8 @@
 //! V2 inherits the dual-leaf method's documented **INV-VL downgrade**:
 //! value↔lexical agreement on the value-FILTER lane rests on TRUSTED-ISSUER
 //! HONESTY, not machine enforcement (#769 accepted at research grade; gap CR-G8 /
-//! sq-qhy4). The whole ZK estate is internally re-audited but **NOT externally
-//! audited**. Nothing here is a soundness or privacy guarantee.
+//! sq-qhy4). The whole ZK estate is **NOT externally audited**. Nothing here is a
+//! soundness or privacy guarantee.
 
 use crate::canon::{self, CanonicalGraph};
 use crate::dual_leaf::{
