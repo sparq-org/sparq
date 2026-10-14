@@ -336,6 +336,42 @@ fn nesting_past_the_bound_degrades_conservatively() {
     assert_eq!(verdict(vec![leaf(0)], vec![node]), Containment::Unknown);
 }
 
+/// `count lt 2` does not prove `xone(count eq 1, count gt 2)`: at `count = 0` the
+/// premise holds and neither goal operand does. The request domain carries
+/// `count = 0` so the differential check would catch an analyser that proved it.
+#[test]
+fn a_bound_does_not_prove_a_xone_its_members_do_not_cover() {
+    let goal = xone(vec![leaf(0), leaf(3)]);
+    assert_eq!(verdict(vec![goal], vec![leaf(2)]), Containment::Unknown);
+}
+
+/// Reflexivity compares structure, not node ids: the same multi-operand `xone` under
+/// a different blank-node id is still proven, and a structurally different one is not.
+#[test]
+fn reflexive_xone_ignores_node_ids() {
+    let renamed = |id: &str, operands| {
+        ConstraintNode::Compound(LogicalConstraint {
+            id: id.to_string(),
+            operator: LogicalOperator::Xone,
+            operands,
+        })
+    };
+    let goal = renamed("_:goal", vec![leaf(0), leaf(4)]);
+    let same = renamed("_:other", vec![leaf(0), leaf(4)]);
+    let different = renamed("_:other", vec![leaf(0), leaf(5)]);
+    assert_eq!(verdict(vec![goal.clone()], vec![same]), Containment::Contains);
+    assert_eq!(verdict(vec![goal], vec![different]), Containment::Unknown);
+}
+
+/// Exhausting the visit budget degrades to unproven: a small `and` goal of copies of
+/// the premise is proven, the same goal far past the budget is not.
+#[test]
+fn visit_exhaustion_degrades_conservatively() {
+    let goal = |n: usize| and(vec![leaf(0); n]);
+    assert_eq!(verdict(vec![goal(10)], vec![leaf(0)]), Containment::Contains);
+    assert_eq!(verdict(vec![goal(10_000)], vec![leaf(0)]), Containment::Unknown);
+}
+
 /// `odrl:andSequence` is NOT a compound the analyser reasons about: `LogicalOperator`
 /// parses only `and`/`or`/`xone`, so the parser never routes such a node into
 /// `logical_constraints` — it degrades to the unsatisfiable guard, which
@@ -392,8 +428,11 @@ impl Lcg {
 /// the `Unprovable` cases the compound fold must fail closed on.
 fn domain() -> Vec<Request> {
     let mut out = Vec::new();
-    for count in [None, Some(1.0), Some(2.0), Some(3.0)] {
-        for purpose in [None, Some("a"), Some("b")] {
+    // `0` and `4` sit outside every pool bound's equality points, and purpose `c`
+    // matches no pool atom: requests no atom names, which only a negative-knowledge
+    // over-claim (e.g. treating `xone` like `or`) would get wrong.
+    for count in [None, Some(0.0), Some(1.0), Some(2.0), Some(3.0), Some(4.0)] {
+        for purpose in [None, Some("a"), Some("b"), Some("c")] {
             let mut r = Request::new(ACTION).on(TARGET).by(PARTY);
             if let Some(c) = count {
                 r = r.with(format!("{ODRL}count"), Value::Num(c));
