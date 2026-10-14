@@ -71,7 +71,7 @@ use crate::partial::MpcError;
 use crate::shamir::{MacSession, ShamirBackend};
 
 /// `n >= 2t+1` is required so each multiplication's degree reduction exists. Mirror
-/// [`crate::compare`]'s fail-closed check, with the malicious-mode message.
+/// [`crate::compare`]'s fail-closed check, with the tamper-evident-mode message.
 fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
     if n < 2 * t + 1 {
         return Err(MpcError::Protocol(format!(

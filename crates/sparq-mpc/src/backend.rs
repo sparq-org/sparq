@@ -515,9 +515,14 @@ pub enum OperatorClass {
     /// (the honest-majority odd-`n` case) degree `2t` has ZERO RS redundancy, so
     /// this open is semi-honest-only there even though the aggregate is robust.
     EqualityJoin,
-    /// Comparison (`<`, `≤`, `>`): bit-decomposition; not yet realized in the
-    /// crate (disclosed operands are recomputed by the verifier outside the
-    /// crypto). Reported for completeness so a federation sees the gap.
+    /// Comparison (`<`, `≤`, `>`, threshold): realized in-crypto by the
+    /// bit-decomposition chain in [`crate::compare`], opening only the verdict
+    /// bit. `ShamirBackend` reports it as
+    /// [`SecurityDescriptor::semi_honest_only`] (`SemiHonest` +
+    /// `Abort(Selective)`) for every `(n, t)`: the re-sharing rounds inside the
+    /// chain carry no in-protocol check, and the IT-MAC twin
+    /// ([`crate::auth_compare`]) is tamper-evident (detect + local abort), not
+    /// malicious-secure, so it does not raise this class.
     Comparison,
 }
 

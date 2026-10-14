@@ -744,10 +744,13 @@ impl MacSession<'_> {
     ///    SECOND, INDEPENDENT product + reduce over DIFFERENT input shares than step
     ///    1 (`[α·x]·[y]`, not `[z]·[α]`). Carrying the MAC forward through the input
     ///    MAC — rather than recomputing it from the just-reduced value — is exactly
-    ///    what makes the multiplication TAMPER-EVIDENT (next paragraph), and is the
-    ///    standard honest-majority malicious-multiplication shape (Chida et al.
-    ///    "Fast Large-Scale Honest-Majority MPC for Malicious Adversaries",
-    ///    CRYPTO'18; the design's route (a)).
+    ///    what makes the multiplication TAMPER-EVIDENT (next paragraph). It borrows
+    ///    the MAC-carry half of the honest-majority malicious-multiplication shape of
+    ///    Chida et al. ("Fast Large-Scale Honest-Majority MPC for Malicious
+    ///    Adversaries", CRYPTO'18; the design's route (a)), but NOT the rest of it:
+    ///    malicious security would need the Chida et al. style check that binds
+    ///    BOTH operands of every multiplication gate, and that check is NOT
+    ///    implemented here (see the NOT malicious-secure note below).
     ///
     /// ## Why this MAC-COVERS the `degree_reduce` re-sharing (Hole 2)
     ///
@@ -800,8 +803,11 @@ impl MacSession<'_> {
         //    (the adversary cannot fix the other side without knowing the secret α).
         //    Recomputing `[α·z]` from `[z]·[α]` would NOT have this property — the MAC
         //    would just track whatever (tampered) value `[z]` carried. This is the
-        //    Chida-et-al. honest-majority malicious multiplication shape (the MAC is
-        //    carried forward via the input MAC, then checked at output).
+        //    MAC-carry half of the Chida-et-al. honest-majority malicious multiplication
+        //    (the MAC is carried forward via the input MAC, then checked at output); the
+        //    Chida et al. style both-operand gate check that malicious security would
+        //    need is NOT implemented, so a value tamper on `y` is adopted (tamper-evident
+        //    only).
         // [OPUS-4.8] The genuine regression test that DISTINGUISHES this sound carry
         //    from the unsound `[z]·[α]` route must inject δ INSIDE this `degree_reduce`
         //    over the independent input shares (a post-hoc output tamper cannot tell the
@@ -1008,7 +1014,8 @@ impl MacSession<'_> {
     /// **One `σ` open per BATCH, not per value** — this is the amortisation the design
     /// (§5, "Output: one batched MAC-check") banks on: an all-pairs hidden join's
     /// `|L|·|R|` equality opens are authenticated by a *single* `σ` open, so the
-    /// marginal round cost of the malicious upgrade is `O(1)` per opened batch, not
+    /// marginal round cost of the IT-MAC (tamper-evident) upgrade is `O(1)` per
+    /// opened batch, not
     /// `O(1)` per opened value. Pass the WHOLE batch in one call; calling this once
     /// per value forfeits exactly that amortisation.
     ///

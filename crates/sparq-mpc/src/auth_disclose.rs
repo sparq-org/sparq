@@ -302,7 +302,7 @@ fn experimental_tamper_evident_threshold_over_sum(
 /// wrap (no statistical value/mask slack) and so supports the full
 /// [`RABBIT_VALUE_BITS`] = 60 magnitude rather than this path's
 /// [`DECOMP_VALUE_BITS`] = 20. Retained for the masked-open regression tests and as
-/// the malicious twin of the (likewise test-only) semi-honest
+/// the authenticated (tamper-evident) twin of the (likewise test-only) semi-honest
 /// `crate::compare::secure_bit_decompose`.
 #[cfg(test)]
 fn auth_masked_bit_decompose(
@@ -441,10 +441,12 @@ fn auth_verify_sum_in_range(
 // [OPUS-4.8] sq-km34.6 — the AUTHENTICATED Rabbit chain (design §3 + Hole 4).
 //
 // The IT-MAC twin of `compare`'s sq-bgsn Rabbit path. The masked-open
-// decomposition above caps the malicious path's value at 2^DECOMP_VALUE_BITS = 2^20
+// decomposition above caps the authenticated (tamper-evident) path's value at
+// 2^DECOMP_VALUE_BITS = 2^20
 // because its mask must be κ = 40 bits WIDER than the value AND `value + r` must not
 // wrap p = 2^61−1. Rabbit removes the slack by RECOVERING the value exactly through
-// the modular wrap (`x = c − r + w·p`, `w = 1{c < r}`), lifting the malicious path to
+// the modular wrap (`x = c − r + w·p`, `w = 1{c < r}`), lifting the authenticated
+// (tamper-evident) path to
 // the full 2^RABBIT_VALUE_BITS = 2^60 — parity with the semi-honest path.
 //
 // The lift is where the malicious threat surface GROWS: the wrap recovery is a much
@@ -882,7 +884,7 @@ fn auth_square_protocol_random_bit(
         let d = c.sqrt_residue();
         if d.mul(d) != c {
             return Err(MpcError::Protocol(format!(
-                "malicious square-protocol random bit: c = {} is not a quadratic residue \
+                "authenticated square-protocol random bit: c = {} is not a quadratic residue \
                  (sqrt d = {}, d² = {} ≠ c) — the MAC-checked open of a² is inconsistent; \
                  refusing to emit a bit",
                 c.value(),
@@ -898,7 +900,7 @@ fn auth_square_protocol_random_bit(
         return Ok(b);
     }
     Err(MpcError::Protocol(
-        "malicious square-protocol random bit: drew a == 0 on every attempt (astronomically \
+        "authenticated square-protocol random bit: drew a == 0 on every attempt (astronomically \
          improbable) — refusing to emit a bit"
             .into(),
     ))
@@ -965,7 +967,8 @@ mod tests {
     //! sq-6fv7 + sq-m4zi/sq-e7ma acceptance suite. The load-bearing ones:
     //! - `differential_*`: across many (sum, threshold) pairs incl. edges, the
     //!   MAC-checked verdict equals the plaintext `sum > threshold`.
-    //! - `matches_semi_honest_disclose`: the malicious path agrees with the
+    //! - `matches_semi_honest_disclose`: the authenticated (tamper-evident) path agrees
+    //!   with the
     //!   semi-honest [`crate::compare::disclose_threshold_verdict`] verdict.
     //! - `tamper_in_*_is_caught`: a tampered open on each of the three named opens
     //!   (`a²`, `c=sum+r`, `verdict`) AND on the range-proof zero-test product
@@ -1048,13 +1051,14 @@ mod tests {
                 assert_eq!(
                     got,
                     sum > thr,
-                    "n={n}: malicious disclose verdict for ({sum} > {thr}) must match plaintext"
+                    "n={n}: authenticated disclose verdict for ({sum} > {thr}) must match plaintext"
                 );
             }
         }
     }
 
-    /// The malicious path agrees with the semi-honest `disclose_threshold_verdict` on
+    /// The authenticated (tamper-evident) path agrees with the semi-honest
+    /// `disclose_threshold_verdict` on
     /// the disclosed boolean (same verdict, just MAC-checked opens).
     #[test]
     fn matches_semi_honest_disclose() {
@@ -1076,7 +1080,7 @@ mod tests {
                     .unwrap_or(false);
                 assert_eq!(
                     mal, semi_bool,
-                    "n={n}: malicious must agree with semi-honest"
+                    "n={n}: authenticated must agree with semi-honest"
                 );
                 assert_eq!(mal, sum > thr);
             }
@@ -1255,7 +1259,7 @@ mod tests {
     #[test]
     fn auth_range_proof_accepts_in_range_and_rejects_out_of_range() {
         // In-range sums (incl. the top of the supported width, and magnitudes FAR
-        // above the old masked-open cap) must be accepted by the full malicious path.
+        // above the old masked-open cap) must be accepted by the full authenticated path.
         for &sum in &[
             0u64,
             1,
@@ -1345,7 +1349,7 @@ mod tests {
     /// ACCEPTANCE (sq-km34.6, correctness): the AUTHENTICATED Rabbit decomposition
     /// recovers bits whose reconstruction equals the plaintext bits of the
     /// never-opened sum — across the FULL supported field width, including magnitudes
-    /// the masked-open malicious path (capped at `2^20`) could never decompose. Every
+    /// the masked-open authenticated path (capped at `2^20`) could never decompose. Every
     /// product in that chain was a `MacSession::auth_mul`, and each recovered bit
     /// still passes its MAC-check (the value/MAC pair is consistent end to end).
     #[test]
@@ -1389,7 +1393,7 @@ mod tests {
     }
 
     /// THE sq-km34.6 differential: the MAC-checked verdict equals the plaintext
-    /// `sum > threshold` at magnitudes the masked-open malicious path could NOT
+    /// `sum > threshold` at magnitudes the masked-open authenticated path could NOT
     /// support (`>= 2^DECOMP_VALUE_BITS`), all the way to the new `2^60` ceiling —
     /// the headline lift, and the acceptance "secure verdict == plaintext".
     #[test]
@@ -1420,15 +1424,15 @@ mod tests {
                 assert_eq!(
                     got,
                     sum > thr,
-                    "n={n}: malicious Rabbit verdict for ({sum} > {thr}) must match plaintext"
+                    "n={n}: authenticated Rabbit verdict for ({sum} > {thr}) must match plaintext"
                 );
             }
         }
     }
 
-    /// The malicious Rabbit path agrees with the semi-honest Rabbit
+    /// The authenticated (tamper-evident) Rabbit path agrees with the semi-honest Rabbit
     /// `disclose_threshold_verdict` at full-field magnitudes — same verdict, just
-    /// MAC-checked opens. (The pre-sq-km34.6 malicious path could not even be RUN on
+    /// MAC-checked opens. (The pre-sq-km34.6 authenticated path could not even be RUN on
     /// these inputs, so the two paths are now comparable over the same domain.)
     #[test]
     fn matches_semi_honest_disclose_at_full_width() {
@@ -1446,7 +1450,7 @@ mod tests {
                 .as_ref()
                 .map(|t| t.to_string().contains("true"))
                 .unwrap_or(false);
-            assert_eq!(mal, semi_bool, "malicious Rabbit must agree with semi-honest");
+            assert_eq!(mal, semi_bool, "authenticated Rabbit must agree with semi-honest");
             assert_eq!(mal, sum > thr);
         }
     }
@@ -1741,7 +1745,8 @@ mod tests {
              neutralises the range proof, so a raised recovered bit flips the verdict to \
              `true` for a true sum of {} — if this now ABORTS, `MacSession` gained \
              multiplication-gate verification that binds both operands and every \
-             'malicious-with-abort' caveat in this crate must be revisited",
+             'tamper-evident, NOT malicious-with-abort' caveat in this crate must be \
+             revisited",
             sum
         );
     }

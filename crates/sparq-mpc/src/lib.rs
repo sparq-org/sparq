@@ -152,8 +152,9 @@ pub mod auth_compare;
 // before reading that as malicious-with-abort — it is not.
 // [OPUS-4.8] sq-km34.6: the production path is now the AUTHENTICATED RABBIT chain —
 // every product/reduce in the solved-bits / LTBits / ripple-add / ripple-sub wrap
-// recovery is a `MacSession::auth_mul`, lifting the malicious magnitude from the
-// masked-open 2^20 to the full 2^60 (parity with the semi-honest `compare` path).
+// recovery is a `MacSession::auth_mul`, lifting the authenticated (tamper-evident)
+// path's magnitude from the masked-open 2^20 to the full 2^60 (parity with the
+// semi-honest `compare` path).
 // Read the module docs' "What the MAC-check does NOT cover" before making any
 // tamper-detection claim: `auth_mul` ADOPTS a value tamper on its second operand and
 // `mac_check` only covers values that are opened, so "any tamper aborts" is NOT the
@@ -371,7 +372,8 @@ pub use hidden_path::planner::{
 // reconstructed). sq-bgsn lifts the production path to the Rabbit-style full-field
 // decomposition, so the supported magnitude is now `< 2^RABBIT_VALUE_BITS = 2^60`
 // (the `RABBIT_*` constants), up from the masked-open path's `< 2^DECOMP_VALUE_BITS
-// = 2^20` (the `DECOMP_*` constants, retained for the malicious twin / tests).
+// = 2^20` (the `DECOMP_*` constants, retained for the authenticated (tamper-evident)
+// twin / tests).
 pub use compare::{
     disclose_threshold_verdict, open_verdict, secure_equal_to_bit, secure_greater_than,
     secure_threshold, COMPARE_BITS, COMPARE_MAX_EXCLUSIVE, DECOMP_MASK_BITS,

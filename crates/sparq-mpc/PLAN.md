@@ -336,11 +336,16 @@ credentialed host, so the measured envelope is not baked into any doc.
   **the principal thing that remains.** Unsolved in the literature; SPIKE.
 - **Q2** ✅ DECIDED at **M3**: honest-majority Shamir for v1 (configurable behind
   the trait long-term). Done.
-- **Guarantee (D), malicious security** ✅ DELIVERED at **M3** for the honest-
-  majority, redundancy-present regime (sq-uu0u WI-1/2/3): RS / Berlekamp–Welch
+- **Guarantee (D), malicious security** — **NOT delivered.** What **M3**
+  delivered (sq-uu0u WI-1/2/3) is the **tamper-evident-with-abort** tier for the
+  honest-majority, redundancy-present regime: RS / Berlekamp–Welch
   detect-and-abort / robust-correct on every reconstruction path, surfaced via
-  the `MaliciousSecurity` enum. Remaining seams (no-redundancy points + dishonest
-  majority via an IT-MAC backend; M4 attestation commitments) are deferred and
+  the `MaliciousSecurity` enum. That checks opened shares only — a cheat inside a
+  re-sharing round is undetected, and the IT-MAC tier is likewise tamper-evident
+  (`auth_mul` adopts a value tamper on its second operand), so the registry reports
+  `OperatorClass::Comparison` as semi-honest-only. Remaining seams (no-redundancy
+  points + dishonest majority via an IT-MAC backend; M4 attestation commitments)
+  are deferred and
   documented under M3 "Deferred malicious-security seams" (bead sq-6d6g);
   attribution sharpening is bead sq-6u6b.
 - **Q3** (BGP-join obliviousness cost / RQ2b) — surfaced concretely at **M3**:
