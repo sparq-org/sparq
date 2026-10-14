@@ -987,6 +987,7 @@ fn verify_value_in_range_rabbit(
     dealer: &mut ShamirDealer,
     value_shares: &[Share],
     value_bits: &[Vec<Share>],
+    context: &'static str,
 ) -> Result<(), MpcError> {
     let n = dealer.parties();
     // Recompose from the RABBIT_VALUE_BITS recovered bits (a FREE local linear comb).
@@ -1002,7 +1003,7 @@ fn verify_value_in_range_rabbit(
     let recompose_diff = shamir::sub_shares(value_shares, &recomposed)?;
     if !secret_is_zero(dealer, &recompose_diff)? {
         return Err(MpcError::Protocol(format!(
-            "disclose_threshold_verdict (Rabbit): in-protocol range proof FAILED — the \
+            "{context} (Rabbit): in-protocol range proof FAILED — the \
              secret-shared value does not equal the bit-composition of its recovered \
              {RABBIT_VALUE_BITS} bits (the value has content above bit {RABBIT_VALUE_BITS}, i.e. \
              value >= 2^{RABBIT_VALUE_BITS} = {RABBIT_VALUE_MAX_EXCLUSIVE}). The verdict would be \
@@ -1090,6 +1091,7 @@ fn verify_sum_in_range(
     dealer: &mut ShamirDealer,
     sum_shares: &[Share],
     sum_bits: &[Vec<Share>],
+    context: &'static str,
 ) -> Result<(), MpcError> {
     let n = dealer.parties();
     // Recompose the sum from ALL L recovered bits, and SEPARATELY the high part
@@ -1109,7 +1111,7 @@ fn verify_sum_in_range(
     let recompose_diff = shamir::sub_shares(sum_shares, &recomposed)?;
     if !secret_is_zero(dealer, &recompose_diff)? {
         return Err(MpcError::Protocol(format!(
-            "disclose_threshold_verdict: in-protocol range proof FAILED — the secret-shared sum \
+            "{context}: in-protocol range proof FAILED — the secret-shared sum \
              does not equal the bit-composition of its recovered {DECOMP_MASK_BITS} bits \
              (the masked open `sum + r` wrapped the field modulus p = 2^61-1, or the sum has \
              content above bit {DECOMP_MASK_BITS}). The verdict would be derived from a corrupted \
@@ -1122,7 +1124,7 @@ fn verify_sum_in_range(
     // zero ⇔ the high part is zero.
     if !secret_is_zero(dealer, &high_part)? {
         return Err(MpcError::Protocol(format!(
-            "disclose_threshold_verdict: in-protocol range proof FAILED — the secret-shared sum is \
+            "{context}: in-protocol range proof FAILED — the secret-shared sum is \
              >= 2^{DECOMP_VALUE_BITS} = {DECOMP_VALUE_MAX_EXCLUSIVE} (a bit at or above position \
              {DECOMP_VALUE_BITS} is set). That exceeds the statistically-safe magnitude the in-MPC \
              masked bit-decomposition supports, so the verdict is REJECTED fail-closed rather than \
@@ -1409,7 +1411,12 @@ pub fn disclose_threshold_verdict(
     // reconstructing the sum: an over-magnitude sum is REJECTED fail-closed here,
     // rather than feeding a truncated decomposition to the comparator and returning
     // a silent wrong verdict.
-    verify_value_in_range_rabbit(&mut dealer, sum_shares, &sum_bits)?;
+    verify_value_in_range_rabbit(
+        &mut dealer,
+        sum_shares,
+        &sum_bits,
+        "disclose_threshold_verdict",
+    )?;
     // The recovered shared bits feed the public-threshold comparator; the threshold's
     // bits are public constants. Open ONLY the verdict bit.
     let verdict_shares = greater_than_public_bits_with(&mut dealer, &sum_bits, public_threshold)?;
@@ -2186,7 +2193,9 @@ mod tests {
                 let res = disclose_threshold_verdict(&b, &s, 100_000);
                 match res {
                     Err(MpcError::Protocol(m)) => assert!(
-                        m.contains("range proof FAILED"),
+                        m.starts_with(
+                            "disclose_threshold_verdict (Rabbit): in-protocol range proof FAILED"
+                        ),
                         "n={n} OOB sum {sum}: expected range-proof fail-closed, got: {m}"
                     ),
                     Err(other) => {
@@ -2307,7 +2316,28 @@ mod tests {
     }
 
     #[test]
+    fn rabbit_range_proof_error_preserves_caller_context() {
+        // Exercise the helper's diagnostic contract directly with distinct caller labels.
+        for context in ["secure_greater_than_shared", "oblivious_sort_by_secret_key"] {
+            let (backend, shares) = shared_value(3, 22_000, RABBIT_VALUE_MAX_EXCLUSIVE);
+            let mut dealer = backend.dealer();
+            let bits = secure_bit_decompose_rabbit(&mut dealer, &backend, &shares).unwrap();
+            let err = verify_value_in_range_rabbit(&mut dealer, &shares, &bits, context)
+                .expect_err("out-of-range value must fail closed");
+            let MpcError::Protocol(message) = err else {
+                panic!("expected Protocol range error, got {err:?}");
+            };
+            assert!(
+                message.starts_with(&format!("{context} (Rabbit): in-protocol range proof FAILED")),
+                "wrong caller context: {message}"
+            );
+            assert!(!message.contains("disclose_threshold_verdict"), "{message}");
+        }
+    }
+
+    #[test]
     fn masked_open_verify_sum_in_range_accepts_in_range_rejects_oob() {
+        let context = "masked_open_verify_sum_in_range_accepts_in_range_rejects_oob";
         // [OPUS-4.8] sq-bgsn — the masked-open `secure_bit_decompose` +
         // `verify_sum_in_range` path is now TEST-ONLY (the production
         // `disclose_threshold_verdict` uses the Rabbit path), but it remains the
@@ -2321,7 +2351,7 @@ mod tests {
                 let (backend, shares) = shared_value(n, 11_000 + sum, sum);
                 let mut dealer = backend.dealer();
                 let bits = secure_bit_decompose(&mut dealer, &backend, &shares).unwrap();
-                verify_sum_in_range(&mut dealer, &shares, &bits).unwrap_or_else(|e| {
+                verify_sum_in_range(&mut dealer, &shares, &bits, context).unwrap_or_else(|e| {
                     panic!("n={n} masked-open in-range sum {sum} rejected: {e:?}")
                 });
             }
@@ -2330,13 +2360,16 @@ mod tests {
                 let (backend, shares) = shared_value(n, 22_000 + (sum & 0xFFFF), sum);
                 let mut dealer = backend.dealer();
                 let bits = secure_bit_decompose(&mut dealer, &backend, &shares).unwrap();
+                let err = verify_sum_in_range(&mut dealer, &shares, &bits, context)
+                    .expect_err("out-of-range sum must fail closed");
+                let MpcError::Protocol(message) = err else {
+                    panic!("expected Protocol range error, got {err:?}");
+                };
                 assert!(
-                    matches!(
-                        verify_sum_in_range(&mut dealer, &shares, &bits),
-                        Err(MpcError::Protocol(_))
-                    ),
-                    "n={n} masked-open OOB sum {sum} must be REJECTED fail-closed"
+                    message.starts_with(&format!("{context}: in-protocol range proof FAILED")),
+                    "wrong caller context: {message}"
                 );
+                assert!(!message.contains("disclose_threshold_verdict"), "{message}");
             }
         }
     }
