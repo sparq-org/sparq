@@ -152,9 +152,9 @@ feature).
 /// Endpoint adapter over the engine's existing SRJ transport; Phase 6 adds brTPF/TPF.
 #[cfg(feature = "fedclient")]
 pub mod source;
-// [OPUS-4.8] sq-g2xs: shared ureq-3 SSRF-resolver helpers (URI→host:port, capacity-bounded
-// filtered resolve, refusal error) used by every native federation transport. Native-only —
-// only built when `fedclient` pulls ureq in.
+// [OPUS-4.8] sq-g2xs: the SSRF-guarded ureq resolver and client used by every native federation
+// transport, over the engine's shared `resolve_vetted`. Native-only — only built when
+// `fedclient` pulls ureq in.
 #[cfg(all(feature = "fedclient", not(target_arch = "wasm32")))]
 pub(crate) mod ureq_egress;
 // [OPUS-4.8] sq-rsxf: re-export the Phase-2 §4.1 source surface at the crate root.
