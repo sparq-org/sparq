@@ -149,6 +149,21 @@ pub enum ReadPrecondition {
     NotModified,
 }
 
+/// Whether an If-Range precondition lets the Range apply (RFC 9110 section 13.1.5): absent, or a
+/// strong entity tag equal to the current one. A date never does: two versions written within
+/// one second share a Last-Modified, so a date is not a strong validator here, and the whole
+/// representation is served instead. Both the LDP and the LWS surface use it.
+pub(crate) fn if_range_holds(if_range: Option<&str>, etag: &str) -> bool {
+    let Some(v) = if_range.map(str::trim) else {
+        return true;
+    };
+    if v.starts_with('"') || v.starts_with("W/") {
+        // A weak tag never matches: the comparison is strong.
+        return !v.starts_with("W/") && !etag.starts_with("W/") && v == etag;
+    }
+    false
+}
+
 /// Evaluate the READ preconditions (`If-None-Match`, then `If-Modified-Since`) of a GET/HEAD against
 /// the resource's CURRENT validators (RFC 9110 §13).
 ///
@@ -355,6 +370,21 @@ fn tag_list(header: &str) -> impl Iterator<Item = InboundTag<'_>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn if_range() {
+        let date =
+            crate::http_date::format(UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+                .unwrap();
+        assert!(if_range_holds(None, "\"a\""));
+        assert!(if_range_holds(Some("\"a\""), "\"a\""));
+        assert!(!if_range_holds(Some("\"b\""), "\"a\""));
+        assert!(!if_range_holds(Some("W/\"a\""), "\"a\""));
+        // Review finding: a date is not a strong validator (two versions can share one), so
+        // even one equal to Last-Modified serves the whole representation.
+        assert!(!if_range_holds(Some(&date), "\"a\""));
+        assert!(!if_range_holds(Some("garbage"), "\"a\""));
+    }
 
     const TAG: &str = "\"abc-123\"";
     const OTHER: &str = "\"xyz-999\"";

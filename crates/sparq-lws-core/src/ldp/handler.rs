@@ -1054,7 +1054,11 @@ async fn serve_read_once<S: Store>(
     let total_len = body.len() as u64;
     // `Range` is defined for GET (RFC 9110 §14.2); ignore it for HEAD so a HEAD never returns 206.
     let outcome = if with_body {
-        range::evaluate(header_str(req_headers, header::RANGE), total_len)
+        // An If-Range that no longer names this representation serves it whole (RFC 9110 §13.1.5).
+        let range = header_str(req_headers, header::RANGE).filter(|_| {
+            conditional::if_range_holds(header_str(req_headers, header::IF_RANGE), &etag)
+        });
+        range::evaluate(range, total_len)
     } else {
         RangeOutcome::Full
     };
@@ -5209,6 +5213,49 @@ mod tests {
             StatusCode::NOT_MODIFIED,
             "the matching If-None-Match must win over Range (no 206)"
         );
+    }
+
+    /// RFC 9110 §13.1.5: a Range applies only while If-Range names this representation by a strong,
+    /// equal entity tag; a stale tag, a weak one, another format's or a date serves the whole body.
+    #[tokio::test]
+    async fn if_range_gates_the_range() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let whole = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+        let etag = etag_of(&whole);
+        let modified = whole.headers()[header::LAST_MODIFIED]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let mut jsonld = HeaderMap::new();
+        jsonld.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/ld+json"),
+        );
+        let jsonld_tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", jsonld).await);
+        let weak = format!("W/{etag}");
+        let cases = [
+            (None, StatusCode::PARTIAL_CONTENT),
+            (Some(etag.as_str()), StatusCode::PARTIAL_CONTENT),
+            (Some("\"stale\""), StatusCode::OK),
+            (Some(weak.as_str()), StatusCode::OK),
+            (Some(jsonld_tag.as_str()), StatusCode::OK),
+            (Some(modified.as_str()), StatusCode::OK),
+        ];
+        for (if_range, want) in cases {
+            let mut h = HeaderMap::new();
+            h.insert(header::RANGE, HeaderValue::from_static("bytes=0-3"));
+            if let Some(v) = if_range {
+                h.insert(header::IF_RANGE, HeaderValue::from_str(v).unwrap());
+            }
+            let resp = get_with(&state, owner_token(), "/alice/doc", h).await;
+            assert_eq!(resp.status(), want, "{if_range:?}");
+            let len = body_bytes(resp).await.len();
+            assert_eq!(
+                len == 4,
+                want == StatusCode::PARTIAL_CONTENT,
+                "{if_range:?}: {len}"
+            );
+        }
     }
 
     #[tokio::test]
