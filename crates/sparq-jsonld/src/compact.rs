@@ -38,6 +38,7 @@
 //! the initial expansion) are dereferenced only through the [`DocumentLoader`]
 //! (deny-by-default via [`NoopLoader`](crate::loader::NoopLoader)).
 
+use crate::cache::Lru;
 use crate::context::inverse::{compact_iri, InverseContext};
 use crate::context::{budget, ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
@@ -164,15 +165,20 @@ fn compact_expanded_inner(
     Ok(result)
 }
 
-thread_local! {
-    /// The last self-contained root context processed on this thread, keyed by the
-    /// context value and options. Callers serialising many documents against one
-    /// context (the engine writer, the playground) skip re-processing it and rebuilding
-    /// its inverse context on every call.
-    static LAST_ROOT: RefCell<Option<(Json, JsonLdOptions, Rc<Ctx>)>> = const { RefCell::new(None) };
+struct RootContext {
+    local: Json,
+    base: Option<String>,
+    options: JsonLdOptions,
+    ctx: Rc<Ctx>,
 }
 
-/// The processed root context for `ctx_value`, reusing [`LAST_ROOT`] when it matches.
+thread_local! {
+    /// Recent self-contained processed contexts and their inverse contexts. Keep the
+    /// full options key: the retained IRI/derived-context memos are reused across calls.
+    static ROOT_CACHE: RefCell<Lru<RootContext>> = const { RefCell::new(Lru::new()) };
+}
+
+/// The processed root context for `ctx_value`, reusing [`ROOT_CACHE`] when it matches.
 /// Only contexts that cannot reach the loader (no remote references, no `@import`) are
 /// cached, since a loader may resolve the same IRI differently between calls.
 fn root_ctx(
@@ -183,11 +189,10 @@ fn root_ctx(
 ) -> Result<Rc<Ctx>, JsonLdError> {
     let cacheable = self_contained(ctx_value);
     if cacheable {
-        let hit = LAST_ROOT.with(|last| {
-            last.borrow()
-                .as_ref()
-                .filter(|(v, o, _)| v == ctx_value && o == options)
-                .map(|(_, _, c)| Rc::clone(c))
+        let hit = ROOT_CACHE.with(|cache| {
+            cache.borrow_mut()
+                .get(|e| e.base.as_deref() == base && e.options == *options && e.local == *ctx_value)
+                .map(|e| Rc::clone(&e.ctx))
         });
         if let Some(ctx) = hit {
             return Ok(ctx);
@@ -197,8 +202,13 @@ fn root_ctx(
         ActiveContext::new(base).process(ctx_value, options.base.as_deref(), loader, options)?;
     let ctx = Rc::new(Ctx::new(active));
     if cacheable {
-        LAST_ROOT.with(|last| {
-            *last.borrow_mut() = Some((ctx_value.clone(), options.clone(), Rc::clone(&ctx)));
+        ROOT_CACHE.with(|cache| {
+            cache.borrow_mut().insert(RootContext {
+                local: ctx_value.clone(),
+                base: base.map(str::to_string),
+                options: options.clone(),
+                ctx: Rc::clone(&ctx),
+            });
         });
     }
     Ok(ctx)
@@ -360,7 +370,7 @@ struct Ctx {
     /// On the root context only: contexts derived mid-walk (step 4 reversion, step 5
     /// property-scoped and step 9 type-scoped contexts), memoised so each distinct switch
     /// builds its active and inverse context once rather than once per node (and, with
-    /// the root cached in [`LAST_ROOT`], once across calls), within the limits in
+    /// the root cached in [`ROOT_CACHE`], once across calls), within the limits in
     /// [`Env::derived`]. Keys name contexts by id, so a dropped context is never mistaken
     /// for a later one.
     derived: RefCell<Vec<(DerivedKey, Rc<Ctx>)>>,
@@ -396,7 +406,7 @@ impl Ctx {
 
     /// Clears this root's IRI memos (its own and its derived contexts') once they hold
     /// more than [`MEMO_CAP`] IRIs between them. The root outlives the call in
-    /// [`LAST_ROOT`] and node ids differ per document, so without this the memos would keep
+    /// [`ROOT_CACHE`] and node ids differ per document, so without this the memos would keep
     /// every IRI ever compacted on the thread. Within one call they hold up to
     /// [`MEMO_CALL_CAP`] IRIs, which keeps large documents fast, and each IRI holds at most
     /// [`MEMO_SHAPES`] value shapes. The derived contexts are dropped here once the cache
@@ -1781,6 +1791,93 @@ mod tests {
     use super::*;
     use crate::NoopLoader;
 
+    #[test]
+    fn distinct_frames_reuse_cached_inverse_contexts() {
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let input = Json::parse(r#"[{"@id":"http://ex/s","http://ex/p":[{"@value":"v"}]}]"#).unwrap();
+        let opts = JsonLdOptions::default();
+        let fopts = crate::frame::FrameOptions::default();
+        // Every frame is distinct, but its context alternates between two definitions.
+        // Both the expanded-frame cache and a single-entry root cache miss each time.
+        for i in 0..6 {
+            let term = if i % 2 == 0 { "p" } else { "q" };
+            let f = Json::parse(&format!(r#"{{"@context":{{"{term}":"http://ex/p"}},"{term}":{{}},"@id":["http://ex/s","http://ex/unused{i}"]}}"#)).unwrap();
+            let out = crate::frame::frame(&input, &f, &opts, &fopts, &NoopLoader).unwrap();
+            let mut bytes = String::new();
+            out.write(&mut bytes);
+            assert_eq!(bytes, format!(r#"{{"@context":{{"{term}":"http://ex/p"}},"@id":"http://ex/s","{term}":"v"}}"#));
+        }
+        assert_eq!(ROOT_CACHE.with(|cache| cache.borrow().hits), 4);
+    }
+
+    #[test]
+    fn root_cache_evicts_the_least_recent_inverse_context() {
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let opts = JsonLdOptions::default();
+        let contexts: Vec<_> = (0..9).map(|i| Json::parse(&format!(r#"{{"p":"http://ex/{i}"}}"#)).unwrap()).collect();
+        let get = |c: &Json| root_ctx(c, None, &opts, &NoopLoader).unwrap();
+        let first: Vec<_> = contexts[..8].iter().map(get).collect();
+        assert!(Rc::ptr_eq(&first[0], &get(&contexts[0])));
+        get(&contexts[8]);
+        assert!(Rc::ptr_eq(&first[0], &get(&contexts[0])));
+        assert!(!Rc::ptr_eq(&first[1], &get(&contexts[1])));
+    }
+
+    #[test]
+    fn root_cache_separates_base_and_options() {
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let local = Json::parse(r#"{"p":"http://ex/p"}"#).unwrap();
+        let opts = JsonLdOptions::default();
+        let other = JsonLdOptions { compact_arrays: false, ..opts.clone() };
+        let a = root_ctx(&local, Some("http://ex/a/"), &opts, &NoopLoader).unwrap();
+        let b = root_ctx(&local, Some("http://ex/b/"), &opts, &NoopLoader).unwrap();
+        let c = root_ctx(&local, Some("http://ex/a/"), &other, &NoopLoader).unwrap();
+        assert_eq!(a.active.base_iri(), Some("http://ex/a/"));
+        assert_eq!(b.active.base_iri(), Some("http://ex/b/"));
+        assert!(!Rc::ptr_eq(&a, &c));
+        assert_eq!(ROOT_CACHE.with(|cache| cache.borrow().hits), 0);
+        assert!(Rc::ptr_eq(&a, &root_ctx(&local, Some("http://ex/a/"), &opts, &NoopLoader).unwrap()));
+        assert!(Rc::ptr_eq(&b, &root_ctx(&local, Some("http://ex/b/"), &opts, &NoopLoader).unwrap()));
+        assert!(Rc::ptr_eq(&c, &root_ctx(&local, Some("http://ex/a/"), &other, &NoopLoader).unwrap()));
+        // Exercise output options through the public compaction entry point as well.
+        let input = Json::parse(r#"[{"http://ex/p":[{"@value":"v"}]}]"#).unwrap();
+        for o in [&opts, &other, &opts, &other] {
+            let out = compact_expanded(&input, &local, o, &NoopLoader).unwrap();
+            let node = match out.get("@graph") {
+                Some(Json::Arr(nodes)) => &nodes[0],
+                _ => &out,
+            };
+            let expected = if o.compact_arrays {
+                Json::Str("v".into())
+            } else {
+                Json::Arr(vec![Json::Str("v".into())])
+            };
+            assert_eq!(node.get("p"), Some(&expected));
+        }
+    }
+
+    #[test]
+    fn root_cache_does_not_reuse_loader_state() {
+        struct Loader(std::cell::Cell<usize>);
+        impl DocumentLoader for Loader {
+            fn load_document(&self, url: &str) -> Result<crate::RemoteDocument, JsonLdError> {
+                let n = self.0.get();
+                self.0.set(n + 1);
+                Ok(crate::RemoteDocument::new(format!(r#"{{"@context":{{"p":"http://ex/{n}"}}}}"#), url))
+            }
+        }
+        ROOT_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let loader = Loader(std::cell::Cell::new(0));
+        let remote = Json::Str("http://ex/context".into());
+        let opts = JsonLdOptions::default();
+        let first = root_ctx(&remote, None, &opts, &loader).unwrap();
+        let second = root_ctx(&remote, None, &opts, &loader).unwrap();
+        assert_eq!(first.active.term_definition("p").unwrap().iri(), Some("http://ex/0"));
+        assert_eq!(second.active.term_definition("p").unwrap().iri(), Some("http://ex/1"));
+        assert!(root_ctx(&remote, None, &opts, &NoopLoader).is_err());
+        assert_eq!(ROOT_CACHE.with(|cache| cache.borrow().hits), 0);
+    }
+
     // The cached root context outlives each call, so its IRI memo must stay bounded
     // however many distinct node ids pass through it.
     #[test]
@@ -1794,7 +1891,7 @@ mod tests {
             let doc = Json::parse(&format!("[{}]", nodes.join(","))).unwrap();
             compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         }
-        let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.memo.borrow().len()));
+        let len = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.memo.borrow().len()));
         assert!(len.is_some_and(|n| n <= MEMO_CAP), "memo size {len:?}");
     }
 
@@ -1814,7 +1911,7 @@ mod tests {
             .unwrap();
             compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         }
-        let n = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.derived.borrow().len()));
+        let n = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.derived.borrow().len()));
         assert!(n.is_some_and(|n| n <= DERIVED_CAP + 4), "derived {n:?}");
     }
 
@@ -1876,7 +1973,7 @@ mod tests {
             Json::Arr(v)
         };
         assert!(same_entries(&sorted(&back), &sorted(&doc)), "round trip changed the data");
-        let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.derived.borrow().len()));
+        let len = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.derived.borrow().len()));
         assert_eq!(len, Some(0));
     }
 
@@ -1998,7 +2095,7 @@ mod tests {
         .unwrap();
         let doc = Json::parse(r#"[{"@id":"http://ex/s","@type":["http://ex/B"]}]"#).unwrap();
         compact_expanded(&doc, &ctx, &JsonLdOptions::default(), &NoopLoader).unwrap();
-        let retained = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.retained.get()));
+        let retained = ROOT_CACHE.with(|last| last.borrow().last().map(|e| e.ctx.retained.get()));
         assert!(retained.is_some_and(|n| n > 4096), "retained {retained:?}");
     }
 
@@ -2255,9 +2352,9 @@ mod tests {
             .unwrap();
             compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         }
-        let shapes = LAST_ROOT.with(|last| {
+        let shapes = ROOT_CACHE.with(|last| {
             let last = last.borrow();
-            let (_, _, c) = last.as_ref().unwrap();
+            let c = &last.last().unwrap().ctx;
             let memo = c.memo.borrow();
             memo.get("http://ex/p").map(Vec::len)
         });
