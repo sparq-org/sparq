@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-zk:** `dual_leaf_v2` is a second dual-leaf commitment method (`CommitmentMethod::DualLeafV2`,
+  scheme IRI `https://sparq.dev/ns/zk#poseidon2-dualleaf-v2`) behind the OFF-by-default `dual-leaf`
+  feature. It keeps V1's leaf shapes and re-derives the constants: lane constants in BLAKE3's
+  key-derivation mode over the length-framed `(datatype IRI, lane params)` pair, the degenerate fold
+  left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
+  value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
+  `research/zk-field-native-encoding.md` §14.1 asks for. V1's constants, vectors and public API are
+  unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
+  §14.1 `LANG_NONE` assumption is not discharged. Both versions carry the same #769-accepted INV-VL
+  downgrade; not externally audited (CR-G8 / sq-qhy4).
+- **sparq-zk-compose:** `filter_value_dl_bool` is the `DualLeafV2` `xsd:boolean` lane's dedicated
+  member — `filter_value_dl_int`'s public layout field-for-field, plus in-circuit constraints that the
+  witnessed `VALUE_HOOK` and the public bound lie in `{0, 1}`, so a handle the integer member's `u64`
+  range decomposition admits is refused by the relation. Wired through `CircuitId::FilterValueDlBool`,
+  `ProofInputs::FilterValueDlBool`, `manifest::boolean_lane_const_v2`,
+  `build::build_filter_value_dl_bool`, `toml::filter_value_dl_bool_prover_toml`, the verifier's
+  public-input reconstruction and the dispatch matrix. The `DualLeafV1` boolean lane keeps sharing the
+  integer member, unchanged. No soundness or privacy claim.
 - **sparq-reason:** `MaterializedN3Graph::with_limits` builds the incremental N3 graph under
   a `ClosureLimits` (`new` uses the default). The counting path now sizes each builtin's
   argument list and result before building it and charges a round and fact allowance; past
