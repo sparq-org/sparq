@@ -1230,3 +1230,73 @@ fn bottom_property_unsupported_positions_and_top_properties_stay_refused() {
         assert_eq!(b, Branch::Extraction);
     }
 }
+
+/// #4762 review: a `owl:bottomDataProperty` restriction filler must be a datatype in the
+/// OWL 2 datatype map — a facet IRI such as `xsd:minInclusive` (in the XSD namespace, but not
+/// a datatype) is refused.
+#[test]
+fn bottom_data_property_filler_must_be_a_datatype_map_entry() {
+    let pre = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . ";
+    for filler in ["xsd:minInclusive", "xsd:maxLength", "xsd:notADatatype"] {
+        for q in ["owl:allValuesFrom", "owl:someValuesFrom"] {
+            let body = format!(
+                "{}:i a [ owl:onProperty owl:bottomDataProperty ; {} {} ] .",
+                pre, q, filler
+            );
+            let (v, b) = check(&body);
+            assert!(
+                matches!(v, ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))),
+                "expected a refusal for {:?}, got {:?}",
+                body,
+                v
+            );
+            assert_eq!(b, Branch::Extraction);
+        }
+    }
+    // Datatype-map entries outside the XSD namespace are accepted.
+    assert_eq!(
+        check(":i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom rdfs:Literal ] .")
+            .0,
+        ConsistencyVerdict::Inconsistent
+    );
+}
+
+/// #4762 review: an explicit `owl:bottomDataProperty a owl:DatatypeProperty` declaration is
+/// consistent with its use in a restriction (in either triple order), while an incompatible
+/// `owl:ObjectProperty` declaration is still refused.
+#[test]
+fn declared_bottom_data_property_restrictions() {
+    let pre = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . ";
+    let decl = "owl:bottomDataProperty a owl:DatatypeProperty .";
+    let some = ":i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom xsd:integer ] .";
+    let all = ":i a [ owl:onProperty owl:bottomDataProperty ; owl:allValuesFrom xsd:integer ] .";
+    for (restriction, expected) in [
+        (some, ConsistencyVerdict::Inconsistent),
+        (all, ConsistencyVerdict::Consistent),
+    ] {
+        for body in [
+            format!("{}{} {}", pre, decl, restriction),
+            format!("{}{} {}", pre, restriction, decl),
+        ] {
+            assert_eq!(check(&body).0, expected, "{:?}", body);
+        }
+        for body in [
+            format!("{}owl:bottomDataProperty a owl:ObjectProperty . {}", pre, restriction),
+            format!("{}{} owl:bottomDataProperty a owl:ObjectProperty .", pre, restriction),
+        ] {
+            assert!(
+                matches!(
+                    check(&body).0,
+                    ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))
+                ),
+                "an ObjectProperty declaration of owl:bottomDataProperty must stay refused: {:?}",
+                body
+            );
+        }
+    }
+    // A declared data assertion is inconsistent too.
+    assert_eq!(
+        check(&format!("{}{} :a owl:bottomDataProperty \"v\" .", pre, decl)).0,
+        ConsistencyVerdict::Inconsistent
+    );
+}

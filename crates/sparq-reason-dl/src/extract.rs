@@ -1044,7 +1044,7 @@ fn decode_restriction(
         };
         if prop == v.bottom_object_property {
             decode_class_inner(dict, v, idx, filler, visiting, depth + 1)?;
-        } else if datatype_iri_name(dict, filler).is_none() {
+        } else if !is_owl2_datatype_map_iri(dict, filler) {
             return Err(ExtractError::DataConstruct(format!(
                 "owl:bottomDataProperty restriction {} whose filler is not a datatype IRI",
                 term_iri(dict, id)
@@ -1568,10 +1568,22 @@ impl Index {
                 // Symmetric to the declaration arms: records the pun so the verdict is
                 // order-independent (RDF graphs are sets; declaration before usage must
                 // produce the same Unclassifiable refusal as usage before declaration).
-                if idx.annotation_props.contains(&o) || idx.data_props.contains(&o) {
-                    idx.punned_props.insert(o);
+                if o == v.bottom_data_property {
+                    // #4762: `owl:bottomDataProperty` is a DATA property by definition, so a
+                    // restriction on it types it as one — keeping an explicit
+                    // `owl:bottomDataProperty a owl:DatatypeProperty` declaration consistent,
+                    // while an `owl:ObjectProperty` / `owl:AnnotationProperty` declaration
+                    // is still a pun (refused), in either triple order.
+                    if idx.annotation_props.contains(&o) || idx.object_props.contains(&o) {
+                        idx.punned_props.insert(o);
+                    }
+                    idx.data_props.insert(o);
+                } else {
+                    if idx.annotation_props.contains(&o) || idx.data_props.contains(&o) {
+                        idx.punned_props.insert(o);
+                    }
+                    idx.object_props.insert(o); // usage-based typing
                 }
-                idx.object_props.insert(o); // usage-based typing
             } else if p == v.some_values_from {
                 if let Some(prev) = idx.some_values_from.insert(s, o) {
                     if prev != o {
@@ -1750,6 +1762,35 @@ const NON_XSD_DATATYPE_IRIS: &[&str] = &[
     "http://www.w3.org/2002/07/owl#real",
     "http://www.w3.org/2002/07/owl#rational",
 ];
+
+/// The OWL 2 datatype map (OWL 2 Structural Specification §4): `rdfs:Literal`, the
+/// [`NON_XSD_DATATYPE_IRIS`] entries, and exactly these XSD datatypes. Used where a filler
+/// must BE a datatype (a `owl:bottomDataProperty` restriction, #4762) — unlike
+/// [`datatype_iri_name`], which refuses the whole `xsd:` namespace and so also matches
+/// non-datatype IRIs such as the facet `xsd:minInclusive`.
+const XSD_DATATYPE_MAP_LOCALS: &[&str] = &[
+    "decimal", "integer", "nonNegativeInteger", "nonPositiveInteger", "positiveInteger",
+    "negativeInteger", "long", "int", "short", "byte", "unsignedLong", "unsignedInt",
+    "unsignedShort", "unsignedByte", "double", "float", "string", "normalizedString", "token",
+    "language", "Name", "NCName", "NMTOKEN", "boolean", "hexBinary", "base64Binary", "anyURI",
+    "dateTime", "dateTimeStamp",
+];
+
+/// `true` iff `id` is an IRI in the OWL 2 datatype map ([`XSD_DATATYPE_MAP_LOCALS`] +
+/// [`NON_XSD_DATATYPE_IRIS`]).
+fn is_owl2_datatype_map_iri(dict: &Dict, id: Id) -> bool {
+    if is_inline(id) {
+        return false;
+    }
+    let TermParts::Iri { prefix, suffix } = dict.term_parts(id) else {
+        return false;
+    };
+    let iri = format!("{}{}", prefix, suffix);
+    match iri.strip_prefix(XSD) {
+        Some(local) => XSD_DATATYPE_MAP_LOCALS.contains(&local),
+        None => NON_XSD_DATATYPE_IRIS.contains(&iri.as_str()),
+    }
+}
 
 /// `Some(display)` when `id` names a well-known OWL 2 datatype-map datatype (an `xsd:*` IRI or
 /// one of the [`NON_XSD_DATATYPE_IRIS`]). A bare datatype IRI carries CONCRETE-DOMAIN meaning
