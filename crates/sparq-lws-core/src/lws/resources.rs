@@ -2407,18 +2407,19 @@ async fn update<S: Store + 'static>(
         Ok(listing) => listing,
         Err(r) => return r,
     };
+    // Authorized, now that the lock is held, before the resource's existence answers anything.
+    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
+    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
+        return r;
+    }
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
     };
-    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
-        return r;
-    }
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
-    }
-    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
-        return r;
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
         &req.headers,
@@ -3443,10 +3444,6 @@ async fn patch<S: Store + 'static>(
         Ok(listing) => listing,
         Err(r) => return r,
     };
-    let meta = match current(state, uri).await {
-        Ok(m) => m,
-        Err(r) => return r,
-    };
     if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
         return r;
     }
@@ -3456,6 +3453,10 @@ async fn patch<S: Store + 'static>(
     if let Err(r) = recheck(state, Action::Read, uri, agent).await {
         return r;
     }
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
@@ -3539,6 +3540,12 @@ async fn delete<S: Store + 'static>(
     uri: &str,
 ) -> Response {
     let storage = state.cfg.storage();
+    // Walking the subtree to lock it can answer (a member set aside, a container that keeps
+    // changing), so the delete is authorized again first; the check that counts is repeated once
+    // the locks are held.
+    if let Err(r) = recheck(state, Action::Delete, uri, agent).await {
+        return r;
+    }
     if let Err(r) = current(state, uri).await {
         return r;
     }
@@ -4615,6 +4622,10 @@ async fn linkset<S: Store + 'static>(
     } else {
         None
     };
+    // Authorized, now that the lock is held, before the resource's existence answers anything.
+    if let Err(r) = recheck(state, action, uri, agent).await {
+        return r;
+    }
     let exists = match state.store.exists(uri).await {
         Ok(e) => e,
         Err(e) => return store_error(e),
@@ -4625,9 +4636,6 @@ async fn linkset<S: Store + 'static>(
         } else {
             problem(StatusCode::NOT_FOUND, None)
         };
-    }
-    if let Err(r) = recheck(state, action, uri, agent).await {
-        return r;
     }
     // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
     // replaces it, and needs Read only to compare it.

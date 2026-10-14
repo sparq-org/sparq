@@ -1311,6 +1311,91 @@ _:p solid:inserts { <https://pod.example/alice/drop/doc#me> foaf:nick \"A\" . }.
         .await;
     assert!(r.status().is_success(), "{}", r.status());
     assert!(!r.headers().contains_key("etag"));
+    // Nor is it told the target's format: an insert into text it may not read, which cannot be
+    // patched, is refused as a write without access is, where a reader is told why.
+    let note = h
+        .request(
+            "PUT",
+            "/alice/drop/note",
+            Some("text/plain"),
+            Body::from("not rdf {"),
+        )
+        .await;
+    assert_eq!(note.status(), StatusCode::CREATED);
+    let insert = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <https://pod.example/alice/drop/note#a> <https://e.example/p> 1 . }.\n";
+    let r = h
+        .request(
+            "PATCH",
+            "/alice/drop/note",
+            Some("text/n3"),
+            Body::from(insert),
+        )
+        .await;
+    assert!(r.status().is_client_error(), "{}", r.status());
+    assert_ne!(r.status(), StatusCode::FORBIDDEN);
+    let acl = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#w> a acl:Authorization;
+     acl:agent <{webid}>;
+     acl:accessTo <https://pod.example/alice/drop/note>;
+     acl:mode acl:Append."#,
+        webid = common::WEBID
+    );
+    let put_acl = h
+        .request(
+            "PUT",
+            "/alice/drop/note.acl",
+            Some("text/turtle"),
+            Body::from(acl),
+        )
+        .await;
+    assert_eq!(put_acl.status(), StatusCode::CREATED);
+    let r = h
+        .request(
+            "PATCH",
+            "/alice/drop/note",
+            Some("text/n3"),
+            Body::from(insert),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_posts_tag_describes_only_what_was_posted() {
+    // A POST's `ETag` goes to a writer that may not read the container (an Append drop box), so it
+    // must describe only the bytes and type it sent: the same body posted into a container with
+    // members and into an empty one gets the same tag.
+    let h = Harness::new().await;
+    h.make_container("/alice/full/").await;
+    h.make_container("/alice/empty/").await;
+    for i in 0..3 {
+        let r = h
+            .request(
+                "PUT",
+                &format!("/alice/full/m{i}"),
+                Some("text/turtle"),
+                Body::from(format!("<#m> <https://e.example/n> {i} .")),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+    }
+    let mut tags = Vec::new();
+    for c in ["/alice/full/", "/alice/empty/"] {
+        let r = h
+            .request(
+                "POST",
+                c,
+                Some("text/turtle"),
+                Body::from("<#x> <https://e.example/p> \"v\" ."),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        tags.push(r.headers().get("etag").cloned());
+    }
+    assert!(tags[0].is_some());
+    assert_eq!(tags[0], tags[1]);
 }
 
 #[tokio::test]

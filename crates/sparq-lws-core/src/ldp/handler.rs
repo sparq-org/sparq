@@ -1716,11 +1716,27 @@ pub async fn patch_handler<S: Store>(
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
+    // An insert-only patch needs only Append, so a writer that may not read the target is told
+    // nothing about it when the patch cannot apply (its format, whether it parses, what the result
+    // would be): it gets the refusal it would get without access.
+    let reader = may_read(&target.iri, &granted);
+    let unread = |e: ServerError| {
+        if reader {
+            e
+        } else if token.web_id.is_none() {
+            state.unauthenticated()
+        } else {
+            ServerError::Forbidden
+        }
+    };
     // Determine the existing triples + the stored format (default Turtle for a new resource).
     let (existing_triples, stored_format) = match &current {
         Some(res) => {
             let fmt = classify(Some(&res.meta.content_type)).unwrap_or(RdfFormat::Turtle);
-            (parse_to_triples(fmt, &res.body, &target.iri)?, fmt)
+            (
+                parse_to_triples(fmt, &res.body, &target.iri).map_err(unread)?,
+                fmt,
+            )
         }
         None => {
             // Create-on-PATCH: only an insert-only patch can create a resource. A delete on a missing
@@ -1729,8 +1745,8 @@ pub async fn patch_handler<S: Store>(
         }
     };
 
-    let patched = apply_patch(&existing_triples, &patch)?;
-    let new_body = serialize_triples(stored_format, &patched)?;
+    let patched = apply_patch(&existing_triples, &patch).map_err(unread)?;
+    let new_body = serialize_triples(stored_format, &patched).map_err(unread)?;
 
     let existed = current.is_some();
     let parent = parent_container(&target);
