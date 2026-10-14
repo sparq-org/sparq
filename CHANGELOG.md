@@ -36,7 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   firing may mention one, at any depth, or bind a value holding a blank node (an
   existential whose witness may depend on it). A ground fact never proves it. Supported where the
   universal is a subject or object (or in a list or quoted triple there) of a
-  stored-predicate atom, in a document with no backward rules; every other placement, and
+  stored-predicate atom, in a document with no backward rules; every other placement (or a
+  premise that also holds a blank constant, as a rule inside a closed formula can), and
   an N3 query document, is still refused with the same error. The `compiled-rules` engine
   compiles such a rule as one that never fires (its store is ground), and
   `MaterializedN3Graph` evaluates it in fallback mode. (#6882)

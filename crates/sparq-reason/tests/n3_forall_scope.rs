@@ -264,6 +264,26 @@ fn a_closure_run_s_own_universal_proves_a_premise_universal() {
 }
 
 #[test]
+fn a_closure_rule_s_premise_blank_does_not_match_a_dependent_witness() {
+    // In a closed formula a rule's premise blank is a constant naming the formula's own
+    // existential, whose witness depends on the universal (`∀y ∃w. y :p w`).
+    for formula in [
+        "{ @forAll :y. @forSome :w. :y :p :w. { @forAll :x. :x :p :w } => { :hit :by :rule } }",
+        "{ @forAll :y. :y :p _:b. { @forAll :x. :x :p _:b } => { :hit :by :rule } }",
+        "{ @forAll :y. :y :p ( _:b ). { @forAll :x. :x :p ( _:b ) } => { :hit :by :rule } }",
+    ] {
+        let src = format!(
+            ":k :is {formula}.\n\
+             {{ :k :is ?f. ?f log:conclusion ?g. ?g log:includes {{ :hit :by :rule }} }} => {{ :closure :fired :yes }}.\n"
+        );
+        match reason_n3_terms(&format!("@prefix : <{EX}>.\n{src}"), None) {
+            Ok(r) => assert!(!has(&r.facts, "closure", "fired", "yes"), "{src}"),
+            Err(e) => assert!(e.contains("universally quantified antecedents"), "{e}"),
+        }
+    }
+}
+
+#[test]
 fn an_outer_universal_does_not_prove_a_closure_s_premise_universal() {
     // The document's `:z` is a free parameter of the closed formula.
     let src = "@forAll :z. :k :is { :z :p :b. { @forAll :y. :y :p :b } => { :hit :by :rule } }.\n\

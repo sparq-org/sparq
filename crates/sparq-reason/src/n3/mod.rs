@@ -3151,6 +3151,23 @@ fn premise_universals_matchable(premise: &[[Term; 3]]) -> bool {
             _ => true,
         }
     }
+    fn has_blank(t: &Term) -> bool {
+        match t {
+            Term::Blank(_) => true,
+            Term::List(ms) => ms.iter().any(has_blank),
+            Term::Triple(tr) => tr.iter().any(has_blank),
+            Term::Formula(ts) => ts.iter().flatten().any(has_blank),
+            _ => false,
+        }
+    }
+    // A premise blank is a constant only in a rule taken from a formula a closure run
+    // closes (a document's premise blanks are variables). It would match that formula's
+    // own blank, an existential whose witness may depend on the store universal, without
+    // reaching the binding [`independent_firing`] checks: refused.
+    let quantified = premise.iter().flatten().any(|t| mentions_var(t, &premise_universal));
+    if quantified && premise.iter().flatten().any(has_blank) {
+        return false;
+    }
     premise.iter().all(|atom| {
         if !atom.iter().any(|t| mentions_var(t, &premise_universal)) {
             return true;
