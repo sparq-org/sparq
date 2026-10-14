@@ -355,3 +355,35 @@ fn compile_expr_matches_eval_expr_for_all_variants() {
         assert_compiled_matches_original(&g, &captured, &b, e);
     }
 }
+
+/// A `BNODE(str)` label a stored blank node already uses gets a deterministic suffix,
+/// whether the node is in the active graph or only in a named graph of the dataset.
+#[test]
+fn keyed_bnode_label_avoids_stored_blank_nodes() {
+    let fresh = |g: &Graph, local: &LocalVocab, f: Function, label: &str| {
+        let minted = Value::Term(Term::BlankNode(oxrdf::BlankNode::new_unchecked(label)));
+        match compiled::fresh_in_dataset(g, local, &f, 1, minted) {
+            Value::Term(Term::BlankNode(b)) => b.as_str().to_owned(),
+            other => panic!("expected a blank node, got {other:?}"),
+        }
+    };
+    let active =
+        Graph::load_str("_:k <http://ex/p> 1 . _:kx1 <http://ex/p> 1 .", "turtle").unwrap();
+    let local = LocalVocab::for_query();
+    let first = fresh(&active, &local, Function::BNode, "k");
+    assert_eq!(first, "kx2");
+    let again = fresh(&active, &local, Function::BNode, "k");
+    assert_eq!(again, first, "the suffix depends on the dataset alone");
+    assert_eq!(fresh(&active, &local, Function::BNode, "free"), "free");
+
+    let dataset = Graph::load_dataset(
+        "_:n <http://ex/p> \"1\" <http://ex/g> .\n<http://ex/s> <http://ex/p> \"1\" .\n",
+        "nquads",
+    )
+    .unwrap();
+    let scoped = LocalVocab::for_dataset(&dataset);
+    let empty = Graph::load_str("", "turtle").unwrap();
+    assert_eq!(fresh(&empty, &scoped, Function::BNode, "n"), "nx1");
+    // Not BNODE: untouched.
+    assert_eq!(fresh(&active, &local, Function::StrUuid, "k"), "k");
+}

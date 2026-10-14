@@ -1775,9 +1775,7 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         F::BNode => {
             if nargs == 0 {
                 // BNODE(): a fresh blank node per call.
-                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-                let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                Value::Term(Term::BlankNode(BlankNode::new_unchecked(format!("fnb{n}"))))
+                Value::Term(Term::BlankNode(next_minted_bnode()))
             } else {
                 // BNODE(str): the label is derived from (solution-row scope, argument),
                 // so equal arguments within ONE solution map to the same blank node and
@@ -2013,7 +2011,53 @@ pub(super) fn eval_function(
     f: &spargebra::algebra::Function,
     args: &[Expression],
 ) -> Result<Value, String> {
-    eval_function_inner(f, args.len(), |i| eval_expr(graph, local, b, row, &args[i]))
+    let v = eval_function_inner(f, args.len(), |i| eval_expr(graph, local, b, row, &args[i]));
+    if matches!(f, spargebra::algebra::Function::BNode) {
+        return Ok(fresh_in_dataset(graph, local, f, args.len(), v?));
+    }
+    v
+}
+
+/// The next `BNODE()` label from the process-wide counter.
+fn next_minted_bnode() -> BlankNode {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    BlankNode::new_unchecked(format!("fnb{n}"))
+}
+
+/// A blank node minted by `BNODE` must be distinct from every blank node in the dataset
+/// (SPARQL 1.1 §17.4.2.9), but term-level comparisons go through the label. A minted label
+/// a stored blank node already uses is replaced: `BNODE()` takes the next counter value;
+/// `BNODE(str)` appends a suffix chosen from the dataset alone, so equal arguments in one
+/// solution still share a node. Other functions pass through.
+pub(super) fn fresh_in_dataset(
+    graph: &Graph,
+    local: &LocalVocab,
+    f: &spargebra::algebra::Function,
+    nargs: usize,
+    v: Value,
+) -> Value {
+    if !matches!(f, spargebra::algebra::Function::BNode) {
+        return v;
+    }
+    let Value::Term(Term::BlankNode(minted)) = v else { return v };
+    let stored = |b: &BlankNode| {
+        let t = Term::BlankNode(b.clone());
+        let in_graph =
+            |g: &Graph| g.id_of(&t).is_some() || g.named.iter().any(|(_, n)| n.id_of(&t).is_some());
+        in_graph(graph) || local.dataset.is_some_and(in_graph)
+    };
+    let mut fresh = minted.clone();
+    let mut k = 0u64;
+    while stored(&fresh) {
+        fresh = if nargs > 0 {
+            k += 1;
+            BlankNode::new_unchecked(format!("{}x{k}", minted.as_str()))
+        } else {
+            next_minted_bnode()
+        };
+    }
+    Value::Term(Term::BlankNode(fresh))
 }
 
 // ── Compiled comparison / arithmetic helpers (sq-7d3dj.4) ───────────────────────────────
@@ -2321,7 +2365,12 @@ pub(super) fn eval_compiled(
             Ok(if errored { Value::Error } else { Value::Bool(false) })
         }
         FunctionCall(f, args) => {
-            eval_function_inner(f, args.len(), |i| eval_compiled(graph, local, b, row, &args[i]))
+            let v =
+                eval_function_inner(f, args.len(), |i| eval_compiled(graph, local, b, row, &args[i]));
+            if matches!(f, spargebra::algebra::Function::BNode) {
+                return Ok(fresh_in_dataset(graph, local, f, args.len(), v?));
+            }
+            v
         }
         Exists(inner) => Ok(Value::Bool(eval_exists(graph, local, b, row, inner)?)),
     }
