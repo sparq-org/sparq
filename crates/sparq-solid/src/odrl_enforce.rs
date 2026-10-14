@@ -9,7 +9,8 @@
 //!
 //! A mode is **granted** when some attached policy's [`decide`] permits it: [`Mode::Read`]
 //! on `odrl:read`, [`Mode::Write`] on both `odrl:modify` and `odrl:delete` (in one
-//! policy), [`Mode::Append`] on `odrl:append` or a `Write` grant. The store applies a
+//! policy), [`Mode::Append`] on `odrl:append` or a `Write` grant. `odrl:use` permits all
+//! of these, so a `use` permission grants `Read`, `Write` and `Append`. The store applies a
 //! grant only to an eligible target: a graph that exists now, that the last static
 //! WAC/ACP materialization covered (so every deny that applies to it is in the view),
 //! whose static decision is authoritative, and on which the auth view does not
@@ -203,29 +204,32 @@ impl OdrlEnforcement {
         })
     }
 
-    /// Whether an attached permission grants `mode` on `target` to `session`, through some
-    /// attached policy's [`decide`]: [`Mode::Read`] when it permits `odrl:read`;
-    /// [`Mode::Write`] when one policy permits both `odrl:modify` and `odrl:delete`;
-    /// [`Mode::Append`] when it permits `odrl:append` or grants `Write`. [`Mode::Control`],
-    /// access-control documents and reserved graphs are never granted, and neither is
-    /// `Write` or `Append` on a container (a slash-terminated IRI), so a grant never
-    /// extends to minting a child. The caller still checks the target's eligibility and
-    /// applies [`OdrlEnforcement::denies`].
+    /// Whether an attached permission grants `mode` on `target` to `session` by itself,
+    /// through some attached policy's [`decide`]: [`Mode::Read`] when it permits
+    /// `odrl:read`; [`Mode::Write`] when one policy permits both `odrl:modify` and
+    /// `odrl:delete`; [`Mode::Append`] when it permits `odrl:append` (the store also
+    /// grants `Append` wherever it grants `Write`). An `odrl:use` permission permits every
+    /// one of these actions. [`Mode::Control`], access-control documents and reserved
+    /// graphs are never granted, and neither is `Write` or `Append` on a container (a
+    /// slash-terminated IRI), so a grant never extends to minting a child, or on a name
+    /// whose last segment reads as a control document in any case or encoding. The caller
+    /// still checks the target's eligibility and applies [`OdrlEnforcement::denies`].
     pub(crate) fn grants(&self, s: &Session, mode: Mode, target: &str) -> bool {
         if mode == Mode::Control || !Self::governs(target) || !self.may_grant(target) {
             return false;
         }
-        if mode != Mode::Read && target.ends_with('/') {
+        if mode != Mode::Read
+            && (target.ends_with('/') || crate::decide::is_control_document_name(target))
+        {
             return false;
         }
         let permits = |p: &ValidatedPolicy, action: &str| {
             permitted(p, &self.request(action, target, s), s.agent)
         };
-        let writes = |p: &ValidatedPolicy| permits(p, "modify") && permits(p, "delete");
         self.policies.iter().any(|p| match mode {
             Mode::Read => permits(p, "read"),
-            Mode::Write => writes(p),
-            Mode::Append => permits(p, "append") || writes(p),
+            Mode::Write => permits(p, "modify") && permits(p, "delete"),
+            Mode::Append => permits(p, "append"),
             Mode::Control => false,
         })
     }

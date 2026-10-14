@@ -975,9 +975,9 @@ impl PodStore {
     /// one grant-eligibility predicate every path uses. A grant applies only on a graph
     /// that exists now and that the last static WAC/ACP materialization covered (so every
     /// deny that applies to it is in the view), when the auth view does not explicitly
-    /// deny it. `Write` and `Append` are never granted on a referenced group document,
-    /// whose members hold static grants. The caller checks that the target's decision is
-    /// authoritative.
+    /// deny it. `Append` is also granted wherever `Write` is. `Write` and `Append` are never
+    /// granted on a referenced group document, whose members hold static grants. The
+    /// caller checks that the target's decision is authoritative.
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
         self.odrl_grants_present(session, mode, target)
@@ -987,10 +987,20 @@ impl PodStore {
     /// [`PodStore::odrl_grants`] for a `target` the caller knows exists now.
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants_present(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        let grants = |m: Mode| {
+            self.odrl.grants(session, m, target) && !self.auth.denies(session, m, target)
+        };
         self.statically_covered.contains(target)
             && (mode == Mode::Read || !self.group_docs().contains(target))
-            && self.odrl.grants(session, mode, target)
-            && !self.auth.denies(session, mode, target)
+            && match mode {
+                // `Append` through a `Write` grant needs that grant to stand, an explicit deny
+                // of `Write` included, as well as no deny of `Append` itself.
+                Mode::Append => {
+                    !self.auth.denies(session, Mode::Append, target)
+                        && (grants(Mode::Append) || grants(Mode::Write))
+                }
+                _ => grants(mode),
+            }
     }
 
     /// Commit an authorized update's effects to the graph. A graph the update removes, at any

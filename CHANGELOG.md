@@ -35,9 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sparq-solid:** an ODRL permission attached to a pod document now grants per request
   through `sparq_policy::decide`, for a target that exists and has a full static decision:
   Read on `odrl:read` (#6941); Write when one policy permits `odrl:modify` and
-  `odrl:delete`, and Append on `odrl:append` or that Write condition (#6942). Write and
-  Append are never granted on a container or a referenced group document, no permission
-  grants a create or Control, and a prohibition still vetoes.
+  `odrl:delete`, and Append on `odrl:append` or wherever Write is granted (#6942). An
+  `odrl:use` permission therefore grants Read, Write and Append. Write and Append are never
+  granted on a container or a referenced group document, no permission grants a create
+  (re-creating a dropped graph in the same update included) or Control, and a prohibition
+  or an explicit deny still vetoes.
 - **Security-property vocabulary:** two ordered dimensions, `secx:AdversaryModel`
   (Malicious ⊐ Covert ⊐ SemiHonest) and `secx:CorruptionThreshold` (DishonestMajority ⊐
   HonestMajority ⊐ SuperHonestMajority), with ODRL leftOperands

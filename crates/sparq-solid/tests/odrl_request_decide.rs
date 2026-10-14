@@ -407,6 +407,9 @@ fn permissions_grant_read_through_every_entry_point() {
 }
 
 const CHANGE_ACTIONS: [&str; 4] = ["append", "modify", "delete", "write"];
+/// The notes container as a graph of its own.
+const CONTAINER: &str = "<https://pod.ex/notes/> <http://www.w3.org/ns/ldp#contains> \
+                         <https://pod.ex/notes/n2> <https://pod.ex/notes/> .\n";
 
 /// Whether `session` holds `mode` on `graph`, asserting that `decide`, `decide_batch`,
 /// the granted modes and `accessible` agree.
@@ -436,7 +439,11 @@ fn change_grants_match_decide_for_every_session() {
                         let Some(pol) = policy(kind, action, constraint, assignee, target) else {
                             continue;
                         };
-                        let mut live = store();
+                        // The container exists as a graph, so only the container rule
+                        // keeps a change grant off it.
+                        let mut live = bare_store_with(CONTAINER);
+                        live.add_odrl_asset_membership(N1, NOTES);
+                        live.add_odrl_asset_membership(N2, NOTES);
                         live.attach_odrl_policy(pol.clone()).expect("attach");
                         for agent in SESSIONS {
                             for now in CLOCKS {
@@ -498,8 +505,7 @@ fn prohibited_on(
 #[test]
 fn change_permissions_grant_existing_resources_only() {
     // The container exists as a graph of its own, so only the container rule keeps it out.
-    let container = "<https://pod.ex/notes/> <http://www.w3.org/ns/ldp#contains> \
-                     <https://pod.ex/notes/n2> <https://pod.ex/notes/> .\n";
+    let container = CONTAINER;
     let mut s = bare_store_with(container);
     s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
         .expect("attach");
@@ -548,7 +554,22 @@ fn change_permissions_grant_existing_resources_only() {
         let ins = format!("INSERT DATA {{ GRAPH <{fresh}> {{ <urn:x> <urn:y> 1 }} }}");
         assert!(s.update_as(&bob, &ins).is_err(), "no create of {fresh}");
     }
+    // Dropping the graph and writing it again in one request re-creates it: a grant
+    // covers only a graph that exists, so only the static view can authorize that.
+    let recreate = "DROP GRAPH <https://pod.ex/notes/n2> ; \
+                    INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } }";
+    assert!(s.update_as(&bob, recreate).is_err(), "no re-create through a grant");
+    let created = "DROP GRAPH <https://pod.ex/notes/n2> ; CREATE GRAPH <https://pod.ex/notes/n2>";
+    assert!(s.update_as(&bob, created).is_err(), "no CREATE after a DROP through a grant");
+    let mut owner = bare_store_with(container);
+    owner.update_as(&session(Some(ALICE), None), recreate).expect("the static grant re-creates");
     s.update_as(&bob, "CLEAR GRAPH <https://pod.ex/notes/n2>").expect("granted Write clears");
+    s.update_as(
+        &bob,
+        "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 3 } } ; \
+         DROP GRAPH <https://pod.ex/notes/n2>",
+    )
+    .expect("granted Write may write and then drop");
 }
 
 /// `Write` needs `odrl:modify` and `odrl:delete` from one policy; `Append` alone never
@@ -611,6 +632,86 @@ fn group_documents_are_never_granted_a_change() {
     );
     assert!(s.update_as(&bob, &join).is_err(), "bob cannot join the group");
     assert!(holds(&s, &bob, N2, Mode::Write), "an ordinary resource is still granted");
+}
+
+/// An explicit ACP deny of `Write` also stops the `Append` a `Write` grant carries; an
+/// `odrl:append` permission still grants `Append`, which the deny does not cover.
+#[test]
+fn acp_write_deny_also_stops_append_through_write() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let g = "https://pod.ex/.acr";
+    let mut nq = String::from(
+        "<https://pod.ex/notes/n2#it> <https://ex.dev/ns#title> \"private\" <https://pod.ex/notes/n2> .\n",
+    );
+    for (s_, p, o) in [
+        (g, "resource", "https://pod.ex/"),
+        (g, "memberAccessControl", "https://pod.ex/.acr#c"),
+        ("https://pod.ex/.acr#c", "apply", "https://pod.ex/.acr#p"),
+        ("https://pod.ex/.acr#p", "deny", "WRITE"),
+        ("https://pod.ex/.acr#p", "anyOf", "https://pod.ex/.acr#m"),
+        ("https://pod.ex/.acr#m", "agent", BOB),
+    ] {
+        let o = if o == "WRITE" { format!("{ACL}Write") } else { o.to_owned() };
+        nq += &format!("<{s_}> <{ACP}{p}> <{o}> <{g}> .\n");
+    }
+    let acp_store = || {
+        let mut acp = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+        acp.materialize_acp().expect("acp");
+        acp
+    };
+    let ttl = format!(
+        "@prefix odrl: <{ODRL}> .\n<urn:pol/p> a odrl:Set ; \
+         odrl:permission [ odrl:action odrl:modify ] , [ odrl:action odrl:delete ] .\n"
+    );
+    let bob = session(Some(BOB), None);
+    let carol = session(Some("https://carol.ex/card#me"), None);
+    let mut acp = acp_store();
+    acp.attach_odrl_policy(parse_policy_str(&ttl, "turtle").expect("parses")).expect("attach");
+    assert!(holds(&acp, &carol, N2, Mode::Write) && holds(&acp, &carol, N2, Mode::Append));
+    assert!(!holds(&acp, &bob, N2, Mode::Write), "bob's Write deny wins");
+    assert!(!holds(&acp, &bob, N2, Mode::Append), "and stops the Append that Write carries");
+    let ins = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } }";
+    assert!(acp.update_as_acp(&bob, ins).is_err());
+
+    acp.attach_odrl_policy(policy("permission", "append", "", None, None).expect("policy"))
+        .expect("attach");
+    assert!(holds(&acp, &bob, N2, Mode::Append), "an append permission is not denied");
+    assert!(!holds(&acp, &bob, N2, Mode::Write));
+    acp.update_as_acp(&bob, ins).expect("bob appends");
+}
+
+/// A `GRAPH ?g` update reaching a referenced group document, or a container, is refused
+/// to a grantee; one name whose last segment reads as a control document in another case
+/// is granted `Read` only.
+#[test]
+fn change_grants_hold_through_variable_graphs_and_odd_names() {
+    let extra = format!(
+        "{CONTAINER}\
+<https://pod.ex/groups#team> <http://www.w3.org/2006/vcard/ns#hasMember> <https://carol.ex/card#me> <https://pod.ex/groups> .
+<https://pod.ex/.acl#team> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#team> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#team> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/groups#team> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#team> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
+<https://pod.ex/notes/r.ACL#it> <https://ex.dev/ns#title> \"odd\" <https://pod.ex/notes/r.ACL> .
+"
+    );
+    let mut s = bare_store_with(&extra);
+    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
+        .expect("attach");
+    let bob = session(Some(BOB), None);
+    for target in ["https://pod.ex/groups", NOTES] {
+        let upd = format!(
+            "INSERT {{ GRAPH ?g {{ <urn:x> <urn:y> 1 }} }} WHERE {{ VALUES ?g {{ <{target}> }} }}"
+        );
+        assert!(s.update_as(&bob, &upd).is_err(), "{target}");
+    }
+    let odd = "https://pod.ex/notes/r.ACL";
+    assert!(holds(&s, &bob, odd, Mode::Read));
+    assert!(!holds(&s, &bob, odd, Mode::Write) && !holds(&s, &bob, odd, Mode::Append));
+    let upd = "INSERT { GRAPH ?g { <urn:x> <urn:y> 1 } } \
+               WHERE { VALUES ?g { <https://pod.ex/notes/n2> } }";
+    s.update_as(&bob, upd).expect("an ordinary resource is still granted");
 }
 
 /// A grant needs a graph that exists now and that the last static materialization
