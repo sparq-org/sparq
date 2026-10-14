@@ -90,7 +90,7 @@ Join holders' partials on GLOBAL IRIs (architecture §2 #6, §4.3 step 4).
 
 ### M3 — `MpcBackend` (honest-majority Shamir) + hidden-value join  ✅ DONE [OPUS-4.8]
 First concrete secret-sharing impl behind the trait + the hidden-value join,
-**plus the RS tampered-share-detection hardening (guarantee (D), sq-uu0u)** —
+**plus the RS tampered-share-detection hardening (reconstruction-only, toward guarantee (D) — NOT malicious security; sq-uu0u)** —
 detect-and-abort / robust-correct on every reconstruction path, surfaced via the
 `MaliciousSecurity` enum. See the "Security model" bullet below and the
 "Deferred malicious-security seams" subsection for what remains beyond v1.
@@ -147,7 +147,7 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
   trip; the threshold actually hides (a <=t-share set is consistent with a
   DIFFERENT secret — information-theoretic hiding witness); reconstruction below
   t+1 errors; the equality primitive in isolation (n=5,t=2). The adversarial
-  suite (`adversarial_tests.rs`) pins guarantee (D): tampered-share detection /
+  suite (`adversarial_tests.rs`) pins the reconstruction hardening: tampered-share detection /
   RS correction across the `(n, t, e)` regimes and at the end-to-end
   `reconstruct_disclosed` API boundary, the non-detection boundaries (exact `t+1`
   and the degree-`2t` `n=2t+1` equality open), and the "no fake crypto" stub
@@ -156,7 +156,8 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
 - **Security model (stated, not papered over):** honest-majority. Privacy holds
   while `< t+1` parties pool shares; each party learns only its shares + the
   disclosed output (confidentiality, guarantee (A)). **Tampered-share detection
-  (guarantee (D)) IS now provided at the Shamir reconstruction layer** (sq-uu0u
+  IS now provided at the Shamir reconstruction layer** (reconstruction-only, toward
+  guarantee (D); malicious security is NOT delivered — sq-uu0u
   WI-1/WI-2/WI-3, merged) — *not* the old semi-honest-only stance:
   - Shamir shares are an `[n, t+1]` Reed–Solomon codeword over the same `F_p`, so
     `robust.rs::reconstruct_robust` (Berlekamp–Welch via Gaussian elimination,

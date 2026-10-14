@@ -599,8 +599,8 @@ pub enum MaliciousSecurity {
 }
 
 impl MaliciousSecurity {
-    /// `true` iff the backend provides *some* active-security guarantee (detects
-    /// or corrects an actively-deviating party), i.e. anything other than
+    /// `true` iff the backend provides *some* reconstruction hardening (detects
+    /// or corrects a tampered opened share; NOT malicious security), i.e. anything other than
     /// [`MaliciousSecurity::SemiHonestOnly`]. The backwards-compatible projection
     /// of the former `malicious_secure: bool` field, for callers that only need
     /// the coarse "is this hardened at all?" bit.
@@ -682,8 +682,9 @@ pub struct BackendInfo {
     /// The trust regime (the Q2 axis). **Back-compat projection** of
     /// `security.threshold` — see [`SecurityDescriptor::trust_model`].
     pub trust_model: TrustModel,
-    /// The malicious-security guarantee against actively-deviating parties
-    /// (§4.2's guarantee (D)), orthogonal to `trust_model`. **Back-compat
+    /// The reconstruction-hardening level against actively-deviating parties
+    /// (toward §4.2's guarantee (D), not malicious security), orthogonal to
+    /// `trust_model`. **Back-compat
     /// projection** of `security` — see [`SecurityDescriptor::malicious_security`].
     /// Replaces the former coarse `malicious_secure: bool` so the *kind* of active
     /// security (detect-and-abort vs robust-up-to-`max_cheaters`) is legible to a
@@ -714,7 +715,8 @@ impl BackendInfo {
     }
 
     /// Backwards-compatible coarse bool: `true` iff this backend provides *any*
-    /// active-security guarantee (i.e. `malicious_security != None`). Preserves
+    /// reconstruction hardening (i.e. `malicious_security != SemiHonestOnly`;
+    /// despite the name, NOT malicious security). Preserves
     /// the question the old `malicious_secure: bool` field answered for callers
     /// that don't need the finer variant.
     pub fn malicious_secure(&self) -> bool {

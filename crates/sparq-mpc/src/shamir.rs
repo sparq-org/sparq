@@ -202,7 +202,7 @@ impl ShamirBackend {
         self.t
     }
 
-    /// The active-security guarantee this `(n, t)` configuration delivers at the
+    /// The reconstruction-hardening level this `(n, t)` configuration delivers at the
     /// degree-`t` reconstruction (WI-1, parent bead sq-uu0u), derived purely from
     /// the RS redundancy `n − (t + 1)`. See [`MaliciousSecurity`] and
     /// [`crate::robust::reconstruct_robust`] for the bound; surfaced via
