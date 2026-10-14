@@ -5796,62 +5796,175 @@ mod tests {
         etag.trim_start_matches("W/").trim_matches('"').to_string()
     }
 
+    /// A writer who can change the container's members but can never read the container: Append and
+    /// Write on `/alice/c/` itself, and Write (only) inherited by its members. Added to the dropbox
+    /// fixture so the successful PUT, PATCH, POST and DELETE paths run for a non-reader.
+    const V5_WRITER: &str = "https://pod.example/writer/profile/card#me";
+
+    async fn dropbox_with_writer(
+    ) -> Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>> {
+        let state = dropbox_with_secret().await;
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#alice> a acl:Authorization;
+         acl:agent <{ALICE}>;
+         acl:accessTo <https://pod.example/alice/c/>;
+         acl:default <https://pod.example/alice/c/>;
+         acl:mode acl:Read, acl:Write, acl:Control.
+<#bob> a acl:Authorization;
+       acl:agent <{BOB}>;
+       acl:accessTo <https://pod.example/alice/c/>;
+       acl:mode acl:Append.
+<#writer> a acl:Authorization;
+          acl:agent <{V5_WRITER}>;
+          acl:accessTo <https://pod.example/alice/c/>;
+          acl:mode acl:Append, acl:Write.
+<#writer-members> a acl:Authorization;
+                  acl:agent <{V5_WRITER}>;
+                  acl:default <https://pod.example/alice/c/>;
+                  acl:mode acl:Write."#
+        );
+        state
+            .store
+            .write(
+                "https://pod.example/alice/c/.acl",
+                AxBytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed container acl with the writer");
+        state
+    }
+
+    /// One request of the V5 matrix, with `{etag}` in a conditional header replaced by `etag`.
+    async fn v5_request(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        conditional: Option<(&'static str, &str)>,
+        etag: &str,
+        token: VerifiedToken,
+    ) -> (u16, String) {
+        let mut headers = match verb {
+            "PUT" | "POST" => turtle_headers(),
+            "PATCH" => n3_patch_headers(),
+            _ => HeaderMap::new(),
+        };
+        if let Some((name, template)) = conditional {
+            let value = HeaderValue::from_str(&template.replace("{etag}", etag)).unwrap();
+            headers.insert(HeaderName::from_static(name), value);
+        }
+        let uri: axum::http::Uri = path.parse().unwrap();
+        let (s, t) = (State(state.clone()), Extension(token));
+        let result = match verb {
+            "GET" => get_handler(s, t, uri, headers).await,
+            "HEAD" => head_handler(s, t, uri, headers).await,
+            "OPTIONS" => options_handler(s, t, uri).await,
+            "PUT" => put_handler(s, t, uri, headers, request_body_bytes()).await,
+            "POST" => post_handler(s, t, uri, headers, request_body_bytes()).await,
+            "PATCH" => {
+                let patch = insert_only_patch("https://pod.example/alice/c/x#me");
+                patch_handler(s, t, uri, headers, patch).await
+            }
+            "DELETE" => delete_handler(s, t, uri, headers).await,
+            _ => unreachable!(),
+        };
+        response_text(result).await
+    }
+
     /// V5 as an invariant rather than one path: whatever a non-reader sends, to the container, its
-    /// members or its `.acl`, and with or without conditional headers naming the ETag, no response
-    /// carries the container's membership ETag anywhere (header or body), neither the value before
-    /// the request nor the one after it. A new response path that emits it to a non-reader fails here.
+    /// members, its `.acl` or paths that do not exist, and with or without conditional headers naming
+    /// the ETag, no response carries the container's membership ETag anywhere (header or body),
+    /// neither the value before the request nor the one after it. And the STATUS never depends on
+    /// whether a validator matches it: each conditional request is replayed, on a fresh copy of the
+    /// pod, with a validator of the same shape that cannot match, and must get the same status. The
+    /// non-readers include a writer, so the successful write paths run too (checked by positive
+    /// controls). A new response path that emits the tag, or answers differently when it is guessed,
+    /// fails here.
     #[tokio::test]
     async fn v5_no_response_path_shows_a_non_reader_the_container_etag() {
-        for path in ["/alice/c/", EXISTING, MISSING, "/alice/c/.acl"] {
+        const WRONG: &str = "0-00000000";
+        let writer = || VerifiedToken {
+            web_id: Some(V5_WRITER.into()),
+            ..VerifiedToken::default()
+        };
+        let conditionals: [Option<(&'static str, &str)>; 11] = [
+            None,
+            Some(("if-match", "\"{etag}\"")),
+            Some(("if-match", "W/\"{etag}\"")),
+            Some(("if-match", "\"x\", \"{etag}\"")),
+            Some(("if-match", "*")),
+            Some(("if-none-match", "\"{etag}\"")),
+            Some(("if-none-match", "W/\"{etag}\"")),
+            Some(("if-none-match", "\"x\", \"{etag}\"")),
+            Some(("if-none-match", "*")),
+            Some(("if-modified-since", "Thu, 01 Jan 1970 00:00:00 GMT")),
+            Some(("if-unmodified-since", "Thu, 01 Jan 1970 00:00:00 GMT")),
+        ];
+        let paths = [
+            "/alice/c/",
+            EXISTING,
+            MISSING,
+            "/alice/c/.acl",
+            "/alice/c/ghost.acl",
+            "/alice/nope/",
+            "/",
+        ];
+        let mut writer_statuses = std::collections::BTreeMap::new();
+        for path in paths {
             for verb in ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] {
-                for conditional in [None, Some("if-match"), Some("if-none-match"), Some("star")] {
-                    for (label, token) in [("anonymous", anon()), ("bob", bob())] {
-                        let state = dropbox_with_secret().await;
+                for conditional in conditionals {
+                    for (label, token) in
+                        [("anonymous", anon()), ("bob", bob()), ("writer", writer())]
+                    {
+                        let state = dropbox_with_writer().await;
                         let before = container_etag(&state).await;
-                        let mut headers = match verb {
-                            "PUT" | "POST" => turtle_headers(),
-                            "PATCH" => n3_patch_headers(),
-                            _ => HeaderMap::new(),
-                        };
-                        match conditional {
-                            Some("star") => {
-                                headers
-                                    .insert(header::IF_NONE_MATCH, HeaderValue::from_static("*"));
-                            }
-                            Some(name) => {
-                                let value =
-                                    HeaderValue::from_str(&format!("\"{before}\"")).unwrap();
-                                headers.insert(HeaderName::from_static(name), value);
-                            }
-                            None => {}
-                        }
-                        let uri: axum::http::Uri = path.parse().unwrap();
-                        let (s, t) = (State(state.clone()), Extension(token));
-                        let result = match verb {
-                            "GET" => get_handler(s, t, uri, headers).await,
-                            "HEAD" => head_handler(s, t, uri, headers).await,
-                            "OPTIONS" => options_handler(s, t, uri).await,
-                            "PUT" => put_handler(s, t, uri, headers, request_body_bytes()).await,
-                            "POST" => post_handler(s, t, uri, headers, request_body_bytes()).await,
-                            "PATCH" => {
-                                let patch = insert_only_patch("https://pod.example/alice/c/x#me");
-                                patch_handler(s, t, uri, headers, patch).await
-                            }
-                            "DELETE" => delete_handler(s, t, uri, headers).await,
-                            _ => unreachable!(),
-                        };
-                        let (status, text) = response_text(result).await;
+                        let (status, text) =
+                            v5_request(&state, verb, path, conditional, &before, token.clone())
+                                .await;
                         let after = container_etag(&state).await;
                         for etag in [&before, &after] {
                             assert!(
                                 !text.contains(etag.as_str()),
-                                "{verb} {path} as {label} ({conditional:?}) answered {status} with \
-                                 the container ETag {etag}:\n{text}"
+                                "{verb} {path} as {label} ({conditional:?}) answered {status} \
+                                 with the container ETag {etag}:\n{text}"
                             );
+                        }
+                        if conditional.is_some_and(|(_, template)| template.contains("{etag}")) {
+                            let fresh = dropbox_with_writer().await;
+                            let (wrong_status, _) =
+                                v5_request(&fresh, verb, path, conditional, WRONG, token).await;
+                            assert_eq!(
+                                status, wrong_status,
+                                "{verb} {path} as {label} ({conditional:?}): the status shows \
+                                 whether the validator is the container ETag"
+                            );
+                        }
+                        if label == "writer" && conditional.is_none() {
+                            writer_statuses.insert((verb, path), status);
                         }
                     }
                 }
             }
+        }
+        // Positive controls: the writer's unconditional writes really succeed, so the matrix above
+        // covered the successful PUT (replace and create), PATCH, POST and DELETE responses, while
+        // the container itself stays unreadable to them.
+        for (verb, path, expected) in [
+            ("PUT", EXISTING, 2),
+            ("PUT", MISSING, 2),
+            ("PATCH", EXISTING, 2),
+            ("POST", "/alice/c/", 2),
+            ("DELETE", EXISTING, 2),
+            ("GET", "/alice/c/", 4),
+            ("HEAD", "/alice/c/", 4),
+        ] {
+            let status = writer_statuses[&(verb, path)];
+            assert_eq!(
+                status / 100,
+                expected,
+                "writer {verb} {path} answered {status}"
+            );
         }
     }
 
