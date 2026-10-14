@@ -85,7 +85,7 @@ supplies negation normal form and the finite subexpression closure the argument 
 
 **Fragment dispatch (L4, bead sq-pbz04.4.4, feature `dispatch`):** consistency checking
 across guarded RL/EL/QL branches and the ALCH tableau, plus entailment-by-refutation.
-See the [crate-level rustdoc](https://docs.rs/sparq-reason-dl/latest/sparq_reason_dl/#l4-fragment-dispatch-guards)
+See the [crate-level rustdoc](src/lib.rs)
 for per-branch guards, fallback rules, and entailment details. The optional reasoner
 dependencies stay **off by default**, so L1–L3 stay dependency-light.
 
