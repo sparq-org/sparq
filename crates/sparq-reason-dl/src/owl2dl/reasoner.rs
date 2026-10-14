@@ -12,17 +12,21 @@
 //! properties with inverses, hierarchies, transitivity, functionality, reflexivity,
 //! irreflexivity, symmetry, asymmetry and disjointness, `hasSelf`, qualified cardinality, and
 //! class / object-property / negative-property / same / different assertions. Data
-//! properties, datatypes, nominals, property chains and keys answer `Unknown`.
+//! properties, datatypes, nominals, property chains other than `R∘R ⊑ R`, keys, and number
+//! restrictions above [`MAX_CARDINALITY`] answer `Unknown`.
 //!
 //! Classification is TBox-only, which is exact when the ontology is consistent and has no
 //! nominals: for SHIQ the ABox cannot change a subsumption between classes.
 
+pub use super::clausify::MAX_CARDINALITY;
 use super::clausify::{clausify, AtomKind, Clauses};
 use super::dl_profile::{check_dl, DlProfileReport, Violation};
 use super::hypertableau::{ClauseIndex, Exhausted, Tableau};
 use super::model::Ontology;
+use super::vocab::Vocab;
 use rustc_hash::FxHashSet;
-use sparq_core::dict::{Dict, Id};
+use sparq_core::dict::{Dict, Id, NO_ID};
+use std::cell::OnceCell;
 
 pub use super::hypertableau::Budget;
 
@@ -76,8 +80,11 @@ pub struct DlReport {
     pub profile: DlProfileReport,
     /// Consistency of TBox plus ABox.
     pub consistency: Consistency,
-    /// The classification; `None` unless the ontology was found consistent (an
-    /// inconsistent ontology entails every subsumption).
+    /// The classification; `None` unless the ontology was found [`Consistent`]
+    /// (an inconsistent ontology entails every subsumption, and an unloaded import could add
+    /// some).
+    ///
+    /// [`Consistent`]: Consistency::Consistent
     pub classification: Option<Classification>,
 }
 
@@ -87,6 +94,10 @@ pub struct Reasoner {
     index: ClauseIndex,
     budget: Budget,
     imports: Vec<Id>,
+    thing: Id,
+    nothing: Id,
+    /// Whether TBox plus ABox has a model (`None`: the budget ran out), once computed.
+    model: OnceCell<Option<bool>>,
 }
 
 impl Reasoner {
@@ -113,24 +124,33 @@ impl Reasoner {
             source: onto.axioms[u.axiom].source.clone(),
         })?;
         let index = ClauseIndex::new(&clauses);
+        let v = Vocab::intern(dict);
         Ok(Reasoner {
             clauses,
             index,
             budget,
             imports: onto.imports.clone(),
+            thing: v.thing,
+            nothing: v.nothing,
+            model: OnceCell::new(),
         })
     }
 
     /// Consistency of the whole ontology (TBox and ABox).
     pub fn consistency(&self) -> Consistency {
-        match self.abox_run() {
-            Err(Exhausted) => Consistency::Unknown(UnknownReason::ResourceBudget),
-            Ok(false) => Consistency::Inconsistent,
-            Ok(true) if !self.imports.is_empty() => {
+        match self.abox_model() {
+            None => Consistency::Unknown(UnknownReason::ResourceBudget),
+            Some(false) => Consistency::Inconsistent,
+            Some(true) if !self.imports.is_empty() => {
                 Consistency::Unknown(UnknownReason::ImportsNotLoaded(self.imports.clone()))
             }
-            Ok(true) => Consistency::Consistent,
+            Some(true) => Consistency::Consistent,
         }
+    }
+
+    /// Whether the ontology (TBox and ABox) has a model, computed once.
+    fn abox_model(&self) -> Option<bool> {
+        *self.model.get_or_init(|| self.abox_run().ok())
     }
 
     fn abox_run(&self) -> Result<bool, Exhausted> {
@@ -157,38 +177,80 @@ impl Reasoner {
         t.run()
     }
 
-    /// `Some(true)` when the named class `class` is satisfiable, `Some(false)` when it is
-    /// not, `None` when the budget ran out. Exact only for a consistent ontology.
-    pub fn is_satisfiable(&self, class: Id) -> Option<bool> {
-        let Some(a) = self.clauses.class_atom(class) else {
-            return Some(true);
-        };
+    /// How a class IRI enters a test.
+    fn concept(&self, class: Id) -> Concept {
+        // A vocabulary IRI absent from the dictionary interns as `NO_ID`.
+        if class == NO_ID {
+            Concept::Fresh
+        } else if class == self.thing {
+            Concept::Thing
+        } else if class == self.nothing {
+            Concept::Nothing
+        } else {
+            match self.clauses.class_atom(class) {
+                Some(a) => Concept::Atom(a),
+                None => Concept::Fresh,
+            }
+        }
+    }
+
+    /// Whether some element can be in `class` and outside `outside` (a TBox test; the ABox
+    /// cannot change it for a consistent ontology without nominals).
+    fn test(&self, class: Option<u32>, outside: Option<u32>) -> Option<bool> {
         let mut t = Tableau::new(&self.clauses, &self.index, self.budget);
         let root = t.add_root();
-        t.assert_concept(root, a);
+        if let Some(b) = outside {
+            t.forbid(root, b);
+        }
+        if let Some(a) = class {
+            t.assert_concept(root, a);
+        }
         t.run().ok()
     }
 
-    /// `Some(true)` when `sub ⊑ sup` is entailed between named classes, `None` when the budget
-    /// ran out. Exact only for a consistent ontology.
-    pub fn is_subclass_of(&self, sub: Id, sup: Id) -> Option<bool> {
-        let Some(a) = self.clauses.class_atom(sub) else {
-            return Some(sub == sup);
+    /// `Some(true)` when the class is satisfiable, `Some(false)` when it is not, `None` when
+    /// it cannot be decided: the budget ran out, consistency is unknown, or an unloaded
+    /// import could make a satisfiable class unsatisfiable. An inconsistent ontology makes
+    /// every class unsatisfiable.
+    pub fn is_satisfiable(&self, class: Id) -> Option<bool> {
+        if !self.abox_model()? {
+            return Some(false);
+        }
+        let sat = match self.concept(class) {
+            Concept::Nothing => false,
+            Concept::Thing | Concept::Fresh => self.test(None, None)?,
+            Concept::Atom(a) => self.test(Some(a), None)?,
         };
-        let Some(b) = self.clauses.class_atom(sup) else {
-            // `sup` occurs in no axiom: only an unsatisfiable `sub` is below it.
-            return self.is_satisfiable(sub).map(|s| !s);
-        };
-        let mut t = Tableau::new(&self.clauses, &self.index, self.budget);
-        let root = t.add_root();
-        t.forbid(root, b);
-        t.assert_concept(root, a);
-        t.run().ok().map(|sat| !sat)
+        (!sat || self.imports.is_empty()).then_some(sat)
     }
 
-    /// Classifies the named classes. `None` when the budget ran out. Exact only for a
-    /// consistent ontology.
+    /// `Some(true)` when `sub ⊑ sup` is entailed, `Some(false)` when it is not, `None` when
+    /// it cannot be decided (as for [`is_satisfiable`](Self::is_satisfiable)). A class that
+    /// occurs in no axiom is constrained by nothing: it is below only `owl:Thing`, itself,
+    /// and what `owl:Thing` is below.
+    pub fn is_subclass_of(&self, sub: Id, sup: Id) -> Option<bool> {
+        if !self.abox_model()? {
+            return Some(true);
+        }
+        let below = match (self.concept(sub), self.concept(sup)) {
+            _ if sub == sup => true,
+            (Concept::Nothing, _) | (_, Concept::Thing) => true,
+            (sub_c, Concept::Nothing | Concept::Fresh) => match sub_c {
+                Concept::Atom(a) => !self.test(Some(a), None)?,
+                _ => !self.test(None, None)?,
+            },
+            (Concept::Atom(a), Concept::Atom(b)) => !self.test(Some(a), Some(b))?,
+            (_, Concept::Atom(b)) => !self.test(None, Some(b))?,
+        };
+        (below || self.imports.is_empty()).then_some(below)
+    }
+
+    /// Classifies the named classes. `None` unless the ontology is consistent with nothing
+    /// left unloaded (an unloaded import could add subsumptions), or when the budget ran out.
     pub fn classify(&self) -> Option<Classification> {
+        if !self.imports.is_empty() || !self.abox_model()? {
+            return None;
+        }
         let classes = &self.clauses.classes;
         let is_class = |a: u32| matches!(self.clauses.atoms[a as usize], AtomKind::Class(_));
         let mut out = Classification::default();
@@ -233,6 +295,17 @@ impl Reasoner {
     }
 }
 
+/// A class as a test sees it.
+#[derive(Clone, Copy)]
+enum Concept {
+    Thing,
+    Nothing,
+    /// A class with an atom in the clauses.
+    Atom(u32),
+    /// A class no axiom mentions.
+    Fresh,
+}
+
 /// Runs the profile check, consistency and (for a consistent ontology) classification.
 pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
     let profile = check_dl(dict, onto);
@@ -247,11 +320,7 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
         }
     };
     let consistency = reasoner.consistency();
-    let found_model = matches!(
-        consistency,
-        Consistency::Consistent | Consistency::Unknown(UnknownReason::ImportsNotLoaded(_))
-    );
-    let classification = if found_model {
+    let classification = if consistency == Consistency::Consistent {
         reasoner.classify()
     } else {
         None

@@ -90,6 +90,9 @@ pub(crate) struct Clause {
     pub body_self: Vec<Role>,
     /// Number of neighbour variables.
     pub n_y: u16,
+    /// Neighbour variables `yᵢ` interchangeable with `yᵢ₋₁` (an at-most restriction's
+    /// successors): a match may bind them in increasing node order only.
+    pub ordered: Vec<u16>,
     /// The disjunctive head; empty means `⊥`.
     pub head: Vec<Head>,
     /// The source triples of the axiom this clause came from.
@@ -213,9 +216,17 @@ struct Builder<'a> {
     trans_carrier: FxHashMap<(Role, Nnf), Atom>,
     /// GCIs `⊤ ⊑ C` waiting for clausification, with their axiom index.
     gcis: Vec<(Nnf, u32)>,
+    /// The axiom whose clause would exceed [`MAX_CLAUSE_VARS`], if any.
+    too_wide: Option<usize>,
     axiom: usize,
     _dict: &'a Dict,
 }
+
+/// The largest cardinality in a number restriction the clausifier translates.
+pub const MAX_CARDINALITY: u32 = 64;
+
+/// The most successor variables one DL-clause may have.
+const MAX_CLAUSE_VARS: u32 = 1024;
 
 /// Translates `onto` to DL-clauses, or names the first axiom outside the fragment.
 pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsupported> {
@@ -233,6 +244,7 @@ pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsuppor
         transitive_all: FxHashMap::default(),
         trans_carrier: FxHashMap::default(),
         gcis: Vec::new(),
+        too_wide: None,
         axiom: 0,
         _dict: dict,
     };
@@ -250,6 +262,12 @@ pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsuppor
     b.close_hierarchy();
     while let Some((c, src)) = b.gcis.pop() {
         b.clausify_gci(c, src);
+        if let Some(axiom) = b.too_wide {
+            return Err(Unsupported {
+                construct: "an axiom whose clause needs more than MAX_CLAUSE_VARS successors",
+                axiom,
+            });
+        }
     }
     let mut classes: Vec<(Id, Atom)> = b.class_atoms.iter().map(|(&c, &a)| (c, a)).collect();
     classes.sort_by_key(|&(_, a)| a);
@@ -258,6 +276,16 @@ pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsuppor
 }
 
 impl Builder<'_> {
+    /// Number restrictions are decided up to [`MAX_CARDINALITY`]: an at-most restriction
+    /// becomes a clause over `n + 1` successors and `n(n + 1)/2` equalities, and an at-least
+    /// one creates `n` nodes.
+    fn cardinality(&self, n: u32) -> Result<(), Unsupported> {
+        if n > MAX_CARDINALITY {
+            return Err(self.unsupported("a number restriction above MAX_CARDINALITY"));
+        }
+        Ok(())
+    }
+
     fn unsupported(&self, construct: &'static str) -> Unsupported {
         Unsupported {
             construct,
@@ -538,20 +566,19 @@ impl Builder<'_> {
                 self.out.abox.roles.push((r, a, b, src));
             }
             Axiom::NegativeObjectPropertyAssertion(p, a, b) => {
-                // Markers follow merges: `Mₐ(x) ∧ R(x, y) ∧ M_b(y) → ⊥`.
+                // `Mₐ ⊑ ∀R.¬M_b` with markers on `a` and `b` only (they follow merges). As a
+                // universal it goes through the transitivity encoding, so an `R`-path made of
+                // a transitive sub-property's edges is caught too.
                 let r = self.role(p)?;
                 let (a, b) = (self.individual(a), self.individual(b));
                 let (ma, mb) = (self.fresh(AtomKind::Fresh), self.fresh(AtomKind::Fresh));
                 let src = self.src();
                 self.out.abox.concepts.push((ma, a, src));
                 self.out.abox.concepts.push((mb, b, src));
-                self.push_clause(Clause {
-                    body_x: vec![ma],
-                    body_roles: vec![(r, 0)],
-                    body_y: vec![(mb, 0)],
-                    n_y: 1,
-                    ..Clause::default()
-                });
+                self.gci(Nnf::Or(vec![
+                    Nnf::Not(ma),
+                    Nnf::All(r, Box::new(Nnf::Not(mb))),
+                ]));
             }
             Axiom::HasKey(..) => return Err(self.unsupported("HasKey")),
             Axiom::SubDataPropertyOf(..)
@@ -624,14 +651,17 @@ impl Builder<'_> {
             }
             C::HasSelf(p) => Nnf::SelfLoop(self.role(p)?),
             C::MinCardinality(n, p, f) => {
+                self.cardinality(*n)?;
                 let (r, f) = (self.role(p)?, self.nnf(f, true)?);
                 at_least(*n, r, f)
             }
             C::MaxCardinality(n, p, f) => {
+                self.cardinality(*n)?;
                 let (r, f) = (self.role(p)?, self.nnf(f, true)?);
                 at_most(*n, r, f)
             }
             C::ExactCardinality(n, p, f) => {
+                self.cardinality(*n)?;
                 let (r, f) = (self.role(p)?, self.nnf(f, true)?);
                 Nnf::And(vec![at_least(*n, r, f.clone()), at_most(*n, r, f)])
             }
@@ -746,6 +776,10 @@ impl Builder<'_> {
                         Nnf::Atom(a) => Some(a),
                         other => Some(self.define_superset(other)),
                     };
+                    if u32::from(cl.n_y) + n + 1 > MAX_CLAUSE_VARS {
+                        self.too_wide = Some(self.axiom);
+                        return;
+                    }
                     let base = cl.n_y;
                     for i in 0..=n as u16 {
                         cl.body_roles.push((r, base + i));
@@ -753,6 +787,7 @@ impl Builder<'_> {
                             cl.body_y.push((a, base + i));
                         }
                     }
+                    cl.ordered.extend((1..=n as u16).map(|i| base + i));
                     for i in 0..=n as u16 {
                         for j in i + 1..=n as u16 {
                             cl.head.push(Head::Eq(Var::Y(base + i), Var::Y(base + j)));
@@ -770,6 +805,11 @@ impl Builder<'_> {
     /// Adds `∀r.f` as a disjunct of `cl` (body `r(x, y)`, head or body `f(y)`); `false` when
     /// the disjunct is `⊤` and the clause is a tautology.
     fn all_into(&mut self, cl: &mut Clause, r: Role, f: Nnf) -> bool {
+        if u32::from(cl.n_y) + 1 > MAX_CLAUSE_VARS {
+            // The caller drops the clause; `clausify` then refuses the axiom.
+            self.too_wide = Some(self.axiom);
+            return false;
+        }
         let y = cl.n_y;
         match f {
             Nnf::Top => return false,

@@ -12,7 +12,9 @@
 use oxrdf::{NamedNode, Term as OTerm};
 use sparq_core::dict::{Dict, Id};
 use sparq_core::Graph;
-use sparq_reason_dl::owl2dl::{check, extract, Budget, Consistency, DlReport, UnknownReason};
+use sparq_reason_dl::owl2dl::{
+    check, extract, Budget, Consistency, DlReport, Reasoner, UnknownReason, MAX_CARDINALITY,
+};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -323,11 +325,108 @@ fn imports_downgrade_consistent_to_unknown() {
         r.consistency,
         Consistency::Unknown(UnknownReason::ImportsNotLoaded(_))
     ));
-    assert!(r.classification.is_some());
+    // An unloaded import could add subsumptions, so no classification is claimed.
+    assert!(r.classification.is_none());
     let (_, r) = run(&format!(
         "{DECL} <http://ex/o> a owl:Ontology ; owl:imports <http://ex/other> . owl:Thing rdfs:subClassOf owl:Nothing ."
     ));
     assert_eq!(r.consistency, Consistency::Inconsistent);
+}
+
+fn reasoner(body: &str) -> (Dict, Reasoner) {
+    let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").expect("parse");
+    let o = extract(&d, &t).unwrap_or_else(|e| panic!("extract: {e}"));
+    let r = Reasoner::new(&d, &o, Budget::default()).expect("in fragment");
+    (d, r)
+}
+
+fn owl(d: &Dict, local: &str) -> Id {
+    d.lookup(&OTerm::NamedNode(NamedNode::new_unchecked(format!(
+        "http://www.w3.org/2002/07/owl#{local}"
+    ))))
+}
+
+#[test]
+fn negative_assertion_sees_transitive_paths() {
+    let neg = "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ; owl:assertionProperty :r ; owl:targetIndividual :c ]";
+    assert!(!consistent(&format!(
+        "{DECL} :r a owl:TransitiveProperty . :a :r :b . :b :r :c . {neg} ."
+    )));
+    // Through a transitive sub-property.
+    assert!(!consistent(&format!(
+        "{DECL} :s a owl:TransitiveProperty . :s rdfs:subPropertyOf :r . :a :s :b . :b :s :c . {neg} ."
+    )));
+    assert!(consistent(&format!("{DECL} :a :r :b . :b :r :c . {neg} .")));
+}
+
+#[test]
+fn large_cardinalities_answer_unknown() {
+    let n = MAX_CARDINALITY + 1;
+    let (_, r) = run(&format!(
+        "{DECL} :A rdfs:subClassOf {} .",
+        max(n, ":r", ":B")
+    ));
+    assert!(matches!(
+        r.consistency,
+        Consistency::Unknown(UnknownReason::OutOfFragment { .. })
+    ));
+    // 65 535 + 1 wrapped to 0 before; it must not become a different restriction.
+    let (_, r) = run(&format!(
+        "{DECL} :A rdfs:subClassOf {} .",
+        max(65_535, ":r", ":B")
+    ));
+    assert!(matches!(
+        r.consistency,
+        Consistency::Unknown(UnknownReason::OutOfFragment { .. })
+    ));
+}
+
+#[test]
+fn at_most_with_many_successors_is_decided() {
+    let succ: String = (0..12)
+        .map(|i| format!(":i{i} a owl:NamedIndividual . :a :r :i{i} . "))
+        .collect();
+    let diff: String = (0..12)
+        .flat_map(|i| (i + 1..12).map(move |j| format!(":i{i} owl:differentFrom :i{j} . ")))
+        .collect();
+    let at_most = |n: u32| format!("{DECL} {succ} :a a {} .", max(n, ":r", "owl:Thing"));
+    assert!(!consistent(&format!("{} {diff}", at_most(11))));
+    assert!(consistent(&format!("{} {diff}", at_most(12))));
+    assert!(consistent(&at_most(5)));
+}
+
+#[test]
+fn queries_answer_builtin_and_unmentioned_classes() {
+    // `:D ⊑ ¬owl:Nothing` is a tautology that puts `owl:Nothing` in the dictionary.
+    let (d, r) = reasoner(&format!(
+        "{DECL} :A rdfs:subClassOf :B . owl:Thing rdfs:subClassOf :C . :D owl:disjointWith owl:Nothing ."
+    ));
+    let (thing, nothing) = (owl(&d, "Thing"), owl(&d, "Nothing"));
+    assert_eq!(r.is_satisfiable(nothing), Some(false));
+    assert_eq!(r.is_satisfiable(thing), Some(true));
+    assert_eq!(r.is_subclass_of(ex(&d, "A"), thing), Some(true));
+    assert_eq!(r.is_subclass_of(nothing, ex(&d, "A")), Some(true));
+    assert_eq!(r.is_subclass_of(ex(&d, "A"), ex(&d, "B")), Some(true));
+    assert_eq!(r.is_subclass_of(ex(&d, "B"), ex(&d, "A")), Some(false));
+    // :X occurs in no axiom, but everything is a :C.
+    let x = d.lookup(&OTerm::NamedNode(NamedNode::new_unchecked("http://ex/X")));
+    assert_eq!(r.is_subclass_of(x, ex(&d, "C")), Some(true));
+    assert_eq!(r.is_subclass_of(x, ex(&d, "B")), Some(false));
+}
+
+#[test]
+fn queries_respect_inconsistency_and_imports() {
+    let (d, r) = reasoner(&format!("{DECL} :A owl:disjointWith :B . :a a :A , :B ."));
+    assert_eq!(r.is_satisfiable(ex(&d, "C")), Some(false));
+    assert_eq!(r.is_subclass_of(ex(&d, "C"), ex(&d, "D")), Some(true));
+    assert!(r.classify().is_none());
+    let (d, r) = reasoner(&format!(
+        "{DECL} <http://ex/o> a owl:Ontology ; owl:imports <http://ex/other> . :A rdfs:subClassOf :B ."
+    ));
+    // Entailed now, entailed whatever the import adds; a non-entailment could change.
+    assert_eq!(r.is_subclass_of(ex(&d, "A"), ex(&d, "B")), Some(true));
+    assert_eq!(r.is_subclass_of(ex(&d, "B"), ex(&d, "A")), None);
+    assert_eq!(r.is_satisfiable(ex(&d, "A")), None);
 }
 
 #[test]

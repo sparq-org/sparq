@@ -25,6 +25,7 @@
 
 use super::clausify::{Atom, AtomKind, Clauses, Head, Role, Var};
 use rustc_hash::FxHashMap;
+use std::cell::Cell;
 use std::rc::Rc;
 
 pub(crate) type Node = u32;
@@ -122,6 +123,10 @@ impl Default for Budget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Exhausted;
 
+/// A clause's neighbour variable: its role atoms, its concept atoms, and whether it binds
+/// only nodes after the previous variable's.
+type YVar = (Vec<Role>, Vec<Atom>, bool);
+
 /// Where the clauses applicable at a central node are found.
 #[derive(Debug, Default)]
 pub(crate) struct ClauseIndex {
@@ -131,8 +136,9 @@ pub(crate) struct ClauseIndex {
     by_role: FxHashMap<Role, Vec<u32>>,
     /// Clauses with an empty body.
     unconditional: Vec<u32>,
-    /// Per clause, per neighbour variable: its role atoms and concept atoms.
-    ys: Vec<Vec<(Vec<Role>, Vec<Atom>)>>,
+    /// Per clause, per neighbour variable: its role atoms, its concept atoms, and whether it
+    /// binds only nodes after the previous variable's.
+    ys: Vec<Vec<YVar>>,
 }
 
 impl ClauseIndex {
@@ -152,7 +158,10 @@ impl ClauseIndex {
             } else {
                 idx.unconditional.push(i);
             }
-            let mut ys = vec![(Vec::new(), Vec::new()); cl.n_y as usize];
+            let mut ys = vec![(Vec::new(), Vec::new(), false); cl.n_y as usize];
+            for &y in &cl.ordered {
+                ys[y as usize].2 = true;
+            }
             for &(r, y) in &cl.body_roles {
                 ys[y as usize].0.push(r);
             }
@@ -220,6 +229,9 @@ pub(crate) struct Tableau<'c> {
     clash: Option<Dep>,
     forbidden: Option<(Node, Atom)>,
     steps: u64,
+    /// Work inside a single rule application (clause matching, clique search), counted
+    /// against the same step budget so one application cannot run unbounded.
+    probes: Cell<u64>,
     budget: Budget,
 }
 
@@ -240,6 +252,7 @@ impl<'c> Tableau<'c> {
             clash: None,
             forbidden: None,
             steps: 0,
+            probes: Cell::new(0),
             budget,
         }
     }
@@ -295,7 +308,7 @@ impl<'c> Tableau<'c> {
     /// built, `Ok(false)` when every branch closed.
     pub(crate) fn run(&mut self) -> Result<bool, Exhausted> {
         loop {
-            if self.steps > self.budget.max_steps || self.nodes.len() > self.budget.max_nodes {
+            if self.over_budget() || self.nodes.len() > self.budget.max_nodes {
                 return Err(Exhausted);
             }
             if let Some(d) = self.clash.take() {
@@ -323,6 +336,17 @@ impl<'c> Tableau<'c> {
             }
             return Ok(true);
         }
+    }
+
+    fn over_budget(&self) -> bool {
+        self.steps.saturating_add(self.probes.get()) > self.budget.max_steps
+    }
+
+    /// Counts one unit of inner work; `true` when the budget is spent and the caller should
+    /// stop (`run` then reports [`Exhausted`] before using any partial result).
+    fn probe(&self) -> bool {
+        self.probes.set(self.probes.get() + 1);
+        self.over_budget()
     }
 
     // ---- facts ------------------------------------------------------------------------
@@ -616,7 +640,8 @@ impl<'c> Tableau<'c> {
             return;
         }
         let x = nodes[0];
-        let (roles, atoms) = &ys[y];
+        let (roles, atoms, ordered) = &ys[y];
+        let after = if *ordered { Some(nodes[y]) } else { None };
         let first = roles[0];
         let mut cands: Vec<Node> = self.nodes[x as usize]
             .adj
@@ -626,6 +651,12 @@ impl<'c> Tableau<'c> {
             .collect();
         cands.sort_unstable();
         'cand: for n in cands {
+            if after.is_some_and(|p| n <= p) {
+                continue;
+            }
+            if self.probe() {
+                return;
+            }
             let mut d = deps.clone();
             for &r in roles {
                 if !self.has_role(r, x, n) {
@@ -893,6 +924,9 @@ impl<'c> Tableau<'c> {
             return false;
         }
         for i in from..cands.len() {
+            if self.probe() {
+                return false;
+            }
             let c = cands[i];
             if chosen
                 .iter()

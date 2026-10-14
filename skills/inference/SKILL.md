@@ -705,13 +705,15 @@ dependency-directed backjumping. It returns a `DlReport` with the profile report
 `consistency` (`Consistent`, `Inconsistent`, or `Unknown(reason)`) and, when consistent, a
 `Classification` (unsatisfiable named classes, every entailed named subsumption, and the
 `inferred` ones not asserted). `owl2dl::Reasoner::new(&dict, &onto, budget)` answers single
-`is_satisfiable` / `is_subclass_of` queries (`Option<bool>`). The decided fragment is
-ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`; anything else (data properties and
+`is_satisfiable` / `is_subclass_of` queries (`Option<bool>`; `owl:Thing`, `owl:Nothing` and
+classes no axiom mentions included; `None` when an unloaded import could change a negative
+answer). The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`,
+number restrictions up to `MAX_CARDINALITY`; anything else (data properties and
 datatypes, nominals and `hasValue`, other chains, keys, the top and bottom object
 properties) gives `Unknown(OutOfFragment { construct, source })`, a blocking profile
 violation gives `Unknown(NotInDl)`, an exhausted step budget gives
 `Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
-`Unknown(ImportsNotLoaded)`. It never guesses a verdict. Its answers are checked against
+`Unknown(ImportsNotLoaded)` with no classification. It never guesses a verdict. Its answers are checked against
 HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
 
 ## Common recipes

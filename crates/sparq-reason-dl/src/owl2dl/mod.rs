@@ -25,5 +25,5 @@ pub use dl_profile::{check_dl, DlProfileReport, Unchecked, Violation, ViolationK
 pub use extract::{extract, ExtractError, ExtractErrorKind};
 pub use model::Ontology;
 pub use reasoner::{
-    check, Budget, Classification, Consistency, DlReport, Reasoner, UnknownReason,
+    check, Budget, Classification, Consistency, DlReport, Reasoner, UnknownReason, MAX_CARDINALITY,
 };
