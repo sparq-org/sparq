@@ -100,6 +100,19 @@ fn is_reserved_derivation_predicate(t: &[Term; 3]) -> bool {
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
+/// Whether the document `graph_iri` may state triple `t`: a document describes only its
+/// own nodes, i.e. a blank node or an IRI whose fragment-stripped document is
+/// `graph_iri` itself. It can still reference any IRI as an object, which is how an ACR
+/// applies a policy defined in another document or an ACL names a group, but statements
+/// about a node defined elsewhere come only from that node's own document.
+fn speaks_for(t: &[Term; 3], graph_iri: &str) -> bool {
+    match &t[0] {
+        Term::BlankNode(_) => true,
+        Term::NamedNode(s) => group_doc_of(s.as_str()) == graph_iri,
+        _ => false,
+    }
+}
+
 /// Drop ALL named graphs in the reserved IRI space — including a pre-existing
 /// `<urn:sparq:auth>`: a loaded dataset must not be able to smuggle in the rewrite
 /// sentinel (`urn:sparq:nothing`) or a FORGED auth view; only `install_auth_view`
@@ -126,7 +139,7 @@ const SPECIAL_AGENTS: [&str; 5] = [
     "http://www.w3.org/ns/auth/acl#AuthenticatedAgent",
 ];
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum System {
     Wac,
     Acp,
@@ -270,7 +283,7 @@ pub(crate) fn assemble_facts(
             // sq-3jtd.5: hard-reject any forged derivation-internal fact
             // (`solidx:creator|owner|appliesToResource|…`) smuggled into the control
             // document — only the loader/rules may produce `solidx:` facts.
-            if is_reserved_derivation_predicate(&t) {
+            if is_reserved_derivation_predicate(&t) || !speaks_for(&t, iri) {
                 continue;
             }
             let s = skolemize(&t[0], iri);
@@ -293,7 +306,7 @@ pub(crate) fn assemble_facts(
             for t in graph_triples(sub) {
                 // sq-3jtd.5: same derivation-internal guard for group
                 // documents — a forged `solidx:` fact here would feed the reasoner too.
-                if is_reserved_derivation_predicate(&t) {
+                if is_reserved_derivation_predicate(&t) || !speaks_for(&t, iri) {
                     continue;
                 }
                 out.push([
@@ -816,6 +829,84 @@ mod tests {
             for mode in [Mode::Read, Mode::Write] {
                 assert!(store.accessible(&session, mode).is_empty(), "{mode:?}");
             }
+        }
+    }
+
+    /// A document's statements about a node defined in another document are dropped;
+    /// references to nodes elsewhere still work. Each case: the other agent gets no access
+    /// to `pod.ex/secret`, while the cross-document reference grants carol.
+    #[test]
+    fn documents_describe_only_their_own_nodes() {
+        const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+        const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+        const VCARD: &str = "http://www.w3.org/2006/vcard/ns#";
+        use super::RDF_TYPE;
+        let (alice, other, carol) =
+            ("https://alice.ex/me", "https://other.ex/card#me", "https://carol.ex/me");
+        let secret = "https://pod.ex/secret";
+        let data = format!(
+            "<{secret}#it> <https://ex.dev/ns#t> \"t\" <{secret}> .\n\
+             <https://other.ex/doc#it> <https://ex.dev/ns#t> \"t\" <https://other.ex/doc> .\n"
+        );
+        let (oacl, oacr, grp) = (
+            "https://other.ex/doc.acl",
+            "https://other.ex/doc.acr",
+            "https://pod.ex/groups",
+        );
+        let wac = format!(
+            "{data}\
+             <{secret}.acl#owner> <{RDF_TYPE}> <{ACL}Authorization> <{secret}.acl> .\n\
+             <{secret}.acl#team> <{RDF_TYPE}> <{ACL}Authorization> <{secret}.acl> .\n\
+             <{oacl}#a> <{RDF_TYPE}> <{ACL}Authorization> <{oacl}> .\n\
+             <{secret}.acl#owner> <{ACL}accessTo> <{secret}> <{secret}.acl> .\n\
+             <{secret}.acl#owner> <{ACL}agent> <{alice}> <{secret}.acl> .\n\
+             <{secret}.acl#owner> <{ACL}mode> <{ACL}Read> <{secret}.acl> .\n\
+             <{secret}.acl#team> <{ACL}accessTo> <{secret}> <{secret}.acl> .\n\
+             <{secret}.acl#team> <{ACL}agentGroup> <{grp}#team> <{secret}.acl> .\n\
+             <{secret}.acl#team> <{ACL}mode> <{ACL}Read> <{secret}.acl> .\n\
+             <{grp}#team> <{VCARD}hasMember> <{carol}> <{grp}> .\n\
+             <{oacl}#a> <{ACL}accessTo> <https://other.ex/doc> <{oacl}> .\n\
+             <{oacl}#a> <{ACL}agentGroup> <https://other.ex/grp#g> <{oacl}> .\n"
+        );
+        let agent_in_foreign_authorization =
+            format!("<{secret}.acl#owner> <{ACL}agent> <{other}> <{oacl}> .\n");
+        let member_in_foreign_group =
+            format!("<{grp}#team> <{VCARD}hasMember> <{other}> <https://other.ex/grp> .\n");
+        let shared = "https://shared.ex/p.acr";
+        let acp = format!(
+            "{data}\
+             <{secret}.acr> <{ACP}accessControl> <{secret}.acr#c> <{secret}.acr> .\n\
+             <{secret}.acr#c> <{ACP}apply> <{shared}#pol> <{secret}.acr> .\n\
+             <{shared}#pol> <{ACP}allow> <{ACL}Read> <{shared}> .\n\
+             <{shared}#pol> <{ACP}anyOf> <{shared}#m> <{shared}> .\n\
+             <{shared}#m> <{ACP}agent> <{carol}> <{shared}> .\n\
+             <{oacr}#c> <{ACP}apply> <{oacr}#p> <{oacr}> .\n\
+             <{oacr}#p> <{ACP}allow> <{ACL}Read> <{oacr}> .\n\
+             <{oacr}#p> <{ACP}anyOf> <{oacr}#m> <{oacr}> .\n\
+             <{oacr}#m> <{ACP}agent> <{other}> <{oacr}> .\n"
+        );
+        let control_on_foreign_resource =
+            format!("<{secret}.acr> <{ACP}accessControl> <{oacr}#c> <{oacr}> .\n");
+        let agent_in_foreign_matcher = format!("<{shared}#m> <{ACP}agent> <{other}> <{oacr}> .\n");
+        let cases = [
+            (System::Wac, &wac, agent_in_foreign_authorization),
+            (System::Wac, &wac, member_in_foreign_group),
+            (System::Acp, &acp, control_on_foreign_resource),
+            (System::Acp, &acp, agent_in_foreign_matcher),
+        ];
+        for (system, base, foreign) in cases {
+            let nq = format!("{base}{foreign}");
+            let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
+            match system {
+                System::Wac => store.materialize_wac().unwrap(),
+                System::Acp => store.materialize_acp().unwrap(),
+            };
+            let can_read = |agent: &str| {
+                let s = Session { agent: Some(agent), client: None, issuer: None, now: None };
+                store.accessible(&s, Mode::Read).iter().any(|r| r.as_str() == secret)
+            };
+            assert!(!can_read(other), "{system:?}: {foreign} granted access");
+            assert!(can_read(carol), "{system:?}: a cross-document reference stopped working");
         }
     }
 }
