@@ -1119,7 +1119,7 @@ dual-leaf method for new issuance is `DualLeafV2` (§14.5).
 which would invalidate every V1 commitment and vector — the scheme is **versioned**:
 `crates/sparq-zk/src/dual_leaf_v2.rs` (same `dual-leaf` feature, off by default) carries a
 second dual-leaf method, scheme IRI `https://sparq.dev/ns/zk#poseidon2-dualleaf-v2`. V1 is
-unchanged byte-for-byte and stays **recognised and verifiable**; V2 is the dual-leaf method
+unchanged in its constants, vectors and public API — only three private lexical parsers widen to `pub(crate)` so V2 shares them verbatim — and stays **recognised and verifiable**; V2 is the dual-leaf method
 `CommitmentMethod::is_production_selectable` admits for **new issuance**.
 
 **(a) The reserved tag is out of band.** `dual_leaf_v2::value_none()` is derived in BLAKE3's
