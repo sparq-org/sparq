@@ -235,9 +235,10 @@ check). On a pull request it runs only for zk-specific inputs (`PR_PREFIXES` /
 `PR_FILES` in `scripts/ci_exact_evaluator_paths.py`, among them this workspace,
 `bench/zk-bindings`, `sparq-canon`, `sparq-query-protocol`, the vendored
 parser and SDK, three engine test fixtures, toolchain pins and the lane's own
-workflow and scripts). Engine crates and `Cargo.*` are checked after merge, on
-every push to `main` that touches any evaluator input. It also runs in the
-merge queue and on manual dispatch. It exports the accepted executable, actual synthetic receipts
+workflow and scripts). Engine crates and the root `Cargo.toml` / `Cargo.lock`
+do not start it on a pull request; they are checked on every push to `main`
+that touches any evaluator input, and in the merge queue when one is enabled.
+It can also be run by hand. It exports the accepted executable, actual synthetic receipts
 and source/toolchain/HAL evidence using the [campaign evidence contract](../../skills/zk-query-proofs/references/evaluator-evidence.md). Partial uploads are not success records.
 
 The shared raw-literal boundary checks numeric/boolean typed lexicals
