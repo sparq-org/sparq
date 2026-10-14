@@ -42,6 +42,7 @@ use crate::compare::secure_equal_to_bit;
 use crate::field::Fp;
 use crate::oblivious_join::{self, Candidate, MatchBit, ObliviousOutputCost};
 use crate::partial::{HolderId, MpcError, PartialResult};
+use crate::randomness::DistributedRandomness;
 use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
 use oxrdf::{Term, Variable};
 use std::collections::BTreeMap;
@@ -440,13 +441,25 @@ impl HiddenValueJoin {
     /// NOT claimed otherwise (pinned by a boundary test; a true fix needs a MAC,
     /// deferred WI-4 / bead sq-6d6g). Detection at `n > 2t + 1` thus requires
     /// running the equality test on MORE than the minimal party count.
-    fn secure_equal(&self, dealer: &mut ShamirDealer, a: Fp, b: Fp) -> Result<bool, MpcError> {
+    ///
+    /// **Randomness routed through the seam (sq-yyro, issue #6117).** Both key
+    /// sharings are dealt with [`DistributedRandomness::vss_own_input`] rather than
+    /// the dealer's inherent `share`, so a dealer-less source can be swapped in
+    /// behind the same trait. For [`ShamirDealer`] that method *is* `share`, so the
+    /// draws — and therefore the output — are unchanged; a source that cannot
+    /// verifiably share a holder's own input (PRSS today) fails closed here.
+    fn secure_equal(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        a: Fp,
+        b: Fp,
+    ) -> Result<bool, MpcError> {
         // Secret-share both keys, then run the shared-input core. The scalar path
         // deals its own shares; the batched path deals a whole key COLUMN up front
         // (a `BatchedShares`) and passes the per-row sharings straight in.
-        let sa = dealer.share(a);
-        let sb = dealer.share(b);
-        self.secure_equal_shared(dealer, &sa, &sb)
+        let sa = source.vss_own_input(a)?;
+        let sb = source.vss_own_input(b)?;
+        self.secure_equal_shared(source, &sa, &sb)
     }
 
     /// The match-bit core of [`Self::secure_equal`], over keys that are ALREADY
@@ -482,26 +495,36 @@ impl HiddenValueJoin {
     /// of scope for the honest-majority equality test and would change the trust
     /// model. The arithmetic and behaviour are pinned by the `sq-ji5f` properties
     /// in `adversarial_tests` (`honest_majority_equality_open_*`).
+    ///
+    /// **Randomness routed through the seam (sq-yyro, issue #6117).** The nonzero
+    /// equality mask `[r]` now comes from
+    /// [`DistributedRandomness::shared_nonzero_mask`] instead of the dealer's own
+    /// `draw_nonzero_fp` + `share`. For [`ShamirDealer`] that method is exactly
+    /// those two calls in that order, so the drawn values — and the opened `m` —
+    /// are unchanged; `(n, t)` are likewise read off the source. The `r ≠ 0`
+    /// structural contract that this verdict rests on is the seam method's, and the
+    /// ACTIVE-adversary `r = 0` defense remains a follow-on bead (see the
+    /// [`crate::randomness`] module note) — nothing stronger is claimed here.
     fn secure_equal_shared(
         &self,
-        dealer: &mut ShamirDealer,
+        source: &mut dyn DistributedRandomness,
         sa: &[Share],
         sb: &[Share],
     ) -> Result<bool, MpcError> {
-        let t = dealer.threshold();
+        let t = source.threshold();
         // Honest-majority headroom: one multiplication needs 2t+1 <= n parties.
-        if dealer.parties() < 2 * t + 1 {
+        if source.parties() < 2 * t + 1 {
             return Err(MpcError::Protocol(format!(
                 "secure_equal needs n >= 2t+1 (n={}, t={})",
-                dealer.parties(),
+                source.parties(),
                 t
             )));
         }
-        // Fresh nonzero mask r from the masking RNG (a CSPRNG in production —
-        // sq-1vt). Zero is rejected inside `draw_nonzero_fp`: masking by zero
-        // would make m=0 even for unequal keys (a false match).
-        let mask_value = dealer.draw_nonzero_fp();
-        let r = dealer.share(mask_value);
+        // Fresh nonzero mask r through the randomness seam (the single-dealer
+        // simulation draws it from its masking CSPRNG — sq-1vt). Nonzero is
+        // load-bearing and part of the seam method's structural contract: masking
+        // by zero would make m=0 even for unequal keys (a false match).
+        let r = source.shared_nonzero_mask()?;
         // d = a - b (local, degree t).
         let d = shamir::sub_shares(sa, sb)?;
         // m = d * r (one multiplication, degree 2t).
@@ -2367,5 +2390,139 @@ mod batched_hidden_value_tests {
         let r = keyed("R", &["y"], &[("k", 1u64, vec![lit("p")])]);
         let err = join.fully_oblivious_batched_join(&l, &r, 4).unwrap_err();
         assert!(matches!(err, MpcError::Protocol(m) if m.contains("row-binding")));
+    }
+}
+
+#[cfg(test)]
+mod randomness_seam_tests {
+    //! sq-yyro / issue #6117 — the hidden-value equality path draws its key
+    //! sharings and its nonzero equality mask through
+    //! [`DistributedRandomness`] instead of the dealer's inherent `share` /
+    //! `draw_nonzero_fp`. These tests pin that the single-dealer simulation draws
+    //! exactly what it drew before the routing, and that a PRSS source drives the
+    //! mask-only core correctly while failing closed on the input-sharing path.
+    use super::*;
+    use crate::prss::PrssRandomness;
+    use crate::shamir::ShamirBackend;
+
+    /// Pinned from the PRE-ROUTING code (`dealer.share` + `draw_nonzero_fp` +
+    /// `share` inline). `secure_equal` returns only a bit, so the WITNESS draw
+    /// after the calls is what actually pins the draw count and order: it is the
+    /// next `draw_fp()` from the same dealer, and it moves if the equality path
+    /// consumes the masking RNG differently.
+    #[test]
+    fn seeded_equality_path_draws_exactly_what_the_dealer_drew_before_the_seam() {
+        let backend = ShamirBackend::new_seeded(5, 0x5EED7).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let mut dealer = backend.dealer();
+        assert!(join
+            .secure_equal(&mut dealer, Fp::new(42), Fp::new(42))
+            .unwrap());
+        assert!(!join
+            .secure_equal(&mut dealer, Fp::new(42), Fp::new(43))
+            .unwrap());
+        assert_eq!(dealer.draw_fp().value(), 13364450358920826);
+
+        let sa = dealer.share(Fp::new(9));
+        let sb = dealer.share(Fp::new(9));
+        assert!(join.secure_equal_shared(&mut dealer, &sa, &sb).unwrap());
+        assert_eq!(dealer.draw_fp().value(), 1388396751701323652);
+    }
+
+    /// `secure_equal_shared` needs ONLY `shared_nonzero_mask` — which PRSS
+    /// genuinely implements, dealer-lessly — so a PRSS source must decide the
+    /// match CORRECTLY over keys that were already shared. PRSS draws from OS
+    /// entropy, so this asserts the verdict invariant, not pinned values.
+    #[test]
+    fn prss_decides_the_match_bit_correctly_over_already_shared_keys() {
+        let backend = ShamirBackend::new(5).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        let mut dealer = backend.dealer();
+        for (a, b, expected) in [
+            (7u64, 7u64, true),
+            (7, 8, false),
+            (0, 0, true),
+            (0, 1, false),
+        ] {
+            let sa = dealer.share(Fp::new(a));
+            let sb = dealer.share(Fp::new(b));
+            assert_eq!(
+                join.secure_equal_shared(&mut prss, &sa, &sb).unwrap(),
+                expected,
+                "PRSS-masked equality disagreed with the plaintext for ({a}, {b})"
+            );
+        }
+    }
+
+    /// Fail-closed: the scalar `secure_equal` must first share both keys, which
+    /// PRSS refuses (it generates correlated randomness; it does not verifiably
+    /// share a holder's own input). The refusal must surface as PRSS's own
+    /// `NotYetImplemented`, not an unverified sharing.
+    #[test]
+    fn prss_fails_closed_when_the_equality_path_must_share_the_keys() {
+        let backend = ShamirBackend::new(5).unwrap();
+        let join = HiddenValueJoin::new(backend);
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        let outcome = join.secure_equal(&mut prss, Fp::new(1), Fp::new(1));
+        assert!(
+            matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+            "a PRSS source must refuse to share the join keys, got {:?}",
+            outcome
+        );
+    }
+
+    /// A source whose plain `shared_mask` deals ZERO and whose
+    /// `shared_nonzero_mask` deals a real nonzero value — the `r = 0` threat from
+    /// the [`crate::randomness`] module note, made deterministic.
+    ///
+    /// This is what pins the CHOICE of seam method at the equality call site: with
+    /// `r = 0` the opened `m = (a−b)·r` is `0` for every pair, so a call site that
+    /// drew the plain mask would report "equal" for UNEQUAL keys — a false match on
+    /// every row. The two methods consume the same number of RNG draws in the
+    /// single-dealer simulation, so the pinned-value test above cannot tell them
+    /// apart; this one can.
+    struct ZeroPlainMaskSource {
+        inner: ShamirDealer,
+    }
+    impl DistributedRandomness for ZeroPlainMaskSource {
+        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            DistributedRandomness::threshold(&self.inner)
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            Ok(self.inner.share(Fp::zero()))
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            self.inner.vss_own_input(secret)
+        }
+    }
+
+    #[test]
+    fn the_equality_mask_comes_from_the_nonzero_seam_method() {
+        let backend = ShamirBackend::new_seeded(5, 0xE9A1).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+        let mut dealer = backend.dealer();
+        let sa = dealer.share(Fp::new(11));
+        let sb = dealer.share(Fp::new(12));
+        let mut source = ZeroPlainMaskSource {
+            inner: backend.dealer(),
+        };
+        // Drawing the NONZERO mask keeps the verdict honest; drawing the plain
+        // (here zero) mask would report a false match.
+        assert!(
+            !join.secure_equal_shared(&mut source, &sa, &sb).unwrap(),
+            "unequal keys must not match — the equality mask must be the nonzero one"
+        );
+        let sc = dealer.share(Fp::new(11));
+        assert!(join.secure_equal_shared(&mut source, &sa, &sc).unwrap());
     }
 }
