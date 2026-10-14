@@ -3973,10 +3973,9 @@ pub const LINKSET_PUT_SCAN_BUDGET: usize = LINKSET_COST_BUDGET / LINKSET_PUT_PAR
 /// Why [`read_linkset`] did not read a body.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum LinksetUnread {
-    /// It is not JSON (RFC 8259).
+    /// It is not JSON (RFC 8259), or nests past what the parser reads: the parser stops at its
+    /// nesting limit before it has read the rest, so the two cannot be told apart.
     NotJson,
-    /// It nests past what the parser reads.
-    TooDeep,
     /// It holds a number, which no linkset document does.
     Number,
     /// Parsing it would allocate more than the budget.
@@ -4012,12 +4011,10 @@ fn walk_linkset(body: &[u8], budget: usize, keep: bool) -> Result<(Value, usize)
         // A number too large for the parser fails before the visitor sees it: a number still.
         Err(e) => Err(why
             .get()
-            .unwrap_or(match e.to_string() {
-                m if m.starts_with("number out of range") => LinksetUnread::Number,
-                // JSON nested past the parser's limit is JSON, too deep to store (as a PATCH
-                // result nested that deep is).
-                m if m.starts_with("recursion limit exceeded") => LinksetUnread::TooDeep,
-                _ => LinksetUnread::NotJson,
+            .unwrap_or(if e.to_string().starts_with("number out of range") {
+                LinksetUnread::Number
+            } else {
+                LinksetUnread::NotJson
             })),
     }
 }
@@ -4765,7 +4762,16 @@ async fn linkset<S: Store + 'static>(
             let Some(locks) = exclusive.take().map(|guard| (guard, listing.take())) else {
                 return store_error(ServerError::Storage("the lock is not held".into()));
             };
-            store_linkset(state, req, uri, meta, patched, locks, true).await
+            store_linkset(
+                state,
+                req,
+                uri,
+                meta,
+                patched,
+                locks,
+                LinksetValidator::Sent,
+            )
+            .await
         }
         Method::PUT => {
             // A whole linkset replaces the user-managed one (lws10-core 9.3.2), in one write. The
@@ -4802,12 +4808,9 @@ async fn linkset<S: Store + 'static>(
             let document = match read_linkset(&req.body, LINKSET_PUT_SCAN_BUDGET) {
                 Ok(d) => d,
                 Err(LinksetUnread::NotJson) => {
-                    return problem(StatusCode::BAD_REQUEST, Some("the body is not JSON"))
-                }
-                Err(LinksetUnread::TooDeep) => {
                     return problem(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        Some("the linkset nests too deeply to be stored"),
+                        StatusCode::BAD_REQUEST,
+                        Some("the body is not JSON, or nests too deeply to be read"),
                     )
                 }
                 Err(LinksetUnread::Number) => {
@@ -4829,7 +4832,16 @@ async fn linkset<S: Store + 'static>(
             // What is stored is not what was sent (references resolved, the server-managed links
             // restored), so a successful PUT carries no validator (RFC 9110 section 9.3.4): the
             // linkset and its tag are read with a GET.
-            store_linkset(state, req, uri, meta, document, locks, false).await
+            store_linkset(
+                state,
+                req,
+                uri,
+                meta,
+                document,
+                locks,
+                LinksetValidator::Withheld,
+            )
+            .await
         }
         _ => method_not_allowed(LINKSET_ALLOW),
     };
@@ -4847,8 +4859,7 @@ async fn linkset<S: Store + 'static>(
 /// user-managed links, holding `locks` (the resource's, exclusive, and its listing's) through the
 /// write. It must be a linkset ([`valid_linkset`]); relative references are resolved against the
 /// linkset's own URI, and the result is checked as it will be served and stored before anything
-/// is written. `204`, with the new tag when `tag` (a PATCH; a PUT's response carries none), or the
-/// refusal.
+/// is written. `204`, with the new tag as `validator` says, or the refusal.
 async fn store_linkset<S, L>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -4856,7 +4867,7 @@ async fn store_linkset<S, L>(
     mut meta: ResourceMeta,
     document: Value,
     locks: L,
-    tag: bool,
+    validator: LinksetValidator,
 ) -> Response
 where
     S: Store + 'static,
@@ -4888,16 +4899,6 @@ where
     meta.links = links_of(&user, uri);
     meta.linkset = Some(user.into_value());
     meta.linkset_etag = None;
-    // The tag of the document as written: the stored links with the server-managed ones (`up`,
-    // `type`, `self`) a patch may strip put back. Only a PATCH's response carries it.
-    let new_etag = if tag {
-        match linkset_document(state, uri, &meta).await {
-            Ok(rebuilt) => Some(linkset_etag(&rebuilt)),
-            Err(e) => return store_error(e),
-        }
-    } else {
-        None
-    };
     // The result is checked with what the next PATCH checks its target with ([`admissible`]):
     // a linkset is stored only if it can be patched again.
     let format = if uri.ends_with('/') {
@@ -4929,6 +4930,15 @@ where
             )
         }
     }
+    // The tag of the document as written, once it is admitted: the stored links with the
+    // server-managed ones (`up`, `type`, `self`) a patch may strip put back.
+    let new_etag = match validator {
+        LinksetValidator::Sent => match linkset_document(state, uri, &meta).await {
+            Ok(rebuilt) => Some(linkset_etag(&rebuilt)),
+            Err(e) => return store_error(e),
+        },
+        LinksetValidator::Withheld => None,
+    };
     // The write runs in a task that holds the lock and the listing's, and then touches
     // the container when the write may have landed (see [`hold_locks`]).
     let write = {
@@ -4953,6 +4963,15 @@ where
         set(r.headers_mut(), header::ETAG, &new_etag);
     }
     r
+}
+
+/// Whether a stored linkset's `204` carries its new `ETag`.
+enum LinksetValidator {
+    /// A PATCH: the client may go on patching with the tag.
+    Sent,
+    /// A PUT: what is stored is not what was sent (references resolved, the server-managed links
+    /// restored), so the response carries no validator (RFC 9110 section 9.3.4); a GET reads it.
+    Withheld,
 }
 
 /// An RFC 9264 linkset document: an object whose `linkset` is an array of objects with an `anchor`
@@ -5875,17 +5894,14 @@ mod tests {
             put(LINKSET_JSON, shape).await,
             StatusCode::UNPROCESSABLE_ENTITY
         );
-        // JSON nested past what the parser reads is JSON, too deep to store: 422 as for a PATCH
-        // result, not "not JSON".
+        // The parser stops at its nesting limit before reading the rest, so a body nested past
+        // it is refused as one that is not JSON, unread.
         let deep = format!(
             r#"{{"linkset":[{{"anchor":"{uri}","x":{}{}}}]}}"#,
             "[".repeat(200),
             "]".repeat(200)
         );
-        assert_eq!(
-            put(LINKSET_JSON, deep).await,
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
+        assert_eq!(put(LINKSET_JSON, deep).await, StatusCode::BAD_REQUEST);
         // Past what the metadata may hold, unread.
         let huge = format!("\"{}\"", "a".repeat(LINKSET_PUT_BODY));
         assert_eq!(put(LINKSET_JSON, huge).await, StatusCode::PAYLOAD_TOO_LARGE);

@@ -319,7 +319,7 @@ What the server exposes, all discoverable from the storage description
   charges it as the patch is charged and refuses it (`413`) past 512 KiB, so parsing it (the same
   reader again, keeping what it reads), which
   holds at most a measured, doubled four times that charge, stays within 2 MiB; a number in it
-  gets `422`, text that is not JSON `400`, a partial `PUT` (`Content-Range`) `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
+  gets `422`, text that is not JSON (or nests past what the parser reads) `400`, a partial `PUT` (`Content-Range`) `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
   server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
   values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored

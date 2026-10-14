@@ -47,6 +47,14 @@ def load(path):
         return json.load(f, object_pairs_hook=unique_keys)
 
 
+def valid_pattern(pattern: str) -> bool:
+    try:
+        re.compile(pattern)
+        return True
+    except re.error:
+        return False
+
+
 def parse(tests) -> tuple:
     """A report's results as `{id: (outcome, level, reason)}`, and why it is not well formed: each
     result is an object of known members with a string id and level, a known outcome and a string
@@ -77,9 +85,15 @@ def check(tests, floor_doc: dict) -> tuple:
     """Whether `tests` (a report's) hold `floor_doc` (floor.json's), and the lines to print."""
     results, bad = parse(tests)
     supported = floor_doc.get("supported", {})
-    for test_id in supported:
+    if not isinstance(supported, dict):
+        supported, bad = {}, bad + ["  floor.json's supported is not an object"]
+    for test_id, pattern in supported.items():
         if not test_id.endswith("-when-unsupported"):
             bad.append(f"  a supported probe must be a *-when-unsupported test: {test_id}")
+        # The pattern pins the precondition by name, so no other reason for being inapplicable
+        # (an earlier step failing, a capability not declared) can stand in for it.
+        elif not (isinstance(pattern, str) and pattern.startswith("precondition '") and valid_pattern(pattern)):
+            bad.append(f"  a supported probe's reason must be a pattern naming its precondition: {test_id}")
     if bad:
         return False, bad
     floor = floor_doc["passed"]
@@ -89,7 +103,7 @@ def check(tests, floor_doc: dict) -> tuple:
         m = module(test_id)
         total[m] += 1
         if test_id in supported:
-            held = outcome == "inapplicable" and re.fullmatch(supported[test_id], reason, re.S) is not None
+            held = outcome == "inapplicable" and re.fullmatch(supported[test_id], reason) is not None
             passed[m] += held
             if not held:
                 ok = False
@@ -140,6 +154,9 @@ def self_test():
         "precondition 'the linkset does not advertise PUT (otherwise this test does not apply)' "
         "does not hold: status expected 200, got 500",
         seen.replace("PUT, PATCH", "PATCH"),
+        seen.replace("PUT, PATCH", "PATCH, X-PUT"),
+        seen.replace("PUT, PATCH", "PATCH") + "\n  exchange: PUT -> 405",
+        seen + " (PUT refused)",
         "precondition 'find its linkset' does not hold: " + seen.split(": ", 1)[1],
     ):
         assert not check(tests_with(z, result(probe, "inapplicable", reason=reason)), floor_doc)[0], reason
@@ -173,6 +190,10 @@ def self_test():
     # Only a *-when-unsupported test may stand in for a pass.
     unsupported_z = {**floor_doc, "supported": {"core/a#z": ".*", **floor_doc["supported"]}}
     assert not check(tests_with(result("core/a#z", "inapplicable", reason="no"), inapp), unsupported_z)[0]
+    # The pattern must pin the precondition by name, and be a pattern.
+    for pattern in (".*", "precondition '(", 3):
+        assert not check(tests_with(z, inapp), {**floor_doc, "supported": {probe: pattern}})[0], pattern
+    assert not check(tests_with(z, inapp), {**floor_doc, "supported": [probe]})[0]
     # Without the probe listed, a module is held to its plain pass count.
     assert not check([result("core/a#x")], {"passed": {"core": 2}})[0]
     assert check([result("core/a#x"), result("core/a#y")], {"passed": {"core": 2}})[0]
@@ -189,8 +210,12 @@ def main() -> int:
     if not reports:
         print(f"no Touchstone report under {runs}", file=sys.stderr)
         return 2
-    report = load(reports[-1])
-    ok, out = check(report["tests"], load(floor_path))
+    try:
+        report, floor_doc = load(reports[-1]), load(floor_path)
+    except ValueError as e:
+        print(f"  malformed report or floor: {e}")
+        return 1
+    ok, out = check(report["tests"], floor_doc)
     print("\n".join(out))
     return 0 if ok else 1
 
