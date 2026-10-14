@@ -643,8 +643,12 @@ pub(crate) fn check_effects(
                     GraphTarget::NamedGraphs => {
                         // Each graph it empties is checked, the auth-view inputs among them
                         // included.
+                        // A graph this request already dropped is gone: nothing to empty.
                         for g in store_named_graphs(graph) {
-                            need_on(&g, Need::Write, dropped_all || dropped.contains(g.as_str()))?;
+                            if dropped_all || dropped.contains(g.as_str()) {
+                                continue;
+                            }
+                            need_on(&g, Need::Write, false)?;
                         }
                         for g in &written {
                             need_on(g, Need::Write, dropped_all || dropped.contains(g.as_str()))?;

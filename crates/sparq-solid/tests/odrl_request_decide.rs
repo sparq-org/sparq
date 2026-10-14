@@ -411,6 +411,17 @@ const CHANGE_ACTIONS: [&str; 4] = ["append", "modify", "delete", "write"];
 const CONTAINER: &str = "<https://pod.ex/notes/> <http://www.w3.org/ns/ldp#contains> \
                          <https://pod.ex/notes/n2> <https://pod.ex/notes/> .\n";
 
+/// One policy whose permissions name `odrl:read`, `modify`, `delete` and `append`: it
+/// grants Read, Write and Append wherever its rules apply.
+fn change_policy() -> ValidatedPolicy {
+    let ttl = format!(
+        "@prefix odrl: <{ODRL}> .\n<urn:pol/p> a odrl:Set ; odrl:permission \
+         [ odrl:action odrl:read ] , [ odrl:action odrl:modify ] , \
+         [ odrl:action odrl:delete ] , [ odrl:action odrl:append ] .\n"
+    );
+    parse_policy_str(&ttl, "turtle").expect("parses")
+}
+
 /// Whether `session` holds `mode` on `graph`, asserting that `decide`, `decide_batch`,
 /// the granted modes and `accessible` agree.
 fn holds(s: &PodStore, session: &Session, graph: &str, mode: Mode) -> bool {
@@ -425,7 +436,8 @@ fn holds(s: &PodStore, session: &Session, graph: &str, mode: Mode) -> bool {
 
 /// `Write` and `Append` follow `decide` for every session: `Write` needs one policy to
 /// permit both `odrl:modify` and `odrl:delete`, `Append` needs `odrl:append` or that
-/// `Write` condition, and any change-family prohibition removes both.
+/// `Write` condition, each through a rule naming the action (so `odrl:use` grants
+/// neither), and any change-family prohibition removes both.
 #[test]
 fn change_grants_match_decide_for_every_session() {
     let constraints =
@@ -451,8 +463,11 @@ fn change_grants_match_decide_for_every_session() {
                                 let prohibited = CHANGE_ACTIONS
                                     .iter()
                                     .any(|a| applies(&pol, request(a, N2, agent, now), agent));
-                                let permit =
-                                    |a: &str| permits(&pol, request(a, N2, agent, now), agent);
+                                // Change modes come only from a rule naming the action.
+                                let permit = |a: &str| {
+                                    action == a
+                                        && permits(&pol, request(a, N2, agent, now), agent)
+                                };
                                 let writes = permit("modify") && permit("delete");
                                 let static_change = agent == Some(ALICE);
                                 let want_write = (static_change || writes) && !prohibited;
@@ -483,7 +498,7 @@ fn change_grants_match_decide_for_every_session() {
         }
     }
     assert!(cases >= 15_000, "only {cases} cases ran");
-    assert!(widened >= 150, "only {widened} change grants beyond the static view");
+    assert!(widened >= 70, "only {widened} change grants beyond the static view");
     assert!(narrowed >= 450, "only {narrowed} static change grants were narrowed");
 }
 
@@ -499,7 +514,8 @@ fn prohibited_on(
         .any(|a| applies(pol, request(a, graph, agent, now), agent))
 }
 
-/// A `use` permission grants `Write` and `Append` on an existing resource, through the
+/// A permission naming the change actions grants `Write` and `Append` on an existing
+/// resource, through the
 /// point decisions, the session sets and every update path, but never on the container,
 /// never a create, never `Control` and never an access-control document.
 #[test]
@@ -507,8 +523,7 @@ fn change_permissions_grant_existing_resources_only() {
     // The container exists as a graph of its own, so only the container rule keeps it out.
     let container = CONTAINER;
     let mut s = bare_store_with(container);
-    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
-        .expect("attach");
+    s.attach_odrl_policy(change_policy()).expect("attach");
     let bob = session(Some(BOB), None);
     assert!(holds(&s, &bob, NOTES, Mode::Read), "the container is read-granted");
     let before = bare_store_with(container);
@@ -561,8 +576,21 @@ fn change_permissions_grant_existing_resources_only() {
     assert!(s.update_as(&bob, recreate).is_err(), "no re-create through a grant");
     let created = "DROP GRAPH <https://pod.ex/notes/n2> ; CREATE GRAPH <https://pod.ex/notes/n2>";
     assert!(s.update_as(&bob, created).is_err(), "no CREATE after a DROP through a grant");
+    let regraph = "DROP GRAPH <https://pod.ex/notes/n2> ; \
+                   INSERT { GRAPH ?g { <urn:x> <urn:y> 4 } } \
+                   WHERE { VALUES ?g { <https://pod.ex/notes/n2> } }";
+    assert!(s.update_as(&bob, regraph).is_err(), "no re-create through GRAPH ?g either");
+    let copy = "COPY <https://pod.ex/notes/n1> TO <https://pod.ex/notes/n2>";
+    assert!(s.update_as(&bob, copy).is_err(), "COPY drops and re-creates its destination");
+    let alice = session(Some(ALICE), None);
     let mut owner = bare_store_with(container);
-    owner.update_as(&session(Some(ALICE), None), recreate).expect("the static grant re-creates");
+    owner.update_as(&alice, recreate).expect("the static grant re-creates");
+    owner
+        .attach_odrl_policy(
+            policy("prohibition", "modify", "", Some(ALICE), Some(N2)).expect("policy"),
+        )
+        .expect("attach");
+    assert!(owner.update_as(&alice, recreate).is_err(), "a prohibition still applies");
     s.update_as(&bob, "CLEAR GRAPH <https://pod.ex/notes/n2>").expect("granted Write clears");
     s.update_as(
         &bob,
@@ -570,6 +598,30 @@ fn change_permissions_grant_existing_resources_only() {
          DROP GRAPH <https://pod.ex/notes/n2>",
     )
     .expect("granted Write may write and then drop");
+}
+
+/// `odrl:use` permits every action under `decide`, but grants `Read` only here: the
+/// change modes need a permission that names the change action.
+#[test]
+fn use_grants_read_only() {
+    let mut s = store();
+    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
+        .expect("attach");
+    let bob = session(Some(BOB), None);
+    assert!(holds(&s, &bob, N2, Mode::Read));
+    assert!(!holds(&s, &bob, N2, Mode::Write) && !holds(&s, &bob, N2, Mode::Append));
+    let ins = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } }";
+    assert!(s.update_as(&bob, ins).is_err());
+    // A `use` rule beside a narrower named one does not widen it: modify for alice only.
+    let ttl = format!(
+        "@prefix odrl: <{ODRL}> .\n<urn:pol/p> a odrl:Set ; odrl:permission \
+         [ odrl:action odrl:use ] , \
+         [ odrl:action odrl:modify ; odrl:assignee <{ALICE}> ] , \
+         [ odrl:action odrl:delete ; odrl:assignee <{ALICE}> ] .\n"
+    );
+    let mut mixed = store();
+    mixed.attach_odrl_policy(parse_policy_str(&ttl, "turtle").expect("parses")).expect("attach");
+    assert!(!holds(&mixed, &bob, N2, Mode::Write), "use does not stand in for modify");
 }
 
 /// `Write` needs `odrl:modify` and `odrl:delete` from one policy; `Append` alone never
@@ -619,8 +671,7 @@ fn group_documents_are_never_granted_a_change() {
 <https://pod.ex/.acl#team> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
 "#;
     let mut s = bare_store_with(extra);
-    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
-        .expect("attach");
+    s.attach_odrl_policy(change_policy()).expect("attach");
     let bob = session(Some(BOB), None);
     assert!(holds(&s, &bob, GROUPS, Mode::Read), "Read is still granted");
     for mode in [Mode::Write, Mode::Append] {
@@ -697,8 +748,7 @@ fn change_grants_hold_through_variable_graphs_and_odd_names() {
 "
     );
     let mut s = bare_store_with(&extra);
-    s.attach_odrl_policy(policy("permission", "use", "", None, None).expect("policy"))
-        .expect("attach");
+    s.attach_odrl_policy(change_policy()).expect("attach");
     let bob = session(Some(BOB), None);
     for target in ["https://pod.ex/groups", NOTES] {
         let upd = format!(
