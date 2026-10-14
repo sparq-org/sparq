@@ -2353,11 +2353,15 @@ impl<'a> Extractor<'a> {
         // Table 5 drops `rdf:Property` only beside a typing that says which kind of property
         // `s` is.
         if o != NO_ID && o == v.rdf_property {
+            // Table 5's companions; Table 6 makes the last two declare an object property.
             let typed = [
                 v.object_property,
                 v.datatype_property,
                 v.annotation_property,
                 v.ontology_property,
+                v.functional,
+                v.inverse_functional,
+                v.transitive,
             ]
             .iter()
             .any(|&k| self.has_type(s, k).is_some());
