@@ -2,14 +2,21 @@
 """Re-measure the result evidence members and rewrite the four evidence files.
 
 `verify_result_evidence.py` binds the evidence to sha256 hashes of every zk/compose Noir
-source, so a change to those sources needs a fresh measurement. Two steps:
+source, so a change to those sources needs a fresh measurement. Save the pre-change
+evidence, then measure and apply (replace placeholders; stop if any command fails):
 
+    baseline_root=$(mktemp -d)
+    mkdir -p "$baseline_root/bench/zk-compose"
+    for name in result_v1_compatibility result_capacity_gates result_signed_gates result_public_gates; do
+        git show <pre-change-commit>:bench/zk-compose/$name.json > "$baseline_root/bench/zk-compose/$name.json"
+    done
     git archive <commit> | tar -x -C run1        # and again into run2
     remeasure_result_evidence.py measure run1 run1.json
     remeasure_result_evidence.py measure run2 run2.json
     remeasure_result_evidence.py apply run1.json run2.json --job job.json \\
         --commit <commit> --observed-at <utc> --platform <host> \\
-        --expect-member <member> ... --expect-source <path> ...
+        --baseline-root "$baseline_root" --expect-member <member> ... --expect-source <path> ...
+    rm -r "$baseline_root"
 
 `measure` compiles every member with the pinned nargo, hashes its ACIR bytecode, ABI and
 artifact, runs `bb gates -s ultra_honk`, and for the v1 members writes the noir-recursive
@@ -17,10 +24,15 @@ verification key. `apply` refuses to write unless the two runs agree (the artifa
 embeds the checkout path and is not compared), every v1 ACIR, ABI and key equals its
 713025dc baseline record, every size equals gate_counts_latest.json, and exactly the expected
 members and sources change. It validates all four files before replacing any of them and
-restores any it replaced if a later replacement fails; an interruption of the process itself
-(a kill or power loss between renames) can still leave a mixed set, which
+attempts every restore independently if a later replacement fails. If any restore fails,
+it exits non-zero and lists exactly which files need `git checkout -- <file>` recovery.
+An interruption of the process itself (a kill or power loss between renames) can
+still leave a mixed set, which
 `git checkout -- <the four files>` undoes. It refuses to run while the four files have
-unstaged edits, so that recovery never discards anything else. The result is always
+staged or unstaged edits against HEAD, so that recovery never discards anything else.
+`--baseline-root` reads pre-change evidence saved with `git show` under that directory's
+bench/zk-compose; it defaults to this checkout. It never writes the baseline directory
+when a separate directory is supplied. The result is always
 labelled non-canonical; the job manifest and run outputs are not part of the repository,
 so the two-run agreement it records is checked when `apply` runs, not later.
 """
@@ -112,11 +124,21 @@ def without_artifacts(run_result: dict) -> dict:
 
 
 def apply(args: argparse.Namespace) -> None:
+    paths = [f"bench/zk-compose/{name}.json" for name in EVIDENCE]
+    try:
+        clean = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", *paths], cwd=ROOT,
+                               capture_output=True, text=True)
+    except OSError as error:
+        raise SystemExit(f"cannot check evidence cleanliness: {error}") from error
+    if clean.returncode == 1:
+        raise SystemExit("the evidence files have staged or unstaged edits against HEAD; commit or discard them first")
+    if clean.returncode:
+        raise SystemExit(f"cannot check evidence cleanliness against HEAD; git diff failed:\n{clean.stderr}")
     first, second = (json.loads(path.read_text()) for path in (args.first, args.second))
     if without_artifacts(first) != without_artifacts(second):
         raise SystemExit("the two runs disagree")
     measured = first["members"]
-    evidence = load(ROOT)
+    evidence = load(args.baseline_root)
     snapshot = json.loads((ROOT / "bench/zk-compose/gate_counts_latest.json").read_text())["benchmarks"]
     for member, record in evidence["result_v1_compatibility"]["members"].items():
         base, got = record["base"], measured[member]
@@ -165,9 +187,6 @@ def apply(args: argparse.Namespace) -> None:
         recorded = data.get("tool_versions") or {"nargo": data["nargo_version"], "bb": data["bb_version"]}
         if recorded["nargo"] != tools["nargo"] or recorded["bb"] != tools["bb"]:
             raise SystemExit(f"{name}: toolchain differs from the recorded one")
-    paths = [f"bench/zk-compose/{name}.json" for name in evidence]
-    if subprocess.run(["git", "diff", "--quiet", "--", *paths], cwd=ROOT).returncode:
-        raise SystemExit("the evidence files have unstaged edits; check them out or stage them first")
     # Every check has passed. Stage all four files, then replace them one by one. Separate
     # renames are not one atomic update, so if a replacement fails the files already replaced
     # are restored from their original bytes, and staged temporaries are always removed.
@@ -187,9 +206,21 @@ def apply(args: argparse.Namespace) -> None:
         for temporary, target in staged:
             os.replace(temporary, target)
             replaced.append(target)
-    except BaseException:
+    except BaseException as error:
+        failed_restores = []
         for target in replaced:
-            target.write_bytes(originals[target])
+            try:
+                target.write_bytes(originals[target])
+            except BaseException as restore_error:
+                failed_restores.append((target, restore_error))
+        if failed_restores:
+            recovery = "\n".join(
+                f"  {target.relative_to(ROOT)}: {restore_error}\n"
+                f"    git checkout -- {target.relative_to(ROOT)}"
+                for target, restore_error in failed_restores
+            )
+            raise SystemExit(f"evidence replacement failed: {error}\n"
+                             f"rollback failed; recover these files from the repository root:\n{recovery}") from error
         raise
     finally:
         for temporary, _ in staged:
@@ -206,6 +237,8 @@ def main() -> None:
     step = commands.add_parser("apply")
     step.add_argument("first", type=Path)
     step.add_argument("second", type=Path, help="independent run; its hash is the handoff")
+    step.add_argument("--baseline-root", type=Path, default=ROOT,
+                      help="root containing pre-change bench/zk-compose evidence (default: this checkout)")
     step.add_argument("--job", type=Path, required=True, help="job manifest; its hash is job_sha256")
     step.add_argument("--commit", required=True)
     step.add_argument("--observed-at", required=True)
