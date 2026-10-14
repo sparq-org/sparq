@@ -1695,10 +1695,12 @@ log uses). Logs stay correlation-useful (same query → same `fp`) without expos
 as the bare TraceLayer did — the deliberate debug escape hatch. Library: `ServerConfig {
 verbose: true, redact_logs: true /* default */, .. }`.
 
-The same switch governs the detail an error withholds from its client (a parse error quoting
-the query or a term, an engine message quoting data): the warning that records it logs the
-`<redacted len=N fp=…>` placeholder, with or without `--verbose`, unless `--log-full-requests`
-is set, and then the detail in full.
+The same switch governs the detail an error withholds from its client when that detail is drawn
+from the request or the data (a parse error quoting the query, a term or a body; an engine
+message quoting data; a refused `SERVICE` host): the warning that records it logs the
+`<redacted len=N fp=…>` placeholder (`sparq_server::redact::placeholder`), with or without
+`--verbose`, unless `--log-full-requests` is set, and then the detail in full. Operator detail (a
+persist path, an I/O error, a backup or compaction failure) is always logged in full.
 
 **Default rationale:** enabling `--verbose` for debugging should not silently write
 potentially-sensitive query text to disk / a SIEM; content-logging is the *deliberate* choice.

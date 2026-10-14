@@ -28,6 +28,9 @@
 //! truthy), the URI is logged verbatim, exactly as the bare `TraceLayer` did before — the escape
 //! hatch for operators who deliberately want full request text in a debug session.
 //!
+//! The same [`placeholder`] stands in, while redaction is on, for the detail an error withholds
+//! from its client when that detail is drawn from the request or the data (`http::content_error`).
+//!
 //! ## Honest boundary — log-CONTENT redaction, not anonymity
 //!
 //! This redacts the *content* of the request as it appears in the log. It does **not** anonymise
@@ -76,33 +79,6 @@ pub fn placeholder(content: &str) -> String {
         content.len(),
         fnv1a_hex(content.as_bytes())
     )
-}
-
-#[cfg(feature = "server")]
-tokio::task_local! {
-    /// Set to `true` around a request served with redaction off ([`crate::http::ServerConfig`]'s
-    /// `redact_logs` false), so its error records log their details in full.
-    static FULL_DETAILS: bool;
-}
-
-/// Run `request` with its error details logged in full: the opt-out the server applies when
-/// redaction is off.
-#[cfg(feature = "server")]
-pub(crate) async fn with_full_details<F: std::future::Future>(request: F) -> F::Output {
-    FULL_DETAILS.scope(true, request).await
-}
-
-/// `detail`, an error's detail withheld from the client, as the server log may record it: the
-/// [`placeholder`] unless the request being served has redaction off. The detail can echo the
-/// request's content (a query, a term, a body) or the data's, so outside a request, and on a
-/// task the request spawned, it is redacted too.
-#[cfg(feature = "server")]
-pub(crate) fn log_detail(detail: &str) -> std::borrow::Cow<'_, str> {
-    if FULL_DETAILS.try_with(|full| *full).unwrap_or(false) {
-        std::borrow::Cow::Borrowed(detail)
-    } else {
-        std::borrow::Cow::Owned(placeholder(detail))
-    }
 }
 
 #[cfg(feature = "server")]
