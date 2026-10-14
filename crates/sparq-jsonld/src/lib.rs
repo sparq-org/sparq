@@ -64,6 +64,7 @@ pub mod flatten;
 pub mod frame;
 pub mod from_rdf;
 mod fx;
+mod cache;
 pub mod node_map;
 pub mod to_rdf;
 
