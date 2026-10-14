@@ -28,6 +28,14 @@ EXACT_FILES = {
     "bench/differential-divergences.json", "crates/sparq-bench/src/fuzz.rs",
     ".github/workflows/zk-toolchain.yml",
 }
+# The pull_request trigger narrows to zk-specific inputs: an engine, manifest or lockfile change
+# is checked after merge by the push trigger (the full set above), so the many engine PRs don't
+# each queue a proof run on this advisory lane. The in-job classifier still uses the full set.
+PR_PREFIXES = (
+    "zk/sparql-evaluator/", "bench/zk-bindings/", "vendor/spargebra/", "vendor/spargebra-shim/",
+    "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
+)
+PR_FILES = EXACT_FILES - {"Cargo.toml", "Cargo.lock"}
 SCOPES = ("exact-evaluator",)
 
 
