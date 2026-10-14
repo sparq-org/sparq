@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   analyzeBundle,
+  firstLoadFromHtml,
   HEAVY_MODULE_SUFFIXES,
   GUARDED_ROUTES,
 } from "../scripts/check-bundle.mjs";
@@ -167,4 +168,40 @@ test("fzstd is pinned as a heavy module (PRESENCE) and flagged if it leaks into 
   shared.app.pages["/surface/data-formats/page"].push(heroChunk);
   const { errors: sharedErrors } = analyzeBundle(shared);
   assert.deepEqual(sharedErrors, []);
+});
+
+// Next 16 no longer writes app-build-manifest.json; main() rebuilds the page-entry set from the
+// exported HTML. The root layout's group (app-shell code shared with lazy demos) is excluded,
+// matching the old manifest's `/page` entry; everything after the layout chunk is kept.
+const SCRIPT = (p) => `<script src="/sparq/_next/static/chunks/${p}" async=""></script>`;
+
+test("firstLoadFromHtml keeps only the page segment after the root layout chunk", () => {
+  const html = [
+    SCRIPT("main-app-1.js"),
+    SCRIPT("6525-shared.js"),
+    SCRIPT("app/layout-abc.js"),
+    SCRIPT("9287-pagedep.js"),
+    SCRIPT("app/surface/data-formats/page-def.js"),
+    SCRIPT("webpack-2.js"),
+    // Inline RSC payload text is not a script tag and must not be picked up.
+    '<script>self.__next_f.push([1,"static/chunks/not-a-tag.js"])</script>',
+  ].join("");
+  assert.deepEqual(firstLoadFromHtml(html), [
+    "static/chunks/9287-pagedep.js",
+    "static/chunks/app/surface/data-formats/page-def.js",
+    "static/chunks/webpack-2.js",
+  ]);
+});
+
+test("firstLoadFromHtml flags a heavy chunk statically pulled into the page segment", () => {
+  const html = SCRIPT("app/layout-abc.js") + SCRIPT("heavy-0.js") + SCRIPT("app/page-x.js");
+  const inputs = healthyInputs();
+  inputs.app.pages["/page"] = firstLoadFromHtml(html);
+  const { errors } = analyzeBundle(inputs);
+  assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
+});
+
+test("firstLoadFromHtml with no layout chunk keeps every script chunk", () => {
+  const html = SCRIPT("a.js") + SCRIPT("b.js") + SCRIPT("a.js");
+  assert.deepEqual(firstLoadFromHtml(html), ["static/chunks/a.js", "static/chunks/b.js"]);
 });

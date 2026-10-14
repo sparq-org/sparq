@@ -186,9 +186,11 @@ export default defineConfig({
       : []),
   ],
   webServer: {
-    // The local Next 15 binary serves the dev route under /sparq; bypass the `dev` npm
+    // The local Next binary serves the dev route under /sparq; bypass the `dev` npm
     // script (which runs sync-wasm/Typst prebuild steps the ZK route does not need).
-    command: `npx next dev -p ${PORT}`,
+    // `--webpack`: Next 16 defaults to Turbopack, which does not honour next.config.ts's
+    // webpack hook (the `.js`→`.ts` extensionAlias + `@sparq/client` alias).
+    command: `npx next dev --webpack -p ${PORT}`,
     url: BASE_URL + "showcase/zk-car-hire/",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

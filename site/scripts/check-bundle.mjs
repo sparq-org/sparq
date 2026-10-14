@@ -21,7 +21,9 @@
 //      back to a STATIC import: its code would fold into the route-entry chunk AND vanish from the
 //      loadable manifest, so a pure "is this chunk in the entry set" test would FALSELY pass.
 //   2. ISOLATION — none of those heavy modules' code-split chunk files appear in the FIRST-LOAD
-//      set (app-build-manifest.json `pages`) of the guarded routes.
+//      set of the guarded routes. Next ≤15 wrote that set to app-build-manifest.json `pages`;
+//      Next 16 no longer emits that manifest, so main() derives the same page-entry set from the
+//      route's exported HTML script tags (see firstLoadFromHtml).
 //   3. CONFIG — images:{unoptimized:true} and basePath prefixing are load-bearing for GitHub
 //      Pages / Tauri (bead item 4). Read straight from the build's OWN resolved artifacts
 //      (routes-manifest.basePath, images-manifest), so the check adapts to BOTH build modes
@@ -225,6 +227,29 @@ export function findSnapshotLeaks(fingerprint, chunks) {
   return chunks.filter((c) => c.text.includes(fingerprint)).map((c) => c.file);
 }
 
+/**
+ * The page entry's first-load JS for an exported route, in the shape Next ≤15 wrote to
+ * app-build-manifest.json `pages["<route>/page"]`. Next 16 dropped that manifest; the exported
+ * HTML carries the same information as its `<script src>` tags, emitted in segment order:
+ * framework/runtime chunks, then the root layout's chunks ending in `app/layout-<hash>.js`, then
+ * the page's own chunks ending in `app/<route>/page-<hash>.js`. The old `/page` entry never held
+ * the root layout's chunks (they lived under `/layout`), so the layout group is dropped here too:
+ * app-shell code the layout ships on every route (e.g. the sonner Toaster, which the lazy demos
+ * also import) is not a lazy-demo leak. Paths are normalised to the `static/chunks/…` form
+ * react-loadable-manifest.json uses. Pure (fs-free).
+ *
+ * @param {string} html  exported HTML document
+ * @returns {string[]}    chunk paths, e.g. ["static/chunks/app/page-<hash>.js"]
+ */
+export function firstLoadFromHtml(html) {
+  const chunks = [];
+  for (const m of html.matchAll(/<script\b[^>]*\bsrc="[^"]*?\/_next\/(static\/chunks\/[^"]+\.js)"/g)) {
+    if (!chunks.includes(m[1])) chunks.push(m[1]);
+  }
+  const layoutEnd = chunks.findIndex((c) => /^static\/chunks\/app\/layout-[^/]+\.js$/.test(c));
+  return layoutEnd === -1 ? chunks : chunks.slice(layoutEnd + 1);
+}
+
 /** Read + JSON-parse a build manifest, or return null if it does not exist. */
 function readJson(path) {
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
@@ -248,12 +273,11 @@ function main() {
   const nextDir = join(siteRoot, ".next");
   const outDir = join(siteRoot, "out");
 
-  const app = readJson(join(nextDir, "app-build-manifest.json"));
   const loadable = readJson(join(nextDir, "react-loadable-manifest.json"));
   const routes = readJson(join(nextDir, "routes-manifest.json"));
   const images = readJson(join(nextDir, "images-manifest.json"));
 
-  if (!app || !loadable || !routes || !images) {
+  if (!loadable || !routes || !images) {
     console.error(
       "[check-bundle] Build manifests missing under site/.next — run `npm run build` first.",
     );
@@ -265,6 +289,16 @@ function main() {
     const p = join(outDir, html);
     htmlByLabel[label] = existsSync(p) ? readFileSync(p, "utf8") : undefined;
   }
+
+  // Next ≤15 wrote the per-route page-entry set to app-build-manifest.json; Next 16 dropped that
+  // manifest, so derive the same set from the exported HTML's script tags.
+  const app = readJson(join(nextDir, "app-build-manifest.json")) ?? {
+    pages: Object.fromEntries(
+      GUARDED_ROUTES.filter(({ label }) => htmlByLabel[label] != null).map(
+        ({ manifestKey, label }) => [manifestKey, firstLoadFromHtml(htmlByLabel[label])],
+      ),
+    ),
+  };
 
   const { errors, summary } = analyzeBundle({ loadable, app, routes, images, htmlByLabel });
 
