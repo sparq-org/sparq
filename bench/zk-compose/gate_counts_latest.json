@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-12T20:14:10Z",
+  "timestamp": "2026-10-14T16:17:17Z",
   "tool": "bb gates -s ultra_honk",
   "bb_version": "5.0.0-nightly.20260324",
   "nargo_version": "nargo version = 1.0.0-beta.21",
@@ -39,6 +39,9 @@
     },
     "filter_signed_int_d4": {
       "circuit_size": 17416
+    },
+    "filter_value_dl_bool": {
+      "circuit_size": 3032
     },
     "filter_value_dl_decimal": {
       "circuit_size": 3070

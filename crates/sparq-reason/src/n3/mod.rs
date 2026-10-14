@@ -1411,7 +1411,7 @@ pub(crate) fn reason_n3_terms_proof(
     cuts: &Truncation,
     runtime: Option<&RuntimeDocs>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
-    let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
+    let parsed = bounded::parse_n3_rules_with_facts(src, "", extra, cuts)?;
     let (facts, steps, _) = run_closure(
         parsed,
         None,
@@ -1552,7 +1552,7 @@ pub(crate) fn reason_n3_terms_with_facts(
     truncated: &Truncation,
     runtime: &RuntimeDocs,
 ) -> Result<N3Closure, String> {
-    let parsed = bounded::parse_n3_with_extra(src, "", extra, truncated)?;
+    let parsed = bounded::parse_n3_rules_with_facts(src, "", extra, truncated)?;
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     let (facts, steps, warning) = run_closure(
         parsed,

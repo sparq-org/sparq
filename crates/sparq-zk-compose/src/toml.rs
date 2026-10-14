@@ -50,7 +50,8 @@ pub enum ProverTomlError {
     /// ([`filter_value_dl_f64_prover_toml`]) and `xsd:decimal`
     /// ([`filter_value_dl_decimal_prover_toml`]) sibling members, and
     /// sq-wz99x: to the `xsd:dateTime` / `xsd:date` member
-    /// ([`filter_value_dl_datetime_prover_toml`]).
+    /// ([`filter_value_dl_datetime_prover_toml`]), and to the `DualLeafV2`
+    /// bit-domain `xsd:boolean` member ([`filter_value_dl_bool_prover_toml`]).
     #[cfg(feature = "dual-leaf")]
     FilterValueDlUseDedicatedFn,
     /// A [`ProofInputs::PathReach`] (bounded-depth property path) was passed to the
@@ -112,6 +113,14 @@ impl std::fmt::Display for ProverTomlError {
 /// via the leaf, never hashes it — the gate win). DOCUMENTED RISK: this carries
 /// the INV-VL downgrade (value↔lexical agreement is trusted-issuer-honesty; #769
 /// accepted, CR-G8 / sq-qhy4); NOT externally audited.
+///
+/// `use_` is the CHECKED lane boundary: the `(member, datatype_const, use_)`
+/// triple goes through `crate::dispatch::check_lane_const_for_member` BEFORE any
+/// text is rendered, so a constant that is not the integer member's — or a
+/// `DualLeafV1` constant asked for under
+/// [`sparq_zk::commit::MethodUse::NewIssuance`] — returns
+/// [`crate::dispatch::DispatchError`] and no `Prover.toml` exists to hand to
+/// `nargo`.
 #[cfg(feature = "dual-leaf")]
 #[allow(clippy::too_many_arguments)]
 pub fn filter_value_dl_prover_toml(
@@ -123,7 +132,13 @@ pub fn filter_value_dl_prover_toml(
     expected: bool,
     value_hook: &FieldHex,
     lexical_component: &FieldHex,
-) -> String {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<String, crate::dispatch::DispatchError> {
+    crate::dispatch::check_lane_const_for_member(
+        &crate::manifest::CircuitId::FilterValueDl,
+        datatype_const,
+        use_,
+    )?;
     let mut s = String::new();
     s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
     s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
@@ -133,7 +148,7 @@ pub fn filter_value_dl_prover_toml(
     s.push_str(&format!("expected = {}\n", expected));
     s.push_str(&format!("value_hook = \"{}\"\n", value_hook.0));
     s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.0));
-    s
+    Ok(s)
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF `xsd:boolean` value-lane FILTER
@@ -152,6 +167,7 @@ pub fn filter_value_dl_prover_toml(
 /// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
 // sq-5xdlk: boolean value-lane Prover.toml. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
+#[allow(clippy::too_many_arguments)]
 pub fn filter_value_dl_boolean_prover_toml(
     challenge: &FieldHex,
     operand_enc: &FieldHex,
@@ -160,7 +176,8 @@ pub fn filter_value_dl_boolean_prover_toml(
     expected: bool,
     value_hook: &FieldHex,
     lexical_component: &FieldHex,
-) -> String {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<String, crate::dispatch::DispatchError> {
     filter_value_dl_prover_toml(
         challenge,
         operand_enc,
@@ -170,7 +187,60 @@ pub fn filter_value_dl_boolean_prover_toml(
         expected,
         value_hook,
         lexical_component,
+        use_,
     )
+}
+
+/// Render the `Prover.toml` body for a `DualLeafV2` BIT-DOMAIN `xsd:boolean`
+/// value-lane FILTER proof. Order MUST match
+/// `zk/compose/filter_value_dl_bool/src/main.nr`: challenge, operand_enc, op,
+/// bound, datatype_const, expected (public), then value_hook, lexical_component
+/// (private).
+///
+/// That order — and every field name — is identical to
+/// [`filter_value_dl_prover_toml`]'s, because the dedicated member's PUBLIC
+/// layout is the integer member's. What differs is the RELATION: the member
+/// constrains the witnessed `value_hook` and this `bound` to `{0, 1}`, so a
+/// handle of `2` is unprovable rather than merely unencodable.
+///
+/// This renderer PINS `datatype_const` to
+/// [`crate::manifest::boolean_lane_const_v2`]`()` (the caller cannot pass another
+/// lane's constant by mistake) and takes `bound` as a `bool`, mapped to the hook
+/// `{0, 1}`. The `DualLeafV1` boolean lane — which shares the integer member —
+/// is [`filter_value_dl_boolean_prover_toml`] and is unchanged.
+///
+/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
+/// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
+#[cfg(feature = "dual-leaf")]
+#[allow(clippy::too_many_arguments)]
+pub fn filter_value_dl_bool_prover_toml(
+    challenge: &FieldHex,
+    operand_enc: &FieldHex,
+    op: u32,
+    bound: bool,
+    expected: bool,
+    value_hook: &FieldHex,
+    lexical_component: &FieldHex,
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<String, crate::dispatch::DispatchError> {
+    let mut s = String::new();
+    crate::dispatch::check_lane_const_for_member(
+        &crate::manifest::CircuitId::FilterValueDlBool,
+        &crate::manifest::boolean_lane_const_v2(),
+        use_,
+    )?;
+    s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
+    s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
+    s.push_str(&format!("op = \"{}\"\n", op));
+    s.push_str(&format!("bound = \"{}\"\n", u64::from(bound)));
+    s.push_str(&format!(
+        "datatype_const = \"{}\"\n",
+        crate::manifest::boolean_lane_const_v2().0
+    ));
+    s.push_str(&format!("expected = {}\n", expected));
+    s.push_str(&format!("value_hook = \"{}\"\n", value_hook.0));
+    s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.0));
+    Ok(s)
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF `xsd:double` value-lane FILTER
@@ -193,7 +263,13 @@ pub fn filter_value_dl_f64_prover_toml(
     expected: bool,
     value_hook: &FieldHex,
     lexical_component: &FieldHex,
-) -> String {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<String, crate::dispatch::DispatchError> {
+    crate::dispatch::check_lane_const_for_member(
+        &crate::manifest::CircuitId::FilterValueDlF64,
+        datatype_const,
+        use_,
+    )?;
     let mut s = String::new();
     s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
     s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
@@ -203,7 +279,7 @@ pub fn filter_value_dl_f64_prover_toml(
     s.push_str(&format!("expected = {}\n", expected));
     s.push_str(&format!("value_hook = \"{}\"\n", value_hook.0));
     s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.0));
-    s
+    Ok(s)
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF `xsd:decimal` value-lane FILTER
@@ -227,7 +303,13 @@ pub fn filter_value_dl_decimal_prover_toml(
     value_neg: bool,
     value_hook_scaled: &FieldHex,
     lexical_component: &FieldHex,
-) -> String {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<String, crate::dispatch::DispatchError> {
+    crate::dispatch::check_lane_const_for_member(
+        &crate::manifest::CircuitId::FilterValueDlDecimal,
+        datatype_const,
+        use_,
+    )?;
     let mut s = String::new();
     s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
     s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
@@ -239,7 +321,7 @@ pub fn filter_value_dl_decimal_prover_toml(
     s.push_str(&format!("value_neg = {}\n", value_neg));
     s.push_str(&format!("value_hook_scaled = \"{}\"\n", value_hook_scaled.0));
     s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.0));
-    s
+    Ok(s)
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF `xsd:dateTime` / `xsd:date`
@@ -268,7 +350,13 @@ pub fn filter_value_dl_datetime_prover_toml(
     value_neg: bool,
     value_hook_scaled: &FieldHex,
     lexical_component: &FieldHex,
-) -> String {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<String, crate::dispatch::DispatchError> {
+    crate::dispatch::check_lane_const_for_member(
+        &crate::manifest::CircuitId::FilterValueDlDateTime,
+        datatype_const,
+        use_,
+    )?;
     let mut s = String::new();
     s.push_str(&format!("challenge = \"{}\"\n", challenge.0));
     s.push_str(&format!("operand_enc = \"{}\"\n", operand_enc.0));
@@ -280,7 +368,7 @@ pub fn filter_value_dl_datetime_prover_toml(
     s.push_str(&format!("value_neg = {}\n", value_neg));
     s.push_str(&format!("value_hook_scaled = \"{}\"\n", value_hook_scaled.0));
     s.push_str(&format!("lexical_component = \"{}\"\n", lexical_component.0));
-    s
+    Ok(s)
 }
 
 impl std::error::Error for ProverTomlError {}
@@ -804,7 +892,8 @@ pub fn prover_toml_for(
         #[cfg(feature = "dual-leaf")]
         ProofInputs::FilterValueDlF64 { .. }
         | ProofInputs::FilterValueDlDecimal { .. }
-        | ProofInputs::FilterValueDlDateTime { .. } => {
+        | ProofInputs::FilterValueDlDateTime { .. }
+        | ProofInputs::FilterValueDlBool { .. } => {
             return Err(ProverTomlError::FilterValueDlUseDedicatedFn);
         }
         // sq-bwwl / sq-r2s8 (step 4 proving path): hidden cross-credential
@@ -1148,11 +1237,15 @@ mod toml_glue_tests {
             &fh("0x02"), // operand_enc
             3,           // op (ge)
             0x4008000000000000, // b_bits (3.0)
-            &fh("0x03"), // datatype_const
+            // The renderer CHECKS this against its member's lane table, so the
+            // shape test renders the real lane constant, not a placeholder.
+            &crate::manifest::FieldHex::from_field(&sparq_zk::dual_leaf_v2::double_lane_const()),
             true,        // expected
             &fh("0x04"), // value_hook (IEEE bits)
             &fh("0x05"), // lexical_component
-        );
+            sparq_zk::commit::MethodUse::NewIssuance,
+        )
+        .expect("the V2 double lane constant pairs with the double member");
         let lines: Vec<&str> = toml.lines().collect();
         // Declaration order: challenge, operand_enc, op, b_bits, datatype_const,
         // expected, then the two private field witnesses.
@@ -1175,12 +1268,15 @@ mod toml_glue_tests {
             3,           // op (ge)
             false,       // bound_neg
             10000,       // bound_scaled (100.00 at fd=2)
-            &fh("0x03"), // datatype_const
+            // The real fd=2 lane constant: the renderer checks it.
+            &crate::manifest::FieldHex::from_field(&sparq_zk::dual_leaf_v2::decimal_lane_const(2)),
             true,        // expected
             true,        // value_neg
             &fh("0x04"), // value_hook_scaled
             &fh("0x05"), // lexical_component
-        );
+            sparq_zk::commit::MethodUse::NewIssuance,
+        )
+        .expect("the fd=2 decimal lane constant pairs with the decimal member");
         let lines: Vec<&str> = toml.lines().collect();
         // Declaration order: challenge, operand_enc, op, bound_neg, bound_scaled,
         // datatype_const, expected, then the three private witnesses.
@@ -1209,12 +1305,17 @@ mod toml_glue_tests {
             0,            // op (lt)
             false,        // bound_neg
             86_400_000,   // bound_scaled_epoch (1970-01-02T00:00:00Z)
-            &fh("0x03"),  // datatype_const (the LANE constant)
+            // The real dateTime LANE constant: the renderer checks it.
+            &crate::manifest::FieldHex::from_field(
+                &sparq_zk::dual_leaf_v2::datetime_lane_const(),
+            ),
             true,         // expected
             true,         // value_neg (a pre-epoch instant)
             &fh("0x04"),  // value_hook_scaled
             &fh("0x05"),  // lexical_component
-        );
+            sparq_zk::commit::MethodUse::NewIssuance,
+        )
+        .expect("the V2 dateTime lane constant pairs with the dateTime member");
         let lines: Vec<&str> = toml.lines().collect();
         assert!(lines[0].starts_with("challenge = "));
         assert!(lines[1].starts_with("operand_enc = "));

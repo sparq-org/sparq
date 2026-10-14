@@ -5,23 +5,18 @@ on:
   workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    # Mirrors relevant_path() in scripts/ci_exact_evaluator_paths.py
-    # (a test keeps them equal), so a PR touching none of the job's inputs
-    # never takes a runner. The in-job classifier still decides each run that
-    # starts. GitHub filters on at most 3,000 changed files, so for a larger
-    # diff run this workflow by hand (workflow_dispatch has no filter).
+    # The zk-specific inputs only (PR_PREFIXES / PR_FILES in
+    # scripts/ci_exact_evaluator_paths.py; a test keeps them equal). An engine,
+    # manifest or lockfile change runs this advisory lane after merge through the
+    # push trigger below instead, so engine PRs don't each queue a proof run. The
+    # in-job classifier still decides each run that starts. GitHub filters on at
+    # most 3,000 changed files, so for a larger diff run this workflow by hand
+    # (workflow_dispatch has no filter).
     paths:
       - 'zk/sparql-evaluator/**'
       - 'bench/zk-bindings/**'
-      - 'crates/sparq-core/**'
-      - 'crates/sparq-engine/**'
-      - 'crates/sparq-substrate/**'
       - 'crates/sparq-canon/**'
       - 'crates/sparq-query-protocol/**'
-      - 'crates/sparq-engine-serialize/**'
-      - 'crates/sparq-engine-service/**'
-      - 'crates/sparq-introspect/**'
-      - 'crates/sparq-jsonld/**'
       - 'vendor/spargebra/**'
       - 'vendor/spargebra-shim/**'
       - 'vendor/zk-sdk/**'
@@ -29,11 +24,12 @@ on:
       - 'rust-toolchain*'
       - '.github/workflows/zk-exact-evaluator.yml'
       - '.github/workflows/zk-toolchain.yml'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
       - 'bench/differential-divergences.json'
       - 'crates/sparq-bench/src/fuzz.rs'
       - 'crates/sparq-conformance/examples/proof_corpus.rs'
+      - 'crates/sparq-engine/tests/fixtures/builtin_edges.json'
+      - 'crates/sparq-engine/tests/fixtures/exact_temporal.json'
+      - 'crates/sparq-engine/tests/fixtures/temporal_lexical.json'
       - 'scripts/ci_exact_evaluator_evidence.py'
       - 'scripts/ci_exact_evaluator_paths.py'
       - 'scripts/tests/_workflow_trigger_paths.py'
@@ -43,7 +39,9 @@ on:
     types: [checks_requested]
   push:
     branches: [main]
-    # Same list as pull_request above.
+    # Mirrors relevant_path() (EXACT_PREFIXES / EXACT_FILES; a test keeps them
+    # equal): every evaluator input, engine crates included. The concurrency group
+    # below collapses a burst of merges into one run.
     paths:
       - 'zk/sparql-evaluator/**'
       - 'bench/zk-bindings/**'
