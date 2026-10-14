@@ -1960,7 +1960,7 @@ async fn render_container<S: Store>(
     // empty for the overwhelmingly common empty/typing-free container body, so the hot path does zero
     // membership work. Insertion order + which triples appear are unchanged, so the serialiser emits
     // the same bytes are preserved byte-for-byte.
-    let children = state.store.list_children(container_iri).await?;
+    let children = sorted_children(state, container_iri).await?;
     let etag = conditional::variant_etag(
         &container_state_etag(stored_etag, &children),
         negotiated.variant_suffix(),
@@ -2055,25 +2055,47 @@ async fn render_container<S: Store>(
 /// read serves `"<state>+<variant>"` ([`conditional::variant_etag`] with the negotiated format), and
 /// a write's `If-Match` / `If-None-Match` compares against this state tag ([`write_validator`]), so
 /// a client can round-trip `GET` (any `Accept`) → conditional `PUT`/`PATCH`/`DELETE` with the tag it
-/// received, while a child added or removed since makes that tag stale for both reads and writes.
+/// received, while any change to the record or the membership makes that tag stale for both reads
+/// and writes.
 ///
-/// FNV-1a over the stored tag, combined with an order-independent sum of each child IRI's FNV-1a
-/// hash (the listing is a set), prefixed with the child count. Never contains `+`, so the variant
-/// suffix stays unambiguous. A non-cryptographic hash, sufficient for a cache validator.
+/// `children` must be in [`sorted_children`] order, the same order the listing is rendered in, so
+/// one state always renders to the same bytes. SHA-256 over the length-framed stored tag and child
+/// IRIs, truncated to 128 bits and prefixed with the child count. Never contains `+`, so the variant
+/// suffix stays unambiguous.
 fn container_state_etag(stored_etag: &str, children: &[crate::store::ValidatedChildIri]) -> String {
-    fn fnv1a(bytes: &[u8]) -> u64 {
-        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-        for &b in bytes {
-            hash ^= b as u64;
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-        hash
+    use sha2::{Digest as _, Sha256};
+    use std::fmt::Write as _;
+    debug_assert!(children.is_sorted_by(|a, b| a.as_str() < b.as_str()));
+    let mut digest = Sha256::new();
+    let mut frame = |bytes: &[u8]| {
+        digest.update((bytes.len() as u64).to_be_bytes());
+        digest.update(bytes);
+    };
+    frame(stored_etag.as_bytes());
+    for child in children {
+        frame(child.as_str().as_bytes());
     }
-    let members = children.iter().fold(0u64, |acc, c| {
-        acc.wrapping_add(fnv1a(c.as_str().as_bytes()))
-    });
-    let hash = fnv1a(stored_etag.as_bytes()) ^ members.rotate_left(17);
-    format!("\"{}-{:x}\"", children.len(), hash)
+    let hash = digest.finalize();
+    // `"<count>-<32 hex>"`, written into one allocation.
+    let mut tag = String::with_capacity(64);
+    let _ = write!(tag, "\"{}-", children.len());
+    for byte in &hash[..16] {
+        let _ = write!(tag, "{byte:02x}");
+    }
+    tag.push('"');
+    tag
+}
+
+/// A container's children in IRI order. Stores list children in whatever order they keep them
+/// (the in-memory store, insertion order), so a child deleted and re-created would otherwise move in
+/// the rendered listing while the state, and so the strong validator, stayed the same.
+async fn sorted_children<S: Store>(
+    state: &Arc<LdpState<S>>,
+    container_iri: &str,
+) -> Result<Vec<crate::store::ValidatedChildIri>, ServerError> {
+    let mut children = state.store.list_children(container_iri).await?;
+    children.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+    Ok(children)
 }
 
 /// The tag a write's `If-Match` / `If-None-Match` is evaluated against: the stored tag for a plain
@@ -2096,7 +2118,7 @@ async fn write_validator<S: Store>(
     if !target.is_container || !names_a_tag {
         return Ok(Some(stored.to_string()));
     }
-    let children = state.store.list_children(&target.iri).await?;
+    let children = sorted_children(state, &target.iri).await?;
     Ok(Some(container_state_etag(stored, &children)))
 }
 
@@ -5284,6 +5306,66 @@ mod tests {
                 .status(),
             StatusCode::OK
         );
+    }
+
+    #[tokio::test]
+    async fn a_container_validator_tracks_membership_and_its_bytes() {
+        // Replacing one child with another keeps the child count but changes the membership, so the
+        // held tag is stale. Deleting and re-creating a child restores the same membership, so the
+        // tag AND the bytes it labels are the same again, though the store now lists the children
+        // in a different order.
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        let put = |path: &'static str| {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::new(),
+            )
+        };
+        let delete = |path: &'static str| {
+            delete_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                HeaderMap::new(),
+            )
+        };
+        let listing = || {
+            let mut accept = HeaderMap::new();
+            accept.insert(
+                header::ACCEPT,
+                HeaderValue::from_static("application/n-triples"),
+            );
+            let state = state.clone();
+            async move {
+                let resp = get_with(&state, owner_token(), "/alice/c/", accept).await;
+                let tag = etag_of(&resp);
+                (tag, body_bytes(resp).await)
+            }
+        };
+        put("/alice/c/a").await.expect("child a");
+        put("/alice/c/b").await.expect("child b");
+        let (before, before_bytes) = listing().await;
+
+        delete("/alice/c/a").await.expect("delete a");
+        put("/alice/c/a").await.expect("re-create a");
+        let (again, again_bytes) = listing().await;
+        assert_eq!(again, before, "the same membership is the same state");
+        assert_eq!(
+            again_bytes, before_bytes,
+            "one strong tag labels one byte sequence"
+        );
+
+        delete("/alice/c/b").await.expect("delete b");
+        put("/alice/c/z").await.expect("child z");
+        let (replaced, _) = listing().await;
+        assert_ne!(replaced, before, "same child count, different membership");
+        let resp =
+            owner_conditional_write(&state, "PATCH", "/alice/c/", header::IF_MATCH, &before).await;
+        assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
     }
 
     #[tokio::test]
