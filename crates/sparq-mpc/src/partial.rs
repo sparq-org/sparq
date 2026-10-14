@@ -123,6 +123,19 @@ pub enum MpcError {
         requirement: String,
         considered: usize,
     },
+    /// Security-qualified backends all failed the declared preprocessing budget.
+    ///
+    /// Distinct from [`MpcError::NoBackendSatisfies`]: at least one backend met
+    /// the security floor, but every such candidate exceeded a set ceiling or
+    /// had an unknown/overflowing estimate for it.
+    PreprocessingBudgetRefused {
+        /// The security floor that candidates met.
+        requirement: String,
+        /// Workload and inclusive ceilings that could not be met.
+        budget: crate::backend::PreprocessingBudget,
+        /// Each rejected security-qualified backend's name and cost estimates.
+        rejected: Vec<String>,
+    },
     /// **The batched IT-MAC check FAILED** (`σ ≠ 0`) just before a value was about
     /// to be opened — the integrity step of the honest-majority
     /// IT-MAC tier (tamper-evident with abort, NOT AXIS-1 `Malicious` today) (design `research/mpc-malicious-security-design.md`
@@ -178,6 +191,18 @@ impl std::fmt::Display for MpcError {
                     f,
                     "no registered MPC backend satisfies the security requirement \
                      [{requirement}] (refused fail-closed after considering {considered} backend(s))"
+                )
+            }
+            MpcError::PreprocessingBudgetRefused {
+                requirement,
+                budget,
+                rejected,
+            } => {
+                write!(
+                    f,
+                    "no security-qualified MPC backend fits preprocessing budget {budget:?} \
+                     for [{requirement}] (refused fail-closed: {})",
+                    rejected.join("; ")
                 )
             }
             MpcError::MacCheckFailed { detail } => {
