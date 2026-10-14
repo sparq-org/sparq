@@ -229,3 +229,29 @@ test("firstLoadFromHtml normalises query-bearing script URLs, so a heavy chunk i
   const { errors } = analyzeBundle(inputs);
   assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
 });
+
+for (const [name, link] of [
+  ["preload", (href) => `<link rel="preload" href="${href}" as="script">`],
+  ["modulepreload", (href) => `<link rel="modulepreload" href="${href}?v=1">`],
+]) {
+  test(`firstLoadFromHtml counts a heavy chunk named only by a head ${name}`, () => {
+    const html =
+      `<head>${link("/sparq/_next/static/chunks/heavy-0.js")}</head>` +
+      SCRIPT("app/layout-abc.js") +
+      SCRIPT("app/page-x.js");
+    const { chunks, error } = htmlFirstLoad(html, "/page");
+    assert.equal(error, null);
+    assert.ok(chunks.includes("static/chunks/heavy-0.js"), chunks.join(", "));
+    const inputs = healthyInputs();
+    inputs.app.pages["/page"] = chunks;
+    const { errors } = analyzeBundle(inputs);
+    assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
+  });
+}
+
+test("htmlFirstLoad does not accept a page entry that is only preloaded", () => {
+  const html =
+    '<link rel="modulepreload" href="/sparq/_next/static/chunks/app/page-x.js">' +
+    SCRIPT("app/layout-abc.js");
+  assert.match(htmlFirstLoad(html, "/page").error ?? "", /^FIRST-LOAD: /);
+});

@@ -242,14 +242,43 @@ export function findSnapshotLeaks(fingerprint, chunks) {
  * @returns {string[]}    chunk paths, e.g. ["static/chunks/app/page-<hash>.js"]
  */
 export function firstLoadFromHtml(html) {
-  const chunks = [];
+  const scripts = [];
   for (const m of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']*)["']/g)) {
-    // Drop any query string or fragment before matching the chunk path.
-    const chunk = m[1].split(/[?#]/)[0].match(/\/_next\/(static\/chunks\/.+\.js)$/)?.[1];
+    const chunk = chunkPath(m[1]);
+    if (chunk && !scripts.includes(chunk)) scripts.push(chunk);
+  }
+  const layoutEnd = scripts.findIndex((c) => /^static\/chunks\/app\/layout-[^/]+\.js$/.test(c));
+  const chunks = layoutEnd === -1 ? scripts : scripts.slice(layoutEnd + 1);
+  // A chunk the document preloads is fetched on entry too, wherever the tag sits, so it is
+  // never dropped with the layout group.
+  for (const chunk of preloadedChunks(html)) if (!chunks.includes(chunk)) chunks.push(chunk);
+  return chunks;
+}
+
+/** Whether a `<script src>` tag in the document names `chunk`. */
+function scriptTagged(html, chunk) {
+  return [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']*)["']/g)].some(
+    (m) => chunkPath(m[1]) === chunk,
+  );
+}
+
+/** `static/chunks/…js` from a script URL, ignoring any query string or fragment. */
+function chunkPath(url) {
+  return url.split(/[?#]/)[0].match(/\/_next\/(static\/chunks\/.+\.js)$/)?.[1];
+}
+
+/** Chunks named by `<link rel="preload" as="script">` or `<link rel="modulepreload">`. */
+function preloadedChunks(html) {
+  const chunks = [];
+  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
+    const rel = tag.match(/\brel=["']([^"']*)["']/i)?.[1].toLowerCase().split(/\s+/) ?? [];
+    const as = tag.match(/\bas=["']([^"']*)["']/i)?.[1].toLowerCase();
+    if (!rel.includes("modulepreload") && !(rel.includes("preload") && as === "script")) continue;
+    const href = tag.match(/\bhref=["']([^"']*)["']/i)?.[1];
+    const chunk = href && chunkPath(href);
     if (chunk && !chunks.includes(chunk)) chunks.push(chunk);
   }
-  const layoutEnd = chunks.findIndex((c) => /^static\/chunks\/app\/layout-[^/]+\.js$/.test(c));
-  return layoutEnd === -1 ? chunks : chunks.slice(layoutEnd + 1);
+  return chunks;
 }
 
 /**
@@ -264,9 +293,11 @@ export function firstLoadFromHtml(html) {
  */
 export function htmlFirstLoad(html, manifestKey) {
   const chunks = firstLoadFromHtml(html);
+  const preloadOnly = new Set(preloadedChunks(html));
   const route = manifestKey.replace(/\/page$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const entry = new RegExp(`^static/chunks/app${route}/page(-[^/]+)?\\.js$`);
-  if (chunks.some((c) => entry.test(c))) return { chunks, error: null };
+  const scripted = (c) => !preloadOnly.has(c) || scriptTagged(html, c);
+  if (chunks.some((c) => entry.test(c) && scripted(c))) return { chunks, error: null };
   return {
     chunks,
     error:
