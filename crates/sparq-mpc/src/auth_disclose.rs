@@ -286,7 +286,7 @@ fn experimental_tamper_evident_threshold_over_sum(
 }
 
 /// Authenticated masked-open bit-decomposition of `[[sum]]` into `L =
-/// `[`DECOMP_MASK_BITS`] AUTHENTICATED bits (LSB-first), the malicious-secure twin of
+/// `[`DECOMP_MASK_BITS`] AUTHENTICATED bits (LSB-first), the IT-MAC twin of
 /// [`crate::compare`] `secure_bit_decompose`. Returns `(sum_bits, r_bits)` — both as
 /// authenticated sharings.
 ///
@@ -440,7 +440,7 @@ fn auth_verify_sum_in_range(
 // =============================================================================
 // [OPUS-4.8] sq-km34.6 — the AUTHENTICATED Rabbit chain (design §3 + Hole 4).
 //
-// The malicious-secure twin of `compare`'s sq-bgsn Rabbit path. The masked-open
+// The IT-MAC twin of `compare`'s sq-bgsn Rabbit path. The masked-open
 // decomposition above caps the malicious path's value at 2^DECOMP_VALUE_BITS = 2^20
 // because its mask must be κ = 40 bits WIDER than the value AND `value + r` must not
 // wrap p = 2^61−1. Rabbit removes the slack by RECOVERING the value exactly through
@@ -459,7 +459,7 @@ fn auth_verify_sum_in_range(
 
 /// `[[a ⊕ b]]` (logical XOR) of two AUTHENTICATED 0/1 sharings: `a + b − 2·a·b`. One
 /// [`MacSession::auth_mul`] (the `a·b` term); the rest is FREE authenticated linear
-/// ops. The malicious-secure twin of `crate::compare`'s `secret_xor`, used by the
+/// ops. The IT-MAC twin of `crate::compare`'s `secret_xor`, used by the
 /// authenticated Rabbit bit-add / bit-sub circuits. `[OPUS-4.8]`
 fn auth_xor(
     session: &mut MacSession,
@@ -472,7 +472,7 @@ fn auth_xor(
 
 /// A fresh full-field random mask `[[r]]` together with its `L = `[`RABBIT_MASK_BITS`]
 /// AUTHENTICATED bits (LSB-first), `r ∈ [0, 2^L)` uniform and produced so NO party
-/// knows it. The malicious-secure twin of `crate::compare`'s
+/// knows it. The IT-MAC twin of `crate::compare`'s
 /// `deal_full_field_solved_bits`: every bit is an [`auth_square_protocol_random_bit`]
 /// (whose `a²` open is MAC-checked before it is read), and `[[r]] = Σ_k [[r_k]]·2^k`
 /// is a FREE authenticated linear combination, so `[[r]]` and the `[[r_k]]` are
@@ -494,7 +494,7 @@ fn auth_deal_full_field_solved_bits(
 
 /// The Rabbit **`LTBits`** comparison of a PUBLIC integer `c` against the AUTHENTICATED
 /// shared bits `[[r]]_B` (LSB-first), returning an authenticated sharing of the wrap
-/// indicator `w = 1{c < r}`. The malicious-secure twin of `crate::compare`'s
+/// indicator `w = 1{c < r}`. The IT-MAC twin of `crate::compare`'s
 /// `rabbit_lt_bits_public_less_than_shared`.
 ///
 /// Same MSB-first "first differing bit decides" recurrence: scanning MSB→LSB, `c < r`
@@ -531,7 +531,7 @@ fn auth_rabbit_lt_bits_public_less_than_shared(
 
 /// Ripple-carry **bit ADD** of a PUBLIC `width`-bit integer `c` with `konst · [[w]]`
 /// (`konst` public, `[[w]]` a single AUTHENTICATED bit), returning the `width`
-/// LSB-first AUTHENTICATED result bits of `c + w·konst`. The malicious-secure twin of
+/// LSB-first AUTHENTICATED result bits of `c + w·konst`. The IT-MAC twin of
 /// `crate::compare`'s `rabbit_add_public_and_w_times_const`.
 ///
 /// `konst_k · [[w]]` is a public bit times one authenticated sharing, so forming the
@@ -583,7 +583,7 @@ fn auth_rabbit_add_public_and_w_times_const(
 
 /// Ripple-borrow **bit SUB** `[[a]]_B = lhs_B ⊖ [[r]]_B` over two vectors of
 /// AUTHENTICATED bits (LSB-first), returning the `width` LSB-first authenticated
-/// difference bits. The malicious-secure twin of `crate::compare`'s
+/// difference bits. The IT-MAC twin of `crate::compare`'s
 /// `rabbit_sub_shared_bits`: both operands are shared, so the result bit's XOR costs a
 /// multiplication too — five authenticated multiplications per bit position, every one
 /// of them MAC-carrying. Missing high positions read as the authenticated constant
@@ -852,7 +852,7 @@ fn auth_or(
 }
 
 /// A single AUTHENTICATED uniform random bit `[[b]] ∈ {0,1}` from the square protocol,
-/// the malicious-secure twin of [`crate::compare`] `square_protocol_random_bit`. The
+/// the IT-MAC twin of [`crate::compare`] `square_protocol_random_bit`. The
 /// `c = a²` open (the FIRST of the three named opens) is **MAC-checked before it is
 /// read**: a tampered open of `a²` makes `σ ≠ 0` and aborts, rather than silently
 /// flipping the mask bit.

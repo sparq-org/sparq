@@ -1018,7 +1018,7 @@ impl MacSession<'_> {
 
     /// [OPUS-4.8] sq-6fv7 — **authenticate an EXISTING degree-`t` value sharing**
     /// `[v]` into `[[v]] = ([v], [α·v])` under this session's key, WITHOUT
-    /// reconstructing `v`. This is the entry the malicious-secure
+    /// reconstructing `v`. This is the entry the IT-MAC (tamper-evident)
     /// [`disclose_threshold_verdict`](crate::compare::disclose_threshold_verdict)
     /// path needs: the federation hands it a plain Shamir sharing of an aggregate
     /// (e.g. the cumulative SUM from [`ShamirBackend::run_secure`]), and to carry it
@@ -1048,7 +1048,7 @@ impl MacSession<'_> {
     /// RNG (the SAME CSPRNG stream the value/MAC sharings are dealt from). The
     /// authenticated square protocol ([`crate::auth_disclose`]) uses it for the
     /// jointly-random `[[a]]` whose `a²` is opened (no party knows `a`). `pub(crate)`
-    /// — an internal protocol accessor, not part of the malicious-secure public API.
+    /// — an internal protocol accessor, not part of the IT-MAC public API.
     pub(crate) fn draw_nonzero_fp(&mut self) -> Fp {
         self.dealer.draw_nonzero_fp()
     }

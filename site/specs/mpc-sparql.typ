@@ -667,11 +667,14 @@ For resilience against tampered shares and cheating parties:
   #cite("BW86")) so that tampered shares are detected and, within the threshold, corrected;
 - the #dfn[authenticated tier] uses information-theoretic MACs (IT-MACs) on shares; in that
   tier, a verdict bit #strong[MUST] be MAC-checked #emph[before] it is opened, at the minimal
-  honest-majority threshold `n = 2t + 1`, yielding malicious security with abort.
+  honest-majority threshold `n = 2t + 1`. That check makes tampering with the opened values
+  evident; malicious security with abort additionally requires every multiplication gate to
+  be verified on both of its operands.
 
 #impl-status("partially implemented — default tier is semi-honest")[
   Robust reconstruction, the IT-MAC authenticated-sharing foundation, authenticated
-  comparison, and MAC-checked-before-open disclosure are implemented. The #emph[full]
+  comparison, and MAC-checked-before-open disclosure are implemented; they are tamper-evident,
+  not maliciously secure, because multiplication gates are not verified on both operands. The #emph[full]  // privacy-claims-allow: NEGATIVE — states the IT-MAC tier is not maliciously secure
   honest-majority malicious-with-abort protocol suite is incomplete (open work items in the
   reference estate, sq-km34 series), and the default operating tier of the reference pipeline is
   #strong[semi-honest honest-majority]. Deployments MUST NOT describe the default tier as
@@ -924,7 +927,7 @@ draft's proposals for capabilities.
    [Verifier-side authenticated-input attestation gate (v1) and the federated public-input
    layout it needs],
   [Robust Reed–Solomon reconstruction; IT-MAC authenticated sharing with MAC-checked
-   disclosure (partial malicious tier)], [Full honest-majority malicious-with-abort suite;
+   disclosure (tamper-evident; not yet malicious-secure)], [Full honest-majority malicious-with-abort suite;  // privacy-claims-allow: NEGATIVE — states the IT-MAC tier is not yet malicious-secure
    dishonest-majority backend; constant-round WAN family],
   [Domain-separated term→field join-key encoder with fail-closed collision detection],
    [In-circuit encoding-correctness proof for hidden join keys],
@@ -971,8 +974,8 @@ and #strong[MUST] surface this status to relying parties.
 == Default tier is semi-honest
 
 The default operating tier of the reference implementation is #strong[honest-majority
-semi-honest]. The authenticated (IT-MAC) malicious-with-abort tier is only partially built
-(§7.5). A deployment #strong[MUST] report the actual per-operator tier (§3.3) and #strong[MUST
+semi-honest]. The authenticated (IT-MAC) tier targets malicious security with abort but is
+only partially built and today only tamper-evident (§7.5). A deployment #strong[MUST] report the actual per-operator tier (§3.3) and #strong[MUST
 NOT] describe a semi-honest run as maliciously secure. Semi-honest security assumes every  // privacy-claims-allow: this is the honesty caveat itself, warning against the overclaim
 party follows the protocol; it provides #emph[no] guarantees against a participant who
 deviates.

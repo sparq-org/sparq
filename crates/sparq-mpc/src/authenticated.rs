@@ -78,13 +78,16 @@
 //! malicious-with-abort** security; today's paths reach only tamper-evident-with-abort
 //! (see [`crate::auth_compare`]'s security tier). On its own it changes NO advertised
 //! guarantee: it adds the MAC sharing alongside the value sharing and keeps the
-//! linear ops free and correct. The malicious-security PROPERTY materialises only
-//! on a path where the multiplication carries the MAC
+//! linear ops free and correct. Tamper DETECTION on opened values needs a path where
+//! the multiplication carries the MAC
 //! ([`MacSession::auth_mul`](crate::shamir::MacSession::auth_mul), sq-km34.3) AND
 //! the batched check
 //! ([`MacSession::mac_check`](crate::shamir::MacSession::mac_check), sq-km34.4)
-//! fires before any opened value is acted on. Both have landed, so that path
-//! EXISTS — but it is opt-in: on any path that does not run it (the plain
+//! fires before any opened value is acted on. Both have landed, so that
+//! tamper-evident path EXISTS. Malicious security does NOT: it additionally needs
+//! multiplication-gate verification binding BOTH operands, because `auth_mul`
+//! adopts a value tamper on its second operand, and that is not implemented. The
+//! tamper-evident path is opt-in: on any path that does not run it (the plain
 //! [`ShamirBackend`](crate::shamir::ShamirBackend) aggregate, the semi-honest
 //! join/compare surfaces) the parties are still trusted to follow the protocol,
 //! and the backend's advertised tier is unchanged pending sq-km34.7. Nothing here
