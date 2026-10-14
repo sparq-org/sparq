@@ -1089,9 +1089,15 @@ fn conclusion_existentials(conclusion: &[[Term; 3]]) -> (Vec<String>, Vec<String
 /// Every variable whose binding can change the instantiated conclusion, sorted: exactly the
 /// variables [`ground_triple`] substitutes ([`apply_deep`]), at any depth — inside lists,
 /// quoted triples AND quoted `{ … }` formulas. This is the one definition of the firing key
-/// ([`firing_key`]), so the dedup of firings, their ranking, and the proof-mode choice of
-/// binding cannot disagree about which bindings instantiate the same conclusion. A variable
-/// a binding leaves unbound (a formula's own quantified variable) keys as unbound.
+/// ([`firing_key`]), so the dedup of firings, their ranking and their tie-break cannot
+/// disagree about which bindings instantiate the same conclusion. A variable a binding
+/// leaves unbound (a formula's own quantified variable) keys as unbound.
+///
+/// One key gives one conclusion; the converse does NOT hold. A conclusion of several
+/// triples, or a symmetric one such as `{ ?x :r ?y . ?y :r ?x }`, derives one fact under
+/// several DISTINCT keys, so the firing key is no guide to how many derivations a FACT has
+/// — which proof step a fact records is settled over the whole round instead
+/// ([`step_precedes`], GH #6844).
 fn conclusion_relevant_vars(conclusion: &[[Term; 3]]) -> Vec<String> {
     fn scan(t: &Term, vars: &mut std::collections::BTreeSet<String>) {
         match t {
@@ -1146,9 +1152,15 @@ struct FiringScratch {
 /// Bindings are deduplicated by key before sorting — `fired` itself is the dedup, so a key
 /// seen twice in one round is as settled as one carried over from an earlier round. Of
 /// several bindings with one key, the first to arrive is kept; with `tie_break`, the least by
-/// its full canonical encoding is kept instead, so the premises a proof step records are
-/// reproducible too. The key covers every conclusion-relevant variable, so the conclusion
-/// they instantiate — and hence the closure — is the same either way.
+/// its full canonical encoding is kept instead, so the premise instances a firing builds are
+/// a function of the round. The key covers every conclusion-relevant variable, so the
+/// conclusion they instantiate — and hence the closure — is the same either way.
+///
+/// `tie_break` alone does NOT make a proof step reproducible: one conclusion can be derived
+/// under several distinct keys and by several rules, and the transitivity fast path never
+/// reaches this function at all. The step a fact records is chosen over the round's whole
+/// derivation list ([`step_precedes`], GH #6844); this tie-break only settles which binding
+/// of one key a firing uses.
 fn canonical_new_firings(
     bindings: Vec<Binding>,
     concl_vars: &[String],
@@ -1253,6 +1265,33 @@ fn rank_keys(keys: &[String], order: &mut Vec<u64>) -> u64 {
         i = end;
     }
     index
+}
+
+/// Whether derivation `a` comes before `b` in the canonical order of the derivations of ONE
+/// conclusion (GH #6844): premise vectors compared lexicographically under
+/// [`serialize::row_cmp`], a shorter vector before a longer one that extends it, then the
+/// lower rule index.
+///
+/// A total order on `(premises, rule)` — `serialize::row_cmp` is `Equal` exactly on equal
+/// rows, so two derivations tie only when they record the same premises from the same rule,
+/// which makes them the same proof step. The conclusions are NOT compared: this orders the
+/// candidates for one fact, never the facts themselves, so the round's derivation order is
+/// left alone.
+fn step_precedes(a: &DerivationStep, b: &DerivationStep) -> bool {
+    use std::cmp::Ordering;
+    let (_, ra, pa) = a;
+    let (_, rb, pb) = b;
+    let by_premises = pa
+        .iter()
+        .zip(pb)
+        .map(|(x, y)| serialize::row_cmp(x, y))
+        .find(|o| *o != Ordering::Equal)
+        // Every compared row was equal, so the shorter vector is a prefix of the longer.
+        .unwrap_or_else(|| pa.len().cmp(&pb.len()));
+    match by_premises {
+        Ordering::Equal => ra < rb,
+        o => o == Ordering::Less,
+    }
 }
 
 /// The length of `a` and `b`'s common prefix.
@@ -1853,9 +1892,6 @@ fn run_closure_in(
     let mut fired: Vec<FxHashSet<String>> = vec![FxHashSet::default(); rules.len()];
     let mut scratch = FiringScratch::default();
     let mut sk_counter = 0usize;
-    // Reused per rule and round by the non-existential proof-mode branch (GH #6844), which
-    // dedups a round's bindings by firing key but carries nothing between rounds.
-    let mut round_keys: FxHashSet<String> = FxHashSet::default();
 
     // TRANSITIVITY fast path: rules of the exact shape `{?x P ?y. ?y P ?z} => {?x P ?z}`
     // (ground predicate, three distinct variables, single conclusion, no existentials, not
@@ -2126,35 +2162,11 @@ fn run_closure_in(
                     }
                 };
                 if concl_blanks.is_empty() {
-                    if mode == StepMode::Full {
-                        // A conclusion with no existentials is instantiated the same way by
-                        // every binding that shares its firing key, so several bindings can
-                        // derive ONE fact — and only the first to arrive has its premises
-                        // recorded as that fact's proof step (`facts.insert` is the dedup
-                        // below). Arrival order is the fact and delta hash sets' traversal
-                        // order, so `why()` could name different premises run to run and
-                        // native vs `wasm32`. Collapse each firing key to its LEAST binding
-                        // first, exactly as the existential branch does, so the step is a
-                        // function of the round's bindings (a set) alone (GH #6844). The
-                        // round's own key set is the dedup — a key already fired in an
-                        // earlier round must still be emitted, since the fact it derives may
-                        // have been truncated away, and `facts.contains` filters the rest.
-                        round_keys.clear();
-                        for (_, b) in canonical_new_firings(
-                            bindings,
-                            concl_vars,
-                            &mut round_keys,
-                            true,
-                            &mut scratch,
-                        ) {
-                            emit(&b, None);
-                        }
-                    } else {
-                        // No premises are recorded, so nothing observable depends on which
-                        // binding of a key arrives first: keep the cheaper path.
-                        for b in &bindings {
-                            emit(b, None);
-                        }
+                    // Which binding of a shared firing key arrives first is not observable
+                    // here: the proof step a fact records is chosen over the whole round's
+                    // `produced` list below (GH #6844), not per rule.
+                    for b in &bindings {
+                        emit(b, None);
                     }
                     continue;
                 }
@@ -2186,6 +2198,41 @@ fn run_closure_in(
             // transitive predicate, those with at least one NON-transitive-rule derivation are
             // generators (a fact may be produced by several rules in one round — OR the flags).
             let mut trans_new: FxHashMap<[Term; 3], bool> = FxHashMap::default();
+            // The proof step a fact records is the derivation at its FIRST entry in
+            // `produced` — `facts.insert` below is the dedup — and `produced` is built in the
+            // order the delta and fact hash sets yield their contents. THREE independent
+            // producers put several derivations of one conclusion in it: a rule whose
+            // conclusion is symmetric or has several triples derives one fact under several
+            // DISTINCT firing keys (one key gives one conclusion, but one conclusion can come
+            // from many keys); different rules derive the same fact in one round; and the
+            // transitivity fast path pushes one entry per intermediate path, over a `gen_out`
+            // adjacency whose own order comes from a hash map. So `why()` could name
+            // different premises run to run and native vs `wasm32`.
+            //
+            // Swap each conclusion's CANONICAL derivation into that conclusion's first slot:
+            // least premise vector (lexicographic under [`step_precedes`]), then least rule
+            // index. A swap only ever exchanges two entries that carry the SAME conclusion,
+            // so the multiset of (conclusion, rule) pairs the generator OR below and
+            // `facts.insert` see is untouched — it decides which derivation `why()` names and
+            // nothing else (GH #6844). Doing it here, once over the round, covers every
+            // producer; collapsing one rule's bindings by firing key cannot.
+            if mode == StepMode::Full && produced.len() > 1 {
+                let mut slot: FxHashMap<[Term; 3], usize> = FxHashMap::default();
+                for i in 0..produced.len() {
+                    match slot.get(&produced[i].0) {
+                        // `j` always holds the best entry for this conclusion so far, so one
+                        // comparison per entry suffices.
+                        Some(&j) => {
+                            if step_precedes(&produced[i], &produced[j]) {
+                                produced.swap(i, j);
+                            }
+                        }
+                        None => {
+                            slot.insert(produced[i].0.clone(), i);
+                        }
+                    }
+                }
+            }
             for (g, ri, prem) in produced {
                 let is_new = facts.insert(g.clone());
                 if is_new {
@@ -9600,6 +9647,19 @@ mod tests {
         // Exactly one step per `i`: `:a<i> :reaches :b<i>`, derivable under three bindings
         // (one per intermediate) in one round, so every recorded step is an ambiguous one.
         assert_eq!(runs[0].len(), n, "one ambiguous step per subject");
+        assert_proof_premises_agree(&runs);
+        // The derivation kept is the one with the LEAST premise vector of the three, so the
+        // proof names `:m00` — not whichever route the delta set happened to yield first.
+        let step = &runs[0]["I\"http://ex/a00\"|I\"http://ex/reaches\"|I\"http://ex/b00\""];
+        assert!(
+            step.iter().any(|p| p[2] == "I\"http://ex/m00\"" || p[0] == "I\"http://ex/m00\""),
+            "the least premise vector is recorded: {step:?}"
+        );
+    }
+
+    /// Every variant's `proof_premises` map, asserted equal to the first variant's, naming
+    /// the first disagreeing step. The shared body of the GH #6844 proof determinism tests.
+    fn assert_proof_premises_agree(runs: &[std::collections::BTreeMap<String, Vec<[String; 3]>>]) {
         for (i, r) in runs.iter().enumerate().skip(1) {
             let diff: Vec<&String> =
                 r.iter().filter(|(k, v)| runs[0].get(*k) != Some(v)).map(|(k, _)| k).collect();
@@ -9615,13 +9675,53 @@ mod tests {
                 runs[0][diff[0]],
             );
         }
-        // The binding kept is the LEAST of the three, so the proof names `:m00` — the one
-        // route that does not depend on which binding the delta set happened to yield first.
-        let step = &runs[0]["I\"http://ex/a00\"|I\"http://ex/reaches\"|I\"http://ex/b00\""];
-        assert!(
-            step.iter().any(|p| p[2] == "I\"http://ex/m00\"" || p[0] == "I\"http://ex/m00\""),
-            "the least binding's premises are recorded: {step:?}"
-        );
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_which_firing_key_arrives_first() {
+        // GH #6844 review round 1: collapsing a rule's bindings by FIRING KEY is not enough,
+        // because one key gives one conclusion but one conclusion can come from many keys. A
+        // symmetric conclusion is the clean witness: over `:a :p :b . :b :p :a .` the rule
+        // below fires under the two DISTINCT keys (?x=:a, ?y=:b) and (?x=:b, ?y=:a), and each
+        // derives BOTH `:a :r :b` and `:b :r :a` — from different premises. The firing-key
+        // dedup never sees the collision; only choosing over the round's derivations does.
+        let n = 24;
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            body.push(format!(":a{i:02} :p :b{i:02} .\n"));
+            body.push(format!(":b{i:02} :p :a{i:02} .\n"));
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :p ?y } => { ?x :r ?y . ?y :r ?x } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":unrelated").iter().map(|s| proof_premises(s)).collect();
+        // Two `:r` facts per `i`, each derivable under either key.
+        assert_eq!(runs[0].len(), 2 * n, "two ambiguous steps per subject pair");
+        assert_proof_premises_agree(&runs);
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_traversal_order_through_the_transitivity_fast_path() {
+        // GH #6844 review round 1: a rule of the exact shape
+        // `{?x P ?y. ?y P ?z} => {?x P ?z}` takes the TRANSITIVITY fast path, which is chosen
+        // regardless of StepMode and bypasses the binding machinery entirely — it walks the
+        // delta set and a `gen_out` adjacency whose own order comes from a hash map, pushing
+        // one derivation per intermediate path. So no per-rule binding fix can reach it.
+        // Here each `:a<i>` reaches its `:b<i>` through three intermediates.
+        let n = 16;
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            for m in ["m", "o", "q"] {
+                body.push(format!(":a{i:02} :link :{m}{i:02} .\n"));
+                body.push(format!(":{m}{i:02} :link :b{i:02} .\n"));
+            }
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :link ?y . ?y :link ?z } => { ?x :link ?z } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":unrelated").iter().map(|s| proof_premises(s)).collect();
+        assert!(runs[0].len() >= n, "steps recorded: {}", runs[0].len());
+        assert_proof_premises_agree(&runs);
     }
 
     /// A deterministic xorshift64* stream, for the randomized differentials below.

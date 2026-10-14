@@ -238,8 +238,10 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // of each round's firing keys (every variable the conclusion substitutes), so for the SAME parsed
 // input the labels and the structural keys of facts carrying them do not depend on hash-set
 // traversal or hasher width (native vs wasm32; GH #6749). why() proof steps are covered too:
-// where several bindings derive ONE non-existential fact, the step records the LEAST of them
-// rather than whichever arrived first (GH #6844). E.g. with :a :p :v. :b :p :v. and rules
+// where a round derives ONE fact several ways - one rule firing under distinct bindings, two
+// different rules, or the transitivity fast path over several intermediate paths - the step
+// records the derivation with the least premise vector, not whichever arrived first (GH
+// #6844). E.g. with :a :p :v. :b :p :v. and rules
 // ?x :p :v => ?x :q :v, ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key
 // are stable AND its why() tree always cites the same :q witness. A log:conclusion formula's
 // derived rows, and the rdf:first/rest cell labels interning a list value mints (_l<k>_<n>),

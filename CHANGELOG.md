@@ -323,9 +323,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   formula's row order is part of its term identity). The rdf:first/rest cell labels minted
   when a list value is interned (`_l<k>_<n>`) are numbered by interning every reachable list
   value up front in that same order, instead of from a counter bumped as the rows arrived.
-  And where several bindings derive ONE fact from a conclusion with no existentials, the proof
-  step records the LEAST binding's premises rather than whichever binding arrived first, so
-  `why()` names the same supporting facts every run. The `__bw<n>_` backward-renaming counter
+  And where a round derives ONE fact several ways — a rule whose conclusion is symmetric or
+  has several triples firing under distinct bindings, two different rules, or the transitivity
+  fast path walking several intermediate paths — the proof step records the derivation with the
+  least premise vector rather than whichever one arrived first, so `why()` names the same
+  supporting facts every run. The `__bw<n>_` backward-renaming counter
   is still assigned in evaluation order and stays tracked on #6844. (refs #6844)
 
 - **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
