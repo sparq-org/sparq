@@ -248,3 +248,31 @@ fn an_explicit_empty_context_clears_it() {
         "the cleared context stays cleared"
     );
 }
+
+#[test]
+fn a_failed_materialization_keeps_the_context() {
+    let mut store = store();
+    let mut bad = AccessProvenance::new();
+    bad.set_creator(D0, "urn:sparq:forged");
+    assert!(store.materialize_acp_with(&bad).is_err());
+    store
+        .put_acl_acp("https://pod.ex/other.acr", OTHER_ACR, "ntriples")
+        .expect("put");
+    assert_context_in_force(&store, "put_acl_acp after a failed materialization");
+}
+
+#[test]
+fn a_rolled_back_write_keeps_the_context() {
+    let mut store = store();
+    // An agent in the reserved encoding cannot be materialized, so the write rolls back.
+    let bad = "<https://pod.ex/other.acr> <http://www.w3.org/ns/solid/acp#accessControl> \
+        <https://pod.ex/other.acr#c> .\n\
+        <https://pod.ex/other.acr#c> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/other.acr#p> .\n\
+        <https://pod.ex/other.acr#p> <http://www.w3.org/ns/solid/acp#allow> <http://www.w3.org/ns/auth/acl#Read> .\n\
+        <https://pod.ex/other.acr#p> <http://www.w3.org/ns/solid/acp#anyOf> <https://pod.ex/other.acr#m> .\n\
+        <https://pod.ex/other.acr#m> <http://www.w3.org/ns/solid/acp#agent> <urn:sparq:forged> .\n";
+    assert!(store
+        .put_acl_acp("https://pod.ex/other.acr", bad, "ntriples")
+        .is_err());
+    assert_context_in_force(&store, "a rolled-back put_acl_acp");
+}

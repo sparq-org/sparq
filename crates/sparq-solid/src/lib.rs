@@ -534,7 +534,8 @@ impl PodStore {
     ///
     /// The view uses the trusted context (provenance and credentials) last passed to
     /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
-    /// none until then; pass empty ones to those to clear it.
+    /// none until then; pass empty ones to those to clear it, and current ones when a
+    /// credential holding expires or is revoked.
     pub fn materialize_acp(&mut self) -> Result<MaterializeStats, String> {
         self.rematerialize_acp_scoped(ReindexScope::Full)
     }
@@ -558,8 +559,9 @@ impl PodStore {
     /// are asserted by the caller (the storage layer that minted the resource) and are
     /// **never** read from the resource graph — a writer who embeds `<r> solidx:creator
     /// <self>` in a document they control cannot thereby grant themselves access (design
-    /// doc §2.4). The store keeps `provenance` for the ACP rebuilds it makes itself (after an
-    /// access-control write or an update, and [`PodStore::materialize_acp`]).
+    /// doc §2.4). The store keeps `provenance`, with no credentials, for the ACP rebuilds it
+    /// makes itself (after an access-control write or an update, and
+    /// [`PodStore::materialize_acp`]); call again when it changes.
     ///
     /// # Errors
     ///

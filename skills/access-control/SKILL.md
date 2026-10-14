@@ -115,8 +115,11 @@ Materialize the authorization view from the access-control documents, then enfor
   `.acr` they control cannot self-grant (this also blocks forged `solidx:appliesToResource`
   policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
   granted `R2`) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
-  `materialize_acp()` is `materialize_acp_with(&AccessProvenance::new())` — no provenance ⇒
-  no `CreatorAgent`/`OwnerAgent` grant (fail-closed).
+  The store keeps the provenance and credentials of its last successful ACP
+  materialization: `materialize_acp()` and every rebuild after `put_acl_acp`,
+  `delete_acl_acp` or an update use them. Before any is passed there is no provenance ⇒
+  no `CreatorAgent`/`OwnerAgent` grant (fail-closed). To clear them, or when a holding
+  expires or is revoked, call `materialize_acp_with_credentials` with the current maps.
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
   `VerifiedCredentials::hold(agent_webid, requirement_iri)` asserts that the TRUSTED caller
