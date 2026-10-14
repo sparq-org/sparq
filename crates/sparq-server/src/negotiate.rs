@@ -130,19 +130,10 @@ pub fn negotiate_graph_or_406(accept: Option<&str>) -> Result<GraphFormat, NotAc
     best.map(|(f, _, _)| f).ok_or(NotAcceptable)
 }
 
-/// Splits an `Accept` header into (lowercased media range, q-value) pairs.
+/// Splits an `Accept` header into (lowercased media range, q-value) pairs, by the grammar every
+/// sparq HTTP surface shares ([`sparq_core::accept`]).
 fn media_ranges(accept: &str) -> impl Iterator<Item = (String, f32)> + '_ {
-    accept.split(',').map(|part| {
-        let mut it = part.split(';');
-        let media = it.next().unwrap_or("").trim().to_ascii_lowercase();
-        let mut q = 1.0f32;
-        for param in it {
-            if let Some(v) = param.trim().strip_prefix("q=") {
-                q = v.parse().unwrap_or(1.0);
-            }
-        }
-        (media, q)
-    })
+    sparq_core::accept::media_ranges(accept).map(|r| (r.essence, r.q))
 }
 
 /// A present-but-unsatisfiable `Accept` header — the HTTP layer maps this to `406 Not
@@ -250,6 +241,31 @@ mod tests {
     #[test]
     fn unsupported_falls_back_to_json() {
         assert_eq!(negotiate(Some("application/pdf")), Format::Json);
+    }
+
+    #[test]
+    fn weights_follow_the_shared_accept_grammar() {
+        // A weight that is not a valid qvalue accepts nothing; a zero weight in any spelling
+        // refuses; parameter names are case-insensitive; a quoted comma does not split a range.
+        assert_eq!(
+            negotiate(Some("text/csv;q=1.5, text/tab-separated-values;q=0.1")),
+            Format::Tsv
+        );
+        assert_eq!(negotiate_or_406(Some("text/csv;q=x")), Err(NotAcceptable));
+        assert_eq!(
+            negotiate_or_406(Some("text/csv;q=0.000")),
+            Err(NotAcceptable)
+        );
+        assert_eq!(
+            negotiate(Some("text/csv;Q=0.2, application/sparql-results+xml;q=0.1")),
+            Format::Csv
+        );
+        assert_eq!(
+            negotiate(Some(
+                r#"text/csv;x="a,b";q=0.9, text/tab-separated-values;q=0.5"#
+            )),
+            Format::Csv
+        );
     }
 
     #[test]

@@ -80,9 +80,15 @@ pub mod auth_cache;
 #[path = "auth_wasm.rs"]
 mod auth_wasm_native_tests;
 pub mod authz;
+// The `Accept` grammar every sparq HTTP surface shares, compiled from its one source file in
+// sparq-core: the pure Solid tier (`--no-default-features`) does not depend on sparq-core, and the
+// file is standard library only.
+#[path = "../../sparq-core/src/accept.rs"]
+pub(crate) mod accept;
 pub mod body_limit;
 mod clock;
 pub mod error;
+pub(crate) mod entity_tag;
 pub(crate) mod http_date;
 /// Provider-issued WebIDs hosted OUTSIDE the pod — the identity host (the RSS adaptation of PSS
 /// `decisions/0020`; design in `research/lws-design-records.md` §4). The id-docs live in a reserved

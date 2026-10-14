@@ -206,9 +206,16 @@ RDFS / OWL-RL IRIs are unchanged (their key is still the conclusion string).
 `sparq-prov` has no identity-scheme version marker; the IRI shape
 (`…fact:<hash>` / `…rule:<hash>`) is the same, only N3 hash inputs differ.
 The key is injective over the engine's term identity, so an entity IRI is exactly as
-reproducible as the fact's terms: a fact carrying an existential's skolem label
-(`__sk<n>_<label>`, allocated in hash-set traversal order) can get a different IRI
-across runs or platforms (pre-existing; GH #6749).
+reproducible as the fact's terms. An existential's skolem label (`__sk<n>_<label>`)
+is numbered in the sorted order of each round's firing keys, so for the same parsed
+input a fact carrying one gets an IRI independent of hash-set traversal and hasher
+width (native vs `wasm32`; GH #6749). It is not canonical across reordered isomorphic
+documents (anonymous `_b<n>` parser labels follow arrival order, formula rows keep
+source order, a label depends on its round's other firings), and it assumes stable
+binding values and firing sets: `log:collectAllIn` lists, `log:conclusion` formulas
+and backward-renamed `__bw<n>` terms can still carry traversal order into a key
+(GH #6844). The numbering changed with GH #6749, so such a fact's IRI differs from
+one minted before it: regenerate as above.
 The `<hash>` is a 64-bit FNV-1a fold of the key: content-addressed, but
 **not collision-free and not a cryptographic commitment** — do not treat an entity
 IRI as proof of a fact's content; bind content with a real commitment if you need one.

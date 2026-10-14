@@ -75,7 +75,7 @@ default-OFF `pattern_probe` feature):
   answer. Behind the extra default-OFF `fedclient-adaptive` feature (it pulls
   `sparq-fedplan/adaptive-replan`); when that feature is off the `adaptive` module and its
   `execute_adaptive_single_source` / `execute_adaptive_multi_source` entry points are
-  `#[cfg]`-compiled out. The multi-source loop ([FABLE-5] sq-xw8zz) lifts the
+  `#[cfg]`-compiled out. The multi-source loop (sq-xw8zz) lifts the
   `MultiSource` guard — union-arm leaves with LIVE per-arm latency observations feeding
   the planner's per-source EWMA.
 
@@ -107,7 +107,7 @@ gains a dependency edge *to* `sparq-fedclient`, in both feature states:
 
 Both must FAIL if a future edit introduces such an edge.
 
-[OPUS-4.8] sq-s1uy / sq-73om / sq-tiq4 — flagged for Fable re-review when available."#
+sq-s1uy / sq-73om / sq-tiq4 — flagged for Fable re-review when available."#
 )]
 // Default (fedclient OFF) build: a concise, link-free crate doc. None of the per-phase
 // modules/items linked above exist in this build, so the doc is plain text + code spans
@@ -128,7 +128,7 @@ arrow points one-way *into* the engine), so the default engine build and the WAS
 are byte-identical with or without `sparq-fedclient` (mirrors `sparq-fedplan`'s `fedplan`
 feature).
 
-[OPUS-4.8] sq-s1uy / sq-73om / sq-tiq4 — flagged for Fable re-review when available."#
+sq-s1uy / sq-73om / sq-tiq4 — flagged for Fable re-review when available."#
 )]
 #![forbid(unsafe_code)]
 // sq-tiq4: lock the fix in. `rustdoc::broken_intra_doc_links` is a rustdoc-only

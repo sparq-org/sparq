@@ -119,7 +119,7 @@ export class Store {
      */
     count(sparql: string): number;
     /**
-     * [SONNET-4.6] sq-q4apb (#2396): derives one complete `FormDescription`
+     * sq-q4apb (#2396): derives one complete `FormDescription`
      * (SHACL-to-form, DASH widget scoring) from serialized workspace snapshots —
      * the hosted-web half of the GUI forms bridge (desktop uses the Tauri
      * `derive_form` command; `forms-bridge.ts` feature-detects this method).
@@ -143,7 +143,7 @@ export class Store {
      */
     deriveForm(data: string, shapes: string, focus: string, format: string, options_json: string): string;
     /**
-     * [OPUS-4.8] sq-ncvq.14: query-plan introspection — `EXPLAIN`.
+     * sq-ncvq.14: query-plan introspection — `EXPLAIN`.
      *
      * Returns the engine's plan for `sparql` as a human-readable string — the
      * algebra tree plus, per BGP, the chosen join order with cardinality
@@ -158,7 +158,7 @@ export class Store {
      */
     explain(sparql: string): string;
     /**
-     * [OPUS-4.8] sq-ncvq.14: query-plan introspection — `EXPLAIN ANALYZE`.
+     * sq-ncvq.14: query-plan introspection — `EXPLAIN ANALYZE`.
      *
      * Like [`explain`](Self::explain) but **executes** the query (SELECT / ASK
      * only) and appends a per-operator execution trace — output row count per
@@ -204,7 +204,7 @@ export class Store {
      */
     static load(text: string, format: string): Store;
     /**
-     * [FABLE-5] sq-3ul2n.3: like [`load`](Self::load) but ingests **raw bytes** (a JS
+     * sq-3ul2n.3: like [`load`](Self::load) but ingests **raw bytes** (a JS
      * `Uint8Array`) instead of a JS string, skipping the UTF-16 string round-trip.
      *
      * Pass the `Uint8Array` you already hold — e.g. `new Uint8Array(await
@@ -222,7 +222,7 @@ export class Store {
      */
     static loadBytes(data: Uint8Array, format: string): Store;
     /**
-     * [FABLE-5] sq-3ul2n.3: the byte-ingest counterpart to
+     * sq-3ul2n.3: the byte-ingest counterpart to
      * [`loadWithBase`](Self::load_with_base) — ingests raw bytes (a `Uint8Array`) and
      * resolves the document's RELATIVE IRIs against `base`.
      *
@@ -255,7 +255,7 @@ export class Store {
      */
     static loadDataset(text: string, format: string): Store;
     /**
-     * [OPUS-4.8] sq-f66jz (#1115): like [`load`](Self::load) but resolves the document's
+     * sq-f66jz (#1115): like [`load`](Self::load) but resolves the document's
      * RELATIVE IRIs against `base`.
      *
      * A document fetched from a URL (or a SHACL shapes graph / W3C test manifest addressed
@@ -272,7 +272,7 @@ export class Store {
      */
     static loadWithBase(text: string, format: string, base: string): Store;
     /**
-     * [OPUS-4.8] sq-ty78o (#1114): a public **empty, mutable** store — the ergonomic
+     * sq-ty78o (#1114): a public **empty, mutable** store — the ergonomic
      * `new Store()` constructor.
      *
      * Until now the only way to obtain a `Store` was a static [`load`](Self::load) /
@@ -293,7 +293,7 @@ export class Store {
      */
     constructor();
     /**
-     * [OPUS-4.8] sq-quly (#796): parses a **SHACL Compact Syntax (SCS)** document
+     * sq-quly (#796): parses a **SHACL Compact Syntax (SCS)** document
      * into the equivalent SHACL **shapes graph** and returns it as a **pretty
      * Turtle** string.
      *
@@ -379,7 +379,7 @@ export class Store {
      */
     queryQuadsChunks(sparql: string, batch_size: number): QuadChunks;
     /**
-     * [OPUS-4.8] sq-fe1s / sq-ixc3.5: serialises the store's contents to a **Turtle**,
+     * sq-fe1s / sq-ixc3.5: serialises the store's contents to a **Turtle**,
      * **TriG**, or **JSON-LD** document string.
      *
      * `format` (case-insensitive) is one of:
@@ -425,7 +425,7 @@ export class Store {
      */
     serialize(format: string, pretty: boolean, indent: string | null | undefined, abbreviate: boolean, prefixes?: Array<any> | null): string;
     /**
-     * [OPUS-4.8] sq-oy1f.5: serialises the store as a **full W3C JSON-LD 1.1 Compaction**
+     * sq-oy1f.5: serialises the store as a **full W3C JSON-LD 1.1 Compaction**
      * document against a caller-supplied `@context`.
      *
      * Where [`serialize`](Self::serialize)`("jsonld-compacted", …)` only abbreviates IRIs
@@ -476,7 +476,7 @@ export class Store {
      */
     updateInPlace(sparql: string): void;
     /**
-     * [OPUS-4.8] sq-yqi1 (#162): validates an RDF **data graph** against a SHACL
+     * sq-yqi1 (#162): validates an RDF **data graph** against a SHACL
      * **shapes graph**, returning a SHACL validation report as a JSON string.
      *
      * Both arguments are RDF documents in the same syntaxes [`Store::load`]
@@ -507,7 +507,7 @@ export class Store {
      */
     validate(data: string, shapes: string, format: string): string;
     /**
-     * [SONNET-4.6] gh-2520: validates the triples **already loaded in this
+     * gh-2520: validates the triples **already loaded in this
      * store** against a SHACL shapes document, returning the same JSON report
      * [`validate`](Self::validate) does.
      *

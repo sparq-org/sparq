@@ -227,6 +227,14 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
         return Ok(None);
     }
     let guard = within_wait(state.locks.lock(container)).await?;
+    // A service listing has no `Last-Modified`, so only a tag compares its state; without one,
+    // only whether the container exists is asked, and it does.
+    if !resources::compares_state(&req.headers, false) {
+        return match resources::unless_preconditions(req, Some(resources::EXISTS), None) {
+            Some(refused) => Err(refused),
+            None => Ok(Some(guard)),
+        };
+    }
     let current = listing(&resources::plain_get(req));
     if !current.status().is_success() {
         return Err(current);
