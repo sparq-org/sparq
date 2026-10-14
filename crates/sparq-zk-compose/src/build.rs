@@ -323,7 +323,7 @@ fn encode_slot(slot: &Slot, salt: &Fr) -> (bool, FieldHex, Option<Fr>) {
 /// `h3(enc) == leaf`), so this re-derivation is sound by construction: a wrong
 /// encoding would fail the in-circuit commitment recompute.
 ///
-/// # Strict-ordering canonicalisation (plan S2.5,)
+/// # Strict-ordering canonicalisation (plan S2.5)
 /// `scan_check` enforces `commitments[0] < commitments[1] < ...` (strict, on the
 /// canonical field representative) to force the committed graphs pairwise
 /// distinct and close the duplicate-inclusion / COUNT-forgery class. So this

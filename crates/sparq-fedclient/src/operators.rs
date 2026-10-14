@@ -381,7 +381,7 @@ pub(crate) fn fetch_leaf_relation(
 /// [`FragBinding`] row contributes one [`Relation`] row, with each [`FragTerm`] converted back to
 /// the engine's [`oxrdf::Term`] model so the leaf joins against the SAME term type a SPARQL-
 /// endpoint leaf produces (so a federated query mixing endpoint + fragment sources joins
-/// correctly). A binding the fragment did not bind for a column is unbound (`None`)..
+/// correctly). A binding the fragment did not bind for a column is unbound (`None`).
 fn frag_solutions_to_relation(pattern: &FragPattern, rows: Vec<FragBinding>) -> Relation {
     let vars = pattern.vars();
     let rows = rows
@@ -409,7 +409,7 @@ fn frag_solutions_to_relation(pattern: &FragPattern, rows: Vec<FragBinding>) -> 
 /// * a literal is parsed from its canonical N-Triples lexical form (`"v"`, `"v"@lang`,
 ///   `"v"^^<dt>` — the `FragTerm::Literal` model stores exactly that) via `Term::from_str`, the
 ///   inverse of the `oxterm_to_fragterm` writer the HTTP transport uses, so the round-trip is
-///   lossless; an unparseable lexical degrades to a simple literal of the raw text..
+///   lossless; an unparseable lexical degrades to a simple literal of the raw text.
 fn fragterm_to_oxterm(term: &FragTerm) -> Term {
     match term {
         FragTerm::Iri(s) => NamedNode::new(s)
@@ -964,7 +964,7 @@ impl ChannelPeek {
 }
 
 impl ChannelPeek {
-    /// Wrap a [`SolutionStream`]'s receiver for readiness-multiplexed pulling..
+    /// Wrap a [`SolutionStream`]'s receiver for readiness-multiplexed pulling.
     fn over(stream: SolutionStream) -> ChannelPeek {
         ChannelPeek {
             rx: stream.into_rx(),
@@ -1597,7 +1597,7 @@ mod tests {
     }
 
     /// A tiny `StreamJoin` memory budget forces the spill path; the streamed join must STILL
-    /// equal the materialised natural join (spill is transparent to correctness)..
+    /// equal the materialised natural join (spill is transparent to correctness).
     #[test]
     fn streaming_join_equals_under_spill() {
         let left = Relation {
@@ -1633,7 +1633,7 @@ mod tests {
     /// `Arc<dyn FederatedSource + Send + Sync>` for the streaming interpreter. It embeds a real
     /// `Endpoint` so `source_type()` reports `SourceType::Endpoint` — which the interpreter's
     /// interface dispatch ([`fetch_leaf_relation`], sq-yzca) now CONSULTS to route an endpoint
-    /// leaf to the SRJ `execute` path (vs the typed fragment path)..
+    /// leaf to the SRJ `execute` path (vs the typed fragment path).
     struct ArcMapSource {
         answers: StdHashMap<String, String>,
         // A real endpoint so `source_type()` is honest (its inner transport is never reached —
@@ -1755,7 +1755,7 @@ mod tests {
     }
 
     /// The streaming interpreter enforces the SAME single-source guard as Phase 3: a leaf with
-    /// >1 retained source fails closed with `MultiSource` (never under-answers)..
+    /// >1 retained source fails closed with `MultiSource` (never under-answers).
     #[test]
     fn stream_interpreter_rejects_multi_source_leaf() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -1878,7 +1878,7 @@ mod tests {
 
     /// A `?s :knows ?o` BGP planned over a single TPF source must be ANSWERED by the interpreter
     /// (the typed `solutions` path), not rejected with `Unsupported` — the wiring the bead asks
-    /// for. The materialised relation is the complete fragment bound into (?s, ?o)..
+    /// for. The materialised relation is the complete fragment bound into (?s, ?o).
     #[test]
     fn interpreter_answers_tpf_leaf() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -2161,7 +2161,7 @@ mod tests {
     }
 
     /// `stream_multi_source` produces the SAME multiset as `materialize_multi_source` for a
-    /// two-source leaf (and proves the guard is lifted on the streaming path too)..
+    /// two-source leaf (and proves the guard is lifted on the streaming path too).
     #[test]
     fn stream_multi_source_equals_materialised() {
         let bgp = Bgp::new(vec![TriplePattern::new(

@@ -452,8 +452,8 @@ fn empty_or_is_fail_closed() {
 }
 
 // ===========================================================================
-// sq-c2aze — `odrl:recipient` constraints resolve party-collection membership
-//: a recipient may be a party OR a member of an `odrl:PartyCollection`,
+// sq-c2aze — `odrl:recipient` constraints resolve party-collection membership:
+// a recipient may be a party OR a member of an `odrl:PartyCollection`,
 // mirroring the assignee field's equality-or-membership lookup. Membership draws
 // ONLY on the request-supplied `with_party_membership(s)` evidence — with no edge,
 // recipient matching stays the flat base case (fail-closed, never widened).

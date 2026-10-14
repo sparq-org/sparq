@@ -1464,7 +1464,7 @@ pub enum CheckError {
     // codex 2221 MEDIUM: attribution must be present + exactly k bits.
     AttributionMalformed { proof: usize, expected: usize, got: usize },
     /// A scan sub-proof's per-graph `commitments` are NOT strictly increasing on
-    /// the field representative (plan S2.5,): two adjacent commitments
+    /// the field representative (plan S2.5): two adjacent commitments
     /// are equal or out of order. `scan_check` step 1b enforces
     /// `commitments[0] < commitments[1] < ...` in-circuit to force the committed
     /// graphs pairwise DISTINCT — closing the duplicate-inclusion / COUNT-forgery
