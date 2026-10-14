@@ -714,7 +714,7 @@ pairwise different values exist inside every range of `pos`, outside every range
 and outside `values`. Each answer is a `Tri`: `Yes` and `No` are exact (rational bounds
 without rounding, discrete floats with `-0` and `+0` distinct, the ±14:00 rule for
 `xsd:dateTime`, strings of XML characters, and automata for XSD patterns, lengths, basic
-language ranges and BCP 47 `langtag`s), and `Unknown` covers particular `rdf:XMLLiteral`
+language ranges and BCP 47 tags, `langtag`s only for `rdf:PlainLiteral`), and `Unknown` covers particular `rdf:XMLLiteral`
 values (their XML content is not checked), a facet outside the datatype's facet space
 (including an order bound outside its value space), a value no literal has, data ranges nested more than 64 deep, an XSD pattern this implementation does
 not support (block escapes such as `\p{IsBasicLatin}`, or groups nested more than 64 deep),

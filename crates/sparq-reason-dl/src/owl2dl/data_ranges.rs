@@ -221,7 +221,7 @@ fn universe(b: Builtin) -> Region {
         Decimal => reals(2, Cuts::full()),
         Double => Region::ordered(Sp::Double, vec![Cuts::full(); 2]),
         Float => Region::ordered(Sp::Float, vec![Cuts::full(); 2]),
-        PlainLiteral => text(F::Const(true)),
+        PlainLiteral => text(F::atom(Atom::Untagged).or(F::atom(Atom::PlainTag))),
         LangString => text(F::atom(Atom::Lang("*".into()))),
         String => text(F::atom(Atom::Untagged)),
         NormalizedString => text(F::atom(Atom::Plain(StrKind::NormalizedString))),

@@ -84,6 +84,9 @@ pub(crate) enum Atom {
     /// A tagged string whose tag matches this basic language range (RFC 4647 §3.3.1,
     /// already validated and lowercase; `*` matches every tag).
     Lang(String),
+    /// A tagged string whose tag is a BCP 47 `langtag`: the tagged values of
+    /// `rdf:PlainLiteral` (its §2), which leaves out private-use and grandfathered tags.
+    PlainTag,
     /// Exactly this encoded value.
     Is(Vec<u8>),
 }
@@ -744,10 +747,24 @@ fn dash_then(h: Hir) -> Hir {
     Hir::concat(vec![Hir::literal(*b"-"), h])
 }
 
-/// A lowercase BCP 47 `langtag` (RFC 5646 §2.1), the tags of `rdf:PlainLiteral` values
-/// (its §2); private-use and grandfathered tags are not `langtag`s.
+const PRIVATE: &str = "x(-[a-z0-9]{1,8})+";
+
+/// A well-formed lowercase BCP 47 language tag (RFC 5646 §2.1 `Language-Tag`), the tags of
+/// `rdf:langString` values.
 fn lang_tag() -> Hir {
-    const PRIVATE: &str = "x(-[a-z0-9]{1,8})+";
+    const GRANDFATHERED: &str = "en-gb-oed|i-ami|i-bnn|i-default|i-enochian|i-hak|i-klingon|\
+        i-lux|i-mingo|i-navajo|i-pwn|i-tao|i-tay|i-tsu|sgn-be-fr|sgn-be-nl|sgn-ch-de|\
+        art-lojban|cel-gaulish|no-bok|no-nyn|zh-guoyu|zh-hakka|zh-min|zh-min-nan|zh-xiang";
+    let grandfathered = GRANDFATHERED.replace(char::is_whitespace, "");
+    Hir::alternation(vec![
+        langtag(),
+        regex_syntax::parse(&format!("{PRIVATE}|{grandfathered}"))
+            .expect("a fixed regular expression"),
+    ])
+}
+
+/// A lowercase BCP 47 `langtag` (RFC 5646 §2.1), the tags of `rdf:PlainLiteral` values.
+fn langtag() -> Hir {
     let langtag = [
         "([a-z]{2,3}(-[a-z]{3}){0,3}|[a-z]{4}|[a-z]{5,8})",
         "(-[a-z]{4})?",
@@ -791,6 +808,7 @@ fn dfa(a: &Atom) -> Result<Rc<Dfa>, ()> {
             Atom::Plain(k) => xsdre::parse(k.pattern()).map_err(|_| ())?,
             Atom::Pattern(p) => Hir::concat(vec![xsdre::parse(p).map_err(|_| ())?, tail]),
             Atom::Lang(r) => Hir::concat(vec![any_text(), sep(), lang_range(r)]),
+            Atom::PlainTag => Hir::concat(vec![any_text(), sep(), langtag()]),
             Atom::Len(..) | Atom::Is(_) | Atom::Untagged => return Err(()),
         })
     })
@@ -897,6 +915,8 @@ mod tests {
             "sl-rozaj-biske",
             "en-a-bbb-x-ccc",
             "zh-min-nan",
+            "x-whatever",
+            "i-klingon",
             "es-419",
             "zh-yue-hk",
         ] {
@@ -910,8 +930,6 @@ mod tests {
             "en-x",
             "a-bbb",
             "en-12",
-            "x-whatever",
-            "i-klingon",
         ] {
             assert_eq!(tagged(bad), Some(0), "{bad}");
         }

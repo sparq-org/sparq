@@ -259,7 +259,8 @@ fn subsumption_follows_the_datatype_hierarchy() {
     assert_eq!(sub("token", "normalizedString"), Tri::Yes);
     assert_eq!(sub("language", "token"), Tri::Yes);
     assert_eq!(sub("string", "rdf:PlainLiteral"), Tri::Yes);
-    assert_eq!(sub("rdf:langString", "rdf:PlainLiteral"), Tri::Yes);
+    // rdf:langString takes every well-formed BCP 47 tag; rdf:PlainLiteral only `langtag`s.
+    assert_eq!(sub("rdf:langString", "rdf:PlainLiteral"), Tri::No);
     assert_eq!(sub("dateTimeStamp", "dateTime"), Tri::Yes);
     assert_eq!(sub("dateTime", "dateTimeStamp"), Tri::No);
     assert_eq!(is_empty(&and(dt("anyURI"), dt("string"))), Tri::Yes);
@@ -626,6 +627,12 @@ fn plain_literal_tags_are_langtags() {
     };
     assert_eq!(tagged("i-klingon"), Tri::No);
     assert_eq!(tagged("en-x-foo"), Tri::Yes);
+    // The tagged strings of rdf:langString keep private-use and grandfathered tags.
+    let x_foo = Value::LangString("hi".into(), "x-foo".into());
+    assert_eq!(contains(&dt("rdf:langString"), &x_foo), Tri::Yes);
+    assert_eq!(has_at_least(&one_of([x_foo.clone()]), 1), Tri::Yes);
+    assert_eq!(contains(&dt("rdf:PlainLiteral"), &x_foo), Tri::No);
+    assert_eq!(contains(&not(dt("rdf:PlainLiteral")), &x_foo), Tri::Yes);
 }
 
 #[test]
