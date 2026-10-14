@@ -274,3 +274,84 @@ fn non_adjacent_duplicates_collapse() {
     let out = distinct_hidden_pairs(&backend, &pairs, pairs.len()).unwrap();
     assert_eq!(out.rows.len(), 3, "(1,1),(5,5),(9,9) distinct");
 }
+
+// ---- sq-yyro / issue #6117: the sort-and-scan stage draws through the seam ----
+
+/// Every key sharing (`a_key` then `b_key`, row by row — the first `2N` own-input
+/// draws) is shape-checked where it is consumed. Each case corrupts exactly ONE
+/// key sharing and must be refused by the shape check itself.
+#[test]
+fn malformed_key_sharings_are_refused() {
+    use crate::randomness::test_sources::{
+        MalformedSource, SeamMethod, ALL_MALFORMATIONS, SHAPE_REFUSAL,
+    };
+    let backend = ShamirBackend::new_seeded(3, 0xD15C8).unwrap();
+    let pairs = vec![
+        pair(5, 6, "e", "f"),
+        pair(1, 2, "a", "b"),
+        pair(5, 6, "e", "f"),
+    ];
+    for skip in 0..2 * pairs.len() {
+        for how in ALL_MALFORMATIONS {
+            let mut src =
+                MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, skip, how);
+            match distinct_hidden_pairs_slots_through(&mut src, &backend, &pairs, 4) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(
+                        m.contains(SHAPE_REFUSAL),
+                        "key sharing {skip}, {how:?}: {m}"
+                    )
+                }
+                other => panic!("key sharing {skip}, {how:?}: must fail closed, got {other:?}"),
+            }
+            assert!(src.fired(), "key sharing {skip} was never drawn");
+        }
+    }
+}
+
+/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+#[test]
+fn distinct_through_refuses_a_source_that_does_not_match_the_backend() {
+    use crate::randomness::test_sources::MisreportedThresholdSource;
+    let backend = ShamirBackend::new_seeded(3, 0xD15C9).unwrap();
+    let pairs = vec![pair(1, 2, "a", "b")];
+    let mut lying = MisreportedThresholdSource {
+        inner: backend.dealer(),
+        t: 0,
+    };
+    let mut other = ShamirBackend::new_seeded(5, 0xD15C9).unwrap().dealer();
+    for source in [
+        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
+        &mut other,
+    ] {
+        match distinct_hidden_pairs_slots_through(source, &backend, &pairs, 1) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+            other => panic!("a mismatched source must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// Under PRSS only the draw-free shape runs: an empty DISTINCT draws nothing from
+/// the source. Any row needs its keys shared as the holder's own input, which PRSS
+/// refuses — so the DISTINCT fails closed with PRSS's own `NotYetImplemented`.
+#[test]
+fn prss_runs_only_the_draw_free_distinct_and_fails_closed_otherwise() {
+    use crate::prss::PrssRandomness;
+    let backend = ShamirBackend::new_seeded(3, 0xD15CA).unwrap();
+    let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
+    let (slots, cost) = distinct_hidden_pairs_slots_through(&mut prss, &backend, &[], 2).unwrap();
+    assert_eq!(slots.len(), 2);
+    assert!(slots.iter().all(|s| matches!(s, OutputSlot::Dummy)));
+    assert_eq!(cost.rows, 0);
+
+    for pairs in [
+        vec![pair(1, 2, "a", "b")],
+        vec![pair(1, 2, "a", "b"), pair(1, 2, "a", "b")],
+    ] {
+        let outcome = distinct_hidden_pairs_slots_through(&mut prss, &backend, &pairs, 2);
+        assert!(
+            matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+            "PRSS must refuse to share the keys, got {outcome:?}"
+        );
+    }
+}

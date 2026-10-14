@@ -61,7 +61,7 @@
 
 use crate::field::Fp;
 use crate::partial::MpcError;
-use crate::shamir::{ShamirDealer, Share};
+use crate::shamir::{ShamirBackend, ShamirDealer, Share};
 
 /// Which correlated-randomness regime is producing masks — an **honest
 /// self-description** so a caller (or a `BackendInfo`-style report) can state
@@ -318,6 +318,31 @@ pub(crate) fn require_canonical_sharing(shares: &[Share], n: usize) -> Result<()
             "the randomness source returned a sharing that is not the canonical {n}-party \
              sharing on x = 1..={n}, in order ({} shares)",
             shares.len()
+        )));
+    }
+    Ok(())
+}
+
+/// Fail closed unless `source` deals sharings for the same `(n, t)` as `backend`.
+///
+/// A stage that draws from a caller-supplied source but combines the result with
+/// sharings, constants and opens built from a [`ShamirBackend`] (its `parties()`
+/// for public-constant sharings, its `reconstruct` for the cleartext the
+/// simulation holds, the oblivious output stage) silently computes garbage if the
+/// two disagree: a source that under-reports `t` passes every honest-majority
+/// guard and then yields too-low-degree reductions. So every `*_through` entry
+/// point that takes both a source and a backend checks the match up front and
+/// refuses a mismatched source with [`MpcError::Protocol`].
+pub(crate) fn require_source_matches(
+    source: &dyn DistributedRandomness,
+    backend: &ShamirBackend,
+) -> Result<(), MpcError> {
+    let (sn, st) = (source.parties(), source.threshold());
+    let (bn, bt) = (backend.parties(), backend.threshold());
+    if (sn, st) != (bn, bt) {
+        return Err(MpcError::Protocol(format!(
+            "the randomness source reports (n, t) = ({sn}, {st}) but the backend is \
+             (n, t) = ({bn}, {bt}); its sharings would not compose with the backend's"
         )));
     }
     Ok(())
