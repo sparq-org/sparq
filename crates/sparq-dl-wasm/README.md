@@ -55,7 +55,8 @@ Most callers want the typed wrapper instead: `import { checkOwlDl } from '@sparq
   decided fragment and answer `"unknown"` with reason `OutOfFragment`.
 - **No serde.** The JSON is written (and the options object parsed) by a small hand-written,
   unit-tested JSON module; all logic is the plain-Rust `check_owl_dl_json`, tested natively
-  with `cargo test -p sparq-dl-wasm`. The `#[wasm_bindgen]` export only maps the error.
+  with `cargo test -p sparq-dl-wasm`. The `#[wasm_bindgen]` export only maps the error;
+  `tests/web.rs` drives it in a real wasm runtime (`wasm-pack test --node`).
 - **Single-threaded + pure-Rust.** `sparq-core` without default features (no rayon); the
   wasm32 graph is guarded by `scripts/wasm-deps-guard.sh`.
 

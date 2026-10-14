@@ -4983,6 +4983,7 @@ dependencies = [
  "sparq-core",
  "sparq-reason-dl",
  "wasm-bindgen",
+ "wasm-bindgen-test",
 ]
 
 [[package]]

@@ -30,3 +30,9 @@ wasm-bindgen = "0.2"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+
+[dev-dependencies]
+# Headless wasm test harness (`wasm-pack test --node`, tests/web.rs): drives the REAL
+# #[wasm_bindgen] export, including the JsError arm the native tests cannot reach.
+# Dev-only: it must NOT enter the non-dev wasm graph.
+wasm-bindgen-test = "0.3"
