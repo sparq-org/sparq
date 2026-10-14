@@ -504,6 +504,12 @@ mod tests {
             Some(-2_208_988_800)
         );
         assert_eq!(parse("Mon Jan  1 00:00:00 1900", now), Some(-2_208_988_800));
+        // An RFC 850 year is within a century of `now`, never before 1900 for any `now` from
+        // the epoch on (an earlier clock reads as the epoch): at the epoch, `00` is 1900 itself.
+        let monday = "Monday, 01-Jan-00 00:00:00 GMT";
+        assert_eq!(parse(monday, UNIX_EPOCH), Some(-2_208_988_800));
+        let before_epoch = UNIX_EPOCH - Duration::from_secs(86_400 * 365 * 30);
+        assert_eq!(parse(monday, before_epoch), Some(-2_208_988_800));
     }
 
     #[test]
