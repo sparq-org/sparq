@@ -45,6 +45,10 @@ fn assert_proxy_ignored(case: &str, vars: &[&str], no_proxy: Option<&str>, dest:
     }
 
     // 10.0.0.1 is private, so the resolver refuses it; the proxy itself is allowlisted.
+    // The refusal names the vetted host and port, so it can only come from vetting `dest`
+    // itself (a proxied request would have vetted the listener's address instead).
+    let port = if dest.starts_with("https:") { 443 } else { 80 };
+    let refused = format!("10.0.0.1:{port} resolves only to private/internal");
     let fetcher = HttpFetcher::new()
         .with_timeout(Duration::from_secs(5))
         .allow_private_host(proxy_addr.to_string());
@@ -52,7 +56,7 @@ fn assert_proxy_ignored(case: &str, vars: &[&str], no_proxy: Option<&str>, dest:
         .get(dest, "text/turtle")
         .expect_err("a private destination must be refused");
     assert!(
-        err.contains("private/internal") && err.contains("10.0.0.1"),
+        err.contains("egress refused") && err.contains(&refused),
         "{case}: the resolver must refuse the destination itself, got: {err}"
     );
     assert!(
