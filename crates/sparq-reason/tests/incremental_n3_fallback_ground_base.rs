@@ -624,3 +624,32 @@ fn why_n3_document_refuses_asserted_facts_of_a_rejected_document() {
         .expect("asserted fact explains");
     assert_eq!(proof.nodes()[0].rule, "asserted");
 }
+
+/// A fact the rules document itself asserts is part of the base: deleting it must stick
+/// when the fallback re-runs the batch engine (which re-reads the rules document), and
+/// re-inserting it must bring its derivation back.
+#[test]
+fn deleting_a_rules_document_fact_sticks_in_fallback() {
+    let rules = "@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+                 <http://ex/a> <http://ex/p> <http://ex/v> .\n\
+                 { ?s <http://ex/p> ?v . (1 2) math:sum ?o } => { ?s <http://ex/q> ?o } .";
+    let doc_fact = [iri("a"), iri("p"), iri("v")];
+    let derived = [iri("a"), iri("q"), int("3")];
+    let mut g = MaterializedN3Graph::new(rules, &[]).expect("parse");
+    assert_eq!(g.mode(), N3Mode::Fallback, "{:?}", g.fallback_reason());
+    assert_eq!(set(g.closure()), set(vec![doc_fact.clone(), derived.clone()]));
+
+    assert_eq!(g.delete(std::slice::from_ref(&doc_fact)), 1);
+    assert!(g.closure().is_empty(), "{:?}", g.closure());
+    // A later mutation re-runs the fallback again; the deleted fact stays deleted.
+    let other = [iri("b"), iri("p"), iri("w")];
+    g.insert(std::slice::from_ref(&other));
+    assert_eq!(
+        set(g.closure()),
+        set(vec![other.clone(), [iri("b"), iri("q"), int("3")]])
+    );
+
+    g.insert(std::slice::from_ref(&doc_fact));
+    assert!(g.contains(&doc_fact));
+    assert!(g.contains(&derived));
+}

@@ -240,6 +240,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-reason:** deleting a fact that the rules document itself asserts from a
+  `MaterializedN3Graph` now sticks when the graph re-runs the batch engine (fallback mode),
+  and `why()` no longer cites such a deleted fact as a premise. The re-run took the
+  document's facts from its source text as well as from the graph's base.
+
 - **sparq-policy:** `contains` and `detect_conflicts` now prove containment and certain
   overlap through `odrl:and` / `odrl:or` / `odrl:xone` compound constraints where the
   runtime semantics decide it, instead of always answering `Unknown` / `Possible`; they
