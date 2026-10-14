@@ -359,13 +359,16 @@ let out = store.materialize_odrl_policy(&policy, &req);
 
 `PodStore::attach_odrl_policy(policy)` keeps a `ValidatedPolicy` on the store and evaluates it for the **accessing session** on every authorizing call: its permissions through `decide`, its prohibitions through `matched_prohibition`. Nothing is materialized, so a party-scoped rule applies only to the parties it names, a time window follows the session's clock, and an asset needs no materialization to be covered.
 
-- **Grants.** `Read` is added when some attached policy's `decide` permits `odrl:read` under every party membership the agent could have, on an eligible graph:
+- **Grants.** A mode is added when some attached policy's `decide` permits it under every party membership the agent could have: `Read` on `odrl:read`; `Write` when one policy permits both `odrl:modify` and `odrl:delete`; `Append` on `odrl:append` or wherever `Write` is granted. `Write` and `Append` come only from permissions that name `odrl:modify`, `odrl:delete` or `odrl:append` themselves: an `odrl:use` permission (which `decide` reads as permitting them) grants `Read` only, so a policy attached before this grants no new change mode. The deprecated `odrl:write` grants no change mode either (a prohibition naming it still removes both). The grant applies only on an eligible graph:
   - it exists now, and the last static WAC/ACP materialization covered it, so every deny that applies to it is in the view (a graph created or dropped since is not granted until the next materialization);
   - its static decision is authoritative (a governing ACL exists and the auth view is loaded), so a graph no access-control document governs is never granted;
-  - the auth view does not explicitly deny it (an ACP `acp:deny` wins);
-  - it is not an `.acl`/`.acr` document or a reserved graph.
+  - the auth view does not explicitly deny it (an ACP `acp:deny` wins; a deny of `Write` also stops the `Append` a `Write` grant carries);
+  - it is not an `.acl`/`.acr` document or a reserved graph;
+  - for `Write` and `Append`, it is not a container (a slash-terminated IRI), not a group document an access-control document references, and its last segment does not read as `.acl`/`.acr` in any case or percent-encoding.
 
-  No other mode is granted: creating and changing resources stay with the static decision. Count constraints are not evaluated per request, so a counted permission does not grant here.
+  Attached policies grant data changes, not graph management: a `Write` or `Append` grant applies only in an update made entirely of `INSERT DATA`, `DELETE DATA` and `DELETE`/`INSERT … WHERE` (an `ADD` is one of these). In an update that also has a `CLEAR`, `DROP`, `CREATE`, `LOAD`, `COPY` or `MOVE`, every write needs the static view, and a prohibition still removes it. `decide`, `wac_allow` and `accessible` report a granted `Write` or `Append` as the data-change right it is; to remove a whole resource, ask `decide_removal`, which counts only the static view and the prohibitions (the MCP `resource_delete` tool does).
+
+  `Control` is never granted, and a permission never grants a create: `decide_create` applies no grant, a graph that does not exist is never granted, and a container never gets a change mode, so a grant cannot extend to minting a child. Count constraints are not evaluated per request, so a counted permission does not grant here.
 - **Denies.** A mode is removed when an attached prohibition applies, after any grant, so prohibitions beat every allow.
 - **One gate.** Every entry point goes through it:
   - the reads behind the cached session set: `accessible`, `accessible_set`, the views and queries, `wac_allow` and `scoped_dataset`;

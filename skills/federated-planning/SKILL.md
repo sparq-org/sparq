@@ -366,7 +366,8 @@ since:
     `Relation`), so terms decode through the same `sparq_engine::srj_term`. The same port-scoping flows through `EgressGuard::check_addr`
     / `check_endpoint` and all three native ureq SSRF resolvers (`HttpTransport` /
     `HttpFragmentTransport` / discovery `HttpFetcher`). There is no wildcard port and no global
-    bypass; default-deny stays default-deny. Use `EgressGuard::is_allowed_port(host, port)` for the
+    bypass; default-deny stays default-deny. These agents ignore `HTTP_PROXY` / `HTTPS_PROXY` /
+    `ALL_PROXY`, so the vetted address is always the dialled one. Use `EgressGuard::is_allowed_port(host, port)` for the
     port-precise check.
 - **Phase 3 planner bridge + single-source interpreter** (`sq-j27p`) — the consumer of THIS
   planner's `JoinTree`. The plan speaks pattern/source **indices** only (no endpoint-URL

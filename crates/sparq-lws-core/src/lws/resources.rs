@@ -342,12 +342,13 @@ fn to_secs(ms: u64) -> u64 {
 }
 
 fn http_date(secs: u64) -> String {
-    httpdate::fmt_http_date(UNIX_EPOCH + Duration::from_secs(secs))
+    crate::http_date::format(UNIX_EPOCH + Duration::from_secs(secs))
+        .expect("a time after the epoch has an HTTP-date")
 }
 
-fn parse_http_date(v: Option<&str>) -> Option<u64> {
-    let t = httpdate::parse_http_date(v?.trim()).ok()?;
-    Some(t.duration_since(UNIX_EPOCH).ok()?.as_secs())
+/// An HTTP-date ([`crate::http_date::parse`]) in whole seconds since the epoch, negative before it.
+fn parse_http_date(v: Option<&str>) -> Option<i64> {
+    crate::http_date::parse(v?, SystemTime::now())
 }
 
 /// A strong entity tag, quoted.
@@ -504,7 +505,7 @@ fn evaluate(
             return Precondition::Failed;
         }
     } else if let (Some(since), Some(m)) = (pre.if_unmodified_since, modified_secs) {
-        if m > since {
+        if m as i64 > since {
             return Precondition::Failed;
         }
     }
@@ -518,8 +519,8 @@ fn evaluate(
         }
     } else if read {
         if let (Some(since), Some(m)) = (pre.if_modified_since, modified_secs) {
-            let now = to_secs(now_ms());
-            if since <= now && m <= since {
+            let now = to_secs(now_ms()) as i64;
+            if since <= now && m as i64 <= since {
                 return Precondition::NotModified;
             }
         }
@@ -531,8 +532,8 @@ fn evaluate(
 struct Preconditions {
     if_match: Option<TagList>,
     if_none_match: Option<TagList>,
-    if_unmodified_since: Option<u64>,
-    if_modified_since: Option<u64>,
+    if_unmodified_since: Option<i64>,
+    if_modified_since: Option<i64>,
 }
 
 impl Preconditions {
@@ -545,12 +546,8 @@ impl Preconditions {
             }
             TagList::parse(&lines.join(&b", "[..])).map(Some)
         };
-        let date = |n: header::HeaderName| -> Result<Option<u64>, ()> {
-            let mut lines = headers.get_all(n).iter();
-            Ok(match (lines.next(), lines.next()) {
-                (Some(v), None) => parse_http_date(v.to_str().ok()),
-                _ => None,
-            })
+        let date = |n: header::HeaderName| -> Result<Option<i64>, ()> {
+            Ok(parse_http_date(crate::http_date::single_line(headers, n)))
         };
         Ok(Self {
             if_match: list(header::IF_MATCH)?,
@@ -599,7 +596,7 @@ pub(crate) fn validators_of(resp: &Response) -> (Option<String>, Option<u64>) {
     };
     (
         h(header::ETAG),
-        parse_http_date(h(header::LAST_MODIFIED).as_deref()),
+        parse_http_date(h(header::LAST_MODIFIED).as_deref()).and_then(|s| u64::try_from(s).ok()),
     )
 }
 
@@ -6872,6 +6869,29 @@ mod tests {
         ];
         let r = call(&st, "PUT", "/x", &lines, "b").await;
         assert!(r.status().is_success(), "{}", r.status());
+        // A single date before 1970, or one naming a leap second, is a valid HTTP-date that the
+        // resource postdates: the write is refused rather than the date ignored.
+        for stale in [
+            "Wed, 31 Dec 1969 23:59:59 GMT",
+            "Thu, 31 Dec 1998 23:59:60 GMT",
+        ] {
+            let r = call(
+                &st,
+                "PUT",
+                "/x",
+                &[("if-unmodified-since", stale), text],
+                "b",
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{stale}");
+        }
+        // A year before 1900 is not an HTTP-date (RFC 5322 section 3.3), so it is ignored.
+        let lines = [
+            ("if-unmodified-since", "Sun, 31 Dec 1899 23:59:59 GMT"),
+            text,
+        ];
+        let r = call(&st, "PUT", "/x", &lines, "b").await;
+        assert!(r.status().is_success(), "{}", r.status());
         let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
         let lines = [("if-match", "\"other\""), ("if-match", tag.as_str()), text];
         let r = call(&st, "PUT", "/x", &lines, "b").await;
@@ -8502,9 +8522,10 @@ mod tests {
             assert_eq!(r.status(), StatusCode::CREATED);
         }
         let root = st.cfg.storage();
-        let since = httpdate::fmt_http_date(
+        let since = crate::http_date::format(
             std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
-        );
+        )
+        .unwrap();
         // Every touch of the root waits.
         let touch = st.locks.lock(&format!("{root}\0touch")).await.unwrap();
         let removal = {
@@ -8588,7 +8609,7 @@ mod tests {
             if let Some(date) = date {
                 for item in doc["items"].as_array().into_iter().flatten() {
                     let m = item["modified"].as_str().and_then(parse_rfc3339).unwrap();
-                    assert!(m as u64 <= date, "a member newer than the listing's date");
+                    assert!(m <= date, "a member newer than the listing's date");
                 }
             }
             (etag, doc)
