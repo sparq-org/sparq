@@ -118,8 +118,14 @@ Materialize the authorization view from the access-control documents, then enfor
   The store keeps the provenance and credentials of its last successful ACP
   materialization: `materialize_acp()` and every rebuild after `put_acl_acp`,
   `delete_acl_acp` or an update use them. Before any is passed there is no provenance ⇒
-  no `CreatorAgent`/`OwnerAgent` grant (fail-closed). To clear them, or when a holding
-  expires or is revoked, call `materialize_acp_with_credentials` with the current maps.
+  no `CreatorAgent`/`OwnerAgent` grant (fail-closed). `materialize_acp_with(&prov)` stores
+  `prov` with NO credentials (it is `materialize_acp_with_credentials(&prov, &empty)`). To
+  clear them, or when a holding expires or is revoked, call
+  `materialize_acp_with_credentials` with the current maps. The store forgets the creator
+  and owner of a resource that no longer exists (an update's `DROP`, or any rebuild that
+  finds it gone), so the same IRI created again inherits neither.
+  `store.record_creator(resource, webid)` adds a creator to the stored context for a
+  caller that creates resources through the store (the MCP server does, under ACP).
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
   `VerifiedCredentials::hold(agent_webid, requirement_iri)` asserts that the TRUSTED caller

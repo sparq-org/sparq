@@ -83,6 +83,23 @@ impl AccessProvenance {
         self.by_resource.is_empty()
     }
 
+    /// Keep the facts of only the resources `exists` accepts. Internal — the store drops
+    /// the facts of a resource that no longer exists, so one created again later under the
+    /// same IRI does not inherit them.
+    pub(crate) fn retain(&mut self, mut exists: impl FnMut(&str) -> bool) {
+        self.by_resource.retain(|r, _| exists(r));
+    }
+
+    /// Forget every fact about `resource`. Internal (see [`AccessProvenance::retain`]).
+    pub(crate) fn forget(&mut self, resource: &str) {
+        self.by_resource.remove(resource);
+    }
+
+    /// Forget every fact. Internal (see [`AccessProvenance::retain`]).
+    pub(crate) fn clear(&mut self) {
+        self.by_resource.clear();
+    }
+
     /// Iterate `(resource, creator?, owner?)` for every resource with a fact. Internal —
     /// used by the loader to synthesize `solidx:creator`/`solidx:owner` reasoning facts.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&str, Option<&str>, Option<&str>)> {

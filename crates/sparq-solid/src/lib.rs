@@ -535,7 +535,8 @@ impl PodStore {
     /// The view uses the trusted context (provenance and credentials) last passed to
     /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
     /// none until then; pass empty ones to those to clear it, and current ones when a
-    /// credential holding expires or is revoked.
+    /// credential holding expires or is revoked. The creator and owner of a resource that no
+    /// longer exists are dropped from it.
     pub fn materialize_acp(&mut self) -> Result<MaterializeStats, String> {
         self.rematerialize_acp_scoped(ReindexScope::Full)
     }
@@ -546,8 +547,30 @@ impl PodStore {
         &mut self,
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
-        let (provenance, credentials) = self.acp_context.clone();
+        let (mut provenance, credentials) = self.acp_context.clone();
+        provenance.retain(|r| self.resource_exists(r));
         self.materialize_acp_with_scoped(&provenance, &credentials, scope)
+    }
+
+    /// Record (TRUSTED) that `creator` created `resource`, in the stored ACP context the
+    /// store's own rebuilds use, for a caller that creates resources through the store
+    /// (such as the MCP server). It takes effect at the next ACP materialization. The store
+    /// forgets a resource's creator and owner once the resource no longer exists, at its
+    /// next rebuild or when an update drops it.
+    pub fn record_creator(&mut self, resource: &str, creator: &str) {
+        self.acp_context.0.set_creator(resource, creator);
+    }
+
+    /// Whether `resource` exists now: a stored graph of that name or, for a container, a
+    /// stored graph under it.
+    fn resource_exists(&self, resource: &str) -> bool {
+        self.graph.named.iter().any(|(n, _)| match n {
+            Term::NamedNode(g) => {
+                let g = g.as_str();
+                g == resource || (resource.ends_with('/') && g.starts_with(resource))
+            }
+            _ => false,
+        })
     }
 
     /// (Re-)materialize the ACP auth view using TRUSTED per-resource creator/owner facts,
@@ -561,7 +584,8 @@ impl PodStore {
     /// <self>` in a document they control cannot thereby grant themselves access (design
     /// doc §2.4). The store keeps `provenance`, with no credentials, for the ACP rebuilds it
     /// makes itself (after an access-control write or an update, and
-    /// [`PodStore::materialize_acp`]); call again when it changes.
+    /// [`PodStore::materialize_acp`]), and forgets a resource's facts once that resource no
+    /// longer exists; call again when it changes.
     ///
     /// # Errors
     ///
@@ -1041,7 +1065,26 @@ impl PodStore {
     /// this update or a later one) is covered only once a static materialization runs again.
     fn apply_update(&mut self, effects: &[sparq_engine::UpdateEffect]) -> Result<(), String> {
         self.forget_removed_coverage(effects);
-        sparq_engine::apply_effects(&mut self.graph, effects)
+        self.forget_removed_provenance(effects);
+        let applied = sparq_engine::apply_effects(&mut self.graph, effects);
+        let mut provenance = std::mem::take(&mut self.acp_context.0);
+        provenance.retain(|r| self.resource_exists(r));
+        self.acp_context.0 = provenance;
+        applied
+    }
+
+    /// Forget the creator and owner of every graph `effects` drops, so a graph of that name
+    /// created again, in this update or a later one, has none.
+    fn forget_removed_provenance(&mut self, effects: &[sparq_engine::UpdateEffect]) {
+        use spargebra::algebra::GraphTarget;
+        for effect in effects {
+            let sparq_engine::UpdateEffect::Drop(target) = effect else { continue };
+            match target {
+                GraphTarget::NamedNode(n) => self.acp_context.0.forget(n.as_str()),
+                GraphTarget::NamedGraphs | GraphTarget::AllGraphs => self.acp_context.0.clear(),
+                GraphTarget::DefaultGraph => {}
+            }
+        }
     }
 
     /// Drop from the static coverage every graph `effects` removes.

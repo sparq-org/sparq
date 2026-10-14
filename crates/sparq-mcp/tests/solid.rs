@@ -1816,3 +1816,73 @@ fn acp_trusted_context_survives_a_write_through_the_server() {
         "the credential deny still applies after the write"
     );
 }
+
+/// Resources created through the server record their creator for ACP `CreatorAgent`
+/// matchers, and a deleted resource's creator is forgotten: the same IRI created again
+/// outside the server has none.
+#[test]
+fn acp_creator_follows_resources_created_and_deleted_through_the_server() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    const BOB: &str = "https://bob.ex/card#me";
+    let docs = "https://pod.ex/docs/.acr";
+    let (d0, d1) = ("https://pod.ex/docs/d0", "https://pod.ex/docs/d1");
+    let nq = format!(
+        "<{d0}#it> <https://ex.dev/ns#k> \"v\" <{d0}> .
+<{docs}> <{ACP}accessControl> <{docs}#own> <{docs}> .
+<{docs}#own> <{ACP}apply> <{docs}#writer> <{docs}> .
+<{docs}#own> <{ACP}apply> <{docs}#lister> <{docs}> .
+<{docs}#lister> <{ACP}allow> <{ACL}Read> <{docs}> .
+<{docs}#lister> <{ACP}anyOf> <{docs}#mb> <{docs}> .
+<{docs}> <{ACP}memberAccessControl> <{docs}#c> <{docs}> .
+<{docs}#c> <{ACP}apply> <{docs}#writer> <{docs}> .
+<{docs}#c> <{ACP}apply> <{docs}#creator> <{docs}> .
+<{docs}#writer> <{ACP}allow> <{ACL}Write> <{docs}> .
+<{docs}#writer> <{ACP}anyOf> <{docs}#mb> <{docs}> .
+<{docs}#mb> <{ACP}agent> <{BOB}> <{docs}> .
+<{docs}#creator> <{ACP}allow> <{ACL}Read> <{docs}> .
+<{docs}#creator> <{ACP}allOf> <{docs}#mc> <{docs}> .
+<{docs}#mc> <{ACP}agent> <{ACP}CreatorAgent> <{docs}> .
+"
+    );
+    let store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture parses"));
+    let config = SolidServerConfig {
+        agent: Some(BOB.to_string()),
+        acp: true,
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    // bob lists and writes in /docs/ and reads only what he created.
+    let (_, is_err) = tool(&mut s, "resource_get", json!({"url": d0}));
+    assert!(is_err, "bob did not create d0, so he cannot read it");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": d1, "content": "<https://pod.ex/docs/d1#it> <https://ex.dev/ns#k> \"b\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes in /docs/: {text}");
+    let (text, is_err) = tool(&mut s, "resource_get", json!({"url": d1}));
+    assert!(!is_err, "bob created d1, so he reads it: {text}");
+    let (text, is_err) = tool(&mut s, "resource_delete", json!({"url": d1}));
+    assert!(!is_err, "bob deletes d1: {text}");
+
+    let mut store = s.into_store();
+    let again = Graph::load_dataset(
+        &format!("<{d1}#it> <https://ex.dev/ns#k> \"c\" <{d1}> .\n"),
+        "nquads",
+    )
+    .expect("parses");
+    store.graph.named.extend(again.named);
+    store.materialize_acp().expect("rebuild");
+    let bob = sparq_solid::Session {
+        agent: Some(BOB),
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    assert!(
+        !store.decide(&bob, d1, sparq_solid::Mode::Read).allow,
+        "d1 created again has no creator"
+    );
+}

@@ -1,7 +1,8 @@
 //! The trusted ACP context (creator/owner provenance and verified credentials) a store was
 //! materialized with stays in force across the rebuilds the store makes itself: after an
 //! authoritative `.acr` replace or delete, and after an authorized update, the grants and
-//! denies that context decides are unchanged.
+//! denies that context decides are unchanged. A resource that goes keeps none of it: one
+//! created again under the same IRI has no creator or owner.
 
 use sparq_core::Graph;
 use sparq_solid::{AccessProvenance, Mode, PodStore, Session, VerifiedCredentials};
@@ -16,8 +17,8 @@ const DAVE: &str = "https://dave.ex/card#me"; // no context at all
 const ADMIN: &str = "https://admin.ex/card#me";
 const FLAGGED: &str = "https://issuer.ex/req#Flagged";
 
-/// `/docs/` policies: everyone reads, the creator also writes, and the owner and holders
-/// of the flagged credential are denied Read. `/other.acr` is unrelated; ADMIN holds Write
+/// `/docs/` policies: everyone reads, the creator writes but is denied Read, and the owner
+/// and holders of the flagged credential are denied Read. `/other.acr` is unrelated; ADMIN holds Write
 /// on it through `/other.acr.acr`.
 fn store() -> PodStore {
     let docs = "https://pod.ex/docs/.acr";
@@ -86,6 +87,24 @@ fn store() -> PodStore {
             &format!("{docs}#mc"),
             "agent",
             format!("{ACP}CreatorAgent"),
+        ),
+        (
+            docs,
+            &format!("{docs}#c"),
+            "apply",
+            format!("{docs}#denyCreator"),
+        ),
+        (
+            docs,
+            &format!("{docs}#denyCreator"),
+            "deny",
+            format!("{ACL}Read"),
+        ),
+        (
+            docs,
+            &format!("{docs}#denyCreator"),
+            "allOf",
+            format!("{docs}#mc"),
         ),
         (
             docs,
@@ -183,6 +202,10 @@ fn assert_context_in_force(store: &PodStore, after: &str) {
         !holds(store, CAROL, Mode::Read),
         "{after}: the credential deny holds"
     );
+    assert!(
+        !holds(store, ALICE, Mode::Read),
+        "{after}: the creator deny holds"
+    );
     assert!(holds(store, DAVE, Mode::Read), "{after}: everyone reads");
     assert!(
         holds(store, ALICE, Mode::Write),
@@ -275,4 +298,74 @@ fn a_rolled_back_write_keeps_the_context() {
         .put_acl_acp("https://pod.ex/other.acr", bad, "ntriples")
         .is_err());
     assert_context_in_force(&store, "a rolled-back put_acl_acp");
+}
+
+fn alice() -> Session<'static> {
+    Session {
+        agent: Some(ALICE),
+        client: None,
+        issuer: None,
+        now: None,
+    }
+}
+
+/// The creator and owner of a resource that no longer exists are not applied again.
+fn assert_context_forgotten(store: &PodStore, after: &str) {
+    assert!(
+        !holds(store, ALICE, Mode::Write),
+        "{after}: the old creator does not write"
+    );
+    assert!(
+        holds(store, ALICE, Mode::Read),
+        "{after}: the creator deny no longer applies"
+    );
+    assert!(
+        holds(store, ERIN, Mode::Read),
+        "{after}: the owner deny no longer applies"
+    );
+    assert!(
+        !holds(store, CAROL, Mode::Read),
+        "{after}: the credential deny holds"
+    );
+}
+
+const D0_DATA: &str = "<https://pod.ex/docs/d0#it> <https://ex.dev/ns#k> \"w\"";
+
+#[test]
+fn a_dropped_resource_created_again_has_no_creator_or_owner() {
+    let mut store = store();
+    store
+        .update_as_acp(&alice(), "DROP GRAPH <https://pod.ex/docs/d0>")
+        .expect("the creator may remove d0");
+    let again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
+    store.graph.named.extend(again.named);
+    store.materialize_acp().expect("rebuild");
+    assert_context_forgotten(&store, "drop, then create");
+}
+
+#[test]
+fn a_resource_dropped_and_created_in_one_update_has_no_creator_or_owner() {
+    let mut store = store();
+    let update = format!("DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}");
+    store
+        .update_as_acp(&alice(), &update)
+        .expect("the creator may replace d0");
+    store.materialize_acp().expect("rebuild");
+    assert_context_forgotten(&store, "drop and create in one update");
+}
+
+#[test]
+fn a_resource_removed_outside_an_update_is_forgotten_at_the_next_rebuild() {
+    let mut store = store();
+    let d0 = store
+        .graph
+        .named
+        .iter()
+        .position(|(n, _)| n.to_string() == format!("<{D0}>"))
+        .expect("d0 is stored");
+    let removed = store.graph.named.remove(d0);
+    store.materialize_acp().expect("rebuild without d0");
+    store.graph.named.push(removed);
+    store.materialize_acp().expect("rebuild with d0 again");
+    assert_context_forgotten(&store, "remove, rebuild, restore");
 }

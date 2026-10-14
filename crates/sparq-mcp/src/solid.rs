@@ -751,6 +751,11 @@ impl SolidMcpServer {
         &self.store
     }
 
+    /// Consume the server, returning the pod store it served (for embedders / tests).
+    pub fn into_store(self) -> PodStore {
+        self.store
+    }
+
     /// Handle one raw JSON-RPC message — the pod twin of
     /// [`crate::McpServer::handle_message`], sharing the very same framing core
     /// (`Some(response)` for a request, `None` for a notification, and top-level
@@ -788,6 +793,18 @@ impl SolidMcpServer {
     }
 
     /// (Re-)materialize the authorization view under the configured model.
+    /// Record the session's agent as the creator of `url`, which this call creates, for the
+    /// ACP `CreatorAgent` matcher. The store forgets it if the resource goes, a rolled-back
+    /// creation included.
+    fn record_creation(&mut self, url: &str) {
+        if !self.config.acp {
+            return;
+        }
+        if let Some(agent) = self.config.agent.clone() {
+            self.store.record_creator(url, &agent);
+        }
+    }
+
     fn rematerialize(&mut self) -> Result<(), String> {
         if self.config.acp {
             self.store.materialize_acp().map(|_| ())
@@ -1505,6 +1522,9 @@ impl SolidMcpServer {
                 return Err(e);
             }
         };
+        if !existed {
+            self.record_creation(&url);
+        }
 
         // Re-materialize so the write is visible (a created doc enters the authorized
         // sets; a replaced group document takes effect) — rollback on error.
@@ -1605,6 +1625,7 @@ impl SolidMcpServer {
                 return Err(e);
             }
         };
+        self.record_creation(&url);
         if let Err(e) = self.rematerialize() {
             self.unlink_containment(&created_graphs, &added_links);
             self.restore_slot(&term, None);
