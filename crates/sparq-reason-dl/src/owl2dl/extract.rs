@@ -2274,7 +2274,21 @@ impl<'a> Extractor<'a> {
             self.emit(i, ax, [ou]);
             return Ok(());
         }
-        // n-ary axioms and negative assertions on blank nodes.
+        // n-ary axioms and negative assertions on blank nodes (Table 16 requires the node to
+        // be blank).
+        let node_form = [
+            v.all_disjoint_classes,
+            v.all_disjoint_properties,
+            v.all_different,
+            v.negative_property_assertion,
+        ];
+        if o != NO_ID && node_form.contains(&o) && !is_blank(self.dict, s) {
+            return Err(self.err(
+                ExtractErrorKind::Malformed,
+                "an n-ary axiom or negative property assertion node must be a blank node",
+                &[i],
+            ));
+        }
         if o != NO_ID && o == v.all_disjoint_classes {
             let (list, li) = self.required(s, v.members, i)?;
             let (items, mut used) = self.list(list)?;

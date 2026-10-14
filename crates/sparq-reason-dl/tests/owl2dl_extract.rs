@@ -1479,3 +1479,55 @@ fn non_xml_characters_are_ill_typed() {
         assert_eq!(v, vec![ViolationKind::IllTypedLiteral], "{lit}");
     }
 }
+
+// ===================== sixth review round =====================
+
+#[test]
+fn n_ary_axiom_nodes_must_be_blank() {
+    let base = ":a a owl:NamedIndividual . :b a owl:NamedIndividual .";
+    for body in [
+        format!("{base} :n a owl:AllDifferent ; owl:members ( :a :b ) ."),
+        format!("{DECLS} :n a owl:AllDisjointClasses ; owl:members ( :A :B ) ."),
+        format!("{DECLS} :n a owl:AllDisjointProperties ; owl:members ( :p :q ) ."),
+        format!("{base} {DECLS} :n a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ; owl:assertionProperty :p ; owl:targetIndividual :b ."),
+    ] {
+        assert_eq!(err(&body).kind, ExtractErrorKind::Malformed, "{body}");
+    }
+}
+
+#[test]
+fn repeated_datatype_definitions_are_one_definition() {
+    let def = "[ a rdfs:Datatype ; owl:datatypeComplementOf xsd:string ]";
+    let v = violations(&format!(
+        ":dt a rdfs:Datatype . :dt owl:equivalentClass {def} . :dt owl:equivalentClass {def} ."
+    ));
+    assert!(v.is_empty(), "{v:?}");
+    // Different ranges are two definitions.
+    let v = violations(":dt a rdfs:Datatype ; owl:equivalentClass xsd:integer, xsd:string .");
+    assert!(
+        v.contains(&ViolationKind::InvalidDatatypeDefinition),
+        "{v:?}"
+    );
+}
+
+#[test]
+fn regularity_does_not_order_hierarchy_edges() {
+    // a∘e ⊑ b and c∘f ⊑ d need a, e < b and c, f < d; b ⊑ c and d ⊑ a forbid only the
+    // reverse pairs. A strict order exists.
+    let decl: String = ["a", "b", "c", "d", "e", "f"]
+        .iter()
+        .map(|p| format!(":{p} a owl:ObjectProperty . "))
+        .collect();
+    let v = violations(&format!(
+        "{decl} :b owl:propertyChainAxiom ( :a :e ) . :d owl:propertyChainAxiom ( :c :f ) . :b rdfs:subPropertyOf :c . :d rdfs:subPropertyOf :a ."
+    ));
+    assert!(v.is_empty(), "{v:?}");
+    // a∘e ⊑ b with b ⊑ a forbids a < b.
+    let v = violations(&format!(
+        "{decl} :b owl:propertyChainAxiom ( :a :e ) . :b rdfs:subPropertyOf :a ."
+    ));
+    assert!(
+        v.contains(&ViolationKind::IrregularPropertyHierarchy),
+        "{v:?}"
+    );
+}
