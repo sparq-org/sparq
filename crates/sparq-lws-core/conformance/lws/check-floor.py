@@ -22,48 +22,57 @@ def module(test_id: str) -> str:
     return "notifications/webhook" if path.startswith("notifications/") else path.split("/")[0]
 
 
-# Touchstone's outcomes (harness-core results/Outcome.java).
+# Touchstone's outcomes (harness-core results/Outcome.java) and the members of a result in its
+# report.json.
 OUTCOMES = {"passed", "failed", "cantTell", "inapplicable", "untested"}
+FIELDS = {"anchor", "detail", "durationMillis", "id", "label", "level", "outcome", "reason", "requirements"}
 
 
-def malformed(tests) -> list:
-    """Why `tests` is not a list of uniquely identified results, each with a known outcome."""
+def parse(tests) -> tuple:
+    """A report's results as `{id: (outcome, level)}`, and why it is not well formed: each result
+    is an object of known members with a string id and level and a known outcome, and no id is
+    repeated. Nothing is counted from a report that is not well formed."""
     if not isinstance(tests, list):
-        return ["the report's tests are not a list"]
-    out, seen = [], set()
+        return {}, ["the report's tests are not a list"]
+    results, bad = {}, []
     for t in tests:
-        if not (isinstance(t, dict) and isinstance(t.get("id"), str) and isinstance(t.get("level"), str)):
-            out.append(f"  malformed result: {t!r}")
-        elif t.get("outcome") not in OUTCOMES:
-            out.append(f"  unknown outcome {t.get('outcome')!r}: {t['id']}")
-        elif t["id"] in seen:
-            out.append(f"  duplicate result: {t['id']}")
+        if not isinstance(t, dict):
+            bad.append(f"  malformed result: {t!r}")
+            continue
+        test_id, outcome, level = t.get("id"), t.get("outcome"), t.get("level")
+        if set(t) - FIELDS:
+            bad.append(f"  unknown members {sorted(set(t) - FIELDS)}: {test_id!r}")
+        elif not isinstance(test_id, str) or not isinstance(level, str):
+            bad.append(f"  malformed result: {t!r}")
+        elif outcome not in OUTCOMES:
+            bad.append(f"  unknown outcome {outcome!r}: {test_id}")
+        elif test_id in results:
+            bad.append(f"  duplicate result: {test_id}")
         else:
-            seen.add(t["id"])
-    return out
+            results[test_id] = (outcome, level)
+    return results, bad
 
 
-def check(tests: list, floor_doc: dict) -> tuple:
-    """Whether `tests` (a report's) hold `floor_doc` (floor.json's), and the lines to print. A
-    report that is not well formed (see `malformed`) holds nothing."""
-    bad = malformed(tests)
+def check(tests, floor_doc: dict) -> tuple:
+    """Whether `tests` (a report's) hold `floor_doc` (floor.json's), and the lines to print."""
+    results, bad = parse(tests)
     if bad:
         return False, bad
     floor, supported = floor_doc["passed"], set(floor_doc.get("supported", []))
     ok, out = True, []
     passed, total = Counter(), Counter()
-    for t in tests:
-        m = module(t["id"])
+    for test_id, (outcome, _) in results.items():
+        m = module(test_id)
         total[m] += 1
-        if t["id"] in supported:
-            held = t["outcome"] == "inapplicable"
+        if test_id in supported:
+            held = outcome == "inapplicable"
             passed[m] += held
             if not held:
                 ok = False
-                out.append(f"  {t['outcome']:9} supported feature lost: {t['id']}")
+                out.append(f"  {outcome:9} supported feature lost: {test_id}")
         else:
-            passed[m] += t["outcome"] == "passed"
-    for missing in sorted(supported - {t["id"] for t in tests}):
+            passed[m] += outcome == "passed"
+    for missing in sorted(supported - set(results)):
         ok = False
         out.append(f"  missing   supported feature not run: {missing}")
     for m in sorted(set(total) | set(floor)):
@@ -73,9 +82,9 @@ def check(tests: list, floor_doc: dict) -> tuple:
             ok = False
             line += "  BELOW FLOOR"
         out.append(line)
-    for t in tests:
-        if t["outcome"] in ("failed", "cantTell"):
-            out.append(f"  {t['outcome']:9} {t['level']:6} {t['id']}")
+    for test_id, (outcome, level) in results.items():
+        if outcome in ("failed", "cantTell"):
+            out.append(f"  {outcome:9} {level:6} {test_id}")
     return ok, out
 
 
@@ -110,10 +119,12 @@ def self_test():
     inapp = {"id": probe, "outcome": "inapplicable", "level": "MUST"}
     failed = {"id": "core/a#z", "outcome": "failed", "level": "MUST"}
     assert not check(tests_with(failed, inapp, dict(inapp)), floor_doc)[0]
+    assert parse(tests_with(inapp, dict(inapp)))[1] == [f"  duplicate result: {probe}"]
     assert not check(tests_with({"id": "core/a#x", "outcome": "passed", "level": "MUST"}, inapp), floor_doc)[0]
     for odd in ({"id": "core/a#z", "outcome": "ok", "level": "MUST"},
                 {"id": "core/a#z", "outcome": "passed"},
                 {"id": 7, "outcome": "passed", "level": "MUST"},
+                {"id": "core/a#z", "outcome": "passed", "level": "MUST", "extra": 1},
                 "core/a#z"):
         assert not check(tests_with(odd, inapp), floor_doc)[0], odd
     assert not check({"core/a#x": "passed"}, floor_doc)[0]
