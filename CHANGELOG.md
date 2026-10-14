@@ -27,6 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first round of each stratum is now naive, as the text engine's is, instead of seeding
   each join position with the whole store. (#6951)
 
+- **sparq-reason (N3):** a forward rule whose premise declares its own universal
+  (`{ @forAll :x. :x :p :o } => { … }`, W3C `simple_forAll_premise.n3`) now fires where
+  the store proves the quantified premise, instead of being refused. A premise universal
+  binds only a universal of the store: a document-level `@forAll` one, or inside a
+  `log:conclusion` / `log:supports` run that formula's own (never an enclosing formula's).
+  Distinct premise universals need distinct store universals, and no other variable of the
+  firing may mention one, at any depth. A ground fact never proves it. Supported where the
+  universal is a subject or object (or in a list or quoted triple there) of a
+  stored-predicate atom, in a document with no backward rules; every other placement, and
+  an N3 query document, is still refused with the same error. The `compiled-rules` engine
+  compiles such a rule as one that never fires (its store is ground), and
+  `MaterializedN3Graph` evaluates it in fallback mode. (#6882)
+
 - **sparq-core:** `net::is_forbidden_ip` is the one outbound-address classifier behind the
   SSRF guards of SERVICE, sparq-fedclient and the LWS federation client, which re-export it
   under the names they had; its answers are unchanged (#6927).

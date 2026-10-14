@@ -3,8 +3,10 @@
 //! The parser names such a universal by its declared IRI plus its de Bruijn distance to
 //! the declaring formula (`?__uf.<n>.<iri>`), so the name is unforgeable (a `.` cannot
 //! occur in a source quickvar) and canonical (alpha-equivalent copies of a formula are the
-//! same term). Rules with premise-local universals are rejected; every other formula-level
-//! universal belongs to its quoted formula, matches only itself and is never substituted. Document-level `@forAll` is unchanged.
+//! same term). A rule premise's own universal is proved only by an independent universal
+//! of the store (GH #6882), and refused where it cannot be matched soundly; every other
+//! formula-level universal belongs to its quoted formula, matches only itself and is never
+//! substituted. Document-level `@forAll` is unchanged.
 
 use sparq_reason::n3::{parser, Term};
 use sparq_reason::{reason_n3_pass_all, reason_n3_terms, RuleVars};
@@ -37,18 +39,22 @@ fn vars(t: &Term, out: &mut Vec<String>) {
 // These entry-point tests exercise validate_rule_quantifiers in every engine.
 const QUANTIFIER_ERROR: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
 
+/// Rules whose premise declares its own universal where no engine matches it soundly: a
+/// builtin operand, a quoted formula, a variable predicate, a list relation, a backward
+/// rule, or a document with backward rules (GH #6882 supports the rest).
 fn premise_cases() -> Vec<String> {
     [
-        "{ @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }. :c :p :b.",
-        "@forAll :y. :y :p :b. { @forAll :x. :x :p :b } => { :hit :by :rule }.",
-        "@forAll :z. :z :p :z. { @forAll :x, :y. :x :p :y } => { :hit :by :rule }.",
-        // An ordinary variable must not alias a premise-local universal.
-        "@forAll :z. :z :p :z. { @forAll :x. :x :p ?y } => { :hit :by :rule }.",
         "{ @forAll :x. ( 1 2 ) math:sum :x } => { :hit :by :rule }.",
-        "{ @forAll :x. :x :p :b } => { ?__uf0_x :q :b }.",
-        "{ @forAll :x. :x :p :b } => { ?__up_x :q :b }.",
+        "@forAll :z. :z :p :b. { @forAll :x. :x :p :b. :x log:notEqualTo :c } => { :hit :by :rule }.",
+        // In a quoted formula of a stored-predicate atom.
+        "@forAll :z. :a :says { :z :p :b }. { @forAll :x. :a :says { :x :p :b } } => { :hit :by :rule }.",
+        // A variable predicate and the list relations evaluate list terms too.
+        "@forAll :z. :z :p :b. { @forAll :x. :x ?p :b } => { :hit :by :rule }.",
+        "{ @forAll :x. ( :x ) rdf:first :x } => { :hit :by :rule }.",
         // Backward rules have the same unsupported antecedent.
         "{ :hit :by :rule } <= { @forAll :x. :x :p :b }.",
+        // A backward proof would read a store universal in a goal as a variable.
+        "@forAll :z. :z :p :b. { @forAll :x. :x :p :b } => { :hit :by :rule }. { :c :q :d } <= { :c :p :b }.",
     ].iter().map(|src| format!("@prefix : <{EX}>. {src}")).collect()
 }
 
@@ -77,7 +83,7 @@ fn scope_cases() -> Vec<String> {
 }
 
 #[test]
-fn naive_rejects_premise_own_forall() {
+fn naive_rejects_unsupported_premise_universals() {
     for src in premise_cases() {
         assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), QUANTIFIER_ERROR, "{src}");
     }
@@ -92,7 +98,7 @@ fn naive_rejects_forall_in_scope_patterns() {
 
 #[cfg(feature = "compiled-rules")]
 #[test]
-fn compiled_rejects_premise_own_forall() {
+fn compiled_rejects_unsupported_premise_universals() {
     for src in premise_cases() {
         assert_eq!(sparq_reason::n3::compiled::compile(&src).unwrap_err(), QUANTIFIER_ERROR, "{src}");
     }
@@ -107,7 +113,7 @@ fn compiled_rejects_forall_in_scope_patterns() {
 }
 
 #[test]
-fn incremental_rejects_premise_own_forall() {
+fn incremental_rejects_unsupported_premise_universals() {
     for src in premise_cases() {
         let err = sparq_reason::MaterializedN3Graph::new(&src, &[]).err().expect("rejected");
         assert_eq!(err, QUANTIFIER_ERROR, "{src}");
@@ -124,17 +130,199 @@ fn incremental_rejects_forall_in_scope_patterns() {
 
 #[test]
 fn a_query_rejects_premise_own_forall() {
+    // A query premise is matched with no firing check: refused.
     let src = format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
     assert_eq!(sparq_reason::reason_n3_query_terms("", &src).unwrap_err(), QUANTIFIER_ERROR);
 }
 
+// GH #6882: a rule premise's own `@forAll` (`{ @forAll :x. :x :p :b } => …`) reads
+// `∀x. x :p :b`. Only a universal of the store proves it, and only when nothing else the
+// firing binds depends on that universal. Each case records what EYE (eyereasoner npm
+// 21.1.25) derives where it differs.
+
+/// Does the premise-universal rule of `src` (concluding `:hit :by :rule`) fire?
+fn hits(src: &str) -> bool {
+    has(&closure(src), "hit", "by", "rule")
+}
+
 #[test]
-fn a_nested_closure_rejects_premise_own_forall() {
-    // An inner premise cannot use the enclosing formula's lifted universal as its own.
-    let src = format!("@prefix : <{EX}>.
-        :k :is {{ @forAll :x. :x :p :b. {{ @forAll :y. :y :p :b }} => {{ :hit :by :rule }} }}.
-        {{ :k :is ?f. ?f log:conclusion ?g }} => {{ :result :is ?g }}.");
-    assert_eq!(reason_n3_terms(&src, None).err().expect("rejected"), format!("in a nested closure: {QUANTIFIER_ERROR}"));
+fn a_ground_fact_does_not_prove_a_premise_universal() {
+    // `:c :p :b` is one instance, not `∀x. x :p :b` (EYE agrees).
+    assert!(!hits(":c :p :b. { @forAll :x. :x :p :b } => { :hit :by :rule }."));
+    assert!(!hits(":c :p :b. { @forAll :x. :x :p :b } => { @forAll :x. :x :q :b. :hit :by :rule }."));
+}
+
+#[test]
+fn a_stored_universal_proves_a_premise_universal() {
+    assert!(hits("@forAll :y. :y :p :b. { @forAll :x. :x :p :b } => { :hit :by :rule }."));
+    // Through two atoms on the same store universal.
+    assert!(hits("@forAll :z. :z :p :b. :z :q :r. { @forAll :x. :x :p :b. :x :q :r } => { :hit :by :rule }."));
+    // Inside a list and a quoted triple of the stored term.
+    assert!(hits("@forAll :z. :a :q ( :z :c ). { @forAll :x. :a :q ( :x :c ) } => { :hit :by :rule }."));
+    assert!(hits("@forAll :z. :a :q <<( :z :r :s )>>. { @forAll :x. :a :q <<( :x :r :s )>> } => { :hit :by :rule }."));
+    // The universal never reaches the conclusion: a quickvar spelled like it is unbound.
+    let facts = closure("@forAll :z. :z :p :b. { @forAll :x. :x :p :b } => { ?__up_x :q :b. ?__uf0_x :q :b. :hit :by :rule }.");
+    assert!(has(&facts, "hit", "by", "rule"), "{facts:?}");
+    assert!(!facts.iter().any(|f| f[1] == iri("q")), "{facts:?}");
+}
+
+/// The W3C N3 test `tests/N3Tests/quantification/simple_forAll_premise.n3` (in no
+/// manifest), verbatim.
+#[test]
+fn w3c_simple_for_all_premise() {
+    let src = "@prefix : <http://example.org#>.\n\n@prefix : <http://example.org#>.\n\n\
+               @forAll :x. :x :p :o.\n\n{@forAll :y. :y :p :o }=>{:test :was :successful}. \n";
+    let facts = reason_n3_terms(src, None).expect("reasons").facts;
+    let ex = |l: &str| Term::Iri(format!("http://example.org#{l}"));
+    assert!(facts.contains(&[ex("test"), ex("was"), ex("successful")]), "{facts:?}");
+}
+
+#[test]
+fn an_ordinary_variable_must_not_alias_the_store_universal() {
+    // `∀z. z :p z` does not give `∃y ∀x. x :p y`. (EYE fires on both.)
+    assert!(!hits("@forAll :z. :z :p :z. { @forAll :x. :x :p ?y } => { :hit :by :rule }."));
+    // The same with the ordinary variable matched first.
+    assert!(!hits("@forAll :z. :z :p :z. :z :q :z. { @forAll :x. ?y :q ?y. :x :p ?y } => { :hit :by :rule }."));
+    // A different store universal is independent: `∀z ∀w. z :p w` gives `∀x. x :p w`.
+    let facts = closure("@forAll :z, :w. :z :p :w. { @forAll :x. :x :p ?v } => { :hit :by :rule. :hit :with { :v :is ?v } }.");
+    assert!(has(&facts, "hit", "by", "rule"), "{facts:?}");
+}
+
+#[test]
+fn an_ordinary_variable_must_not_carry_the_store_universal_in_a_value() {
+    // ?l binds a list, a quoted formula or a quoted triple that mentions `:z`.
+    for value in ["( :z )", "{ :z :r :s }", "<<( :z :r :s )>>"] {
+        let src = format!("@forAll :z. :z :p :b. :a :q {value}. {{ @forAll :x. :x :p :b. :a :q ?l }} => {{ :hit :by :rule }}.");
+        assert!(!hits(&src), "{src}");
+        // With the ordinary variable matched first.
+        let src = format!("@forAll :z. :z :p :b. :a :q {value}. {{ @forAll :x. :a :q ?l. :x :p :b }} => {{ :hit :by :rule }}.");
+        assert!(!hits(&src), "{src}");
+    }
+    // A value with no store universal in it is fine.
+    assert!(hits("@forAll :z. :z :p :b. :a :q ( :c ). { @forAll :x. :x :p :b. :a :q ?l } => { :hit :by :rule }."));
+}
+
+#[test]
+fn distinct_premise_universals_need_distinct_store_universals() {
+    // `∀z. z :p z` does not give `∀x ∀y. x :p y` (EYE agrees)...
+    assert!(!hits("@forAll :z. :z :p :z. { @forAll :x, :y. :x :p :y } => { :hit :by :rule }."));
+    // ...but does give `∀x. x :p x`, and `∀z ∀w. z :p w` gives `∀x ∀y. x :p y`.
+    assert!(hits("@forAll :z. :z :p :z. { @forAll :x. :x :p :x } => { :hit :by :rule }."));
+    assert!(hits("@forAll :z, :w. :z :p :w. { @forAll :x, :y. :x :p :y } => { :hit :by :rule }."));
+}
+
+#[test]
+fn a_transitivity_shaped_rule_still_checks_its_premise_universal() {
+    // `{ ?x :P ?y. ?y :P ?z } => { ?x :P ?z }` has a fast path; with `?y` the premise's own
+    // universal the rule is `∀x ∀z. (∀y. x :P y ∧ y :P z) → x :P z`.
+    let rule = "{ @forAll :y. ?x :P :y. :y :P ?z } => { ?x :P ?z }.";
+    let facts = closure(&format!(":a :P :b. :b :P :c. {rule}"));
+    assert!(!has(&facts, "a", "P", "c"), "{facts:?}");
+    let facts = closure(&format!("@forAll :u. :a :P :u. :u :P :c. {rule}"));
+    assert!(has(&facts, "a", "P", "c"), "{facts:?}");
+}
+
+#[test]
+fn an_ordinary_variable_still_binds_no_universal_fact_into_a_conclusion() {
+    // Unchanged: `?s` binds the universal, and a conclusion left with a variable at the
+    // triple level is not asserted.
+    let facts = closure("@forAll :x. :x :p :o. { ?s :p :o } => { :hit :by ?s }.");
+    assert!(!facts.iter().any(|f| f[0] == iri("hit")), "{facts:?}");
+}
+
+/// The closure-run cases: `:k`'s formula is closed by `log:conclusion`, and the outer
+/// rule reports whether the inner premise-universal rule fired there.
+fn fires_in_closure(formula: &str) -> bool {
+    let src = format!(
+        ":k :is {formula}.\n\
+         {{ :k :is ?f. ?f log:conclusion ?g. ?g log:includes {{ :hit :by :rule }} }} => {{ :closure :fired :yes }}.\n"
+    );
+    has(&closure(&src), "closure", "fired", "yes")
+}
+
+#[test]
+fn a_closure_run_s_own_universal_proves_a_premise_universal() {
+    assert!(fires_in_closure("{ @forAll :x. :x :p :b. { @forAll :y. :y :p :b } => { :hit :by :rule } }"));
+    assert!(!fires_in_closure("{ :c :p :b. { @forAll :y. :y :p :b } => { :hit :by :rule } }"));
+    assert!(!fires_in_closure("{ @forAll :x. :x :p :x. { @forAll :y. :y :p ?v } => { :hit :by :rule } }"));
+}
+
+#[test]
+fn an_outer_universal_does_not_prove_a_closure_s_premise_universal() {
+    // The document's `:z` is a free parameter of the closed formula.
+    let src = "@forAll :z. :k :is { :z :p :b. { @forAll :y. :y :p :b } => { :hit :by :rule } }.\n\
+               { :k :is ?f. ?f log:conclusion ?g. ?g log:includes { :hit :by :rule } } => { :closure :fired :yes }.\n";
+    assert!(!has(&closure(src), "closure", "fired", "yes"));
+    // An enclosing formula's universal, in a closure nested in another closure's run.
+    let src = ":k :is { @forAll :x. :x :p :b.\n\
+                 :k2 :is { :x :p :b. { @forAll :y. :y :p :b } => { :hit :by :rule } }.\n\
+                 { :k2 :is ?f. ?f log:conclusion ?g. ?g log:includes { :hit :by :rule } } => { :inner :fired :yes } }.\n\
+               { :k :is ?f. ?f log:conclusion ?g. ?g log:includes { :inner :fired :yes } } => { :closure :fired :yes }.\n";
+    assert!(!has(&closure(src), "closure", "fired", "yes"));
+    // The same nesting with the inner formula's own universal does fire.
+    let src = ":k :is { :c :p :b.\n\
+                 :k2 :is { @forAll :x. :x :p :b. { @forAll :y. :y :p :b } => { :hit :by :rule } }.\n\
+                 { :k2 :is ?f. ?f log:conclusion ?g. ?g log:includes { :hit :by :rule } } => { :inner :fired :yes } }.\n\
+               { :k :is ?f. ?f log:conclusion ?g. ?g log:includes { :inner :fired :yes } } => { :closure :fired :yes }.\n";
+    assert!(has(&closure(src), "closure", "fired", "yes"));
+}
+
+/// The W3C `nested_universal*.n3` premises quote a RULE (`{ @forAll :x. { :x :p :o } =>
+/// { … } }`), which matches only a rule stored as a fact; this engine keeps a document's
+/// rules out of its facts, and a premise universal inside a quoted formula is refused.
+#[test]
+fn a_premise_universal_in_a_quoted_rule_is_refused() {
+    let src = "@prefix : <http://example.org#>.\n{?x :p :o}=>{?x :p2 :o2}.\n\
+               {@forAll :x. {:x :p :o}=>{:x :p2 :o2}  }=>{:test :was :successful}.";
+    assert_eq!(reason_n3_terms(src, None).err().expect("rejected"), QUANTIFIER_ERROR);
+}
+
+#[cfg(feature = "compiled-rules")]
+#[test]
+fn compiled_premise_universals_never_fire_on_ground_ids() {
+    // A compiled store holds ground ids only, so the rule compiles and never fires, as the
+    // text engine never fires it over ground facts. A document universal is refused.
+    use sparq_reason::n3::compiled::{compile, eval, intern_facts};
+    let rules = format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}. {{ :c :p :b }} => {{ :plain :rule :fires }}.");
+    let compiled = compile(&rules).expect("compiles");
+    let mut dict = sparq_core::dict::Dict::new();
+    let facts = intern_facts(&mut dict, &format!("@prefix : <{EX}>. :c :p :b.")).expect("facts");
+    let closure = eval(&mut dict, &facts, &compiled).expect("closure");
+    assert_eq!(closure.len(), 2, "the fact and the plain rule's derivation only");
+    let text = reason_n3_terms(&format!("{rules} :c :p :b."), None).expect("reasons").facts;
+    assert!(!has(&text, "hit", "by", "rule") && has(&text, "plain", "rule", "fires"), "{text:?}");
+    let stored = format!("@prefix : <{EX}>. @forAll :y. :y :p :b. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
+    assert!(compile(&stored).is_err());
+}
+
+#[cfg(feature = "explain")]
+#[test]
+fn a_premise_universal_firing_is_explained_by_the_stored_universal() {
+    let src = format!("@prefix : <{EX}>. @forAll :y. :y :p :b. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
+    let proof = sparq_reason::why_n3_document(&src, &[iri("hit"), iri("by"), iri("rule")], sparq_reason::ExplainOpts::default())
+        .expect("parses")
+        .expect("derived");
+    let nodes = proof.nodes();
+    let root = nodes.last().expect("root");
+    assert_eq!(root.premises.len(), 1, "{nodes:?}");
+    let premise = &nodes[root.premises[0] as usize];
+    assert_eq!(premise.rule, "asserted");
+    assert!(premise.conclusion[1].contains("http://ex/p"), "{premise:?}");
+}
+
+#[test]
+fn incremental_premise_universals_match_the_batch_engine() {
+    // The counting path leaves such a rule to the batch engine, which fires it.
+    let src = format!("@prefix : <{EX}>. @forAll :y. :y :p :b. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
+    let g = sparq_reason::MaterializedN3Graph::new(&src, &[]).expect("supported");
+    assert!(g.fallback_reason().is_some_and(|r| r.contains("premise-local @forAll")), "{:?}", g.fallback_reason());
+    assert!(g.contains(&[iri("hit"), iri("by"), iri("rule")]));
+    // A ground fact inserted later does not prove it.
+    let src = format!("@prefix : <{EX}>. {{ @forAll :x. :x :p :b }} => {{ :hit :by :rule }}.");
+    let mut g = sparq_reason::MaterializedN3Graph::new(&src, &[]).expect("supported");
+    assert_eq!(g.insert(&[[iri("c"), iri("p"), iri("b")]]), 1);
+    assert!(g.contains(&[iri("c"), iri("p"), iri("b")]));
+    assert!(!g.contains(&[iri("hit"), iri("by"), iri("rule")]));
 }
 
 #[test]
