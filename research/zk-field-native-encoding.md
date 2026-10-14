@@ -1056,6 +1056,10 @@ the language-tag domain rather than on a check, and it stays an assumption until
 fail-closed ingest/circuit assert §14.1 names actually ships. No soundness or privacy
 property is claimed for any of the three, pending the external sign-off.
 
+The band-exclusion rule itself is **met by `DualLeafV2`** (§14.5) as an asserted,
+checkable invariant; `DualLeafV1` retains the in-band tag (§14.4). Registration under
+CR-G8 / sq-qhy4 is unchanged either way — being checkable is not being audited.
+
 ### 14.4 The shipped `DualLeafV1` host builder (sq-vvfte)
 
 The §11 bead 2 host builder is in `crates/sparq-zk/src/dual_leaf.rs` behind the
@@ -1104,3 +1108,55 @@ only the per-term leaf. Nothing in `encode.rs` / `commit.rs` calls it, so the de
 `string-canonical` pipeline and every checked-in vector are byte-unchanged. The one-time
 recommit of §3.5 (§10 Q4) has therefore not happened. It is needed only if `DualLeafV1`
 replaces `StringCanonicalV1` as the default, and that remains a maintainer call.
+
+**Superseded for new issuance.** Everything above is still what `DualLeafV1` ships, and V1
+commitments stay verifiable, but the method is no longer production-selectable: the
+dual-leaf method for new issuance is `DualLeafV2` (§14.5).
+
+### 14.5 `DualLeafV2` — the versioned scheme that discharges the §14.1 reserved-tag requirement
+
+`DualLeafV1` ships the in-band tag §14.4 records. Rather than change V1's constants —
+which would invalidate every V1 commitment and vector — the scheme is **versioned**:
+`crates/sparq-zk/src/dual_leaf_v2.rs` (same `dual-leaf` feature, off by default) carries a
+second dual-leaf method, scheme IRI `https://sparq.dev/ns/zk#poseidon2-dualleaf-v2`. V1 is
+unchanged byte-for-byte and stays **recognised and verifiable**; V2 is the dual-leaf method
+`CommitmentMethod::is_production_selectable` admits for **new issuance**.
+
+**(a) The reserved tag is out of band.** `dual_leaf_v2::value_none()` is derived in BLAKE3's
+key-derivation mode under its own context string and re-derived with a `u32` counter part
+until it falls **outside** the reachable handle band `[0, 2^64) ∪ (p − 2^64, p)`. The
+exclusion is asserted by a host test over `is_in_handle_band`, which is exactly the
+checkable invariant §14.1 asks for, so §14.1's requirement is **met for V2**. `NO_VALUE`
+mirrors it unfolded, as in V1. The Noir-side compile-time check §14.1 also names is NOT
+part of this slice: no shipped member takes a degenerate component as an in-circuit
+operand, and it belongs with the `scan.nr` / `join.nr` leaf recompute (§11 bead 3).
+
+**(b) Lane constants are framed in a separate hash domain.** A V2 value-lane
+`DATATYPE_CONST` is `derive_key(LANE_CONTEXT, u32_be(len iri) ‖ iri ‖ u32_be(len params) ‖
+params)`, where `params` names the lane's sub-domain or scale (`""`, `"scale=<fd>"`,
+`"epochscale=3"`, `"bit"`). The length framing makes a lane constant injective in
+`(datatype, params)` jointly, for **arbitrary byte strings** — `sparq-core`'s native
+N-Triples loader does not validate datatype IRIs, so the argument must not rest on IRI
+syntax. A V2 string-lane leaf keeps folding the **plain** `blake3_field(datatype)`, a
+different BLAKE3 mode, so a lane constant differs from the degenerate fold of every byte
+string. Both statements are properties under BLAKE3's mode domain separation and, after
+the 248-bit field reduction, its collision/preimage resistance — not unconditional facts.
+V2's language constants move into their own key-derivation context the same way.
+
+**(c) The boolean lane gets its own bit-constrained member.** `filter_value_dl_bool`
+(`zk/compose/compose_core/src/filter_value_bool.nr`) has `filter_value_dl_int`'s public
+layout field-for-field and additionally constrains the witnessed `VALUE_HOOK` **and** the
+public `bound` to `{0, 1}` (`v * (v - 1) == 0`). The shared integer member range-decomposes
+its handle to the whole `u64` domain, which it legitimately needs, and adding constraints to
+it would move its gate count and its measured evidence — hence a separate member. V2's
+boolean lane targets it; V1's keeps sharing the integer member, unchanged. `xsd:boolean`,
+`xsd:dateTime` and `xsd:date` remain **unrouted** in the whole-graph builder for V2 as for
+V1 (§14.4), so their literals still take the string lane unless an encoder is called
+directly.
+
+**What V2 does NOT discharge.** The §14.1 **`LANG_NONE` assumption** stands: V2 still folds
+`LANG_NONE = 1` in the no-language slot and asserts nothing about a real `LANG_CONST`
+differing from it, so §14.3's registration of that assumption is unchanged. Nor does
+anything here become an audited property: both dual-leaf versions carry the same INV-VL
+downgrade (value↔lexical agreement rests on trusted-issuer honesty) and the whole ZK estate
+remains NOT externally audited under CR-G8 / sq-qhy4.
