@@ -703,16 +703,26 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
-/// Whether the resource at `uri` was there before the change in flight to it (or set aside) began,
-/// as [`aside`] reads it, for every caller alike.
-pub async fn existed_before<S: Store + 'static>(
+/// [`allowed`] as for a URI where nothing is (no metadata, no format): what a caller other than the
+/// owner is told about a resource it was not there for before a change in flight began.
+pub async fn allowed_absent<S: Store + 'static>(
     state: &LwsState<S>,
+    action: Action,
     uri: &str,
+    agent: &Agent,
 ) -> Result<bool, ServerError> {
-    match state.locks.prior(uri).existed {
-        Some(existed) => Ok(existed),
-        None => state.store.exists(uri).await,
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(true);
     }
+    decide(
+        state,
+        action,
+        uri,
+        agent,
+        &ResourceMeta::default(),
+        Some(None),
+    )
+    .await
 }
 
 /// What a decision about a resource rests on, taken while the resource is there: its metadata

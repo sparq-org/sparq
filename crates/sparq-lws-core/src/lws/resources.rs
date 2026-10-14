@@ -527,39 +527,30 @@ async fn unread_precondition<S: Store + 'static>(
     {
         return None;
     }
-    match reads_stably(state, uri, agent).await {
-        Ok(true) => None,
-        Ok(false) => Some(state.deny(agent)),
-        Err(retry) => Some(retry),
-    }
+    (!reads_stably(state, uri, agent).await).then(|| state.deny(agent))
 }
 
 /// Whether `agent` may read `uri`, decided without its lock the way [`authorize_unlocked`] decides:
 /// on what the resource was before a change in flight to it (or one set aside) began, and only once
-/// no change began or ended meanwhile. A resource such a change is creating has no state before it
-/// to decide on: every caller, the owner included, is told to retry (`Err`), and nothing is
-/// decided on what the change wrote meanwhile.
-async fn reads_stably<S: Store + 'static>(
-    state: &LwsState<S>,
-    uri: &str,
-    agent: &Agent,
-) -> Result<bool, Response> {
-    use super::access::{aside, existed_before, Aside};
-    let being_created = || retry_later("the resource is being created");
+/// no change began or ended meanwhile. A resource such a change is creating is decided, for anyone
+/// but the owner, as a URI where nothing is: nothing the change wrote meanwhile (its metadata, its
+/// format) is read, and the answer is the one the same request gets where nothing was ever created.
+async fn reads_stably<S: Store + 'static>(state: &LwsState<S>, uri: &str, agent: &Agent) -> bool {
+    use super::access::{allowed_absent, aside, Aside};
     stably(state, uri, || async {
         if !state.visible(uri) || state.locks.changing(uri) {
-            if !existed_before(state, uri).await.unwrap_or(false) {
-                return Err(being_created());
-            }
-            return Ok(matches!(
-                aside(state, Action::Read, uri, agent).await,
-                Ok(Aside::Allowed)
-            ));
+            return match aside(state, Action::Read, uri, agent).await {
+                Ok(Aside::Allowed) => true,
+                Ok(Aside::Missing) => allowed_absent(state, Action::Read, uri, agent)
+                    .await
+                    .unwrap_or(false),
+                Ok(Aside::Denied) | Err(_) => false,
+            };
         }
-        Ok(state.allowed(Action::Read, uri, agent).await)
+        state.allowed(Action::Read, uri, agent).await
     })
     .await
-    .unwrap_or(Ok(false))
+    .unwrap_or(false)
 }
 
 /// The tag a precondition is evaluated against when it asks only whether an existing target
@@ -11871,29 +11862,38 @@ mod tests {
         );
     }
 
-    /// Review findings: the Read check before the lock let a writer through, unchecked, on a
-    /// resource a stalled change was creating (one with no state before it), and then answered it
-    /// differently for different callers. Every caller, the owner included, is told to retry, the
-    /// same way, on the resource and on its linkset.
+    /// Review finding: a create that is set aside (it landed, reported a failure, and could not be
+    /// taken back) has no state before it. Anyone but the owner is answered on it as on a URI where
+    /// nothing was ever created, by the Read check before the lock as by every other check, so no
+    /// caller learns from a write or a patch that someone is creating it, nor whether it may read
+    /// it. The owner is told to retry.
     #[tokio::test]
-    async fn a_resource_being_created_is_retried_by_every_caller_alike() {
+    async fn a_resource_being_created_is_answered_as_nothing_there() {
         use super::super::test_store::{agent, closed_state, request as req, OWNER};
         let (st, store) = closed_state(100).await;
         let root = st.cfg.storage();
-        let grant = |actions: Value, who: &str| {
+        let grant = |actions: Value, who: &str, constraint: Value| {
             super::super::access::policies(
-                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
                 &root,
             )
             .unwrap()
         };
-        let (dave, bob) = ("https://dave.example/#me", "https://bob.example/#me");
+        let (dave, bob, carol, eve) = (
+            "https://dave.example/#me",
+            "https://bob.example/#me",
+            "https://carol.example/#me",
+            "https://eve.example/#me",
+        );
         st.access
-            .put_grant_for_test("dave", grant(json!(["modify"]), dave));
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
         st.access
-            .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob));
-        // A create that lands, reports a failure, and cannot be taken back: it is set aside,
-        // with nothing there before it.
+            .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob, json!([])));
+        // Carol may read and modify JSON only: what the create wrote must not decide for her.
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read", "modify"]), carol, json_only));
         let uri = st.cfg.absolute("/new.json");
         store
             .fail_after_create
@@ -11906,40 +11906,63 @@ mod tests {
             .store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(r.status().is_server_error(), "{}", r.status());
         assert!(!st.visible(&uri), "the create is set aside");
-        let callers = [agent(OWNER), agent(bob), agent(dave), Agent::anonymous()];
-        let requests = [
-            (Method::PATCH, "/new.json", JSON_PATCH, "[]", None),
-            (Method::PATCH, "/new.json.meta", JSON_PATCH, "[]", None),
-            (Method::PUT, "/new.json", JSON, "{}", Some("\"x\"")),
-        ];
-        for (method, path, ty, body, tag) in requests {
-            let mut answers = Vec::new();
-            for who in &callers {
-                let mut h = vec![("content-type", ty)];
-                if let Some(tag) = tag {
-                    h.push(("if-match", tag));
+        let answer =
+            |method: Method, path: String, h: Vec<(&'static str, &'static str)>, body, who| {
+                let st = st.clone();
+                async move {
+                    let r = handle(&st, &req(method, &path, &h, body), &who).await;
+                    let mut headers: Vec<String> = r
+                        .headers()
+                        .iter()
+                        .map(|(k, v)| format!("{k}: {v:?}"))
+                        .collect();
+                    headers.sort();
+                    (r.status(), headers, body_of(r).await)
                 }
-                let r = handle(&st, &req(method.clone(), path, &h, body), who).await;
-                let mut headers: Vec<String> = r
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| format!("{k}: {v:?}"))
-                    .collect();
-                headers.sort();
-                answers.push((r.status(), headers, body_of(r).await));
+            };
+        let callers = [
+            agent(bob),
+            agent(carol),
+            agent(dave),
+            agent(eve),
+            Agent::anonymous(),
+        ];
+        let requests = [
+            (Method::PATCH, "", "[]", vec![("content-type", JSON_PATCH)]),
+            (
+                Method::PATCH,
+                ".meta",
+                "[]",
+                vec![("content-type", JSON_PATCH)],
+            ),
+            (
+                Method::PUT,
+                "",
+                "{}",
+                vec![("content-type", JSON), ("if-match", "\"x\"")],
+            ),
+            (Method::PUT, "", "{}", vec![("content-type", JSON)]),
+            (Method::DELETE, "", "", vec![("if-match", "\"x\"")]),
+            (Method::GET, "", "", vec![]),
+        ];
+        for (method, suffix, body, h) in requests {
+            for who in &callers {
+                let created = format!("/new.json{suffix}");
+                let never = format!("/never.json{suffix}");
+                let a = answer(method.clone(), created, h.clone(), body, who.clone()).await;
+                let b = answer(method.clone(), never, h.clone(), body, who.clone()).await;
+                assert_eq!(a, b, "{method} {suffix} as {:?}", who.subject);
             }
-            assert_eq!(
-                answers[0].0,
-                StatusCode::SERVICE_UNAVAILABLE,
-                "{method} {path}"
-            );
+            if method == Method::GET {
+                continue;
+            }
+            let path = format!("/new.json{suffix}");
+            let (status, headers, _) = answer(method.clone(), path, h, body, agent(OWNER)).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{method} {suffix}");
             assert!(
-                answers[0].1.iter().any(|h| h.starts_with("retry-after")),
-                "{method} {path}"
+                headers.iter().any(|h| h.starts_with("retry-after")),
+                "{method} {suffix}"
             );
-            for answer in &answers[1..] {
-                assert_eq!(answer, &answers[0], "{method} {path}");
-            }
         }
     }
 }
