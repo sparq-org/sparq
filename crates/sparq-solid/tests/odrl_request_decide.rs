@@ -647,6 +647,36 @@ fn drop_then_wildcard_stays_open_to_a_static_writer() {
     s.update_as(&session(Some(ALICE), None), wipe).expect("alice may drop every graph");
 }
 
+/// A grant-only writer may repeat a `DROP` of a graph the request already dropped (a
+/// no-op), but a static `Append` never stands in for the `Write` a re-`CREATE` needs.
+#[test]
+fn dropped_graphs_need_static_write_to_come_back() {
+    let bob_appends = format!(
+        "{CONTAINER}\
+<https://pod.ex/.acl#bob> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#bob> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#bob> <http://www.w3.org/ns/auth/acl#agent> <{BOB}> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Append> <https://pod.ex/.acl> .
+"
+    );
+    let bob = session(Some(BOB), None);
+    let mut s = bare_store_with(&bob_appends);
+    s.attach_odrl_policy(change_policy()).expect("attach");
+    assert!(holds(&s, &bob, N2, Mode::Write), "Write through the grant");
+    let recreate = "DROP GRAPH <https://pod.ex/notes/n2> ; CREATE GRAPH <https://pod.ex/notes/n2>";
+    assert!(s.update_as(&bob, recreate).is_err(), "static Append does not re-create");
+    s.update_as(
+        &bob,
+        "DROP GRAPH <https://pod.ex/notes/n2> ; DROP SILENT GRAPH <https://pod.ex/notes/n2>",
+    )
+    .expect("dropping a dropped graph again changes nothing");
+    let rewrite = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } } ; \
+                   DROP GRAPH <https://pod.ex/notes/n2> ; \
+                   INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } } ; \
+                   DROP NAMED";
+    assert!(s.update_as(&bob, rewrite).is_err(), "no re-create, and no wildcard, by a grant");
+}
+
 /// `Write` needs `odrl:modify` and `odrl:delete` from one policy; `Append` alone never
 /// implies `Write`.
 #[test]

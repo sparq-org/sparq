@@ -636,7 +636,12 @@ pub(crate) fn check_effects(
             UpdateEffect::Clear(target) | UpdateEffect::Drop(target) => {
                 match target {
                     GraphTarget::NamedNode(n) => {
-                        need_on(n, Need::Write, dropped_all || dropped.contains(n.as_str()))?
+                        let was_dropped = dropped_all || dropped.contains(n.as_str());
+                        // A graph this request dropped and has not written since is gone:
+                        // clearing or dropping it again changes nothing.
+                        if !was_dropped || written.contains(&n) {
+                            need_on(n, Need::Write, was_dropped)?;
+                        }
                     }
                     GraphTarget::DefaultGraph | GraphTarget::AllGraphs => {
                         return Err(default_denied())
@@ -672,7 +677,8 @@ pub(crate) fn check_effects(
                 }
             }
             UpdateEffect::Create(Term::NamedNode(n)) => {
-                need_on(n, Need::WriteOrAppend, dropped_all || dropped.contains(n.as_str()))?;
+                // `CREATE` needs `Write`, as [`analyze`] requires of its static target.
+                need_on(n, Need::Write, dropped_all || dropped.contains(n.as_str()))?;
                 written.push(n);
             }
             UpdateEffect::Create(_) => {
