@@ -1292,3 +1292,17 @@ fn literal_lexical_forms_are_strict() {
         assert_eq!(verdict(&body), None, "{tag}");
     }
 }
+
+#[test]
+fn binary_types_take_only_length_facets() {
+    for dt in ["hexBinary", "base64Binary"] {
+        let v = violations(&with_decls(&format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:{dt} ; owl:withRestrictions ( [ xsd:pattern \"[0-9]*\" ] ) ] ."
+        )));
+        assert_eq!(v, vec![ViolationKind::InvalidFacet], "{dt}");
+        let v = violations(&with_decls(&format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:{dt} ; owl:withRestrictions ( [ xsd:maxLength 4 ] ) ] ."
+        )));
+        assert!(v.is_empty(), "{dt}: {v:?}");
+    }
+}

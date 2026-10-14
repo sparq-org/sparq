@@ -254,6 +254,8 @@ impl Builtin {
             Facet::MaxLength,
             Facet::Pattern,
         ];
+        // OWL 2 §4.5: the binary types take the length facets only.
+        const BINARY: &[Facet] = &[Facet::Length, Facet::MinLength, Facet::MaxLength];
         const PLAIN: &[Facet] = &[
             Facet::Length,
             Facet::MinLength,
@@ -266,8 +268,10 @@ impl Builtin {
             | PositiveInteger | NegativeInteger | Long | Int | Short | Byte | UnsignedLong
             | UnsignedInt | UnsignedShort | UnsignedByte | Double | Float | DateTime
             | DateTimeStamp => ORDER,
-            String | NormalizedString | Token | Language | Name | NcName | NmToken | HexBinary
-            | Base64Binary | AnyUri => LENGTH,
+            String | NormalizedString | Token | Language | Name | NcName | NmToken | AnyUri => {
+                LENGTH
+            }
+            HexBinary | Base64Binary => BINARY,
             PlainLiteral => PLAIN,
             RdfsLiteral | LangString | Boolean | XmlLiteral => &[],
         }
