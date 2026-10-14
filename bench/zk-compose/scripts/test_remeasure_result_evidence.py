@@ -148,12 +148,27 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual({path: path.read_bytes() for path in self.paths}, self.originals)
         self.assert_no_temporaries()
 
-    def test_non_repository_fails_closed(self):
-        with mock.patch.dict(os.environ, {"GIT_DIR": str(self.root / "missing.git")}):
-            with self.assertRaisesRegex(SystemExit, "cannot check evidence cleanliness"):
+    def test_git_environment_overrides_are_ignored(self):
+        # A GIT_DIR pointing elsewhere must not redirect the cleanliness check.
+        self.paths[0].write_bytes(self.originals[self.paths[0]] + b"\n")
+        other = self.root / "other"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=other, check=True)
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)}):
+            with self.assertRaisesRegex(SystemExit, "unstaged edits against HEAD"):
                 self.apply()
-        self.assertEqual({path: path.read_bytes() for path in self.paths}, self.originals)
-        self.assert_no_temporaries()
+
+    def test_commit_other_than_head_is_refused(self):
+        first = self.git("rev-parse", "HEAD").stdout.strip()
+        data = json.loads(self.originals[self.paths[1]])
+        data["members"] = {"later": {}}
+        self.paths[1].write_text(json.dumps(data))
+        self.commit("later")
+        self.args.commit = first
+        with mock.patch.object(remeasure.os, "replace") as replace:
+            with self.assertRaisesRegex(SystemExit, "is not HEAD"):
+                self.apply()
+            replace.assert_not_called()
 
     def test_staged_edit_hidden_by_reverted_worktree_is_refused(self):
         self.paths[0].write_bytes(self.originals[self.paths[0]] + b"\n")

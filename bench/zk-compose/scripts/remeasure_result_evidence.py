@@ -23,7 +23,8 @@ it exits non-zero and lists exactly which files need `git checkout -- <file>` re
 An interruption of the process itself (a kill or power loss between renames) can
 still leave a mixed set, which
 `git checkout -- <the four files>` undoes. It refuses to run while the four files have
-staged or unstaged edits against HEAD, so that recovery never discards anything else.
+staged or unstaged edits against HEAD, so that recovery never discards anything else,
+and unless `--commit` is HEAD. Git runs without inherited GIT_* environment variables.
 `--baseline-commit` names the commit whose evidence is the pre-change baseline (default
 HEAD); the files are read from that commit with `git show`, never from the working tree.
 Each file keeps its destination `prepared_by`, and `apply` refuses a baseline whose
@@ -119,8 +120,11 @@ def without_artifacts(run_result: dict) -> dict:
 
 
 def git(*arguments: str) -> subprocess.CompletedProcess:
+    # GIT_* variables (GIT_DIR, GIT_INDEX_FILE, ...) could point git at another repository or
+    # index than the checkout being rewritten, so they are not inherited.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     try:
-        return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True)
+        return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True, env=environment)
     except OSError as error:
         raise SystemExit(f"cannot run git: {error}") from error
 
@@ -154,6 +158,12 @@ def apply(args: argparse.Namespace) -> None:
             raise SystemExit(f"the evidence files have {label} edits against HEAD; commit or discard them first")
         if clean.returncode:
             raise SystemExit(f"cannot check evidence cleanliness against HEAD; git diff failed:\n{clean.stderr}")
+    head = git("rev-parse", "--verify", "--quiet", "HEAD^{commit}")
+    measured_commit = git("rev-parse", "--verify", "--quiet", f"{args.commit}^{{commit}}")
+    if head.returncode or measured_commit.returncode:
+        raise SystemExit(f"cannot resolve HEAD and --commit {args.commit!r}")
+    if head.stdout.strip() != measured_commit.stdout.strip():
+        raise SystemExit(f"--commit {args.commit!r} is not HEAD; check out the measured commit first")
     first, second = (json.loads(path.read_text()) for path in (args.first, args.second))
     if without_artifacts(first) != without_artifacts(second):
         raise SystemExit("the two runs disagree")
