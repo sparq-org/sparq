@@ -248,6 +248,12 @@ N worst-by-wall-time analyzed plans (`record` / `push` / `slowest` / `to_json`) 
 view. Honest boundaries: only BGP nodes carry an estimate (the only operators the planner sizes);
 q-error is `None` when either side is 0; `nanos` are always 0 on wasm32.
 
+Under the same `explain-json` feature, `plan.to_mermaid()` and `plan.to_dot()` return
+standalone Mermaid flowchart and Graphviz DOT source, respectively (no new dependencies).
+Both show escaped operator labels and parent-to-input edges, with deterministic preorder
+IDs (`n0`, `n1`, …) following `children` order. Metrics remain in `to_json()`;
+diagram strings end with a newline and contain no Markdown fences.
+
 Persistent planner statistics *(opt-in `persistent-stats`, OFF by default)* are rebuilt explicitly
 with `stats::analyze(&graph, saved_store_dir)`. This atomically writes a deterministic `stats.bin`
 beside the saved/mmap store containing per-predicate cardinalities and equi-depth subject/object
