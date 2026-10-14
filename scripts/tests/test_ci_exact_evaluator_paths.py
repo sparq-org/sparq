@@ -121,12 +121,24 @@ class ExactEvaluatorSelection(unittest.TestCase):
         self.assertIn("python3 scripts/ci_exact_evaluator_evidence.py", workflow)
 
     def test_trigger_paths_filters_equal_the_classifier(self):
-        # The filter only spares a runner; it must never drop an input the classifier keeps.
+        # The push filter only spares a runner; it must never drop an input the classifier
+        # keeps. The pull_request filter is the narrower zk-only set, checked after merge.
         workflow = ROOT / ".github/workflows/zk-exact-evaluator.yml"
-        expected = classifier_globs(selector.EXACT_PREFIXES, selector.EXACT_FILES)
-        for event in ("pull_request", "push"):
-            self.assertEqual(trigger_paths(workflow, event), expected, event)
+        self.assertEqual(trigger_paths(workflow, "push"),
+                         classifier_globs(selector.EXACT_PREFIXES, selector.EXACT_FILES))
+        self.assertEqual(trigger_paths(workflow, "pull_request"),
+                         classifier_globs(selector.PR_PREFIXES, selector.PR_FILES))
         self.assertEqual(trigger_paths(workflow, "merge_group"), [])
+
+    def test_pull_request_inputs_are_a_zk_only_subset(self):
+        self.assertLessEqual(set(selector.PR_PREFIXES), set(selector.EXACT_PREFIXES))
+        for path in selector.PR_FILES:
+            self.assertTrue(selector.relevant_path(path), path)
+            self.assertTrue((ROOT / path).is_file(), path)
+        for path in ("crates/sparq-engine/src/exec.rs", "crates/sparq-core/Cargo.toml",
+                     "Cargo.lock", "Cargo.toml"):
+            self.assertFalse(path.startswith(selector.PR_PREFIXES) or path in selector.PR_FILES,
+                             path)
 
     def test_every_execution_input_is_relevant(self):
         for path in EXACT_INPUTS:
