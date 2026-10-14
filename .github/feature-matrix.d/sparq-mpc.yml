@@ -22,3 +22,13 @@
   crate: "sparq-mpc"
   features: "insecure-test-rng"
   test: true
+
+# sparq-mpc: the per-protocol security-properties annotation graph (#3275/#6186).
+# Both the module's own drift/honesty tests and the end-to-end
+# `tests/secprop_admissibility.rs` (whole file `#![cfg(feature =
+# "secprop-annotations")]`) compile out in the default state, so without this leg they
+# never execute on CI.
+- name: "sparq-mpc (secprop-annotations — per-protocol trust-model annotation graph)"
+  crate: "sparq-mpc"
+  features: "secprop-annotations"
+  test: true
