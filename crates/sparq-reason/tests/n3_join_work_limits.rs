@@ -395,10 +395,8 @@ fn counting_engine_layer_rounds_leave_the_wave_allowance_alone() {
         .collect();
     base.extend(edges("p", 0, M));
     let l = rows(8 * N);
-    assert!(
-        2 * M <= 8 * N && 2 * M > 8 * N - 2 * N,
-        "the fixture's premise"
-    );
+    // The fixture's premise, checked at compile time.
+    const { assert!(2 * M <= 8 * N && 2 * M > 8 * N - 2 * N) };
     let g = MaterializedN3Graph::with_limits(&format!("{PREFIXES}{rules}"), &base, l)
         .expect("accepted without falling back");
     assert_eq!(g.mode(), N3Mode::Counting, "{:?}", g.fallback_reason());
