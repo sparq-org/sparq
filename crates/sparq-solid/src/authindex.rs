@@ -267,8 +267,10 @@ struct ConditionalGrant {
 /// assert!(index.accessible(&alice, Mode::Write).is_empty()); // fail-closed
 /// # Ok::<(), String>(())
 /// ```
-/// The auth-view predicate marking a resource whose access-control document the loader
-/// rejected (`<r> auth:withheld true`); only the loader emits it.
+/// The auth-view predicate marking a resource whose ACP access-control document the loader
+/// rejected (`<r> auth:withheld true`); only the loader emits it. (A WAC resource whose
+/// `.acl` was rejected keeps that `.acl` as its governing document with no authorizations;
+/// grants from other sources still apply to it, and WAC has no deny for them to bypass.)
 pub(crate) const WITHHELD: &str = "https://sparq.dev/ns/auth#withheld";
 
 /// Whether `graph` is in `withheld` or below a withheld container.
@@ -305,8 +307,8 @@ pub struct AuthIndex {
     matcher_clients: FxHashMap<String, FxHashSet<String>>,
     /// sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
     matcher_issuers: FxHashMap<String, FxHashSet<String>>,
-    /// Resources (and, for a container, everything below it) whose access-control document
-    /// the loader rejected: no grant applies to them, whichever source installed it.
+    /// Resources (and, for a container, everything below it) whose ACP access-control
+    /// document the loader rejected: no grant applies to them, whichever source installed it.
     withheld: FxHashSet<String>,
 }
 

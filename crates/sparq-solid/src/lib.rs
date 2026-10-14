@@ -1791,7 +1791,8 @@ impl PodStore {
     /// bridged grant).
     ///
     /// As with [`PodStore::attach_odrl_policy`], `policy` and `request` are trusted input
-    /// from the embedding application; no pod content reaches this bridge.
+    /// from the embedding application: the store never reads them from pod content, so pass
+    /// only a policy the application itself vetted.
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission(
         &mut self,
