@@ -16,7 +16,8 @@
 //!   instant under two offsets is equal (for facets) but not identical (for counting).
 //! - **String-like families** (strings with and without a language tag, `xsd:anyURI`,
 //!   `rdf:XMLLiteral`) are boolean formulas over automata for XSD patterns, lengths,
-//!   extended language ranges and enumerated values; emptiness and counting walk the
+//!   basic language ranges, well-formed BCP 47 tags and enumerated values; emptiness and
+//!   counting walk the
 //!   product automaton.
 //!
 //! The data domain is the union of the datatype map's value spaces, so `Not` is taken

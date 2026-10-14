@@ -72,7 +72,7 @@ pub(crate) enum Atom {
     Pattern(String),
     /// The string part has between `lo` and `hi` characters.
     Len(u64, Option<u64>),
-    /// A tagged string whose tag matches this extended language range (RFC 4647 §3.3.2,
+    /// A tagged string whose tag matches this basic language range (RFC 4647 §3.3.1,
     /// already validated and lowercase; `*` matches every tag).
     Lang(String),
     /// Exactly this encoded value.
@@ -178,7 +178,7 @@ pub(crate) fn pattern_status(pattern: &str) -> Option<bool> {
     }
 }
 
-/// Whether `range` is an extended language range (RFC 4647 §2.2).
+/// Whether `range` is a basic language range (RFC 4647 §2.1).
 pub(crate) fn is_language_range(range: &str) -> bool {
     let subtag = |p: &str, alpha: bool| {
         !p.is_empty()
@@ -192,8 +192,12 @@ pub(crate) fn is_language_range(range: &str) -> bool {
             })
     };
     let mut parts = range.split('-');
-    let first = parts.next().unwrap_or("");
-    (first == "*" || subtag(first, true)) && parts.all(|p| p == "*" || subtag(p, false))
+    range == "*" || (subtag(parts.next().unwrap_or(""), true) && parts.all(|p| subtag(p, false)))
+}
+
+/// Whether the encoded value `v` is in `space`; `None` when its automaton could not be built.
+pub(crate) fn in_space(space: Space, v: &[u8]) -> Option<bool> {
+    Some(universe(space).ok()?.matches(v))
 }
 
 /// Whether `f` holds for the encoded value `v`; `None` when an automaton could not be built.
@@ -240,7 +244,10 @@ pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
             Atom::Len(lo, hi) => Auto::Len {
                 lo: *lo,
                 hi: *hi,
-                cap: hi.map_or(*lo, |h| h + 1),
+                cap: match hi {
+                    Some(h) => h.checked_add(1)?,
+                    None => *lo,
+                },
             },
             Atom::Is(w) => Auto::Is(w.clone()),
             Atom::Untagged => Auto::Untagged,
@@ -365,7 +372,13 @@ fn byte_classes(autos: &[Auto]) -> Vec<(u8, u128)> {
                 Auto::Dfa(d) => u16::from(d.0.byte_classes().get(b)),
                 Auto::Len { .. } => u16::from(b == SEP) * 2 + u16::from(b & 0xC0 == 0x80),
                 Auto::Untagged => u16::from(b == SEP),
-                Auto::Is(w) => w.iter().position(|&x| x == b).map_or(0, |i| i as u16 + 1),
+                Auto::Is(w) => {
+                    if w.contains(&b) {
+                        u16::from(b) + 1
+                    } else {
+                        0
+                    }
+                }
             })
             .collect();
         classes.entry(key).or_insert((b, 0)).1 += 1;
@@ -553,31 +566,37 @@ fn dash_then(h: Hir) -> Hir {
     Hir::concat(vec![Hir::literal(*b"-"), h])
 }
 
-/// `[a-z]{1,8}(-[a-z0-9]{1,8})*`: a lowercase language tag.
+/// A well-formed lowercase BCP 47 language tag (RFC 5646 §2.1 `Language-Tag`), the tags
+/// of `rdf:PlainLiteral` values.
 fn lang_tag() -> Hir {
-    Hir::concat(vec![
-        subtag(1, true),
-        rep(dash_then(subtag(1, false)), 0, None),
-    ])
+    const PRIVATE: &str = "x(-[a-z0-9]{1,8})+";
+    const GRANDFATHERED: &str = "en-gb-oed|i-ami|i-bnn|i-default|i-enochian|i-hak|i-klingon|\
+        i-lux|i-mingo|i-navajo|i-pwn|i-tao|i-tay|i-tsu|sgn-be-fr|sgn-be-nl|sgn-ch-de|\
+        art-lojban|cel-gaulish|no-bok|no-nyn|zh-guoyu|zh-hakka|zh-min|zh-min-nan|zh-xiang";
+    let langtag = [
+        "([a-z]{2,3}(-[a-z]{3}){0,3}|[a-z]{4}|[a-z]{5,8})",
+        "(-[a-z]{4})?",
+        "(-([a-z]{2}|[0-9]{3}))?",
+        "(-([a-z0-9]{5,8}|[0-9][a-z0-9]{3}))*",
+        "(-[0-9a-wy-z](-[a-z0-9]{2,8})+)*",
+    ]
+    .concat()
+        + &format!("(-{PRIVATE})?");
+    let grandfathered = GRANDFATHERED.replace(char::is_whitespace, "");
+    regex_syntax::parse(&format!("{langtag}|{PRIVATE}|{grandfathered}"))
+        .expect("a fixed regular expression")
 }
 
-/// The tags an extended language range matches (RFC 4647 §3.3.2): the first subtag must
-/// match; each later non-wildcard subtag must match some later tag subtag, skipping only
-/// subtags that are not singletons; wildcards match anything.
+/// The tags a basic language range matches (RFC 4647 §3.3.1): `*` matches every tag;
+/// otherwise the tag equals the range or extends it by further subtags.
 fn lang_range(range: &str) -> Hir {
-    let mut parts = range.split('-');
-    let first = parts.next().unwrap_or("*");
-    let mut seq = vec![if first == "*" {
-        subtag(1, true)
-    } else {
-        Hir::literal(first.as_bytes().to_vec())
-    }];
-    for p in parts.filter(|p| *p != "*") {
-        seq.push(rep(dash_then(subtag(2, false)), 0, None));
-        seq.push(Hir::literal(format!("-{p}").into_bytes()));
+    if range == "*" {
+        return rep(class(&[('-', '-'), ('0', '9'), ('a', 'z')]), 1, None);
     }
-    seq.push(rep(dash_then(subtag(1, false)), 0, None));
-    Hir::concat(seq)
+    Hir::concat(vec![
+        Hir::literal(range.as_bytes().to_vec()),
+        rep(dash_then(subtag(1, false)), 0, None),
+    ])
 }
 
 fn universe(space: Space) -> Result<Rc<Dfa>, ()> {
@@ -676,21 +695,78 @@ mod tests {
     }
 
     #[test]
-    fn extended_ranges_skip_non_singleton_subtags() {
+    fn basic_ranges_match_a_tag_prefix_at_subtag_boundaries() {
         let m = |r: &str, tag: &str| {
             holds(&F::atom(Atom::Lang(r.into())), &encode("x", Some(tag))).unwrap()
         };
-        assert!(m("de-de", "de-de") && m("de-de", "de-de-1996"));
-        assert!(
-            m("de-de", "de-latn-de"),
-            "extended filtering skips the script subtag"
-        );
-        assert!(!m("de-de", "de-x-de"), "but never a singleton");
-        assert!(m("de-*-de", "de-latn-de") && m("*-de", "en-de") && m("*", "fr"));
-        assert!(!m("de", "deu") && !m("de-de", "de"));
+        assert!(m("de-de", "de-de") && m("de-de", "de-de-1996") && m("de", "de-latn-de"));
+        assert!(!m("de-de", "de-latn-de"), "basic filtering skips nothing");
+        assert!(m("*", "fr") && !m("de", "deu") && !m("de-de", "de"));
         assert!(!holds(&F::atom(Atom::Lang("*".into())), &encode("x", None)).unwrap());
-        assert!(
-            is_language_range("de-*-DE") && is_language_range("*") && !is_language_range("de--de")
+        assert!(is_language_range("de-DE") && is_language_range("*") && is_language_range("i"));
+        for bad in ["de-*-DE", "*-de", "de--de", "", "d1", "de-123456789"] {
+            assert!(!is_language_range(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn tags_are_well_formed_bcp47() {
+        let tagged = |tag: &str| {
+            let w = encode("x", Some(tag));
+            count(&F::atom(Atom::Is(w)), Space::Text, 1)
+        };
+        for ok in [
+            "en",
+            "en-gb",
+            "zh-hant-tw",
+            "de-ch-1901",
+            "sl-rozaj-biske",
+            "en-a-bbb-x-ccc",
+            "x-whatever",
+            "i-klingon",
+            "zh-min-nan",
+            "es-419",
+            "zh-yue-hk",
+        ] {
+            assert_eq!(tagged(ok), Some(1), "{ok}");
+        }
+        for bad in [
+            "en-a",
+            "e",
+            "en-gb-",
+            "toolongtag",
+            "en-x",
+            "a-bbb",
+            "en-12",
+        ] {
+            assert_eq!(tagged(bad), Some(0), "{bad}");
+        }
+        // `*` matches every well-formed tag and nothing else.
+        let star = F::atom(Atom::Lang("*".into()));
+        assert_eq!(
+            count(&star.and(F::atom(Atom::Len(1, Some(1)))), Space::Text, 2),
+            Some(u128::MAX)
+        );
+    }
+
+    #[test]
+    fn long_enumerations_keep_their_bytes_apart() {
+        // `Q` and `R`, which no other automaton tells apart, first occur 65536 bytes apart.
+        let mut w = b"Q".to_vec();
+        w.extend(std::iter::repeat_n(b'a', 65535));
+        w.push(b'R');
+        assert_eq!(count(&F::atom(Atom::Is(w)), Space::Text, 2), Some(1));
+    }
+
+    #[test]
+    fn length_bounds_at_the_integer_limit_give_up() {
+        assert_eq!(
+            count(&F::atom(Atom::Len(0, Some(u64::MAX))), Space::Text, 2),
+            None
+        );
+        assert_eq!(
+            count(&F::atom(Atom::Len(u64::MAX, None)), Space::Text, 2),
+            None
         );
     }
 

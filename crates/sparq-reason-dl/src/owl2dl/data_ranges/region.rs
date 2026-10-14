@@ -415,6 +415,8 @@ impl Region {
     /// Whether `v` is in the set; `None` when an automaton could not be built.
     pub(crate) fn contains(&self, v: &Value) -> Option<bool> {
         match text(v) {
+            // A tag that is not well-formed BCP 47 puts the value outside the data domain.
+            Some((Space::Text, enc)) if !strings::in_space(Space::Text, &enc)? => Some(false),
             Some((Space::Text, enc)) => strings::holds(&self.text, &enc),
             Some((Space::Uri, enc)) => strings::holds(&self.uri, &enc),
             Some((Space::Xml, enc)) => strings::holds(&self.xml, &enc),

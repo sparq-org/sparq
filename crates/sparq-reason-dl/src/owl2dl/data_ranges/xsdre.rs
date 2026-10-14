@@ -16,11 +16,16 @@ pub(crate) enum PatternError {
     Unsupported,
 }
 
+/// Groups and class subtractions nested deeper than this report
+/// [`PatternError::Unsupported`], bounding the parser's recursion.
+const MAX_DEPTH: usize = 64;
+
 /// Parses `pattern` into an [`Hir`] over the characters of a string value.
 pub(crate) fn parse(pattern: &str) -> Result<Hir, PatternError> {
     let mut p = Parser {
         s: pattern.chars().collect(),
         i: 0,
+        depth: 0,
     };
     let hir = p.reg_exp()?;
     if p.i != p.s.len() {
@@ -102,9 +107,24 @@ fn category(name: &str) -> Result<ClassUnicode, PatternError> {
 struct Parser {
     s: Vec<char>,
     i: usize,
+    depth: usize,
 }
 
 impl Parser {
+    /// Runs `f` one nesting level deeper.
+    fn nested<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, PatternError>,
+    ) -> Result<T, PatternError> {
+        if self.depth >= MAX_DEPTH {
+            return Err(PatternError::Unsupported);
+        }
+        self.depth += 1;
+        let r = f(self);
+        self.depth -= 1;
+        r
+    }
+
     fn peek(&self) -> Option<char> {
         self.s.get(self.i).copied()
     }
@@ -198,7 +218,7 @@ impl Parser {
     fn atom(&mut self) -> Result<Hir, PatternError> {
         let class = match self.next()? {
             '(' => {
-                let inner = self.reg_exp()?;
+                let inner = self.nested(Self::reg_exp)?;
                 return if self.eat(')') {
                     Ok(inner)
                 } else {
@@ -206,7 +226,7 @@ impl Parser {
                 };
             }
             '.' => neg(ranges(&[('\n', '\n'), ('\r', '\r')])),
-            '[' => self.class_expr()?,
+            '[' => self.nested(Self::class_expr)?,
             '\\' => match self.escape()? {
                 Esc::Char(c) => ranges(&[(c, c)]),
                 Esc::Class(c) => c,
@@ -270,7 +290,7 @@ impl Parser {
                 }
                 '-' if self.s.get(self.i + 1) == Some(&'[') && !first => {
                     self.i += 2;
-                    let sub = self.class_expr()?;
+                    let sub = self.nested(Self::class_expr)?;
                     if !self.eat(']') {
                         return Err(PatternError::Invalid);
                     }
@@ -294,7 +314,8 @@ impl Parser {
                 Esc::Char(c) => c,
                 Esc::Class(c) => return Ok(c),
             },
-            '[' => return Err(PatternError::Invalid),
+            // `[` and `]` are never unescaped characters in a group (`XmlChar`).
+            '[' | ']' => return Err(PatternError::Invalid),
             c => c,
         };
         // `lo-hi`, unless the `-` ends the group or starts a subtraction.
@@ -362,12 +383,28 @@ mod tests {
 
     #[test]
     fn rejects_non_xsd_syntax_and_reports_blocks() {
-        for bad in ["a{2,1}", "(a", "a)", "[a", r"\b", "*a", "[z-a]", r"\p{Foo}"] {
+        for bad in [
+            "a{2,1}", "(a", "a)", "[a", r"\b", "*a", "[z-a]", r"\p{Foo}", "[]]", "[]", "[^]a]",
+        ] {
             assert_eq!(parse(bad).err(), Some(PatternError::Invalid), "{bad}");
         }
         assert_eq!(
             parse(r"\p{IsBasicLatin}").err(),
             Some(PatternError::Unsupported)
         );
+        assert!(full(r"[\]]", "]"));
+    }
+
+    #[test]
+    fn deep_nesting_is_unsupported_not_a_stack_overflow() {
+        let deep = |n: usize| format!("{}a{}", "(".repeat(n), ")".repeat(n));
+        assert!(parse(&deep(MAX_DEPTH)).is_ok());
+        assert_eq!(
+            parse(&deep(MAX_DEPTH + 1)).err(),
+            Some(PatternError::Unsupported)
+        );
+        assert_eq!(parse(&deep(100_000)).err(), Some(PatternError::Unsupported));
+        let classes = format!("[a{}]", "-[a".repeat(10_000) + &"]".repeat(10_000));
+        assert_eq!(parse(&classes).err(), Some(PatternError::Unsupported));
     }
 }

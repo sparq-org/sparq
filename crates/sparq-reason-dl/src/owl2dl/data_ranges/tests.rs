@@ -308,12 +308,34 @@ fn string_ranges_combine_patterns_lengths_and_languages() {
     assert_eq!(contains(&en, &v("x@EN", "rdf:PlainLiteral")), Tri::Yes);
     assert_eq!(contains(&en, &lang("x", "eng")), Tri::No);
     assert_eq!(contains(&en, &s("x")), Tri::No);
-    // Extended filtering (RFC 4647 §3.3.2): a wildcard subtag skips any subtags, but
-    // never across a singleton.
-    let de_de = restrict("rdf:PlainLiteral", &[("langRange", s("de-*-DE"))]);
-    assert_eq!(contains(&de_de, &lang("x", "de-Latn-DE")), Tri::Yes);
-    assert_eq!(contains(&de_de, &lang("x", "de-DE")), Tri::Yes);
-    assert_eq!(contains(&de_de, &lang("x", "de-x-DE")), Tri::No);
+    // Basic filtering (RFC 4647 §3.3.1): the range is a prefix of the tag ending at a
+    // subtag boundary. Extended ranges are not language ranges here.
+    let de = restrict("rdf:PlainLiteral", &[("langRange", s("de"))]);
+    assert_eq!(contains(&de, &lang("x", "de-Latn-DE")), Tri::Yes);
+    assert_eq!(contains(&de, &lang("x", "deu")), Tri::No);
+    let de_de = restrict("rdf:PlainLiteral", &[("langRange", s("de-DE"))]);
+    assert_eq!(contains(&de_de, &lang("x", "de-Latn-DE")), Tri::No);
+    assert_eq!(
+        is_empty(&restrict(
+            "rdf:PlainLiteral",
+            &[("langRange", s("de-*-DE"))]
+        )),
+        Tri::Unknown
+    );
+    // Tags are well-formed BCP 47 tags: `en-a` has a singleton with no extension subtag.
+    assert_eq!(
+        contains(&dt("rdf:PlainLiteral"), &lang("x", "en-a")),
+        Tri::No
+    );
+    assert_eq!(
+        contains(&dt("rdf:PlainLiteral"), &lang("x", "en-a-bbb")),
+        Tri::Yes
+    );
+    assert_eq!(
+        is_empty(&restrict("rdf:PlainLiteral", &[("langRange", s("a"))])),
+        Tri::Yes,
+        "no well-formed tag starts with a lone singleton"
+    );
     // Length counts characters of the string part, whatever the tag.
     let two = restrict("rdf:PlainLiteral", &[("length", v("2", "integer"))]);
     assert_eq!(contains(&two, &lang("é€", "fr")), Tri::Yes);
