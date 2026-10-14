@@ -9,7 +9,7 @@ on:
     # Mirrors relevant_path() in scripts/ci_native_composition_paths.py
     # (a test keeps them equal), so a PR touching none of the job's inputs
     # never takes a runner. The in-job classifier still decides each run that
-    # starts. GitHub filters on at most 300 changed files, so for a larger
+    # starts. GitHub filters on at most 3,000 changed files, so for a larger
     # diff run this workflow by hand (workflow_dispatch has no filter).
     paths:
       - 'zk/native-composition/**'

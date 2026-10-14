@@ -180,7 +180,7 @@ public doc-comment that links to a private item inside a default-OFF feature mod
 | a new bench suite (`bench/<suite>/`) | register it in `bench/benchmarks.toml` and add a `FEATURED_SUITES` row in `bench/dashboard/dashboard.js` (or `featured = false`) (`scripts/check-new-bench-registered.py`) |
 | a `research/*.md` design that is now shipped | graduate it into an architecture doc / crate README / `SKILL.md` (*Documents must stay current*) |
 | coverage | the per-crate coverage ratchet + test-presence gate (`scripts/coverage-gate.py`, `scripts/coverage-presence.py`). Floors only rise: `coverage-gate.py --check-monotonic` fails on a lowered floor without an explicit, reviewed `--allow-lower`. |
-| test quality (a test that runs a line but never asserts on it) | the mutation ratchet (`bench/mutants-baseline.json`, `scripts/mutants-gate.py`; nightly in `ci.yml`, advisory while seeding) — and mutate your headline guard by hand |
+| test quality (a test that runs a line but never asserts on it) | the mutation ratchet (`bench/mutants-baseline.json`, `scripts/mutants-gate.py`; weekly (Saturday) in `ci.yml`, advisory while seeding) — and mutate your headline guard by hand |
 
 ### ZK circuit-member checklist — adding or removing a `zk/compose/` member
 A `zk/compose/` **member** is a `bin`-type Noir package directory under `zk/compose/` that uses the shared `compose_core` library (e.g. `join_eq_na16_nb16`, `filter_int_d4`, `scan_k1_n16_r4`). It is NOT `compose_core` itself (the shared lib) and NOT `target`. The membership-and-count gate lives in the **Rust** test suite (`crates/sparq-zk-compose/tests/gate_count.rs`), not in `nargo`, so `nargo test` passing is not evidence the gate passes. When you **add or remove** a member:

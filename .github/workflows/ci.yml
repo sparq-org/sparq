@@ -11,6 +11,7 @@ name: CI
 #   gh workflow run ci.yml --ref <branch>
 # The per-commit coverage tier (coverage floors + per-crate measurement) runs on dispatch;
 # the nightly schedule runs the heavier coverage-nightly tier instead.
+# The cargo-mutants sweep runs only on the Saturday tick (and on dispatch).
 #
 # Heavy benchmarks live in bench.yml / bench-ec2.yml, NOT here.
 on:
@@ -18,7 +19,11 @@ on:
   # Nightly; also drives the heavy coverage tier (coverage-nightly runs the sparq-vectors 50k
   # recall/diskann accuracy tests under llvm-cov instrumentation).
   schedule:
-    - cron: "17 3 * * *"
+    # Sunday to Friday: the nightly tier. Saturday: the same tier plus the mutation sweep
+    # (mutants-nightly-advisory keys on this exact cron string). Keep the two disjoint: a
+    # same-day second tick would cancel the first through the concurrency group below.
+    - cron: "17 3 * * 0-5"
+    - cron: "17 3 * * 6"
 
 permissions:
   contents: read
@@ -3036,7 +3041,14 @@ jobs:
     #      both blockers clear.
     name: mutation ratchet (cargo-mutants, advisory)
     needs: nightly-gate
-    if: needs.nightly-gate.outputs.fresh == 'true'
+    # WEEKLY, not nightly: a full sweep is ~140 runner-hours (the 2026-10-12 run held ~7
+    # runners for ~20h), which starved PR checks of runners every day. It runs on the
+    # Saturday cron (and manual dispatch) only, inside one day's wall clock before Sunday's
+    # tick. A skipped weekday sweep is not completion evidence for nightly-gate, so the
+    # Saturday run is always admitted at a head no Saturday run has measured.
+    if: >-
+      needs.nightly-gate.outputs.fresh == 'true'
+      && (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * 6')
     runs-on: ubuntu-latest
     # sq-qcnn.11: ONE crate PER MATRIX SHARD so the FULL eligible crate set is
     # measured every nightly. The old single serial job walked all crates on ONE runner and
