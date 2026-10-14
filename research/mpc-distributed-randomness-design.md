@@ -381,6 +381,13 @@ and the crate remains research-grade and externally unaudited (`sq-qhy4` pending
      hop equality via `secure_equal_to_bit_through`, every AND / OR-fold via
      `degree_reduce_through` (`eval_exact_k_chain_hidden_slots_through`,
      `eval_bounded_path_hidden_slots_through`; the public functions delegate).
+   - The **input-dealing** paths — `ShamirBackend`'s `MpcBackend::share_private_input` /
+     `share_private_inputs` (each holder's own input, row by row in the value-sorted order, via
+     `vss_own_input`; in-crate `share_private_input_through` / `share_private_inputs_through`) and
+     `join::BatchedHiddenInput::shared_keys` (one `vss_own_input` per key, in row order;
+     `shared_keys_through`), so `HiddenValueJoin::batched_join` draws its key columns and its
+     equality masks through the seam (`batched_join_through`). `share_batch` is exactly a `share`
+     loop in order, so no batch method was needed. Public signatures are unchanged.
 
    Every sharing drawn from the seam is **shape-checked** where it is consumed
    (`randomness::require_canonical_sharing`: exactly `n` shares on `x = 1..=n`, in order), the
@@ -389,15 +396,15 @@ and the crate remains research-grade and externally unaudited (`sq-qhy4` pending
    `(n, t)` differs from the backend's (`randomness::require_source_matches`). Under PRSS the
    DISTINCT / path stages run only their draw-free shapes (an empty DISTINCT, `k = 1` with
    distinct endpoint pairs, `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair); every shape that needs a holder's own
-   input shared fails closed with PRSS's `NotYetImplemented`.
+   input shared — including every non-empty private-input or batched-key sharing — fails closed
+   with PRSS's `NotYetImplemented`. These are shape checks only: they add no VSS / consistency
+   guarantee, and nothing here is maliciously secure.
 
    *Still calling the dealer directly:*
    - The **oblivious output stage** — `oblivious_join::oblivious_set_output`'s selector / tag
      sharings and the oblivious shuffle's permutation draws. It mints its own dealer from the
      backend, so `hidden_distinct` / `hidden_path` / the batched joins still reach the dealer
      there.
-   - `join::BatchedHiddenInput::shared_keys` — `ShamirDealer::share_batch`; the seam has no
-     batch method. Likewise `ShamirBackend`'s `MpcBackend::share_private_input(s)`.
    - The IT-MAC twins (`authenticated` / `auth_compare` / `auth_disclose`), which draw through
      their `MacSession`.
    - `transport` and `bench`.

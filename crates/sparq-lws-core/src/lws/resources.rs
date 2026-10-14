@@ -460,6 +460,48 @@ fn evaluate(
     Precondition::Proceed
 }
 
+/// Whether a write's preconditions compare the target's state: an `If-Match` or `If-None-Match`
+/// naming a tag, or, when the write evaluates times (`dated`), an `If-Unmodified-Since` it applies.
+/// A bare `*` asks only whether the target exists, an empty list names no tag, and a field outside
+/// the grammar fails whatever the state, so none of them tells the caller anything about a
+/// representation.
+pub(crate) fn compares_state(headers: &HeaderMap, dated: bool) -> bool {
+    let names_a_tag = |name: header::HeaderName| {
+        entity_tag::field(headers, name)
+            .is_some_and(|v| matches!(TagList::parse(&v), Ok(TagList::Tags(t)) if !t.is_empty()))
+    };
+    names_a_tag(header::IF_MATCH)
+        || names_a_tag(header::IF_NONE_MATCH)
+        || (dated
+            && !headers.contains_key(header::IF_MATCH)
+            && parse_http_date(crate::http_date::single_line(
+                headers,
+                header::IF_UNMODIFIED_SINCE,
+            ))
+            .is_some())
+}
+
+/// A write's preconditions are answered only to a caller that may read what they compare
+/// ([`compares_state`]): a writer that may not Read `uri` is refused, rather than told whether
+/// the representation it cannot read has the tag or the date it names.
+async fn precondition_read_check<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    uri: &str,
+    agent: &Agent,
+    dated: bool,
+) -> Result<(), Response> {
+    if compares_state(&req.headers, dated) {
+        return recheck(state, Action::Read, uri, agent).await;
+    }
+    Ok(())
+}
+
+/// The tag a precondition is evaluated against when it asks only whether an existing target
+/// exists ([`compares_state`] false): `*` matches it, and no tag can be named that it equals
+/// without counting as a comparison.
+pub(crate) const EXISTS: &str = "\"\"";
+
 /// Whether the request carries a precondition a state-changing method evaluates.
 pub(crate) fn is_conditional(req: &LwsRequest) -> bool {
     [
@@ -1547,7 +1589,15 @@ async fn create<S: Store + 'static>(
         let (etag, modified) =
             if parent == state.cfg.storage() && serves_description(get.header(header::ACCEPT)) {
                 (Some(description_etag(&storage_description(state))), None)
+            } else if !compares_state(&req.headers, true) {
+                // Only whether the container exists is asked, and it does: no listing is read,
+                // so none that cannot be produced (a page past the last) answers instead.
+                (Some(EXISTS.to_string()), None)
             } else {
+                // The storage description is public; the listing is not.
+                if let Err(r) = recheck(state, Action::Read, parent, agent).await {
+                    return r;
+                }
                 // Held exclusively: no change to a member is in flight.
                 let listing = read_container(state, &get, parent, &meta, true)
                     .await
@@ -2294,6 +2344,11 @@ async fn update<S: Store + 'static>(
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
+    if let Err(r) =
+        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
+    {
+        return r;
+    }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
         &req.headers,
         Some(&quoted(&meta.etag)),
@@ -2367,6 +2422,9 @@ async fn update<S: Store + 'static>(
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
         return refused;
     }
+    // The new tag covers the stored content type, which a PUT without `Content-Type` keeps from
+    // before: only a writer that may read the resource is given it.
+    let reader = state.allowed(Action::Read, uri, agent).await;
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
     let (written, _guard, _) = write_with_meta(
@@ -2384,7 +2442,9 @@ async fn update<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    if reader {
+        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    }
     if set_linkset {
         set(
             resp.headers_mut(),
@@ -3372,6 +3432,11 @@ async fn patch<S: Store + 'static>(
     if !is_json_type(&meta.content_type) {
         return not_json();
     }
+    if let Err(r) =
+        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
+    {
+        return r;
+    }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
         &req.headers,
         Some(&quoted(&meta.etag)),
@@ -3401,6 +3466,9 @@ async fn patch<S: Store + 'static>(
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
+    // The new tag describes the content as patched, which only a reader may learn (a writer that
+    // may not read it would otherwise learn its length and a hash of it).
+    let reader = state.allowed(Action::Read, uri, agent).await;
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -3419,7 +3487,9 @@ async fn patch<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    if reader {
+        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    }
     resp
 }
 
@@ -3456,6 +3526,12 @@ async fn delete<S: Store + 'static>(
         Ok(m) => m,
         Err(r) => return r,
     };
+    // A data resource's date is compared only when it has one; a container's listing may have
+    // one.
+    let dated = uri.ends_with('/') || meta.last_modified.is_some();
+    if let Err(r) = precondition_read_check(state, req, uri, agent, dated).await {
+        return r;
+    }
     // The validators the preconditions are evaluated against (RFC 9110 section 13): a data
     // resource's own; a container's are its listing's, computed the way a read computes them,
     // under the subtree locks, whenever the request is conditional at all.
@@ -3464,6 +3540,9 @@ async fn delete<S: Store + 'static>(
             Some(quoted(&meta.etag)),
             meta.last_modified.map(|t| to_secs(epoch_ms(t))),
         )
+    } else if is_conditional(req) && !compares_state(&req.headers, true) {
+        // Only whether the container exists is asked, and it does (see [`create`]).
+        (Some(EXISTS.to_string()), None)
     } else if is_conditional(req) {
         // The whole subtree is held: no change to a member is in flight.
         let listing = read_container(state, &plain_get(req), uri, &meta, true)
@@ -4556,6 +4635,9 @@ async fn linkset<S: Store + 'static>(
                 Ok(p) => p,
                 Err(r) => return r,
             };
+            if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
+                return r;
+            }
             if let Precondition::Failed | Precondition::NotModified =
                 evaluate(&req.headers, Some(&etag), None, false)
             {
@@ -4616,7 +4698,12 @@ async fn linkset<S: Store + 'static>(
                 meta,
                 patched,
                 locks,
-                LinksetValidator::Sent,
+                // The tag describes the linkset as patched, which only a reader may learn.
+                if state.allowed(Action::Read, uri, agent).await {
+                    LinksetValidator::Sent
+                } else {
+                    LinksetValidator::Withheld
+                },
             )
             .await
         }
@@ -4644,6 +4731,9 @@ async fn linkset<S: Store + 'static>(
                     StatusCode::UNSUPPORTED_MEDIA_TYPE,
                     Some("a linkset is replaced with application/linkset+json"),
                 );
+            }
+            if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
+                return r;
             }
             // A writer need not be able to read the linkset, so a 412 carries no tag of it, as
             // for a PATCH.
@@ -4812,10 +4902,12 @@ where
 
 /// Whether a stored linkset's `204` carries its new `ETag`.
 enum LinksetValidator {
-    /// A PATCH: the client may go on patching with the tag.
+    /// A PATCH by a client that may read the linkset: it may go on patching with the tag.
     Sent,
     /// A PUT: what is stored is not what was sent (references resolved, the server-managed links
     /// restored), so the response carries no validator (RFC 9110 section 9.3.4); a GET reads it.
+    /// A PATCH by a writer that may not read the linkset: the tag would describe a document it
+    /// may not read.
     Withheld,
 }
 
@@ -6267,6 +6359,227 @@ mod tests {
         meta.creator = who.subject.clone();
         st.put_resource_meta(&location, &meta).await.unwrap();
         location
+    }
+
+    /// A write's precondition that compares the target's state tells the writer how a
+    /// representation compares; one that may not read it is refused instead, whatever the outcome
+    /// would have been. A bare `*` asks only whether the target exists, and stays open to it.
+    #[tokio::test]
+    async fn a_precondition_on_state_needs_read() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, bob) = ("https://dave.example/#me", "https://bob.example/#me");
+        let writes = json!(["modify", "create", "delete"]);
+        st.access
+            .put_grant_for_test("dave", grant(writes.clone(), dave));
+        st.access.put_grant_for_test(
+            "bob",
+            grant(json!(["read", "modify", "create", "delete"]), bob),
+        );
+        let owner = agent("https://owner.example/#me");
+        let (dave, bob) = (agent(dave), agent(bob));
+        let r = create(
+            &st,
+            &request(
+                "POST",
+                "/",
+                &[("slug", "d.json"), ("content-type", JSON)],
+                "{}",
+            ),
+            &owner,
+            &root,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let uri = hdr(&r, "location");
+        let p = path_of(&uri).to_string();
+        let meta = format!("{p}{META_SUFFIX}");
+        let tag = hdr(&r, "etag");
+        let ls = hdr(
+            &handle(&st, &request("GET", &meta, &[], ""), &owner).await,
+            "etag",
+        );
+        let date = crate::http_date::format(SystemTime::now() + Duration::from_secs(3600)).unwrap();
+        let doc =
+            json!({"linkset": [{"anchor": uri, "describedby": [{"href": "d.ttl"}]}]}).to_string();
+        let add = r#"[{"op": "add", "path": "/a", "value": 1}]"#;
+        let link =
+            r#"[{"op": "add", "path": "/linkset/0/describedby", "value": [{"href": "d.ttl"}]}]"#;
+        let send =
+            |who: Agent, method: &'static str, path: String, h: Vec<(&'static str, String)>| {
+                let st = st.clone();
+                let doc = doc.clone();
+                async move {
+                    let (ty, body) = match (method, path.ends_with(META_SUFFIX)) {
+                        ("PUT", true) => (LINKSET_JSON, doc.as_str()),
+                        ("PUT", false) => (JSON, "{}"),
+                        ("PATCH", true) => (JSON_PATCH, link),
+                        ("PATCH", false) => (JSON_PATCH, add),
+                        ("POST", _) => ("text/plain", "x"),
+                        _ => ("text/plain", ""),
+                    };
+                    let mut headers = vec![("content-type", ty)];
+                    headers.extend(h.iter().map(|(k, v)| (*k, v.as_str())));
+                    handle(&st, &request(method, &path, &headers, body), &who)
+                        .await
+                        .status()
+                }
+            };
+        let writes = [
+            ("PUT", p.clone(), tag.clone()),
+            ("PATCH", p.clone(), tag.clone()),
+            ("DELETE", p.clone(), tag.clone()),
+            ("PUT", meta.clone(), ls.clone()),
+            ("PATCH", meta.clone(), ls.clone()),
+        ];
+        for (method, path, current) in &writes {
+            for h in [
+                vec![("if-match", current.clone())],
+                vec![("if-match", "\"other\"".to_string())],
+                vec![("if-none-match", current.clone())],
+                vec![("if-none-match", "\"other\"".to_string())],
+            ] {
+                // Dave may write but not read: the same refusal, matched or not.
+                let status = send(dave.clone(), method, path.clone(), h.clone()).await;
+                assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path} {h:?}");
+            }
+            // Bob may read too, and is told the outcome.
+            let status = send(
+                bob.clone(),
+                method,
+                path.clone(),
+                vec![("if-match", "\"other\"".into())],
+            )
+            .await;
+            assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{method} {path}");
+        }
+        // A date the write compares is state too; on a linkset, which a date never decides, it is
+        // ignored, so it is no reason to refuse.
+        for (method, path) in [
+            ("PUT", p.clone()),
+            ("PATCH", p.clone()),
+            ("DELETE", p.clone()),
+        ] {
+            let status = send(
+                dave.clone(),
+                method,
+                path,
+                vec![("if-unmodified-since", date.clone())],
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method}");
+        }
+        let status = send(
+            dave.clone(),
+            "PATCH",
+            meta.clone(),
+            vec![("if-unmodified-since", date.clone())],
+        )
+        .await;
+        assert!(status.is_success(), "{status}");
+        // A conditional create is compared with the container's listing; at the storage root
+        // without an Accept, with the storage description, which is public.
+        let c = create(
+            &st,
+            &request("POST", "/", &[("slug", "c"), ("link", CONTAINER_LINK)], ""),
+            &owner,
+            &root,
+        )
+        .await;
+        assert_eq!(c.status(), StatusCode::CREATED);
+        let c = path_of(&hdr(&c, "location")).to_string();
+        let other = || vec![("if-none-match", "\"other\"".to_string())];
+        let status = send(dave.clone(), "POST", c.clone(), other()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(dave.clone(), "POST", "/".into(), other()).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let status = send(bob.clone(), "POST", c.clone(), other()).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let status = send(dave.clone(), "POST", c.clone(), vec![("if-match", "*".into())]).await;
+        assert_eq!(status, StatusCode::CREATED);
+        // `*` asks only whether the container exists, so it reads no listing: a page past the
+        // last, which a listing would answer with 404, tells a writer nothing about the members.
+        let page = format!("{c}?page=99");
+        let status = send(dave.clone(), "POST", page, vec![("if-match", "*".into())]).await;
+        assert_eq!(status, StatusCode::CREATED);
+        // `*` alongside a date the write compares is still a comparison.
+        let status = send(
+            dave.clone(),
+            "PUT",
+            p.clone(),
+            vec![
+                ("if-none-match", "*".into()),
+                ("if-unmodified-since", date.clone()),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Read is asked of the container the create compares, not of another: Erin may read
+        // only `e/`, and is told how its listing compares.
+        let e = create(
+            &st,
+            &request("POST", "/", &[("slug", "e"), ("link", CONTAINER_LINK)], ""),
+            &owner,
+            &root,
+        )
+        .await;
+        let e_uri = hdr(&e, "location");
+        let erin = "https://erin.example/#me";
+        st.access
+            .put_grant_for_test("erin", grant(json!(["create"]), erin));
+        st.access.put_grant_for_test(
+            "erin-reads-e",
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": ["read"], "assignee": erin,
+                    "target": {"type": "Container", "value": [e_uri.clone()]}}]),
+                &root,
+            )
+            .unwrap(),
+        );
+        let erin = agent(erin);
+        let status = send(erin.clone(), "POST", path_of(&e_uri).into(), other()).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let status = send(erin, "POST", c.clone(), other()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // A new tag describes content only a reader may learn: a PUT without `Content-Type` keeps
+        // the stored type, which the tag covers.
+        for (who, sent) in [(&dave, false), (&bob, true)] {
+            let r = handle(&st, &request("PUT", &p, &[], "{}"), who).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            assert_eq!(r.headers().contains_key("etag"), sent, "PUT {who:?}");
+        }
+        for (who, sent) in [(&dave, false), (&bob, true)] {
+            for (path, body) in [(&p, add), (&meta, link)] {
+                let r = handle(
+                    &st,
+                    &request("PATCH", path, &[("content-type", JSON_PATCH)], body),
+                    who,
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::NO_CONTENT, "{path}");
+                assert_eq!(r.headers().contains_key("etag"), sent, "{path} {who:?}");
+            }
+        }
+        // `*` stays open to a writer that may not read.
+        for (method, path) in [
+            ("PUT", meta.clone()),
+            ("PATCH", p.clone()),
+            ("PUT", p.clone()),
+            ("DELETE", p.clone()),
+        ] {
+            let status = send(dave.clone(), method, path, vec![("if-match", "*".into())]).await;
+            assert!(status.is_success(), "{method} {status}");
+        }
     }
 
     #[tokio::test]

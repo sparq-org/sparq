@@ -63,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the HOST side. The in-circuit half stays open: no Noir global or assert names the sentinel, so a
   member refuses it only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
-  §14.1 `LANG_NONE` assumption is not discharged. Both versions carry the same #769-accepted INV-VL
+  §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
 - **sparq-zk-compose:** `filter_value_dl_bool` is the `DualLeafV2` `xsd:boolean` lane's dedicated
   member — `filter_value_dl_int`'s public layout field-for-field, plus in-circuit constraints that the
@@ -77,6 +77,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   soundness or privacy claim.
 
 ### Changed
+
+- **sparq-zk:** hardening — the dual-leaf encoders now assert the §14.1 `LANG_NONE` separation
+  on the host side instead of assuming it. `dual_leaf::degenerate_value_component` and
+  `dual_leaf_v2::degenerate_value_component` return `Result<Fr, DualLeafError>` and refuse a language
+  tag whose language constant equals the reserved `LANG_NONE` sentinel with the new
+  `DualLeafError::ReservedLanguageConstant`, so such a tag fails the literal, term, triple and
+  whole-graph encoders rather than being encoded; `checked_lang_const` (in both modules) is the gate.
+  A language constant is a 248-bit truncated BLAKE3 digest and `LANG_NONE` is the field element `1`,
+  so only a fixed-target preimage reaches the refusal. No committed value, vector or leaf changes. The
+  in-circuit half of the assert stays open (no Noir member checks it;
+  `research/zk-field-native-encoding.md` §14.1, §14.3).
+
+- **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
+  the same parsed input, and as long as the binding values and firing sets are themselves
+  stable, their labels (`__sk<n>_<label>`), and the statement keys and `sparq-prov` entity IRIs
+  of facts carrying them, no longer depend on hash-set traversal order or hasher width (native
+  vs `wasm32`). Bindings that still carry traversal order (for example a `log:collectAllIn`
+  list) can still change those keys (#6844). Existing labels are renumbered, so these keys and
+  IRIs differ from those minted by earlier versions; regenerate stored ones. `why()` proof
+  trees can still vary with traversal order. Ranking each round's existential firings adds a
+  small per-firing cost to rules with existential conclusions (#6843). (#6749)
 
 - **sparq-zk:** `CommitmentMethod::DualLeafV1` is no longer production-selectable
   (`is_production_selectable()` is `false` for it), and `secprop::production_method_iris()` yields the
@@ -318,6 +339,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
+  / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to
+  a stored formula that holds no variable at any depth is matched as that formula, as
+  stored (its blank nodes are its existentials), the same as the formula written in the
+  rule; its statements are charged to the round's `max_join_rows` allowance. It was
+  matched as the empty pattern, so `log:includes` held whatever the formula held and
+  `log:notIncludes` never fired. Every other value (a formula holding a variable, a
+  non-formula value, an unbound variable) and every bound pattern with the store as the
+  scope still match as the empty pattern (#6943). Each containment matches its pattern's
+  blank nodes afresh: a witness found by one `log:includes` no longer constrains the next
+  one in the premise. (refs #6936, #6943)
+
+- **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
+  entry with a variable outside a formula, as `insert` already does, instead of adding it
+  to the base.
+
+- **sparq-reason (N3):** a rule whose existential conclusion contains a quoted formula with
+  variables (e.g. `{ ?x :p :v } => { _:e :q { ?x :r :v } }`) now fires once per distinct
+  binding of those variables. Before, it could fire only once and drop the other bindings'
+  conclusions, so such closures can now be larger and may reach closure limits sooner. (#6749)
 
 - **sparq-reason:** deleting a fact that the rules document itself asserts from a
   `MaterializedN3Graph` now sticks when the graph re-runs the batch engine (fallback mode),

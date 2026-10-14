@@ -971,11 +971,16 @@ record must not say otherwise. A real `LANG_CONST` is `blake3_field(lang)` — a
 that collision negligible, not impossible; the language slot is collision-resistant and
 domain-separated, never provably disjoint. The enforceable sharpening is the same shape
 §14.1 demands of the value slot — a fail-closed `assert(lang_const != LANG_NONE)` at
-ingest, mirrored wherever a witnessed `LANG_CONST` enters a circuit — and until that
-ships, "no committed language tag hashes to `LANG_NONE`" is a **retained assumption**,
-registered as an OPEN audit obligation in §14.3. (The shipped host and Noir constants
-assert nothing; their doc comments state this assumption rather than separation by
-construction, #5263.)
+ingest, mirrored wherever a witnessed `LANG_CONST` enters a circuit. The **host half
+has shipped** for both dual-leaf versions: `degenerate_value_component` (and so every
+literal, term, triple and whole-graph encoder above it) routes each language constant
+through `checked_lang_const`'s gate and refuses a tag whose constant equals `LANG_NONE`
+with `DualLeafError::ReservedLanguageConstant`, so such a tag is rejected at ingest
+rather than encoded. The gate changes no committed value: it only adds a refusal for an
+input no known tag produces. The **circuit half is still open** — no Noir member asserts
+`LANG_CONST != LANG_NONE` — so for a witnessed `LANG_CONST`, "no committed language tag
+hashes to `LANG_NONE`" remains a **retained assumption**, registered as an OPEN audit
+obligation in §14.3.
 
 The value slot is worse than probabilistic, which is why it gets an assert and not a
 caveat: its real occupants ARE small field elements, so a `0`/`1` tag collides with
@@ -1052,11 +1057,12 @@ obligations.
 Both §14 rules — the reserved-tag band exclusion on `VALUE_NONE`, and the double lane's
 in-circuit canonical fold together with the residual it leaves to sq-mslu — are registered
 as OPEN external-audit obligations under CR-G8 / sq-qhy4 alongside the rest of this
-record. So is the §14.1 **`LANG_NONE` separation assumption**: like `VALUE_NONE`'s
-exclusion (§14.4) it is today *unasserted*, resting on collision-resistance of `blake3_field` over
-the language-tag domain rather than on a check, and it stays an assumption until the
-fail-closed ingest/circuit assert §14.1 names actually ships. No soundness or privacy
-property is claimed for any of the three, pending the external sign-off.
+record. So is the §14.1 **`LANG_NONE` separation**: the fail-closed ingest assert §14.1
+names now ships on the host side for `DualLeafV1` and `DualLeafV2` (a language tag whose
+constant equals `LANG_NONE` is refused, never encoded), but no circuit asserts it, so on
+the circuit side it still rests on the preimage resistance of the 248-bit truncated hash
+for the fixed target `1`. No soundness or privacy property is claimed for any of the
+three, pending the external sign-off.
 
 The band-exclusion rule itself is **met by `DualLeafV2` on the HOST side** (§14.5) as an
 asserted, checkable invariant; `DualLeafV1` retains the in-band tag (§14.4). The
@@ -1096,7 +1102,8 @@ That is not the domain-separated `blake3_field` constant §14.1 asks for: `2` li
 the reachable handle band. Distinctness in this build rests on the routing argument
 instead: a hookable `DATATYPE_CONST` never carries a degenerate component, and a
 non-hookable one never carries a real hook. So the §14.1 band exclusion is not yet met,
-and it stays an open audit obligation alongside the `LANG_NONE` assumption (§14.3).
+and it stays an open audit obligation alongside the circuit half of the `LANG_NONE`
+separation (§14.3).
 
 **Fail-closed ingest.** A literal whose datatype is on a hookable lane in this build
 (`xsd:integer`, `xsd:decimal`, `xsd:double`) but whose lexical form that lane's encoder
@@ -1262,9 +1269,11 @@ What is still NOT enforced, stated plainly:
 Nothing in §14.5, and nothing in the method authentication or the pin functions, makes a V2
 value-lane proof verifier-enforced.
 
-**What V2 does NOT discharge.** The §14.1 **`LANG_NONE` assumption** stands: V2 still folds
-`LANG_NONE = 1` in the no-language slot and asserts nothing about a real `LANG_CONST`
-differing from it, so §14.3's registration of that assumption is unchanged. Nor does
+**What V2 does NOT discharge.** V2 still folds `LANG_NONE = 1` in the no-language slot;
+its `LANG_CONTEXT` key derivation does not separate a language constant from `1`, which
+is a small field element, not a hash output. The host encoder asserts the separation
+instead (the same `ReservedLanguageConstant` refusal as V1, §14.1), but no circuit does,
+so §14.3's registration of the circuit half is unchanged. Nor does
 anything here become an audited property: both dual-leaf versions carry the same INV-VL
 downgrade (value↔lexical agreement rests on trusted-issuer honesty) and the whole ZK estate
 remains NOT externally audited under CR-G8 / sq-qhy4.

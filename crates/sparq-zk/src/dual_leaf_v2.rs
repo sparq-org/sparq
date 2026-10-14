@@ -78,11 +78,15 @@
 //! out-of-band value only because their `u64` range decomposition (and
 //! `filter_value_dl_bool`'s `{0, 1}` constraint) cannot represent it.
 //!
-//! The §14.1 **`LANG_NONE` separation assumption is NOT discharged here**: the
-//! no-language slot still folds the V1 [`crate::dual_leaf::LANG_NONE`] tag, whose
-//! separation from a derived language constant remains probabilistic (a hash
-//! reduced into the field can equal `1`). That assumption stays open exactly as
-//! §14.3 records it.
+//! The §14.1 **`LANG_NONE` separation** is enforced on the HOST side, not by
+//! construction: the no-language slot still folds the V1
+//! [`crate::dual_leaf::LANG_NONE`] tag (`1`), and a derived language constant is
+//! a hash truncated into the field, which can in principle equal `1`. So
+//! [`degenerate_value_component`] (and every encoder above it) refuses a tag
+//! whose [`lang_const`] equals `LANG_NONE` with
+//! [`DualLeafError::ReservedLanguageConstant`] — the same gate as V1
+//! ([`checked_lang_const`]). The in-circuit mirror §14.1 also names is still
+//! open: no Noir member asserts `LANG_CONST != LANG_NONE`.
 //!
 //! ## 3. The bit-domain boolean lane
 //!
@@ -104,9 +108,9 @@
 
 use crate::canon::{self, CanonicalGraph};
 use crate::dual_leaf::{
-    canonical_decimal_scaled, canonical_nonneg_u64, parse_xsd_double_bits, DualCommitError,
-    DualGraphCommitment, DualLeafComponents, DualLeafError, LANG_NONE, XSD_DECIMAL, XSD_DOUBLE,
-    XSD_INTEGER,
+    canonical_decimal_scaled, canonical_nonneg_u64, parse_xsd_double_bits, refuse_lang_none,
+    DualCommitError, DualGraphCommitment, DualLeafComponents, DualLeafError, LANG_NONE,
+    XSD_DECIMAL, XSD_DOUBLE, XSD_INTEGER,
 };
 use crate::dual_leaf_boolean::{canonical_boolean, XSD_BOOLEAN};
 use crate::dual_leaf_datetime::{
@@ -272,10 +276,20 @@ pub fn date_lane_const() -> Fr {
 /// (`oxrdf::Literal::language` already yields a lowercased tag; the explicit
 /// lowercasing makes the constant independent of that).
 ///
-/// This does NOT discharge the §14.1 `LANG_NONE` assumption — see the module docs
-/// §2.
+/// The key-derivation context does not separate a language constant from the
+/// `LANG_NONE` sentinel, which is the field element `1`, not a hash output; the
+/// encoder checks that separation instead ([`checked_lang_const`]; module docs
+/// §2).
 pub fn lang_const(language: &str) -> Fr {
     derive(LANG_CONTEXT, language.to_ascii_lowercase().as_bytes())
+}
+
+/// The V2 [`lang_const`], refusing fail-closed a language tag whose constant
+/// equals the reserved `LANG_NONE` sentinel
+/// ([`DualLeafError::ReservedLanguageConstant`]) — the V2 counterpart of
+/// [`crate::dual_leaf::checked_lang_const`], through the same gate.
+pub fn checked_lang_const(language: &str) -> Result<Fr, DualLeafError> {
+    refuse_lang_none(language, lang_const(language))
 }
 
 /// Whether `f` lies in the REACHABLE value-handle band
@@ -469,12 +483,29 @@ fn signed_hook(neg: bool, magnitude: u64) -> Fr {
 /// `h3(value_none(), degenerate_datatype_const(datatype), LANG_CONST)`, with
 /// `LANG_CONST` the V2 [`lang_const`] of the language tag for a language-tagged
 /// literal and the V1 `LANG_NONE` sentinel otherwise.
-pub fn degenerate_value_component(datatype: &str, language: Option<&str>) -> Fr {
+///
+/// **Fail-closed:** returns [`DualLeafError::ReservedLanguageConstant`] when the
+/// language tag's constant equals `LANG_NONE` (see [`checked_lang_const`]).
+/// Every other input yields the same component as before the check existed.
+pub fn degenerate_value_component(
+    datatype: &str,
+    language: Option<&str>,
+) -> Result<Fr, DualLeafError> {
+    degenerate_value_component_with(datatype, language, lang_const)
+}
+
+/// [`degenerate_value_component`] over an injected language derivation, so a
+/// test can drive the `LANG_NONE` refusal with a derivation that hits it.
+fn degenerate_value_component_with(
+    datatype: &str,
+    language: Option<&str>,
+    derive_lang: fn(&str) -> Fr,
+) -> Result<Fr, DualLeafError> {
     let lang = match language {
-        Some(l) => lang_const(l),
+        Some(l) => refuse_lang_none(l, derive_lang(l))?,
         None => Fr::from(LANG_NONE),
     };
-    poseidon2::hash(&[value_none(), degenerate_datatype_const(datatype), lang])
+    Ok(poseidon2::hash(&[value_none(), degenerate_datatype_const(datatype), lang]))
 }
 
 /// Encodes a literal to its V2 leaf, routing by datatype exactly as V1 does
@@ -482,7 +513,8 @@ pub fn degenerate_value_component(datatype: &str, language: Option<&str>) -> Fr 
 ///
 /// **Fail-closed (§6):** a hookable-datatyped literal whose lexical form the lane
 /// encoder rejects returns that encoder's [`DualLeafError`]; it is NEVER
-/// downgraded onto the degenerate lane.
+/// downgraded onto the degenerate lane. A language tag whose constant equals
+/// `LANG_NONE` is likewise refused ([`DualLeafError::ReservedLanguageConstant`]).
 pub fn encode_literal(literal: &Literal) -> Result<Fr, DualLeafError> {
     let datatype = literal.datatype();
     let components = match datatype.as_str() {
@@ -497,7 +529,7 @@ pub fn encode_literal(literal: &Literal) -> Result<Fr, DualLeafError> {
     Ok(match components {
         Some(c) => c.leaf(),
         None => poseidon2::hash(&[
-            degenerate_value_component(datatype.as_str(), literal.language()),
+            degenerate_value_component(datatype.as_str(), literal.language())?,
             // EXACTLY the string-canonical `h_s` over the canonical N-Triples
             // token, byte-identical to `encode.rs`'s and to V1's.
             blake3_field(literal.to_string().as_bytes()),
@@ -752,7 +784,7 @@ mod tests {
             // hook — including the boolean hook `2` an unconstrained integer
             // member would have accepted.
             for lang in [None, Some("en")] {
-                let component = degenerate_value_component(d, lang);
+                let component = degenerate_value_component(d, lang).unwrap();
                 for l in &named {
                     for hook in [0u64, 1, 2, u64::MAX] {
                         assert_ne!(
@@ -1082,7 +1114,7 @@ mod tests {
             assert_eq!(
                 encode_literal(&lit).unwrap(),
                 poseidon2::hash(&[
-                    degenerate_value_component(iri, lit.language()),
+                    degenerate_value_component(iri, lit.language()).unwrap(),
                     blake3_field(lit.to_string().as_bytes()),
                     Fr::from(TYPE_CODE_LITERAL),
                 ]),
@@ -1123,12 +1155,12 @@ mod tests {
         // A different language is a different value component (LANG_CONST is
         // load-bearing, not decorative).
         assert_ne!(
-            degenerate_value_component(RDF_LANG_STRING, Some("en")),
-            degenerate_value_component(RDF_LANG_STRING, Some("fr")),
+            degenerate_value_component(RDF_LANG_STRING, Some("en")).unwrap(),
+            degenerate_value_component(RDF_LANG_STRING, Some("fr")).unwrap(),
         );
         assert_ne!(
-            degenerate_value_component(RDF_LANG_STRING, Some("en")),
-            degenerate_value_component(RDF_LANG_STRING, None),
+            degenerate_value_component(RDF_LANG_STRING, Some("en")).unwrap(),
+            degenerate_value_component(RDF_LANG_STRING, None).unwrap(),
         );
         // The §3.2 distinctness the degenerate lane must preserve.
         let leaves = [
@@ -1335,5 +1367,35 @@ mod tests {
             encode_triple(&t, &salt).unwrap(),
             encode_triple(&swapped, &salt).unwrap()
         );
+    }
+
+    /// V2 applies the same fail-closed `LANG_CONST != LANG_NONE` gate as V1:
+    /// a language derivation that hits the reserved sentinel is refused, the
+    /// no-language slot still folds `LANG_NONE`, and real V2 tags pass the gate
+    /// with their committed constants unchanged.
+    #[test]
+    fn a_v2_language_constant_equal_to_lang_none_is_refused() {
+        let sentinel = Fr::from(LANG_NONE);
+        let colliding: fn(&str) -> Fr = |_| Fr::from(LANG_NONE);
+        assert_eq!(
+            degenerate_value_component_with(RDF_LANG_STRING, Some("en"), colliding),
+            Err(DualLeafError::ReservedLanguageConstant("en".to_string()))
+        );
+        assert_eq!(
+            degenerate_value_component_with(XSD_STRING, None, colliding),
+            degenerate_value_component(XSD_STRING, None)
+        );
+        let tags = [
+            "en", "EN", "en-GB", "fr", "de-CH-1996", "zh-Hant-TW", "x-private", "", " ", "\0",
+        ];
+        for tag in tags {
+            let c = checked_lang_const(tag).unwrap();
+            assert_ne!(c, sentinel, "V2 lang const of {tag:?} is LANG_NONE");
+            assert_eq!(c, lang_const(tag));
+            assert_eq!(
+                degenerate_value_component(RDF_LANG_STRING, Some(tag)).unwrap(),
+                poseidon2::hash(&[value_none(), degenerate_datatype_const(RDF_LANG_STRING), c])
+            );
+        }
     }
 }

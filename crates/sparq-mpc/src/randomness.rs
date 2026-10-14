@@ -151,8 +151,9 @@ impl RandomnessModel {
 /// refusal gate — today it refuses EVERY source (see its docs), and wiring it
 /// through the production call sites is itself a follow-on bead (no call site is
 /// gated on it yet, although `degree_reduce`, the hidden-value equality path, the
-/// whole comparison chain and the hidden DISTINCT / property-path stages already
-/// draw through this trait).
+/// whole comparison chain, the hidden DISTINCT / property-path stages, the
+/// private-input sharing and the batched join's key sharing already draw through
+/// this trait).
 ///
 /// See `research/mpc-distributed-randomness-design.md` for the full design and
 /// the follow-on implementation beads.
@@ -183,11 +184,13 @@ pub trait DistributedRandomness {
     /// beads add. No production call site is gated on this yet. Wiring the callers
     /// is in progress (design record §5 item 5): `degree_reduce`
     /// ([`crate::shamir::degree_reduce_through`]), the hidden-value equality path
-    /// ([`crate::join::HiddenValueJoin`]), the [`crate::compare`] chain and the
-    /// [`crate::hidden_distinct`] / [`crate::hidden_path`] stages draw through the
-    /// seam; the oblivious output stage (selector / tag sharings and the shuffle),
-    /// the batched key and private-input sharing, the authenticated (IT-MAC)
-    /// twins, `transport` and `bench` still call the dealer directly.
+    /// ([`crate::join::HiddenValueJoin`]), the [`crate::compare`] chain, the
+    /// [`crate::hidden_distinct`] / [`crate::hidden_path`] stages, the
+    /// [`crate::shamir::ShamirBackend`] private-input sharing and
+    /// [`crate::join::BatchedHiddenInput::shared_keys`] draw through the seam; the
+    /// oblivious output stage (selector / tag sharings and the shuffle), the
+    /// authenticated (IT-MAC) twins, `transport`, `bench` and `draw_bit` still call
+    /// the dealer directly.
     /// Provided as a default so every implementor inherits the same refusal.
     fn require_deployable(&self) -> Result<(), MpcError> {
         let model = self.randomness_model();
