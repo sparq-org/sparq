@@ -257,7 +257,7 @@ jobs:
           python3 -c 'import json,os; json.dump({"head_sha": os.environ["HEAD_SHA"], "event": os.environ["EVENT_NAME"]}, open("fmg-metadata/metadata.json","w"))'
       - name: Upload the selected-matrix artifact (reporter completeness ground truth)
         if: steps.assemble.outputs.legs != '0'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: feature-matrix-selected
           path: fmg-selected/selected-matrix.json
@@ -265,7 +265,7 @@ jobs:
           if-no-files-found: error
       - name: Upload the run metadata artifact (head SHA + event for the reporter)
         if: steps.assemble.outputs.legs != '0'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: feature-matrix-metadata
           path: fmg-metadata/metadata.json
@@ -409,7 +409,7 @@ jobs:
         # re-runs of failed jobs working (v4+ artifacts are otherwise immutable
         # within a run). The artifact name is unique per matrix entry.
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: feature-matrix-results-${{ strategy.job-index }}
           path: fmg-results/results.json
