@@ -1,6 +1,9 @@
 # Exact-evaluator campaign evidence
 
-The mandatory `real exact-dataset guest and proof` job executes
+The `real exact-dataset guest and proof` job (in the advisory
+`zk-exact-evaluator` workflow: triggers in
+`.github/workflows/zk-exact-evaluator.yml`, path sets in
+`scripts/ci_exact_evaluator_paths.py`) executes
 `scripts/ci_exact_evaluator_evidence.py --output NEW_DIRECTORY`. This GitHub
 Actions helper requires the actual event context and installed pinned toolchain;
 it has no mock or missing-tool success path. It runs native semantic tests,

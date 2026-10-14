@@ -190,8 +190,11 @@ read accepts the same three forms. A `GET` or `HEAD` evaluates `If-Match` and
 fail; on a read `If-Match` must name the tag of the representation selected,
 not another format's. An entity-tag list may span several header lines; one that
 is not the RFC 9110 grammar (only space and tab may surround a tag) names no tag,
-so it fails `If-Match` and never triggers `If-None-Match`. As with a concrete ETag
-validator, a writer without Read on the target is refused rather than told the outcome.
+so it fails `If-Match` and never triggers `If-None-Match`. A `Range` applies only
+while `If-Range`, when sent on one header line, is the strong `ETag` of the
+representation selected; otherwise the whole body is served. As with a concrete
+ETag validator, a writer without Read on the target is refused rather than told
+the outcome.
 Container reads include generated `ldp:contains` triples. A container's `ETag`
 covers its own record and its membership: a tag read in any format is a valid
 `If-Match` for the container until it or its membership changes. Creating a
@@ -551,7 +554,13 @@ What the server exposes, all discoverable from the storage description
   (a partial PUT) is refused with `400`.
 - A `Link` target that is not a URI reference is refused with `400`; entity tags in
   `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
-  nothing.
+  nothing. A write whose precondition compares the target's state (a tag in `If-Match` or
+  `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
+  and on a conditional `POST` Read on the container whose listing it compares (an access request's
+  listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
+  outcome would have been. A bare `*` asks only whether the target exists and needs no Read (nor
+  reads a listing, so a page past the last is no `404` then). A `PUT`'s or `PATCH`'s `204` carries
+  the new `ETag`, of a resource or a linkset, only to a writer that may read the result.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
