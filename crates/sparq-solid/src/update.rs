@@ -612,7 +612,8 @@ pub(crate) fn check_effects(
             .to_owned()
     };
     // Graphs earlier effects of this request wrote or created: a later `CLEAR`/`DROP NAMED`
-    // empties them too, though the store before the request did not hold them.
+    // empties them too, though the store before the request did not hold them. A graph
+    // leaves this list when a later effect drops it, and comes back if one writes it again.
     let mut written: Vec<&NamedNode> = Vec::new();
     // Graphs earlier effects dropped; `dropped_all` after a `DROP NAMED`.
     let mut dropped: FxHashSet<&str> = FxHashSet::default();
@@ -642,8 +643,9 @@ pub(crate) fn check_effects(
                     }
                     GraphTarget::NamedGraphs => {
                         // Each graph it empties is checked, the auth-view inputs among them
-                        // included.
-                        // A graph this request already dropped is gone: nothing to empty.
+                        // included. A graph this request already dropped is gone, so there
+                        // is nothing to empty unless a later effect wrote it again (then it
+                        // is in `written`).
                         for g in store_named_graphs(graph) {
                             if dropped_all || dropped.contains(g.as_str()) {
                                 continue;
@@ -659,8 +661,12 @@ pub(crate) fn check_effects(
                     match target {
                         GraphTarget::NamedNode(n) => {
                             dropped.insert(n.as_str());
+                            written.retain(|w| *w != n);
                         }
-                        GraphTarget::NamedGraphs => dropped_all = true,
+                        GraphTarget::NamedGraphs => {
+                            dropped_all = true;
+                            written.clear();
+                        }
                         GraphTarget::DefaultGraph | GraphTarget::AllGraphs => {}
                     }
                 }
