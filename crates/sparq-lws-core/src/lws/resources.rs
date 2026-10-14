@@ -20,6 +20,7 @@ use super::{
     GRANTS_PATH, JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS,
     META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
+use crate::entity_tag::{self, TagList};
 use crate::error::ServerError;
 use crate::store::Store;
 
@@ -360,82 +361,6 @@ fn quoted(tag: &str) -> String {
     }
 }
 
-/// An `If-Match` / `If-None-Match` field value: `*`, or entity tags as `(weak, opaque-tag)`, the
-/// opaque tag with its quotes, as bytes (it may hold `obs-text`).
-enum TagList {
-    Any,
-    Tags(Vec<(bool, Vec<u8>)>),
-}
-
-impl TagList {
-    /// Parse a field value by the RFC 9110 grammar (`"*" / #entity-tag`, section 8.8.3): a comma
-    /// inside a quoted tag belongs to the tag, and `*` is the whole value or not a wildcard.
-    /// Anything else is unreadable.
-    fn parse(b: &[u8]) -> Result<Self, ()> {
-        if b.trim_ascii() == b"*" {
-            return Ok(Self::Any);
-        }
-        let mut i = 0;
-        let mut tags = Vec::new();
-        loop {
-            while i < b.len() && matches!(b[i], b' ' | b'\t' | b',') {
-                i += 1;
-            }
-            if i == b.len() {
-                break;
-            }
-            let weak = b[i..].starts_with(b"W/");
-            if weak {
-                i += 2;
-            }
-            if b.get(i) != Some(&b'"') {
-                return Err(());
-            }
-            let start = i;
-            i += 1;
-            while i < b.len() && b[i] != b'"' {
-                if !(b[i] == 0x21 || (0x23..=0x7e).contains(&b[i]) || b[i] >= 0x80) {
-                    return Err(());
-                }
-                i += 1;
-            }
-            if i == b.len() {
-                return Err(());
-            }
-            i += 1;
-            tags.push((weak, b[start..i].to_vec()));
-            while i < b.len() && matches!(b[i], b' ' | b'\t') {
-                i += 1;
-            }
-            if i < b.len() && b[i] != b',' {
-                return Err(());
-            }
-        }
-        // An empty list (`#entity-tag` allows one) names no tag: it matches nothing.
-        Ok(Self::Tags(tags))
-    }
-
-    /// Whether the list matches `etag` (the server's own, quoted). `weak` compares opaque tags
-    /// only (RFC 9110 section 8.8.3.2).
-    fn matches(&self, etag: &str, weak: bool) -> bool {
-        let (etag_weak, opaque) = match etag.strip_prefix("W/") {
-            Some(o) => (true, o),
-            None => (false, etag),
-        };
-        match self {
-            Self::Any => true,
-            Self::Tags(tags) => tags
-                .iter()
-                .any(|(w, t)| t == opaque.as_bytes() && (weak || (!w && !etag_weak))),
-        }
-    }
-}
-
-#[cfg(test)]
-fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
-    TagList::parse(header.as_bytes()).is_ok_and(|l| l.matches(etag, weak))
-}
-
 /// A body (of POST, PUT, PATCH or QUERY) sent with a content coding other than `identity` is refused (`415`, with
 /// `Accept-Encoding: identity`, RFC 9110 section 15.5.16) before anything reads it: the server
 /// does not decode bodies, and storing the coded bytes as the representation would drop the
@@ -497,19 +422,26 @@ fn evaluate(
     modified_secs: Option<u64>,
     read: bool,
 ) -> Precondition {
-    let Ok(pre) = Preconditions::read(headers) else {
+    // Read as bytes: an opaque tag may hold obs-text (RFC 9110 section 8.8.3).
+    let if_match = entity_tag::field(headers, header::IF_MATCH);
+    let if_none_match = entity_tag::field(headers, header::IF_NONE_MATCH);
+    let (Ok(if_match), Ok(if_none_match)) = (
+        if_match.as_deref().map(TagList::parse).transpose(),
+        if_none_match.as_deref().map(TagList::parse).transpose(),
+    ) else {
         return Precondition::Failed;
     };
-    if let Some(im) = pre.if_match.as_ref() {
+    let date = |n: header::HeaderName| parse_http_date(crate::http_date::single_line(headers, n));
+    if let Some(im) = if_match.as_ref() {
         if !etag.is_some_and(|e| im.matches(e, false)) {
             return Precondition::Failed;
         }
-    } else if let (Some(since), Some(m)) = (pre.if_unmodified_since, modified_secs) {
+    } else if let (Some(since), Some(m)) = (date(header::IF_UNMODIFIED_SINCE), modified_secs) {
         if m as i64 > since {
             return Precondition::Failed;
         }
     }
-    if let Some(inm) = pre.if_none_match.as_ref() {
+    if let Some(inm) = if_none_match.as_ref() {
         if etag.is_some_and(|e| inm.matches(e, true)) {
             return if read {
                 Precondition::NotModified
@@ -518,7 +450,7 @@ fn evaluate(
             };
         }
     } else if read {
-        if let (Some(since), Some(m)) = (pre.if_modified_since, modified_secs) {
+        if let (Some(since), Some(m)) = (date(header::IF_MODIFIED_SINCE), modified_secs) {
             let now = to_secs(now_ms()) as i64;
             if since <= now && m as i64 <= since {
                 return Precondition::NotModified;
@@ -526,36 +458,6 @@ fn evaluate(
         }
     }
     Precondition::Proceed
-}
-
-/// A request's preconditions, every field line of each read.
-struct Preconditions {
-    if_match: Option<TagList>,
-    if_none_match: Option<TagList>,
-    if_unmodified_since: Option<i64>,
-    if_modified_since: Option<i64>,
-}
-
-impl Preconditions {
-    fn read(headers: &HeaderMap) -> Result<Self, ()> {
-        let list = |n: header::HeaderName| -> Result<Option<TagList>, ()> {
-            // Read as bytes: an opaque tag may hold obs-text (RFC 9110 section 8.8.3).
-            let lines: Vec<&[u8]> = headers.get_all(n).iter().map(|v| v.as_bytes()).collect();
-            if lines.is_empty() {
-                return Ok(None);
-            }
-            TagList::parse(&lines.join(&b", "[..])).map(Some)
-        };
-        let date = |n: header::HeaderName| -> Result<Option<i64>, ()> {
-            Ok(parse_http_date(crate::http_date::single_line(headers, n)))
-        };
-        Ok(Self {
-            if_match: list(header::IF_MATCH)?,
-            if_none_match: list(header::IF_NONE_MATCH)?,
-            if_unmodified_since: date(header::IF_UNMODIFIED_SINCE)?,
-            if_modified_since: date(header::IF_MODIFIED_SINCE)?,
-        })
-    }
 }
 
 /// Whether the request carries a precondition a state-changing method evaluates.
@@ -4784,27 +4686,6 @@ mod tests {
             Some("http://h/a/")
         );
         assert_eq!(parent_of("http://h/", s), None);
-    }
-
-    #[test]
-    fn etag_lists() {
-        assert!(etag_listed("\"a\", \"b\"", "\"b\"", false));
-        assert!(!etag_listed("W/\"b\"", "\"b\"", false));
-        assert!(etag_listed("W/\"b\"", "\"b\"", true));
-        assert!(etag_listed("*", "\"x\"", false));
-        // A comma inside a tag is part of it, never a wildcard.
-        assert!(!etag_listed("\"x,*,y\"", "\"x\"", false));
-        assert!(etag_listed("\"x,*,y\"", "\"x,*,y\"", false));
-        assert!(!etag_listed("\"a\", *", "\"x\"", false));
-        assert!(!etag_listed("\"a", "\"a\"", false));
-        assert!(!etag_listed("a", "a", false));
-        // An empty list matches nothing, and is not unreadable.
-        assert!(!etag_listed("", "\"x\"", true));
-        assert!(TagList::parse(b" , ").is_ok());
-        // obs-text is allowed inside an opaque tag.
-        let mut obs = b"\"\xe9\", ".to_vec();
-        obs.extend_from_slice(b"\"x\"");
-        assert!(TagList::parse(&obs).is_ok_and(|l| l.matches("\"x\"", false)));
     }
 
     // ---- request-level tests over an in-memory store ----

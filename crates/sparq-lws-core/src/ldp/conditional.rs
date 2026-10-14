@@ -35,6 +35,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::entity_tag::TagList;
 use crate::error::ServerError;
 
 /// The outcome of evaluating preconditions: proceed, or fail with the spec-mandated status.
@@ -52,16 +53,16 @@ pub enum Precondition {
 
 /// Evaluate the `If-Match` / `If-None-Match` preconditions for a mutating request.
 ///
-/// `if_match` / `if_none_match` are the raw header values (already validated as UTF-8 by the HTTP
-/// layer). `current` is `Some(etag)` if the target exists with that strong ETag, or `None` if the
-/// target does not currently exist.
+/// `if_match` / `if_none_match` are the raw field values as bytes, every field line combined; a
+/// value that is not an entity-tag list names no tag. `current` is `Some(etag)` if the target
+/// exists with that strong ETag, or `None` if the target does not currently exist.
 ///
 /// Precedence follows RFC 9110 §13.2.2: when both are present, `If-Match` is evaluated **first**.
 /// (`If-None-Match` then still applies — but a request that supplies both a matching `If-Match` and
 /// an `If-None-Match` for the same existing tag is contradictory and fails on the `If-None-Match`.)
 pub fn evaluate(
-    if_match: Option<&str>,
-    if_none_match: Option<&str>,
+    if_match: Option<&[u8]>,
+    if_none_match: Option<&[u8]>,
     current: Option<&str>,
 ) -> Precondition {
     evaluate_write(if_match, if_none_match, None, current, None)
@@ -76,8 +77,8 @@ pub fn evaluate(
 /// requires or permits, when `If-Match` is present, when the date is not a valid IMF-fixdate, and
 /// when there is no modification time to compare (including a target that does not exist).
 pub fn evaluate_write(
-    if_match: Option<&str>,
-    if_none_match: Option<&str>,
+    if_match: Option<&[u8]>,
+    if_none_match: Option<&[u8]>,
     if_unmodified_since: Option<&str>,
     current: Option<&str>,
     last_modified: Option<SystemTime>,
@@ -88,13 +89,10 @@ pub fn evaluate_write(
     // client received from a content-negotiated GET matches the stored state it derives from (the
     // GET → If-Match round-trip; see the module doc).
     if let Some(im) = if_match {
-        let ok = match current {
-            // `If-Match: *` ⇒ the resource must exist.
-            _ if is_wildcard(im) => current.is_some(),
-            Some(cur) => tag_list(im).any(|t| t.matches_strong_state(cur)),
-            // No current representation can match a concrete tag list.
-            None => false,
-        };
+        // `If-Match: *` ⇒ the resource must exist; no missing representation matches a tag.
+        let ok = list_hits(im, current.is_some(), |weak, tag| {
+            !weak && current_state(current).is_some_and(|cur| state_part(tag) == cur)
+        });
         if !ok {
             return Precondition::Failed;
         }
@@ -114,11 +112,9 @@ pub fn evaluate_write(
     // the current state is "current" for a write guard). `If-None-Match: *` ⇒ the resource must
     // NOT exist.
     if let Some(inm) = if_none_match {
-        let matched = match current {
-            _ if is_wildcard(inm) => current.is_some(),
-            Some(cur) => tag_list(inm).any(|t| t.matches_weak_state(cur)),
-            None => false,
-        };
+        let matched = list_hits(inm, current.is_some(), |_, tag| {
+            current_state(current).is_some_and(|cur| state_part(tag) == cur)
+        });
         if matched {
             return Precondition::Failed;
         }
@@ -149,32 +145,6 @@ pub enum ReadPrecondition {
     NotModified,
 }
 
-/// The entity-tag list a precondition header carries across all of its field lines, which combine
-/// as one comma-separated list (RFC 9110 §5.3), or `None` when the header is absent. A byte above
-/// ASCII (`obs-text`, valid inside a quoted entity tag, §8.8.3) is read as a replacement character,
-/// so a tag holding one still parses (and matches none of this server's ASCII tags) while every
-/// other tag on its line is kept.
-pub(crate) fn tag_header(
-    headers: &http::HeaderMap,
-    name: http::HeaderName,
-) -> Option<std::borrow::Cow<'_, str>> {
-    let mut lines = headers
-        .get_all(name)
-        .iter()
-        .map(|v| String::from_utf8_lossy(v.as_bytes()));
-    let first = lines.next()?;
-    let rest: Vec<_> = lines.collect();
-    if rest.is_empty() {
-        return Some(first);
-    }
-    let mut all = first.into_owned();
-    for line in rest {
-        all.push_str(", ");
-        all.push_str(&line);
-    }
-    Some(std::borrow::Cow::Owned(all))
-}
-
 /// Evaluate RFC 9110 §13.2.2 steps 1 and 2 for a GET/HEAD: `If-Match`, or without it
 /// `If-Unmodified-Since`, before the read's own [`evaluate_read`]. `If-Match` uses EXACT strong
 /// comparison against the selected representation's tag (§8.8.3.2), variant suffix included, so a
@@ -182,13 +152,15 @@ pub(crate) fn tag_header(
 /// pieces of two representations); `*` passes, the resource existing. `If-Unmodified-Since` fails
 /// when `last_modified` is after the date and is ignored without a time (a container listing).
 pub fn evaluate_read_guard(
-    if_match: Option<&str>,
+    if_match: Option<&[u8]>,
     if_unmodified_since: Option<&str>,
     current_etag: &str,
     last_modified: Option<SystemTime>,
 ) -> Precondition {
     if let Some(im) = if_match {
-        let ok = is_wildcard(im) || tag_list(im).any(|t| t.matches_strong(current_etag));
+        let ok = list_hits(im, true, |weak, tag| {
+            !weak && parse_current(current_etag) == Some(tag)
+        });
         return if ok {
             Precondition::Proceed
         } else {
@@ -226,7 +198,7 @@ pub fn evaluate_read_guard(
 ///   modification time (`last_modified` is `None`) or the date is unparseable, the condition CANNOT be
 ///   proven "not modified", so we fail OPEN to a fresh 200 — never a spurious 304.
 pub fn evaluate_read(
-    if_none_match: Option<&str>,
+    if_none_match: Option<&[u8]>,
     if_modified_since: Option<&str>,
     current_etag: &str,
     last_modified: Option<SystemTime>,
@@ -234,12 +206,8 @@ pub fn evaluate_read(
     // --- If-None-Match takes precedence (§13.1.3): if present it decides, and If-Modified-Since is
     // ignored. Weak comparison (§13.1.2); `*` matches the existing resource.
     if let Some(inm) = if_none_match {
-        let matched = if is_wildcard(inm) {
-            // The resource exists (the read reached it post-auth), so `*` matches.
-            true
-        } else {
-            tag_list(inm).any(|t| t.matches_weak(current_etag))
-        };
+        // The resource exists (the read reached it post-auth), so `*` matches.
+        let matched = list_hits(inm, true, |_, tag| parse_current(current_etag) == Some(tag));
         return if matched {
             ReadPrecondition::NotModified
         } else {
@@ -269,21 +237,13 @@ pub fn evaluate_read(
 /// existence-non-disclosure guard can Read-gate exactly the requests whose outcome would depend on
 /// the target's modification time.
 pub(crate) fn unmodified_since_applies(
-    if_match: Option<&str>,
+    if_match: Option<&[u8]>,
     if_unmodified_since: Option<&str>,
 ) -> Option<i64> {
     if if_match.is_some() {
         return None;
     }
     if_unmodified_since.and_then(|v| crate::http_date::parse(v, crate::clock::now()))
-}
-
-/// Whether a header value is the wildcard `*` (after trimming). `pub(crate)` so the V4
-/// existence-non-disclosure guard ([`crate::ldp::handler`]) can distinguish a bare `*` precondition
-/// (existence-only, no content-derived ETag) from a concrete-validator one when deciding whether a
-/// conditional write must be Read-gated.
-pub(crate) fn is_wildcard(header: &str) -> bool {
-    header.trim() == "*"
 }
 
 /// A [`SystemTime`] as whole seconds since the Unix epoch, or `None` for a pre-epoch time (which no
@@ -294,88 +254,34 @@ fn system_time_to_unix(t: SystemTime) -> Option<i64> {
         .map(|d| d.as_secs() as i64)
 }
 
-/// A syntactically VALID inbound entity-tag with its validator strength preserved (RFC 9110
-/// §8.8.3). Only [`parse_entity_tag`] constructs one — a malformed header member never becomes an
-/// `InboundTag`, so it can never reach a comparison.
-struct InboundTag<'a> {
-    /// The tag's inner opaque characters (the `*etagc` between the quotes, e.g. `abc` for `"abc"`),
-    /// with the quotes and any `W/` prefix removed.
-    opaque: &'a str,
-    /// Whether the inbound validator was weak (`W/`-prefixed).
-    weak: bool,
-}
-
-impl InboundTag<'_> {
-    /// STRONG comparison on the STATE part (for the WRITE path's `If-Match`): both validators must
-    /// be strong and the state parts equal — a `+<variant>` tag from a content-negotiated GET
-    /// matches the stored state it derives from (the GET → `If-Match` round-trip). The server's
-    /// stored tag is always strong, so a weak inbound tag never matches strongly.
-    fn matches_strong_state(&self, current_strong: &str) -> bool {
-        if self.weak {
-            return false;
-        }
-        match parse_current(current_strong) {
-            Some(cur) => state_part(self.opaque) == state_part(cur),
-            None => false,
-        }
-    }
-
-    /// WEAK comparison on the STATE part (for the WRITE path's `If-None-Match` guard): state parts
-    /// equal regardless of strength.
-    fn matches_weak_state(&self, current_strong: &str) -> bool {
-        match parse_current(current_strong) {
-            Some(cur) => state_part(self.opaque) == state_part(cur),
-            None => false,
-        }
-    }
-
-    /// STRONG comparison, EXACT opaque tags (for the READ path's `If-Match`): both validators strong
-    /// and the opaque tags equal, variant suffix included.
-    fn matches_strong(&self, current_strong: &str) -> bool {
-        !self.weak && parse_current(current_strong) == Some(self.opaque)
-    }
-
-    /// WEAK comparison, EXACT opaque tags (for the READ path's `If-None-Match`): the inbound tag
-    /// must equal the negotiated representation's own tag — variant suffix included — so a tag for
-    /// a different negotiated representation of the same state never yields a 304.
-    fn matches_weak(&self, current_strong: &str) -> bool {
-        match parse_current(current_strong) {
-            Some(cur) => self.opaque == cur,
-            None => false,
-        }
+/// Whether the `If-Match` / `If-None-Match` field `value` names a tag `(weak, opaque)` for which
+/// `hit` holds, the wildcard `*` counting as `wildcard`. The list is read by the crate's one
+/// entity-tag parser ([`crate::entity_tag::TagList`]), on the field's bytes. A value that is not
+/// the RFC 9110 grammar (§8.8.3) names no tag, so it matches nothing: `If-Match` fails and
+/// `If-None-Match` neither 304s nor 412s. A `*` is a wildcard only as the whole value.
+fn list_hits(value: &[u8], wildcard: bool, hit: impl Fn(bool, &[u8]) -> bool) -> bool {
+    match TagList::parse(value) {
+        Ok(TagList::Any) => wildcard,
+        Ok(TagList::Tags(tags)) => tags.iter().any(|&(weak, tag)| hit(weak, tag)),
+        Err(()) => false,
     }
 }
 
-/// Parse ONE inbound entity-tag STRICTLY per RFC 9110 §8.8.3 — `entity-tag = [ weak ] opaque-tag`,
-/// `weak = "W/"` (case-sensitive), `opaque-tag = DQUOTE *etagc DQUOTE`,
-/// `etagc = %x21 / %x23-7E / obs-text` (no DQUOTE, no whitespace, no control chars inside).
-///
-/// Returns the tag's INNER opaque characters (quotes stripped) + its strength, or `None` when the
-/// value is malformed — an unclosed quote (`"abc`), a doubled trailing quote (`"abc""`), a bare
-/// unquoted token, an interior DQUOTE/space/control byte, a lone `W/`, etc. Validation happens
-/// BEFORE any comparison, so a malformed validator can never match anything (in particular it can
-/// never be "normalised" into equality with a valid current tag — the regression roborev caught).
-fn parse_entity_tag(raw: &str) -> Option<InboundTag<'_>> {
-    let t = raw.trim();
-    let (weak, quoted) = match t.strip_prefix("W/") {
-        Some(rest) => (true, rest),
-        None => (false, t),
-    };
-    let inner = quoted.strip_prefix('"')?.strip_suffix('"')?;
-    inner
-        .bytes()
-        .all(|b| b == 0x21 || (0x23..=0x7E).contains(&b) || b >= 0x80)
-        .then_some(InboundTag {
-            opaque: inner,
-            weak,
-        })
+/// The opaque bytes of the SERVER's own current ETag, which is always a well-formed STRONG tag.
+/// `None` (⇒ no match, fail closed) if it is somehow not — defensive only.
+fn parse_current(current_strong: &str) -> Option<&[u8]> {
+    match TagList::parse(current_strong.as_bytes()) {
+        Ok(TagList::Tags(tags)) => match tags[..] {
+            [(false, opaque)] => Some(opaque),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
-/// The inner opaque characters of the SERVER's own current ETag, which is always a well-formed
-/// STRONG tag. `None` (⇒ no match, fail closed) if it is somehow not — defensive only.
-fn parse_current(current_strong: &str) -> Option<&str> {
-    let tag = parse_entity_tag(current_strong)?;
-    (!tag.weak).then_some(tag.opaque)
+/// The STATE part of the current ETag, for the write comparisons.
+fn current_state(current: Option<&str>) -> Option<&[u8]> {
+    current.and_then(parse_current).map(state_part)
 }
 
 /// Mint the representation-variant entity-tag for a content-negotiated response: the stored (state)
@@ -391,26 +297,13 @@ pub fn variant_etag(stored: &str, variant: &str) -> String {
     }
 }
 
-/// The STATE part of a VALIDATED tag's inner opaque characters: everything before the first `+`
-/// (dropping any `+<variant>` representation suffix). Operates only on [`parse_entity_tag`] output,
-/// so no quote handling happens here — a malformed tag was already rejected upstream.
-fn state_part(inner: &str) -> &str {
-    match inner.split_once('+') {
-        Some((head, _)) => head,
-        None => inner,
+/// The STATE part of a tag's opaque bytes: everything before the first `+` (dropping any
+/// `+<variant>` representation suffix).
+fn state_part(opaque: &[u8]) -> &[u8] {
+    match opaque.iter().position(|&b| b == b'+') {
+        Some(i) => &opaque[..i],
+        None => opaque,
     }
-}
-
-/// Iterate the WELL-FORMED entity-tags in a comma-separated `If-(None-)Match` header value,
-/// preserving each tag's validator STRENGTH (so `If-Match` can correctly reject a weak validator).
-/// Each member is validated by [`parse_entity_tag`]; a malformed member is DROPPED — it can never
-/// match — while the remaining valid members are still evaluated. (A quoted tag containing a comma
-/// — legal `etagc`, never minted by this server — splits into two malformed halves and is likewise
-/// dropped: fail-safe in both directions, `If-Match` won't proceed on it and `If-None-Match` won't
-/// 304/412 on it. A `*` is handled by the callers on the WHOLE header only, per the grammar —
-/// a `*` member inside a list is not a wildcard and, unquoted, drops as malformed.)
-fn tag_list(header: &str) -> impl Iterator<Item = InboundTag<'_>> {
-    header.split(',').filter_map(parse_entity_tag)
 }
 
 #[cfg(test)]
@@ -429,32 +322,56 @@ mod tests {
     #[test]
     fn if_none_match_star_creates_only_when_absent() {
         // Create guard: proceed when the resource does NOT exist.
-        assert_eq!(evaluate(None, Some("*"), None), Precondition::Proceed);
+        assert_eq!(
+            evaluate(None, Some("*".as_bytes()), None),
+            Precondition::Proceed
+        );
         // Fail when it already exists (no-overwrite create).
-        assert_eq!(evaluate(None, Some("*"), Some(TAG)), Precondition::Failed);
+        assert_eq!(
+            evaluate(None, Some("*".as_bytes()), Some(TAG)),
+            Precondition::Failed
+        );
     }
 
     #[test]
     fn if_match_star_requires_existence() {
-        assert_eq!(evaluate(Some("*"), None, Some(TAG)), Precondition::Proceed);
-        assert_eq!(evaluate(Some("*"), None, None), Precondition::Failed);
+        assert_eq!(
+            evaluate(Some("*".as_bytes()), None, Some(TAG)),
+            Precondition::Proceed
+        );
+        assert_eq!(
+            evaluate(Some("*".as_bytes()), None, None),
+            Precondition::Failed
+        );
     }
 
     #[test]
     fn if_match_matches_current_tag() {
-        assert_eq!(evaluate(Some(TAG), None, Some(TAG)), Precondition::Proceed);
-        assert_eq!(evaluate(Some(OTHER), None, Some(TAG)), Precondition::Failed);
+        assert_eq!(
+            evaluate(Some(TAG.as_bytes()), None, Some(TAG)),
+            Precondition::Proceed
+        );
+        assert_eq!(
+            evaluate(Some(OTHER.as_bytes()), None, Some(TAG)),
+            Precondition::Failed
+        );
         // If-Match against a missing resource never matches.
-        assert_eq!(evaluate(Some(TAG), None, None), Precondition::Failed);
+        assert_eq!(
+            evaluate(Some(TAG.as_bytes()), None, None),
+            Precondition::Failed
+        );
     }
 
     #[test]
     fn if_none_match_concrete_tag_blocks_on_match() {
         // The tag matches ⇒ "none match" fails.
-        assert_eq!(evaluate(None, Some(TAG), Some(TAG)), Precondition::Failed);
+        assert_eq!(
+            evaluate(None, Some(TAG.as_bytes()), Some(TAG)),
+            Precondition::Failed
+        );
         // A different tag ⇒ proceeds.
         assert_eq!(
-            evaluate(None, Some(OTHER), Some(TAG)),
+            evaluate(None, Some(OTHER.as_bytes()), Some(TAG)),
             Precondition::Proceed
         );
     }
@@ -464,7 +381,7 @@ mod tests {
         // A strong member of the list matches ⇒ If-Match proceeds (strong comparison).
         let list = format!("{OTHER}, {TAG}");
         assert_eq!(
-            evaluate(Some(&list), None, Some(TAG)),
+            evaluate(Some(list.as_bytes()), None, Some(TAG)),
             Precondition::Proceed
         );
     }
@@ -474,10 +391,16 @@ mod tests {
         // RFC 9110 §13.1.1: a weak (`W/`) validator must NOT satisfy If-Match — even with the same
         // opaque tag, so this must FAIL (the bug roborev flagged).
         let weak = format!("W/{TAG}");
-        assert_eq!(evaluate(Some(&weak), None, Some(TAG)), Precondition::Failed);
+        assert_eq!(
+            evaluate(Some(weak.as_bytes()), None, Some(TAG)),
+            Precondition::Failed
+        );
         // …and a list whose only matching tag is weak still fails.
         let list = format!("{OTHER}, W/{TAG}");
-        assert_eq!(evaluate(Some(&list), None, Some(TAG)), Precondition::Failed);
+        assert_eq!(
+            evaluate(Some(list.as_bytes()), None, Some(TAG)),
+            Precondition::Failed
+        );
     }
 
     #[test]
@@ -485,7 +408,10 @@ mod tests {
         // RFC 9110 §13.1.2: If-None-Match uses WEAK comparison — a `W/`-prefixed tag with the same
         // opaque value DOES match (so "none match" fails ⇒ 412 on a mutation).
         let weak = format!("W/{TAG}");
-        assert_eq!(evaluate(None, Some(&weak), Some(TAG)), Precondition::Failed);
+        assert_eq!(
+            evaluate(None, Some(weak.as_bytes()), Some(TAG)),
+            Precondition::Failed
+        );
     }
 
     #[test]
@@ -516,10 +442,10 @@ mod tests {
         let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
         // A matching If-Match proceeds even though the target changed after the date.
         assert_eq!(
-            evaluate_write(Some(TAG), None, date, Some(TAG), Some(at(3000))),
+            evaluate_write(Some(TAG.as_bytes()), None, date, Some(TAG), Some(at(3000))),
             Precondition::Proceed
         );
-        assert_eq!(unmodified_since_applies(Some("*"), date), None);
+        assert_eq!(unmodified_since_applies(Some("*".as_bytes()), date), None);
         assert_eq!(unmodified_since_applies(None, date), Some(2000));
         assert_eq!(unmodified_since_applies(None, Some("bad")), None);
     }
@@ -528,7 +454,7 @@ mod tests {
     fn if_none_match_still_applies_after_if_unmodified_since() {
         let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
         assert_eq!(
-            evaluate_write(None, Some("*"), date, Some(TAG), Some(at(1000))),
+            evaluate_write(None, Some("*".as_bytes()), date, Some(TAG), Some(at(1000))),
             Precondition::Failed
         );
     }
@@ -565,7 +491,7 @@ mod tests {
     fn read_if_none_match_matching_is_304() {
         // A matching tag ⇒ the client's cache is fresh ⇒ 304.
         assert_eq!(
-            evaluate_read(Some(TAG), None, TAG, None),
+            evaluate_read(Some(TAG.as_bytes()), None, TAG, None),
             ReadPrecondition::NotModified
         );
     }
@@ -573,7 +499,7 @@ mod tests {
     #[test]
     fn read_if_none_match_non_matching_is_200() {
         assert_eq!(
-            evaluate_read(Some(OTHER), None, TAG, None),
+            evaluate_read(Some(OTHER.as_bytes()), None, TAG, None),
             ReadPrecondition::Proceed
         );
     }
@@ -582,7 +508,7 @@ mod tests {
     fn read_if_none_match_star_on_existing_is_304() {
         // `If-None-Match: *` on a resource that exists (the read reached it) ⇒ 304.
         assert_eq!(
-            evaluate_read(Some("*"), None, TAG, None),
+            evaluate_read(Some("*".as_bytes()), None, TAG, None),
             ReadPrecondition::NotModified
         );
     }
@@ -593,7 +519,7 @@ mod tests {
         // current tag by opaque value ⇒ 304.
         let weak = format!("W/{TAG}");
         assert_eq!(
-            evaluate_read(Some(&weak), None, TAG, None),
+            evaluate_read(Some(weak.as_bytes()), None, TAG, None),
             ReadPrecondition::NotModified
         );
     }
@@ -602,7 +528,7 @@ mod tests {
     fn read_if_none_match_list_matches_any_member() {
         let list = format!("{OTHER}, {TAG}");
         assert_eq!(
-            evaluate_read(Some(&list), None, TAG, None),
+            evaluate_read(Some(list.as_bytes()), None, TAG, None),
             ReadPrecondition::NotModified
         );
     }
@@ -643,12 +569,12 @@ mod tests {
         // If-Modified-Since that would otherwise 304. If-None-Match decides; If-Modified-Since ignored.
         let ims = "Thu, 01 Jan 1970 00:33:20 GMT"; // 2000s — would be "not modified" for lm=1000
         assert_eq!(
-            evaluate_read(Some(OTHER), Some(ims), TAG, Some(at(1_000))),
+            evaluate_read(Some(OTHER.as_bytes()), Some(ims), TAG, Some(at(1_000))),
             ReadPrecondition::Proceed
         );
         // …and a MATCHING If-None-Match still 304s regardless of the (contradictory) IMS.
         assert_eq!(
-            evaluate_read(Some(TAG), Some(ims), TAG, Some(at(3_000))),
+            evaluate_read(Some(TAG.as_bytes()), Some(ims), TAG, Some(at(3_000))),
             ReadPrecondition::NotModified
         );
     }
@@ -689,7 +615,7 @@ mod tests {
         // GET (Accept: JSON-LD) → variant tag → If-Match PUT with it must round-trip: the state is
         // unchanged, so the write proceeds.
         assert_eq!(
-            evaluate(Some(&tag_variant()), None, Some(TAG)),
+            evaluate(Some(tag_variant().as_bytes()), None, Some(TAG)),
             Precondition::Proceed
         );
     }
@@ -699,7 +625,7 @@ mod tests {
         // The variant derives from a DIFFERENT (old) state ⇒ 412.
         let stale = variant_etag(OTHER, "jsonld");
         assert_eq!(
-            evaluate(Some(&stale), None, Some(TAG)),
+            evaluate(Some(stale.as_bytes()), None, Some(TAG)),
             Precondition::Failed
         );
     }
@@ -708,14 +634,17 @@ mod tests {
     fn write_if_match_still_rejects_a_weak_variant_tag() {
         // Strong comparison: a weak validator never satisfies If-Match, variant or not.
         let weak = format!("W/{}", tag_variant());
-        assert_eq!(evaluate(Some(&weak), None, Some(TAG)), Precondition::Failed);
+        assert_eq!(
+            evaluate(Some(weak.as_bytes()), None, Some(TAG)),
+            Precondition::Failed
+        );
     }
 
     #[test]
     fn write_if_none_match_guard_matches_a_variant_of_the_current_state() {
         // The no-overwrite guard: a variant of the CURRENT state is "current" ⇒ Failed (412).
         assert_eq!(
-            evaluate(None, Some(&tag_variant()), Some(TAG)),
+            evaluate(None, Some(tag_variant().as_bytes()), Some(TAG)),
             Precondition::Failed
         );
     }
@@ -727,17 +656,17 @@ mod tests {
         // NOT hold that representation ⇒ Proceed (200), never 304.
         let served_variant = tag_variant();
         assert_eq!(
-            evaluate_read(Some(TAG), None, &served_variant, None),
+            evaluate_read(Some(TAG.as_bytes()), None, &served_variant, None),
             ReadPrecondition::Proceed
         );
         // And vice versa: a variant tag never 304s the stored representation.
         assert_eq!(
-            evaluate_read(Some(&served_variant), None, TAG, None),
+            evaluate_read(Some(served_variant.as_bytes()), None, TAG, None),
             ReadPrecondition::Proceed
         );
         // Holding the variant tag AND being served that variant ⇒ 304.
         assert_eq!(
-            evaluate_read(Some(&served_variant), None, &served_variant, None),
+            evaluate_read(Some(served_variant.as_bytes()), None, &served_variant, None),
             ReadPrecondition::NotModified
         );
     }
@@ -762,7 +691,7 @@ mod tests {
     fn malformed_if_match_never_matches_the_valid_current_tag() {
         for bad in MALFORMED {
             assert_eq!(
-                evaluate(Some(bad), None, Some(TAG)),
+                evaluate(Some(bad.as_bytes()), None, Some(TAG)),
                 Precondition::Failed,
                 "If-Match {bad:?} must not match {TAG:?}"
             );
@@ -770,7 +699,7 @@ mod tests {
         // A well-formed EMPTY tag `""` is valid syntax but matches only an empty opaque-tag —
         // never a real current tag (and this server never mints an empty tag).
         assert_eq!(
-            evaluate(Some("\"\""), None, Some(TAG)),
+            evaluate(Some("\"\"".as_bytes()), None, Some(TAG)),
             Precondition::Failed
         );
     }
@@ -781,13 +710,13 @@ mod tests {
         // malformed tag must not 412.
         for bad in MALFORMED {
             assert_eq!(
-                evaluate(None, Some(bad), Some(TAG)),
+                evaluate(None, Some(bad.as_bytes()), Some(TAG)),
                 Precondition::Proceed,
                 "If-None-Match {bad:?} must not match {TAG:?}"
             );
         }
         assert_eq!(
-            evaluate(None, Some("\"\""), Some(TAG)),
+            evaluate(None, Some("\"\"".as_bytes()), Some(TAG)),
             Precondition::Proceed
         );
     }
@@ -796,13 +725,13 @@ mod tests {
     fn malformed_read_if_none_match_is_a_fresh_200_never_304() {
         for bad in MALFORMED {
             assert_eq!(
-                evaluate_read(Some(bad), None, TAG, None),
+                evaluate_read(Some(bad.as_bytes()), None, TAG, None),
                 ReadPrecondition::Proceed,
                 "read If-None-Match {bad:?} must not 304 against {TAG:?}"
             );
         }
         assert_eq!(
-            evaluate_read(Some("\"\""), None, TAG, None),
+            evaluate_read(Some("\"\"".as_bytes()), None, TAG, None),
             ReadPrecondition::Proceed
         );
     }
@@ -811,58 +740,102 @@ mod tests {
     fn empty_opaque_tag_matches_only_an_empty_current_tag() {
         // `""` is well-formed (`*etagc` allows zero chars): exact-match semantics still hold.
         assert_eq!(
-            evaluate_read(Some("\"\""), None, "\"\"", None),
+            evaluate_read(Some("\"\"".as_bytes()), None, "\"\"", None),
             ReadPrecondition::NotModified
         );
         // But it is NOT the same as a tag whose CONTENT is a quote-pair — that content is not
         // valid etagc, so such an inbound tag is malformed and matches nothing.
         assert_eq!(
-            evaluate_read(Some("\"\\\"\\\"\""), None, "\"\"", None),
+            evaluate_read(Some("\"\\\"\\\"\"".as_bytes()), None, "\"\"", None),
             ReadPrecondition::Proceed
         );
     }
 
     #[test]
-    fn malformed_member_in_a_list_is_dropped_but_valid_members_still_match() {
-        // A malformed member must not poison the list: the VALID member still matches…
+    fn a_list_that_is_not_the_grammar_names_no_tag() {
+        // An unclosed quote swallows the rest of the value, so the list cannot be read, even
+        // though a well-formed tag follows: it matches nothing.
         let with_valid = format!("\"unclosed, {TAG}");
         assert_eq!(
-            evaluate(Some(&with_valid), None, Some(TAG)),
-            Precondition::Proceed,
-            "the valid If-Match member must still match"
-        );
-        assert_eq!(
-            evaluate_read(Some(&with_valid), None, TAG, None),
-            ReadPrecondition::NotModified,
-            "the valid read member must still 304"
-        );
-        // …and a list of ONLY malformed members matches nothing.
-        let all_bad = "\"unclosed, bare, \"doubled\"\"";
-        assert_eq!(
-            evaluate(Some(all_bad), None, Some(TAG)),
+            evaluate(Some(with_valid.as_bytes()), None, Some(TAG)),
             Precondition::Failed
         );
         assert_eq!(
-            evaluate_read(Some(all_bad), None, TAG, None),
+            evaluate(None, Some(with_valid.as_bytes()), Some(TAG)),
+            Precondition::Proceed
+        );
+        assert_eq!(
+            evaluate_read(Some(with_valid.as_bytes()), None, TAG, None),
             ReadPrecondition::Proceed
+        );
+        let all_bad = "\"unclosed, bare, \"doubled\"\"";
+        assert_eq!(
+            evaluate(Some(all_bad.as_bytes()), None, Some(TAG)),
+            Precondition::Failed
+        );
+        assert_eq!(
+            evaluate_read(Some(all_bad.as_bytes()), None, TAG, None),
+            ReadPrecondition::Proceed
+        );
+    }
+
+    #[test]
+    fn unicode_whitespace_around_a_validator_is_not_http_whitespace() {
+        // Review finding: only space and tab may surround a list member (RFC 9110 §5.6.3). A
+        // validator wrapped in other Unicode whitespace is malformed, so it matches nothing on
+        // either header, read or write, and `*` so wrapped is not a wildcard.
+        for ws in ["\u{a0}", "\u{3000}", "\u{85}", "\u{2028}"] {
+            for v in [format!("{ws}{TAG}{ws}"), format!("{ws}*{ws}")] {
+                let v = v.as_bytes();
+                assert_eq!(
+                    evaluate(Some(v), None, Some(TAG)),
+                    Precondition::Failed,
+                    "{ws:?}"
+                );
+                assert_eq!(
+                    evaluate(None, Some(v), Some(TAG)),
+                    Precondition::Proceed,
+                    "{ws:?}"
+                );
+                assert_eq!(
+                    evaluate_read_guard(Some(v), None, TAG, None),
+                    Precondition::Failed,
+                    "{ws:?}"
+                );
+                assert_eq!(
+                    evaluate_read(Some(v), None, TAG, None),
+                    ReadPrecondition::Proceed,
+                    "{ws:?}"
+                );
+            }
+        }
+        // Space and tab still surround a member.
+        let ows = format!(" \t{TAG}\t ");
+        assert_eq!(
+            evaluate(Some(ows.as_bytes()), None, Some(TAG)),
+            Precondition::Proceed
+        );
+        assert_eq!(
+            evaluate_read(Some(ows.as_bytes()), None, TAG, None),
+            ReadPrecondition::NotModified
         );
     }
 
     #[test]
     fn wildcard_is_only_the_whole_header_never_a_list_member() {
         // `*` inside a list is not a wildcard (the grammar is `*` OR a tag list) — and, unquoted,
-        // it drops as malformed, so it cannot satisfy If-Match…
+        // it makes the list unreadable, so it cannot satisfy If-Match…
         assert_eq!(
-            evaluate(Some(&format!("*, {OTHER}")), None, Some(TAG)),
+            evaluate(Some(format!("*, {OTHER}").as_bytes()), None, Some(TAG)),
             Precondition::Failed
         );
         // …nor trip If-None-Match / the read path into a match.
         assert_eq!(
-            evaluate(None, Some(&format!("*, {OTHER}")), Some(TAG)),
+            evaluate(None, Some(format!("*, {OTHER}").as_bytes()), Some(TAG)),
             Precondition::Proceed
         );
         assert_eq!(
-            evaluate_read(Some(&format!("*, {OTHER}")), None, TAG, None),
+            evaluate_read(Some(format!("*, {OTHER}").as_bytes()), None, TAG, None),
             ReadPrecondition::Proceed
         );
     }

@@ -649,7 +649,7 @@ impl<S: Store> LdpState<S> {
             || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH)
             || (!target_iri.ends_with('/')
                 && conditional::unmodified_since_applies(
-                    conditional::tag_header(headers, header::IF_MATCH).as_deref(),
+                    crate::entity_tag::field(headers, header::IF_MATCH).as_deref(),
                     crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
                 )
                 .is_some());
@@ -743,7 +743,7 @@ impl<S: Store> LdpState<S> {
     /// bearing (fail-closed), keeping it subject to the V4 Read-gate. Used only by
     /// [`guard_conditional_requires_read`](Self::guard_conditional_requires_read).
     fn conditional_carries_etag(headers: &HeaderMap, name: HeaderName) -> bool {
-        conditional::tag_header(headers, name).is_some_and(|v| !conditional::is_wildcard(&v))
+        crate::entity_tag::field(headers, name).is_some_and(|v| !crate::entity_tag::is_wildcard(&v))
     }
 
     /// The nearest EXISTING container at or above `target` (its parent, then grandparent, … up to the
@@ -1027,13 +1027,13 @@ async fn serve_read_once<S: Store>(
     // tag), so a tag read in any format holds for the state it was read from; a container's listing
     // has no recorded time, so it ignores `If-Unmodified-Since` here as on writes.
     conditional::require(conditional::evaluate_read_guard(
-        conditional::tag_header(req_headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(req_headers, header::IF_MATCH).as_deref(),
         crate::http_date::single_line(req_headers, header::IF_UNMODIFIED_SINCE),
         &etag,
         effective_last_modified,
     ))?;
     if conditional::evaluate_read(
-        conditional::tag_header(req_headers, header::IF_NONE_MATCH).as_deref(),
+        crate::entity_tag::field(req_headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(req_headers, header::IF_MODIFIED_SINCE),
         &etag,
         effective_last_modified,
@@ -1204,8 +1204,8 @@ pub async fn put_handler<S: Store>(
     )
     .await?;
     conditional::require(conditional::evaluate_write(
-        conditional::tag_header(&headers, header::IF_MATCH).as_deref(),
-        conditional::tag_header(&headers, header::IF_NONE_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|m| m.last_modified)),
@@ -1532,8 +1532,8 @@ pub async fn delete_handler<S: Store>(
     let current_etag =
         write_validator(&state, &target, &headers, Some(current.etag.as_str())).await?;
     conditional::require(conditional::evaluate_write(
-        conditional::tag_header(&headers, header::IF_MATCH).as_deref(),
-        conditional::tag_header(&headers, header::IF_NONE_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.last_modified),
@@ -1716,8 +1716,8 @@ pub async fn patch_handler<S: Store>(
     )
     .await?;
     conditional::require(conditional::evaluate_write(
-        conditional::tag_header(&headers, header::IF_MATCH).as_deref(),
-        conditional::tag_header(&headers, header::IF_NONE_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
@@ -2140,7 +2140,8 @@ async fn write_validator<S: Store>(
     let names_a_tag = [header::IF_MATCH, header::IF_NONE_MATCH]
         .into_iter()
         .any(|h| {
-            conditional::tag_header(headers, h).is_some_and(|v| !conditional::is_wildcard(&v))
+            crate::entity_tag::field(headers, h)
+                .is_some_and(|v| !crate::entity_tag::is_wildcard(&v))
         });
     if !target.is_container || !names_a_tag {
         return Ok(Some(stored.to_string()));
@@ -6559,6 +6560,44 @@ mod tests {
                     .await
                     .status();
             assert!(got.is_success(), "{verb} obs-text line: {got}");
+        }
+    }
+
+    /// Review finding: only space and tab surround an entity tag (RFC 9110 §5.6.3). The current
+    /// tag wrapped in other Unicode whitespace is not a validator, so it matches nothing: a read
+    /// is neither a 304 nor passed by `If-Match`, and a write's `If-None-Match` does not refuse it.
+    #[tokio::test]
+    async fn a_tag_wrapped_in_unicode_whitespace_matches_nothing() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        for ws in ["\u{a0}", "\u{3000}"] {
+            let wrapped = format!("{ws}{tag}{ws}");
+            let value = HeaderValue::from_bytes(wrapped.as_bytes()).unwrap();
+            for verb in ["GET", "HEAD"] {
+                let mut h = HeaderMap::new();
+                h.insert(header::IF_NONE_MATCH, value.clone());
+                assert_eq!(
+                    read_status(&state, verb, "/alice/doc", h).await,
+                    StatusCode::OK
+                );
+                let mut h = HeaderMap::new();
+                h.insert(header::IF_MATCH, value.clone());
+                assert_eq!(
+                    read_status(&state, verb, "/alice/doc", h).await,
+                    StatusCode::PRECONDITION_FAILED
+                );
+            }
+            for verb in ["PUT", "PATCH", "DELETE"] {
+                for (name, ok) in [(header::IF_MATCH, false), (header::IF_NONE_MATCH, true)] {
+                    let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+                    let lines = [wrapped.as_bytes()];
+                    let got =
+                        owner_conditional_lines(&state, verb, "/alice/doc", name.clone(), &lines)
+                            .await
+                            .status();
+                    assert_eq!(got.is_success(), ok, "{verb} {name} {ws:?}: {got}");
+                }
+            }
         }
     }
 
