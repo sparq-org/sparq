@@ -18,7 +18,7 @@
 //! ## What this closes (sq-ka8m residual)
 //!
 //! sq-ka8m's [`crate::auth_compare`] made the *cleartext fresh-operand* comparison
-//! malicious-secure: it bit-shares the operands as authenticated values and
+//! tamper-evident: it bit-shares the operands as authenticated values and
 //! MAC-checks the verdict. But the FEDERATION path —
 //! [`crate::compare::disclose_threshold_verdict`], which runs over an EXISTING
 //! degree-`t` sharing `[sum]` (e.g. the cumulative aggregate from
@@ -68,8 +68,8 @@
 //!
 //! **Honest-majority; tamper-EVIDENT-with-abort on the opened values, NOT full
 //! malicious-with-abort** (design §3 aspires to the latter; see "Integrity coverage is
-//! NOT total" below for the demonstrated gap). AXIS-2 `Abort(Unanimous)`, AXIS-3
-//! `HonestMajority`; AXIS-1 is **not** `Malicious` today. The exact sum is NEVER opened
+//! NOT total" below for the demonstrated gap). AXIS-2 local detect-and-abort (NOT an agreed
+//! unanimous or identifiable abort), AXIS-3 `HonestMajority`; AXIS-1 is **not** `Malicious` today. The exact sum is NEVER opened
 //! — only `c = a²` (sign-independent), the statistically-masked `c = sum + r`, and the
 //! 1-bit verdict, and the latter two only after their MAC-checks pass — so the
 //! CONFIDENTIALITY statement is unaffected by the integrity gap. `[SONNET-4.6]`
@@ -286,7 +286,7 @@ fn experimental_tamper_evident_threshold_over_sum(
 }
 
 /// Authenticated masked-open bit-decomposition of `[[sum]]` into `L =
-/// `[`DECOMP_MASK_BITS`] AUTHENTICATED bits (LSB-first), the malicious-secure twin of
+/// `[`DECOMP_MASK_BITS`] AUTHENTICATED bits (LSB-first), the IT-MAC twin of
 /// [`crate::compare`] `secure_bit_decompose`. Returns `(sum_bits, r_bits)` — both as
 /// authenticated sharings.
 ///
@@ -364,7 +364,7 @@ fn auth_masked_bit_decompose(
 }
 
 /// [OPUS-4.8] sq-m4zi/sq-e7ma — **MAC-checked in-protocol range proof of the
-/// secret-shared sum**, the malicious-with-abort twin of the semi-honest
+/// secret-shared sum**, the IT-MAC twin of the semi-honest
 /// `crate::compare::verify_sum_in_range` (sq-nx0s; that masked-open reference is
 /// now test-only after the sq-bgsn Rabbit lift on the semi-honest production path).
 /// Given the AUTHENTICATED sum
@@ -383,7 +383,7 @@ fn auth_masked_bit_decompose(
 /// [`MpcError::Protocol`] (an out-of-range / wrapping sum), and on a TAMPERED zero-test
 /// open [`MpcError::MacCheckFailed`] — so a deviating party can no longer flip
 /// "was it zero?" to smuggle an out-of-range sum past the guard. Honest-majority,
-/// malicious-with-abort. `[OPUS-4.8]`
+/// tamper-evident-with-abort (see the module security tier). `[OPUS-4.8]`
 ///
 /// [OPUS-4.8] sq-km34.6 — now **TEST-ONLY**: the production path range-proves the
 /// AUTHENTICATED Rabbit decomposition via [`auth_verify_value_in_range_rabbit`] (full
@@ -440,7 +440,7 @@ fn auth_verify_sum_in_range(
 // =============================================================================
 // [OPUS-4.8] sq-km34.6 — the AUTHENTICATED Rabbit chain (design §3 + Hole 4).
 //
-// The malicious-secure twin of `compare`'s sq-bgsn Rabbit path. The masked-open
+// The IT-MAC twin of `compare`'s sq-bgsn Rabbit path. The masked-open
 // decomposition above caps the malicious path's value at 2^DECOMP_VALUE_BITS = 2^20
 // because its mask must be κ = 40 bits WIDER than the value AND `value + r` must not
 // wrap p = 2^61−1. Rabbit removes the slack by RECOVERING the value exactly through
@@ -459,7 +459,7 @@ fn auth_verify_sum_in_range(
 
 /// `[[a ⊕ b]]` (logical XOR) of two AUTHENTICATED 0/1 sharings: `a + b − 2·a·b`. One
 /// [`MacSession::auth_mul`] (the `a·b` term); the rest is FREE authenticated linear
-/// ops. The malicious-secure twin of `crate::compare`'s `secret_xor`, used by the
+/// ops. The IT-MAC twin of `crate::compare`'s `secret_xor`, used by the
 /// authenticated Rabbit bit-add / bit-sub circuits. `[OPUS-4.8]`
 fn auth_xor(
     session: &mut MacSession,
@@ -472,7 +472,7 @@ fn auth_xor(
 
 /// A fresh full-field random mask `[[r]]` together with its `L = `[`RABBIT_MASK_BITS`]
 /// AUTHENTICATED bits (LSB-first), `r ∈ [0, 2^L)` uniform and produced so NO party
-/// knows it. The malicious-secure twin of `crate::compare`'s
+/// knows it. The IT-MAC twin of `crate::compare`'s
 /// `deal_full_field_solved_bits`: every bit is an [`auth_square_protocol_random_bit`]
 /// (whose `a²` open is MAC-checked before it is read), and `[[r]] = Σ_k [[r_k]]·2^k`
 /// is a FREE authenticated linear combination, so `[[r]]` and the `[[r_k]]` are
@@ -494,7 +494,7 @@ fn auth_deal_full_field_solved_bits(
 
 /// The Rabbit **`LTBits`** comparison of a PUBLIC integer `c` against the AUTHENTICATED
 /// shared bits `[[r]]_B` (LSB-first), returning an authenticated sharing of the wrap
-/// indicator `w = 1{c < r}`. The malicious-secure twin of `crate::compare`'s
+/// indicator `w = 1{c < r}`. The IT-MAC twin of `crate::compare`'s
 /// `rabbit_lt_bits_public_less_than_shared`.
 ///
 /// Same MSB-first "first differing bit decides" recurrence: scanning MSB→LSB, `c < r`
@@ -531,7 +531,7 @@ fn auth_rabbit_lt_bits_public_less_than_shared(
 
 /// Ripple-carry **bit ADD** of a PUBLIC `width`-bit integer `c` with `konst · [[w]]`
 /// (`konst` public, `[[w]]` a single AUTHENTICATED bit), returning the `width`
-/// LSB-first AUTHENTICATED result bits of `c + w·konst`. The malicious-secure twin of
+/// LSB-first AUTHENTICATED result bits of `c + w·konst`. The IT-MAC twin of
 /// `crate::compare`'s `rabbit_add_public_and_w_times_const`.
 ///
 /// `konst_k · [[w]]` is a public bit times one authenticated sharing, so forming the
@@ -583,7 +583,7 @@ fn auth_rabbit_add_public_and_w_times_const(
 
 /// Ripple-borrow **bit SUB** `[[a]]_B = lhs_B ⊖ [[r]]_B` over two vectors of
 /// AUTHENTICATED bits (LSB-first), returning the `width` LSB-first authenticated
-/// difference bits. The malicious-secure twin of `crate::compare`'s
+/// difference bits. The IT-MAC twin of `crate::compare`'s
 /// `rabbit_sub_shared_bits`: both operands are shared, so the result bit's XOR costs a
 /// multiplication too — five authenticated multiplications per bit position, every one
 /// of them MAC-carrying. Missing high positions read as the authenticated constant
@@ -619,9 +619,9 @@ fn auth_rabbit_sub_shared_bits(
 /// [OPUS-4.8] sq-km34.6 — **AUTHENTICATED Rabbit-style FULL-FIELD in-MPC
 /// bit-decomposition** of an EXISTING authenticated sharing `[[x]]` into its
 /// [`RABBIT_VALUE_BITS`] AUTHENTICATED bits (LSB-first), WITHOUT ever reconstructing
-/// `x`. The malicious-with-abort twin of `crate::compare`'s
+/// `x`. The IT-MAC twin of `crate::compare`'s
 /// `secure_bit_decompose_rabbit` (sq-bgsn, eprint 2021/119), and the lift that brings
-/// the malicious disclose path to the semi-honest path's full `2^60` magnitude.
+/// the IT-MAC disclose path to the semi-honest path's full `2^60` magnitude.
 ///
 /// ## Protocol (and where the MAC sits at each step)
 ///
@@ -701,7 +701,7 @@ fn auth_rabbit_sub_shared_bits(
 /// Correct only while `x < 2^`[`RABBIT_VALUE_BITS`] so the recovered low bits capture
 /// the whole value. `x` is a SHARING, so this cannot be checked here without disclosing
 /// it; the caller proves it in-protocol via [`auth_verify_value_in_range_rabbit`].
-/// Honest-majority, malicious-with-abort. `[OPUS-4.8]`
+/// Honest-majority, tamper-evident-with-abort (see the module security tier). `[OPUS-4.8]`
 fn auth_bit_decompose_rabbit(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -736,7 +736,7 @@ fn auth_bit_decompose_rabbit(
 
 /// [OPUS-4.8] sq-km34.6 — **MAC-checked in-protocol range proof for the AUTHENTICATED
 /// Rabbit path**: PROVES `value ∈ [0, 2^`[`RABBIT_VALUE_BITS`]`)` from the recovered
-/// authenticated bits WITHOUT reconstructing the value. The malicious-with-abort twin
+/// authenticated bits WITHOUT reconstructing the value. The IT-MAC twin
 /// of `crate::compare`'s `verify_value_in_range_rabbit`.
 ///
 /// `[[Σ_k b_k·2^k]]` is a FREE authenticated linear combination of the recovered bits,
@@ -792,7 +792,7 @@ fn auth_verify_value_in_range_rabbit(
 
 /// [OPUS-4.8] sq-m4zi/sq-e7ma — **MAC-checked secret zero-test**: returns `true` iff the
 /// AUTHENTICATED `[[v]]` reconstructs to `0`, WITHOUT reconstructing `v`, the
-/// malicious-with-abort twin of [`crate::compare`] `secret_is_zero` (sq-nx0s). Draw a
+/// IT-MAC twin of [`crate::compare`] `secret_is_zero` (sq-nx0s). Draw a
 /// fresh NONZERO authenticated mask `[[r]]`, form `[[m]] = [[v]]·[[r]]` via
 /// [`MacSession::auth_mul`] (which carries the sound MAC `[α·m]` — design §2.4), then
 /// **MAC-check `[[m]]` BEFORE its value open is read** ([`MacSession::mac_check`], §2.5),
@@ -852,7 +852,7 @@ fn auth_or(
 }
 
 /// A single AUTHENTICATED uniform random bit `[[b]] ∈ {0,1}` from the square protocol,
-/// the malicious-secure twin of [`crate::compare`] `square_protocol_random_bit`. The
+/// the IT-MAC twin of [`crate::compare`] `square_protocol_random_bit`. The
 /// `c = a²` open (the FIRST of the three named opens) is **MAC-checked before it is
 /// read**: a tampered open of `a²` makes `σ ≠ 0` and aborts, rather than silently
 /// flipping the mask bit.

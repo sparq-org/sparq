@@ -1,0 +1,165 @@
+# secprop-mpc-methods.ttl — the sparq-mpc PER-PROTOCOL security-properties annotation
+# graph (issues #3275 + #6186; design record
+# research/security-properties-ontology-design.md §5c). Modelled on
+# crates/sparq-zk/ontologies/secprop-methods.ttl.
+#
+# WHAT THIS IS. The machine-readable form of the per-protocol trust model each
+# sparq-mpc module states in its own docs, expressed on the TWO ORDERED secx:
+# dimensions minted for it — secx:AdversaryModel (Malicious ⊐ Covert ⊐ SemiHonest)
+# and secx:CorruptionThreshold (DishonestMajority ⊐ HonestMajority ⊐
+# SuperHonestMajority). One annotation block per protocol IRI; each
+# `secx:hasProperty` is a reified (property, level, assurance, audit-status,
+# assumption) claim. Each protocol also carries a method-wide
+# `secx:AssuranceLevel` claim (`secx:Claimed`), so a `secx:requiresAssurance`
+# preference is discharged for it the same way the sparq-zk adapter derives one.
+#
+# WHY A LEVEL AND NOT JUST AN ASSUMPTION (#6186). `secx:assumption` is human-facing
+# PROVENANCE: the shared N3 admissibility reasoner
+# (crates/sparq-trust/src/admissibility.rs) keys strictly on (dimension, level) via
+# `secx:overDimension` + `secx:atLeast`, so an `secx:assumption secx:SemiHonest`
+# triple alone can never be discharged by an ODRL preference. Every block below
+# therefore carries BOTH: the `secx:level` the reasoner reads, and the
+# `secx:assumption` a human reads. Nothing recomputes the exclusion crate-locally —
+# `sparq_trust::admissible` is the one reasoner.
+#
+# WHAT IT IS NOT. It RECORDS claims + their epistemic basis; it is NOT a proof of any
+# property. sparq-mpc is a research scaffold and is NOT externally audited (bead
+# sq-qhy4); every assertion here is at most `secx:Claimed` with
+# `secx:ExternalSignOffPending`.
+#
+# HONESTY RULES APPLIED HERE.
+#   1. NO sparq-mpc protocol is annotated `secx:Malicious`. The IT-MAC-hardened
+#      modules (`auth_compare`, `auth_disclose`) are a REAL but PARTIAL hardening
+#      over their semi-honest twins; their own docs (`auth_disclose` module docs,
+#      "Integrity coverage is NOT total", and skills/mpc) say neither is AXIS-1
+#      `Malicious` today. Until `shamir::MacSession` gains both-operand gate
+#      verification, the honest AXIS-1
+#      level for every protocol here is `secx:SemiHonest`. The hardening that IS
+#      delivered is recorded in prose (`rdfs:comment`), not as a level.
+#   2. NO protocol is annotated `secx:Covert` either: covert security means a stated
+#      deterrence probability ε, which no module claims. `AdversaryModel::Covert` is
+#      EXPRESSIBLE in `backend.rs` and PROVIDED by nothing.
+#   3. `proof.rs` (`CollaborativeProof` / `Attestation`) is deliberately NOT a
+#      subject: every method returns `MpcError::NotYetImplemented`, so it runs no
+#      protocol and has no trust model to record. Annotating a stub would assert a
+#      posture for something that cannot execute.
+
+@prefix mpc:     <https://sparq.dev/ns/mpc#> .
+@prefix secx:    <https://w3id.org/zkp-sparql/sec-prop#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+
+# ════════════════════════════════════════════════════════════════════════════
+# mpc:shamir-honest-majority-v1 — the Shamir t-of-n MpcBackend (src/shamir.rs).
+# Its own docs: "Decision (resolving Q2 for v1): Shamir t-of-n, honest-majority";
+# honest-majority means t < n/2, and confidentiality holds against <= t colluding
+# HONEST-BUT-CURIOUS parties.
+# ════════════════════════════════════════════════════════════════════════════
+
+mpc:shamir-honest-majority-v1
+  rdfs:comment "Shamir t-of-n secret sharing over F_p (p = 2^61-1), t = (n-1)/2. Robust/RS-checked reconstruction DETECTS tampered shares where redundancy exists, which is an integrity bonus, not a malicious-security tier."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:AdversaryModel ; secx:level secx:SemiHonest ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:SemiHonest ] ,
+    [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
+
+# ════════════════════════════════════════════════════════════════════════════
+# mpc:secure-compare-v1 — the semi-honest secure comparison / threshold
+# (src/compare.rs: secure_greater_than / secure_threshold /
+# disclose_threshold_verdict). Its own docs: "this module realises the
+# honest-majority, semi-honest version"; the semi-honest twin "stays semi-honest by
+# design (the cheap zero-round honest path)".
+# ════════════════════════════════════════════════════════════════════════════
+
+mpc:secure-compare-v1
+  rdfs:comment "Bit-decomposition MSB-first secure greater-than; opens only the 1-bit verdict. Semi-honest by design — the cheap honest path, with the IT-MAC twin a separate subject."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:AdversaryModel ; secx:level secx:SemiHonest ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:SemiHonest ] ,
+    [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
+
+# ════════════════════════════════════════════════════════════════════════════
+# mpc:hidden-value-join-v1 — the hidden-value join / circuit-PSI core
+# (src/join.rs HiddenValueJoin + its batched / fully-oblivious tiers). Its own docs:
+# "semi-honest only, exactly as ShamirBackend states" and "NOT maliciously secure …
+# only the documented semi-honest model is claimed".
+# ════════════════════════════════════════════════════════════════════════════
+
+mpc:hidden-value-join-v1
+  rdfs:comment "Secret-shared field-equality join over private keys. All tiers (join / batched_join / fully_oblivious_batched_join) are honest-majority, semi-honest only; the degree-2t equality open has no RS redundancy at n = 2t+1."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:AdversaryModel ; secx:level secx:SemiHonest ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:SemiHonest ] ,
+    [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
+
+# ════════════════════════════════════════════════════════════════════════════
+# mpc:auth-compare-v1 — the IT-MAC comparison chain (src/auth_compare.rs
+# malicious_greater_than / malicious_threshold). Threads an information-theoretic
+# MAC through every gate and MAC-checks the verdict before opening it, aborting on a
+# tampered OPEN at the minimal n = 2t+1 — a real hardening. NOT annotated
+# secx:Malicious, per auth_disclose's module docs ("Integrity coverage is NOT total") and
+# skills/mpc/SKILL.md: neither twin is AXIS-1 Malicious today).
+# ════════════════════════════════════════════════════════════════════════════
+
+mpc:auth-compare-v1
+  rdfs:comment "IT-MAC-hardened (tamper-evident-with-abort) secure greater-than over secret operands. The hardening catches a tampered OPEN, not an arbitrary deviating party, so AXIS-1 stays SemiHonest until MacSession gains both-operand (Chida-et-al. style) gate verification. Unanimous abort, never identifiable abort, never guaranteed output."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:AdversaryModel ; secx:level secx:SemiHonest ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:SemiHonest ] ,
+    [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
+
+# ════════════════════════════════════════════════════════════════════════════
+# mpc:auth-disclose-threshold-v1 — the IT-MAC threshold disclosure over an EXISTING
+# sharing (src/auth_disclose.rs
+# experimental_tamper_evident_disclose_threshold_verdict). Its own docs state the
+# tier outright: "AXIS-1 is NOT `Malicious` today".
+# ════════════════════════════════════════════════════════════════════════════
+
+mpc:auth-disclose-threshold-v1
+  rdfs:comment "EXPERIMENTAL tamper-evident-with-abort threshold disclosure. Its own docs state that integrity coverage is not total, so AXIS-1 is SemiHonest: do NOT deploy it as the integrity tier against a malicious party. Confidentiality (only the verdict bit is disclosed) is unaffected by the integrity gap."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:AdversaryModel ; secx:level secx:SemiHonest ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:SemiHonest ] ,
+    [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
+
+# ════════════════════════════════════════════════════════════════════════════
+# mpc:federated-pipeline-v1 — the end-to-end federated driver (src/pipeline.rs).
+# Its own docs: "Honest-majority, semi-honest — exactly ShamirBackend's tier,
+# inherited unchanged (the driver adds no new crypto assumption)."
+# ════════════════════════════════════════════════════════════════════════════
+
+mpc:federated-pipeline-v1
+  rdfs:comment "The four-flatmates federated response driver. Composes the primitives and invents no crypto, so it inherits the Shamir backend's tier unchanged. Its collaborative-proof step stays an honest NotYetImplemented stub."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:AdversaryModel ; secx:level secx:SemiHonest ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:SemiHonest ] ,
+    [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .

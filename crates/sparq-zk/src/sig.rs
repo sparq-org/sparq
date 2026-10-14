@@ -533,15 +533,25 @@ impl SecretKey {
 // [OPUS-4.8] audit #3 codex #4.
 fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     use subtle::{ConditionallySelectable, ConstantTimeEq};
+    use zeroize::Zeroizing;
     // A distinct domain tag from the challenge so the nonce-PRF output can never
     // collide with / be mistaken for a challenge value.
     const SIG_DOMAIN_NONCE: u64 = 0x5a4b_5349_475f_4e31; // "ZKSIG_N1"
-    // Map the secret scalar into the base field via its big-endian bytes. The
-    // base field (BN254 scalar field) is larger than the Baby-JubJub scalar
-    // field, so this reduction is injective on canonical sk encodings.
-    let sk_base = Fr::from_be_bytes_mod_order(&sk.0.into_bigint().to_bytes_be());
-    let k_base: Fr = poseidon2::hash(&[Fr::from(SIG_DOMAIN_NONCE), sk_base, *m]);
-    let k = JjScalar::from_be_bytes_mod_order(&k_base.into_bigint().to_bytes_be());
+
+    // Every secret-bearing intermediate (integers, field elements, hash inputs and the
+    // sponge state) is held in a `Zeroizing` wrapper, and the conversions between the
+    // two fields go through 64-bit limbs and field arithmetic only, so no byte buffer
+    // and no heap copy of `sk` or the nonce is ever made. Register and stack temporaries
+    // inside the field arithmetic itself are not scrubbed; Rust gives no way to.
+    //
+    // Map the secret scalar into the base field. The base field (BN254 scalar field) is
+    // larger than the Baby-JubJub scalar field, so this is injective on canonical sk.
+    let sk_int = Zeroizing::new(sk.0.into_bigint());
+    let sk_base = Zeroizing::new(reduce_limbs::<Fr>(&sk_int.0));
+    let nonce_input = Zeroizing::new([Fr::from(SIG_DOMAIN_NONCE), *sk_base, *m]);
+    let k_base = Zeroizing::new(poseidon2::hash_secret(&*nonce_input));
+    let k_base_int = Zeroizing::new(k_base.into_bigint());
+    let k = Zeroizing::new(reduce_limbs::<JjScalar>(&k_base_int.0));
 
     // [OPUS-4.8] sq-8jv7: guard the degenerate `k == 0` (would make `R` the
     // identity) WITHOUT a secret-dependent branch in our own code. The old
@@ -555,20 +565,32 @@ fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     // arkworks scalar arithmetic `e·sk.0` and the underlying field ops, which
     // sparq does NOT assert constant-time — see the module CONSTANT-TIME POSTURE
     // note and `compliance/cryptoreview/side-channel-analysis.md` §2.2.)
-    let k2_base: Fr = poseidon2::hash(&[Fr::from(SIG_DOMAIN_NONCE), k_base, *m]);
-    let k2 = JjScalar::from_be_bytes_mod_order(&k2_base.into_bigint().to_bytes_be());
-    // Constant-time "is k zero?" over the canonical little-endian scalar bytes,
-    // then a branchless byte-wise select of `k` vs `k2` keyed on that Choice.
-    let k_le = k.into_bigint().to_bytes_le();
-    let zero_le = JjScalar::zero().into_bigint().to_bytes_le();
-    let k_is_zero = k_le.ct_eq(&zero_le);
-    let mut sel = k_le;
-    let k2_le = k2.into_bigint().to_bytes_le();
-    debug_assert_eq!(sel.len(), k2_le.len());
-    for (dst, src) in sel.iter_mut().zip(k2_le.iter()) {
-        *dst = u8::conditional_select(dst, src, k_is_zero);
+    let nonce2_input = Zeroizing::new([Fr::from(SIG_DOMAIN_NONCE), *k_base, *m]);
+    let k2_base = Zeroizing::new(poseidon2::hash_secret(&*nonce2_input));
+    let k2_base_int = Zeroizing::new(k2_base.into_bigint());
+    let k2 = Zeroizing::new(reduce_limbs::<JjScalar>(&k2_base_int.0));
+    // Constant-time "is k zero?" over the canonical limbs, then a branchless limb-wise
+    // select of `k` vs `k2` keyed on that Choice.
+    let mut sel = Zeroizing::new(k.into_bigint());
+    let k2_int = Zeroizing::new(k2.into_bigint());
+    let k_is_zero = sel.0.ct_eq(&JjScalar::zero().into_bigint().0);
+    for (dst, src) in sel.0.iter_mut().zip(k2_int.0.iter()) {
+        *dst = u64::conditional_select(dst, src, k_is_zero);
     }
-    JjScalar::from_le_bytes_mod_order(&sel)
+    reduce_limbs::<JjScalar>(&sel.0)
+}
+
+/// The integer with little-endian 64-bit `limbs`, reduced into `F` by Horner's rule in
+/// field arithmetic. Unlike `from_be_bytes_mod_order`, this makes no byte buffer or
+/// heap copy of its (secret) input.
+fn reduce_limbs<F: PrimeField>(limbs: &[u64]) -> F {
+    let base = F::from(1u128 << 64);
+    let mut acc = zeroize::Zeroizing::new(F::zero());
+    for &limb in limbs.iter().rev() {
+        *acc *= base;
+        *acc += F::from(limb);
+    }
+    *acc
 }
 
 /// Sign `m` with `sk` using a DETERMINISTIC nonce derived from `(sk, m)` (no
@@ -1451,6 +1473,43 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use ark_std::rand::SeedableRng;
+
+    #[test]
+    fn derive_nonce_matches_fixed_bytes() {
+        let inputs = [
+            (JjScalar::from(1u64), Fr::from(0u64)),
+            (JjScalar::from(1u64), Fr::from(1u64)),
+            (JjScalar::from(2u64), Fr::from(1u64)),
+            (JjScalar::from(0x1234_5678_9abc_def0u64), Fr::from(0xc0ffeeu64)),
+            (-JjScalar::from(1u64), -Fr::from(1u64)),
+        ];
+        let expected = [
+            [
+                221, 108, 141, 65, 153, 131, 230, 68, 69, 100, 109, 16, 50, 75, 188, 86,
+                220, 127, 141, 164, 239, 32, 140, 120, 48, 179, 205, 181, 84, 28, 159, 2,
+            ],
+            [
+                254, 103, 21, 53, 40, 76, 253, 98, 162, 57, 214, 136, 240, 45, 194, 2,
+                252, 104, 58, 55, 120, 177, 49, 34, 204, 49, 21, 109, 192, 196, 156, 4,
+            ],
+            [
+                210, 255, 252, 160, 60, 55, 105, 107, 4, 182, 171, 191, 200, 152, 248, 100,
+                203, 53, 162, 77, 89, 121, 13, 203, 184, 175, 219, 91, 90, 197, 197, 1,
+            ],
+            [
+                217, 237, 163, 198, 29, 129, 165, 250, 212, 236, 1, 101, 71, 164, 211, 220,
+                234, 65, 169, 221, 41, 127, 91, 245, 216, 134, 106, 77, 242, 155, 122, 5,
+            ],
+            [
+                178, 178, 227, 124, 156, 32, 44, 242, 89, 69, 83, 161, 111, 17, 132, 198,
+                208, 98, 210, 37, 119, 0, 80, 222, 245, 2, 244, 33, 22, 71, 63, 1,
+            ],
+        ];
+        for ((sk, m), expected_le) in inputs.into_iter().zip(expected) {
+            let actual = derive_nonce(&SecretKey(sk), &m).into_bigint().to_bytes_le();
+            assert_eq!(actual.as_slice(), expected_le);
+        }
+    }
 
     fn rng() -> ark_std::rand::rngs::StdRng {
         ark_std::rand::rngs::StdRng::seed_from_u64(42)

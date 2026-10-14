@@ -1433,7 +1433,10 @@ surface, `research/sparq-solid-scope.md` §4); this is exactly that missing shel
     policy, unimplementable `odrl:conflict` strategy, a rule without a concrete target graph IRI
     (pattern targets = sq-lrtc3.3), a non-read `mode` (query-action contract = sq-lrtc3.2), an
     anonymous session, or a `trust` block combined with an ODRL-carrying dataset on `/decide`
-    (the trust dispatch would bypass the lane). Constraints the stateless lane cannot evidence
+    (the trust dispatch would bypass the lane). The work is bounded BEFORE it is done: one
+    `(rule, evaluated target)` pair — rule targets plus their stated collection members — is one
+    evaluation, and a request over the lane's evaluation bound is `400`-refused rather than
+    evaluated in part. Constraints the stateless lane cannot evidence
     (`odrl:purpose`, `odrl:count` — stateful budgets remain unimplemented) never grant. The lane
     reads the request BODY dataset, so it does not apply to `"source":"server"`; an ODRL-carrying
     server store is REFUSED there rather than un-enforced (see `"source"` below). `/decide` stays
