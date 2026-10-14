@@ -862,7 +862,7 @@ pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bind
     // (Safe to parallelise: rows reference only ids created by EARLIER operators, never ids
     // created within this BIND loop.)
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
-    let scope = b.rows.as_ptr() as usize;
+    let scope = (local.mint_scope.0, b.rows.as_ptr() as usize);
     #[cfg(feature = "parallel")]
     let resolved: Vec<Result<Id, Term>> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
@@ -893,7 +893,7 @@ pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bind
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
                 let _qb = query_base_worker_install(&qb);
-                ROW_SCOPE.set((scope, i));
+                ROW_SCOPE.set((scope.0, scope.1, i));
                 let v = eval_compiled(graph, lv, bref, row, &compiled)?;
                 Ok(value_to_id_readonly(graph, lv, &v))
             })
@@ -901,7 +901,7 @@ pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bind
     } else {
         let mut out = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
-            ROW_SCOPE.set((scope, i));
+            ROW_SCOPE.set((scope.0, scope.1, i));
             let v = eval_compiled(graph, local, &b, row, &compiled)?;
             out.push(value_to_id_readonly(graph, local, &v));
         }
@@ -911,7 +911,7 @@ pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bind
     let resolved: Vec<Result<Id, Term>> = {
         let mut out = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
-            ROW_SCOPE.set((scope, i));
+            ROW_SCOPE.set((scope.0, scope.1, i));
             let v = eval_compiled(graph, local, &b, row, &compiled)?;
             out.push(value_to_id_readonly(graph, local, &v));
         }
