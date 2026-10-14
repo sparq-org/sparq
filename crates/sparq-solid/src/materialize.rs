@@ -160,7 +160,7 @@ pub fn materialize_wac(graph: &mut Graph) -> Result<MaterializeStats, String> {
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
     let facts = assemble_input_ids(&mut dict, graph, System::Wac, &AccessProvenance::new(), &VerifiedCredentials::new())?;
-    let closure = eval(&mut dict, &facts, rules);
+    let closure = eval(&mut dict, &facts, rules)?;
     strip_reserved_graphs(graph);
     let mut stats = install_auth_view(graph, &dict, &closure);
     stats.strata_facts = vec![closure.len()];
@@ -271,7 +271,7 @@ pub fn materialize_acp_with_credentials(
     let mut closure = facts;
     let mut strata_facts = Vec::with_capacity(rules.len());
     for stratum in rules {
-        closure = eval(&mut dict, &closure, stratum);
+        closure = eval(&mut dict, &closure, stratum)?;
         strata_facts.push(closure.len());
     }
 

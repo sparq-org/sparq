@@ -240,7 +240,7 @@ pub mod pushdown;
 #[cfg(feature = "fedclient")]
 pub use pushdown::{
     bind_block_size, common_variable_check, exclusive_groups, group_vars, push_group,
-    render_values_block, ExclusiveGroup, Filter, PushedGroup, DEFAULT_BIND_BLOCK,
+    render_values_block, ExclusiveGroup, Filter, OrderKey, PushedGroup, DEFAULT_BIND_BLOCK,
 };
 
 /// §4.4 — **physical federation operators**: interpret a `JoinTree` into operators —

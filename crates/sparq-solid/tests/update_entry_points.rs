@@ -140,15 +140,14 @@ fn every_entry_point_persists_what_it_writes() {
 
 /// Review finding: the static check resolved a `GRAPH ?g` target against the store before the
 /// request, so a later operation could reach a graph an earlier one named: Bob, who may write
-/// only his own container, removed a rule from the root ACL. Every entry point authorizes what
-/// the update actually wrote.
+/// only his own container, changed the root ACL. Every entry point authorizes what the update
+/// actually wrote, and refuses the whole request when any operation's target is not writable.
 #[test]
 fn every_entry_point_authorizes_what_the_update_wrote() {
     let attack = "INSERT DATA { GRAPH <https://pod.ex/bob/b1> { \
         <https://pod.ex/bob/b1#it> <https://ex.dev/ns#ptr> <https://pod.ex/.acl> } } ; \
-        DELETE { GRAPH ?g { <https://pod.ex/.acl#alice> ?p ?o } } \
-        WHERE { GRAPH <https://pod.ex/bob/b1> { <https://pod.ex/bob/b1#it> <https://ex.dev/ns#ptr> ?g } \
-                GRAPH ?g { <https://pod.ex/.acl#alice> ?p ?o } }";
+        INSERT { GRAPH ?g { <https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#agent> <https://bob.ex/card#me> } } \
+        WHERE { GRAPH <https://pod.ex/bob/b1> { <https://pod.ex/bob/b1#it> <https://ex.dev/ns#ptr> ?g } }";
     for (name, entry) in ENTRY_POINTS {
         let mut store = store();
         let rules = graph_len(&store, "https://pod.ex/.acl");
