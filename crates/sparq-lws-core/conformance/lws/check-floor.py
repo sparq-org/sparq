@@ -4,7 +4,9 @@
     check-floor.py <runs-dir> [floor.json]
 
 Modules are the first path segment of a test id (core, auth, index), except notifications/webhook.
-Raise the floor in the same change that makes more tests pass; never lower it to go green.
+Raise the floor in the same change that makes more tests pass; never lower it to go green. The one
+exception is a test that becomes inapplicable because the server gains the feature it probes the
+absence of: lower the floor by that test, and name it in floor.json.
 """
 import glob
 import json
