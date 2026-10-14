@@ -185,8 +185,13 @@ conditional mutations. `If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
 listing can change without moving their recorded time. `If-Modified-Since` on a
-read accepts the same three forms. As with a concrete ETag validator, a
-writer without Read on the target is refused rather than told the outcome.
+read accepts the same three forms. A `GET` or `HEAD` evaluates `If-Match` and
+`If-Unmodified-Since` too, before `If-None-Match`, and answers `412` when they
+fail; on a read `If-Match` must name the tag of the representation selected,
+not another format's. An entity-tag list may span several header lines; one that
+is not the RFC 9110 grammar (only space and tab may surround a tag) names no tag,
+so it fails `If-Match` and never triggers `If-None-Match`. As with a concrete ETag
+validator, a writer without Read on the target is refused rather than told the outcome.
 Container reads include generated `ldp:contains` triples. A container's `ETag`
 covers its own record and its membership: a tag read in any format is a valid
 `If-Match` for the container until it or its membership changes. Creating a
@@ -310,8 +315,15 @@ What the server exposes, all discoverable from the storage description
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
   data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
   `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`,
-  which take `PATCH` with JSON Patch (advertised in `Allow` and `Accept-Patch`; a failed
-  precondition gets `412`). A linkset `PATCH` changes only user-managed links: the
+  which take `PATCH` with JSON Patch and `PUT` of a whole `application/linkset+json` document
+  (both advertised in `Allow`, the patch format in `Accept-Patch`; a failed precondition gets
+  `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link
+  in one write and is checked as a `PATCH` result is (its `204` carries no `ETag`, since what is
+  stored is the document resolved and with the server-managed links; a `GET` reads the tag); its body is at most what the metadata may
+  hold (`413` past it, unread), and before it is parsed a scan that keeps nothing charges it as
+  the patch is charged and refuses it (`413`) past what keeps parsing it (the same reader again,
+  keeping what it reads) within the linkset cost budget beyond the body itself; a number in it
+  gets `422`, text that is not JSON (or nests past what the parser reads) `400`, a partial `PUT` (`Content-Range`) `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
   server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
   values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
   `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
@@ -328,7 +340,7 @@ What the server exposes, all discoverable from the storage description
   relative reference grown by the base) to 2 MiB; past any of these, `413`. A document with
   members besides `linkset` gets `422`. A `Link` header on a create or replace is held to the
   same target and length caps (`431` past them). Every write that stores a linkset (a create, a
-  replace, a linkset `PATCH`) checks the document it would serve, with the server-managed links
+  replace, a linkset `PATCH` or `PUT`) checks the document it would serve, with the server-managed links
   put back and the representation's size at its longest, against exactly what a linkset `PATCH`
   checks its target with (those caps, that cost, and the metadata's size limit), and gets `413`
   past it, so whatever is stored can be patched. A linkset stored before these checks that
@@ -477,7 +489,7 @@ What the server exposes, all discoverable from the storage description
   resource's access taken for the change, so its metadata is read and the grants are scanned
   once per change. A recursive delete too large to put back is refused before any of its
   notifications is prepared.
-- Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH and a `DELETE`
+- Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before

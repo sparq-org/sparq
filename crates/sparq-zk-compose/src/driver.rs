@@ -13,6 +13,8 @@
 //! - `bb verify -p proof -i public_inputs -k vk` exits 0 on success.
 
 use crate::manifest::CircuitId;
+#[cfg(feature = "dual-leaf")]
+use sparq_zk::commit::{CommitmentMethod, MethodUse};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -22,6 +24,53 @@ pub use metrics::{
     AcirCacheObservation, DriverStage, DriverStageEvent, DriverStageMetrics, DriverStageOutcome,
 };
 use metrics::{Collector, StageTimer};
+
+/// The `datatype_const` value of a rendered `Prover.toml`, or `None`.
+///
+/// This crate has no TOML parser, so instead of interpreting TOML it accepts
+/// only the flat form the value-lane renderers emit, a form in which every
+/// conforming TOML parser reads the same top-level keys and values. Every line
+/// must be `key = "text"`, `key = true` or `key = false`, where:
+///
+/// - `key` is one or more of `a-z` / `_` (a bare key: no quoting, no dots);
+/// - `text` is zero or more ASCII alphanumerics (no escapes, quotes or
+///   multi-line strings);
+/// - exactly one space each side of `=`;
+/// - lines end in `\n` only, and no key repeats.
+///
+/// Anything else is refused (`None`): a table or array-of-tables header,
+/// comments, blank lines, inline tables, arrays, `\r`, a byte-order mark,
+/// quoted or dotted keys, and any other spelling. Exactly one `datatype_const`
+/// must be present.
+#[cfg(feature = "dual-leaf")]
+fn top_level_datatype_const(prover_toml: &str) -> Option<String> {
+    let body = prover_toml.strip_suffix('\n').unwrap_or(prover_toml);
+    let mut keys = std::collections::HashSet::new();
+    let mut found: Option<String> = None;
+    for line in body.split('\n') {
+        let (key, value) = line.split_once(" = ")?;
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+            return None;
+        }
+        let text = match value {
+            "true" | "false" => None,
+            _ => {
+                let t = value.strip_prefix('"')?.strip_suffix('"')?;
+                if !t.bytes().all(|b| b.is_ascii_alphanumeric()) {
+                    return None;
+                }
+                Some(t)
+            }
+        };
+        if !keys.insert(key) {
+            return None;
+        }
+        if key == "datatype_const" {
+            found = Some(text?.to_string());
+        }
+    }
+    found
+}
 
 /// Driver / proving error.
 #[derive(Debug)]
@@ -35,6 +84,21 @@ pub enum DriverError {
         stderr: String,
     },
     Io(std::io::Error),
+    /// The `(method, circuit, use)` dispatch refused before any subprocess ran —
+    /// e.g. a FRESH proof routed under a method that is not selectable for new
+    /// issuance. Raised only by the method-checked prove entry
+    /// [`CircuitProver::prove_in_for_method`].
+    #[cfg(feature = "dual-leaf")]
+    Dispatch(crate::dispatch::DispatchError),
+    /// The rendered `Prover.toml` handed to the method-checked prove entry is not
+    /// in the renderers' flat form, or does not carry the `datatype_const` of
+    /// the `ProofInputs` it was given, so the
+    /// witness would bind a different lane from the one the checked inputs
+    /// declare. Refused before any subprocess runs.
+    #[cfg(feature = "dual-leaf")]
+    ProverTomlLaneMismatch {
+        circuit: String,
+    },
 }
 
 impl std::fmt::Display for DriverError {
@@ -47,6 +111,15 @@ impl std::fmt::Display for DriverError {
                 write!(f, "`{tool}` failed:\n{stderr}")
             }
             DriverError::Io(e) => write!(f, "io error: {e}"),
+            #[cfg(feature = "dual-leaf")]
+            DriverError::Dispatch(e) => write!(f, "dispatch refused the proof: {}", e),
+            #[cfg(feature = "dual-leaf")]
+            DriverError::ProverTomlLaneMismatch { circuit } => write!(
+                f,
+                "the Prover.toml does not carry the checked datatype_const of the \
+                 {} inputs it was given: refused before witness generation",
+                circuit
+            ),
         }
     }
 }
@@ -539,6 +612,62 @@ impl CircuitProver {
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
         self.prove_package(&id.package(), prover_toml, out_dir, tag)
+    }
+
+    /// As [`Self::prove_in`], but routed through the `(method, circuit, use)`
+    /// dispatch AND the LANE↔MEMBER pairing of the INPUTS first, so a refused
+    /// proof never reaches a `nargo`/`bb` subprocess. Three refusals, in order:
+    ///
+    /// 1. the method is not selectable for this `use_`
+    ///    ([`DriverError::Dispatch`], from `resolve_circuit_for_use`);
+    /// 2. `inputs` pair a lane constant with the wrong member, carry an unknown
+    ///    constant, carry a non-canonical `FieldHex`, or carry a `DualLeafV1`
+    ///    constant under [`MethodUse::NewIssuance`]
+    ///    ([`DriverError::Dispatch`], from
+    ///    `crate::dispatch::check_lane_member_pairing_for_use`) — so a V2 method
+    ///    enum paired with a V1-constant input is refused here, not proved;
+    /// 3. the rendered `prover_toml` is not in the renderers' flat form, or
+    ///    its `datatype_const` is not the one on those checked `inputs`
+    ///    ([`DriverError::ProverTomlLaneMismatch`]). The TOML is the bytes the
+    ///    witness is generated from, so checking the inputs alone would leave
+    ///    the actual lane unchecked. `top_level_datatype_const` decides this; it
+    ///    refuses any TOML outside the flat form (tables, comments, quoted or
+    ///    dotted keys, escapes, `\r`, repeats) instead of interpreting it, so
+    ///    no TOML parser can read a different `datatype_const` from the one it
+    ///    compared.
+    ///
+    /// What it does NOT check: the rest of the TOML. The challenge, the operand,
+    /// the bound, the verdict and the private witnesses are not compared against
+    /// `inputs`, so this refuses a cross-LANE rendering, not every disagreement
+    /// between the inputs and the bytes.
+    ///
+    /// [`Self::prove_in`] itself stays method-AGNOSTIC: it takes a `CircuitId` and
+    /// nothing else, and re-proving an already-issued graph is a legitimate use
+    /// (pass [`MethodUse::LegacyAlreadyIssued`] here for that). This entry is the
+    /// one an issuance path uses, so the method check happens in the prover rather
+    /// than only in the builder that produced the inputs.
+    #[cfg(feature = "dual-leaf")]
+    pub fn prove_in_for_method(
+        &self,
+        method: CommitmentMethod,
+        inputs: &crate::manifest::ProofInputs,
+        prover_toml: &str,
+        out_dir: &Path,
+        tag: &str,
+        use_: MethodUse,
+    ) -> Result<ProofArtifacts, DriverError> {
+        let id = crate::dispatch::resolve_circuit_for_use(method, inputs.circuit_id(), use_)
+            .map_err(DriverError::Dispatch)?;
+        crate::dispatch::check_lane_member_pairing_for_use(inputs, use_)
+            .map_err(DriverError::Dispatch)?;
+        if let Some((_, datatype_const)) = crate::dispatch::value_lane_fields(inputs) {
+            if top_level_datatype_const(prover_toml).as_deref() != Some(&datatype_const.0) {
+                return Err(DriverError::ProverTomlLaneMismatch {
+                    circuit: id.package(),
+                });
+            }
+        }
+        self.prove_in(&id, prover_toml, out_dir, tag)
     }
 
     // Shares the explicit noir-recursive (ZK) backend with legacy members.

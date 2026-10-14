@@ -3,6 +3,7 @@
 // block. Mechanically enforces the per-site argument the unsafe-register documents.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
+pub mod accept;
 pub mod baseenc;
 pub mod civil;
 pub mod compress;

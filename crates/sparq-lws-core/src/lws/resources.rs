@@ -20,12 +20,13 @@ use super::{
     GRANTS_PATH, JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS,
     META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
+use crate::entity_tag::{self, TagList};
 use crate::error::ServerError;
 use crate::store::Store;
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const ACCEPT_PATCH: &str = "application/json-patch+json";
-const LINKSET_ALLOW: &str = "GET, HEAD, PATCH";
+const LINKSET_ALLOW: &str = "GET, HEAD, PUT, PATCH";
 
 /// Relations that are server-managed or protocol-level: never taken from a client's Link header
 /// as user-managed metadata.
@@ -360,82 +361,6 @@ fn quoted(tag: &str) -> String {
     }
 }
 
-/// An `If-Match` / `If-None-Match` field value: `*`, or entity tags as `(weak, opaque-tag)`, the
-/// opaque tag with its quotes, as bytes (it may hold `obs-text`).
-enum TagList {
-    Any,
-    Tags(Vec<(bool, Vec<u8>)>),
-}
-
-impl TagList {
-    /// Parse a field value by the RFC 9110 grammar (`"*" / #entity-tag`, section 8.8.3): a comma
-    /// inside a quoted tag belongs to the tag, and `*` is the whole value or not a wildcard.
-    /// Anything else is unreadable.
-    fn parse(b: &[u8]) -> Result<Self, ()> {
-        if b.trim_ascii() == b"*" {
-            return Ok(Self::Any);
-        }
-        let mut i = 0;
-        let mut tags = Vec::new();
-        loop {
-            while i < b.len() && matches!(b[i], b' ' | b'\t' | b',') {
-                i += 1;
-            }
-            if i == b.len() {
-                break;
-            }
-            let weak = b[i..].starts_with(b"W/");
-            if weak {
-                i += 2;
-            }
-            if b.get(i) != Some(&b'"') {
-                return Err(());
-            }
-            let start = i;
-            i += 1;
-            while i < b.len() && b[i] != b'"' {
-                if !(b[i] == 0x21 || (0x23..=0x7e).contains(&b[i]) || b[i] >= 0x80) {
-                    return Err(());
-                }
-                i += 1;
-            }
-            if i == b.len() {
-                return Err(());
-            }
-            i += 1;
-            tags.push((weak, b[start..i].to_vec()));
-            while i < b.len() && matches!(b[i], b' ' | b'\t') {
-                i += 1;
-            }
-            if i < b.len() && b[i] != b',' {
-                return Err(());
-            }
-        }
-        // An empty list (`#entity-tag` allows one) names no tag: it matches nothing.
-        Ok(Self::Tags(tags))
-    }
-
-    /// Whether the list matches `etag` (the server's own, quoted). `weak` compares opaque tags
-    /// only (RFC 9110 section 8.8.3.2).
-    fn matches(&self, etag: &str, weak: bool) -> bool {
-        let (etag_weak, opaque) = match etag.strip_prefix("W/") {
-            Some(o) => (true, o),
-            None => (false, etag),
-        };
-        match self {
-            Self::Any => true,
-            Self::Tags(tags) => tags
-                .iter()
-                .any(|(w, t)| t == opaque.as_bytes() && (weak || (!w && !etag_weak))),
-        }
-    }
-}
-
-#[cfg(test)]
-fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
-    TagList::parse(header.as_bytes()).is_ok_and(|l| l.matches(etag, weak))
-}
-
 /// A body (of POST, PUT, PATCH or QUERY) sent with a content coding other than `identity` is refused (`415`, with
 /// `Accept-Encoding: identity`, RFC 9110 section 15.5.16) before anything reads it: the server
 /// does not decode bodies, and storing the coded bytes as the representation would drop the
@@ -497,19 +422,26 @@ fn evaluate(
     modified_secs: Option<u64>,
     read: bool,
 ) -> Precondition {
-    let Ok(pre) = Preconditions::read(headers) else {
+    // Read as bytes: an opaque tag may hold obs-text (RFC 9110 section 8.8.3).
+    let if_match = entity_tag::field(headers, header::IF_MATCH);
+    let if_none_match = entity_tag::field(headers, header::IF_NONE_MATCH);
+    let (Ok(if_match), Ok(if_none_match)) = (
+        if_match.as_deref().map(TagList::parse).transpose(),
+        if_none_match.as_deref().map(TagList::parse).transpose(),
+    ) else {
         return Precondition::Failed;
     };
-    if let Some(im) = pre.if_match.as_ref() {
+    let date = |n: header::HeaderName| parse_http_date(crate::http_date::single_line(headers, n));
+    if let Some(im) = if_match.as_ref() {
         if !etag.is_some_and(|e| im.matches(e, false)) {
             return Precondition::Failed;
         }
-    } else if let (Some(since), Some(m)) = (pre.if_unmodified_since, modified_secs) {
+    } else if let (Some(since), Some(m)) = (date(header::IF_UNMODIFIED_SINCE), modified_secs) {
         if m as i64 > since {
             return Precondition::Failed;
         }
     }
-    if let Some(inm) = pre.if_none_match.as_ref() {
+    if let Some(inm) = if_none_match.as_ref() {
         if etag.is_some_and(|e| inm.matches(e, true)) {
             return if read {
                 Precondition::NotModified
@@ -518,7 +450,7 @@ fn evaluate(
             };
         }
     } else if read {
-        if let (Some(since), Some(m)) = (pre.if_modified_since, modified_secs) {
+        if let (Some(since), Some(m)) = (date(header::IF_MODIFIED_SINCE), modified_secs) {
             let now = to_secs(now_ms()) as i64;
             if since <= now && m as i64 <= since {
                 return Precondition::NotModified;
@@ -526,36 +458,6 @@ fn evaluate(
         }
     }
     Precondition::Proceed
-}
-
-/// A request's preconditions, every field line of each read.
-struct Preconditions {
-    if_match: Option<TagList>,
-    if_none_match: Option<TagList>,
-    if_unmodified_since: Option<i64>,
-    if_modified_since: Option<i64>,
-}
-
-impl Preconditions {
-    fn read(headers: &HeaderMap) -> Result<Self, ()> {
-        let list = |n: header::HeaderName| -> Result<Option<TagList>, ()> {
-            // Read as bytes: an opaque tag may hold obs-text (RFC 9110 section 8.8.3).
-            let lines: Vec<&[u8]> = headers.get_all(n).iter().map(|v| v.as_bytes()).collect();
-            if lines.is_empty() {
-                return Ok(None);
-            }
-            TagList::parse(&lines.join(&b", "[..])).map(Some)
-        };
-        let date = |n: header::HeaderName| -> Result<Option<i64>, ()> {
-            Ok(parse_http_date(crate::http_date::single_line(headers, n)))
-        };
-        Ok(Self {
-            if_match: list(header::IF_MATCH)?,
-            if_none_match: list(header::IF_NONE_MATCH)?,
-            if_unmodified_since: date(header::IF_UNMODIFIED_SINCE)?,
-            if_modified_since: date(header::IF_MODIFIED_SINCE)?,
-        })
-    }
 }
 
 /// Whether the request carries a precondition a state-changing method evaluates.
@@ -769,41 +671,8 @@ fn store_error(e: ServerError) -> Response {
 
 // ---- content negotiation ----
 
-/// One media range of an Accept header.
-struct Range {
-    essence: String,
-    q: f32,
-    profile: Option<String>,
-}
-
-fn parse_accept(accept: &str) -> Vec<Range> {
-    accept
-        .split(',')
-        .filter_map(|part| {
-            let mut pieces = part.split(';');
-            let essence = pieces.next()?.trim().to_ascii_lowercase();
-            if essence.is_empty() {
-                return None;
-            }
-            let mut q = 1.0;
-            let mut profile = None;
-            for p in pieces {
-                if let Some((k, v)) = p.split_once('=') {
-                    let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"'));
-                    if k == "q" {
-                        q = v.parse().unwrap_or(0.0);
-                    } else if k == "profile" {
-                        profile = Some(v.to_string());
-                    }
-                }
-            }
-            Some(Range {
-                essence,
-                q,
-                profile,
-            })
-        })
-        .collect()
+fn parse_accept(accept: &str) -> Vec<crate::accept::MediaRange<'_>> {
+    crate::accept::media_ranges(accept).collect()
 }
 
 /// The best of `offered` for `accept` (earlier offers win ties); the first offer when Accept is
@@ -813,22 +682,14 @@ pub(super) fn negotiate(accept: Option<&str>, offered: &[&str]) -> Option<String
         return offered.first().map(|s| s.to_string());
     };
     let ranges = parse_accept(accept);
-    let mut best: Option<(f32, usize, usize)> = None; // (q, specificity, offer index)
+    let mut best: Option<(f32, u8, usize)> = None; // (q, specificity, offer index)
     for (i, offer) in offered.iter().enumerate() {
-        let (otype, _) = offer.split_once('/').unwrap_or((offer, ""));
-        let mut q_for: Option<(f32, usize)> = None;
+        let mut q_for: Option<(f32, u8)> = None;
         for r in &ranges {
-            let spec = if r.essence == *offer {
-                3
-            } else if r.essence == format!("{otype}/*") {
-                2
-            } else if r.essence == "*/*" {
-                1
-            } else {
-                0
-            };
-            if spec > 0 && q_for.is_none_or(|(_, s)| spec > s) {
-                q_for = Some((r.q, spec));
+            if let Some(spec) = r.specificity(offer) {
+                if q_for.is_none_or(|(_, s)| spec > s) {
+                    q_for = Some((r.q, spec));
+                }
             }
         }
         if let Some((q, spec)) = q_for {
@@ -853,7 +714,7 @@ pub(crate) fn negotiate_container(accept: Option<&str>) -> Option<String> {
     if let Some(a) = accept {
         if parse_accept(a)
             .iter()
-            .any(|r| r.essence == LD_JSON && r.profile.as_deref() == Some(LWS_CONTEXT) && r.q > 0.0)
+            .any(|r| r.essence == LD_JSON && r.param("profile") == Some(LWS_CONTEXT) && r.q > 0.0)
         {
             return Some(ld_json_lws_profile());
         }
@@ -3936,7 +3797,7 @@ pub const LINKSET_PARSE_AMPLIFICATION: usize = 256;
 
 /// The most a linkset PATCH body may be: what parsing it, whatever its shape, can allocate
 /// within [`LINKSET_COST_BUDGET`] ([`LINKSET_PARSE_AMPLIFICATION`]). Ample for a patch to a
-/// linkset; replacing a large linkset whole takes several.
+/// linkset; a large linkset is replaced whole with a PUT ([`LINKSET_PUT_BODY`]).
 pub const LINKSET_PATCH_BODY: usize = LINKSET_COST_BUDGET / LINKSET_PARSE_AMPLIFICATION;
 /// Whether `s` starts with a URI scheme (RFC 3986 section 3.1): an absolute reference, which
 /// resolving leaves as long as it is. Anything else is charged as if it grew by the base.
@@ -3954,6 +3815,196 @@ fn has_scheme(s: &str) -> bool {
 /// stored linkset as patched (every clone checked first, `value_cost`), and resolving and
 /// indexing the result (`linkset_cost`).
 pub const LINKSET_COST_BUDGET: usize = 2 << 20;
+
+/// The most a linkset PUT body may be: what the resource's metadata, which stores the linkset,
+/// may hold. What reading it may allocate is bounded apart from its size (`read_linkset`).
+pub const LINKSET_PUT_BODY: usize = LINKSET_SERVED_BYTES;
+
+/// The most memory parsing a linkset PUT body holds at once per byte its scan charged
+/// (`read_linkset`): measured as peak live bytes with a counting allocator over the smallest
+/// syntactic units, escapes, long keys, deep nesting and mixes of them, repeated
+/// (`tests/linkset_parse_amplification.rs`), whose worst is arrays nested in arrays (about twice
+/// the charge, an array's first growth each), and doubled.
+pub const LINKSET_PUT_PARSE_AMPLIFICATION: usize = 4;
+
+/// What a linkset PUT's scan may charge a body before it is refused: what parsing it may then
+/// allocate, beyond the body itself, stays within [`LINKSET_COST_BUDGET`]
+/// ([`LINKSET_PUT_PARSE_AMPLIFICATION`]).
+pub const LINKSET_PUT_SCAN_BUDGET: usize = LINKSET_COST_BUDGET / LINKSET_PUT_PARSE_AMPLIFICATION;
+
+/// Why [`read_linkset`] did not read a body.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LinksetUnread {
+    /// It is not JSON (RFC 8259), or nests past what the parser reads: the parser stops at its
+    /// nesting limit before it has read the rest, so the two cannot be told apart.
+    NotJson,
+    /// It holds a number, which no linkset document does.
+    Number,
+    /// Parsing it would allocate more than the budget.
+    TooLarge,
+}
+
+/// Read `body` as a linkset document within `budget`: what parsing it into a [`Value`] allocates.
+/// The body is first scanned without keeping anything, and every value charged what parsing it
+/// allocates, as [`value_cost`] charges a parsed one: [`VALUE_COST`] each, [`OBJECT_COST`] and
+/// [`MEMBER_COST`] a member more for objects, and its string bytes. Past `budget` the scan stops
+/// there; only a body within it is parsed, by the same visitor, now keeping what it reads, so
+/// the parse builds exactly what the scan charged (no member name means anything to it, as one
+/// may to a [`Value`]'s own parse). A number refuses it, since no linkset holds one.
+fn read_linkset(body: &[u8], budget: usize) -> Result<Value, LinksetUnread> {
+    walk_linkset(body, budget, false)?;
+    walk_linkset(body, budget, true).map(|(document, _)| document)
+}
+
+/// One pass of [`read_linkset`] over `body`: the document, when `keep`, and what it charged.
+fn walk_linkset(body: &[u8], budget: usize, keep: bool) -> Result<(Value, usize), LinksetUnread> {
+    use serde::de::DeserializeSeed;
+    let cost = std::cell::Cell::new(0usize);
+    let why = std::cell::Cell::new(None);
+    let walk = LinksetWalk {
+        cost: &cost,
+        budget,
+        why: &why,
+        keep,
+    };
+    let mut de = serde_json::Deserializer::from_slice(body);
+    match walk.deserialize(&mut de).and_then(|v| de.end().map(|()| v)) {
+        Ok(v) => Ok((v, cost.get())),
+        // A number too large for the parser fails before the visitor sees it: a number still.
+        Err(e) => Err(why
+            .get()
+            .unwrap_or(if e.to_string().starts_with("number out of range") {
+                LinksetUnread::Number
+            } else {
+                LinksetUnread::NotJson
+            })),
+    }
+}
+
+/// Read `body` as a linkset PUT reads it ([`read_linkset`]), within [`LINKSET_PUT_SCAN_BUDGET`],
+/// dropping the document: what the scan charged, when it is read. Public only so the bound the
+/// scan charges is measured (`tests/linkset_parse_amplification.rs`).
+#[doc(hidden)]
+pub fn reads_as_linkset(body: &[u8]) -> Option<usize> {
+    let (_, cost) = walk_linkset(body, LINKSET_PUT_SCAN_BUDGET, false).ok()?;
+    walk_linkset(body, LINKSET_PUT_SCAN_BUDGET, true)
+        .ok()
+        .map(|_| cost)
+}
+
+/// One value of a pass [`read_linkset`] makes, kept when `keep` (else [`Value::Null`]).
+#[derive(Clone, Copy)]
+struct LinksetWalk<'a> {
+    cost: &'a std::cell::Cell<usize>,
+    budget: usize,
+    why: &'a std::cell::Cell<Option<LinksetUnread>>,
+    keep: bool,
+}
+
+impl LinksetWalk<'_> {
+    fn charge<E: serde::de::Error>(&self, n: usize) -> Result<(), E> {
+        let cost = self.cost.get().saturating_add(n);
+        self.cost.set(cost);
+        if cost > self.budget {
+            return self.refuse(LinksetUnread::TooLarge);
+        }
+        Ok(())
+    }
+
+    fn refuse<T, E: serde::de::Error>(&self, why: LinksetUnread) -> Result<T, E> {
+        self.why.set(Some(why));
+        Err(E::custom("not read"))
+    }
+
+    fn kept(&self, v: impl FnOnce() -> Value) -> Value {
+        if self.keep {
+            v()
+        } else {
+            Value::Null
+        }
+    }
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for LinksetWalk<'_> {
+    type Value = Value;
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
+        d.deserialize_any(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for LinksetWalk<'_> {
+    type Value = Value;
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a JSON value")
+    }
+    fn visit_bool<E: serde::de::Error>(self, b: bool) -> Result<Value, E> {
+        self.charge(VALUE_COST)?;
+        Ok(self.kept(|| Value::Bool(b)))
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> Result<Value, E> {
+        self.charge(VALUE_COST)?;
+        Ok(Value::Null)
+    }
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Value, E> {
+        self.charge(VALUE_COST.saturating_add(v.len()))?;
+        Ok(self.kept(|| Value::String(v.to_owned())))
+    }
+    fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Value, E> {
+        self.refuse(LinksetUnread::Number)
+    }
+    fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Value, E> {
+        self.refuse(LinksetUnread::Number)
+    }
+    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Value, E> {
+        self.refuse(LinksetUnread::Number)
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        self.charge(VALUE_COST)?;
+        let mut items = Vec::new();
+        while let Some(v) = seq.next_element_seed(self)? {
+            if self.keep {
+                items.push(v);
+            }
+        }
+        Ok(self.kept(|| Value::Array(items)))
+    }
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        self.charge(VALUE_COST.saturating_add(OBJECT_COST))?;
+        let mut members = serde_json::Map::new();
+        while let Some(k) = map.next_key_seed(LinksetKey(self))? {
+            let v = map.next_value_seed(self)?;
+            if self.keep {
+                members.insert(k, v);
+            }
+        }
+        Ok(self.kept(|| Value::Object(members)))
+    }
+}
+
+/// A member name in a pass [`read_linkset`] makes, kept when the pass keeps (else empty).
+struct LinksetKey<'a>(LinksetWalk<'a>);
+
+impl<'de> serde::de::DeserializeSeed<'de> for LinksetKey<'_> {
+    type Value = String;
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<String, D::Error> {
+        d.deserialize_str(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for LinksetKey<'_> {
+    type Value = String;
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a member name")
+    }
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<String, E> {
+        self.0.charge(MEMBER_COST.saturating_add(v.len()))?;
+        Ok(if self.0.keep {
+            v.to_owned()
+        } else {
+            String::new()
+        })
+    }
+}
 
 /// Restore, in place, the strings of a document read with its numbers as text
 /// ([`read_numbers_as_text`]): `false` when it holds a number.
@@ -4418,8 +4469,8 @@ fn linkset_etag(doc: &Value) -> String {
     format!("\"ls-{}\"", jose::b64url(&digest[..12]))
 }
 
-/// A resource's linkset (RFC 9264): GET, HEAD and PATCH (JSON Patch). PUT is
-/// not offered, so it is 405 with the methods that are.
+/// A resource's linkset (RFC 9264): GET, HEAD, PATCH (JSON Patch) and PUT of a whole
+/// `application/linkset+json` document; any other method is 405 with the methods that are.
 async fn linkset<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -4437,9 +4488,10 @@ async fn linkset<S: Store + 'static>(
         return refused;
     }
     // The resource's lock is taken before the permission check that counts, so the decision holds
-    // for what is served or changed: shared for a read, exclusive for a patch (from the
+    // for what is served or changed: shared for a read, exclusive for a PUT or PATCH (from the
     // precondition through the write).
-    let (_shared, mut exclusive) = if req.method == Method::PATCH {
+    let writes = matches!(req.method, Method::PATCH | Method::PUT);
+    let (_shared, mut exclusive) = if writes {
         match state.locks.lock(uri).await {
             Some(guard) => (None, Some(guard)),
             None => return set_aside_meanwhile(),
@@ -4450,7 +4502,7 @@ async fn linkset<S: Store + 'static>(
             None => return set_aside_meanwhile(),
         }
     };
-    let mut listing = if req.method == Method::PATCH {
+    let mut listing = if writes {
         match listing_guard(state, uri).await {
             Ok(listing) => listing,
             Err(r) => return r,
@@ -4472,7 +4524,7 @@ async fn linkset<S: Store + 'static>(
     if let Err(r) = recheck(state, action, uri, agent).await {
         return r;
     }
-    let mut meta = match state.resource_meta(uri).await {
+    let meta = match state.resource_meta(uri).await {
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
@@ -4569,97 +4621,87 @@ async fn linkset<S: Store + 'static>(
                     Some("the result is not a linkset document"),
                 );
             }
-            let Some(patched) = Some(patched).filter(valid_linkset) else {
-                return problem(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Some("the result is not a linkset document"),
-                );
-            };
-            // Relative references are resolved once, here, against the linkset's own URI: what
-            // is stored, served and indexed is then the same absolute link.
-            let patched = match absolute_linkset(&patched, &base, LINKSET_COST_BUDGET) {
-                Ok(p) => p,
-                Err(Unresolved::Invalid) => return problem(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Some("an anchor or href is not a URI reference, or a target attribute is not shaped as RFC 9264 says"),
-                ),
-                Err(Unresolved::TooLarge) => return problem(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    Some("the patched document would be too large"),
-                ),
-            };
-            // Only the user-managed part is kept; the links the type index matches are taken from
-            // it, so the two never drift apart.
-            let user = user_linkset(&patched, uri);
-            meta.links = links_of(&user, uri);
-            meta.linkset = Some(user.into_value());
-            meta.linkset_etag = None;
-            // The result is checked as it will be served, with the server-managed links (`up`,
-            // `type`, `self`) a patch may strip put back, with what the next PATCH checks its
-            // target with ([`admissible`]): a linkset is stored only if it can be patched again.
-            let rebuilt = match linkset_document(state, uri, &meta).await {
-                Ok(d) => d,
-                Err(e) => return store_error(e),
-            };
-            let format = if uri.ends_with('/') {
-                None
-            } else {
-                match state.store.meta(uri).await {
-                    Ok(stored) => stored.map(|m| m.content_type),
-                    Err(e) => return store_error(e),
-                }
-            };
-            if let Err(refused) =
-                admissible_meta(uri, &state.cfg.storage(), &meta, format.as_deref())
-            {
-                return refused;
-            }
-            // The linkset is checked whole, as it will be stored: inside the metadata it nests a
-            // level deeper than in the patched document, and metadata that does not read back
-            // would be lost.
-            match super::encode_meta(&meta) {
-                Ok(_) => {}
-                Err(ServerError::Conflict(_)) => {
-                    return problem(
-                        StatusCode::PAYLOAD_TOO_LARGE,
-                        Some("the resource's metadata would be too large"),
-                    )
-                }
-                Err(_) => {
-                    return problem(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        Some("the linkset nests too deeply to be stored"),
-                    )
-                }
-            }
-            // The tag of the document as written, which `rebuilt` is.
-            let new_etag = linkset_etag(&rebuilt);
-            // The write runs in a task that holds the lock and the listing's, and then touches
-            // the container when the write may have landed (see [`hold_locks`]).
-            let Some(guard) = exclusive.take() else {
+            let Some(locks) = exclusive.take().map(|guard| (guard, listing.take())) else {
                 return store_error(ServerError::Storage("the lock is not held".into()));
             };
-            let write = {
-                let (state, uri, meta) = (state.clone(), uri.to_string(), meta.clone());
-                async move { (state.put_resource_meta(&uri, &meta).await, None) }
-            };
-            let parent = parent_of(uri, &state.cfg.storage());
-            let event = updated(uri);
-            let after = move |w: &Result<(), ServerError>| {
-                let landed = matches!(
-                    w,
-                    Ok(()) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+            store_linkset(
+                state,
+                req,
+                uri,
+                meta,
+                patched,
+                locks,
+                LinksetValidator::Sent,
+            )
+            .await
+        }
+        Method::PUT => {
+            // A whole linkset replaces the user-managed one (lws10-core 9.3.2), in one write. The
+            // body is held to what the metadata may hold, and read only once a scan that keeps
+            // nothing has charged it what parsing it allocates ([`read_linkset`]), so a body of
+            // any shape costs at most [`LINKSET_COST_BUDGET`] beyond the body itself.
+            // A partial PUT (RFC 9110 section 14.5) is refused here as for any resource: taken as
+            // a whole linkset, it would replace the linkset with the part.
+            if req.headers.contains_key(header::CONTENT_RANGE) {
+                return problem(
+                    StatusCode::BAD_REQUEST,
+                    Some("a partial PUT (Content-Range) is not supported"),
                 );
-                (parent.filter(|_| landed), w.is_ok().then_some(event))
-            };
-            let locks = (guard, listing.take());
-            match hold_locks(state, locks, req.admission.clone(), after, write).await {
-                Ok((Ok(()), _)) => {}
-                Ok((Err(e), _)) | Err(e) => return store_error(e),
             }
-            let mut r = StatusCode::NO_CONTENT.into_response();
-            set(r.headers_mut(), header::ETAG, &new_etag);
-            r
+            if req.body.len() > LINKSET_PUT_BODY {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some(&format!("a linkset is at most {LINKSET_PUT_BODY} bytes")),
+                );
+            }
+            if req.content_type().as_deref() != Some(LINKSET_JSON) {
+                return problem(
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    Some("a linkset is replaced with application/linkset+json"),
+                );
+            }
+            // A writer need not be able to read the linkset, so a 412 carries no tag of it, as
+            // for a PATCH.
+            if let Precondition::Failed = evaluate(&req.headers, Some(&etag), None, false) {
+                return problem(StatusCode::PRECONDITION_FAILED, None);
+            }
+            let document = match read_linkset(&req.body, LINKSET_PUT_SCAN_BUDGET) {
+                Ok(d) => d,
+                Err(LinksetUnread::NotJson) => {
+                    return problem(
+                        StatusCode::BAD_REQUEST,
+                        Some("the body is not JSON, or nests too deeply to be read"),
+                    )
+                }
+                Err(LinksetUnread::Number) => {
+                    return problem(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Some("the body is not a linkset document"),
+                    )
+                }
+                Err(LinksetUnread::TooLarge) => {
+                    return problem(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        Some("the linkset is more than a linkset may hold"),
+                    )
+                }
+            };
+            let Some(locks) = exclusive.take().map(|guard| (guard, listing.take())) else {
+                return store_error(ServerError::Storage("the lock is not held".into()));
+            };
+            // What is stored is not what was sent (references resolved, the server-managed links
+            // restored), so a successful PUT carries no validator (RFC 9110 section 9.3.4): the
+            // linkset and its tag are read with a GET.
+            store_linkset(
+                state,
+                req,
+                uri,
+                meta,
+                document,
+                locks,
+                LinksetValidator::Withheld,
+            )
+            .await
         }
         _ => method_not_allowed(LINKSET_ALLOW),
     };
@@ -4671,6 +4713,125 @@ async fn linkset<S: Store + 'static>(
     );
     add_link(resp.headers_mut(), uri, "anchor", None);
     resp
+}
+
+/// Store `document`, a client's linkset for `uri` (patched, or put whole), as the resource's
+/// user-managed links, holding `locks` (the resource's, exclusive, and its listing's) through the
+/// write. It must be a linkset ([`valid_linkset`]); relative references are resolved against the
+/// linkset's own URI, and the result is checked as it will be served and stored before anything
+/// is written. `204`, with the new tag as `validator` says, or the refusal.
+async fn store_linkset<S, L>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    uri: &str,
+    mut meta: ResourceMeta,
+    document: Value,
+    locks: L,
+    validator: LinksetValidator,
+) -> Response
+where
+    S: Store + 'static,
+    L: Send + 'static,
+{
+    let Some(patched) = Some(document).filter(valid_linkset) else {
+        return problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("the result is not a linkset document"),
+        );
+    };
+    let base = linkset_base(uri);
+    // Relative references are resolved once, here, against the linkset's own URI: what
+    // is stored, served and indexed is then the same absolute link.
+    let patched = match absolute_linkset(&patched, &base, LINKSET_COST_BUDGET) {
+        Ok(p) => p,
+        Err(Unresolved::Invalid) => return problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("an anchor or href is not a URI reference, or a target attribute is not shaped as RFC 9264 says"),
+        ),
+        Err(Unresolved::TooLarge) => return problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some("the linkset would be too large"),
+        ),
+    };
+    // Only the user-managed part is kept; the links the type index matches are taken from
+    // it, so the two never drift apart.
+    let user = user_linkset(&patched, uri);
+    meta.links = links_of(&user, uri);
+    meta.linkset = Some(user.into_value());
+    meta.linkset_etag = None;
+    // The result is checked with what the next PATCH checks its target with ([`admissible`]):
+    // a linkset is stored only if it can be patched again.
+    let format = if uri.ends_with('/') {
+        None
+    } else {
+        match state.store.meta(uri).await {
+            Ok(stored) => stored.map(|m| m.content_type),
+            Err(e) => return store_error(e),
+        }
+    };
+    if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &meta, format.as_deref()) {
+        return refused;
+    }
+    // The linkset is checked whole, as it will be stored: inside the metadata it nests a
+    // level deeper than in the patched document, and metadata that does not read back
+    // would be lost.
+    match super::encode_meta(&meta) {
+        Ok(_) => {}
+        Err(ServerError::Conflict(_)) => {
+            return problem(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Some("the resource's metadata would be too large"),
+            )
+        }
+        Err(_) => {
+            return problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the linkset nests too deeply to be stored"),
+            )
+        }
+    }
+    // The tag of the document as written, once it is admitted: the stored links with the
+    // server-managed ones (`up`, `type`, `self`) a patch may strip put back.
+    let new_etag = match validator {
+        LinksetValidator::Sent => match linkset_document(state, uri, &meta).await {
+            Ok(rebuilt) => Some(linkset_etag(&rebuilt)),
+            Err(e) => return store_error(e),
+        },
+        LinksetValidator::Withheld => None,
+    };
+    // The write runs in a task that holds the lock and the listing's, and then touches
+    // the container when the write may have landed (see [`hold_locks`]).
+    let write = {
+        let (state, uri, meta) = (state.clone(), uri.to_string(), meta.clone());
+        async move { (state.put_resource_meta(&uri, &meta).await, None) }
+    };
+    let parent = parent_of(uri, &state.cfg.storage());
+    let event = updated(uri);
+    let after = move |w: &Result<(), ServerError>| {
+        let landed = matches!(
+            w,
+            Ok(()) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+        );
+        (parent.filter(|_| landed), w.is_ok().then_some(event))
+    };
+    match hold_locks(state, locks, req.admission.clone(), after, write).await {
+        Ok((Ok(()), _)) => {}
+        Ok((Err(e), _)) | Err(e) => return store_error(e),
+    }
+    let mut r = StatusCode::NO_CONTENT.into_response();
+    if let Some(new_etag) = new_etag {
+        set(r.headers_mut(), header::ETAG, &new_etag);
+    }
+    r
+}
+
+/// Whether a stored linkset's `204` carries its new `ETag`.
+enum LinksetValidator {
+    /// A PATCH: the client may go on patching with the tag.
+    Sent,
+    /// A PUT: what is stored is not what was sent (references resolved, the server-managed links
+    /// restored), so the response carries no validator (RFC 9110 section 9.3.4); a GET reads it.
+    Withheld,
 }
 
 /// An RFC 9264 linkset document: an object whose `linkset` is an array of objects with an `anchor`
@@ -4784,27 +4945,6 @@ mod tests {
             Some("http://h/a/")
         );
         assert_eq!(parent_of("http://h/", s), None);
-    }
-
-    #[test]
-    fn etag_lists() {
-        assert!(etag_listed("\"a\", \"b\"", "\"b\"", false));
-        assert!(!etag_listed("W/\"b\"", "\"b\"", false));
-        assert!(etag_listed("W/\"b\"", "\"b\"", true));
-        assert!(etag_listed("*", "\"x\"", false));
-        // A comma inside a tag is part of it, never a wildcard.
-        assert!(!etag_listed("\"x,*,y\"", "\"x\"", false));
-        assert!(etag_listed("\"x,*,y\"", "\"x,*,y\"", false));
-        assert!(!etag_listed("\"a\", *", "\"x\"", false));
-        assert!(!etag_listed("\"a", "\"a\"", false));
-        assert!(!etag_listed("a", "a", false));
-        // An empty list matches nothing, and is not unreadable.
-        assert!(!etag_listed("", "\"x\"", true));
-        assert!(TagList::parse(b" , ").is_ok());
-        // obs-text is allowed inside an opaque tag.
-        let mut obs = b"\"\xe9\", ".to_vec();
-        obs.extend_from_slice(b"\"x\"");
-        assert!(TagList::parse(&obs).is_ok_and(|l| l.matches("\"x\"", false)));
     }
 
     // ---- request-level tests over an in-memory store ----
@@ -5478,6 +5618,193 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+    }
+
+    /// lws10-core 9.3.2: a PUT of a whole linkset replaces the resource's user-managed links in
+    /// one write, under the linkset's tag; the server-managed ones are kept.
+    #[tokio::test]
+    async fn a_linkset_is_replaced_whole_with_put() {
+        let st = state().await;
+        let uri = post(
+            &st,
+            "p.txt",
+            "text/plain",
+            "hello",
+            &[("link", "<https://ex.org/lic>; rel=\"license\"")],
+        )
+        .await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let r = call(&st, "GET", &meta, &[], "").await;
+        assert!(hdr(&r, "allow").contains("PUT"));
+        let tag = hdr(&r, "etag");
+        let doc =
+            json!({"linkset": [{"anchor": uri, "describedby": [{"href": "d.ttl"}]}]}).to_string();
+        let put = |tag: String| {
+            let (st, meta, doc) = (st.clone(), meta.clone(), doc.clone());
+            async move {
+                call(
+                    &st,
+                    "PUT",
+                    &meta,
+                    &[("content-type", LINKSET_JSON), ("if-match", &tag)],
+                    &doc,
+                )
+                .await
+            }
+        };
+        let r = put(tag.clone()).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        // What is stored is not what was sent, so no validator (RFC 9110 section 9.3.4).
+        assert!(r.headers().get("etag").is_none());
+        let r = call(&st, "GET", &meta, &[], "").await;
+        let new_tag = hdr(&r, "etag");
+        assert!(!new_tag.is_empty() && new_tag != tag);
+        let e = json_of(r).await["linkset"][0].clone();
+        assert!(e.get("license").is_none());
+        assert_eq!(e["describedby"][0]["href"], format!("{BASE}/d.ttl"));
+        assert_eq!(e["up"][0]["href"], format!("{BASE}/"));
+        // The old tag no longer matches, and the 412 names no tag: a writer need not be able to
+        // read the linkset.
+        let r = put(tag).await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert!(r.headers().get("etag").is_none());
+    }
+
+    /// Review finding (#6809): a linkset PATCH body is capped so that parsing any body of its
+    /// size stays within the budget, so a large linkset could only be replaced over several
+    /// requests. A PUT is held to what the metadata may hold, and its parse to the budget by a
+    /// scan that keeps nothing, so a linkset several times a PATCH body lands in one.
+    #[tokio::test]
+    async fn a_large_linkset_is_replaced_in_one_request() {
+        let st = state().await;
+        let uri = post(&st, "big.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let targets: Vec<Value> = (0..400)
+            .map(|i| json!({"href": format!("https://ex.org/{i}/{}", "a".repeat(40))}))
+            .collect();
+        let doc = json!({"linkset": [{"anchor": uri, "related": targets}]}).to_string();
+        assert!(doc.len() > LINKSET_PATCH_BODY * 2);
+        let r = call(&st, "PUT", &meta, &[("content-type", LINKSET_JSON)], &doc).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let r = call(&st, "GET", &meta, &[], "").await;
+        assert_eq!(
+            json_of(r).await["linkset"][0]["related"]
+                .as_array()
+                .unwrap()
+                .len(),
+            400
+        );
+    }
+
+    /// What a linkset PUT refuses, before anything is written.
+    #[tokio::test]
+    async fn a_linkset_put_is_refused_what_no_linkset_is() {
+        let st = state().await;
+        let uri = post(&st, "r.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let put = |ct: &'static str, body: String| {
+            let (st, meta) = (st.clone(), meta.clone());
+            async move {
+                call(&st, "PUT", &meta, &[("content-type", ct)], &body)
+                    .await
+                    .status()
+            }
+        };
+        let ok = json!({"linkset": [{"anchor": uri, "next": [{"href": "n"}]}]}).to_string();
+        assert_eq!(
+            put("application/json", ok).await,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+        assert_eq!(put(LINKSET_JSON, "{".into()).await, StatusCode::BAD_REQUEST);
+        let number = json!({"linkset": [{"anchor": uri, "next": [{"href": 1}]}]}).to_string();
+        assert_eq!(
+            put(LINKSET_JSON, number).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // However large: one past what the parser converts is a number still.
+        for huge in ["1e400", "-1e400", "1E+999"] {
+            let number =
+                format!(r#"{{"linkset":[{{"anchor":"{uri}","next":[{{"href":{huge}}}]}}]}}"#);
+            assert_eq!(
+                put(LINKSET_JSON, number).await,
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{huge}"
+            );
+        }
+        let shape = json!({"linkset": [{"anchor": uri, "next": "n"}]}).to_string();
+        assert_eq!(
+            put(LINKSET_JSON, shape).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // The parser stops at its nesting limit before reading the rest, so a body nested past
+        // it is refused as one that is not JSON, unread.
+        let deep = format!(
+            r#"{{"linkset":[{{"anchor":"{uri}","x":{}{}}}]}}"#,
+            "[".repeat(200),
+            "]".repeat(200)
+        );
+        assert_eq!(put(LINKSET_JSON, deep).await, StatusCode::BAD_REQUEST);
+        // Past what the metadata may hold, unread.
+        let huge = format!("\"{}\"", "a".repeat(LINKSET_PUT_BODY));
+        assert_eq!(put(LINKSET_JSON, huge).await, StatusCode::PAYLOAD_TOO_LARGE);
+        // Small, but what parsing it would allocate is past the budget: the scan stops it.
+        let objects = vec!["{}"; LINKSET_PUT_SCAN_BUDGET / OBJECT_COST + 1].join(",");
+        let costly = format!("{{\"linkset\":[{objects}]}}");
+        assert!(costly.len() < LINKSET_PUT_BODY);
+        assert_eq!(
+            put(LINKSET_JSON, costly).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        // Nothing was written.
+        let r = call(&st, "GET", &meta, &[], "").await;
+        assert!(json_of(r).await["linkset"][0].get("next").is_none());
+    }
+
+    /// Review finding (#6875): a PUT to a linkset with `Content-Range` replaced the whole linkset
+    /// with the part (RFC 9110 section 14.5). It is refused, and the linkset and its tag are kept.
+    #[tokio::test]
+    async fn a_partial_linkset_put_is_refused() {
+        let st = state().await;
+        let uri = post(&st, "c.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let r = call(&st, "GET", &meta, &[], "").await;
+        let tag = hdr(&r, "etag");
+        let before = json_of(r).await;
+        let doc = json!({"linkset": [{"anchor": uri, "next": [{"href": "n"}]}]}).to_string();
+        let range = format!("bytes 0-{}/{}", doc.len() - 1, doc.len() * 2);
+        let r = call(
+            &st,
+            "PUT",
+            &meta,
+            &[("content-type", LINKSET_JSON), ("content-range", &range)],
+            &doc,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        let r = call(&st, "GET", &meta, &[], "").await;
+        assert_eq!(hdr(&r, "etag"), tag);
+        assert_eq!(json_of(r).await, before);
+    }
+
+    /// Review finding (#6875): a body was scanned and then parsed into a [`Value`], whose own
+    /// parse gives some member names a meaning the scan did not (`serde_json`'s raw-value marker,
+    /// whose string it parses as JSON again), so the parse could build more than the scan charged.
+    /// One visitor makes both passes, so every member name is a name and its string a string.
+    #[test]
+    fn a_linkset_is_read_as_the_scan_charged_it() {
+        let marker = r#"{"$serde_json::private::RawValue":"[[[[]]]]"}"#;
+        let read = read_linkset(marker.as_bytes(), LINKSET_PUT_SCAN_BUDGET).unwrap();
+        assert_eq!(read, json!({"$serde_json::private::RawValue": "[[[[]]]]"}));
+        let doc = json!({"linkset": [{"anchor": "a", "next": [{"href": "n", "x": [true, null]}]}]});
+        let text = doc.to_string();
+        assert_eq!(
+            read_linkset(text.as_bytes(), LINKSET_PUT_SCAN_BUDGET).unwrap(),
+            doc
+        );
+        assert_eq!(
+            read_linkset(br#"{"a":"","a":"b"}"#, LINKSET_PUT_SCAN_BUDGET).unwrap(),
+            json!({"a": "b"})
+        );
     }
 
     /// Review findings: a Turtle representation stating thousands of types was stored, but its
@@ -7792,6 +8119,50 @@ mod tests {
         let r = handle(&st, &get, &stranger).await;
         assert_eq!(r.status(), StatusCode::OK);
         assert_eq!(body_of(r).await, Bytes::from("public again"));
+    }
+
+    /// A container listing's tag is its validator on reads too: it is a 304 for If-None-Match and
+    /// passes If-Match until a member arrives, and is stale after that.
+    #[tokio::test]
+    async fn container_reads_compare_the_listing_tag() {
+        let st = state().await;
+        let c = hdr(
+            &call(
+                &st,
+                "POST",
+                "/",
+                &[("slug", "c"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+            "location",
+        );
+        let p = path_of(&c);
+        let accept = ("accept", LWS_JSON);
+        let tag = hdr(&call(&st, "GET", p, &[accept], "").await, "etag");
+        for m in ["GET", "HEAD"] {
+            let r = call(&st, m, p, &[accept, ("if-none-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::NOT_MODIFIED, "{m}");
+            assert_eq!(hdr(&r, "etag"), tag, "{m}");
+            let r = call(&st, m, p, &[accept, ("if-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::OK, "{m}");
+        }
+        let r = call(
+            &st,
+            "POST",
+            p,
+            &[("slug", "m"), ("content-type", "text/plain")],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        for m in ["GET", "HEAD"] {
+            let r = call(&st, m, p, &[accept, ("if-none-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::OK, "{m}: a member arrived");
+            assert_ne!(hdr(&r, "etag"), tag, "{m}");
+            let r = call(&st, m, p, &[accept, ("if-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{m}");
+        }
     }
 
     /// Review finding: a conditional DELETE of a container computed the listing's tag only for

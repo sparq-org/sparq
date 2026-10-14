@@ -704,29 +704,7 @@ fn is_valid_xml_ncname(lex: &str) -> bool {
 /// Returns `None` for odd-length strings or strings containing non-hex characters.
 /// sq-pbz04.6.2.
 fn decode_hex_binary(lex: &str) -> Option<Vec<u8>> {
-    if !lex.len().is_multiple_of(2) {
-        return None;
-    }
-    let mut bytes = Vec::with_capacity(lex.len() / 2);
-    let lex_bytes = lex.as_bytes();
-    let mut i = 0;
-    while i < lex_bytes.len() {
-        let hi = hex_nibble(lex_bytes[i])?;
-        let lo = hex_nibble(lex_bytes[i + 1])?;
-        bytes.push((hi << 4) | lo);
-        i += 2;
-    }
-    Some(bytes)
-}
-
-/// Decode one hex nibble from an ASCII byte. Case-insensitive.
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    sparq_core::hex::decode(lex)
 }
 
 /// Decode an `xsd:base64Binary` lexical form to a byte sequence.
@@ -1214,7 +1192,7 @@ mod tests {
     /// xsd:hexBinary decoding — case-insensitive, even-length hex strings only.
     ///
     /// MUTATION SPOT CHECK: if the decoder treats hex chars as case-sensitive
-    /// (e.g. by removing the `b'a'..=b'f'` arm in `hex_nibble`), the assertion
+    /// (e.g. by removing the `b'a'..=b'f'` arm in `sparq_core::hex::decode`), the assertion
     /// `d_value_key("0FB7", …) == d_value_key("0fb7", …)` will FAIL because "0FB7"
     /// would decode correctly while "0fb7" would return None, making the keys
     /// differ. This verifies the test is non-vacuous w.r.t. case normalization.
@@ -1364,19 +1342,6 @@ mod tests {
                 local
             );
         }
-    }
-
-    /// Internal: hex_nibble recognizes all valid hex digits including lowercase.
-    #[test]
-    fn hex_nibble_all_values() {
-        assert_eq!(hex_nibble(b'0'), Some(0));
-        assert_eq!(hex_nibble(b'9'), Some(9));
-        assert_eq!(hex_nibble(b'a'), Some(10));
-        assert_eq!(hex_nibble(b'f'), Some(15));
-        assert_eq!(hex_nibble(b'A'), Some(10));
-        assert_eq!(hex_nibble(b'F'), Some(15));
-        assert_eq!(hex_nibble(b'G'), None);
-        assert_eq!(hex_nibble(b' '), None);
     }
 
     /// Internal: b64_val covers the full base64 alphabet.
