@@ -605,10 +605,10 @@ impl PodStore {
 
     /// Rebuild the auth view (ACP when `acp`, else WAC) after a caller changed `graph`
     /// directly since it took `before` ([`PodStore::stored_graphs`]), such as the MCP server
-    /// creating or deleting a resource. The stored provenance follows the change as an
-    /// update's does: a graph removed, or a resource that stops existing, loses its creator
-    /// and owner, and every resource the change brings into being gets `creator` (the acting
-    /// agent, when the view takes it as a principal). The view and the provenance are
+    /// creating or deleting a resource. The stored provenance follows the change's net
+    /// effect as an update's does: a resource that existed before it and does not after it
+    /// loses its creator and owner, and every resource that exists after it and did not
+    /// before gets `creator` (the acting agent, when the view takes it as a principal). The view and the provenance are
     /// installed together, and only if the rebuild succeeds.
     ///
     /// # Errors
@@ -621,11 +621,12 @@ impl PodStore {
         creator: Option<&str>,
         acp: bool,
     ) -> Result<MaterializeStats, String> {
-        self.usable_acp_context()?;
         let events = lifecycle::edit_events(&before.0, &self.graph);
         let staged =
-            lifecycle::provenance_after_names(&before.0, &events, &self.acp_context.0, creator);
+            lifecycle::provenance_after_names(&before.0, &events, &self.acp_context.0, creator)
+                .unwrap_or_else(|| self.acp_context.0.clone());
         if acp {
+            self.usable_acp_context()?;
             let credentials = self.acp_context.1.clone();
             self.materialize_acp_with_scoped(&staged, &credentials, ReindexScope::Full)
         } else {
@@ -1134,18 +1135,27 @@ impl PodStore {
             }
     }
 
-    /// The provenance an update by `s` with `effects` stages (see [`lifecycle`]): installed
-    /// with the update when it commits.
-    fn staged_provenance(&self, s: &Session, effects: &[sparq_engine::UpdateEffect]) -> AccessProvenance {
+    /// The provenance an update with `effects` stages (see [`lifecycle`]): the creator and
+    /// owner of every resource it ends are forgotten, and it records no creator. Installed
+    /// with the update when it commits; `None` when it ends no resource (most updates).
+    fn staged_provenance(
+        &self,
+        effects: &[sparq_engine::UpdateEffect],
+    ) -> Option<AccessProvenance> {
         let events = lifecycle::update_events(&self.graph, effects);
-        let creator = s.agent.filter(|a| loader::session_value_allowed(a));
-        lifecycle::provenance_after(&self.graph, &events, &self.acp_context.0, creator)
+        if !events
+            .iter()
+            .any(|e| !matches!(e, lifecycle::GraphEvent::Added(_)))
+        {
+            return None;
+        }
+        lifecycle::provenance_after(&self.graph, &events, &self.acp_context.0, None)
     }
 
     /// Whether installing `staged` changes what the ACP view in force decides, so the view
     /// must be rebuilt with it.
-    fn provenance_rebuilds(&self, acp: bool, staged: &AccessProvenance) -> bool {
-        acp && self.acp_uses_provenance && *staged != self.acp_context.0
+    fn provenance_rebuilds(&self, acp: bool, staged: &Option<AccessProvenance>) -> bool {
+        acp && self.acp_uses_provenance && staged.is_some()
     }
 
     /// Commit an authorized update: its effects to the store, then (only once they are
@@ -1156,35 +1166,60 @@ impl PodStore {
     fn commit_update(
         &mut self,
         effects: &[sparq_engine::UpdateEffect],
-        staged: AccessProvenance,
+        staged: Option<AccessProvenance>,
         rebuild: Option<bool>,
     ) -> Result<(), String> {
-        self.forget_removed_coverage(effects);
-        let committed = sparq_engine::apply_effects(&mut self.graph, effects);
+        if rebuild == Some(true) {
+            self.usable_acp_context()
+                .map_err(|e| format!("update denied: {e}; nothing was changed"))?;
+        }
+        #[cfg(test)]
+        let committed = update_path_tests::injected_failure_before_commit()
+            .map_err(|e| sparq_engine::ApplyError {
+                applied: false,
+                message: e,
+            })
+            .and_then(|()| sparq_engine::apply_effects_checked(&mut self.graph, effects));
+        #[cfg(not(test))]
+        let committed = sparq_engine::apply_effects_checked(&mut self.graph, effects);
         // A commit that applied everything in memory and still failed: the worst case.
         #[cfg(test)]
-        let committed = committed.and_then(|()| update_path_tests::injected_commit_failure());
-        if let Err(e) = committed {
-            // Part of it may be applied in memory: neither the view nor the provenance is known
-            // to describe the store any more.
-            let provenance_moved = staged != self.acp_context.0;
-            if provenance_moved {
-                self.acp_context_stale = true;
-            }
-            if rebuild.is_some() || provenance_moved {
-                self.drop_auth_view();
-            }
+        let committed = committed.and_then(|()| {
+            update_path_tests::injected_commit_failure().map_err(|e| sparq_engine::ApplyError {
+                applied: true,
+                message: e,
+            })
+        });
+        if let Err(sparq_engine::ApplyError {
+            applied: false,
+            message,
+        }) = &committed
+        {
+            // Refused at the commit point: the store, and so the view and the provenance that
+            // describe it, are as they were.
+            return Err(format!("the update could not be committed: {message}"));
+        }
+        self.forget_removed_coverage(effects);
+        if let Err(sparq_engine::ApplyError { message: e, .. }) = committed {
+            // Part of it may be applied in memory, intermediate steps included: neither the
+            // view nor the stored provenance is known to describe the store any more, whatever
+            // the update's net effect would have been.
+            self.acp_context_stale = true;
+            self.drop_auth_view();
             return Err(format!("the update could not be committed: {e}"));
         }
-        self.acp_context.0 = staged;
+        if let Some(staged) = staged {
+            self.acp_context.0 = staged;
+        }
         if let Some(acp) = rebuild {
             let rebuilt = if acp {
                 self.materialize_acp().map(drop)
             } else {
                 self.materialize_wac().map(drop)
             };
-            // The same rules and provenance materialized on the fork; should this rebuild fail
-            // anyway, the view no longer describes them, and it goes.
+            // Rules it changed materialized on the fork first, and a provenance change alone
+            // names only validated principals; should this rebuild fail anyway, the view no
+            // longer describes the store, and it goes.
             if let Err(e) = rebuilt {
                 self.drop_auth_view();
                 return Err(format!(
@@ -1781,10 +1816,9 @@ impl PodStore {
                     Ok(false),
                     "the static check covers a data-only update's effects"
                 );
-                let staged = self.staged_provenance(s, &effects);
-                if !self.provenance_rebuilds(acp, &staged) {
-                    return self.commit_update(&effects, staged, None);
-                }
+                let staged = self.staged_provenance(&effects);
+                let rebuild = self.provenance_rebuilds(acp, &staged).then_some(true);
+                return self.commit_update(&effects, staged, rebuild);
             }
         }
         // A single `DELETE`/`INSERT … WHERE` (the LDP PATCH shape) whose static targets leave
@@ -1805,9 +1839,10 @@ impl PodStore {
                     self.group_docs(),
                     &odrl,
                 )?;
-                let staged = self.staged_provenance(s, &effects);
-                if !wrote_rules && !self.provenance_rebuilds(acp, &staged) {
-                    return self.commit_update(&effects, staged, None);
+                if !wrote_rules {
+                    let staged = self.staged_provenance(&effects);
+                    let rebuild = self.provenance_rebuilds(acp, &staged).then_some(true);
+                    return self.commit_update(&effects, staged, rebuild);
                 }
             }
         }
@@ -1848,18 +1883,20 @@ impl PodStore {
         // The ACP view is built from trusted provenance too: an update that ends or begins a
         // resource's life stages the provenance that follows, and rebuilds the view with it
         // when the view depends on it.
-        let staged = self.staged_provenance(s, &effects);
-        let rules_changed = permit.rematerialize
-            || auth_input
-            || wrote_rules
-            || self.provenance_rebuilds(acp, &staged);
+        let staged = self.staged_provenance(&effects);
+        let rules_changed = permit.rematerialize || auth_input || wrote_rules;
         // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
         // update, and nothing is changed, so no writer of one access-control document can take
         // the whole store's view down.
         if rules_changed {
             let rebuilt = if acp {
+                let provenance = staged.as_ref().unwrap_or(&self.acp_context.0);
                 self.usable_acp_context().and_then(|()| {
-                    materialize_acp_with_credentials(&mut candidate, &staged, &self.acp_context.1)
+                    materialize_acp_with_credentials(
+                        &mut candidate,
+                        provenance,
+                        &self.acp_context.1,
+                    )
                 })
             } else {
                 materialize_wac(&mut candidate)
@@ -1875,7 +1912,8 @@ impl PodStore {
         // Commit: the effects to the store itself (one journaled, durable commit for a
         // directory-backed graph), then the provenance and the view rebuilt from what is now
         // stored, together.
-        self.commit_update(&effects, staged, rules_changed.then_some(acp))
+        let rebuild = rules_changed || self.provenance_rebuilds(acp, &staged);
+        self.commit_update(&effects, staged, rebuild.then_some(acp))
     }
 
     /// Drop the materialized auth view, so every decision fails closed (an un-materialized

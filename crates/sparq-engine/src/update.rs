@@ -1068,9 +1068,42 @@ fn apply_update_in_place(
 /// unchanged. `DROP`'s manifest/sub-dir removal stays a materialisation concern (already crash-safe
 /// via `recover_named_drop`); the journal only carries the DATA retraction needed for atomicity.
 pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), String> {
+    apply_effects_checked(graph, effects).map_err(|e| e.message)
+}
+
+/// Why [`apply_effects_checked`] failed, and whether it changed `graph` first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApplyError {
+    /// `false` when the commit point refused the effects and `graph` is untouched; `true`
+    /// when a failure came after it, with part of the effects possibly applied in memory.
+    pub applied: bool,
+    /// The failure.
+    pub message: String,
+}
+
+/// [`apply_effects`], saying on failure whether `graph` was changed before it.
+///
+/// # Errors
+///
+/// As [`apply_effects`].
+pub fn apply_effects_checked(
+    graph: &mut Graph,
+    effects: &[UpdateEffect],
+) -> Result<(), ApplyError> {
     // (sq-ycle) (1) RESOLVE + (2) COMMIT: the single durable commit point for the body.
     let records = resolve_effect_records(graph, effects);
-    graph.commit_txn(&records)?;
+    graph.commit_txn(&records).map_err(|message| ApplyError {
+        applied: false,
+        message,
+    })?;
+    materialize_effects(graph, effects).map_err(|message| ApplyError {
+        applied: true,
+        message,
+    })
+}
+
+/// The in-memory half of [`apply_effects`], after its commit point.
+fn materialize_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), String> {
     // (3) MATERIALISE: the per-effect loop (unchanged from the pre-journal `apply_effects`).
     for effect in effects {
         match effect {

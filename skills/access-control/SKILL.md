@@ -123,10 +123,12 @@ Materialize the authorization view from the access-control documents, then enfor
   clear them, or when a holding expires or is revoked, call
   `materialize_acp_with_credentials` with the current maps. Provenance follows every
   change to which graphs exist, staged with the change and installed only once it
-  commits: a graph removed, or a resource that stops existing (a container left with no
-  graph below it), at any point of an update loses its creator and owner, and a resource
-  the update brings into being (or back) gets the session agent as its creator. A commit
-  that fails after staging a provenance change drops the view, and `materialize_acp()`
+  commits. Only the net effect counts: a resource that existed before an update and does
+  not after it (a document whose graph is dropped, a container left with no graph below it)
+  loses its creator and owner, and one that exists before and after keeps both, whatever
+  happens in between. A SPARQL update never records a creator. A commit refused at its
+  commit point changes nothing; one that fails after it (part of the update may be applied)
+  drops the view, and `materialize_acp()`
   refuses until the context is passed again. A caller that edits `store.graph` directly
   takes `store.stored_graphs()` first and then calls
   `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does), which

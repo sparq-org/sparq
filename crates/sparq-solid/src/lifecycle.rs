@@ -2,16 +2,18 @@
 //!
 //! Every change the store makes to which graphs exist (an update's effects, or a caller's
 //! direct edit such as the MCP server's) is replayed, in order, against one rule for which
-//! resources exist ([`ResourceGraphs`], the loader's own enumeration). A resource whose graph
-//! is removed, or that stops being a resource, at ANY point of the change loses its creator
-//! and owner; a resource the change brings into being (one that was not a resource just
-//! before, or whose life ended earlier in the same change) gets the acting agent as its
-//! creator. The result is staged with the change and installed only once the change commits.
+//! resources exist ([`ResourceGraphs`], the loader's own enumeration), and only its net
+//! effect counts. A resource that existed before the change and does not after it (a
+//! document whose graph is removed, a container left with no graph below it) loses its
+//! creator and owner; one that exists after it and did not before gets the acting agent as
+//! its creator, when there is one (a SPARQL update records none). A resource that exists
+//! before and after keeps both, whatever happens in between. The result is staged with the
+//! change and installed only once the change commits.
 
 use crate::loader::{validate_principal_iri, ResourceGraphs};
 use crate::AccessProvenance;
 use oxrdf::Term;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use spargebra::algebra::GraphTarget;
 use sparq_core::Graph;
 
@@ -55,10 +57,14 @@ pub(crate) fn update_events<'e>(
         }
     }
     // An update that only adds to graphs already stored changes no resource; most do.
+    let stored = |name: &str| {
+        graph
+            .named
+            .iter()
+            .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
+    };
     let changes = |e: &GraphEvent| match e {
-        GraphEvent::Added(n) => graph
-            .named_graph(&Term::NamedNode(oxrdf::NamedNode::new_unchecked(*n)))
-            .is_none(),
+        GraphEvent::Added(n) => !stored(n),
         _ => true,
     };
     if events.iter().any(changes) {
@@ -98,15 +104,16 @@ pub(crate) fn edit_events<'a>(
 
 /// `provenance` after `events` change `before` (the store's graphs before them), with
 /// `creator` (the acting agent, when the view would take it as a principal) recorded as the
-/// creator of every resource the change brings into being.
+/// creator of every resource that exists after them and did not before; `None` when the
+/// events change no resource's life (most updates), so nothing is copied.
 pub(crate) fn provenance_after(
     before: &Graph,
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
-) -> AccessProvenance {
+) -> Option<AccessProvenance> {
     if events.is_empty() {
-        return provenance.clone();
+        return None;
     }
     replay(ResourceGraphs::of(before), events, provenance, creator)
 }
@@ -117,9 +124,9 @@ pub(crate) fn provenance_after_names(
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
-) -> AccessProvenance {
+) -> Option<AccessProvenance> {
     if events.is_empty() {
-        return provenance.clone();
+        return None;
     }
     replay(
         ResourceGraphs::from_names(before.iter().map(String::as_str)),
@@ -134,44 +141,47 @@ fn replay(
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
-) -> AccessProvenance {
-    let mut ended: FxHashSet<String> = FxHashSet::default();
-    let mut began: FxHashSet<String> = FxHashSet::default();
+) -> Option<AccessProvenance> {
+    // Each resource the change touches, with whether it was one before the change (the first
+    // time the change touches it says which). Only the net effect counts: a resource that
+    // exists before and after keeps its creator and owner, whatever happens in between.
+    let mut touched: FxHashMap<String, bool> = FxHashMap::default();
     for event in events {
         match *event {
-            GraphEvent::Added(name) => {
-                let new_life = !graphs.holds(name) || ended.contains(name);
-                graphs.add(name, |r| {
-                    began.insert(r.to_owned());
-                });
-                if new_life && graphs.holds(name) {
-                    began.insert(name.to_owned());
-                }
-            }
-            GraphEvent::Removed(name) => {
-                // A removed graph's life ends even when its name stays a container.
-                if graphs.holds(name) {
-                    ended.insert(name.to_owned());
-                }
-                graphs.remove(name, |r| {
-                    ended.insert(r.to_owned());
-                });
-            }
+            GraphEvent::Added(name) => graphs.add(name, |r| {
+                touched.entry(r.to_owned()).or_insert(false);
+            }),
+            GraphEvent::Removed(name) => graphs.remove(name, |r| {
+                touched.entry(r.to_owned()).or_insert(true);
+            }),
             GraphEvent::RemovedAll => graphs.clear(|r| {
-                ended.insert(r.to_owned());
+                touched.entry(r.to_owned()).or_insert(true);
             }),
         }
     }
+    let creator = creator.filter(|c| validate_principal_iri(c).is_ok());
+    let mut ended = Vec::new();
+    let mut began = Vec::new();
+    for (r, was) in &touched {
+        match (*was, graphs.holds(r)) {
+            (true, false) if provenance.knows(r) => ended.push(r),
+            (false, true) if creator.is_some() => began.push(r),
+            _ => {}
+        }
+    }
+    if ended.is_empty() && began.is_empty() {
+        return None;
+    }
     let mut kept = provenance.clone();
-    for r in &ended {
+    for r in ended {
         kept.forget(r);
     }
-    if let Some(creator) = creator.filter(|c| validate_principal_iri(c).is_ok()) {
-        for r in began.iter().filter(|r| graphs.holds(r)) {
+    if let Some(creator) = creator {
+        for r in began {
             kept.set_creator(r.as_str(), creator);
         }
     }
-    kept
+    Some(kept)
 }
 
 #[cfg(test)]
@@ -200,18 +210,18 @@ mod tests {
     }
 
     #[test]
-    fn a_container_that_goes_and_comes_back_in_one_change_is_new() {
+    fn a_container_that_goes_and_comes_back_in_one_change_keeps_its_creator() {
         let before = store(&["https://pod.ex/a/x", "https://pod.ex/keep"]);
         let prov = created_by(&["https://pod.ex/a/", "https://pod.ex/a/x"], ALICE);
         let events = [
             GraphEvent::Removed("https://pod.ex/a/x"),
             GraphEvent::Added("https://pod.ex/a/y"),
         ];
-        let after = provenance_after(&before, &events, &prov, Some(BOB));
+        let after = provenance_after(&before, &events, &prov, Some(BOB)).expect("a change");
         assert_eq!(
             after.creator("https://pod.ex/a/"),
-            Some(BOB),
-            "a new container"
+            Some(ALICE),
+            "/a/ exists before and after"
         );
         assert_eq!(after.creator("https://pod.ex/a/x"), None, "gone");
         assert_eq!(after.creator("https://pod.ex/a/y"), Some(BOB));
@@ -223,6 +233,17 @@ mod tests {
     }
 
     #[test]
+    fn a_document_removed_and_stored_again_in_one_change_keeps_its_creator() {
+        let before = store(&["https://pod.ex/a/x"]);
+        let prov = created_by(&["https://pod.ex/a/x"], ALICE);
+        let events = [
+            GraphEvent::Removed("https://pod.ex/a/x"),
+            GraphEvent::Added("https://pod.ex/a/x"),
+        ];
+        assert!(provenance_after(&before, &events, &prov, Some(BOB)).is_none());
+    }
+
+    #[test]
     fn a_container_kept_by_another_graph_keeps_its_creator() {
         let before = store(&["https://pod.ex/a/x", "https://pod.ex/a/z"]);
         let prov = created_by(&["https://pod.ex/a/"], ALICE);
@@ -231,34 +252,34 @@ mod tests {
             GraphEvent::Added("https://pod.ex/a/"),
         ];
         let after = provenance_after(&before, &events, &prov, Some(BOB));
-        assert_eq!(
-            after.creator("https://pod.ex/a/"),
-            Some(ALICE),
-            "never stopped existing"
-        );
+        assert!(after.is_none(), "/a/ never stopped existing: {after:?}");
     }
 
     #[test]
-    fn a_removed_graph_loses_its_provenance_even_when_its_name_stays_a_container() {
+    fn a_container_with_members_keeps_its_provenance_whatever_happens_to_its_own_graph() {
         let before = store(&["https://pod.ex/a/", "https://pod.ex/a/x"]);
         let prov = created_by(&["https://pod.ex/a/"], ALICE);
-        let after = provenance_after(
-            &before,
-            &[GraphEvent::Removed("https://pod.ex/a/")],
-            &prov,
-            Some(BOB),
-        );
-        assert_eq!(after.creator("https://pod.ex/a/"), None);
-        let back = [
-            GraphEvent::Removed("https://pod.ex/a/"),
-            GraphEvent::Added("https://pod.ex/a/"),
+        for events in [
+            &[GraphEvent::Removed("https://pod.ex/a/")][..],
+            &[
+                GraphEvent::Removed("https://pod.ex/a/"),
+                GraphEvent::Added("https://pod.ex/a/"),
+            ],
+        ] {
+            let after = provenance_after(&before, events, &prov, Some(BOB));
+            assert!(after.is_none(), "{events:?}: nothing changes: {after:?}");
+        }
+    }
+
+    #[test]
+    fn dropping_a_graph_that_is_not_stored_changes_nothing() {
+        let before = store(&["https://pod.ex/docs/d0"]);
+        let prov = created_by(&["https://pod.ex/docs/"], ALICE);
+        let events = [
+            GraphEvent::Removed("https://pod.ex/docs/"),
+            GraphEvent::Added("https://pod.ex/docs/"),
         ];
-        let after = provenance_after(&before, &back, &prov, Some(BOB));
-        assert_eq!(
-            after.creator("https://pod.ex/a/"),
-            Some(BOB),
-            "created again in the change"
-        );
+        assert!(provenance_after(&before, &events, &prov, Some(BOB)).is_none());
     }
 
     #[test]
@@ -270,7 +291,8 @@ mod tests {
             &[GraphEvent::Added(name)],
             &AccessProvenance::new(),
             Some(BOB),
-        );
+        )
+        .expect("a change");
         for r in [name, "https://pod.ex/a//", "https://pod.ex/a/"] {
             assert_eq!(after.creator(r), Some(BOB), "{r}");
         }
@@ -282,18 +304,33 @@ mod tests {
     }
 
     #[test]
-    fn dropping_everything_forgets_everything_and_an_unusable_creator_records_nothing() {
+    fn dropping_everything_forgets_everything() {
         let before = store(&["https://pod.ex/a/x"]);
         let prov = created_by(
             &["https://pod.ex/a/", "https://pod.ex/a/x", "https://pod.ex/"],
             ALICE,
         );
+        let after = provenance_after(&before, &[GraphEvent::RemovedAll], &prov, Some(BOB))
+            .expect("a change");
+        assert!(after.is_empty(), "forgotten: {after:?}");
         let events = [
             GraphEvent::RemovedAll,
             GraphEvent::Added("https://pod.ex/a/x"),
         ];
-        let after = provenance_after(&before, &events, &prov, Some("urn:sparq:x"));
-        assert!(after.is_empty(), "forgotten, and no creator: {after:?}");
+        assert!(
+            provenance_after(&before, &events, &prov, Some(BOB)).is_none(),
+            "everything back as it was"
+        );
+    }
+
+    #[test]
+    fn an_unusable_creator_or_none_records_nothing() {
+        let before = store(&["https://pod.ex/a/x"]);
+        let events = [GraphEvent::Added("https://pod.ex/b/y")];
+        for creator in [Some("urn:sparq:x"), None] {
+            let after = provenance_after(&before, &events, &AccessProvenance::new(), creator);
+            assert!(after.is_none(), "{creator:?}: {after:?}");
+        }
     }
 
     #[test]
@@ -308,12 +345,15 @@ mod tests {
             "https://",
             "https://other.ex/",
             "https://pod.ex/g?x=/y",
+            "urn:a/",
+            "urn:c/d",
         ];
         let graph = store(&names);
         let enumerated = crate::loader::resources(&graph);
         let graphs = crate::loader::ResourceGraphs::of(&graph);
         assert_eq!(graphs.all(), enumerated);
         let mut probes: Vec<String> = enumerated.iter().cloned().collect();
+        probes.push("urn:c/".to_owned());
         probes.extend(
             [
                 "https://pod.ex/f/",

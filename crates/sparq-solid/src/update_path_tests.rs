@@ -16,6 +16,20 @@ thread_local! {
     static FAIL_COMMIT: Cell<bool> = const { Cell::new(false) };
 }
 
+thread_local! {
+    /// Whether the next commit on this thread is refused at its commit point, before it
+    /// applies anything.
+    pub(crate) static FAIL_BEFORE_COMMIT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The injected refusal at the commit point, consumed by the commit it refuses.
+pub(crate) fn injected_failure_before_commit() -> Result<(), String> {
+    if FAIL_BEFORE_COMMIT.with(|f| f.replace(false)) {
+        return Err("injected refusal at the commit point".to_owned());
+    }
+    Ok(())
+}
+
 /// The injected commit failure, consumed by the commit it fails.
 pub(crate) fn injected_commit_failure() -> Result<(), String> {
     if FAIL_COMMIT.with(|f| f.replace(false)) {
@@ -253,44 +267,121 @@ fn reads_d0(store: &PodStore, agent: &str) -> bool {
     store.decide(&session(agent), D0, Mode::Read).allow
 }
 
-/// A failed commit of an update that leaves every resource in place changes neither the
-/// stored provenance nor the view.
+/// A commit that fails after applying part of an update fails closed even when the update
+/// would leave every resource in place (here d0 dropped and created again): an
+/// intermediate step may be what was applied.
 #[test]
-fn a_failed_commit_that_moves_no_provenance_keeps_the_context_and_the_view() {
-    let mut store = creator_pod();
-    let before = store.acp_provenance().clone();
-    FAIL_COMMIT.with(|f| f.set(true));
-    store
-        .update_as_acp(&session(ADMIN), &format!("INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"))
-        .expect_err("the commit fails");
-    assert_eq!(*store.acp_provenance(), before);
-    assert!(reads_d0(&store, ALICE), "the creator still reads d0");
-    store.materialize_acp().expect("the stored context is still usable");
-    assert!(reads_d0(&store, ALICE));
+fn a_partly_applied_commit_fails_closed_whatever_its_net_effect() {
+    for update in [
+        format!("INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"),
+        format!(
+            "DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"
+        ),
+    ] {
+        let mut store = creator_pod();
+        let before = store.acp_provenance().clone();
+        FAIL_COMMIT.with(|f| f.set(true));
+        store
+            .update_as_acp(&session(ADMIN), &update)
+            .expect_err("the commit fails");
+        assert_eq!(
+            *store.acp_provenance(),
+            before,
+            "{update}: nothing installed"
+        );
+        assert!(!reads_d0(&store, ALICE), "{update}: the view is gone");
+        assert!(
+            store.materialize_acp().is_err(),
+            "{update}: the stored context is not used"
+        );
+        store
+            .materialize_acp_with(&before)
+            .expect("the caller supplies the context");
+        assert!(reads_d0(&store, ALICE), "{update}: and decisions resume");
+    }
 }
 
-/// A failed commit of an update that would have moved the provenance (here d0 dropped and
-/// created again, so alice is no longer its creator) leaves the store holding an unknown
-/// part of it: the view goes, and no rebuild uses the stored provenance until the caller
-/// supplies the context again.
+/// A failed commit of an update that would have moved the provenance (here d0 dropped, so
+/// alice is no longer its creator) leaves the store holding an unknown part of it: the view
+/// goes, and no rebuild uses the stored provenance until the caller supplies the context
+/// again.
 #[test]
 fn a_failed_commit_that_moves_provenance_fails_closed_until_the_context_is_supplied() {
     let mut store = creator_pod();
     let before = store.acp_provenance().clone();
     FAIL_COMMIT.with(|f| f.set(true));
-    let update = format!("DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}");
+    let update = format!("DROP GRAPH <{D0}>");
     store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
     assert_eq!(*store.acp_provenance(), before, "the staged provenance was not installed");
     assert!(!reads_d0(&store, ALICE), "the view is gone");
-    assert!(!reads_d0(&store, ADMIN));
     assert!(store.materialize_acp().is_err(), "the stored context is not used");
     assert!(
         store.update_as_acp(&session(ADMIN), &update).is_err(),
         "nor is any update authorized"
     );
-    let mut prov = AccessProvenance::new();
-    prov.set_creator(D0, ADMIN);
-    store.materialize_acp_with(&prov).expect("the caller supplies the context");
-    assert!(reads_d0(&store, ADMIN) && !reads_d0(&store, ALICE));
+    store
+        .materialize_acp_with(&AccessProvenance::new())
+        .expect("the caller supplies the context");
     store.materialize_acp().expect("the stored context is usable again");
+}
+
+/// A commit refused at its commit point applies nothing, so the view and the stored context
+/// stay as they were even when the update would have moved the provenance.
+#[test]
+fn a_commit_refused_before_it_applies_anything_keeps_the_context_and_the_view() {
+    let mut store = creator_pod();
+    let before = store.acp_provenance().clone();
+    FAIL_BEFORE_COMMIT.with(|f| f.set(true));
+    store
+        .update_as_acp(&session(ADMIN), &format!("DROP GRAPH <{D0}>"))
+        .expect_err("the commit is refused");
+    assert_eq!(*store.acp_provenance(), before);
+    assert!(reads_d0(&store, ALICE), "the view stays, d0 with it");
+    store
+        .materialize_acp()
+        .expect("the stored context is still usable");
+    assert!(reads_d0(&store, ALICE));
+}
+
+/// An update that drops a resource and creates it again keeps its creator: an update never
+/// records its agent as one.
+#[test]
+fn an_update_never_takes_over_a_resource() {
+    let mut store = creator_pod();
+    let update = format!(
+        "DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"
+    );
+    store
+        .update_as_acp(&session(ADMIN), &update)
+        .expect("ADMIN may replace d0");
+    assert_eq!(store.acp_provenance().creator(D0), Some(ALICE));
+    assert!(!reads_d0(&store, ADMIN), "ADMIN gains nothing");
+    assert!(reads_d0(&store, ALICE));
+}
+
+/// Under WAC, a partly applied commit leaves the store's own WAC rebuild usable: it uses no
+/// provenance.
+#[test]
+fn a_failed_commit_under_wac_leaves_its_rebuild_usable() {
+    let mut store = pod();
+    let n2 = "https://pod.ex/notes/n2";
+    assert!(
+        store.decide(&session(BOB), N1, Mode::Read).allow,
+        "control: bob reads n1"
+    );
+    FAIL_COMMIT.with(|f| f.set(true));
+    store
+        .update_as(
+            &session(ALICE),
+            &format!("INSERT DATA {{ GRAPH <{n2}> {{ <{n2}#x> <{TITLE}> \"y\" }} }}"),
+        )
+        .expect_err("the commit fails");
+    let names = store.stored_graphs();
+    store
+        .rematerialize_after_edit(&names, Some(ALICE), false)
+        .expect("a WAC rebuild does not use the provenance");
+    assert!(
+        store.decide(&session(BOB), N1, Mode::Read).allow,
+        "bob reads n1"
+    );
 }

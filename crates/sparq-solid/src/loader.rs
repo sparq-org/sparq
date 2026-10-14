@@ -509,6 +509,13 @@ fn is_resource_graph(iri: &str) -> bool {
     !iri.starts_with(RESERVED_PREFIX) && !is_control_graph(iri) && !is_authority_less(iri)
 }
 
+/// Whether `iri` can be a structural container: a `/`-terminated IRI at or below an
+/// authority root (`scheme://host/…`), the only names [`parent_iri`] yields.
+fn is_container_name(iri: &str) -> bool {
+    iri.find("://")
+        .is_some_and(|i| iri[i + 3..].contains('/') && !is_authority_less(iri))
+}
+
 /// Add `iri` and its structural container chain (https://host/a/b/doc -> /a/b/ -> /a/ -> /).
 fn insert_with_containers(resources: &mut FxHashSet<String>, iri: &str) {
     resources.insert(iri.to_owned());
@@ -551,6 +558,7 @@ impl ResourceGraphs {
     pub(crate) fn holds(&self, iri: &str) -> bool {
         self.0.contains(iri)
             || (iri.ends_with('/')
+                && is_container_name(iri)
                 && self
                     .0
                     .range::<str, _>((std::ops::Bound::Included(iri), std::ops::Bound::Unbounded))

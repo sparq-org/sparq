@@ -366,21 +366,19 @@ fn a_dropped_resource_created_again_has_no_creator_or_owner() {
 }
 
 #[test]
-fn a_resource_dropped_and_created_in_one_update_has_only_its_new_creator() {
+fn a_resource_dropped_and_created_in_one_update_keeps_its_creator_and_owner() {
     let mut store = store();
+    let before = store.acp_provenance().clone();
     let update = format!("DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}");
     store
         .update_as_acp(&alice(), &update)
         .expect("the creator may replace d0");
-    let prov = store.acp_provenance();
-    assert_eq!(prov.creator(D0), Some(ALICE), "alice created d0 again");
-    assert_eq!(prov.owner(D0), None, "the old owner is forgotten");
-    assert!(
-        holds(&store, ERIN, Mode::Read),
-        "the owner deny no longer applies"
+    assert_eq!(
+        *store.acp_provenance(),
+        before,
+        "d0 exists before and after"
     );
-    store.materialize_acp().expect("rebuild");
-    assert!(holds(&store, ERIN, Mode::Read), "nor after a rebuild");
+    assert_context_in_force(&store, "a drop and create in one update");
 }
 
 #[test]
@@ -468,37 +466,66 @@ fn decisions_follow_a_drop_with_no_rebuild_after_it() {
 }
 
 #[test]
-fn decisions_follow_a_move_onto_a_resource_with_no_rebuild_after_it() {
+fn a_move_onto_a_resource_keeps_its_creator_and_ends_the_source() {
     let mut store = store();
-    let writes_d0 = |store: &PodStore| {
+    let mut prov = store.acp_provenance().clone();
+    prov.set_creator(D1, DAVE);
+    let mut creds = VerifiedCredentials::new();
+    creds.hold(CAROL, FLAGGED);
+    store
+        .materialize_acp_with_credentials(&prov, &creds)
+        .expect("acp materializes");
+    let writes = |store: &PodStore, r: &str| {
         store
-            .accessible(&alice(), Mode::Write)
+            .accessible(&admin(), Mode::Write)
             .iter()
-            .any(|g| g == D0)
+            .any(|g| g == r)
     };
     assert!(
-        writes_d0(&store),
-        "the creator writes d0 (and the session cache holds it)"
+        writes(&store, D1),
+        "ADMIN writes d1 (and the session cache holds it)"
     );
     store
         .update_as_acp(&admin(), &format!("MOVE <{D1}> TO <{D0}>"))
         .expect("ADMIN may move d1 onto d0");
-    assert_context_forgotten(&store, "move onto d0");
-    assert!(!writes_d0(&store), "the cached set no longer holds d0");
+    let prov = store.acp_provenance();
+    assert_eq!(prov.creator(D0), Some(ALICE), "d0 exists before and after");
+    assert_eq!(prov.creator(D1), None, "d1 is gone");
+    assert_context_in_force(&store, "a move onto d0");
+    assert!(!writes(&store, D1), "the cached set no longer holds d1");
 }
 
 #[test]
-fn decisions_follow_a_drop_and_create_in_one_update() {
+fn an_update_never_makes_its_agent_a_creator() {
     let mut store = store();
     let update = format!("DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}");
     store
         .update_as_acp(&admin(), &update)
         .expect("ADMIN may replace d0");
-    assert_context_forgotten(&store, "drop and create in one update, no rebuild");
+    assert_eq!(
+        store.acp_provenance().creator(D0),
+        Some(ALICE),
+        "in one update"
+    );
+    assert_context_in_force(&store, "a drop and create in one update, no rebuild");
+
+    store
+        .update_as_acp(&admin(), &format!("DROP GRAPH <{D0}>"))
+        .expect("ADMIN may remove d0");
+    assert_eq!(
+        store.acp_provenance().creator(D0),
+        None,
+        "across two changes"
+    );
+    let again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
+    store.graph.named.extend(again.named);
+    store.materialize_acp().expect("rebuild");
+    assert_eq!(store.acp_provenance().creator(D0), None);
+    assert_context_forgotten(&store, "a drop, then a create");
 }
 
 #[test]
-fn a_container_that_goes_and_comes_back_in_one_update_is_new() {
+fn a_container_that_goes_and_comes_back_in_one_update_keeps_its_creator() {
     const DOCS: &str = "https://pod.ex/docs/";
     let mut store = store();
     let mut prov = store.acp_provenance().clone();
@@ -508,9 +535,8 @@ fn a_container_that_goes_and_comes_back_in_one_update_is_new() {
     store
         .materialize_acp_with_credentials(&prov, &creds)
         .expect("acp materializes");
-    assert_eq!(store.acp_provenance().creator(DOCS), Some(ALICE));
     // d0 and d1 are the only graphs below /docs/ (its .acr is not a resource): dropping both
-    // ends the container, and the insert brings it back.
+    // ends the container on the way, and the insert brings it back.
     let update = format!(
         "DROP GRAPH <{D0}> ; DROP GRAPH <{D1}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}"
     );
@@ -520,13 +546,44 @@ fn a_container_that_goes_and_comes_back_in_one_update_is_new() {
     let prov = store.acp_provenance();
     assert_eq!(
         prov.creator(DOCS),
-        Some(ADMIN),
-        "the container was created again"
+        Some(ALICE),
+        "/docs/ exists before and after"
     );
-    assert_eq!(prov.creator(D0), Some(ADMIN), "so was d0");
-    assert_eq!(prov.owner(D0), None, "with no owner");
+    assert_eq!(prov.creator(D0), Some(ALICE), "so does d0");
     assert_eq!(prov.creator(D1), None, "d1 is gone");
-    assert_context_forgotten(&store, "the container went and came back");
+    assert_context_in_force(&store, "the container went and came back");
+}
+
+#[test]
+fn dropping_a_container_that_is_not_stored_changes_nothing() {
+    const BOX: &str = "https://pod.ex/box/";
+    let root = "https://pod.ex/.acr";
+    let nq = format!(
+        "<{BOX}x#it> <https://ex.dev/ns#k> \"v\" <{BOX}x> .\n\
+         <{root}> <{ACP}accessControl> <{root}#c> <{root}> .\n\
+         <{root}> <{ACP}memberAccessControl> <{root}#c> <{root}> .\n\
+         <{root}#c> <{ACP}apply> <{root}#admin> <{root}> .\n\
+         <{root}#admin> <{ACP}allow> <{ACL}Write> <{root}> .\n\
+         <{root}#admin> <{ACP}anyOf> <{root}#ma> <{root}> .\n\
+         <{root}#ma> <{ACP}agent> <{ADMIN}> <{root}> .\n\
+         <{root}#c> <{ACP}apply> <{root}#creator> <{root}> .\n\
+         <{root}#creator> <{ACP}allow> <{ACL}Read> <{root}> .\n\
+         <{root}#creator> <{ACP}anyOf> <{root}#mc> <{root}> .\n\
+         <{root}#mc> <{ACP}agent> <{ACP}CreatorAgent> <{root}> .\n"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(BOX, ALICE);
+    store.materialize_acp_with(&prov).expect("acp materializes");
+    assert!(store.decide(&alice(), BOX, Mode::Read).allow, "control");
+    store
+        .update_as_acp(&admin(), &format!("DROP SILENT GRAPH <{BOX}>"))
+        .expect("ADMIN may write the container");
+    assert_eq!(*store.acp_provenance(), prov);
+    assert!(
+        store.decide(&alice(), BOX, Mode::Read).allow,
+        "the container never went"
+    );
 }
 
 #[test]

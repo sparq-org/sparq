@@ -1953,8 +1953,8 @@ fn acp_container_creator_follows_the_container() {
         "bob created /docs/a/ on the way"
     );
 
-    // A graph under /docs/c/ that its containment listing does not name keeps /docs/c/ in
-    // place as an anchor once the container's own document is deleted.
+    // A graph stored under /docs/c/ keeps it from being deleted, whatever its containment
+    // listing says, and it keeps its creator.
     let (text, is_err) = tool(
         &mut s,
         "resource_put",
@@ -1972,10 +1972,17 @@ fn acp_container_creator_follows_the_container() {
         "resource_delete",
         json!({"url": "https://pod.ex/docs/c/"}),
     );
-    assert!(!is_err, "bob deletes /docs/c/: {text}");
     assert!(
-        !bob_reads(&s, "https://pod.ex/docs/c/"),
-        "the deleted container's creator is forgotten"
+        is_err && text.contains("not empty"),
+        "/docs/c/ holds x: {text}"
+    );
+    assert!(
+        bob_reads(&s, "https://pod.ex/docs/c/"),
+        "a container that still exists keeps its creator"
+    );
+    assert_eq!(
+        s.store().acp_provenance().creator("https://pod.ex/docs/c/"),
+        Some(BOB)
     );
 }
 

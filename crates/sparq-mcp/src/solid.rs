@@ -1563,10 +1563,19 @@ impl SolidMcpServer {
             return Err(write_denied_error(&url));
         }
         if url.ends_with('/') {
-            // A container: reject when its STORED containment listing is non-empty.
+            // A container: reject when any resource is stored below it (whatever its
+            // containment listing says), or when that listing still names a member.
+            let (acl, acr) = (format!("{url}.acl"), format!("{url}.acr"));
+            let has_member = self.store.graph.named.iter().any(|(n, _)| {
+                matches!(n, Term::NamedNode(n)
+                    if n.as_str().len() > url.len()
+                        && n.as_str().starts_with(url.as_str())
+                        && n.as_str() != acl
+                        && n.as_str() != acr)
+            });
             let doc = self.find_doc(&url).expect("slot checked above");
             let q = format!("ASK {{ <{url}> <{LDP_CONTAINS}> ?m }}");
-            if sparq_engine::ask(doc, &q)? {
+            if has_member || sparq_engine::ask(doc, &q)? {
                 return Err(format!(
                     "container <{url}> is not empty — delete its members first"
                 ));

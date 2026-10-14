@@ -125,7 +125,7 @@ at construction — the MCP-Solid proposal draft's local-trusted-agent deploymen
 | `stats` | totals over the same projection | two sessions get different totals; no grants ⇒ zeros |
 | `update` *(gated)* | `PodStore::update_as_with_budget` / `update_as_acp_with_budget` | per-graph session write check, fail-closed; its SPARQL *evaluation* is bounded by the SAME per-call budget the read tools use (draft §9.4) — the one place an update evaluates SPARQL, its `DELETE`/`INSERT … WHERE`. The rest is NOT budgeted, and a request cap covers only the inline `INSERT`/`DELETE DATA`: `CLEAR`/`DROP` cost whatever the session may write, and `LOAD` is refused unless the embedder installs an allowlisted base |
 | `resource_put` *(gated)* | atomic named-graph swap (+ containment link on create) | `.acl`/`.acr` route through `put_acl`/`put_acl_acp`; a created document, and each container created for it, records the session agent as its creator for `acp:CreatorAgent`, while an existing container keeps its own (`PodStore::rematerialize_after_edit`); a rolled-back write changes no provenance |
-| `resource_delete` *(gated)* | slot removal + containment unlink | non-empty containers rejected; `.acl` via `delete_acl`; forgets the resource's creator and owner |
+| `resource_delete` *(gated)* | slot removal + containment unlink | containers with anything stored below them (or a non-empty listing) rejected; `.acl` via `delete_acl`; a resource that no longer exists afterwards loses its creator and owner |
 | `container_create` *(gated)* | typed `ldp:BasicContainer` graph + containment | slash-terminated IRIs only; records the creator like `resource_put` |
 
 Key contracts: a resource the session cannot read errors **byte-identically** to a
