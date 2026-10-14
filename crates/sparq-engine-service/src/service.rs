@@ -1924,6 +1924,9 @@ pub enum EgressRefusal<'a> {
 /// addresses, so there is no DNS-rebinding re-resolve window. A refusal is a HARD
 /// `PermissionDenied` [`ureq::Error::Io`] carrying `refuse`'s text, never an empty set, so ureq
 /// cannot fall through to an unguarded dial.
+///
+/// `allowed` must be a real allowlist: a host it accepts skips the private-address filter, so
+/// `|_, _| true` would switch the SSRF guard off.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 #[doc(hidden)]
 pub fn resolve_vetted(
