@@ -6967,7 +6967,7 @@ mod tests {
         let doc = format!(
             "@prefix : <http://ex/> .\n\
              :d :f {{ {value} }} .\n\
-             :e :f {{ :a :p :b . :a :p :c . :c :q :z }} .\n\
+             :e :f {{ :a :p :c . :a :p :b . :c :q :z }} .\n\
              {{ :d :f {{ {reversed} }} }} => {{ :m :m :m }} .\n\
              {{ :e :f {{ :a :p ?x . :a :p ?y . ?y :q :z }} }} => {{ :k :k ?x }} ."
         );
