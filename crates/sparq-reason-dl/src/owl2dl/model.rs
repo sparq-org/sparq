@@ -353,6 +353,10 @@ pub struct Ontology {
     pub version_iri: Option<Id>,
     /// The input triples of the ontology header (typing and version IRI).
     pub header_source: Vec<usize>,
+    /// Parts of the graph the model cannot represent although they are valid (e.g. an
+    /// `owl:deprecated` annotation when the dictionary has no id for `owl:deprecated`). The
+    /// profile check reports each as unchecked.
+    pub unrepresented: Vec<ExtractNote>,
     /// IRIs of `owl:imports` targets. The extractor does not dereference them.
     pub imports: Vec<Id>,
     /// Ontology and axiom annotations.

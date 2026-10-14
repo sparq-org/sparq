@@ -984,6 +984,21 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
     if !lex.chars().all(is_xml_char) {
         return Err(ValueError::IllTyped);
     }
+    // RDF does not apply the `whiteSpace` facet: the lexical form itself must be in the
+    // lexical space, so whitespace that `replace` or `collapse` would remove is ill-typed.
+    let ws = |c: char| matches!(c, '\t' | '\n' | '\r');
+    let well_spaced = match b {
+        String | PlainLiteral | LangString | XmlLiteral | RdfsLiteral | OwlReal | AnyUri => true,
+        NormalizedString => !lex.contains(ws),
+        // base64Binary allows single spaces between characters (XSD 1.1 §3.3.16).
+        Base64Binary => {
+            !lex.contains(ws) && !lex.starts_with(' ') && !lex.ends_with(' ') && !lex.contains("  ")
+        }
+        _ => collapse(lex) == lex,
+    };
+    if !well_spaced {
+        return Err(ValueError::IllTyped);
+    }
     Ok(match b {
         // rdfs:Literal and owl:real have no lexical space of their own (OWL 2 §4.1).
         RdfsLiteral | OwlReal => return Err(ValueError::IllTyped),
@@ -1136,7 +1151,9 @@ mod tests {
         );
         assert_eq!(val("-1", "nonNegativeInteger"), Err(ValueError::IllTyped));
         assert_eq!(val("300", "byte"), Err(ValueError::IllTyped));
-        assert!(val(" 42 ", "int").is_ok());
+        // RDF applies no whiteSpace facet: the lexical form itself must be in the space.
+        assert_eq!(val(" 42 ", "int"), Err(ValueError::IllTyped));
+        assert!(val("42", "int").is_ok());
         assert_eq!(val("1/3", "decimal"), Err(ValueError::IllTyped));
         assert!(parse_value("1/3", &format!("{OWL}rational"), None).is_ok());
         assert_eq!(
@@ -1171,7 +1188,14 @@ mod tests {
 
     #[test]
     fn strings_booleans_binaries() {
-        assert_eq!(val("  a  b ", "token"), Ok(Value::String("a b".into())));
+        assert_eq!(val("  a  b ", "token"), Err(ValueError::IllTyped));
+        assert_eq!(val("a b", "token"), Ok(Value::String("a b".into())));
+        assert_eq!(val("a\nb", "normalizedString"), Err(ValueError::IllTyped));
+        assert_eq!(
+            val("aGk =", "base64Binary"),
+            Ok(Value::Base64Binary(b"hi".to_vec()))
+        );
+        assert_eq!(val("aGk=\n", "base64Binary"), Err(ValueError::IllTyped));
         assert_eq!(val("1", "boolean"), val("true", "boolean"));
         assert_eq!(val("yes", "boolean"), Err(ValueError::IllTyped));
         assert_eq!(

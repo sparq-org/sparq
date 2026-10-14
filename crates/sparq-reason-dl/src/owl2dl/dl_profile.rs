@@ -135,18 +135,40 @@ pub fn check_dl(dict: &Dict, onto: &Ontology) -> DlProfileReport {
     c.anonymous_individuals();
     c.datatypes();
     c.operand_sets();
-    if !onto.imports.is_empty() {
-        c.unchecked(
-            "the imports closure (owl:imports targets are not loaded)",
-            &[],
-        );
-    }
     for note in &onto.notes {
         c.out.push(Violation {
             kind: ViolationKind::ExtractionNote,
             message: note.message.clone(),
             source: note.source.clone(),
         });
+    }
+    for note in &onto.unrepresented {
+        c.unchecked(
+            "parts of the graph the model cannot represent",
+            &note.source,
+        );
+    }
+    if !onto.imports.is_empty() {
+        c.unchecked(
+            "the imports closure (owl:imports targets are not loaded)",
+            &[],
+        );
+        // An unloaded import may declare the entities, define the datatypes and settle the
+        // property kinds these violations are about, so they are not definite.
+        let (open, kept): (Vec<Violation>, Vec<Violation>) =
+            std::mem::take(&mut c.out).into_iter().partition(|v| {
+                matches!(
+                    v.kind,
+                    ViolationKind::Undeclared
+                        | ViolationKind::UnknownDatatype
+                        | ViolationKind::InvalidDatatypeDefinition
+                        | ViolationKind::ExtractionNote
+                )
+            });
+        c.out = kept;
+        for v in open {
+            c.unchecked("declarations an unloaded import may supply", &v.source);
+        }
     }
     c.out.sort_by(|a, b| {
         a.source

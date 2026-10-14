@@ -422,14 +422,27 @@ impl<'a> Extractor<'a> {
             if p != v.ty || !is_iri(self.dict, s) {
                 continue;
             }
-            if o == v.rdfs_class || o == v.deprecated_class {
-                // Table 5 drops these typings; they read `s` as a class but declare nothing,
-                // so a class typed only this way is undeclared.
+            if o == v.rdfs_class {
+                // Table 5 drops `rdfs:Class` only beside an `owl:Class` or `rdfs:Datatype`
+                // typing that makes it redundant; alone it is not read.
+                if self.has_type(s, v.owl_class).is_none()
+                    && self.has_type(s, v.rdfs_datatype).is_none()
+                {
+                    return Err(self.err(
+                        ExtractErrorKind::Unparsed,
+                        "rdfs:Class without owl:Class or rdfs:Datatype is not an OWL 2 typing",
+                        &[i],
+                    ));
+                }
+                self.consume(i);
+                continue;
+            }
+            if o == v.deprecated_class {
+                // Table 5 reads `s` as a class with an `owl:deprecated` annotation, but
+                // declares nothing, so a class typed only this way is undeclared.
                 self.classes.insert(s);
                 self.consume(i);
-                if o == v.deprecated_class {
-                    self.deprecated(s, i);
-                }
+                self.deprecated(s, i);
                 continue;
             }
             let kind = if o == v.owl_class {
@@ -1659,6 +1672,15 @@ impl<'a> Extractor<'a> {
             }
             self.axiom_triple(i)?;
         }
+        if let Some(i) = (0..self.triples.len()).find(|&i| {
+            !self.consumed[i] && self.triples[i][1] == v.ty && self.triples[i][2] == v.rdf_list
+        }) {
+            return Err(self.err(
+                ExtractErrorKind::Unparsed,
+                "an rdf:List typing on a node that is not a list cell of the ontology",
+                &[i],
+            ));
+        }
         // Mapping Table 17: an `owl:Axiom` reification annotates an axiom, so the triple it
         // names must be the main triple of an axiom that was read.
         if let Some(&(_, ti)) = self.reified.iter().find(|(m, _)| !self.mains.contains(m)) {
@@ -1704,6 +1726,33 @@ impl<'a> Extractor<'a> {
         let mut nested = nodes(v.owl_annotation);
         axioms.sort_unstable();
         nested.sort_unstable();
+        // Tables 10 and 17: a reification node is a blank node, and the only triples that
+        // may name it are the `owl:annotatedSource` triples of the `owl:Annotation` nodes
+        // that annotate its annotations.
+        let nested_ids: FxHashSet<Id> = nested.iter().map(|&(n, _)| n).collect();
+        let all: FxHashSet<Id> = axioms
+            .iter()
+            .chain(nested.iter())
+            .map(|&(n, _)| n)
+            .collect();
+        for &(node, ti) in axioms.iter().chain(nested.iter()) {
+            if !is_blank(self.dict, node) {
+                return Err(self.err(
+                    ExtractErrorKind::Malformed,
+                    "a reification node must be a blank node",
+                    &[ti],
+                ));
+            }
+        }
+        for (i, &[s, p, o]) in self.triples.iter().enumerate() {
+            if all.contains(&o) && !(p == v.annotated_source && nested_ids.contains(&s)) {
+                return Err(self.err(
+                    ExtractErrorKind::Malformed,
+                    "a reification node is referenced outside its annotations",
+                    &[i],
+                ));
+            }
+        }
         for (node, ti) in axioms {
             let (sv, si) = self.required(node, v.annotated_source, ti)?;
             let (pv, pi) = self.required(node, v.annotated_property, ti)?;
@@ -1976,7 +2025,7 @@ impl<'a> Extractor<'a> {
         if p == NO_ID {
             self.consume(i);
             let source = self.src(&[i]);
-            self.out.notes.push(ExtractNote {
+            self.out.unrepresented.push(ExtractNote {
                 message: format!(
                     "{} is deprecated, but owl:deprecated is not in the dictionary, so the annotation is not represented",
                     render_term(self.dict, s)
@@ -2301,9 +2350,39 @@ impl<'a> Extractor<'a> {
             self.deprecated(s, i);
             return Ok(());
         }
-        // Ignorable typings.
-        if o == v.rdf_property || o == v.rdf_list || (o == v.owl_class && is_blank(self.dict, s)) {
+        // Table 5 drops `rdf:Property` only beside a typing that says which kind of property
+        // `s` is.
+        if o != NO_ID && o == v.rdf_property {
+            let typed = [
+                v.object_property,
+                v.datatype_property,
+                v.annotation_property,
+                v.ontology_property,
+            ]
+            .iter()
+            .any(|&k| self.has_type(s, k).is_some());
+            if !typed {
+                return Err(self.err(
+                    ExtractErrorKind::Unparsed,
+                    "rdf:Property without an OWL property typing is not an OWL 2 typing",
+                    &[i],
+                ));
+            }
             self.consume(i);
+            return Ok(());
+        }
+        if o != NO_ID && o == v.owl_class && is_blank(self.dict, s) {
+            // A class-expression node's typing is read with the expression; this blank node
+            // is not one.
+            return Err(self.err(
+                ExtractErrorKind::Unparsed,
+                "owl:Class on a blank node that is not a class expression",
+                &[i],
+            ));
+        }
+        // `rdf:List` typings are read with their list cells; any left over is checked after
+        // the axiom pass.
+        if o != NO_ID && o == v.rdf_list {
             return Ok(());
         }
         // A class assertion.

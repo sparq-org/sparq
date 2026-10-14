@@ -700,7 +700,10 @@ content, an unloaded imports closure, anonymous individuals outside an anonymous
 literal values beyond the represented range such as a year past `i64` or a language tag
 that is not well-formed BCP 47, and the facet space of a bound outside the restricted
 datatype's value space, and whether operands with cardinality restrictions are distinct). Cardinalities must be valid non-negative `xsd:nonNegativeInteger` or
-`xsd:integer` literals; others are refused as unsupported.
+`xsd:integer` literals; others are refused as unsupported. Lexical forms get no
+whitespace normalisation (RDF applies no `whiteSpace` facet), and with unloaded imports
+the violations an import could repair (undeclared entities, unknown datatypes) are
+unchecked rather than definite.
 `blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
 `Ontology::imports`, never dereferenced.
 
