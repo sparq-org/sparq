@@ -255,20 +255,20 @@ fn parse_rfc850_date(value: &str, now: SystemTime) -> Option<i64> {
     let day = two_digits(b, 0)?;
     let month = month_from_abbrev(&rest[3..6])?;
     let yy = i64::from(two_digits(b, 7)?);
-    let current_year =
-        system_time_to_unix(now).map_or(1970, |secs| civil_year(secs.div_euclid(86_400)));
-    let mut year = current_year - current_year.rem_euclid(100) + yy;
-    if year > current_year + 50 {
+    let (hh, mm, ss) = (two_digits(b, 10)?, two_digits(b, 13)?, two_digits(b, 16)?);
+    // §5.6.7: a timestamp that appears MORE than 50 years in the future means the most recent past
+    // year with the same last two digits. "50 years" is calendar years from `now`, compared on the
+    // full timestamp, so the boundary year resolves by month, day and time too.
+    let now_secs = system_time_to_unix(now).unwrap_or(0);
+    let (now_year, now_month, now_day) = civil_from_days(now_secs.div_euclid(86_400));
+    let horizon_day = now_day.min(days_in_month(now_year + 50, now_month));
+    let horizon = days_from_civil(now_year + 50, now_month, horizon_day) * 86_400
+        + now_secs.rem_euclid(86_400);
+    let mut year = now_year - now_year.rem_euclid(100) + yy;
+    if civil_to_unix(year, month, day, hh, mm, ss).is_some_and(|(secs, _)| secs > horizon) {
         year -= 100;
     }
-    let (secs, days) = civil_to_unix(
-        year,
-        month,
-        day,
-        two_digits(b, 10)?,
-        two_digits(b, 13)?,
-        two_digits(b, 16)?,
-    )?;
+    let (secs, days) = civil_to_unix(year, month, day, hh, mm, ss)?;
     let short = day_name_for(days);
     (day_name.len() > 3 && day_name.starts_with(short) && full_day_name(short) == day_name)
         .then_some(secs)
@@ -309,8 +309,18 @@ fn parse_asctime_date(value: &str) -> Option<i64> {
 }
 
 /// Validate a civil UTC date-time and return (seconds, days) since the Unix epoch.
+///
+/// A leap second (`23:59:60`, RFC 5322 §3.3, which HTTP-date inherits) is accepted and counts as the
+/// following midnight, the instant it precedes on the POSIX timeline; `:60` at any other minute is
+/// not a real UTC time and is rejected.
 fn civil_to_unix(year: i64, month: u32, day: u32, hh: u32, mm: u32, ss: u32) -> Option<(i64, i64)> {
-    if day == 0 || day > days_in_month(year, month) || hh > 23 || mm > 59 || ss > 59 {
+    let leap_second = ss == 60 && hh == 23 && mm == 59;
+    if day == 0
+        || day > days_in_month(year, month)
+        || hh > 23
+        || mm > 59
+        || (ss > 59 && !leap_second)
+    {
         return None;
     }
     let days = days_from_civil(year, month, day);
@@ -320,17 +330,19 @@ fn civil_to_unix(year: i64, month: u32, day: u32, hh: u32, mm: u32, ss: u32) -> 
     ))
 }
 
-/// The proleptic Gregorian year containing `days` since the Unix epoch.
-fn civil_year(days: i64) -> i64 {
-    // Walk from an estimate: at most one step either way.
-    let mut year = 1970 + days.div_euclid(365);
-    while days_from_civil(year, 1, 1) > days {
-        year -= 1;
-    }
-    while days_from_civil(year + 1, 1, 1) <= days {
-        year += 1;
-    }
-    year
+/// The proleptic Gregorian (year, month, day) of `days` since the Unix epoch (the inverse of
+/// [`days_from_civil`], same era arithmetic).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (year, month, day)
 }
 
 /// The RFC 850 full day-name for an IMF-fixdate abbreviation.
@@ -371,7 +383,7 @@ fn system_time_to_unix(t: SystemTime) -> Option<i64> {
 /// (day within the month's true length, leap years included), and the leading day-name must be the
 /// ACTUAL weekday of the date (a wrong or arbitrary day-name token is malformed — RFC 9110 §5.6.7
 /// fixes `day-name` to the day of week). Anything else — the obsolete RFC 850 / asctime forms,
-/// non-fixed-width fields, negative components, a leap-second `:60` — returns `None`, and the
+/// non-fixed-width fields, negative components, a `:60` second anywhere but `23:59` — returns `None`, and the
 /// caller FAILS OPEN to a fresh 200 (never a spurious 304), so strictness costs at most a cache
 /// miss.
 ///
@@ -401,17 +413,18 @@ fn parse_http_date(value: &str) -> Option<i64> {
     let day = two_digits(b, 5)?;
     let month = month_from_abbrev(&v[8..11])?;
     let year = four_digits(b, 12)?;
-    let hh = two_digits(b, 17)?;
-    let mm = two_digits(b, 20)?;
-    let ss = two_digits(b, 23)?;
-    if day == 0 || day > days_in_month(year, month) || hh > 23 || mm > 59 || ss > 59 {
-        return None;
-    }
-    let days = days_from_civil(year, month, day);
+    let (secs, days) = civil_to_unix(
+        year,
+        month,
+        day,
+        two_digits(b, 17)?,
+        two_digits(b, 20)?,
+        two_digits(b, 23)?,
+    )?;
     if day_name_for(days) != &v[0..3] {
         return None; // day-name inconsistent with the actual date (or not a day-name at all)
     }
-    Some(days * 86_400 + i64::from(hh) * 3_600 + i64::from(mm) * 60 + i64::from(ss))
+    Some(secs)
 }
 
 /// Exactly two ASCII digits at `b[at..at+2]`, as a number.
@@ -758,6 +771,44 @@ mod tests {
     }
 
     #[test]
+    fn rfc850_century_cutoff_compares_the_full_timestamp() {
+        // Now: 2026-10-14 10:00:00 UTC. The cutoff is 2076-10-14 10:00:00.
+        let now = at(1_791_972_000);
+        let date = |v| parse_any_http_date(v, now);
+        // December 2076 is past the cutoff, so `76` there means 1976.
+        assert_eq!(
+            date("Friday, 31-Dec-76 12:00:00 GMT"),
+            parse_http_date("Fri, 31 Dec 1976 12:00:00 GMT")
+        );
+        assert_eq!(date("Thursday, 31-Dec-76 12:00:00 GMT"), None);
+        // The cutoff instant itself is exactly 50 years ahead, not more: it stays in 2076.
+        assert_eq!(
+            date("Wednesday, 14-Oct-76 10:00:00 GMT"),
+            Some(3_369_895_200)
+        );
+        // One second later it rolls back a century (and must then carry 1976's weekday).
+        assert_eq!(
+            date("Thursday, 14-Oct-76 10:00:01 GMT"),
+            parse_http_date("Thu, 14 Oct 1976 10:00:01 GMT")
+        );
+    }
+
+    #[test]
+    fn a_leap_second_is_the_following_midnight_in_every_form() {
+        let now = at(1_791_972_000);
+        let midnight = Some(1_483_228_800); // 2017-01-01T00:00:00Z
+        for v in [
+            "Sat, 31 Dec 2016 23:59:60 GMT",
+            "Saturday, 31-Dec-16 23:59:60 GMT",
+            "Sat Dec 31 23:59:60 2016",
+        ] {
+            assert_eq!(parse_any_http_date(v, now), midnight, "{v}");
+        }
+        assert_eq!(parse_http_date("Sat, 31 Dec 2016 23:58:60 GMT"), None);
+        assert_eq!(parse_http_date("Sat, 31 Dec 2016 23:59:61 GMT"), None);
+    }
+
+    #[test]
     fn if_none_match_still_applies_after_if_unmodified_since() {
         let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
         assert_eq!(
@@ -949,7 +1000,7 @@ mod tests {
         // Case-sensitive tokens.
         assert_eq!(parse_http_date("sun, 06 Nov 1994 08:49:37 GMT"), None);
         assert_eq!(parse_http_date("Sun, 06 NOV 1994 08:49:37 GMT"), None);
-        // A leap-second `:60` is rejected (strict; fails open to a 200).
+        // `:60` outside 23:59 is not a real leap second and is rejected (fails open to a 200).
         assert_eq!(parse_http_date("Sun, 06 Nov 1994 08:49:60 GMT"), None);
         // Non-ASCII input of plausible shape must not panic (byte-slicing guard) and must fail.
         assert_eq!(parse_http_date("Sün, 06 Nov 1994 08:49:37 GMT"), None);
