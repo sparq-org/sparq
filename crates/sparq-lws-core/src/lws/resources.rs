@@ -7794,6 +7794,50 @@ mod tests {
         assert_eq!(body_of(r).await, Bytes::from("public again"));
     }
 
+    /// A container listing's tag is its validator on reads too: it is a 304 for If-None-Match and
+    /// passes If-Match until a member arrives, and is stale after that.
+    #[tokio::test]
+    async fn container_reads_compare_the_listing_tag() {
+        let st = state().await;
+        let c = hdr(
+            &call(
+                &st,
+                "POST",
+                "/",
+                &[("slug", "c"), ("link", CONTAINER_LINK)],
+                "",
+            )
+            .await,
+            "location",
+        );
+        let p = path_of(&c);
+        let accept = ("accept", LWS_JSON);
+        let tag = hdr(&call(&st, "GET", p, &[accept], "").await, "etag");
+        for m in ["GET", "HEAD"] {
+            let r = call(&st, m, p, &[accept, ("if-none-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::NOT_MODIFIED, "{m}");
+            assert_eq!(hdr(&r, "etag"), tag, "{m}");
+            let r = call(&st, m, p, &[accept, ("if-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::OK, "{m}");
+        }
+        let r = call(
+            &st,
+            "POST",
+            p,
+            &[("slug", "m"), ("content-type", "text/plain")],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        for m in ["GET", "HEAD"] {
+            let r = call(&st, m, p, &[accept, ("if-none-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::OK, "{m}: a member arrived");
+            assert_ne!(hdr(&r, "etag"), tag, "{m}");
+            let r = call(&st, m, p, &[accept, ("if-match", &tag)], "").await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{m}");
+        }
+    }
+
     /// Review finding: a conditional DELETE of a container computed the listing's tag only for
     /// If-Match; If-Unmodified-Since used the stored body's time and `If-None-Match: *` let the
     /// delete of an existing container through.

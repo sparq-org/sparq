@@ -1027,6 +1027,18 @@ async fn serve_read_once<S: Store>(
     if let Some(imf) = effective_last_modified.and_then(crate::http_date::format) {
         set_str(&mut out, header::LAST_MODIFIED, &imf);
     }
+    // RFC 9110 §13.2.2 steps 1 and 2 apply to every method: a read whose `If-Match` names no tag of
+    // the current state, or whose `If-Unmodified-Since` the resource postdates, is a 412 before
+    // `If-None-Match` is looked at. The comparison is the one a write makes (the state part of the
+    // tag), so a tag read in any format holds for the state it was read from; a container's listing
+    // has no recorded time, so it ignores `If-Unmodified-Since` here as on writes.
+    conditional::require(conditional::evaluate_write(
+        header_str(req_headers, header::IF_MATCH),
+        None,
+        crate::http_date::single_line(req_headers, header::IF_UNMODIFIED_SINCE),
+        Some(&etag),
+        effective_last_modified,
+    ))?;
     if conditional::evaluate_read(
         header_str(req_headers, header::IF_NONE_MATCH),
         crate::http_date::single_line(req_headers, header::IF_MODIFIED_SINCE),
@@ -5341,6 +5353,135 @@ mod tests {
                 .status(),
             StatusCode::OK
         );
+    }
+
+    /// The status of a GET or HEAD of `path` by the owner, with `headers`.
+    async fn read_status(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        headers: HeaderMap,
+    ) -> StatusCode {
+        let (s, t) = (State(state.clone()), Extension(owner_token()));
+        let uri: axum::http::Uri = path.parse().unwrap();
+        let result = match verb {
+            "GET" => get_handler(s, t, uri, headers).await,
+            _ => head_handler(s, t, uri, headers).await,
+        };
+        result.unwrap_or_else(IntoResponse::into_response).status()
+    }
+
+    /// RFC 9110 §13.2.2: `If-Match` and `If-Unmodified-Since` are evaluated on reads too, before
+    /// `If-None-Match`. A tag of the current state (read in any format) passes; another is a 412.
+    #[tokio::test]
+    async fn reads_evaluate_if_match_and_if_unmodified_since() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let mut jsonld = HeaderMap::new();
+        jsonld.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/ld+json"),
+        );
+        let jsonld_tag = etag_of(&get_with(&state, owner_token(), "/alice/doc", jsonld).await);
+        let stale = "Thu, 01 Jan 1970 00:00:00 GMT";
+        let with = |pairs: &[(HeaderName, &str)]| {
+            let mut h = HeaderMap::new();
+            for (n, v) in pairs {
+                h.append(n.clone(), HeaderValue::from_str(v).unwrap());
+            }
+            h
+        };
+        for verb in ["GET", "HEAD"] {
+            let cases = [
+                (
+                    with(&[(header::IF_MATCH, "\"other\"")]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (with(&[(header::IF_MATCH, &tag)]), StatusCode::OK),
+                (with(&[(header::IF_MATCH, &jsonld_tag)]), StatusCode::OK),
+                (with(&[(header::IF_MATCH, "*")]), StatusCode::OK),
+                (
+                    with(&[(header::IF_UNMODIFIED_SINCE, stale)]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (
+                    with(&[(header::IF_UNMODIFIED_SINCE, "last week")]),
+                    StatusCode::OK,
+                ),
+                // If-Match decides alone when present (§13.2.2 step 2 applies only without it).
+                (
+                    with(&[
+                        (header::IF_MATCH, &tag),
+                        (header::IF_UNMODIFIED_SINCE, stale),
+                    ]),
+                    StatusCode::OK,
+                ),
+                // A failed If-Match is a 412 even when If-None-Match would have been a 304.
+                (
+                    with(&[
+                        (header::IF_MATCH, "\"other\""),
+                        (header::IF_NONE_MATCH, &tag),
+                    ]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (
+                    with(&[(header::IF_MATCH, &tag), (header::IF_NONE_MATCH, &tag)]),
+                    StatusCode::NOT_MODIFIED,
+                ),
+            ];
+            for (headers, want) in cases {
+                let got = read_status(&state, verb, "/alice/doc", headers.clone()).await;
+                assert_eq!(got, want, "{verb} {headers:?}");
+            }
+        }
+    }
+
+    /// A container's read `If-Match` compares against its state tag, which a membership change moves
+    /// on; its listing has no recorded time, so `If-Unmodified-Since` is ignored as on writes.
+    #[tokio::test]
+    async fn container_reads_evaluate_if_match_against_the_state_tag() {
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        let put = |path: &'static str| {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::new(),
+            )
+        };
+        put("/alice/c/a").await.expect("child a");
+        let held = etag_of(&get_with(&state, owner_token(), "/alice/c/", HeaderMap::new()).await);
+        let if_match = |tag: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::IF_MATCH, HeaderValue::from_str(tag).unwrap());
+            h
+        };
+        let mut ius = HeaderMap::new();
+        ius.insert(
+            header::IF_UNMODIFIED_SINCE,
+            HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
+        );
+        for verb in ["GET", "HEAD"] {
+            assert_eq!(
+                read_status(&state, verb, "/alice/c/", if_match(&held)).await,
+                StatusCode::OK
+            );
+            assert_eq!(
+                read_status(&state, verb, "/alice/c/", ius.clone()).await,
+                StatusCode::OK
+            );
+        }
+        put("/alice/c/b").await.expect("child b");
+        for verb in ["GET", "HEAD"] {
+            let got = read_status(&state, verb, "/alice/c/", if_match(&held)).await;
+            assert_eq!(
+                got,
+                StatusCode::PRECONDITION_FAILED,
+                "{verb}: a member arrived"
+            );
+        }
     }
 
     #[tokio::test]
