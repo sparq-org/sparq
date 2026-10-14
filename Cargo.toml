@@ -46,14 +46,14 @@ default-members = [
 # `fuzz` is the cargo-fuzz harness (bead sq-ovnf): it requires a NIGHTLY toolchain
 # (libFuzzer codegen), so it is excluded from the workspace to keep the STABLE
 # `cargo build`/`cargo test`/`clippy --workspace` gate from ever trying to compile it.
-# Build/run it only via `cargo +nightly fuzz run <target>` from `fuzz/`. [OPUS-4.8]
+# Build/run it only via `cargo +nightly fuzz run <target>` from `fuzz/`.
 exclude = ["vendor/spargebra", "vendor/spargebra-shim", "fuzz", "gui/src-tauri"]
 # `gui/src-tauri` (bead sq-2e93) is the Tauri 2 desktop GUI scaffold. It has its OWN
 # `[workspace]` table (a standalone crate root) AND is excluded here so Tauri's heavy,
 # webview-system-lib-dependent dependency tree (webkit2gtk / WebView2 / WKWebView) never
 # enters the required `cargo build --workspace` / `clippy --workspace` gate, which runs on
 # CI runners without those libs. The GUI is built/linted/typechecked in its own path-scoped
-# `.github/workflows/gui.yml` lane (which installs the system deps). [OPUS-4.8]
+# `.github/workflows/gui.yml` lane (which installs the system deps).
 
 # Vendored spargebra 0.4.6: six surgical W3C-conformance parser fixes (§1–§6, each
 # prepared as an upstream PR against oxigraph/oxigraph) plus four sparq-local patches
@@ -76,7 +76,7 @@ spargebra = { path = "vendor/spargebra-shim" }
 version = "0.1.6"
 edition = "2021"
 license = "MIT"
-# [OPUS-4.8] (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep
+# (sq-qmth) MSRV floor 1.88. Upstream-driven: `geo@0.33.1` (a transitive dep
 # of sparq-geo) requires rustc 1.88, and the released oxigraph parser stack
 # (oxrdf/oxttl/oxrdfio/spargebra/… 0.2–0.4) requires 1.87. Verified empirically: the
 # MSRV-scope workspace (--exclude sparq-py --exclude sparq-hdt) fails on 1.87 with ONLY
@@ -96,11 +96,11 @@ categories = ["database-implementations", "parsing", "science"]
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 oxttl = { version = "0.2", features = ["rdf-12"] }
 # JSON-LD parser (same oxigraph family as oxrdf/oxttl, pure-Rust + wasm-portable — no
-# native-only deps, so it is safe in the lean wasm bundle). [OPUS-4.8] sq-dvyi: the
+# native-only deps, so it is safe in the lean wasm bundle). sq-dvyi: the
 # engine-side JSON-LD ingest the browser REPL's upload/URL path needs.
 oxjsonld = { version = "0.2", features = ["rdf-12"] }
 # RDF/XML parser (same oxigraph family; the version sparq-server already pins for its GSP
-# request-body reader + conformance harness, so it is proven in-tree). [OPUS-4.8] sq-f47w1
+# request-body reader + conformance harness, so it is proven in-tree). sq-f47w1
 # (survey §B1): the engine-side RDF/XML ingest gap — OPT-IN behind sparq-core's `rdfxml`
 # feature so the lean default / wasm build never links it (it pulls `quick-xml`).
 oxrdfxml = { version = "0.2", features = ["rdf-12"] }
@@ -122,7 +122,7 @@ smallvec = "1"
 rayon = "1"
 # SIMD byte search for the Turtle parallel-split terminator pre-scan (T2). Already in the
 # tree transitively (via oxttl); promoted to a direct dep behind sparq-core's `parallel`
-# feature so the wasm build (no `parallel`) does not pull it. [OPUS-4.8]
+# feature so the wasm build (no `parallel`) does not pull it.
 memchr = "2"
 # Memory-mapped on-disk indexes (out-of-core, native only) — query datasets larger
 # than RAM by letting the OS page in only the working set.
@@ -153,7 +153,7 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 
-# [SONNET-4.6] sq-6vshe.10 — optimized correctness/smoke lanes do not need the
+# sq-6vshe.10 — optimized correctness/smoke lanes do not need the
 # shipping profile's serial codegen and fat-LTO link tail. This profile is never
 # valid for benchmarks, perf ratchets, published measurements, or shipped artifacts.
 [profile.release-fast]
@@ -169,7 +169,7 @@ codegen-units = 16
 inherits = "release"
 panic = "unwind"
 
-# [OPUS-4.8] sq-7d3dj.1 — WASM release profile that BUILDS THE SHIPPED BROWSER BUNDLE.
+# sq-7d3dj.1 — WASM release profile that BUILDS THE SHIPPED BROWSER BUNDLE.
 # Inherits the tuned `release` profile (opt-level 3, fat LTO, codegen-units 1, panic=abort) so
 # the HOT engine/core query-eval crates keep their opt-level-3 + simd128 / core::simd FILTER
 # investment untouched, then makes only the COLD, run-once RDF/SPARQL PARSE crates build for

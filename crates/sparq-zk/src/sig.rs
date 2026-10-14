@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! Issuer signatures over per-graph commitments (audit #3, the M1 attestation
 //! foundation).
 //!
@@ -43,7 +43,7 @@
 //! candidate can ship as parallel options for the paper's per-signature
 //! performance + security table. v1 ships `poseidon2-schnorr-v1` only.
 //!
-//! ## Constant-time posture (CR-G5 / sq-8jv7 / sq-j3b9) [OPUS-5]
+//! ## Constant-time posture (CR-G5 / sq-8jv7 / sq-j3b9)
 //! Honest statement, do NOT over-read: **this signing path is still NOT
 //! asserted constant-time.** What has changed, in two steps, is how much of the
 //! secret-dependent *shape* lives in code sparq owns.
@@ -126,7 +126,7 @@ impl SignatureScheme {
 }
 
 // --- pluggable issuer-signature seam (sq-1hsl) ----------------------------
-// [OPUS-4.8] sq-1hsl: the OFF-circuit signature seam as an OPEN trait, per the
+// sq-1hsl: the OFF-circuit signature seam as an OPEN trait, per the
 // maintainer-greenlit (#769) configurable-commitment build-out
 // (`research/zk-configurable-commitment-design.md` §4, §10 Q4 default = open
 // trait). This is the SIGNATURE-VERIFICATION axis, distinct from the
@@ -158,7 +158,7 @@ impl SignatureScheme {
 /// gadget for the v1 scheme lives in `sparq-zk-compose`'s `hidden_issuer_d{depth}`
 /// member; this only NAMES that such a member exists). Fail-closed by default:
 /// a scheme with no in-circuit verifier returns [`Self::None`].
-// [OPUS-4.8] sq-1hsl.
+// sq-1hsl.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InCircuitVerifier {
     /// The scheme has NO in-circuit verifier — it is checkable verifier-side only
@@ -196,7 +196,7 @@ pub enum InCircuitVerifier {
 /// externally audited (sq-qhy4). The trait only standardizes the verifier-side
 /// dispatch boundary so a second scheme can be wired in without touching call
 /// sites.
-// [OPUS-4.8] sq-1hsl: open OFF-circuit signature-scheme trait.
+// sq-1hsl: open OFF-circuit signature-scheme trait.
 pub trait IssuerSignatureScheme {
     /// The `zk:cryptosuite` IRI this scheme records on a registry entry /
     /// attestation. The resolver ([`resolve_signature_scheme`]) matches on this.
@@ -228,7 +228,7 @@ pub trait IssuerSignatureScheme {
 /// field IS BN254's scalar field), so [`Self::in_circuit`] reports the
 /// `hidden_issuer` member family — the embedded-curve property that made this the
 /// v1 choice over Ed25519 (see the module-level scheme note).
-// [OPUS-4.8] sq-1hsl: the Schnorr-over-Baby-JubJub scheme as the first trait impl.
+// sq-1hsl: the Schnorr-over-Baby-JubJub scheme as the first trait impl.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SchnorrBjjScheme;
 
@@ -267,7 +267,7 @@ impl IssuerSignatureScheme for SchnorrBjjScheme {
 ///
 /// Returns a boxed `dyn` so the caller can dispatch uniformly across schemes
 /// whose key/signature layouts differ.
-// [OPUS-4.8] sq-1hsl: cryptosuite-IRI -> scheme resolver (the open seam's registry).
+// sq-1hsl: cryptosuite-IRI -> scheme resolver (the open seam's registry).
 pub fn resolve_signature_scheme(cryptosuite_iri: &str) -> Option<Box<dyn IssuerSignatureScheme>> {
     if cryptosuite_iri == SignatureScheme::POSEIDON2_SCHNORR_V1_IRI {
         return Some(Box::new(SchnorrBjjScheme));
@@ -289,7 +289,7 @@ pub fn resolve_signature_scheme(cryptosuite_iri: &str) -> Option<Box<dyn IssuerS
 /// a caller resolves the method via [`crate::commit::CommitmentMethod::from_scheme_iri`]
 /// and the signature scheme via this function — the two independent axes the
 /// design separates).
-// [OPUS-4.8] sq-1hsl.
+// sq-1hsl.
 pub fn verify_commitment_with_scheme(
     cryptosuite_iri: &str,
     pk_hex: &str,
@@ -312,7 +312,7 @@ impl PublicKey {
     /// True iff this is a USABLE issuer/binding key: on the Baby-JubJub curve, in
     /// the prime-order (order-`L`) subgroup, and not the identity.
     ///
-    /// [OPUS-4.8] sq-l15mi (audit H-1): Baby-JubJub has cofactor 8, so on-curve
+    /// sq-l15mi (audit H-1): Baby-JubJub has cofactor 8, so on-curve
     /// points can have small order (2/4/8). Because [`PublicKey`]'s inner field is
     /// `pub`, a caller can construct a key around such a torsion point (or an
     /// off-curve point) DIRECTLY, bypassing `public_key_from_hex`. A torsion issuer
@@ -334,7 +334,7 @@ impl PublicKey {
 /// relying party never sees it.
 ///
 /// # Secret-memory hygiene (sq-u8a8, from the side-channel analysis CR-G5)
-/// [OPUS-4.8] The scalar is **zeroized on drop** so the key bytes do not linger
+/// The scalar is **zeroized on drop** so the key bytes do not linger
 /// in freed stack/heap memory after the `SecretKey` goes out of scope. arkworks'
 /// `JjScalar` (`ark-ed-on-bn254::Fr`) does not implement [`zeroize::Zeroize`], so
 /// we cannot derive it; instead a manual [`Drop`] overwrites the scalar's
@@ -348,7 +348,7 @@ impl PublicKey {
 #[derive(Clone)]
 pub struct SecretKey(pub JjScalar);
 
-// [OPUS-4.8] sq-u8a8: zeroize the secret scalar on drop. `JjScalar` is not
+// sq-u8a8: zeroize the secret scalar on drop. `JjScalar` is not
 // `Zeroize`, so we best-effort scrub its canonical byte image and overwrite the
 // field element with zero. This is hygiene, not a protocol change — the key
 // behaves identically for its whole lifetime; only its drop is scrubbed.
@@ -370,7 +370,7 @@ impl Drop for SecretKey {
     }
 }
 
-// [OPUS-4.8] sq-u8a8: manual `Debug` that REDACTS the secret scalar. A derived
+// sq-u8a8: manual `Debug` that REDACTS the secret scalar. A derived
 // `Debug` would print the raw key; a stray `{:?}` (log line, panic, failed
 // `assert_eq!`) would then leak it. (The old derive was `Debug` only because the
 // type was a simple newtype; redacting it is pure hygiene — no caller relies on
@@ -382,7 +382,7 @@ impl std::fmt::Debug for SecretKey {
 }
 
 impl SecretKey {
-    /// [OPUS-4.8] sq-u8a8: constant-time equality of two secret keys, comparing
+    /// sq-u8a8: constant-time equality of two secret keys, comparing
     /// their canonical little-endian scalar bytes via [`subtle::ConstantTimeEq`]
     /// so the comparison time does not depend on WHERE two keys first differ.
     ///
@@ -413,7 +413,7 @@ pub struct Signature {
 
 impl SecretKey {
     /// Derive the public key `pk = sk·G`.
-    // [OPUS-5] sq-j3b9: `sk` is the long-term secret, so the multiplication goes
+    // sq-j3b9: `sk` is the long-term secret, so the multiplication goes
     // through the scalar-independent ladder (`crate::ct::mul_ct`) rather than
     // arkworks' `if bit { add }` double-and-add. Value-identical; see `crate::ct`
     // for the bounded claim (this is NOT "constant-time signing").
@@ -426,7 +426,7 @@ impl SecretKey {
     /// convenience so callers in crates without an `ark` dependency can mint a
     /// key without touching the curve types. NOT for production key generation
     /// (use OS entropy). Distinct seeds give distinct keys.
-    // [OPUS-4.8] audit #3 test/tooling helper.
+    // audit #3 test/tooling helper.
     pub fn from_seed(seed: u64) -> Self {
         use ark_std::rand::SeedableRng;
         let mut rng = ark_std::rand::rngs::StdRng::seed_from_u64(seed);
@@ -450,7 +450,7 @@ impl SecretKey {
     /// nonce collision. Production keys must still be generated from OS entropy
     /// (see [`SecretKey::from_seed`]'s warning); deterministic nonces only remove
     /// the *signing-time* entropy requirement, exactly as RFC6979 does for ECDSA.
-    // [OPUS-4.8] audit #3 codex #4: deterministic (sk, m) nonce, no caller seed.
+    // audit #3 codex #4: deterministic (sk, m) nonce, no caller seed.
     pub fn sign_commitment(&self, commitment: &Fr) -> String {
         let sig = sign_deterministic(self, &commitment_message(commitment));
         signature_to_hex(&sig)
@@ -460,7 +460,7 @@ impl SecretKey {
     /// signature hex. The signed message is [`commitment_message_with_salt`], so
     /// the salt under which the graph was committed is issuer-attested. Same
     /// deterministic `(sk, m)` nonce discipline as [`Self::sign_commitment`].
-    // [OPUS-4.8] audit #9: salt-bound issuance.
+    // audit #9: salt-bound issuance.
     pub fn sign_commitment_with_salt(&self, commitment: &Fr, salt: &Fr) -> String {
         let sig = sign_deterministic(self, &commitment_message_with_salt(commitment, salt));
         signature_to_hex(&sig)
@@ -472,7 +472,7 @@ impl SecretKey {
     /// reference (list id + index + version) is issuer-attested and cannot be
     /// omitted or forged by the prover. Same deterministic `(sk, m)` nonce
     /// discipline as [`Self::sign_commitment`].
-    // [OPUS-4.8] audit #12: status-bound issuance.
+    // audit #12: status-bound issuance.
     pub fn sign_commitment_with_status(
         &self,
         commitment: &Fr,
@@ -504,8 +504,8 @@ impl SecretKey {
     /// with `HolderBindingPolicy::require_binding()` additionally rejects a bearer
     /// credential (`HolderBindingMissing`). Research-grade, NOT externally audited
     /// (sq-qhy4) — no soundness or privacy property is claimed as achieved.
-    // [OPUS-4.8] sq-y464 (HolderPoP T1): holder-bound issuance.
-    // [OPUS-5] sq-sg37 (HolderPoP T8): deferral note retired — T3/sq-z8s7 landed.
+    // sq-y464 (HolderPoP T1): holder-bound issuance.
+    // sq-sg37 (HolderPoP T8): deferral note retired — T3/sq-z8s7 landed.
     pub fn sign_commitment_with_holder(
         &self,
         commitment: &Fr,
@@ -530,7 +530,7 @@ impl SecretKey {
 /// leaks `sk`, so no signing-time entropy is needed and seed-reuse is impossible
 /// by construction (there is no seed). Both this and the in-circuit-recomputable
 /// challenge live in the same base field, keeping the scheme circuit-friendly.
-// [OPUS-4.8] audit #3 codex #4.
+// audit #3 codex #4.
 fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     use subtle::{ConditionallySelectable, ConstantTimeEq};
     use zeroize::Zeroizing;
@@ -553,14 +553,14 @@ fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     let k_base_int = Zeroizing::new(k_base.into_bigint());
     let k = Zeroizing::new(reduce_limbs::<JjScalar>(&k_base_int.0));
 
-    // [OPUS-4.8] sq-8jv7: guard the degenerate `k == 0` (would make `R` the
+    // sq-8jv7: guard the degenerate `k == 0` (would make `R` the
     // identity) WITHOUT a secret-dependent branch in our own code. The old
     // `if k.is_zero() { .. } else { .. }` selected on the secret nonce; here we
     // ALWAYS compute the re-fold candidate `k2` and then `subtle`-select it only
     // when `k == 0`, so the control flow our code emits is data-independent of
     // the secret nonce. (The `k == 0` event is itself negligibly rare — ~2^-251
     // for a 251-bit scalar field — so this is defence-in-depth, not a measured
-    // leak. [OPUS-5] sq-j3b9 has since moved the scalar mul `G·k` onto the
+    // leak. sq-j3b9 has since moved the scalar mul `G·k` onto the
     // fixed-width `crate::ct::mul_ct` ladder; the remaining residual is the
     // arkworks scalar arithmetic `e·sk.0` and the underlying field ops, which
     // sparq does NOT assert constant-time — see the module CONSTANT-TIME POSTURE
@@ -599,7 +599,7 @@ fn reduce_limbs<F: PrimeField>(limbs: &[u64]) -> F {
 /// only ever calls [`verify`]. Equivalent in shape to `sign` but with the
 /// nonce pinned, so it is replay-stable and seed-reuse-proof.
 //
-// # Constant-time posture (CR-G5 / sq-8jv7 / sq-j3b9) [OPUS-5]
+// # Constant-time posture (CR-G5 / sq-8jv7 / sq-j3b9)
 // Still NOT asserted constant-time. The secret-dependent SHAPE is now sparq's:
 // [`derive_nonce`]'s `k == 0` guard is branchless (sq-8jv7) and `G·k` goes
 // through the fixed-width `crate::ct::mul_ct` ladder rather than arkworks'
@@ -607,11 +607,11 @@ fn reduce_limbs<F: PrimeField>(limbs: &[u64]) -> F {
 // and every underlying field operation remain arkworks ops sparq does not
 // assert are constant-time — the residual (see the module CONSTANT-TIME POSTURE
 // note), LOW today by issuance-side placement.
-// [OPUS-4.8] audit #3 codex #4.
+// audit #3 codex #4.
 pub fn sign_deterministic(sk: &SecretKey, m: &Fr) -> Signature {
     let g = EdwardsProjective::generator();
     let k = derive_nonce(sk, m);
-    // [OPUS-5] sq-j3b9: `k` is the secret nonce — recovering even a few of its
+    // sq-j3b9: `k` is the secret nonce — recovering even a few of its
     // bits over several signatures recovers `sk` — so `R = G·k` goes through the
     // scalar-independent ladder, not arkworks' bit-branching double-and-add.
     let r_pt = crate::ct::mul_ct(&g, &k).into_affine();
@@ -629,7 +629,7 @@ pub fn sign_deterministic(sk: &SecretKey, m: &Fr) -> Signature {
 /// verify (single source of truth, mirroring the `verify_*_relation` discipline
 /// in the noir-optimisation skill).
 fn challenge(r: &Affine<EdwardsConfig>, pk: &Affine<EdwardsConfig>, m: &Fr) -> JjScalar {
-    // [OPUS-4.8] codex #2 (false positive, confirmed): in ark-ec 0.5
+    // codex #2 (false positive, confirmed): in ark-ec 0.5
     // `AffineRepr::xy()` returns `Option<(Self::BaseField, Self::BaseField)>` —
     // OWNED `BaseField` values, not references (see ark-ec-0.5.0
     // models/twisted_edwards/affine.rs:164). `BaseField == Fr` here, so the
@@ -678,7 +678,7 @@ pub fn commitment_message(commitment: &Fr) -> Fr {
 /// `encode::salt_from_bytes`) rather than on an unenforced honest-ingest
 /// convention. A forger who reuses a salt cannot obtain a valid issuer signature
 /// over the reused `(C(G), salt)` pair.
-// [OPUS-4.8] audit #9: salt-bound commitment message.
+// audit #9: salt-bound commitment message.
 const SIG_DOMAIN_COMMITMENT_SALT: u64 = 0x5a4b_5349_475f_4332; // "ZKSIG_C2"
 pub fn commitment_message_with_salt(commitment: &Fr, salt: &Fr) -> Fr {
     poseidon2::hash(&[Fr::from(SIG_DOMAIN_COMMITMENT_SALT), *commitment, *salt])
@@ -696,7 +696,7 @@ pub fn commitment_message_with_salt(commitment: &Fr, salt: &Fr) -> Fr {
 /// verifier hashes the disclosed `manifest.revocation.status_list` IRI the same
 /// way and asserts equality, so the in-the-clear IRI is bound). The index and
 /// version enter as field elements directly.
-// [OPUS-4.8] audit #12: status-list reference digest.
+// audit #12: status-list reference digest.
 pub fn status_ref_digest(list_id: &Fr, index: u64, version: u64) -> Fr {
     const SIG_DOMAIN_STATUS_REF: u64 = 0x5a4b_5349_475f_5352; // "ZKSIG_SR"
     poseidon2::hash(&[
@@ -729,7 +729,7 @@ pub fn status_ref_digest(list_id: &Fr, index: u64, version: u64) -> Fr {
 /// (the same hash the commitment + Merkle layers use). Issuer and verifier (and
 /// the circuit) all compute it identically, so a drift cannot make a wrong
 /// commitment verify (single source of truth).
-// [OPUS-4.8] sq-ayv: hiding index commitment (issuer-signed in place of the clear index).
+// sq-ayv: hiding index commitment (issuer-signed in place of the clear index).
 pub fn status_index_commitment(index: u64, blinding: &Fr) -> Fr {
     const SIG_DOMAIN_STATUS_IDX_COMMIT: u64 = 0x5a4b_5349_475f_4943; // "ZKSIG_IC"
     poseidon2::hash(&[
@@ -745,7 +745,7 @@ pub fn status_index_commitment(index: u64, blinding: &Fr) -> Fr {
 /// cross-substituted for a status/index/holder/credential commitment. (The
 /// Noir-side circuit exposes the identical byte tag under the name
 /// `JOIN_DOMAIN`.)
-// [OPUS-4.8] sq-bwwl / sq-sco0: hidden-join value-commitment domain tag.
+// sq-bwwl / sq-sco0: hidden-join value-commitment domain tag.
 pub const SIG_DOMAIN_JOIN: u64 = 0x5a4b_5349_475f_4a4e; // "ZKSIG_JN"
 
 /// A HIDING commitment to a hidden cross-credential join VALUE
@@ -770,7 +770,7 @@ pub const SIG_DOMAIN_JOIN: u64 = 0x5a4b_5349_475f_4a4e; // "ZKSIG_JN"
 /// pairwise `join_eq`, composing pairwise equalities into an N-way join without
 /// ever disclosing the value. Issuer/verifier/circuit all compute it identically
 /// (single source of truth), so a drift cannot make a wrong commitment verify.
-// [OPUS-4.8] sq-bwwl / sq-sco0: hidden-join value commitment (mirrors the Noir
+// sq-bwwl / sq-sco0: hidden-join value commitment (mirrors the Noir
 // `join::join_value_commitment` gadget — h3(SIG_DOMAIN_JOIN, value, blinding)).
 pub fn join_value_commitment(value: &Fr, blinding: &Fr) -> Fr {
     poseidon2::hash(&[Fr::from(SIG_DOMAIN_JOIN), *value, *blinding])
@@ -791,7 +791,7 @@ pub fn join_value_commitment(value: &Fr, blinding: &Fr) -> Fr {
 /// index in-circuit (see [`status_index_commitment`]). So the index is disclosed
 /// in NEITHER the signed object NOR any clear field, yet revocation is still
 /// checked against the authoritative root.
-// [OPUS-4.8] sq-ayv: committed-index status-reference digest.
+// sq-ayv: committed-index status-reference digest.
 pub fn status_ref_commit_digest(list_id: &Fr, index_commitment: &Fr, version: u64) -> Fr {
     const SIG_DOMAIN_STATUS_REF_COMMIT: u64 = 0x5a4b_5349_475f_5343; // "ZKSIG_SC"
     poseidon2::hash(&[
@@ -802,7 +802,7 @@ pub fn status_ref_commit_digest(list_id: &Fr, index_commitment: &Fr, version: u6
     ])
 }
 
-/// [OPUS-4.8] sq-6qe: a hiding COMMITMENT to a credential's status-list
+/// sq-6qe: a hiding COMMITMENT to a credential's status-list
 /// `(list_id, version)` reference — the IRI/version-hiding analogue of the clear
 /// `list_id` + `version` that [`status_ref_commit_digest`] still folds in the
 /// clear. The fully-hidden committed-index revocation path (sq-6qe) signs over
@@ -832,8 +832,8 @@ pub fn status_ref_commit_digest(list_id: &Fr, index_commitment: &Fr, version: u6
 /// soundness or privacy property is claimed as achieved.
 ///
 /// Maps to a Noir `Poseidon2::hash([DOMAIN, list_id, version, ref_blinding], 4)`.
-// [OPUS-4.8] sq-6qe: hiding (list, version) reference commitment.
-// [OPUS-5] sq-kndw: deferral note retired — the fully-hidden member is compiled.
+// sq-6qe: hiding (list, version) reference commitment.
+// sq-kndw: deferral note retired — the fully-hidden member is compiled.
 pub fn status_ref_commitment(list_id: &Fr, version: u64, ref_blinding: &Fr) -> Fr {
     const SIG_DOMAIN_STATUS_REF_COMMITMENT: u64 = 0x5a4b_5349_475f_5243; // "ZKSIG_RC"
     poseidon2::hash(&[
@@ -844,7 +844,7 @@ pub fn status_ref_commitment(list_id: &Fr, version: u64, ref_blinding: &Fr) -> F
     ])
 }
 
-/// [OPUS-4.8] sq-6qe: a domain-separated digest of a credential's status-list
+/// sq-6qe: a domain-separated digest of a credential's status-list
 /// reference that binds a COMMITMENT to BOTH the `(list, version)` reference AND
 /// the index — the fully-hidden analogue of [`status_ref_commit_digest`] (which
 /// still folds the clear `list_id` + `version`). The issuer folds
@@ -870,8 +870,8 @@ pub fn status_ref_commitment(list_id: &Fr, version: u64, ref_blinding: &Fr) -> F
 /// (sq-qhy4) — no soundness or privacy property is claimed as achieved.
 ///
 /// Maps to a Noir `Poseidon2::hash([DOMAIN, ref_commitment, index_commitment], 3)`.
-// [OPUS-4.8] sq-6qe: fully-committed (list+version+index hidden) status-reference digest.
-// [OPUS-5] sq-kndw: deferral note retired — the fully-hidden path is landed.
+// sq-6qe: fully-committed (list+version+index hidden) status-reference digest.
+// sq-kndw: deferral note retired — the fully-hidden path is landed.
 pub fn status_ref_fully_committed_digest(ref_commitment: &Fr, index_commitment: &Fr) -> Fr {
     const SIG_DOMAIN_STATUS_REF_FULL_COMMIT: u64 = 0x5a4b_5349_475f_4643; // "ZKSIG_FC"
     poseidon2::hash(&[
@@ -881,7 +881,7 @@ pub fn status_ref_fully_committed_digest(ref_commitment: &Fr, index_commitment: 
     ])
 }
 
-/// [OPUS-4.8] sq-6qe: the relying party's ACCEPTED-SET Merkle LEAF for a
+/// sq-6qe: the relying party's ACCEPTED-SET Merkle LEAF for a
 /// `(list_id, version, status_list_root)` triple (sub-option A of the sq-6qe
 /// design — see `research/zk-statuslist-hide-iri-version.md`). The fully-hidden
 /// revocation circuit proves membership of the credential's hidden `(list_id,
@@ -900,7 +900,7 @@ pub fn status_ref_fully_committed_digest(ref_commitment: &Fr, index_commitment: 
 ///
 /// Maps to the in-circuit leaf `Poseidon2::hash([DOMAIN, list_id, version,
 /// status_list_root], 4)` (the accepted-set analogue of `issuer.nr`'s `key_leaf`).
-// [OPUS-4.8] sq-6qe: accepted (list, version, root)-set Merkle leaf.
+// sq-6qe: accepted (list, version, root)-set Merkle leaf.
 pub fn accepted_status_leaf(list_id: &Fr, version: u64, status_list_root: &Fr) -> Fr {
     const SIG_DOMAIN_ACCEPTED_STATUS_LEAF: u64 = 0x5a4b_5349_475f_414c; // "ZKSIG_AL"
     poseidon2::hash(&[
@@ -915,7 +915,7 @@ pub fn accepted_status_leaf(list_id: &Fr, version: u64, status_list_root: &Fr) -
 /// in-the-clear `manifest.revocation.status_list` IRI can be bound under the
 /// issuer signature. Issuer and verifier both call this, so a drift cannot make
 /// a wrong IRI verify (single source of truth).
-// [OPUS-4.8] audit #12.
+// audit #12.
 pub fn status_list_id_to_field(list_iri: &str) -> Fr {
     const SIG_DOMAIN_STATUS_LIST_IRI: u64 = 0x5a4b_5349_475f_4c49; // "ZKSIG_LI"
     // Fold the UTF-8 bytes 31 at a time (each chunk fits a BN254 field element
@@ -950,7 +950,7 @@ pub fn status_list_id_to_field(list_iri: &str) -> Fr {
 /// checks the signature, (b) checks the disclosed status-list snapshot's
 /// bit[index] is UNSET, and (c) checks the snapshot version is within a
 /// freshness window. See `sparq_zk_compose::verifier`.
-// [OPUS-4.8] audit #12: status-bound commitment message.
+// audit #12: status-bound commitment message.
 const SIG_DOMAIN_COMMITMENT_STATUS: u64 = 0x5a4b_5349_475f_4333; // "ZKSIG_C3"
 pub fn commitment_message_with_status(commitment: &Fr, salt: &Fr, status_ref: &Fr) -> Fr {
     poseidon2::hash(&[
@@ -964,7 +964,7 @@ pub fn commitment_message_with_status(commitment: &Fr, salt: &Fr, status_ref: &F
 /// A holder key that cannot be digested into a binding (sq-y464, HolderPoP T1).
 /// Fails closed — mirrors the [`verify`] / [`public_key_from_hex`] discipline that
 /// the curve identity is never an admissible key.
-// [OPUS-4.8] sq-y464 (HolderPoP T1): holder-key digest error (fail-closed).
+// sq-y464 (HolderPoP T1): holder-key digest error (fail-closed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HolderKeyError {
     /// The holder public key is the curve IDENTITY (neutral element): it has no
@@ -1019,7 +1019,7 @@ impl std::error::Error for HolderKeyError {}
 /// [`commitment_message_with_holder`] and [`SecretKey::sign_commitment_with_holder`]
 /// take the already-validated `&Fr` digest, so the whole holder-binding path is
 /// fail-closed on an identity key without any infallible `(0, 0)` back-door.
-// [OPUS-4.8] sq-y464 (HolderPoP T1): domain-separated holder-public-key digest.
+// sq-y464 (HolderPoP T1): domain-separated holder-public-key digest.
 const SIG_DOMAIN_HOLDER_KEY: u64 = 0x5a4b_5349_475f_484b; // "ZKSIG_HK"
 pub fn holder_key_digest(hpk: &PublicKey) -> Result<Fr, HolderKeyError> {
     // Reject the curve identity (no affine coordinates). Do NOT fold (0, 0): an
@@ -1077,8 +1077,8 @@ pub fn holder_key_digest(hpk: &PublicKey) -> Result<Fr, HolderKeyError> {
 /// the disclosed `(C(G), salt, status_ref, holder_pk_digest)`, so a drift cannot
 /// make a wrong holder binding verify (single source of truth, matching the
 /// audit-#12 message family).
-// [OPUS-4.8] sq-y464 (HolderPoP T1): holder-bound commitment message (new ZKSIG_C4 tag).
-// [OPUS-5] sq-sg37 (HolderPoP T8): T2/T3/T5/T6 deferral notes retired — all landed.
+// sq-y464 (HolderPoP T1): holder-bound commitment message (new ZKSIG_C4 tag).
+// sq-sg37 (HolderPoP T8): T2/T3/T5/T6 deferral notes retired — all landed.
 const SIG_DOMAIN_COMMITMENT_HOLDER: u64 = 0x5a4b_5349_475f_4334; // "ZKSIG_C4"
 pub fn commitment_message_with_holder(
     commitment: &Fr,
@@ -1115,8 +1115,8 @@ pub fn commitment_message_with_holder(
 /// B's credential. The relying party still anchors the holder key in an EXTERNAL
 /// holder registry (mirroring the issuer key-set `K`), so an absent/untrusted/forged
 /// PoP fails closed.
-// [OPUS-4.8] sq-cwq: holder proof-of-possession message (challenge-bound).
-// [OPUS-5] sq-sg37 (HolderPoP T8): deferral note retired — the binding is enforced.
+// sq-cwq: holder proof-of-possession message (challenge-bound).
+// sq-sg37 (HolderPoP T8): deferral note retired — the binding is enforced.
 pub fn holder_pop_message(challenge: &Fr) -> Fr {
     const SIG_DOMAIN_HOLDER_POP: u64 = 0x5a4b_5349_475f_4850; // "ZKSIG_HP"
     poseidon2::hash(&[Fr::from(SIG_DOMAIN_HOLDER_POP), *challenge])
@@ -1128,7 +1128,7 @@ impl SecretKey {
     /// message is [`holder_pop_message`], matching the verifier-side
     /// `bind_holder_pop` check. Same deterministic `(sk, m)` nonce discipline as
     /// [`Self::sign_commitment`] (no signing-time entropy, seed-reuse-proof).
-    // [OPUS-4.8] sq-cwq: holder-side PoP signing.
+    // sq-cwq: holder-side PoP signing.
     pub fn sign_holder_pop(&self, challenge: &Fr) -> String {
         let sig = sign_deterministic(self, &holder_pop_message(challenge));
         signature_to_hex(&sig)
@@ -1146,7 +1146,7 @@ impl SecretKey {
 /// ([`sign_deterministic`] / [`SecretKey::sign_commitment`]); this remains only
 /// to exercise [`verify`] against an independently-nonce'd honest signature in
 /// this crate's own tests.
-// [OPUS-4.8] codex 2216 MEDIUM: random-nonce signer is test-only; no public caller-RNG API.
+// codex 2216 MEDIUM: random-nonce signer is test-only; no public caller-RNG API.
 #[cfg(test)]
 pub(crate) fn sign<R: ark_std::rand::RngCore + ark_std::rand::CryptoRng>(
     sk: &SecretKey,
@@ -1155,7 +1155,7 @@ pub(crate) fn sign<R: ark_std::rand::RngCore + ark_std::rand::CryptoRng>(
 ) -> Signature {
     let g = EdwardsProjective::generator();
     let k = JjScalar::rand(rng);
-    // [OPUS-5] sq-j3b9: this test-only signer deliberately KEEPS the arkworks
+    // sq-j3b9: this test-only signer deliberately KEEPS the arkworks
     // multiplication. `sk.public_key()` below now goes through the ladder, so
     // every `sign` → `verify` test in this module cross-checks a ladder-derived
     // public key against an arkworks-derived `R` — an independent-path check the
@@ -1172,7 +1172,7 @@ pub(crate) fn sign<R: ark_std::rand::RngCore + ark_std::rand::CryptoRng>(
 /// requires — the relying party resolves `pk` from the disclosed key-set `K`,
 /// recomputes `e`, and checks this equation over the commitment message.
 pub fn verify(pk: &PublicKey, m: &Fr, sig: &Signature) -> bool {
-    // [OPUS-4.8] codex #3: reject the IDENTITY public key. The identity point is
+    // codex #3: reject the IDENTITY public key. The identity point is
     // on-curve and in-subgroup, but `e·pk = 0` for it, so the verification
     // equation collapses to `s·G == R`; a forger picks any `s`, sets `R = s·G`,
     // and a signature verifies for the identity key under ANY message. Rejecting
@@ -1200,7 +1200,7 @@ pub fn verify(pk: &PublicKey, m: &Fr, sig: &Signature) -> bool {
 }
 
 // --- in-circuit witness bridge (sq-z9l) -----------------------------------
-// [OPUS-4.8] sq-z9l: the witness an in-circuit Schnorr verifier needs. The
+// sq-z9l: the witness an in-circuit Schnorr verifier needs. The
 // in-circuit gadget (`zk/compose/compose_core/src/issuer.nr`) verifies
 // `s*G == R + e*pk` over Baby-JubJub with point coordinates in the BASE field
 // (= Noir `Field` = `crate::field::Fr`) and the SCALAR `e` reduced mod the
@@ -1213,7 +1213,7 @@ impl PublicKey {
     /// `Field`). `None` for the identity (no affine coordinates) — which is never
     /// a usable key (rejected at parse/verify, see [`verify`]). The in-circuit
     /// gadget and the key-set Merkle leaf both work over these coordinates.
-    // [OPUS-4.8] sq-z9l.
+    // sq-z9l.
     pub fn coords(&self) -> Option<(Fr, Fr)> {
         self.0.xy()
     }
@@ -1224,9 +1224,9 @@ impl PublicKey {
 /// the identity key (no coordinates). The relying party commits its authoritative
 /// KeySet K with this leaf, and the in-circuit membership proof folds it to the
 /// public root.
-// [OPUS-4.8] sq-z9l: key-set Merkle leaf (host mirror of issuer.nr::key_leaf).
+// sq-z9l: key-set Merkle leaf (host mirror of issuer.nr::key_leaf).
 pub fn key_set_leaf(pk: &PublicKey) -> Option<Fr> {
-    // [OPUS-4.8] sq-l15mi (audit H-1): never commit a torsion / low-order /
+    // sq-l15mi (audit H-1): never commit a torsion / low-order /
     // off-curve key into the key set `K`. `PublicKey`'s inner field is `pub`, so a
     // key can be constructed around such a point directly (bypassing
     // `public_key_from_hex`); binding it into `K` would let the hidden-issuer
@@ -1259,7 +1259,7 @@ fn jj_scalar_to_base(s: &JjScalar) -> Fr {
 /// `e_base = e + e_k * L` with `e < L` and `e_k < 8` (the soundness binding the
 /// circuit re-checks). All as base-field [`Fr`] elements (= Noir `Field`).
 ///
-/// [OPUS-4.8] sq-ru0yx (internal re-audit M-1): the circuit's reduction binding
+/// sq-ru0yx (internal re-audit M-1): the circuit's reduction binding
 /// ALSO enforces a no-wrap bound (`issuer.nr::challenge_scalar` step 4) — when
 /// `e_k == 7` it requires `e < q_base - 7*L`, closing the field-wrap alternative
 /// `(e_base + q_base - 7*L, 7)` that the bare `e + e_k*L == e_base` identity would
@@ -1291,7 +1291,7 @@ pub struct InCircuitSchnorrWitness {
 /// (the circuit does), it only lays out the witness fields. Callers that want a
 /// sanity check should also call [`verify`].
 pub fn in_circuit_witness(pk: &PublicKey, m: &Fr, sig: &Signature) -> Option<InCircuitSchnorrWitness> {
-    // [OPUS-4.8] sq-l15mi (audit H-1): reject a torsion / low-order / off-curve key
+    // sq-l15mi (audit H-1): reject a torsion / low-order / off-curve key
     // before laying out a circuit witness. The in-circuit `schnorr_verify` now
     // enforces `[L]·pk == O`, so a torsion-key witness would be unprovable; refuse
     // to emit it here (fail-closed; subsumes the earlier identity-only `is_zero`
@@ -1347,7 +1347,7 @@ pub fn in_circuit_witness(pk: &PublicKey, m: &Fr, sig: &Signature) -> Option<InC
 /// ([`in_circuit_witness`]'s `s`/`e`): a canonical Baby-JubJub scalar (`< L`)
 /// maps injectively into the larger base field via its big-endian bytes, so the
 /// in-circuit `hsk·G` is computed over the same integer the holder signs with.
-// [OPUS-4.8] sq-xqfg (HolderPoP T5): in-circuit holder-PoK witness.
+// sq-xqfg (HolderPoP T5): in-circuit holder-PoK witness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InCircuitHolderPokWitness {
     /// Holder secret scalar `hsk` (canonical, `< L`), embedded in the base field.
@@ -1369,7 +1369,7 @@ pub struct InCircuitHolderPokWitness {
 /// member proves over; it does not itself prove anything (the circuit does). The
 /// digest it returns is exactly [`holder_key_digest`]`(hsk.public_key())`, so the
 /// host and circuit agree bit-for-bit (the cross-check T6 relies on).
-// [OPUS-4.8] sq-xqfg (HolderPoP T5).
+// sq-xqfg (HolderPoP T5).
 pub fn in_circuit_holder_witness(hsk: &SecretKey) -> Option<InCircuitHolderPokWitness> {
     let hpk = hsk.public_key();
     let (hpk_x, hpk_y) = hpk.coords()?;
@@ -1400,7 +1400,7 @@ pub fn public_key_from_hex(s: &str) -> Option<PublicKey> {
     let bytes = from_hex(s)?;
     let pt = Affine::<EdwardsConfig>::deserialize_compressed(&bytes[..]).ok()?;
     let pk = PublicKey(pt);
-    // [OPUS-4.8] codex #3 + sq-l15mi (audit H-1): fail-closed unless the key is a
+    // codex #3 + sq-l15mi (audit H-1): fail-closed unless the key is a
     // genuine prime-order, non-identity, on-curve point. A signature is universally
     // forgeable for the identity key (e·pk = 0), and a torsion / low-order key
     // (Baby-JubJub cofactor 8) admits a no-secret forgery on the hidden-issuer path
@@ -1453,7 +1453,7 @@ fn to_hex(bytes: &[u8]) -> String {
 
 fn from_hex(s: &str) -> Option<Vec<u8>> {
     let s = s.strip_prefix("0x").unwrap_or(s);
-    // [OPUS-4.8] sq-hbg7: stable-1.96 clippy `manual_is_multiple_of`.
+    // sq-hbg7: stable-1.96 clippy `manual_is_multiple_of`.
     if !s.len().is_multiple_of(2) {
         return None;
     }
@@ -1531,7 +1531,7 @@ mod tests {
         assert!(verify(&pk, &m, &sig), "honest signature must verify");
     }
 
-    // [OPUS-4.8] sq-u8a8: the constant-time secret-key equality returns the SAME
+    // sq-u8a8: the constant-time secret-key equality returns the SAME
     // boolean as a value equality on the underlying scalars — for an equal pair
     // (same seed) and an unequal pair. This is the "CT-eq agrees with the prior
     // `==`" gate; nothing in the protocol calls `ct_eq` today (the verifier path
@@ -1557,7 +1557,7 @@ mod tests {
         assert_eq!(eq_diff, sk_a.0 == sk_b.0);
     }
 
-    // [OPUS-5] sq-j3b9: routing the two SECRET-scalar multiplications through the
+    // sq-j3b9: routing the two SECRET-scalar multiplications through the
     // fixed-width `crate::ct::mul_ct` ladder must be a pure timing-shape change —
     // every derived key and every signature has to be BYTE-IDENTICAL to what the
     // arkworks variable-time multiplication produced. This pins both halves
@@ -1591,7 +1591,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-u8a8: compile + behaviour check that `SecretKey` implements
+    // sq-u8a8: compile + behaviour check that `SecretKey` implements
     // `Zeroize` and that scrubbing resets the scalar to zero. (A `SecretKey` also
     // zeroizes on `Drop`; this asserts the scrub itself, which `Drop` calls.)
     #[test]
@@ -1669,7 +1669,7 @@ mod tests {
 
     // --- audit #3 codex #3: identity-key forgery rejection ----------------
 
-    /// [OPUS-4.8] codex #3: a signature is universally forgeable for the IDENTITY
+    /// codex #3: a signature is universally forgeable for the IDENTITY
     /// public key (`e·pk = 0` ⇒ the equation is `s·G == R`, satisfied by any `s`
     /// with `R = s·G`). Such a forgery — valid for ANY message — MUST be rejected
     /// by `verify`. Before the fix this returned `true`.
@@ -1701,7 +1701,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-l15mi (audit H-1): a torsion / low-order Baby-JubJub key
+    /// sq-l15mi (audit H-1): a torsion / low-order Baby-JubJub key
     /// (cofactor 8) must be rejected at every host boundary a key could enter a
     /// key-set `K` or a circuit witness through. The order-2 point `(0, -1)` is
     /// on-curve, non-identity, and NOT in the prime-order subgroup, so it slips past
@@ -1762,7 +1762,7 @@ mod tests {
 
     // --- audit #3 codex #4: deterministic nonce (no caller seed) ----------
 
-    /// [OPUS-4.8] codex #4: `sign_commitment` derives the nonce from `(sk, m)`,
+    /// codex #4: `sign_commitment` derives the nonce from `(sk, m)`,
     /// so it is deterministic (replay-stable) and seed-reuse is impossible by
     /// construction. The signature verifies, and re-signing the same commitment
     /// yields byte-identical output.
@@ -1781,7 +1781,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-8jv7: the branchless degenerate-`k` guard in `derive_nonce`
+    /// sq-8jv7: the branchless degenerate-`k` guard in `derive_nonce`
     /// is BEHAVIOURALLY IDENTICAL to the old `if k.is_zero()` select. In the
     /// non-degenerate case (overwhelmingly the only reachable case — `k == 0`
     /// has probability ~2^-251) the nonce equals the first PRF fold, so the
@@ -1812,7 +1812,7 @@ mod tests {
         assert!(verify(&pk, &m, &sig), "signature still verifies after CT rewrite");
     }
 
-    /// [OPUS-4.8] codex #4: distinct messages get DISTINCT nonces `R` — the
+    /// codex #4: distinct messages get DISTINCT nonces `R` — the
     /// property that makes seed-reuse key-extraction impossible (the old seeded
     /// API let a caller force `R1 == R2` across messages, leaking `sk`).
     #[test]
@@ -1825,7 +1825,7 @@ mod tests {
 
     // --- audit #12: status-bound commitment message ----------------------
 
-    /// [OPUS-4.8] audit #12: a status-bound signature verifies over the SAME
+    /// audit #12: a status-bound signature verifies over the SAME
     /// `(C(G), salt, status_ref)` and is REJECTED if any of the three differ —
     /// the property that makes an omitted/forged/swapped status reference (a
     /// different version, index, or list id) unverifiable.
@@ -1864,7 +1864,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-ayv: `status_index_commitment` is bit-identical to the
+    /// sq-ayv: `status_index_commitment` is bit-identical to the
     /// in-circuit `h3(SIG_DOMAIN_STATUS_IDX_COMMIT, index, blinding)` the
     /// `revoke_unset_d{depth}` member recomputes. The cross-binding (the index
     /// proven unset == the index the issuer committed to) rests on both computing
@@ -1880,7 +1880,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-ayv: a COMMITTED-index status-bound signature binds the index
+    /// sq-ayv: a COMMITTED-index status-bound signature binds the index
     /// COMMITMENT (not the clear index), is hiding (a different blinding => a
     /// different commitment for the same index), and the committed-digest domain
     /// is distinct from the clear-index digest (no substitution).
@@ -1919,7 +1919,7 @@ mod tests {
         assert_ne!(clear, committed, "clear-index and committed-index digests are domain-separated");
     }
 
-    /// [OPUS-4.8] sq-6qe: the `(list, version)` reference commitment is HIDING
+    /// sq-6qe: the `(list, version)` reference commitment is HIDING
     /// (a different blinding => a different commitment for the same list+version,
     /// so two presentations are unlinkable on the reference) and BINDING (a
     /// different list OR a different version => a different commitment).
@@ -1940,7 +1940,7 @@ mod tests {
         assert_ne!(rc, rc_other_list, "different list => different commitment");
     }
 
-    /// [OPUS-4.8] sq-6qe: a FULLY-HIDDEN status-bound signature binds BOTH the
+    /// sq-6qe: a FULLY-HIDDEN status-bound signature binds BOTH the
     /// reference commitment and the index commitment (neither list, version, nor
     /// index in the clear), and its digest domain is distinct from BOTH the
     /// clear-index (audit #12) and committed-index-clear-list (sq-ayv) digests, so
@@ -1984,7 +1984,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-6qe: the accepted `(list, version, status_list_root)`-set leaf
+    /// sq-6qe: the accepted `(list, version, status_list_root)`-set leaf
     /// binds all three atomically — any one differing changes the leaf, so a prover
     /// cannot pair one list's identity with another list's root (the sub-option-A
     /// soundness property). Also distinct from the reference commitment's domain.
@@ -2008,7 +2008,7 @@ mod tests {
         assert_ne!(leaf, rc, "accepted-set leaf and ref commitment are domain-separated");
     }
 
-    /// [OPUS-4.8] audit #12: the list-id hash is collision-resistant on distinct
+    /// audit #12: the list-id hash is collision-resistant on distinct
     /// IRIs and length-separated (a prefix cannot collide with a longer IRI).
     #[test]
     fn status_list_id_is_distinct_per_iri() {
@@ -2023,7 +2023,7 @@ mod tests {
 
     use crate::field::field_to_hex;
 
-    /// [OPUS-4.8] sq-z9l: the in-circuit witness reproduces the verify equation
+    /// sq-z9l: the in-circuit witness reproduces the verify equation
     /// AND the challenge-reduction binding the circuit re-checks. This is the
     /// host/circuit contract: `s*G == R + e*pk` (in base-field coordinates) and
     /// `e_base == e + e_k*L` with `e < L`, `e_k < 8`.
@@ -2065,7 +2065,7 @@ mod tests {
         assert_eq!(field_to_hex(&w.pk_x).len(), 66, "pk_x is a field hex");
     }
 
-    /// [OPUS-4.8] sq-z9l: the witness bridge declines the identity key (the
+    /// sq-z9l: the witness bridge declines the identity key (the
     /// circuit rejects it; the bridge returns None rather than emitting a
     /// degenerate witness).
     #[test]
@@ -2080,7 +2080,7 @@ mod tests {
 
     // --- sq-y464 (HolderPoP T1): holder-bound signed-message family ----------
 
-    /// [OPUS-4.8] sq-y464 (HolderPoP T1): `commitment_message_with_holder` is
+    /// sq-y464 (HolderPoP T1): `commitment_message_with_holder` is
     /// DETERMINISTIC (same inputs => same message), DOMAIN-SEPARATED from the
     /// audit-#12 status message over the same `(C(G), salt, status_ref)` (a distinct
     /// `ZKSIG_C4` tag, so a holder-bound attestation can never be cross-substituted
@@ -2122,7 +2122,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-y464 (HolderPoP T1): `holder_key_digest` is DETERMINISTIC and
+    /// sq-y464 (HolderPoP T1): `holder_key_digest` is DETERMINISTIC and
     /// distinguishes distinct holder keys, and is DOMAIN-SEPARATED from the issuer
     /// key-set Merkle leaf (`Poseidon2([x, y])`) over the same coordinates — so a
     /// holder-key digest and a key-set leaf can never be cross-substituted.
@@ -2151,7 +2151,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-y464 (HolderPoP T1): an issuer Schnorr-signs a holder-bound
+    /// sq-y464 (HolderPoP T1): an issuer Schnorr-signs a holder-bound
     /// message and the EXISTING `verify` accepts it (round-trip via the additive
     /// `sign_commitment_with_holder` path), AND the binding is REAL — a signature
     /// over the holder-bound message does NOT verify against the non-holder
@@ -2212,7 +2212,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-y464 (HolderPoP T1) — Copilot review on #124: the IDENTITY /
+    /// sq-y464 (HolderPoP T1) — Copilot review on #124: the IDENTITY /
     /// neutral holder key MUST be rejected by `holder_key_digest`, not silently
     /// digested as `(0, 0)`. `PublicKey`'s tuple field is `pub`, so an identity key
     /// is externally constructible and could reach this PUBLIC helper directly; a
@@ -2245,7 +2245,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-bwwl / sq-sco0: hidden-join value commitment.
+    // sq-bwwl / sq-sco0: hidden-join value commitment.
     #[test]
     fn join_value_commitment_is_deterministic_and_domain_separated() {
         let value = Fr::from(0x1234u64);
@@ -2273,7 +2273,7 @@ mod tests {
     }
 
     // --- sq-1hsl: the pluggable OFF-circuit signature seam ------------------
-    // [OPUS-4.8]
+    //
 
     /// A second, MOCK `IssuerSignatureScheme` that exercises the open seam
     /// WITHOUT any real cryptography: it "accepts" iff the signature hex equals a

@@ -6,7 +6,7 @@
 //! stateless evaluator — a `secx:` constraint still evaluates as an opaque
 //! custom-leftOperand block, fail-closed) plus the profile-recognition surface.
 //!
-//! [OPUS-4.8] sq-uor3g (epic sq-0dksu, Phase 4). 🤖 SPARQ agent —
+//! sq-uor3g (epic sq-0dksu, Phase 4). 🤖 SPARQ agent —
 //! security-properties ontology. Flag for re-review when Fable returns.
 #![cfg(feature = "secprop-leftoperands")]
 

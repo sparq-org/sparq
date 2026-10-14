@@ -1,4 +1,4 @@
-//! Shared ureq-3 SSRF-resolver helpers. [OPUS-4.8] sq-g2xs.
+//! Shared ureq-3 SSRF-resolver helpers. sq-g2xs.
 //!
 //! ureq 3 (the migration off the unmaintained `rustls-pemfile`, RUSTSEC-2025-0134) changed the
 //! [`Resolver`](ureq::unversioned::resolver::Resolver) trait: it now takes a parsed
@@ -21,7 +21,7 @@
 /// SSRF resolvers call this instead of a bare `allow.contains(host)`, so a PORT-SCOPED allowlist
 /// entry (`host:port`) re-opens a private host ONLY on its exact dialled port — byte-for-byte the
 /// same host:port matching the engine guard applies (one source of truth, bead sq-vbnyc). A
-/// host-level entry (no `:port`) still re-opens every port (backward compatible). [OPUS-4.8].
+/// host-level entry (no `:port`) still re-opens every port (backward compatible).
 pub(crate) fn allowlist_permits(
     allow: &std::collections::HashSet<String>,
     host: &str,
@@ -157,7 +157,7 @@ impl GuardedHttp {
     }
 }
 
-// [FABLE-5] sq-3dyje.6 (mutation-kill): direct unit tests for this `pub(crate)` module. The
+// sq-3dyje.6 (mutation-kill): direct unit tests for this `pub(crate)` module. The
 // shared resolve's own tests (URI parse, address filter, refusal kinds) live with
 // `resolve_vetted` in sparq-engine-service.
 #[cfg(test)]

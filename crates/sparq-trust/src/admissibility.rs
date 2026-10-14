@@ -75,7 +75,7 @@
 //! `sparq-reason` edge this crate already carries — **no new dependency**, and
 //! the lean default build is byte-identical with it OFF.
 //!
-//! [OPUS-4.8] sq-ufsi9 (epic sq-0dksu; design §4.3) — Phase 2. 🤖 SPARQ agent —
+//! sq-ufsi9 (epic sq-0dksu; design §4.3) — Phase 2. 🤖 SPARQ agent —
 //! security-properties ontology. Flag for re-review when Fable returns.
 
 use crate::secprop::SEC_PROP_NS;

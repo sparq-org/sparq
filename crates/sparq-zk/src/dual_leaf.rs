@@ -291,7 +291,7 @@ pub fn encode_double(literal: &Literal) -> Result<DualLeafComponents, DualLeafEr
     if literal.datatype().as_str() != XSD_DOUBLE {
         return Err(DualLeafError::NotValueLane(literal.to_string()));
     }
-    // [GPT-5.6] Same-leaf co-binding: validate the canonical lexical form before
+    // Same-leaf co-binding: validate the canonical lexical form before
     // asking Rust for its value. Rust deliberately accepts a wider language.
     let bits = parse_xsd_double_bits(literal.value())
         .ok_or_else(|| DualLeafError::NonCanonicalValue(literal.to_string()))?;
@@ -856,7 +856,7 @@ mod tests {
 
     #[test]
     fn double_rejects_non_canonical_lexicals() {
-        // [GPT-5.6] Audit regression: Rust's permissive `f64` parser accepts all
+        // Audit regression: Rust's permissive `f64` parser accepts all
         // of these, but none is in the canonical xsd:double lexical space.
         for lexical in [
             "inf", "Infinity", "+INF", "1.", "+.5", "01.5", "1e3", "1.0E+3",
