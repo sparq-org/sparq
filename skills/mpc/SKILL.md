@@ -290,6 +290,45 @@ let backend = sparq_mpc::ShamirBackend::new_seeded(3, 0xBEEF)?;   // determinist
 # Ok::<(), sparq_mpc::MpcError>(())
 ```
 
+### 6b. Let an ODRL preference exclude a protocol by its trust model (opt-in `secprop-annotations`)
+Issues #3275 / #6186. Each protocol's trust model ships as a machine-readable annotation graph
+(`crates/sparq-mpc/ontologies/secprop-mpc-methods.ttl`) carrying `secx:property`/`secx:level` claims on
+two **ordered** dimensions — `secx:AdversaryModel` (`Malicious ⊐ Covert ⊐ SemiHonest`) and
+`secx:CorruptionThreshold` (`DishonestMajority ⊐ HonestMajority ⊐ SuperHonestMajority`, ordered by how
+much corruption is *tolerated*). `secx:assumption` is kept as human-facing provenance; the **level** is
+what the shared N3 reasoner reads, because `sparq_trust::admissibility` keys strictly on
+`(dimension, level)` and discharges nothing from an assumption triple.
+
+```toml
+sparq-mpc   = { path = "crates/sparq-mpc",   features = ["secprop-annotations"] }
+sparq-trust = { path = "crates/sparq-trust", features = ["secprop-admissibility"] }
+```
+```rust,ignore
+let policy = "\
+<urn:c1> odrl:leftOperand secx:requiresAdversaryModel ; odrl:operator odrl:gteq ; \
+         odrl:rightOperand secx:Malicious .\n";
+let a = sparq_trust::admissible(
+    sparq_mpc::secprop::SHAMIR_HONEST_MAJORITY_V1,
+    &["urn:c1"],
+    policy,
+    sparq_mpc::secprop::annotations_n3(),
+)?;
+assert!(!a.admissible);                 // semi-honest only ⇒ excluded, with `a.unsatisfied` naming why
+```
+
+`sparq_mpc::secprop::ANNOTATED_PROTOCOLS` lists the annotated protocol IRIs. **There is no crate-local
+exclusion predicate** — the one reasoner is `sparq_trust::admissible`, and the exclusion is pinned
+end-to-end by `crates/sparq-mpc/tests/secprop_admissibility.rs`.
+
+**Honest annotations only.** **No** `sparq-mpc` protocol is annotated `secx:Malicious`, the IT-MAC
+modules included: their integrity coverage is partial (see the `auth_disclose` tier correction above),
+so the hardening is recorded in `rdfs:comment`, not as a level. None is annotated `secx:Covert` either (that needs a stated deterrence probability, which no
+module claims). Every assertion is at most `secx:Claimed` with `secx:ExternalSignOffPending`
+(`sq-qhy4`). `proof.rs` is deliberately **not** a subject: every method returns `NotYetImplemented`, so
+it runs no protocol. The graph also carries one clearly-labelled **illustrative** malicious /
+dishonest-majority subject that sparq-mpc does **not** implement, present only so the orders have a
+positive control in the tests.
+
 ### 7. Handle deferred crypto honestly
 The collaborative proof and the hidden-key path of `DisclosedKeyJoin` are gated; match the error rather than assuming success.
 
@@ -309,6 +348,7 @@ match some_result {
 
 - **Native-only, not in wasm.** `sparq-mpc` is intentionally absent from `sparq-wasm`'s dependency graph (`cargo tree -p sparq-wasm` must not show it). The browser bundle carries zero MPC/crypto surface.
 - **`insecure-test-rng` feature (OFF by default).** Gates `ShamirBackend::new_seeded` and `rng::InsecureTestRng` (a deterministic SplitMix64). The masks it produces are **predictable** — enabling it in a deployment reintroduces the very confidentiality weakness the CSPRNG default fixes. Use it only for reproducible tests/benchmarks. Default builds physically cannot construct a predictable masking RNG. The isolated glue test `crates/sparq-mpc/tests/oblivious_join_determinism.rs` (whole file `#![cfg(feature = "insecure-test-rng")]`) leans on this: a fixed `(n, seed)` yields a **bit-identical** `Vec<OutputSlot>` (including the oblivious-shuffled order). That reproducibility is a property of the **seeded test RNG only** — the production path draws OS-seeded ChaCha20 and is NOT reproducible, and determinism is **not** a security property. The transport-codec round-trip / malformed-frame tests and the collaborative-proof deferral tests (`tests/transport_codec.rs`, `tests/proof_deferred.rs`) need no RNG and run in **both** feature states.
+- **`secprop-annotations` feature (OFF by default).** Ships `sparq_mpc::secprop` + the per-protocol trust-model annotation graph so an ODRL preference can exclude a protocol through the SHARED reasoner (recipe 6b). Pure `const &str` + Turtle data over the zero-dependency `sparq-secprop-vocab` leaf; the default build is byte-identical with it off. It RECORDS trust-model claims and proves none.
 - **Malicious-security is now SURFACED, not blanket-absent.** Confidentiality holds against `<= t` colluding *honest-but-curious* parties. Against an *actively-deviating* party, `ShamirBackend` reports the precise guarantee via `BackendInfo.malicious_security` (`ShamirBackend::malicious_security()`): the WI-1 RS-checked / Berlekamp–Welch reconstruction **detects** tampered shares and aborts when there is redundancy (`n > t+1`, always true for the honest-majority `t`), and **robustly corrects** up to `max_cheaters = ⌊(n−t−1)/2⌋` cheaters when redundancy allows (`n >= 4`). **Boundaries that are NOT hardened (do not over-trust):** the degree-`2t` equality/mult open in the hidden-value join has *no* RS redundancy at `n = 2t+1` (the common odd-`n` case, e.g. n=3,5,7) — a tampered product share there is undetectable; a fix needs an information-theoretic MAC (deferred, bead sq-6d6g). Dishonest-majority remains future work behind the same `MpcBackend` trait.
 - **In-process simulation for the PROTOCOL crypto; a real loopback transport for the COST.** The protocol crypto (the dealer/`HiddenValueJoin` plays all parties to deal shares and open results) runs in one process — cleartext inputs are passed to the simulator only to be shared internally. The `transport` module (sq-tg6b + sq-bdbv) adds a REAL multi-process star-coordinator over loopback TCP for MEASURED cost (all four cells, incl. the multi-round oblivious shuffle/sort), but it remains a star-coordinator *measurement harness*, not a full party-mesh deployment, and the netem LAN/WAN shaping (Tier 3) needs a privileged host. **`disclose_threshold_verdict` no longer reconstructs the sum** — that local shortcut was removed (**sq-g7t5**); the sum is bit-decomposed **in-MPC**. **sq-bgsn** lifted the production path to the **Rabbit-style full-field** decomposition (eprint 2021/119, `secure_bit_decompose_rabbit`): a full-field mask `[r]` (square-protocol, no party knows it) is added, only the (near-)uniform `c = (sum + r) mod p` is opened, and the sum is recovered exactly through the modular wrap (`sum = c − r + w·p`, `w = 1{c < r}`). With an in-protocol range proof (**sq-nx0s**), only the verdict bit is ever an OUTPUT. **sq-mnv5 deployment residuals** (`sq-qhy4` external sign-off pending): (1) **wider magnitude** — **CLOSED by sq-bgsn** on the semi-honest production path (the Rabbit decomposition recovers the wrap, so the bound is the full `< 2^60`, up from `< 2^20`); **sq-km34.6** lifted the IT-MAC twin `auth_disclose` onto the same authenticated Rabbit construction, so it too supports `< 2^60`; (2) **malicious security** — **PARTLY CLOSED by sq-ka8m**, and LESS closed than previously written: `auth_mul` adopts a second-operand value tamper, which is exploitable end to end on the disclose path (see the tier correction on the `auth_disclose` bullet above), so neither twin is AXIS-1 `Malicious` today — the malicious-with-abort *comparison chain* over secret operands now threads IT-MACs (`MacSession::auth_mul`, design §2.4 route (a)) through every gate and MAC-checks the verdict before open (`MacSession::mac_check`, §2.5), aborting on a tampered OPEN at the minimal `n = 2t+1` (not on *any* tamper — the second-operand adoption above applies to this chain too) — see `auth_compare` (`malicious_greater_than` / `malicious_threshold`). The end-to-end **`disclose_threshold_verdict` decomposition opens** (`a²`, `c = sum+r`, the range-proof zero-test `v·r` products, and the verdict) are now ALL routed through the MAC-check in the IT-MAC-hardened twin `auth_disclose::experimental_tamper_evident_disclose_threshold_verdict` (sq-6fv7 + **sq-m4zi/sq-e7ma**) — the semi-honest `disclose_threshold_verdict` itself stays semi-honest by design (the cheap zero-round honest path). Both remain `sq-qhy4` external-sign-off-pending.
 - **Field & range.** `Fp` is over `p = 2^61 - 1`. Keep values (salaries, counts, key encodings) well under `2^61` so sums never wrap. `Fp::inv(0)` panics (only nonzero differences are inverted internally).

@@ -5440,6 +5440,8 @@ dependencies = [
  "sha2 0.11.0",
  "sparq-core",
  "sparq-engine",
+ "sparq-secprop-vocab",
+ "sparq-trust",
  "subtle",
  "zeroize",
 ]

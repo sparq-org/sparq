@@ -151,6 +151,16 @@ pub const REQUIRES_INTERACTIVITY: &str =
 /// gate: `requiresAssurance gteq secx:Proven` mechanically removes every unaudited
 /// sparq method from the admissible set (`sq-qhy4` enters the data flow).
 pub const REQUIRES_ASSURANCE: &str = "https://w3id.org/zkp-sparql/sec-prop#requiresAssurance";
+/// `secx:requiresAdversaryModel` — over the `AdversaryModel` dimension (the MPC
+/// trust-model axis; issue #6186). `requiresAdversaryModel gteq secx:Malicious`
+/// mechanically removes every semi-honest-only protocol from the admissible set.
+pub const REQUIRES_ADVERSARY_MODEL: &str =
+    "https://w3id.org/zkp-sparql/sec-prop#requiresAdversaryModel";
+/// `secx:requiresCorruptionThreshold` — over the `CorruptionThreshold` dimension
+/// (issue #6186). `requiresCorruptionThreshold gteq secx:DishonestMajority`
+/// mechanically removes every honest-majority-only protocol.
+pub const REQUIRES_CORRUPTION_THRESHOLD: &str =
+    "https://w3id.org/zkp-sparql/sec-prop#requiresCorruptionThreshold";
 
 // ── the dimension IRIs (the `secx:overDimension` targets) ────────────────────
 //
@@ -197,6 +207,11 @@ pub use sparq_secprop_vocab::SECX_SETUP as DIM_SETUP;
 pub use sparq_secprop_vocab::SECX_INTERACTIVITY as DIM_INTERACTIVITY;
 /// `secx:AssuranceLevel` dimension (the epistemic-basis axis — design §4.2.2).
 pub use sparq_secprop_vocab::SECX_ASSURANCE_LEVEL as DIM_ASSURANCE_LEVEL;
+/// `secx:AdversaryModel` dimension (`Malicious ⊐ Covert ⊐ SemiHonest`; issue #6186).
+pub use sparq_secprop_vocab::SECX_ADVERSARY_MODEL as DIM_ADVERSARY_MODEL;
+/// `secx:CorruptionThreshold` dimension (`DishonestMajority ⊐ HonestMajority ⊐
+/// SuperHonestMajority`; issue #6186).
+pub use sparq_secprop_vocab::SECX_CORRUPTION_THRESHOLD as DIM_CORRUPTION_THRESHOLD;
 
 /// The complete `(leftOperand, dimension)` map of the sparq security-property
 /// profile — one entry per requireable dimension, in declaration order. The **single
@@ -221,6 +236,8 @@ pub const SECPROP_LEFT_OPERANDS: &[(&str, &str)] = &[
     (REQUIRES_SETUP, DIM_SETUP),
     (REQUIRES_INTERACTIVITY, DIM_INTERACTIVITY),
     (REQUIRES_ASSURANCE, DIM_ASSURANCE_LEVEL),
+    (REQUIRES_ADVERSARY_MODEL, DIM_ADVERSARY_MODEL),
+    (REQUIRES_CORRUPTION_THRESHOLD, DIM_CORRUPTION_THRESHOLD),
 ];
 
 /// True iff `left_operand` is a `secx:requires…` leftOperand this profile declares
