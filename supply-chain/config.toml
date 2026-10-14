@@ -1098,10 +1098,6 @@ criteria = "safe-to-deploy"
 version = "1.10.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.humantime]]
-version = "2.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.hybrid-array]]
 version = "0.4.12"
 criteria = "safe-to-deploy"
@@ -1558,10 +1554,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.objc2-io-surface]]
 version = "0.3.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.object_store]]
-version = "0.14.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.oid-registry]]
