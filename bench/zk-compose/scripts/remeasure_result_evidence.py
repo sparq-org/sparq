@@ -8,7 +8,7 @@ source, so a change to those sources needs a fresh measurement. Two steps:
     remeasure_result_evidence.py measure run1 run1.json
     remeasure_result_evidence.py measure run2 run2.json
     remeasure_result_evidence.py apply run1.json run2.json --job job.json \\
-        --commit <commit> --observed-at <utc> --platform <host> \\
+        --commit <commit> [--baseline <rev>] --observed-at <utc> --platform <host> \\
         --expect-member <member> ... --expect-source <path> ...
 
 `measure` compiles every member with the pinned nargo, hashes its ACIR bytecode, ABI and
@@ -17,12 +17,14 @@ verification key. `apply` refuses to write unless the two runs agree (the artifa
 embeds the checkout path and is not compared), every v1 ACIR, ABI and key equals its
 713025dc baseline record, every size equals gate_counts_latest.json, and exactly the expected
 members and sources change. It validates all four files before replacing any of them and
-restores any it replaced if a later replacement fails; an interruption of the process itself
-(a kill or power loss between renames) can still leave a mixed set, which
-`git checkout -- <the four files>` undoes. It refuses to run while the four files have
-unstaged edits, so that recovery never discards anything else. The result is always
-labelled non-canonical; the job manifest and run outputs are not part of the repository,
-so the two-run agreement it records is checked when `apply` runs, not later.
+restores each one it replaced if a later replacement fails, listing any it could not restore;
+an interruption of the process itself (a kill or power loss between renames) can still leave a
+mixed set, which `git checkout HEAD -- <the four files>` undoes. It refuses to run while the
+four files differ from HEAD, staged or not, so that recovery never discards anything else.
+`apply` reads the pre-change evidence from `--baseline` (default HEAD) with `git show`, so
+starting from another commit's evidence never writes the index or the working tree. The
+result is always labelled non-canonical; the job manifest and run outputs are not part of
+the repository, so the two-run agreement it records is checked when `apply` runs, not later.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -59,6 +62,11 @@ def run(command: list[str], cwd: Path) -> str:
 
 def load(root: Path) -> dict[str, dict]:
     return {name: json.loads((root / "bench/zk-compose" / f"{name}.json").read_text()) for name in EVIDENCE}
+
+
+def load_revision(revision: str) -> dict[str, dict]:
+    return {name: json.loads(run(["git", "show", f"{revision}:bench/zk-compose/{name}.json"], ROOT))
+            for name in EVIDENCE}
 
 
 def measure(source: Path, output: Path) -> None:
@@ -111,12 +119,49 @@ def without_artifacts(run_result: dict) -> dict:
     return copy
 
 
+def require_clean(paths: list[str]) -> None:
+    """Refuse to run unless the files equal HEAD, staged or not, so recovery loses nothing."""
+    if subprocess.run(["git", "diff", "--quiet", "HEAD", "--", *paths], cwd=ROOT).returncode:
+        raise SystemExit("the evidence files differ from HEAD; commit them or run git checkout HEAD -- them first")
+
+
+def replace_all(files: dict[Path, dict]) -> None:
+    """Stage every file, then replace them one by one. Separate renames are not one atomic
+    update, so if a replacement fails each file already replaced is restored from its original
+    bytes independently, any that cannot be are listed, and staged temporaries are removed."""
+    originals, staged, replaced = {}, [], []
+    try:
+        for target, data in files.items():
+            originals[target] = target.read_bytes()
+            handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.stem}.", suffix=".json")
+            staged.append((Path(temporary), target))
+            with os.fdopen(handle, "w") as output:
+                output.write(json.dumps(data, indent=2) + "\n")
+        for temporary, target in staged:
+            os.replace(temporary, target)
+            replaced.append(target)
+    except BaseException:
+        unrestored = []
+        for target in replaced:
+            try:
+                target.write_bytes(originals[target])
+            except OSError as error:
+                unrestored.append(f"{target} ({error})")
+        if unrestored:
+            print("could not restore, recover with git checkout HEAD -- <file>:", *unrestored,
+                  sep="\n  ", file=sys.stderr)
+        raise
+    finally:
+        for temporary, _ in staged:
+            temporary.unlink(missing_ok=True)
+
+
 def apply(args: argparse.Namespace) -> None:
     first, second = (json.loads(path.read_text()) for path in (args.first, args.second))
     if without_artifacts(first) != without_artifacts(second):
         raise SystemExit("the two runs disagree")
     measured = first["members"]
-    evidence = load(ROOT)
+    evidence = load_revision(args.baseline)
     snapshot = json.loads((ROOT / "bench/zk-compose/gate_counts_latest.json").read_text())["benchmarks"]
     for member, record in evidence["result_v1_compatibility"]["members"].items():
         base, got = record["base"], measured[member]
@@ -165,35 +210,13 @@ def apply(args: argparse.Namespace) -> None:
         recorded = data.get("tool_versions") or {"nargo": data["nargo_version"], "bb": data["bb_version"]}
         if recorded["nargo"] != tools["nargo"] or recorded["bb"] != tools["bb"]:
             raise SystemExit(f"{name}: toolchain differs from the recorded one")
-    paths = [f"bench/zk-compose/{name}.json" for name in evidence]
-    if subprocess.run(["git", "diff", "--quiet", "--", *paths], cwd=ROOT).returncode:
-        raise SystemExit("the evidence files have unstaged edits; check them out or stage them first")
-    # Every check has passed. Stage all four files, then replace them one by one. Separate
-    # renames are not one atomic update, so if a replacement fails the files already replaced
-    # are restored from their original bytes, and staged temporaries are always removed.
-    originals, staged, replaced = {}, [], []
-    try:
-        for name, data in evidence.items():
-            data["source_files"] = new
-            data["measured_source"] = provenance
-            data["measurement_method"] = method
-            data["limitations"] = limitations
-            target = ROOT / "bench/zk-compose" / f"{name}.json"
-            originals[target] = target.read_bytes()
-            handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{name}.", suffix=".json")
-            staged.append((Path(temporary), target))
-            with os.fdopen(handle, "w") as output:
-                output.write(json.dumps(data, indent=2) + "\n")
-        for temporary, target in staged:
-            os.replace(temporary, target)
-            replaced.append(target)
-    except BaseException:
-        for target in replaced:
-            target.write_bytes(originals[target])
-        raise
-    finally:
-        for temporary, _ in staged:
-            temporary.unlink(missing_ok=True)
+    for data in evidence.values():
+        data["source_files"] = new
+        data["measured_source"] = provenance
+        data["measurement_method"] = method
+        data["limitations"] = limitations
+    require_clean([f"bench/zk-compose/{name}.json" for name in evidence])
+    replace_all({ROOT / "bench/zk-compose" / f"{name}.json": data for name, data in evidence.items()})
     print("changed members:", ", ".join(sorted(changed)))
 
 
@@ -208,6 +231,7 @@ def main() -> None:
     step.add_argument("second", type=Path, help="independent run; its hash is the handoff")
     step.add_argument("--job", type=Path, required=True, help="job manifest; its hash is job_sha256")
     step.add_argument("--commit", required=True)
+    step.add_argument("--baseline", default="HEAD", help="revision holding the pre-change evidence")
     step.add_argument("--observed-at", required=True)
     step.add_argument("--platform", required=True)
     step.add_argument("--expect-member", action="append", default=[])
