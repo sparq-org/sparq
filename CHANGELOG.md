@@ -32,10 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the names they had; its answers are unchanged (#6927).
   `Graph::is_directory_backed()` reports whether a graph or any named graph under it is
   opened from a directory; it is always `false` without the `mmap` feature (#6944).
-- **sparq-solid:** an ODRL permission attached to a pod document now grants Read per request
-  through `sparq_policy::decide`, for a target that exists and has a full static decision;
-  attached permissions never grant Append, Write or Control, and a prohibition still vetoes
-  (#6941).
+- **sparq-solid:** an ODRL permission attached to a pod document now grants per request
+  through `sparq_policy::decide`, for a target that exists and has a full static decision:
+  Read on `odrl:read` (#6941); Write when one policy permits `odrl:modify` and
+  `odrl:delete`, and Append on `odrl:append` or wherever Write is granted (#6942), each
+  from a rule that names the action, so an `odrl:use` permission still grants Read only.
+  Write and Append are never granted on a container or a referenced group document, and
+  apply only in an update made of `INSERT DATA`, `DELETE DATA` and `DELETE`/`INSERT …
+  WHERE`: attached policies grant data changes, not graph management (`CLEAR`, `DROP`,
+  `CREATE`, `LOAD`, `COPY`, `MOVE`), and `PodStore::decide_removal` (used by the MCP
+  `resource_delete` tool) ignores them. No permission grants a create or Control, and a
+  prohibition or an explicit deny still vetoes.
 - **Security-property vocabulary:** two ordered dimensions, `secx:AdversaryModel`
   (Malicious ⊐ Covert ⊐ SemiHonest) and `secx:CorruptionThreshold` (DishonestMajority ⊐
   HonestMajority ⊐ SuperHonestMajority), with ODRL leftOperands

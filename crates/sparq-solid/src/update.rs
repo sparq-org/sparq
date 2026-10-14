@@ -233,6 +233,21 @@ fn analyze(upd: &Update) -> WriteReqs {
     reqs
 }
 
+/// Whether every operation of `upd` changes data only (`INSERT DATA`, `DELETE DATA`,
+/// `DELETE`/`INSERT … WHERE`): no `CLEAR`, `DROP`, `CREATE` or `LOAD`, nor a `COPY` or
+/// `MOVE`, which the parser lowers to a `DROP` (an `ADD` lowers to an `INSERT … WHERE`
+/// alone). Attached policies grant changes only in such a request.
+pub(crate) fn changes_data_only(upd: &Update) -> bool {
+    upd.operations.iter().all(|op| {
+        matches!(
+            op,
+            GraphUpdateOperation::InsertData { .. }
+                | GraphUpdateOperation::DeleteData { .. }
+                | GraphUpdateOperation::DeleteInsert { .. }
+        )
+    })
+}
+
 /// Does the session have `need` on the concrete graph `g`? `odrl` turns the static
 /// view's verdict into the effective one (the store's request-time ODRL layer, issue
 /// #6743).
@@ -638,7 +653,8 @@ pub(crate) fn check_effects(
                 }
             },
             UpdateEffect::Create(Term::NamedNode(n)) => {
-                need_on(n, Need::WriteOrAppend)?;
+                // `CREATE` needs `Write`, as [`analyze`] requires of its static target.
+                need_on(n, Need::Write)?;
                 written.push(n);
             }
             UpdateEffect::Create(_) => {

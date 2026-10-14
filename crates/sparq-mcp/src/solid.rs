@@ -1546,7 +1546,9 @@ impl SolidMcpServer {
         if self.slot_index(&term).is_none() {
             return Err(not_found_error(&url));
         }
-        if !self.allowed(&url, Mode::Write) {
+        // Removing a document is graph management: attached ODRL permissions grant data
+        // changes only, so this needs `Write` from the static view.
+        if !self.store.decide_removal(&self.session(), &url).allow {
             return Err(write_denied_error(&url));
         }
         if url.ends_with('/') {
