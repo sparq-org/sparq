@@ -20,16 +20,6 @@ deferred malicious-security seams live in [`PLAN.md`](./PLAN.md).
 Per-protocol trust-model annotations (opt-in `secprop-annotations`):
 [`ontologies/secprop-mpc-methods.ttl`](./ontologies/secprop-mpc-methods.ttl).
 
-Backend selection: `SecurityRequirement::max_preprocessing` defaults to `None`,
-preserving security-only ranking. Set a `PreprocessingBudget` with multiplication
-and ordering-comparison counts plus optional inclusive `max_items` and
-`max_bytes_per_party` ceilings. Both `BackendRegistry::select` and
-`select_for_operator` use the existing `PreprocessingCost` estimates: excessive,
-unknown or overflowing estimates fail a set ceiling. `PreprocessingBudgetRefused`
-carries the workload, ceilings and rejected candidate estimates; `NoBackendSatisfies`
-remains the error when no backend meets the security floor. Costs are declared,
-not measured runtime spending limits; update workload counts when the plan changes.
-
 Plan: [`PLAN.md`](./PLAN.md).
 How-to: [`skills/mpc/SKILL.md`](../../skills/mpc/SKILL.md).
 Design: [`research/mpc-zkp-research-and-architecture.md`](../../research/mpc-zkp-research-and-architecture.md).
