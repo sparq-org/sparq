@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-39kps — **POST-`Slug` `.acl` escalation corpus** (dotted / encoded /
+//! sq-39kps — **POST-`Slug` `.acl` escalation corpus** (dotted / encoded /
 //! percent / unicode / trailing-dot variants) as DATA plus a DECISION-layer assertion
 //! harness.
 //!
@@ -166,37 +166,6 @@ pub static CORPUS: &[EscalationVector] = &[
 
 // ─── the decode / acl-shape model (mirrors sparq-lws-core's mint-side guard intent) ───
 
-/// Percent-decode `%XX` escapes to their bytes, then interpret the result as UTF-8
-/// (lossily). Self-contained (no new dependency): only `%XX` hex pairs are decoded; a
-/// stray `%` or malformed escape is passed through verbatim.
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                out.push((h << 4) | l);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-/// The nibble value of an ASCII hex digit, or `None`.
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
-}
-
 /// Map the compatibility "dot-like" codepoints an NFKC normaliser folds onto ASCII `.`
 /// (full-width full stop, one-dot leader, ideographic/small full stop) to `.`; other
 /// characters pass through. Models the normalisation a hardened mint guard must apply
@@ -212,7 +181,7 @@ fn map_dotlike(c: char) -> char {
 /// gets: percent-decode → compatibility-dot-map → strip trailing dots/spaces (the
 /// filesystem/Windows canonicalisation an attacker exploits).
 pub fn canonicalize_child(raw: &str) -> String {
-    let decoded = percent_decode(raw);
+    let decoded = sparq_core::percent::decode(raw, false);
     let mapped: String = decoded.chars().map(map_dotlike).collect();
     mapped.trim_end_matches(['.', ' ']).to_string()
 }

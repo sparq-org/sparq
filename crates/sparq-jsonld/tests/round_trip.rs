@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-gcs5q — the **round-trip validation** half of survey §C3
+//! sq-gcs5q — the **round-trip validation** half of survey §C3
 //! ("expand → compact reconstructs the same RDF").
 //!
 //! The rest of §C3 — the `expand` and `flatten` conformance lanes plus their
@@ -26,113 +26,12 @@
 use sparq_jsonld::compact::compact;
 use sparq_jsonld::{expand, flatten, Json, JsonLdOptions, NoopLoader};
 
+mod common;
+use common::json_ld_equal;
+
 // ---------------------------------------------------------------------------
-// Oracle
+// Oracle (`json_ld_equal` lives in `tests/common/mod.rs`, shared with flatten.rs)
 // ---------------------------------------------------------------------------
-
-/// How the array immediately under comparison must be compared — the JSON-LD
-/// data model gives arrays three different meanings depending on where they sit.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Arrays {
-    /// The default: a property's value array is an unordered SET of values.
-    Unordered,
-    /// The array under a `@list` key: its order is significant, but its elements
-    /// are ordinary JSON-LD values again (so nested arrays revert to `Unordered`).
-    ListOrdered,
-    /// Inside a `@json` literal's `@value` payload: plain JSON, so array order is
-    /// significant RECURSIVELY (object member order stays insignificant).
-    JsonExact,
-}
-
-/// Native JSON-LD document-level equality over the crate's `Json` AST: object key
-/// order insignificant, array order significant inside a `@list` value and
-/// (recursively) inside a `@json` literal payload, everything else exact (scalars
-/// compared as their `Json::Raw` / `Json::Str` tokens). Same semantics as
-/// `tests/flatten.rs` and the conformance crate's `json_ld_equal`, restated here
-/// because Rust integration tests are separate binaries with no shared module.
-///
-/// The `@json` carve-out is load-bearing for this module's claim to pin `@json`
-/// payload SHAPE: a `@json` value is opaque JSON, where `[1,2]` and `[2,1]` are
-/// different documents, so comparing the payload with set semantics would let a
-/// payload-reordering compaction bug pass `json_literal_round_trips`.
-fn json_ld_equal(a: &Json, b: &Json) -> bool {
-    json_ld_equal_inner(a, b, Arrays::Unordered)
-}
-
-fn json_ld_equal_inner(a: &Json, b: &Json, arrays: Arrays) -> bool {
-    match (a, b) {
-        (Json::Str(x), Json::Str(y)) => x == y,
-        (Json::Raw(x), Json::Raw(y)) => x == y,
-        (Json::Arr(xs), Json::Arr(ys)) => {
-            if xs.len() != ys.len() {
-                return false;
-            }
-            match arrays {
-                Arrays::Unordered => array_equal_unordered(xs, ys),
-                // A `@list`'s elements are JSON-LD values: back to set semantics.
-                Arrays::ListOrdered => xs
-                    .iter()
-                    .zip(ys.iter())
-                    .all(|(x, y)| json_ld_equal_inner(x, y, Arrays::Unordered)),
-                // Inside a `@json` payload the exactness propagates all the way down.
-                Arrays::JsonExact => xs
-                    .iter()
-                    .zip(ys.iter())
-                    .all(|(x, y)| json_ld_equal_inner(x, y, Arrays::JsonExact)),
-            }
-        }
-        (Json::Obj(xa), Json::Obj(ya)) => {
-            if xa.len() != ya.len() {
-                return false;
-            }
-            let json_literal = arrays != Arrays::JsonExact && is_json_literal(xa);
-            xa.iter().all(|(k, va)| {
-                let child = if arrays == Arrays::JsonExact {
-                    // An opaque payload: `@list` / `@type` are ordinary member names here.
-                    Arrays::JsonExact
-                } else if json_literal && k == "@value" {
-                    Arrays::JsonExact
-                } else if k == "@list" {
-                    Arrays::ListOrdered
-                } else {
-                    Arrays::Unordered
-                };
-                ya.iter()
-                    .find(|(k2, _)| k2 == k)
-                    .is_some_and(|(_, vb)| json_ld_equal_inner(va, vb, child))
-            })
-        }
-        _ => false,
-    }
-}
-
-/// Is this object an expanded `@json` value object (`{"@value":…,"@type":"@json"}`)?
-/// `expand` emits the `@type` as a bare string; a kept single-element array is
-/// accepted too so the check does not depend on that normalisation.
-fn is_json_literal(members: &[(String, Json)]) -> bool {
-    members.iter().any(|(k, v)| {
-        k == "@type"
-            && match v {
-                Json::Str(s) => s == "@json",
-                Json::Arr(a) => matches!(a.as_slice(), [Json::Str(s)] if s == "@json"),
-                _ => false,
-            }
-    })
-}
-
-fn array_equal_unordered(xs: &[Json], ys: &[Json]) -> bool {
-    let mut used = vec![false; ys.len()];
-    'outer: for x in xs {
-        for (j, y) in ys.iter().enumerate() {
-            if !used[j] && json_ld_equal_inner(x, y, Arrays::Unordered) {
-                used[j] = true;
-                continue 'outer;
-            }
-        }
-        return false;
-    }
-    true
-}
 
 fn render(v: &Json) -> String {
     let mut s = String::new();
@@ -159,7 +58,7 @@ fn assert_lossless(case: &str, input: &str, ctx: &str, opts: &JsonLdOptions) {
 
     assert!(
         json_ld_equal(&reexpanded, &expanded),
-        // [SONNET-4.6] positional format args (CodeQL rust/unused-variable false-positive guard).
+        // positional format args (CodeQL rust/unused-variable false-positive guard).
         "{}: compaction lost information\n  expanded:   {}\n  compacted:  {}\n  re-expanded:{}",
         case,
         render(&expanded),
@@ -655,7 +554,7 @@ fn flatten_survives_a_compaction_round_trip() {
 
         assert!(
             json_ld_equal(&reflattened, &flat),
-            // [SONNET-4.6] positional format args (CodeQL false-positive guard).
+            // positional format args (CodeQL false-positive guard).
             "{}: flatten → compact → flatten lost information\n  flat:       {}\n  compacted:  {}\n  reflattened:{}",
             case,
             render(&flat),

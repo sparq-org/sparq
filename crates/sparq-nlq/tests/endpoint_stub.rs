@@ -6,7 +6,6 @@
 //!
 //!   cargo test -p sparq-nlq --features nlq-endpoint --test endpoint_stub
 //!
-//! [OPUS-4.8]
 #![cfg(feature = "nlq-endpoint")]
 
 use std::io::{Read, Write};

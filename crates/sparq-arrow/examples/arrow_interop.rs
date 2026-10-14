@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-vwnzh — thin, deliberately machine-readable Arrow interop driver.
+// sq-vwnzh — thin, deliberately machine-readable Arrow interop driver.
 #![cfg(feature = "arrow")]
 
 use arrow_array::cast::AsArray;

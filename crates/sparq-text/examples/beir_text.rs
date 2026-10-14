@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-1fz0) sparq-text BEIR retrieval driver — the sparq side of the
+//! (sq-1fz0) sparq-text BEIR retrieval driver — the sparq side of the
 //! full-text-search **IR-quality axis** (design §3.4). It loads a BEIR cut's corpus
 //! (as RDF literals) into a sparq `Graph`, builds a BM25 `TextIndex`, retrieves the
 //! top-k documents for each query, and emits a **TREC run file** on stdout.

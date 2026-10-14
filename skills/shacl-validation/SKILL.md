@@ -245,6 +245,7 @@ pub fn to_turtle(&self) -> String;          // W3C report vocabulary (valid, rou
 pub fn to_ntriples(&self) -> String;        // same report graph, one N-Triples statement per line
 pub fn to_text(&self) -> String;            // human-readable summary
 pub fn to_json(&self) -> String;            // deterministic JSON; fixed keys and result order
+pub fn to_js_json(&self) -> String;         // compact JSON the wasm bindings return (focusNode/path/value/…/message; null when absent)
 ```
 
 `ValidationResult` (`sparq_shacl::ValidationResult`) — all fields public:
@@ -261,6 +262,7 @@ pub messages: Vec<oxrdf::Term>;             // sh:message literals
 pub default_message: String;
 pub details: Vec<ValidationResult>;         // nested sh:detail sub-results (see below); empty for most components
 pub fn effective_messages(&self) -> Vec<oxrdf::Term>;   // messages, or a generated default
+pub fn message_text(&self) -> &str;                     // first sh:message's text, or the generated default
 ```
 
 `details` carries non-normative `sh:detail` sub-results that explain WHY a result
@@ -615,7 +617,8 @@ error paths and the SHACL-SPARQL §5.2/§6 edge cases get the same treatment
 (`tests/scs_error_paths.rs` under `scs`, `tests/sparql_edge_cases.rs`). The
 pre-binding's deep-algebra arms (`push_values_down` over Group / Slice / Distinct /
 Reduced / OrderBy / Minus-left / LeftJoin-left, plus the multi-scope arms — both
-UNION branches, sibling joins, and a projecting sub-SELECT, sq-mue75) and the
+UNION branches, sibling joins, both LATERAL sides, and a projecting sub-SELECT,
+sq-mue75 / GH #4291) and the
 fail-closed runtime-error paths (an inexpressible blank-node focus, a `SERVICE`-clause
 runtime query error) are pinned directly by the in-`src/sparql.rs` unit module
 (`sparql::tests`, sq-qcnn.1 / sq-mue75): each arm is asserted both structurally (the
@@ -687,6 +690,18 @@ SHACL-spec-correct conforms/violations).
   `REGEX`), and `\i` / `\I` / `\c` / `\C` (XML NameStartChar / NameChar classes and
   complements) expand to explicit character classes — including inside `[...]`, via
   nested classes. Look-around remains genuinely unsupported → the sq-lz99x skip path.
+- **Temporal comparison is exact, and cross-family pairs are INCOMPARABLE (GH #3526).**
+  `sh:lessThan`, `sh:lessThanOrEquals` and `sh:min/maxInclusive` / `sh:min/maxExclusive`
+  decide `xsd:dateTime` / `xsd:dateTimeStamp` / `xsd:date` / `xsd:time` through the
+  engine's shared exact comparator (`sparq_core::temporal::ExactTemporal`), not on f64
+  instants, so the ±14h mixed-timezone indeterminate window is decided on exact instants
+  rather than rounded. A temporal paired with another family compares as nothing — a date
+  against a dateTime, either against an `xsd:time`, a temporal against a non-temporal —
+  and so does an ill-formed raw lexical (a timezone-free `xsd:dateTimeStamp`, a padded
+  value: XSD whitespace processing does not apply to an RDF literal). Incomparable means a
+  validation result, not a silent pass. `sh:in` and `sh:hasValue` are RDF-**term**
+  membership (SHACL §§4.8.1–4.8.2), not value equality, so two distinct literals denoting
+  one instant are different members.
 - **Results are NOT deduplicated** across traversal routes / component occurrences — a
   nested shape reached via two parents reports twice (intentional, matches the suite).
 - **Recursion is treated as conforming.** Re-entering the same (focus, shape) pair
@@ -695,7 +710,9 @@ SHACL-spec-correct conforms/violations).
 - **`sh:sparql` pre-binding:** `$this` (and `$PATH` on property shapes) is injected via
   an algebra-level VALUES on the parsed query — it lands below solution modifiers (so
   `LIMIT`/`ORDER BY`/`DISTINCT` behave correctly) AND propagates into every scope the
-  variable can reach: both UNION branches, sibling joins, and a sub-SELECT that
+  variable can reach: both UNION branches, sibling joins, both sides of a LATERAL
+  (its right side is a required part evaluated per left solution, so both sides take
+  the pre-binding exactly as a JOIN's siblings do — GH #4291), and a sub-SELECT that
   explicitly projects the variable (sq-mue75). A `SELECT *` sub-select re-scopes the
   variable, so the VALUES is joined above it (the spec-rejection case). Each `sh:sparql`
   result carries `sh:sourceConstraint` (the `sh:SPARQLConstraint` node).  `sh:prefixes`

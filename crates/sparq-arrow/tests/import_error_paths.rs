@@ -1,4 +1,4 @@
-//! [GPT-5.6] Fail-closed tests for malformed Arrow RDF-term input.
+//! Fail-closed tests for malformed Arrow RDF-term input.
 #![cfg(feature = "arrow")]
 
 use std::sync::Arc;
@@ -26,7 +26,7 @@ fn batch_with_children(children: Vec<(Arc<Field>, ArrayRef)>) -> RecordBatch {
     RecordBatch::try_new(schema, vec![column]).unwrap()
 }
 
-/// [GPT-5.6] Mutation witness: accepting four children or changing the pinned error
+/// Mutation witness: accepting four children or changing the pinned error
 /// text makes this assertion fail.
 #[test]
 fn four_child_term_struct_is_rejected() {

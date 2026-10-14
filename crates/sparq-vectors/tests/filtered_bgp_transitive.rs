@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-3tjd, epic sq-3183) End-to-end tests for the **transitive /
+//! (sq-3tjd, epic sq-3183) End-to-end tests for the **transitive /
 //! multi-variable** filtered-ANN BGP→IdMask derivation of the `vec:` magic predicate
 //! (follow-up to sq-bvmd/#281). The single-variable wiring restricted the candidate
 //! id-set to patterns that DIRECTLY mention the neighbour variable; sq-3tjd extends the

@@ -7,7 +7,7 @@
 //!   use the haversine great-circle distance (exact for point/point and
 //!   point/geometry via the spherical closest point; for two EXTENDED geometries
 //!   uses vertex-`HaversineClosestPoint` iteration — see [`distance_meters`]).
-//!   [SONNET-4.6] sq-lk3aw.3
+//!   sq-lk3aw.3
 //! - the eight simple-features relations (`geof:sfEquals`, `sfDisjoint`,
 //!   `sfIntersects`, `sfTouches`, `sfCrosses`, `sfWithin`, `sfContains`,
 //!   `sfOverlaps`) — DE-9IM intersection matrices via `geo`'s `Relate` — plus
@@ -32,7 +32,7 @@
 //!   via `i_overlay`'s string-line clip + linear referencing — the gap `geo`'s
 //!   polygon-only overlay leaves. Operands the dimension dispatch cannot
 //!   classify return an honest [`GeoError::Unsupported`]; see each function's
-//!   docs and the README for the supported matrix. [OPUS-4.8]
+//!   docs and the README for the supported matrix.
 //!
 //! The [`lex`] sub-module provides lexical-level WKT-string helpers for direct
 //! use. `crate::registry::geof_registry` parses geometry literals and invokes
@@ -60,7 +60,7 @@ const METERS_PER_DEGREE: f64 = std::f64::consts::PI * 6_371_008.8 / 180.0;
 
 /// The local equirectangular metre frame shared by metric measurement and
 /// buffering. Its latitude is the geometry bounding box's centre, matching
-/// the crate's established `geof:buffer` convention. [GPT-5.6] sq-lsp7k.18
+/// the crate's established `geof:buffer` convention. sq-lsp7k.18
 #[derive(Debug, Clone, Copy)]
 struct LocalMetricFrame {
     x_scale: f64,
@@ -127,7 +127,7 @@ impl Unit {
     /// Metres per 1.0 of this unit (metric units only); `None` for the angular
     /// units (degree/radian), whose distance is euclidean coordinate-space — a
     /// different metric the metre-keyed `GeoIndex` cannot bound (so the spatial
-    /// pushdown declines them, see `provider`). [OPUS-4.8]
+    /// pushdown declines them, see `provider`).
     pub(crate) fn meters_scale(self) -> Option<f64> {
         match self {
             Unit::Metre => Some(1.0),
@@ -142,7 +142,7 @@ impl Unit {
 /// CRSs (CRS84 / EPSG:4326) are mutually compatible because parsing
 /// normalised them to long/lat; any other CRS must match exactly.
 /// `pub(crate)` so the engine registry's prepared-relate path (sq-hq8t5)
-/// applies the SAME compatibility rule before relating. [FABLE-5]
+/// applies the SAME compatibility rule before relating.
 pub(crate) fn ensure_compatible(a: &GeoGeometry, b: &GeoGeometry) -> Result<(), GeoError> {
     let compatible = match (&a.crs, &b.crs) {
         (x, y) if x.is_geographic() && y.is_geographic() => true,
@@ -195,7 +195,7 @@ pub fn point_to_geometry_meters(p: Point<f64>, g: &Geometry<f64>) -> Result<f64,
 /// This resolves the prior equirectangular projection distortion for
 /// continent-spanning extended↔extended pairs. Remaining approximation:
 /// interior-of-segment↔interior-of-segment closest pairs (uncommon; bounded
-/// by the vertex arc spacing on each side). [SONNET-4.6]
+/// by the vertex arc spacing on each side).
 pub fn distance_meters(a: &Geometry<f64>, b: &Geometry<f64>) -> Result<f64, GeoError> {
     if a.intersects(b) {
         return Ok(0.0);
@@ -204,7 +204,7 @@ pub fn distance_meters(a: &Geometry<f64>, b: &Geometry<f64>) -> Result<f64, GeoE
         (Geometry::Point(p), _) => point_to_geometry_meters(*p, b),
         (_, Geometry::Point(p)) => point_to_geometry_meters(*p, a),
         _ => {
-            // [SONNET-4.6] sq-lk3aw.3: vertex-HaversineClosestPoint iteration,
+            // sq-lk3aw.3: vertex-HaversineClosestPoint iteration,
             // replacing the local equirectangular approximation. For each vertex
             // of a, find the haversine distance to b via HaversineClosestPoint
             // (exact point-to-nearest-on-b); likewise for each vertex of b
@@ -424,7 +424,7 @@ pub fn relate(a: &GeoGeometry, b: &GeoGeometry, pattern: &str) -> Result<bool, G
 /// `true` iff `matrix` matches ANY of `patterns` — the spec defines some
 /// relations as a disjunction of matrices. `pub(crate)` so the engine
 /// registry's prepared-relate path (sq-hq8t5) evaluates the SAME disjunction
-/// over a matrix it computed from a cached prepared side. [FABLE-5]
+/// over a matrix it computed from a cached prepared side.
 pub(crate) fn matrix_matches_any(matrix: &IntersectionMatrix, patterns: &[&str]) -> bool {
     // Patterns are compile-time constants below — a failure is a crate bug.
     patterns.iter().any(|p| matrix.matches(p).expect("valid built-in DE-9IM pattern"))
@@ -443,7 +443,7 @@ macro_rules! de9im_relation {
         /// relation of the same name. `pub(crate)` so the engine registry's
         /// prepared-relate path (sq-hq8t5) tests the SAME spec matrices —
         /// this const and the public function below are the single source
-        /// of truth. [FABLE-5]
+        /// of truth.
         pub(crate) const $patterns: &[&str] = &[$($pattern),+];
         $(#[$doc])*
         pub fn $name(a: &GeoGeometry, b: &GeoGeometry) -> Result<bool, GeoError> {
@@ -527,7 +527,7 @@ de9im_relation!(
 /// `geof:isEmpty` — whether the geometry is the empty set.
 ///
 /// This predicate is pure geometry introspection and does not depend on the
-/// geometry's CRS or any unit convention. [GPT-5.6] sq-lc2io
+/// geometry's CRS or any unit convention. sq-lc2io
 pub fn is_empty(g: &GeoGeometry) -> Result<bool, GeoError> {
     Ok(g.geometry.is_empty())
 }
@@ -607,7 +607,7 @@ pub fn convex_hull(g: &GeoGeometry) -> Result<GeoGeometry, GeoError> {
 /// `MultiPolygon` delegate directly to `geo`'s Douglas–Peucker implementation.
 /// Rectangles, triangles, and geometry collections return
 /// [`GeoError::Unsupported`] because `geo` does not implement [`Simplify`] for
-/// those types. A positive tolerance must be finite. [GPT-5.6] sq-lsp7k.23
+/// those types. A positive tolerance must be finite. sq-lsp7k.23
 pub fn simplify(g: &GeoGeometry, tolerance: f64) -> Result<GeoGeometry, GeoError> {
     if tolerance <= 0.0 {
         return Ok(g.clone());
@@ -701,7 +701,7 @@ fn boundary_geometry(g: &Geometry<f64>) -> Result<Geometry<f64>, GeoError> {
 // sets, returning the result geometry. `geo`'s `BooleanOps` realises this for
 // the POLYGON×POLYGON case (a polygon-overlay algorithm) but does NOT touch
 // 1-D operands — it only nodes/overlays polygons. We fill the 1-D gap with two
-// roll-your-own pieces (see AGENTS.md "Upstream blockers"): [OPUS-4.8]
+// roll-your-own pieces (see AGENTS.md "Upstream blockers"):
 //
 //   * line ∩ polygon / line − polygon — a robustly-noded polyline clip via
 //     `i_overlay`'s string-line overlay (`FloatClip::clip_by`). This is the
@@ -940,7 +940,7 @@ fn point_on_linestring(c: Coord<f64>, ls: &LineString<f64>) -> bool {
 /// the exact complement of the `(invert: true, boundary_included: true)` rule
 /// used for line − polygon. Returns a (MULTI)LINESTRING, or — when the line
 /// only touches the polygon at isolated points (which `i_overlay` drops as
-/// zero-length pieces) — a MULTIPOINT of those touch points. [OPUS-4.8]
+/// zero-length pieces) — a MULTIPOINT of those touch points.
 fn intersect_line_with_polygon(line: &Geometry<f64>, poly: &MultiPolygon<f64>) -> Geometry<f64> {
     let pieces = clip_line_by_polygon(line, poly, false, true);
     if !pieces.is_empty() {
@@ -1007,7 +1007,7 @@ fn merge_pieces(pieces: &mut Vec<LineString<f64>>) {
 // ---- 1-D overlay via i_overlay (string-line clip) + linear-referencing -------------
 //
 // `geo`'s `BooleanOps` does not touch open paths; these helpers fill the gap.
-// [OPUS-4.8]
+//
 
 /// A geo-types ring as an `i_overlay` contour ([`[f64; 2]`] is
 /// `FloatPointCompatible`). The closing duplicate vertex is dropped —
@@ -1170,9 +1170,9 @@ fn union_geometry(a: &Geometry<f64>, b: &Geometry<f64>) -> Result<Geometry<f64>,
 /// - point − anything → the points of `a` that do NOT lie on `b` (MULTIPOINT),
 /// - point − point (special-cased by the above): exact set subtraction,
 /// - line − polygon → the portions of the line OUTSIDE the polygon, as a
-///   (MULTI)LINESTRING (`i_overlay` string-line clip), [OPUS-4.8]
+///   (MULTI)LINESTRING (`i_overlay` string-line clip),
 /// - line − line → the portions of `a` not collinearly overlapped by `b`
-///   (linear-referencing subtraction; crossing points are measure-zero), [OPUS-4.8]
+///   (linear-referencing subtraction; crossing points are measure-zero),
 /// - polygon − line / polygon − point → the polygon unchanged (subtracting a
 ///   lower-dimensional, measure-zero set from a surface leaves it intact).
 pub fn difference(a: &GeoGeometry, b: &GeoGeometry) -> Result<GeoGeometry, GeoError> {
@@ -1200,13 +1200,13 @@ fn difference_geometry(a: &Geometry<f64>, b: &Geometry<f64>) -> Result<Geometry<
         // Line − point: a point is measure-zero in a curve, so the line is
         // unchanged.
         (Some(1), Some(0)) => Ok(a.clone()),
-        // Line − line: subtract `b`'s collinear overlaps from `a`. [OPUS-4.8]
+        // Line − line: subtract `b`'s collinear overlaps from `a`.
         (Some(1), Some(1)) => Ok(collect_lines(line_minus_lines(a, b))),
         // Line − polygon: keep the line OUTSIDE the polygon. The polygon is a
         // CLOSED set, so a span lying ALONG its boundary belongs to the polygon
         // and is removed — `boundary_included: true` under `invert` excludes the
         // boundary from the "outside" result, making line−polygon the exact
-        // complement of line∩polygon (verified). [OPUS-4.8]
+        // complement of line∩polygon (verified).
         (Some(1), Some(2)) => {
             let poly = polygonal(b).unwrap();
             Ok(collect_lines(clip_line_by_polygon(a, &poly, true, true)))
@@ -1233,9 +1233,9 @@ fn difference_geometry(a: &Geometry<f64>, b: &Geometry<f64>) -> Result<Geometry<
 ///   the other, unioned with the other operand (a GEOMETRYCOLLECTION when mixed
 ///   dimension),
 /// - line ∆ line → (a−b) ∪ (b−a): the non-shared portions of both curves, as a
-///   (MULTI)LINESTRING (linear-referencing subtraction), [OPUS-4.8]
+///   (MULTI)LINESTRING (linear-referencing subtraction),
 /// - line ∆ polygon (either order) → (line outside polygon) ∪ polygon, a
-///   GEOMETRYCOLLECTION (polygon − line is the polygon unchanged). [OPUS-4.8]
+///   GEOMETRYCOLLECTION (polygon − line is the polygon unchanged).
 pub fn sym_difference(a: &GeoGeometry, b: &GeoGeometry) -> Result<GeoGeometry, GeoError> {
     ensure_compatible(a, b)?;
     let geometry = sym_difference_geometry(&a.geometry, &b.geometry)?;
@@ -1266,7 +1266,7 @@ fn sym_difference_geometry(
         // (a−b) ∪ (b−a). With `difference_geometry` now covering the 1-D cases,
         // this serves point∆line/polygon, line∆line, and line∆polygon alike;
         // `union_geometry` collapses same-dimension results and emits a
-        // GEOMETRYCOLLECTION for mixed dimensions. [OPUS-4.8]
+        // GEOMETRYCOLLECTION for mixed dimensions.
         _ => {
             let left = difference_geometry(a, b)?;
             let right = difference_geometry(b, a)?;

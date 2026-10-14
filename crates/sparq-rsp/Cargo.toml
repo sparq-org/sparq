@@ -15,7 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
 # front page renders on docs.rs (the front page now comes from README.md via include_str!).
 [package.metadata.docs.rs]
 all-features = true
@@ -33,22 +33,22 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-# [GPT-5.6] sq-zckkq: gap-triggered event-time session windows are an explicit
+# sq-zckkq: gap-triggered event-time session windows are an explicit
 # opt-in so the established time/count paths remain byte-neutral by default.
 session_windows = []
-# [GPT-5.6] sq-ayn0i: the T0/MAXDELAY RSP-QL textual clauses are an explicit
+# sq-ayn0i: the T0/MAXDELAY RSP-QL textual clauses are an explicit
 # opt-in so the established parser remains byte-identical by default.
 window-origin = []
-# [GPT-5.6] sq-lsp7k.27: deterministic scalar folds over closed SELECT
+# sq-lsp7k.27: deterministic scalar folds over closed SELECT
 # window results are opt-in, leaving the established RSP surface unchanged.
 window-aggregate = []
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false }
-sparq-engine = { path = "../sparq-engine", version = "0.1.5", default-features = false }
-# [FABLE-5] sq-2n1q3.4: the shared zero-overhead eval substrate. The Delta/Snapshot
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.6", default-features = false }
+# sq-2n1q3.4: the shared zero-overhead eval substrate. The Delta/Snapshot
 # windowed-materialisation slide (the ISTREAM/DSTREAM-shaped consecutive-window diff in
 # `eval.rs`) drives `join::delta::DeltaTable` + `rows` — the same semi-naive Δ-vs-full
 # probe body the engine and the reasoners drive — keyed monomorphically on the full
@@ -57,19 +57,19 @@ sparq-engine = { path = "../sparq-engine", version = "0.1.5", default-features =
 # `sparq-wasm` bundle graph is unaffected (it never pulls sparq-rsp; it already carried
 # sparq-substrate via sparq-engine); the opt-in tier-b `sparq-rsp-wasm` bundle wraps
 # this crate and now carries the (wasm-safe, pure-Rust) `join` module with it.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.5", default-features = false, features = ["join"] }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.6", default-features = false, features = ["join"] }
 oxrdf.workspace = true
 # Register-time validation only (SELECT-form check); already in the tree via sparq-engine.
 spargebra.workspace = true
 # CONSTRUCT set differences (already in the tree via sparq-core).
 rustc-hash.workspace = true
 
-# [OPUS-4.8] (sq-cxji) Test-only: PARSE the `examples/throughput.rs` `--json` emit back
+# (sq-cxji) Test-only: PARSE the `examples/throughput.rs` `--json` emit back
 # to assert it is valid, well-shaped JSON. The emit itself stays serde-free (hand-built
 # `format!`, mirroring `mpc_net_bench::cell_json`); serde_json is a dev-dependency so it
 # never enters the crate's published graph.
 [dev-dependencies]
-# [SONNET-4.6] sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
+# sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
 # `publish = false`): the conformance ratchet floor this crate's test runner enforces is
 # the SAME `const` sparq-conformance's central scoreboard reports, so the two cannot
 # drift, and the dep edge puts this crate in the floors crate's reverse-dependency

@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-zgbso.6 (epic sq-zgbso, issue #1582, Phase 4) — the MEASURED SPIKE that
+//! sq-zgbso.6 (epic sq-zgbso, issue #1582, Phase 4) — the MEASURED SPIKE that
 //! decides whether RDFS (and then OWL-RL) should be represented as Notation3 rule text
 //! compiled through the `compiled-rules` evaluator instead of the hand-optimized
 //! id-level materializer in `src/rdfs.rs`.
@@ -86,7 +86,7 @@ fn hand_closure(dict: &Dict, facts: &[[Id; 3]]) -> BTreeSet<String> {
 /// The COMPILED-N3 path: bind the rule symbols into the dictionary, run the fixpoint.
 fn compiled_closure(dict: &Dict, facts: &[[Id; 3]], rules: &CompiledRuleSet) -> BTreeSet<String> {
     let mut d = dict.clone();
-    let out = rules.bind(&mut d).eval(&mut d, facts);
+    let out = rules.bind(&mut d).eval(&mut d, facts).expect("eval");
     as_strings(&d, &out)
 }
 
@@ -137,7 +137,7 @@ fn time_compiled(dict: &Dict, facts: &[[Id; 3]], rules: &CompiledRuleSet) -> (f6
         // call, exactly as `compiled_rules_bench` charges it.
         let mut d = dict.clone();
         let t0 = Instant::now();
-        let out = rules.bind(&mut d).eval(&mut d, facts);
+        let out = rules.bind(&mut d).eval(&mut d, facts).expect("eval");
         best = best.min(t0.elapsed().as_secs_f64() * 1e3);
         n = out.len();
     }

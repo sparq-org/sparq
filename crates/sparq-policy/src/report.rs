@@ -20,7 +20,7 @@ pub struct ActionReport {
     pub denied: usize,
 }
 
-/// A deterministic aggregate of a batch of policy decisions. [GPT-5.6] sq-mu4au.
+/// A deterministic aggregate of a batch of policy decisions. sq-mu4au.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecisionReport {
     /// Number of decisions in the batch.
@@ -93,7 +93,7 @@ impl DecisionReport {
                 out.push(',');
             }
             out.push_str("{\"action\":\"");
-            write_json_string(&mut out, &action.action);
+            sparq_core::json::escape_into(&mut out, &action.action);
             write!(
                 out,
                 "\",\"permitted\":{},\"denied\":{}}}",
@@ -103,24 +103,5 @@ impl DecisionReport {
         }
         out.push_str("]}");
         out
-    }
-}
-
-fn write_json_string(out: &mut String, value: &str) {
-    for character in value.chars() {
-        match character {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            character if character <= '\u{1f}' => {
-                write!(out, "\\u{:04x}", u32::from(character))
-                    .expect("writing to a String cannot fail");
-            }
-            character => out.push(character),
-        }
     }
 }

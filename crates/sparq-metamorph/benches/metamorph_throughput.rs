@@ -1,6 +1,6 @@
 //! Self-relative throughput bench for deterministic generation plus TLP + NoREC checks.
 //!
-//! [GPT-5.6] sq-hgqza. There is no directly runnable RDF/SPARQL peer for this
+//! sq-hgqza. There is no directly runnable RDF/SPARQL peer for this
 //! SQLancer-family logic-bug harness, so Criterion's result is a regression signal
 //! against this bench's own prior runs, not an external comparison. Measurements are
 //! emitted only after every generated case has two exhaustively classified verdicts.

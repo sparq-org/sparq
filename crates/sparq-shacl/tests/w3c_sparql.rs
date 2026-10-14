@@ -1,4 +1,4 @@
-//! [OPUS-4.8] Manifest-driven runner for the W3C SHACL-SPARQL test suite
+//! Manifest-driven runner for the W3C SHACL-SPARQL test suite
 //! (`data-shapes-test-suite/tests/sparql/...`) — the `node/` and `property/`
 //! sections that exercise `sh:sparql` constraints.
 //!
@@ -28,10 +28,10 @@ const MF: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#";
 const SHT: &str = "http://www.w3.org/ns/shacl-test#";
 const SH: &str = "http://www.w3.org/ns/shacl#";
 
-/// [OPUS-4.8] Pass-count floor for the `sh:sparql` node+property sub-suites at
+/// Pass-count floor for the `sh:sparql` node+property sub-suites at
 /// the pinned suite commit (`sq-qap0`). A ratchet: it may only RISE. Mirrors
 /// `w3c_core.rs`'s `BASELINE_PASS`. The CI `shacl-conformance` job re-checks it.
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).

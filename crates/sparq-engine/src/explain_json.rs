@@ -33,7 +33,6 @@
 //!   the text trace already documents, so `slowest`-by-time is row-count-only
 //!   there.
 //!
-//! [OPUS-4.8]
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;
@@ -144,24 +143,7 @@ impl PlanNode {
     }
 }
 
-/// Writes a JSON string literal with the minimal required escaping.
-fn write_json_string(s: &mut String, v: &str) {
-    s.push('"');
-    for c in v.chars() {
-        match c {
-            '"' => s.push_str("\\\""),
-            '\\' => s.push_str("\\\\"),
-            '\n' => s.push_str("\\n"),
-            '\r' => s.push_str("\\r"),
-            '\t' => s.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(s, "\\u{:04x}", c as u32);
-            }
-            c => s.push(c),
-        }
-    }
-    s.push('"');
-}
+use sparq_core::json::push_string as write_json_string;
 
 /// Writes an `Option<f64>` as a JSON number (or `null`). A non-finite value (the
 /// q-error never produces one, but be defensive) degrades to `null` rather than

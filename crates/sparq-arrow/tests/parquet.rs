@@ -20,7 +20,7 @@ fn assert_identity(result: &QueryResult) {
     assert_eq!(restored.rows, result.rows);
 }
 
-/// [GPT-5.6] Mutation witness: removing any exporter/importer term-kind arm, treating
+/// Mutation witness: removing any exporter/importer term-kind arm, treating
 /// unbound as a value, or collapsing the empty literal changes at least one exact row.
 #[test]
 fn every_term_kind_empty_literal_and_unbound_round_trip_row_for_row() {
@@ -56,7 +56,7 @@ fn every_term_kind_empty_literal_and_unbound_round_trip_row_for_row() {
     assert_identity(&result);
 }
 
-/// [GPT-5.6] Value-pinned mutation witness: changing either expected name fails while
+/// Value-pinned mutation witness: changing either expected name fails while
 /// the encoded rows remain untouched.
 #[test]
 fn schema_only_reader_recovers_nonempty_result_variables() {
@@ -79,7 +79,7 @@ fn schema_only_reader_recovers_nonempty_result_variables() {
     );
 }
 
-/// [GPT-5.6] Value-pinned mutation witness: the two variables and three rows make a
+/// Value-pinned mutation witness: the two variables and three rows make a
 /// column-count implementation return 2, while the all-unbound row exercises nullability.
 #[test]
 fn metadata_only_reader_recovers_exact_row_count() {

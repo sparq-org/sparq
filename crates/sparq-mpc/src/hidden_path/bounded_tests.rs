@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-py8h.3 — DIFFERENTIAL tests for the HIDDEN-intermediate BOUNDED
+// sq-py8h.3 — DIFFERENTIAL tests for the HIDDEN-intermediate BOUNDED
 // property-path operator ({1,k} / {0,k} / p? + alternation, OR-fold length-dedup).
 //! Differential acceptance suite for [`eval_bounded_path_hidden`].
 //!

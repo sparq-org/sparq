@@ -1,5 +1,5 @@
 //! A **cross-process** [`UsageCounterStore`] backed by a single on-disk file guarded by
-//! an OS-level lockfile. [OPUS-4.8] sq-5z1q.
+//! an OS-level lockfile. sq-5z1q.
 //!
 //! [`crate::count::InMemoryCounterStore`] closes the *in-process* TOCTOU race with a
 //! `Mutex`, but its counts live only in one process's heap: two `sparq` processes (two
@@ -97,7 +97,7 @@ const LOCK_RETRY_BACKOFF: Duration = Duration::from_millis(2);
 
 /// A cross-process [`UsageCounterStore`] persisting all usage counters in one file under
 /// `dir`, with the whole compare-and-increment serialized by an OS-level lockfile so it
-/// is atomic **across processes** that share `dir`. [OPUS-4.8] sq-5z1q.
+/// is atomic **across processes** that share `dir`. sq-5z1q.
 ///
 /// This is the cross-process answer to the single-process
 /// [`InMemoryCounterStore`](crate::count::InMemoryCounterStore): see the module docs for
@@ -178,7 +178,7 @@ impl FileCounterStore {
 }
 
 /// RAII guard for the lockfile: dropping it removes the lockfile, releasing the
-/// cross-process lock even on an early return / panic. [OPUS-4.8] sq-5z1q.
+/// cross-process lock even on an early return / panic. sq-5z1q.
 struct LockGuard {
     path: PathBuf,
 }

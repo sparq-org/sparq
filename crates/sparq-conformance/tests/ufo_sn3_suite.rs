@@ -1,4 +1,4 @@
-//! [FABLE-5] UFO-SN3 — the finite-world UFO expressibility suite, wired into the
+//! UFO-SN3 — the finite-world UFO expressibility suite, wired into the
 //! central conformance scoreboard as a sparq-EXTENSION-shaped ratchet. HONESTLY an
 //! extension ratchet over sparq's own reference profile — NOT a UFO / OntoUML /
 //! gUFO standards-conformance claim (no normative UFO conformance test suite
@@ -59,7 +59,7 @@ use std::collections::HashSet;
 /// (`scoreboard::SUITES`) and read TEXTUALLY by `tests/scoreboard_floors.rs`. It
 /// may only RISE (raise it as cases/negatives grow). HONESTLY a sparq
 /// EXTENSION-shaped ratchet over the finite-world UFO-SN3 reference profile, NOT
-/// a UFO/gUFO/OntoUML standards-conformance claim. [FABLE-5]
+/// a UFO/gUFO/OntoUML standards-conformance claim.
 pub const UFO_SN3_FLOOR: usize = 42;
 
 const VOCAB: &str = include_str!("ufo_sn3/vocab/ufo-sn3.ttl");

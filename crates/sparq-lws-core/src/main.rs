@@ -1,4 +1,5 @@
 // AUTHORED-BY Claude Opus 4.8
+#![forbid(unsafe_code)]
 //! EXPERIMENTAL solid-server-rs binary entry point.
 //!
 //! Boots the vertical slice: an axum server with **real** DPoP-bound Solid-OIDC auth (delegated to
@@ -292,7 +293,7 @@ fn reject_seed_on_nonmemory(seed_requested: bool, backend: &str, allow_override:
     seed_requested && backend != "memory" && !allow_override
 }
 
-/// [GPT-5.6] Build the opt-in QUIC endpoint from a CLONE of the existing TCP rustls config.
+/// Build the opt-in QUIC endpoint from a CLONE of the existing TCP rustls config.
 ///
 /// The clone is load-bearing: the TCP endpoint must keep advertising exactly `h2` + `http/1.1`,
 /// while QUIC advertises only the protocol it can actually serve (`h3`). Binding UDP to the TCP
@@ -718,7 +719,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
-    // [GPT-5.6] Each backend arm returns its router plus at most ONE boot-owned reconciler task.
+    // Each backend arm returns its router plus at most ONE boot-owned reconciler task.
     // Crucially, the OFF path keeps the original direct backend construction (no Arc allocation or
     // indirection); only an explicitly-present interval selects shared handles for request path + sweep.
     let reconcile_interval = reconcile_interval_from_env()?;
@@ -908,7 +909,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(feature = "http3")]
             let http3_addr = tokio_listener.local_addr()?;
 
-            // [GPT-5.6] The h3 listener gets a clone of the ONE already-assembled, hardened router.
+            // The h3 listener gets a clone of the ONE already-assembled, hardened router.
             // `serve_h3` injects the Quinn peer as `ConnectInfo<SocketAddr>` before dispatch, so the
             // OUTERMOST pre-crypto rate limiter sees the real source instead of failing open to auth.
             // Endpoint construction happens before the TCP listener is handed off: a UDP bind/config
@@ -917,7 +918,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let (app, http3_server) = {
                 let endpoint = bind_http3_endpoint(&config, http3_addr)?;
                 let bound_addr = endpoint.local_addr()?;
-                // [GPT-5.6] sq-oprna.4: an Alt-Svc promise is created only after UDP bind succeeds,
+                // sq-oprna.4: an Alt-Svc promise is created only after UDP bind succeeds,
                 // and names the endpoint's actual port. The unlayered clone remains the h3 router.
                 let h3_app = app.clone();
                 let tcp_app = app.layer(sparq_http3::alt_svc_layer(bound_addr.port()));
@@ -1270,7 +1271,7 @@ fn fmt_opt_secs(d: Option<Duration>) -> String {
 /// (after trimming) ⇒ true; anything else — absent, empty, `0`, `false`, `no`, `yes`,
 /// `01`, `1abc` — ⇒ false.
 ///
-/// [OPUS-5] sq-5ougp review round 3: this doc previously said "`1` / `true`
+/// sq-5ougp review round 3: this doc previously said "`1` / `true`
 /// (case-insensitive)", which is INACCURATE — mixed-case spellings such as `tRuE` are
 /// rejected. Only the four literals above are accepted. The error direction is safe (an
 /// unrecognised value means OFF), but the doc must not promise a laxer parse than the
@@ -1282,7 +1283,7 @@ fn env_flag(key: &str) -> bool {
     )
 }
 
-/// [OPUS-5] sq-5ougp review round 3 (gpt-5.6-sol finding 1): the DEMO-SEED BOOT CALL
+/// sq-5ougp review round 3 (gpt-5.6-sol finding 1): the DEMO-SEED BOOT CALL
 /// SITE, extracted from `build_app_for_store` so the **off-by-default** invariant is
 /// TESTABLE at the site that actually decides it.
 ///
@@ -1309,7 +1310,7 @@ async fn maybe_seed_demo<S: Store>(
     Ok(Some(fixtures))
 }
 
-/// [OPUS-5] sq-5ougp review round 3 (gpt-5.6-sol finding 2): GUARD #2's seed-request
+/// sq-5ougp review round 3 (gpt-5.6-sol finding 2): GUARD #2's seed-request
 /// predicate, extracted from the boot body so the DEMO disjunct is testable.
 ///
 /// Deleting `|| env_flag(ENV_SEED_DEMO)` here is the mutation that previously failed
@@ -1504,7 +1505,7 @@ async fn shutdown_signal() {
 mod tests {
     use super::*;
 
-    /// [GPT-5.6] sq-oprna.2: the QUIC endpoint must gain `h3` without mutating the TCP ALPN list.
+    /// sq-oprna.2: the QUIC endpoint must gain `h3` without mutating the TCP ALPN list.
     /// A missing `h3` mutation is rejected by `sparq_http3::quic_server_config`; mutating the shared
     /// config instead of its clone makes the second assertion fail.
     #[cfg(feature = "http3")]
@@ -1718,7 +1719,7 @@ mod tests {
     }
 
     // =====================================================================
-    // [OPUS-5] sq-5ougp review round 3 — the BOOT-LEVEL demo-seed invariants.
+    // sq-5ougp review round 3 — the BOOT-LEVEL demo-seed invariants.
     //
     // gpt-5.6-sol's adversarial cross-provider review of #3476 found that the
     // off-by-default property — the single most important property of an

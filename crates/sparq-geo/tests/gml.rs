@@ -1,5 +1,5 @@
 //! `geo:gmlLiteral` (GML Simple-Features) parsing + equivalence to its WKT twin.
-//! [OPUS-4.8] sq-zy0
+//! sq-zy0
 
 use geo_types::{
     Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
@@ -283,7 +283,7 @@ fn malformed_gml_is_a_clean_error() {
         // Truncated / unbalanced XML.
         r#"<gml:Point><gml:pos>1 2</gml:pos>"#,
         // NB: an empty lexical form is NOT an error — it is the empty geometry
-        // (GeoSPARQL Req 16); see `empty_gml_lexical_form_is_empty_geometry`. [OPUS-4.8]
+        // (GeoSPARQL Req 16); see `empty_gml_lexical_form_is_empty_geometry`.
     ];
     for lex in cases {
         match parse_gml_literal(lex) {
@@ -295,7 +295,7 @@ fn malformed_gml_is_a_clean_error() {
 
 #[test]
 fn still_deferred_types_are_clean_unsupported() {
-    // [OPUS-4.8] sq-47vu: gml:Envelope, arc-segment Curve/Surface, and 3-D coords
+    // sq-47vu: gml:Envelope, arc-segment Curve/Surface, and 3-D coords
     // are now SUPPORTED (see the dedicated tests below). What remains deferred —
     // tessellated TIN/TriangulatedSurface patches and non-PolygonPatch surface
     // patches — must still be a clean Unsupported, never a panic or wrong answer.
@@ -322,7 +322,7 @@ fn still_deferred_types_are_clean_unsupported() {
 }
 
 // ---- Beyond GML-SF: Envelope, arc Curve/Surface, 3-D coords (sq-47vu) -------
-// [OPUS-4.8]
+//
 
 #[test]
 fn envelope_becomes_bbox_polygon() {
@@ -658,7 +658,7 @@ fn parse_geometry_literal_dispatches_by_datatype() {
 }
 
 // ---- R16: an empty gmlLiteral is the empty geometry -------------------------
-// [OPUS-4.8] sq-mzmh — GeoSPARQL Req 16, the GML counterpart of the empty
+// sq-mzmh — GeoSPARQL Req 16, the GML counterpart of the empty
 // wktLiteral (Req 13).
 
 /// An empty / whitespace-only lexical form is the empty geometry (CRS84).

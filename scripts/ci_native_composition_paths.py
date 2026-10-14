@@ -6,21 +6,27 @@ import re
 import subprocess
 
 
+NATIVE_PREFIXES = (
+    "zk/native-composition/", "crates/sparq-canon/", "crates/sparq-core/",
+    "vendor/spargebra/", ".cargo/", "rust-toolchain",
+)
+NATIVE_FILES = {
+    "Cargo.toml", ".github/workflows/zk-native-composition.yml",
+    "scripts/ci_native_composition_paths.py",
+    "scripts/tests/test_ci_native_composition_paths.py",
+    "scripts/ci_summary_gate.py", "scripts/tests/test_ci_summary_gate.py",
+    ".github/workflows/ci-summary.yml",
+    "bench/zk-bindings/corpus.py", "bench/zk-bindings/run.py",
+    "bench/zk-bindings/protocol.json", "bench/zk-bindings/inventory.json",
+    "bench/zk-bindings/native_ci.py", "bench/zk-bindings/test_native_ci.py",
+    "bench/zk-bindings/test_harness.py",
+    # vendor-support/wasmer/verify.py requires the wasmer-derive audit policy here.
+    "supply-chain/config.toml",
+}
+
+
 def relevant_path(path: str) -> bool:
-    return path.startswith((
-        "zk/native-composition/", "crates/sparq-canon/", "crates/sparq-core/",
-        "vendor/spargebra/", ".cargo/", "rust-toolchain",
-    )) or path in {
-        "Cargo.toml", ".github/workflows/zk-native-composition.yml",
-        "scripts/ci_native_composition_paths.py",
-        "scripts/tests/test_ci_native_composition_paths.py",
-        "scripts/ci_summary_gate.py", "scripts/tests/test_ci_summary_gate.py",
-        ".github/workflows/ci-summary.yml",
-        "bench/zk-bindings/corpus.py", "bench/zk-bindings/run.py",
-        "bench/zk-bindings/protocol.json", "bench/zk-bindings/inventory.json",
-        "bench/zk-bindings/native_ci.py", "bench/zk-bindings/test_native_ci.py",
-        "bench/zk-bindings/test_harness.py",
-    }
+    return path.startswith(NATIVE_PREFIXES) or path in NATIVE_FILES
 
 
 def requires_execution(event: str, base: str, head: str) -> bool:

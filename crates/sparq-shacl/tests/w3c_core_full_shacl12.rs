@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-6glcr) Manifest-driven runner for the **FULL** SHACL 1.2 core
+//! (sq-6glcr) Manifest-driven runner for the **FULL** SHACL 1.2 core
 //! test suite — the whole `shacl12-test-suite/tests/core/manifest.ttl`
 //! `mf:include` tree (`complex/`, `misc/`, `node/`, `path/`, `property/`,
 //! `targets/`, `validation-reports/`), not just the `node/` subtree that
@@ -100,24 +100,24 @@ fn unimplemented() -> Vec<String> {
 /// commit (`fetch-shacl-tests.sh` PIN). Calibrated by running the harness; a
 /// regression below this fails the build, raising it is a deliberate bump.
 ///
-/// [OPUS-4.8] (sq-6glcr) Set to the measured pass count; see
+/// (sq-6glcr) Set to the measured pass count; see
 /// `research/shacl12-conformance-gap.md` for the per-category gap map. With
 /// `shacl-af` off the `nodeByExpression-001` node entry is a SKIP, so the floor
 /// is one below the `shacl-af`-on floor.
 ///
-/// [OPUS-4.8] (sq-rnkdh) Raised 114 → 129: locks in the SHACL-1.2 core value
+/// (sq-rnkdh) Raised 114 → 129: locks in the SHACL-1.2 core value
 /// constraints (sq-sx15d / #1267) and the 1.2 TARGET features added here —
 /// `sh:targetWhere`, the `sh:shape` data-graph link, and the `sh:ShapeClass`
 /// implicit class target (`targets/` now 10/10).
 ///
-/// [OPUS-4.8] (sq-0mjfd / sq-5q76d) Raised 129 → 133: this wave closes the
+/// (sq-0mjfd / sq-5q76d) Raised 129 → 133: this wave closes the
 /// `property/reifierShape-001,002` (`sh:reifierShape` / `sh:reificationRequired`),
 /// `property/uniqueLang-003` (the `rdf:dirLangString` base-direction key) and
 /// `validation-reports/conformance-disallows-001` (shapes-graph
 /// `sh:conformanceDisallows` threading) gaps. EQUALS the measured default-state
 /// pass count exactly (not above it — see the #1271 near-failure note).
 ///
-/// [OPUS-4.8] (sq-pb0wm, epic sq-waf9o) Raised 133 → 136: the FINAL SHACL 1.2 core
+/// (sq-pb0wm, epic sq-waf9o) Raised 133 → 136: the FINAL SHACL 1.2 core
 /// conformance gap — per-constraint-statement RDF-1.2 reified-annotation overrides
 /// (`<constraint> {| sh:deactivated/sh:message/sh:severity … |}`) — now interpreted,
 /// so `misc/{deactivated-003,message-002,severity-003}` move FAIL → PASS (`misc`
@@ -126,10 +126,10 @@ const BASELINE_PASS_CORE: usize = 136;
 
 /// Pass-floor over the FULL core tree with `shacl-af` ON: the `shacl-af`
 /// `sh:nodeByExpression` core/node entry becomes implemented and PASSes, so the
-/// floor rises by one. [OPUS-4.8] (sq-0mjfd) Raised 130 → 134 in lock-step with
+/// floor rises by one. (sq-0mjfd) Raised 130 → 134 in lock-step with
 /// [`BASELINE_PASS_CORE`].
 ///
-/// [OPUS-4.8] (sq-pb0wm) Raised 134 → 137 in lock-step with [`BASELINE_PASS_CORE`]
+/// (sq-pb0wm) Raised 134 → 137 in lock-step with [`BASELINE_PASS_CORE`]
 /// (the misc reified-annotation trio). With `shacl-af` ON the whole core tree now
 /// PASSes (137 pass, 0 fail, 0 skip).
 const BASELINE_PASS_AF: usize = 137;
@@ -140,15 +140,15 @@ const BASELINE_PASS_AF: usize = 137;
 /// the build; closing a gap drops it (bump down). The same in both feature
 /// states: the `shacl-af`-gated entries flip SKIP↔PASS, never to/from FAIL.
 ///
-/// [OPUS-4.8] (sq-rnkdh) Lowered 22 → 7: sq-sx15d (#1267) closed the value-constraint
+/// (sq-rnkdh) Lowered 22 → 7: sq-sx15d (#1267) closed the value-constraint
 /// gaps and this change closes the `targets/` gaps.
 ///
-/// [OPUS-4.8] (sq-0mjfd / sq-5q76d) Lowered 7 → 3: reifierShape ×2, uniqueLang-003 and
+/// (sq-0mjfd / sq-5q76d) Lowered 7 → 3: reifierShape ×2, uniqueLang-003 and
 /// conformance-disallows-001 now PASS. The remaining 3 were `misc/{deactivated-003,
 /// message-002, severity-003}` — each needs PER-CONSTRAINT-STATEMENT RDF-1.2
 /// reified-annotation interpretation (`sh:datatype X {| sh:deactivated/message/severity … |}`).
 ///
-/// [OPUS-4.8] (sq-pb0wm, epic sq-waf9o) Lowered 3 → 0: that final gap is now closed
+/// (sq-pb0wm, epic sq-waf9o) Lowered 3 → 0: that final gap is now closed
 /// (the per-statement reified-annotation overrides are interpreted), so NO full-core
 /// entry is an honest FAIL in either feature state. The two-sided ratchet still
 /// guards against a regression in either direction — a previously-correct entry

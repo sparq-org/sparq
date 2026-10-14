@@ -1,6 +1,6 @@
 //! Response-bytes result cache (research/concurrent-serving.md §5 verdict 2, §6.3).
 //!
-//! [OPUS-4.8] sq-jluc — written while Fable 5 unavailable; re-review when Fable
+//! sq-jluc — written while Fable 5 unavailable; re-review when Fable
 //! returns. **OPT-IN, OFF by default** (cargo feature `result-cache`).
 //!
 //! This is the §5-row-2 **RECOMMEND**: a cache from a *request identity* to the

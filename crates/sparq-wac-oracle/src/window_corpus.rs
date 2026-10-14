@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-x1ayt — **time-windowed conditional-grant** decision rows: the
+//! sq-x1ayt — **time-windowed conditional-grant** decision rows: the
 //! `Session::now` dimension of the corpus.
 //!
 //! # Why this is a separate corpus

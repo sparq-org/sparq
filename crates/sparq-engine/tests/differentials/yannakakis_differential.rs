@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-5zf8i / survey §A4) Feature-on vs feature-off equivalence for the opt-in
+//! (sq-5zf8i / survey §A4) Feature-on vs feature-off equivalence for the opt-in
 //! `yannakakis` bottom-up full-semijoin PREPASS for acyclic BGPs.
 //!
 //! The prepass (`exec::eval_bgp_yannakakis`, with the pure join-tree topology in

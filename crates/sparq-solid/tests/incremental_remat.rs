@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-b7k7u (issue #1571) — incremental re-materialization + diff-based
+//! sq-b7k7u (issue #1571) — incremental re-materialization + diff-based
 //! session-cache invalidation on `put_acl`/`delete_acl`.
 //!
 //! The load-bearing invariant, exercised over the REAL write-through + session oracle (no
@@ -17,7 +17,7 @@
 //! Sound by construction: `reindex_with` diffs old vs new `AuthIndex` per-origin buckets and
 //! invalidates exactly the origins that changed — no confinement lemma assumed. This suite is
 //! the differential guard that the diff-based reuse of untouched origins' slices never
-//! diverges from a full rebuild, including the adversarial cross-origin cases. [SONNET-4.6]
+//! diverges from a full rebuild, including the adversarial cross-origin cases.
 //! sq-b7k7u fix.
 
 use sparq_solid::{AuthIndex, Mode, PodStore, Session};
@@ -185,7 +185,7 @@ fn write_to_one_pod_never_changes_another_pods_decision() {
     }
 }
 
-// ── [OPUS-4.8] sq-b7k7u perf harness (ignored; work-box timings are NON-canonical) ──────
+// ── sq-b7k7u perf harness (ignored; work-box timings are NON-canonical) ──────
 // `cargo test -p sparq-solid --release --test incremental_remat -- --ignored --nocapture`
 // The PSS scenario is "reads at full QPS, ACL writes as events", so this isolates the two
 // per-REQUEST wins (which run once per read) from the write cost (which runs once per ACL
@@ -258,7 +258,7 @@ fn root_acl_nq(pod: &str) -> String {
     )
 }
 
-// ── Adversarial cross-origin tests [SONNET-4.6] sq-b7k7u fix ─────────────────────────────
+// ── Adversarial cross-origin tests sq-b7k7u fix ─────────────────────────────
 
 /// A group-doc body (N-Triples, no graph column) listing `members` under `group_subj`.
 fn group_doc_ntriples(group_subj: &str, members: &[&str]) -> String {

@@ -1,4 +1,4 @@
-// 🤖 SPARQ agent [SONNET-4.6]. Issue #2503 ("make sure tableau reasoning is properly
+// 🤖 SPARQ agent. Issue #2503 ("make sure tableau reasoning is properly
 // implemented") — a RANDOMISED CROSS-CHECK of the L3 ALCH tableau (`src/tableau.rs`)
 // against an INDEPENDENT oracle, plus the logical identities the tableau must respect.
 //

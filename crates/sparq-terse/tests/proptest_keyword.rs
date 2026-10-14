@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-v7li4 — metamorphic laws for the lean `K:` keyword layer.
+//! sq-v7li4 — metamorphic laws for the lean `K:` keyword layer.
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};

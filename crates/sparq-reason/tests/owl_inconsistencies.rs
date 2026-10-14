@@ -1,6 +1,6 @@
 //! OWL 2 RL inconsistency (clash) detection — `sparq_reason::inconsistencies`.
 //!
-//! 🤖 SPARQ agent — sq-qcnn test-quality slice [OPUS-4.8].
+//! 🤖 SPARQ agent — sq-qcnn test-quality slice.
 //!
 //! `inconsistencies(dict, triples)` is the load-bearing safety check the trust-graph admission
 //! gate relies on: it reports every OWL-RL CLASH the materialized graph entails (an ABox that

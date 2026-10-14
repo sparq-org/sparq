@@ -1,4 +1,4 @@
-//! [GPT-5.6] Fail-closed tests for corrupted and truncated Parquet input.
+//! Fail-closed tests for corrupted and truncated Parquet input.
 #![cfg(feature = "parquet")]
 
 use oxrdf::{Literal, Term, Variable};
@@ -21,7 +21,7 @@ fn assert_all_readers_reject(bytes: &[u8]) {
     }
 }
 
-/// [GPT-5.6] Mutation witness: any reader accepting arbitrary bytes, or changing the
+/// Mutation witness: any reader accepting arbitrary bytes, or changing the
 /// pinned error class, makes this assertion fail.
 #[test]
 fn garbage_bytes_are_rejected_by_all_parquet_readers() {

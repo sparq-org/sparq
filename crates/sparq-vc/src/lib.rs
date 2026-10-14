@@ -55,7 +55,7 @@
 //!   engine's JSON-LD parser); doing it inside this crate would force a JSON-LD
 //!   context processor (and remote-context fetching) onto the lean build. See
 //!   [`ProofConfig`] for how the proof options are supplied.
-//! - **Proof-config RDF matches the W3C vectors.** [OPUS-5.5] `created` maps to
+//! - **Proof-config RDF matches the W3C vectors.** `created` maps to
 //!   `dcterms:created` and `cryptosuite` is typed `sec:cryptosuiteString`, as in
 //!   the published [vc-di-eddsa test vectors]; the published `proofValue` is
 //!   regression-tested. Proofs from earlier releases (`sec:created`, plain
@@ -93,7 +93,7 @@
 //! the wasm artifact depends on it — `sparq-core`/`sparq-engine` stay lean. Pull
 //! it in explicitly only when you need W3C Data Integrity verify/sign.
 //!
-//! [OPUS-4.8] sq-ylbrq (issue #908) — written while Fable is unavailable; flag for
+//! sq-ylbrq (issue #908) — written while Fable is unavailable; flag for
 //! re-review when Fable returns.
 //!
 //! ## Quickstart

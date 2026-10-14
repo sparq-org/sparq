@@ -1,4 +1,4 @@
-//! SPARQL 1.1 Federated Query — `SERVICE` evaluation. [OPUS-4.8]
+//! SPARQL 1.1 Federated Query — `SERVICE` evaluation.
 //!
 //! `SERVICE <endpoint> { pattern }` evaluates `pattern` against a *remote* SPARQL
 //! endpoint and joins the returned solutions back into the surrounding query, per
@@ -97,23 +97,10 @@
 
 use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple, Variable};
 
-/// A fully-collected remote SELECT result: the projected variables and one row per
-/// solution (`None` = the variable is unbound in that solution).
-///
-/// PRODUCTION consumption is streaming ([`eval_remote_into`] hands rows to a sink as
-/// they are parsed, bead sq-my8wd.4); this collected form backs the convenience
-/// wrappers ([`eval_remote`], [`parse_results`], [`parse_srj`], [`parse_srx`]) and the
-/// tests. `PartialEq` supports the streaming-vs-reference equivalence tests. [FABLE-5]
-#[derive(Debug, PartialEq)]
-pub(crate) struct ServiceRelation {
-    pub vars: Vec<Variable>,
-    pub rows: Vec<Vec<Option<Term>>>,
-}
-
 /// Shorthand for the streaming row-sink contract (bead sq-my8wd.4): called once per
 /// parsed solution row, positionally projected over the result's variables (`None` =
 /// unbound). Returning `Err` ABORTS the parse and the error string is propagated to
-/// the caller VERBATIM (so a sink can enforce its own resource policy). [FABLE-5]
+/// the caller VERBATIM (so a sink can enforce its own resource policy).
 ///
 /// A closure bound rather than a trait object: every call site is monomorphised, so
 /// the per-row delivery adds no dynamic dispatch (the #1303 perf-neutrality stance).
@@ -129,7 +116,7 @@ pub trait Transport {
 
 /// Streaming transport seam: returns the raw HTTP response body as a `Read` handle
 /// so the parser can consume it incrementally WITHOUT buffering it into a `String`
-/// first. (bead sq-my8wd.5) [OPUS-4.8] / [FABLE-5]
+/// first. (bead sq-my8wd.5) /
 ///
 /// The production `HttpTransport` implements this by handing back the ureq response
 /// body reader directly (with the same `SERVICE_MAX_BODY_BYTES` body cap enforced by
@@ -156,7 +143,7 @@ pub trait ReaderTransport {
 
 /// Adapter: wraps any `Transport` as a `ReaderTransport` by calling `fetch()` and
 /// returning an `io::Cursor` over the owned `String` body.  This gives test mocks the
-/// streaming path without any changes. [OPUS-4.8] (sq-my8wd.5)
+/// streaming path without any changes. (sq-my8wd.5)
 #[cfg(feature = "service")]
 pub struct TransportAsReader<'t, T: ?Sized>(pub &'t T);
 
@@ -177,7 +164,7 @@ impl<T: Transport + ?Sized> ReaderTransport for TransportAsReader<'_, T> {
 /// content-sniff + parse the response incrementally, and return the projected
 /// variable list. SILENT handling is the caller's responsibility (it owns the
 /// join-identity fallback, and must discard whatever the sink accumulated when this
-/// returns `Err`). [FABLE-5]
+/// returns `Err`).
 pub fn eval_remote_into<F: RowSink>(
     transport: &dyn Transport,
     endpoint: &str,
@@ -192,7 +179,7 @@ pub fn eval_remote_into<F: RowSink>(
 /// `transport`, receive the response body as a `Read` stream (NOT buffered into a
 /// `String`), content-sniff + parse it incrementally, and call `on_row` for each
 /// parsed solution. Peak memory stays below the response body size — the body is
-/// never materialised in full. [OPUS-4.8] (bead sq-my8wd.5) [FABLE-5]
+/// never materialised in full. (bead sq-my8wd.5)
 ///
 /// SILENT handling is the caller's responsibility (it owns the join-identity fallback,
 /// and must discard whatever the sink accumulated when this returns `Err`).
@@ -207,26 +194,15 @@ pub fn eval_remote_into_read<F: RowSink>(
     parse_results_into_read(std::io::BufReader::new(reader), on_row)
 }
 
-/// Collecting wrapper over [`eval_remote_into`]: evaluate one SERVICE call end-to-end
-/// into a fully-collected [`ServiceRelation`]. Kept for tests and small-result
-/// callers; production SERVICE evaluation streams via [`eval_remote_into`].
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn eval_remote(
-    transport: &dyn Transport,
-    endpoint: &str,
-    query: &str,
-) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = eval_remote_into(transport, endpoint, query, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
-}
+/// The error for a response body that starts with neither `{` nor `<`.
+#[cfg(feature = "service")]
+const NOT_A_RESULTS_DOCUMENT: &str =
+    "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
+     (expected a leading '{' or '<')";
 
 /// Parse a remote SELECT results document incrementally, content-sniffing JSON vs
 /// XML, delivering each row to `on_row` and returning the projected variables.
-/// [OPUS-4.8] / streaming form [FABLE-5] (sq-my8wd.4)
+/// / streaming form (sq-my8wd.4)
 ///
 /// The SPARQL Protocol lets a client advertise an `Accept` preference, but a server MAY
 /// ignore it; in practice some endpoints always emit SPARQL-Results-XML even when we ask
@@ -244,30 +220,14 @@ pub(crate) fn parse_results_into<F: RowSink>(
         Some(b'{') => parse_srj_into(text, on_row),
         // An empty body or a leading byte that is neither `{` nor `<` is not a results
         // document we can parse; report it (SILENT turns this into an empty result).
-        _ => Err(
-            "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
-             (expected a leading '{' or '<')"
-                .into(),
-        ),
+        _ => Err(NOT_A_RESULTS_DOCUMENT.into()),
     }
-}
-
-/// Collecting wrapper over `parse_results_into` (tests / small-result callers).
-#[cfg(feature = "service")]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn parse_results(text: &str) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = parse_results_into(text, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
 }
 
 /// Parse a remote SELECT results document from a `BufRead` stream WITHOUT buffering
 /// the full body. Content-sniffs the first non-whitespace byte (identical dispatch
 /// logic to [`parse_results_into`]) then delegates to the reader-based JSON or XML
-/// parser. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
+/// parser. (bead sq-my8wd.5)
 ///
 /// The `reader` is consumed incrementally; at no point is the whole body held in
 /// memory. A mid-stream I/O error is reported as a SERVICE failure.
@@ -284,11 +244,7 @@ pub(crate) fn parse_results_into_read<R: std::io::BufRead, F: RowSink>(
             .fill_buf()
             .map_err(|e| format!("SERVICE: reading response: {}", e))?;
         if buf.is_empty() {
-            return Err(
-                "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
-                 (expected a leading '{' or '<')"
-                    .into(),
-            );
+            return Err(NOT_A_RESULTS_DOCUMENT.into());
         }
         // Find first non-whitespace byte in this buffer chunk.
         let pos = buf.iter().position(|b| !b.is_ascii_whitespace());
@@ -304,11 +260,7 @@ pub(crate) fn parse_results_into_read<R: std::io::BufRead, F: RowSink>(
                 return match sniff {
                     b'<' => parse_srx_into_read(reader, on_row),
                     b'{' => parse_srj_into_read(reader, on_row),
-                    _ => Err(
-                        "SERVICE: endpoint response is neither SPARQL-Results-JSON nor -XML \
-                         (expected a leading '{' or '<')"
-                            .into(),
-                    ),
+                    _ => Err(NOT_A_RESULTS_DOCUMENT.into()),
                 };
             }
             None => {
@@ -321,7 +273,7 @@ pub(crate) fn parse_results_into_read<R: std::io::BufRead, F: RowSink>(
 }
 
 // ---------------------------------------------------------------------------
-// Bind-join (VALUES pushdown) into SERVICE — block size knob [OPUS-4.8] (sq-sjkj)
+// Bind-join (VALUES pushdown) into SERVICE — block size knob (sq-sjkj)
 // ---------------------------------------------------------------------------
 //
 // When a SERVICE sub-query is the right side of a join whose join variables are
@@ -390,7 +342,7 @@ mod bind_block {
     }
 }
 
-/// The bind-join block size in force for the current scope. [OPUS-4.8] (sq-sjkj)
+/// The bind-join block size in force for the current scope. (sq-sjkj)
 #[cfg(feature = "service")]
 pub fn bind_block_size() -> usize {
     bind_block::current()
@@ -420,7 +372,7 @@ pub fn with_service_bound_join_block_size<R>(n: usize, f: impl FnOnce() -> R) ->
 }
 
 // ---------------------------------------------------------------------------
-// Per-query remote-request cap for high-cardinality `SERVICE ?ep` [OPUS-4.8] (sq-b93pv)
+// Per-query remote-request cap for high-cardinality `SERVICE ?ep` (sq-b93pv)
 // ---------------------------------------------------------------------------
 //
 // A `SERVICE ?ep { P }` whose endpoint variable binds to MANY distinct endpoint IRIs
@@ -448,7 +400,7 @@ pub fn with_service_bound_join_block_size<R>(n: usize, f: impl FnOnce() -> R) ->
 // `SPARQ_SERVICE_REMOTE_CAP` env var.
 
 /// Stable marker substring embedded in the engine error string when a `SERVICE ?ep`
-/// query is refused for exceeding the per-query remote-request cap. [OPUS-4.8] (sq-b93pv)
+/// query is refused for exceeding the per-query remote-request cap. (sq-b93pv)
 ///
 /// Mirrors [`SERVICE_EGRESS_REFUSED_MARKER`]: a network-exposed host (`sparq-server`)
 /// can `contains()`-classify the refusal as a deliberate resource-policy decision (an
@@ -498,14 +450,14 @@ mod remote_cap {
 }
 
 /// The per-query SERVICE remote-request cap in force for the current scope, or `None`
-/// when no cap is active (the default). [OPUS-4.8] (sq-b93pv)
+/// when no cap is active (the default). (sq-b93pv)
 #[cfg(feature = "service")]
 pub fn remote_request_cap() -> Option<usize> {
     remote_cap::current()
 }
 
 /// Runs `f` with a ceiling of `n` distinct remote endpoints per `SERVICE ?ep`
-/// evaluation. [OPUS-4.8] (sq-b93pv)
+/// evaluation. (sq-b93pv)
 ///
 /// A `SERVICE ?ep { P }` whose endpoint variable binds to MANY distinct endpoint IRIs
 /// dispatches one remote bind-join per distinct endpoint. This OPT-IN cap bounds that
@@ -540,7 +492,7 @@ pub fn with_service_remote_request_cap<R>(n: usize, f: impl FnOnce() -> R) -> R 
 }
 
 /// Renders a `VALUES` block that binds `vars` to each tuple in `tuples`, in the
-/// SPARQL 1.1 syntax accepted inside a group graph pattern. [OPUS-4.8] (sq-sjkj)
+/// SPARQL 1.1 syntax accepted inside a group graph pattern. (sq-sjkj)
 ///
 /// Each term is emitted via its canonical N-Triples/Turtle form (oxrdf `Display`),
 /// which is valid SPARQL term syntax for IRIs and literals (the only kinds the
@@ -584,7 +536,7 @@ pub fn render_values_block(vars: &[Variable], tuples: &[Vec<Term>]) -> String {
 }
 
 /// Whether a `Term` may be pushed as a `VALUES` data value into a remote query.
-/// [OPUS-4.8] (sq-sjkj)
+/// (sq-sjkj)
 ///
 /// IRIs and literals are pushable (their `Display` is valid SPARQL term syntax and
 /// their identity is global). A **blank node** is NOT: blank-node labels are scoped
@@ -610,7 +562,7 @@ pub fn pushable_term(t: &Term) -> bool {
 /// positionally over `head.vars` and handed to `on_row` immediately, and the
 /// projected variables are returned. ASK results (`{"boolean": …}`) are reported as
 /// an error — `SERVICE { … }` always wraps a SELECT in our forwarding, so a boolean
-/// body indicates a misbehaving endpoint. [FABLE-5]
+/// body indicates a misbehaving endpoint.
 ///
 /// Result-equivalent to the previous whole-DOM parse (same rows, order, multiplicity
 /// and errors — pinned by the `streaming_equivalence` tests), with two documented
@@ -618,14 +570,38 @@ pub fn pushable_term(t: &Term) -> bool {
 /// document buffers raw binding objects until `head` arrives, and duplicate top-level
 /// keys (malformed JSON) resolve in document order rather than DOM check order.
 #[cfg(feature = "service")]
-pub(crate) fn parse_srj_into<F: RowSink>(
+pub fn parse_srj_into<F: RowSink>(
     text: &str,
+    on_row: &mut F,
+) -> Result<Vec<Variable>, String> {
+    parse_srj_with(serde_json::Deserializer::from_str(text), on_row)
+}
+
+/// Reader-seam variant of [`parse_srj_into`]: parse a SPARQL-Results-JSON document
+/// from a `Read` stream WITHOUT buffering the body, calling `on_row` per solution.
+/// Uses `serde_json::Deserializer::from_reader`, so the only in-memory state is one
+/// binding object at a time — identical streaming guarantees to [`parse_srj_into`],
+/// extended to the HTTP body read. (bead sq-my8wd.5)
+///
+/// Result-semantics are IDENTICAL to [`parse_srj_into`] on the same byte sequence:
+/// same rows, order, multiplicity, and errors (the `srj_stream` seed logic is shared).
+#[cfg(feature = "service")]
+pub(crate) fn parse_srj_into_read<R: std::io::Read, F: RowSink>(
+    reader: R,
+    on_row: &mut F,
+) -> Result<Vec<Variable>, String> {
+    parse_srj_with(serde_json::Deserializer::from_reader(reader), on_row)
+}
+
+/// The SPARQL-Results-JSON driver behind [`parse_srj_into`] and [`parse_srj_into_read`].
+#[cfg(feature = "service")]
+fn parse_srj_with<'de, R: serde_json::de::Read<'de>, F: RowSink>(
+    mut de: serde_json::Deserializer<R>,
     on_row: &mut F,
 ) -> Result<Vec<Variable>, String> {
     use serde::de::DeserializeSeed;
 
     let mut st = srj_stream::State::new(on_row);
-    let mut de = serde_json::Deserializer::from_str(text);
     if let Err(e) = srj_stream::TopSeed(&mut st).deserialize(&mut de) {
         // A semantic error (bad term / bad variable / sink refusal) was smuggled out
         // through the side channel VERBATIM; anything else is a JSON syntax error and
@@ -641,46 +617,7 @@ pub(crate) fn parse_srj_into<F: RowSink>(
     st.finish()
 }
 
-/// Collecting wrapper over `parse_srj_into` (tests / small-result callers).
-#[cfg(feature = "service")]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn parse_srj(text: &str) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = parse_srj_into(text, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
-}
-
-/// Reader-seam variant of [`parse_srj_into`]: parse a SPARQL-Results-JSON document
-/// from a `Read` stream WITHOUT buffering the body, calling `on_row` per solution.
-/// Uses `serde_json::Deserializer::from_reader`, so the only in-memory state is one
-/// binding object at a time — identical streaming guarantees to [`parse_srj_into`],
-/// extended to the HTTP body read. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
-///
-/// Result-semantics are IDENTICAL to [`parse_srj_into`] on the same byte sequence:
-/// same rows, order, multiplicity, and errors (the `srj_stream` seed logic is shared).
-#[cfg(feature = "service")]
-pub(crate) fn parse_srj_into_read<R: std::io::Read, F: RowSink>(
-    reader: R,
-    on_row: &mut F,
-) -> Result<Vec<Variable>, String> {
-    use serde::de::DeserializeSeed;
-
-    let mut st = srj_stream::State::new(on_row);
-    let mut de = serde_json::Deserializer::from_reader(reader);
-    if let Err(e) = srj_stream::TopSeed(&mut st).deserialize(&mut de) {
-        return Err(st
-            .take_fail()
-            .unwrap_or_else(|| format!("SERVICE: invalid results JSON: {}", e)));
-    }
-    de.end()
-        .map_err(|e| format!("SERVICE: invalid results JSON: {}", e))?;
-    st.finish()
-}
-
-/// Streaming serde seeds for SPARQL-Results-JSON (bead sq-my8wd.4). [FABLE-5]
+/// Streaming serde seeds for SPARQL-Results-JSON (bead sq-my8wd.4).
 ///
 /// The document shape is `{"head": {"vars": […]}, "results": {"bindings": […]}}`.
 /// Only the `bindings` ARRAY is result-sized, so that is the one place a streaming
@@ -956,9 +893,10 @@ mod srj_stream {
 }
 
 /// Reconstruct one term from an SRJ binding value object. Mirrors the conformance
-/// suite's `srj_term` (uri / bnode / literal / SPARQL-1.2 triple terms).
+/// suite's `srj_term` (uri / bnode / literal / SPARQL-1.2 triple terms). Public so
+/// `sparq-fedclient` decodes remote results with the same function as SERVICE.
 #[cfg(feature = "service")]
-fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
+pub fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
     let get = |k: &str| val.get(k).and_then(|s| s.as_str());
     match get("type") {
         Some("uri") => {
@@ -975,68 +913,87 @@ fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
         }
         // Both "literal" and the legacy "typed-literal" (pre-2013 endpoints) map here.
         Some("literal") | Some("typed-literal") | None => {
-            let value = get("value")
-                .ok_or_else(|| "SERVICE: literal binding without value".to_string())?
-                .to_string();
-            if let Some(lang) = get("xml:lang") {
-                // [OPUS-4.8] sq-s955: the INBOUND counterpart to the outbound `its:dir`
-                // emission (sq-bj7o, `json.rs::term_to_json`). A remote endpoint's SPARQL 1.2
-                // results carry the RDF 1.2 base direction as a SEPARATE `its:dir` field
-                // alongside the bare `xml:lang` tag; reading only `xml:lang` dropped the
-                // direction, so a `dirLangString` arrived as a plain language-tagged literal
-                // and silently lost its direction on the way in. We now reconstruct the
-                // directional literal, validating the direction through the single source of
-                // truth (`dict::parse_base_direction`, also used by the stored-slot,
-                // materialised and outbound paths). An ABSENT or INVALID `its:dir` degrades
-                // to a plain language-tagged literal — the SAME decision `split_lang_dir` /
-                // `reconstruct_ref` make for a malformed stored slot — so all four paths AGREE
-                // on `(lang, dir)`.
-                match get("its:dir").and_then(sparq_core::dict::parse_base_direction) {
-                    Some(dir) => Ok(Term::Literal(
-                        Literal::new_directional_language_tagged_literal(value, lang, dir).map_err(
-                            |e| format!("SERVICE: bad language tag {lang:?}: {e}"),
-                        )?,
-                    )),
-                    None => Ok(Term::Literal(
-                        Literal::new_language_tagged_literal(value, lang)
-                            .map_err(|e| format!("SERVICE: bad language tag {lang:?}: {e}"))?,
-                    )),
-                }
-            } else if let Some(dt) = get("datatype") {
-                let dt = NamedNode::new(dt).map_err(|e| format!("SERVICE: bad datatype {dt:?}: {e}"))?;
-                Ok(Term::Literal(Literal::new_typed_literal(value, dt)))
-            } else {
-                Ok(Term::Literal(Literal::new_simple_literal(value)))
-            }
+            let value =
+                get("value").ok_or_else(|| "SERVICE: literal binding without value".to_string())?;
+            literal(
+                value.to_string(),
+                get("xml:lang"),
+                get("its:dir"),
+                get("datatype"),
+            )
         }
         Some("triple") => {
             let v = val
                 .get("value")
                 .ok_or_else(|| "SERVICE: triple term without value".to_string())?;
             let part = |k: &str| -> Result<Term, String> {
-                srj_term(v.get(k).ok_or_else(|| format!("SERVICE: triple term without {k}"))?)
+                srj_term(
+                    v.get(k)
+                        .ok_or_else(|| format!("SERVICE: triple term without {k}"))?,
+                )
             };
-            let subject = match part("subject")? {
-                Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
-                Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
-                other => return Err(format!("SERVICE: invalid triple-term subject: {other}")),
-            };
-            let predicate = match part("predicate")? {
-                Term::NamedNode(n) => n,
-                other => return Err(format!("SERVICE: invalid triple-term predicate: {other}")),
-            };
-            Ok(Term::Triple(Box::new(Triple {
-                subject,
-                predicate,
-                object: part("object")?,
-            })))
+            triple_term(part("subject")?, part("predicate")?, part("object")?)
         }
         Some(other) => Err(format!("SERVICE: unknown binding type {other:?}")),
     }
 }
 
+/// A literal from a results binding's lexical value and its optional `xml:lang`, `its:dir`
+/// and `datatype`, shared by the SRJ and SRX readers.
+///
+/// sq-s955: a SPARQL 1.2 result carries the RDF 1.2 base direction as a separate
+/// `its:dir` next to the bare language tag, so a language-tagged value with a valid direction
+/// becomes a `dirLangString`. The direction is validated by `dict::parse_base_direction`, the
+/// same rule the stored-slot, materialised and outbound paths use; an absent or invalid
+/// `its:dir` degrades to a plain language-tagged literal, as `split_lang_dir` /
+/// `reconstruct_ref` do for a malformed stored slot.
+#[cfg(feature = "service")]
+fn literal(
+    value: String,
+    lang: Option<&str>,
+    dir: Option<&str>,
+    datatype: Option<&str>,
+) -> Result<Term, String> {
+    if let Some(lang) = lang {
+        let bad_lang = |e| format!("SERVICE: bad language tag {lang:?}: {e}");
+        Ok(Term::Literal(
+            match dir.and_then(sparq_core::dict::parse_base_direction) {
+                Some(dir) => Literal::new_directional_language_tagged_literal(value, lang, dir)
+                    .map_err(bad_lang)?,
+                None => Literal::new_language_tagged_literal(value, lang).map_err(bad_lang)?,
+            },
+        ))
+    } else if let Some(dt) = datatype {
+        let dt = NamedNode::new(dt).map_err(|e| format!("SERVICE: bad datatype {dt:?}: {e}"))?;
+        Ok(Term::Literal(Literal::new_typed_literal(value, dt)))
+    } else {
+        Ok(Term::Literal(Literal::new_simple_literal(value)))
+    }
+}
+
+/// A SPARQL 1.2 triple term from its parsed parts, shared by the SRJ and SRX readers: the
+/// subject must be an IRI or blank node and the predicate an IRI.
+#[cfg(feature = "service")]
+fn triple_term(subject: Term, predicate: Term, object: Term) -> Result<Term, String> {
+    let subject = match subject {
+        Term::NamedNode(n) => NamedOrBlankNode::NamedNode(n),
+        Term::BlankNode(b) => NamedOrBlankNode::BlankNode(b),
+        other => return Err(format!("SERVICE: invalid triple-term subject: {other}")),
+    };
+    let Term::NamedNode(predicate) = predicate else {
+        return Err(format!(
+            "SERVICE: invalid triple-term predicate: {predicate}"
+        ));
+    };
+    Ok(Term::Triple(Box::new(Triple {
+        subject,
+        predicate,
+        object,
+    })))
+}
+
 // ---------------------------------------------------------------------------
-// SPARQL-Results-XML (SRX) parsing [OPUS-4.8] (bead sq-ycu)
+// SPARQL-Results-XML (SRX) parsing (bead sq-ycu)
 // ---------------------------------------------------------------------------
 //
 // The JSON path (`parse_srj`) is the preferred format, but some endpoints ignore the
@@ -1053,7 +1010,7 @@ fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
 /// Resolve one XML entity reference name (as quick-xml 0.40 hands it out in a
 /// `Event::GeneralRef`, i.e. WITHOUT the surrounding `&`/`;`) to its replacement text:
 /// the five predefined named entities (`amp`/`lt`/`gt`/`quot`/`apos`) and numeric
-/// character references (`#38` decimal, `#x26` hex). [OPUS-4.8]
+/// character references (`#38` decimal, `#x26` hex).
 #[cfg(feature = "service")]
 fn resolve_xml_entity(name: &str) -> Result<String, String> {
     if let Some(rep) = quick_xml::escape::resolve_predefined_entity(name) {
@@ -1073,50 +1030,37 @@ fn resolve_xml_entity(name: &str) -> Result<String, String> {
     Err(format!("SERVICE: unknown XML entity &{name};"))
 }
 
-/// Reconstruct one term from an SRX value element's collected attributes/text. Mirrors the
-/// conformance suite's `make_term` and the SRJ `srj_term` (uri / bnode / plain, language-
-/// tagged — incl. the SPARQL 1.2 `its:dir` directional literal — and typed literals).
+/// The open SRX value element (`<uri>`, `<bnode>` or `<literal>`): its kind, its literal
+/// attributes, and the character data collected so far.
 #[cfg(feature = "service")]
-fn srx_term(
-    kind: &str,
+struct SrxValue {
+    kind: &'static str,
     lang: Option<String>,
     dir: Option<String>,
-    dt: Option<String>,
+    datatype: Option<String>,
     text: String,
-) -> Result<Term, String> {
-    match kind {
-        "uri" => Ok(Term::NamedNode(
-            NamedNode::new(&text).map_err(|e| format!("SERVICE: bad IRI {text:?}: {e}"))?,
-        )),
-        "bnode" => Ok(Term::BlankNode(
-            BlankNode::new(&text).map_err(|e| format!("SERVICE: bad bnode {text:?}: {e}"))?,
-        )),
-        // "literal" (and any other leaf, defensively).
-        _ => {
-            if let Some(lang) = lang {
-                // A `<literal xml:lang="…" its:dir="…">` is an RDF 1.2 dirLangString. As in
-                // the SRJ path (sq-s955), an ABSENT or INVALID direction degrades to a plain
-                // language-tagged literal so all parse paths agree on `(lang, dir)`.
-                match dir
-                    .as_deref()
-                    .and_then(sparq_core::dict::parse_base_direction)
-                {
-                    Some(direction) => Ok(Term::Literal(
-                        Literal::new_directional_language_tagged_literal(text, &lang, direction)
-                            .map_err(|e| format!("SERVICE: bad language tag {lang:?}: {e}"))?,
-                    )),
-                    None => Ok(Term::Literal(
-                        Literal::new_language_tagged_literal(text, &lang)
-                            .map_err(|e| format!("SERVICE: bad language tag {lang:?}: {e}"))?,
-                    )),
-                }
-            } else if let Some(dt) = dt {
-                let dt =
-                    NamedNode::new(&dt).map_err(|e| format!("SERVICE: bad datatype {dt:?}: {e}"))?;
-                Ok(Term::Literal(Literal::new_typed_literal(text, dt)))
-            } else {
-                Ok(Term::Literal(Literal::new_simple_literal(text)))
+}
+
+#[cfg(feature = "service")]
+impl SrxValue {
+    /// The term this element denotes: the SRX counterpart of `srj_term`'s leaf arms.
+    fn into_term(self) -> Result<Term, String> {
+        let text = self.text;
+        match self.kind {
+            "uri" => Ok(Term::NamedNode(
+                NamedNode::new(&text).map_err(|e| format!("SERVICE: bad IRI {text:?}: {e}"))?,
+            )),
+            "bnode" => {
+                Ok(Term::BlankNode(BlankNode::new(&text).map_err(|e| {
+                    format!("SERVICE: bad bnode {text:?}: {e}")
+                })?))
             }
+            _ => literal(
+                text,
+                self.lang.as_deref(),
+                self.dir.as_deref(),
+                self.datatype.as_deref(),
+            ),
         }
     }
 }
@@ -1126,43 +1070,186 @@ fn srx_term(
 /// `<boolean>` bodies are rejected (SERVICE always wraps a SELECT in our forwarding).
 /// The quick-xml event loop was already streaming; the only sq-my8wd.4 change is that
 /// a finished row goes to the sink instead of a collected `Vec` — same projection,
-/// same order, same errors. [FABLE-5]
+/// same order, same errors.
+///
+/// In memory this borrows events straight from `text`; [`parse_srx_into_read`] runs the
+/// same loop over a `BufRead` stream, so a response body is never buffered into a
+/// `String` first (bead sq-my8wd.5).
 #[cfg(feature = "service")]
 pub(crate) fn parse_srx_into<F: RowSink>(
     text: &str,
     on_row: &mut F,
 ) -> Result<Vec<Variable>, String> {
-    use quick_xml::events::Event;
-    use quick_xml::Reader;
-
-    let mut reader = Reader::from_str(text);
+    let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().trim_text(false);
+    parse_srx_events(&mut reader, on_row)
+}
+
+/// Streaming form of [`parse_srx_into`].
+#[cfg(feature = "service")]
+pub(crate) fn parse_srx_into_read<R: std::io::BufRead, F: RowSink>(
+    reader: R,
+    on_row: &mut F,
+) -> Result<Vec<Variable>, String> {
+    let mut reader = quick_xml::Reader::from_reader(reader);
+    reader.config_mut().trim_text(false);
+    parse_srx_events(&mut (reader, Vec::new()), on_row)
+}
+
+/// The XML event source behind [`parse_srx_events`]: zero-copy over a `&[u8]`, or a
+/// reader plus the scratch buffer its events are decoded into.
+#[cfg(feature = "service")]
+trait SrxEvents {
+    fn next_event(&mut self) -> Result<quick_xml::events::Event<'_>, quick_xml::Error>;
+}
+
+#[cfg(feature = "service")]
+impl SrxEvents for quick_xml::Reader<&[u8]> {
+    fn next_event(&mut self) -> Result<quick_xml::events::Event<'_>, quick_xml::Error> {
+        self.read_event()
+    }
+}
+
+#[cfg(feature = "service")]
+impl<R: std::io::BufRead> SrxEvents for (quick_xml::Reader<R>, Vec<u8>) {
+    fn next_event(&mut self) -> Result<quick_xml::events::Event<'_>, quick_xml::Error> {
+        self.1.clear();
+        self.0.read_event_into(&mut self.1)
+    }
+}
+
+/// The namespace of the SPARQL Query Results XML Format.
+#[cfg(feature = "service")]
+const SRX_NS: &[u8] = b"http://www.w3.org/2005/sparql-results#";
+
+/// The W3C Internationalization Tag Set namespace, which SPARQL 1.2's `its:dir` is in.
+#[cfg(feature = "service")]
+const ITS_NS: &[u8] = b"http://www.w3.org/2005/11/its";
+
+/// A declared namespace, as far as results XML cares.
+#[cfg(feature = "service")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SrxNs {
+    Results,
+    Its,
+    /// `xmlns=""`: unprefixed elements are back in no namespace.
+    Unbound,
+    Other,
+}
+
+/// The namespace declarations in scope while reading results XML. Declarations are taken
+/// from the one pass the reader makes over each tag's attributes; a full
+/// namespace-resolving reader costs more on this hot path.
+#[cfg(feature = "service")]
+struct SrxScopes {
+    depth: usize,
+    /// `(depth of the declaring element, prefix (empty for the default), namespace)`.
+    bindings: Vec<(usize, Vec<u8>, SrxNs)>,
+    /// Whether an unprefixed element is a results element, kept current as `bindings`
+    /// changes, so the common unprefixed element needs no lookup.
+    unprefixed_ours: bool,
+}
+
+#[cfg(feature = "service")]
+impl Default for SrxScopes {
+    fn default() -> Self {
+        SrxScopes { depth: 0, bindings: Vec::new(), unprefixed_ours: true }
+    }
+}
+
+#[cfg(feature = "service")]
+impl SrxScopes {
+    /// Enters an element; its declarations follow through [`Self::declare`].
+    fn enter(&mut self) {
+        self.depth += 1;
+    }
+
+    /// Takes in the entered element's `xmlns` (empty `prefix`) or `xmlns:prefix`
+    /// declaration of `ns`, its attribute value with references already replaced.
+    fn declare(&mut self, prefix: &[u8], ns: &[u8]) {
+        let ns = match ns {
+            SRX_NS => SrxNs::Results,
+            ITS_NS => SrxNs::Its,
+            b"" if prefix.is_empty() => SrxNs::Unbound,
+            _ => SrxNs::Other,
+        };
+        self.bindings.push((self.depth, prefix.to_vec(), ns));
+        if prefix.is_empty() {
+            self.unprefixed_ours = matches!(ns, SrxNs::Results | SrxNs::Unbound);
+        }
+    }
+
+    /// Whether `name`, inside the innermost open element, is a results element: its
+    /// prefix binds the results namespace, or it is unprefixed and no default namespace
+    /// is declared (an endpoint that omits `xmlns`). An undeclared prefix is foreign.
+    fn ours(&self, name: quick_xml::name::QName<'_>) -> bool {
+        // Element names are short: a plain scan beats `QName::prefix`'s vectorised search.
+        let name = name.into_inner();
+        match name.iter().position(|&c| c == b':') {
+            Some(colon) => self.lookup(&name[..colon]) == Some(SrxNs::Results),
+            None => self.unprefixed_ours,
+        }
+    }
+
+    /// The namespace the innermost declaration of `prefix` binds.
+    fn lookup(&self, prefix: &[u8]) -> Option<SrxNs> {
+        self.bindings.iter().rev().find(|(_, p, _)| p == prefix).map(|b| b.2)
+    }
+
+    /// Leaves the innermost open element, dropping its declarations.
+    fn close(&mut self) {
+        if self.bindings.last().is_some_and(|b| b.0 == self.depth) {
+            while self.bindings.last().is_some_and(|b| b.0 == self.depth) {
+                self.bindings.pop();
+            }
+            self.unprefixed_ours =
+                matches!(self.lookup(&[]), None | Some(SrxNs::Results | SrxNs::Unbound));
+        }
+        self.depth = self.depth.saturating_sub(1);
+    }
+}
+
+/// The deepest triple-term nesting an SRX document may carry. A nested term is built and later
+/// dropped recursively, so its depth must be bounded; this is the depth the SRJ reader admits,
+/// whose bound comes from `serde_json`'s nesting limit (pinned by a test on both readers).
+#[cfg(feature = "service")]
+const MAX_SRX_TRIPLE_DEPTH: usize = 61;
+
+#[cfg(feature = "service")]
+fn parse_srx_events<E: SrxEvents, F: RowSink>(
+    events: &mut E,
+    on_row: &mut F,
+) -> Result<Vec<Variable>, String> {
+    use quick_xml::events::Event;
 
     let mut vars: Vec<Variable> = Vec::new();
-    // Per-row map of variable-name → term; projected positionally over `vars` at </result>.
-    let mut cur_row: rustc_hash::FxHashMap<String, Term> = rustc_hash::FxHashMap::default();
-    let mut cur_var: Option<String> = None;
-    // The open value element: (kind, xml:lang, its:dir, datatype, text).
-    #[allow(clippy::type_complexity)]
-    let mut cur_val: Option<(String, Option<String>, Option<String>, Option<String>, String)> =
-        None;
+    // The current row, positional over `vars`: a binding for an undeclared variable is
+    // ignored, a repeated binding keeps the last term, and a missing one is UNBOUND.
+    let mut cur_row: Vec<Option<Term>> = Vec::new();
+    // The column of the open `<binding name=…>` (the first declared variable of that name).
+    let mut cur_var: Option<usize> = None;
+    let mut cur_val: Option<SrxValue> = None;
     // SPARQL 1.2 `<triple>` nesting: each frame is (active slot, [s, p, o]).
     let mut triple_stack: Vec<(usize, [Option<Term>; 3])> = Vec::new();
     let mut in_boolean = false;
     let mut boolean: Option<bool> = None;
+    let mut scopes = SrxScopes::default();
 
     // Route a finished term into the enclosing `<triple>` frame's active slot, or, at top
     // level, into the current row keyed by the open `<binding name=…>`.
     fn commit(
         term: Term,
         triple_stack: &mut [(usize, [Option<Term>; 3])],
-        cur_row: &mut rustc_hash::FxHashMap<String, Term>,
-        cur_var: &Option<String>,
+        cur_row: &mut Vec<Option<Term>>,
+        cur_var: Option<usize>,
     ) {
         if let Some((slot, parts)) = triple_stack.last_mut() {
             parts[*slot] = Some(term);
-        } else if let Some(var) = cur_var.clone() {
-            cur_row.insert(var, term);
+        } else if let Some(col) = cur_var {
+            if cur_row.len() <= col {
+                cur_row.resize(col + 1, None);
+            }
+            cur_row[col] = Some(term);
         }
     }
     fn set_slot(triple_stack: &mut [(usize, [Option<Term>; 3])], slot: usize) {
@@ -1172,8 +1259,8 @@ pub(crate) fn parse_srx_into<F: RowSink>(
     }
 
     loop {
-        match reader
-            .read_event()
+        match events
+            .next_event()
             .map_err(|e| format!("SERVICE: invalid results XML: {e}"))?
         {
             Event::Eof => break,
@@ -1183,59 +1270,114 @@ pub(crate) fn parse_srx_into<F: RowSink>(
                     Event::Start(e) | Event::Empty(e) => e,
                     _ => unreachable!(),
                 };
-                let name = e.local_name();
-                let name = std::str::from_utf8(name.as_ref()).unwrap_or("").to_string();
-                let attr = |key: &str| -> Option<String> {
-                    e.attributes().filter_map(|a| a.ok()).find_map(|a| {
-                        let k = std::str::from_utf8(a.key.as_ref()).ok()?;
-                        // Matches a bare key or any namespaced `*:key` (e.g. `xml:lang`).
-                        if k == key || k.ends_with(&format!(":{key}")) {
-                            quick_xml::escape::unescape(std::str::from_utf8(&a.value).ok()?)
-                                .ok()
-                                .map(std::borrow::Cow::into_owned)
-                        } else {
-                            None
-                        }
-                    })
+                // One pass over the attributes: namespace declarations, and the first
+                // well-formed value of each attribute the results format reads. `name`
+                // and `datatype` are unprefixed (a default namespace never applies to an
+                // attribute), `lang` is `xml:lang`, and `dir` is in the ITS namespace,
+                // resolved once the tag's own declarations are in.
+                scopes.enter();
+                let [mut name_attr, mut lang, mut datatype] = [None, None, None];
+                let mut dirs = Vec::new();
+                let text = |a: &quick_xml::events::attributes::Attribute<'_>| {
+                    std::str::from_utf8(&a.value)
+                        .ok()
+                        .and_then(|v| quick_xml::escape::unescape(v).ok())
+                        .map(std::borrow::Cow::into_owned)
                 };
-                match name.as_str() {
-                    "variable" => {
-                        if let Some(v) = attr("name") {
+                for a in e.attributes().filter_map(|a| a.ok()) {
+                    let key = a.key.into_inner();
+                    let prefix = match key.strip_prefix(b"xmlns") {
+                        Some([]) => Some(&[][..]),
+                        Some([b':', prefix @ ..]) => Some(prefix),
+                        _ => None,
+                    };
+                    if let Some(prefix) = prefix {
+                        let ns = text(&a).ok_or_else(|| {
+                            "SERVICE: invalid results XML: bad namespace declaration".to_string()
+                        })?;
+                        scopes.declare(prefix, ns.as_bytes());
+                        continue;
+                    }
+                    let slot = match key {
+                        b"name" => &mut name_attr,
+                        b"xml:lang" => &mut lang,
+                        b"datatype" => &mut datatype,
+                        _ => {
+                            if let Some(prefix) = key.strip_suffix(b":dir") {
+                                dirs.push((prefix, a));
+                            }
+                            continue;
+                        }
+                    };
+                    if slot.is_none() {
+                        *slot = text(&a);
+                    }
+                }
+                // Like any prefix, `its` must be declared: an undeclared `its:dir` is
+                // not in the ITS namespace and is ignored.
+                let dir = dirs.iter().find_map(|(prefix, a)| {
+                    (scopes.lookup(prefix) == Some(SrxNs::Its)).then(|| text(a)).flatten()
+                });
+                let ours = scopes.ours(e.name());
+                let value = |kind| SrxValue {
+                    kind,
+                    lang: None,
+                    dir: None,
+                    datatype: None,
+                    text: String::new(),
+                };
+                // An element in another namespace is not a results element, whatever its
+                // local name: it is ignored like any unknown element.
+                let name = e.local_name();
+                let name: &[u8] = if ours { name.as_ref() } else { &[] };
+                match name {
+                    b"variable" => {
+                        if let Some(v) = name_attr {
                             vars.push(Variable::new(&v).map_err(|e| {
                                 format!("SERVICE: bad result variable {v:?}: {e}")
                             })?);
                         }
                     }
-                    "result" => cur_row.clear(),
-                    "binding" => cur_var = attr("name"),
-                    "uri" | "bnode" => cur_val = Some((name, None, None, None, String::new())),
-                    "literal" => {
-                        cur_val = Some((
-                            name,
-                            attr("lang"),
-                            attr("dir"),
-                            attr("datatype"),
-                            String::new(),
-                        ))
+                    b"result" => cur_row.clear(),
+                    b"binding" => {
+                        cur_var = name_attr
+                            .and_then(|name| vars.iter().position(|v| v.as_str() == name))
                     }
-                    "triple" => triple_stack.push((0, [None, None, None])),
-                    "subject" => set_slot(&mut triple_stack, 0),
-                    "predicate" => set_slot(&mut triple_stack, 1),
-                    "object" => set_slot(&mut triple_stack, 2),
-                    "boolean" => in_boolean = true,
+                    b"uri" => cur_val = Some(value("uri")),
+                    b"bnode" => cur_val = Some(value("bnode")),
+                    b"literal" => {
+                        cur_val = Some(SrxValue {
+                            lang,
+                            dir,
+                            datatype,
+                            ..value("literal")
+                        })
+                    }
+                    b"triple" => {
+                        if triple_stack.len() == MAX_SRX_TRIPLE_DEPTH {
+                            return Err(format!(
+                                "SERVICE: results XML nests triple terms more than \
+                                 {MAX_SRX_TRIPLE_DEPTH} deep"
+                            ));
+                        }
+                        triple_stack.push((0, [None, None, None]))
+                    }
+                    b"subject" => set_slot(&mut triple_stack, 0),
+                    b"predicate" => set_slot(&mut triple_stack, 1),
+                    b"object" => set_slot(&mut triple_stack, 2),
+                    b"boolean" => in_boolean = true,
                     _ => {}
                 }
                 // Self-closing value elements (`<literal/>`, `<bnode/>`) get no End event:
-                // commit the (empty-text) term right away.
-                if is_empty {
-                    if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                        commit(
-                            srx_term(&kind, lang, dir, dt, t)?,
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
+                // commit the (empty-text) term right away. Any other empty element leaves
+                // an open value alone.
+                if is_empty && matches!(name, b"uri" | b"bnode" | b"literal") {
+                    if let Some(v) = cur_val.take() {
+                        commit(v.into_term()?, &mut triple_stack, &mut cur_row, cur_var);
                     }
+                }
+                if is_empty {
+                    scopes.close();
                 }
             }
             Event::Text(t) => {
@@ -1246,68 +1388,46 @@ pub(crate) fn parse_srx_into<F: RowSink>(
                 if in_boolean {
                     boolean = Some(s.trim() == "true");
                 } else if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&s);
+                    v.text.push_str(&s);
                 }
             }
             // A `&amp;` / `&lt;` / numeric `&#38;` / `&#x26;` reference inside the open
-            // value element's text. (boolean bodies never carry references.) [OPUS-4.8]
+            // value element's text. (boolean bodies never carry references.)
             Event::GeneralRef(r) => {
                 if let Some(v) = cur_val.as_mut() {
                     let name = r.decode().map_err(|e| e.to_string())?;
-                    v.4.push_str(&resolve_xml_entity(&name)?);
+                    v.text.push_str(&resolve_xml_entity(&name)?);
                 }
             }
             Event::CData(t) => {
                 if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&String::from_utf8_lossy(&t));
+                    v.text.push_str(&String::from_utf8_lossy(&t));
                 }
             }
             Event::End(e) => {
+                let ours = scopes.ours(e.name());
+                scopes.close();
                 let name = e.local_name();
-                match name.as_ref() {
+                let name: &[u8] = if ours { name.as_ref() } else { &[] };
+                match name {
                     b"uri" | b"bnode" | b"literal" => {
-                        if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                            commit(
-                                srx_term(&kind, lang, dir, dt, t)?,
-                                &mut triple_stack,
-                                &mut cur_row,
-                                &cur_var,
-                            );
+                        if let Some(v) = cur_val.take() {
+                            commit(v.into_term()?, &mut triple_stack, &mut cur_row, cur_var);
                         }
                     }
                     b"triple" => {
                         let Some((_, [s, p, o])) = triple_stack.pop() else {
                             return Err("SERVICE: stray </triple> in results XML".into());
                         };
-                        let subject = match s {
-                            Some(Term::NamedNode(n)) => NamedOrBlankNode::NamedNode(n),
-                            Some(Term::BlankNode(b)) => NamedOrBlankNode::BlankNode(b),
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term subject: {other:?}"
-                                ))
-                            }
+                        let part = |t: Option<Term>, k: &str| {
+                            t.ok_or_else(|| format!("SERVICE: triple term without {k}"))
                         };
-                        let predicate = match p {
-                            Some(Term::NamedNode(n)) => n,
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term predicate: {other:?}"
-                                ))
-                            }
-                        };
-                        let object = o
-                            .ok_or_else(|| "SERVICE: triple term without object".to_string())?;
-                        commit(
-                            Term::Triple(Box::new(Triple {
-                                subject,
-                                predicate,
-                                object,
-                            })),
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
+                        let term = triple_term(
+                            part(s, "subject")?,
+                            part(p, "predicate")?,
+                            part(o, "object")?,
+                        )?;
+                        commit(term, &mut triple_stack, &mut cur_row, cur_var);
                     }
                     b"binding" => cur_var = None,
                     b"result" => {
@@ -1316,226 +1436,8 @@ pub(crate) fn parse_srx_into<F: RowSink>(
                         // semantics the SRJ path uses. Delivered to the sink NOW
                         // (streaming, sq-my8wd.4): a sink error aborts the parse and
                         // propagates verbatim.
-                        let row: Vec<Option<Term>> =
-                            vars.iter().map(|v| cur_row.remove(v.as_str())).collect();
-                        cur_row.clear();
-                        on_row(row)?;
-                    }
-                    b"boolean" => in_boolean = false,
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if boolean.is_some() {
-        return Err(
-            "SERVICE: endpoint returned an ASK boolean, expected SELECT bindings".into(),
-        );
-    }
-    Ok(vars)
-}
-
-/// Collecting wrapper over `parse_srx_into` (tests / small-result callers).
-#[cfg(feature = "service")]
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn parse_srx(text: &str) -> Result<ServiceRelation, String> {
-    let mut rows: Vec<Vec<Option<Term>>> = Vec::new();
-    let vars = parse_srx_into(text, &mut |row| {
-        rows.push(row);
-        Ok(())
-    })?;
-    Ok(ServiceRelation { vars, rows })
-}
-
-/// Reader-seam variant of [`parse_srx_into`]: parse a SPARQL-Results-XML document
-/// from a `BufRead` stream WITHOUT buffering the body into a `String`. Uses
-/// `quick_xml::Reader::from_reader` with the same event-driven logic as
-/// [`parse_srx_into`]; the only difference is that events are delivered via
-/// `read_event_into(&mut buf)` (a `Vec<u8>` working buffer) rather than
-/// `read_event()`. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
-///
-/// Result-semantics are IDENTICAL to [`parse_srx_into`] on the same byte sequence.
-#[cfg(feature = "service")]
-pub(crate) fn parse_srx_into_read<R: std::io::BufRead, F: RowSink>(
-    reader: R,
-    on_row: &mut F,
-) -> Result<Vec<Variable>, String> {
-    use quick_xml::events::Event;
-    use quick_xml::Reader;
-
-    let mut qr = Reader::from_reader(reader);
-    qr.config_mut().trim_text(false);
-
-    // Event scratch buffer — reused across calls; event data is eagerly cloned out.
-    let mut buf: Vec<u8> = Vec::new();
-
-    let mut vars: Vec<Variable> = Vec::new();
-    let mut cur_row: rustc_hash::FxHashMap<String, Term> = rustc_hash::FxHashMap::default();
-    let mut cur_var: Option<String> = None;
-    #[allow(clippy::type_complexity)]
-    let mut cur_val: Option<(String, Option<String>, Option<String>, Option<String>, String)> =
-        None;
-    let mut triple_stack: Vec<(usize, [Option<Term>; 3])> = Vec::new();
-    let mut in_boolean = false;
-    let mut boolean: Option<bool> = None;
-
-    // Identical helper closures to the `from_str` parser.
-    fn commit_r(
-        term: Term,
-        triple_stack: &mut [(usize, [Option<Term>; 3])],
-        cur_row: &mut rustc_hash::FxHashMap<String, Term>,
-        cur_var: &Option<String>,
-    ) {
-        if let Some((slot, parts)) = triple_stack.last_mut() {
-            parts[*slot] = Some(term);
-        } else if let Some(var) = cur_var.clone() {
-            cur_row.insert(var, term);
-        }
-    }
-    fn set_slot_r(triple_stack: &mut [(usize, [Option<Term>; 3])], slot: usize) {
-        if let Some((s, _)) = triple_stack.last_mut() {
-            *s = slot;
-        }
-    }
-
-    loop {
-        buf.clear();
-        match qr
-            .read_event_into(&mut buf)
-            .map_err(|e| format!("SERVICE: invalid results XML: {e}"))?
-        {
-            Event::Eof => break,
-            ev @ (Event::Start(_) | Event::Empty(_)) => {
-                let is_empty = matches!(ev, Event::Empty(_));
-                let e = match &ev {
-                    Event::Start(e) | Event::Empty(e) => e,
-                    _ => unreachable!(),
-                };
-                let name = e.local_name();
-                let name = std::str::from_utf8(name.as_ref()).unwrap_or("").to_string();
-                let attr = |key: &str| -> Option<String> {
-                    e.attributes().filter_map(|a| a.ok()).find_map(|a| {
-                        let k = std::str::from_utf8(a.key.as_ref()).ok()?;
-                        if k == key || k.ends_with(&format!(":{key}")) {
-                            quick_xml::escape::unescape(std::str::from_utf8(&a.value).ok()?)
-                                .ok()
-                                .map(std::borrow::Cow::into_owned)
-                        } else {
-                            None
-                        }
-                    })
-                };
-                match name.as_str() {
-                    "variable" => {
-                        if let Some(v) = attr("name") {
-                            vars.push(Variable::new(&v).map_err(|e| {
-                                format!("SERVICE: bad result variable {v:?}: {e}")
-                            })?);
-                        }
-                    }
-                    "result" => cur_row.clear(),
-                    "binding" => cur_var = attr("name"),
-                    "uri" | "bnode" => cur_val = Some((name, None, None, None, String::new())),
-                    "literal" => {
-                        cur_val = Some((
-                            name,
-                            attr("lang"),
-                            attr("dir"),
-                            attr("datatype"),
-                            String::new(),
-                        ))
-                    }
-                    "triple" => triple_stack.push((0, [None, None, None])),
-                    "subject" => set_slot_r(&mut triple_stack, 0),
-                    "predicate" => set_slot_r(&mut triple_stack, 1),
-                    "object" => set_slot_r(&mut triple_stack, 2),
-                    "boolean" => in_boolean = true,
-                    _ => {}
-                }
-                if is_empty {
-                    if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                        commit_r(
-                            srx_term(&kind, lang, dir, dt, t)?,
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
-                    }
-                }
-            }
-            Event::Text(t) => {
-                let s = t.decode().map_err(|e| e.to_string())?;
-                if in_boolean {
-                    boolean = Some(s.trim() == "true");
-                } else if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&s);
-                }
-            }
-            Event::GeneralRef(r) => {
-                if let Some(v) = cur_val.as_mut() {
-                    let name = r.decode().map_err(|e| e.to_string())?;
-                    v.4.push_str(&resolve_xml_entity(&name)?);
-                }
-            }
-            Event::CData(t) => {
-                if let Some(v) = cur_val.as_mut() {
-                    v.4.push_str(&String::from_utf8_lossy(&t));
-                }
-            }
-            Event::End(e) => {
-                let name = e.local_name();
-                match name.as_ref() {
-                    b"uri" | b"bnode" | b"literal" => {
-                        if let Some((kind, lang, dir, dt, t)) = cur_val.take() {
-                            commit_r(
-                                srx_term(&kind, lang, dir, dt, t)?,
-                                &mut triple_stack,
-                                &mut cur_row,
-                                &cur_var,
-                            );
-                        }
-                    }
-                    b"triple" => {
-                        let Some((_, [s, p, o])) = triple_stack.pop() else {
-                            return Err("SERVICE: stray </triple> in results XML".into());
-                        };
-                        let subject = match s {
-                            Some(Term::NamedNode(n)) => NamedOrBlankNode::NamedNode(n),
-                            Some(Term::BlankNode(b)) => NamedOrBlankNode::BlankNode(b),
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term subject: {other:?}"
-                                ))
-                            }
-                        };
-                        let predicate = match p {
-                            Some(Term::NamedNode(n)) => n,
-                            other => {
-                                return Err(format!(
-                                    "SERVICE: invalid triple-term predicate: {other:?}"
-                                ))
-                            }
-                        };
-                        let object = o
-                            .ok_or_else(|| "SERVICE: triple term without object".to_string())?;
-                        commit_r(
-                            Term::Triple(Box::new(Triple {
-                                subject,
-                                predicate,
-                                object,
-                            })),
-                            &mut triple_stack,
-                            &mut cur_row,
-                            &cur_var,
-                        );
-                    }
-                    b"binding" => cur_var = None,
-                    b"result" => {
-                        let row: Vec<Option<Term>> =
-                            vars.iter().map(|v| cur_row.remove(v.as_str())).collect();
-                        cur_row.clear();
+                        let mut row = std::mem::take(&mut cur_row);
+                        row.resize(vars.len(), None);
                         on_row(row)?;
                     }
                     b"boolean" => in_boolean = false,
@@ -1555,10 +1457,10 @@ pub(crate) fn parse_srx_into_read<R: std::io::BufRead, F: RowSink>(
 }
 
 // ---------------------------------------------------------------------------
-// SSRF egress policy (default-deny private / internal ranges) [OPUS-4.8]
+// SSRF egress policy (default-deny private / internal ranges)
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] (sq-iu0c) Stable marker substring embedded in EVERY engine error string
+/// (sq-iu0c) Stable marker substring embedded in EVERY engine error string
 /// for a SERVICE egress refusal (a host blocked by the allowlist / default-deny SSRF
 /// policy). It survives the transport-error wrapping in `HttpTransport::fetch`, so a
 /// network-exposed host (e.g. `sparq-server`) can `contains()`-classify the refusal as a
@@ -1587,52 +1489,18 @@ pub const SERVICE_EGRESS_REFUSED_MARKER: &str = "SERVICE egress refused";
 // at 127.0.0.1 / 169.254.169.254 is dropped before any socket is opened, and
 // there is no resolve-then-reresolve TOCTOU window.
 
-/// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden (private /
-/// internal / non-global) destination for SERVICE federation. Returns `true`
-/// when the address is in a range the default-deny policy refuses.
-///
-/// Forbidden ranges:
-/// * loopback — `127.0.0.0/8`, `::1`
-/// * RFC1918 private — `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
-/// * link-local — `169.254.0.0/16` (incl. the `169.254.169.254` cloud-metadata
-///   IP) and IPv6 `fe80::/10`
-/// * unique-local IPv6 — `fc00::/7`
-/// * unspecified — `0.0.0.0`, `::`
-/// * IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped and re-classified as the
-///   embedded IPv4 address, so a private v4 cannot be smuggled through a v6 host.
+/// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden destination for
+/// SERVICE federation: `true` unless the address is globally reachable unicast. The shared
+/// classifier ([`sparq_core::net::is_forbidden_ip`]), re-exported here so the SERVICE surface
+/// keeps its name for it.
 #[cfg(feature = "service")]
-pub(crate) fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()            // 127.0.0.0/8
-                || v4.is_private()      // 10/8, 172.16/12, 192.168/16
-                || v4.is_link_local()   // 169.254.0.0/16 (incl. 169.254.169.254)
-                || v4.is_unspecified()  // 0.0.0.0
-                // Defence-in-depth on ranges that are also internal but not
-                // covered above: broadcast, shared CGNAT (100.64/10), benchmarking.
-                || v4.is_broadcast()    // 255.255.255.255
-                || matches!(v4.octets(), [100, b, ..] if (64..=127).contains(&b)) // 100.64/10 CGNAT
-        }
-        IpAddr::V6(v6) => {
-            // Unwrap IPv4-mapped (::ffff:a.b.c.d) and re-check as IPv4 so a
-            // private v4 can't ride in through a v6 literal.
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(IpAddr::V4(v4));
-            }
-            v6.is_loopback()            // ::1
-                || v6.is_unspecified()  // ::
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
-        }
-    }
-}
+pub use sparq_core::net::is_forbidden_ip;
 
 /// SERVICE egress allowlist + policy mode. A host (DNS name or IP literal, exactly
 /// as written in the SERVICE IRI authority) on this list is exempt from
 /// [`is_forbidden_ip`] — its resolved addresses are permitted even when private.
 ///
-/// ## Port scoping ([OPUS-4.8] sq-a7jw4)
+/// ## Port scoping (sq-a7jw4)
 ///
 /// An allowlist entry may be **host-level** (`sparql.internal`, `127.0.0.1`,
 /// `.example.org`) or **port-scoped** (`127.0.0.1:8053`, `sparql.internal:8443`,
@@ -1667,13 +1535,13 @@ pub(crate) fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
 /// policy) preserves the original behaviour: public allowed, private denied.
 /// Installed for a scope via [`with_service_egress_allow`] /
 /// [`with_service_egress_policy`], mirroring `update.rs`'s `with_load_base`
-/// thread-local allowlist pattern. [OPUS-4.8] (sq-4w18)
+/// thread-local allowlist pattern. (sq-4w18)
 #[cfg(feature = "service")]
 pub(crate) mod egress_policy {
     use std::cell::RefCell;
     use std::collections::HashSet;
 
-    /// How the allowlist is interpreted for hosts NOT on it. [OPUS-4.8] (sq-4w18)
+    /// How the allowlist is interpreted for hosts NOT on it. (sq-4w18)
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) enum Mode {
         /// Hosts off the allowlist are reachable iff they resolve to a *public*
@@ -1717,7 +1585,7 @@ pub(crate) mod egress_policy {
         POLICY.with(|p| Guard(Some(std::mem::replace(&mut *p.borrow_mut(), next))))
     }
 
-    /// Split one allowlist entry into its `(host_pattern, port_constraint)`. [OPUS-4.8] (sq-a7jw4)
+    /// Split one allowlist entry into its `(host_pattern, port_constraint)`. (sq-a7jw4)
     ///
     /// An entry is **port-scoped** (`Some(port)`) only when it carries an *unambiguous*
     /// trailing `:port`; otherwise it is **host-level** (`None` = every port). The split is
@@ -1758,7 +1626,7 @@ pub(crate) mod egress_policy {
     }
 
     /// True iff `host_pattern` (an entry's host part, already lower-cased) matches the
-    /// lower-cased connect host `h`: exact, or a leading-dot suffix wildcard. [OPUS-4.8]
+    /// lower-cased connect host `h`: exact, or a leading-dot suffix wildcard.
     ///   * **exact** — the pattern equals the host (`"sparql.example.org"`).
     ///   * **suffix wildcard** — a pattern beginning with a dot (`".example.org"`)
     ///     matches any host ending in that suffix INCLUDING the bare apex
@@ -1772,7 +1640,7 @@ pub(crate) mod egress_policy {
         }
     }
 
-    /// True if `(host, port)` is permitted by the active allowlist. [OPUS-4.8] (sq-a7jw4)
+    /// True if `(host, port)` is permitted by the active allowlist. (sq-a7jw4)
     ///
     /// `host` is the SERVICE IRI authority host (case-insensitive); `port` is the
     /// authority's port (its explicit `:port` or the scheme default — the SAME port that is
@@ -1798,7 +1666,7 @@ pub(crate) mod egress_policy {
 
     /// True iff the single allowlist `entry` permits the lower-cased connect host `h` on
     /// `port` — the pure per-entry predicate `is_allowed`'s `.any(…)` closure applies to
-    /// every stored entry. [OPUS-4.8] (sq-a7jw4)
+    /// every stored entry. (sq-a7jw4)
     ///
     /// Factored out so the host:port parsing + matching semantics (port-0/overflow/
     /// IPv6-bracket/trailing-colon all handled by [`split_entry`]) live in ONE place and can
@@ -1812,7 +1680,7 @@ pub(crate) mod egress_policy {
     }
 
     /// True iff the allowlist `entry`'s HOST part matches the lower-cased connect host `h`,
-    /// IGNORING any port constraint — i.e. "is `h` named by this entry on *some* port". [OPUS-4.8]
+    /// IGNORING any port constraint — i.e. "is `h` named by this entry on *some* port".
     /// (sq-vbnyc). The fedclient guard's backward-compatible "is this host allowlisted at all"
     /// query reuses this so the host-pattern parsing (bracket-stripping, suffix wildcard) lives in
     /// ONE place rather than being re-derived client-side.
@@ -1827,7 +1695,7 @@ pub(crate) mod egress_policy {
     }
 }
 
-/// True iff a single SSRF-allowlist `entry` permits connecting to `host` on `port`. [OPUS-4.8] (sq-vbnyc)
+/// True iff a single SSRF-allowlist `entry` permits connecting to `host` on `port`. (sq-vbnyc)
 ///
 /// This is the engine's SERVICE-egress per-entry matching rule, exposed so the
 /// **`sparq-fedclient`** crate's independent host-level egress guard can adopt the SAME
@@ -1853,7 +1721,7 @@ pub fn allowlist_entry_permits(entry: &str, host: &str, port: u16) -> bool {
 }
 
 /// True iff a single SSRF-allowlist `entry`'s HOST part names `host`, IGNORING any port
-/// constraint — "is `host` reachable through this entry on *some* port". [OPUS-4.8] (sq-vbnyc)
+/// constraint — "is `host` reachable through this entry on *some* port". (sq-vbnyc)
 ///
 /// Companion to [`allowlist_entry_permits`] for the `sparq-fedclient` guard's backward-compatible
 /// "is this host allowlisted at all" query (where the dialled port is not yet known), so the
@@ -1948,7 +1816,7 @@ pub struct HttpTransport {
 
 /// The transport's own finite default round-trip timeout, used when no per-query
 /// budget deadline constrains it further. A slow/unreachable endpoint cannot hang the
-/// engine past this; SILENT then turns the timeout into an empty result. [OPUS-4.8]
+/// engine past this; SILENT then turns the timeout into an empty result.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 pub(crate) const DEFAULT_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -1956,14 +1824,14 @@ pub(crate) const DEFAULT_SERVICE_TIMEOUT: std::time::Duration = std::time::Durat
 /// within a few ms) would otherwise yield a zero/near-zero socket timeout that fails
 /// every dial instantly; we still give the round-trip a brief window, and the engine's
 /// own cooperative budget check (`exec::budget::check`) reports the over-deadline query
-/// as `"query budget exceeded (timeout)"` either way. [OPUS-4.8] (sq-d4p)
+/// as `"query budget exceeded (timeout)"` either way. (sq-d4p)
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 pub(crate) const MIN_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(50);
 
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 impl HttpTransport {
     /// Construct a transport whose per-request timeout is the active query budget's
-    /// remaining time, capped by the built-in `DEFAULT_SERVICE_TIMEOUT`. [OPUS-4.8] (sq-d4p)
+    /// remaining time, capped by the built-in `DEFAULT_SERVICE_TIMEOUT`. (sq-d4p)
     ///
     /// `remaining` is the time left until the `QueryBudget`
     /// deadline (from `exec::budget::remaining_timeout`):
@@ -1991,32 +1859,106 @@ impl HttpTransport {
     }
 }
 
-/// ureq [`Resolver`](ureq::unversioned::resolver::Resolver) wrapper that enforces the SSRF egress policy
-/// on the *resolved* addresses (DNS-rebinding-safe). [OPUS-4.8]
-///
-/// It resolves `netloc` with the standard system resolver, drops every address
-/// the [`is_forbidden_ip`] policy refuses (unless the host is on the active
-/// allowlist), and returns only the survivors — so ureq dials only vetted IPs.
-/// If resolution yields nothing but forbidden addresses, it returns a
-/// `PermissionDenied` error rather than an empty set, which surfaces to the
-/// caller as a SERVICE failure (and an empty result under SILENT).
+/// ureq [`Resolver`](ureq::unversioned::resolver::Resolver) wrapper that enforces the SSRF egress
+/// policy on the *resolved* addresses (DNS-rebinding-safe), through [`resolve_vetted`] with the
+/// thread's active SERVICE allowlist and mode. A refusal surfaces to the caller as a SERVICE
+/// failure (and an empty result under SILENT).
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 #[derive(Debug)]
 struct EgressFilterResolver;
 
-// [OPUS-4.8] sq-g2xs: the ureq-3 `Resolver` trait takes a parsed `&http::Uri` (+ `Config` +
-// timeout) and returns an `ArrayVec<SocketAddr, 16>` rather than ureq-2's `&str` netloc → `Vec`.
-// The SSRF logic is otherwise byte-for-byte the ureq-2 policy: derive `host:port` from the URI
-// authority + scheme default port, key the allowlist by the bare host, resolve, drop every
-// `is_forbidden_ip` address (unless allowlisted), and refuse with a `PermissionDenied` io error
-// (carried as `ureq::Error::Io`, so the `SERVICE_EGRESS_REFUSED_MARKER` survives the wrapping
-// and the kind stays `PermissionDenied` for the egress tests). A refusal is a HARD error (never
-// an empty address set), so ureq cannot fall through to an unguarded dial.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
+    fn resolve(
+        &self,
+        uri: &ureq::http::Uri,
+        _config: &ureq::config::Config,
+        _timeout: ureq::unversioned::transport::NextTimeout,
+    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+        // (sq-4w18) STRICT (AllowlistOnly) mode — the server's policy — refuses any
+        // host not on the allowlist BEFORE resolving DNS. An empty allowlist = deny ALL SERVICE.
+        let strict = egress_policy::mode() == egress_policy::Mode::AllowlistOnly;
+        resolve_vetted(uri, egress_policy::is_allowed, strict, |refusal| match refusal {
+            EgressRefusal::NoAuthority => format!(
+                "{SERVICE_EGRESS_REFUSED_MARKER}: request URI {uri} has no host authority to vet"
+            ),
+            EgressRefusal::NotAllowlisted { host } => format!(
+                "{SERVICE_EGRESS_REFUSED_MARKER}: host {host:?} is not on the SERVICE allowlist \
+                 (strict allowlist-only policy; add it via --service-allow / SPARQ_SERVICE_ALLOW \
+                 on the server, or with_service_egress_policy in an embedder)"
+            ),
+            EgressRefusal::PrivateOnly { host_port } => format!(
+                "{SERVICE_EGRESS_REFUSED_MARKER}: {host_port} resolves only to private/internal addresses \
+                 (default-deny SSRF policy; allowlist the host via with_service_egress_allow)"
+            ),
+        })
+    }
+}
+
+/// Why [`resolve_vetted`] refused a request; the caller words the error text.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EgressRefusal<'a> {
+    /// The request URI carries no host authority to vet.
+    NoAuthority,
+    /// Strict mode, and the host is not allowlisted: refused before any DNS lookup.
+    NotAllowlisted {
+        /// The bare, lowercased host.
+        host: &'a str,
+    },
+    /// The host is not allowlisted and every address it resolves to is private or internal.
+    PrivateOnly {
+        /// The `host:port` that was resolved.
+        host_port: &'a str,
+    },
+}
+
+/// The SSRF-vetted addresses for a ureq-3 resolver: the one implementation behind the engine's
+/// SERVICE transport and every sparq-fedclient HTTP client. sq-g2xs / sq-a7jw4.
+///
+/// Derives `host:port` from the URI authority (scheme default port when absent), asks
+/// `allowed(host, port)` whether the bare lowercased host is allowlisted on the port actually
+/// dialled, refuses an unlisted host before resolving when `strict`, then resolves and drops
+/// every [`is_forbidden_ip`] address unless the host is allowlisted. ureq dials only the returned
+/// addresses, so there is no DNS-rebinding re-resolve window. A refusal is a HARD
+/// `PermissionDenied` [`ureq::Error::Io`] carrying `refuse`'s text, never an empty set, so ureq
+/// cannot fall through to an unguarded dial.
+///
+/// `allowed` must be a real allowlist: a host it accepts skips the private-address filter, so
+/// `|_, _| true` would switch the SSRF guard off.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+pub fn resolve_vetted(
+    uri: &ureq::http::Uri,
+    allowed: impl FnOnce(&str, u16) -> bool,
+    strict: bool,
+    refuse: impl FnOnce(EgressRefusal<'_>) -> String,
+) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
+    use std::net::ToSocketAddrs;
+    let Some((host_port, host, port)) = uri_host_port(uri) else {
+        return Err(egress_refused(refuse(EgressRefusal::NoAuthority)));
+    };
+    let allowed = allowed(&host, port);
+    if !allowed && strict {
+        return Err(egress_refused(refuse(EgressRefusal::NotAllowlisted {
+            host: &host,
+        })));
+    }
+    let resolved = host_port.to_socket_addrs().map_err(ureq::Error::Io)?;
+    let permitted = filter_addrs(resolved, allowed, is_forbidden_ip);
+    if permitted.is_empty() {
+        return Err(egress_refused(refuse(EgressRefusal::PrivateOnly {
+            host_port: &host_port,
+        })));
+    }
+    Ok(permitted)
+}
 
 /// `host:port` (for resolution) + bare host (for the allowlist key, IPv6 brackets stripped,
 /// lowercased) + the numeric `port` (for the port-scoped allowlist check, sq-a7jw4) from a
 /// ureq-3 request [`Uri`](ureq::http::Uri). `port` falls back to the scheme default (443 for
-/// https, 80 otherwise). [OPUS-4.8] sq-g2xs / sq-a7jw4.
+/// https, 80 otherwise). sq-g2xs / sq-a7jw4.
 ///
 /// The returned `port` is exactly the port `to_socket_addrs(host:port)` dials for EVERY
 /// resolved address, so a port-scoped allowlist entry is checked against the port actually
@@ -2041,7 +1983,7 @@ fn uri_host_port(uri: &ureq::http::Uri) -> Option<(String, String, u16)> {
 }
 
 /// Wrap a refusal reason as a `PermissionDenied` [`ureq::Error::Io`], preserving both the kind
-/// (the egress tests assert on it) and the [`SERVICE_EGRESS_REFUSED_MARKER`] text. [OPUS-4.8].
+/// (the egress tests assert on it) and the reason text.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 fn egress_refused(reason: String) -> ureq::Error {
     ureq::Error::Io(std::io::Error::new(
@@ -2050,80 +1992,54 @@ fn egress_refused(reason: String) -> ureq::Error {
     ))
 }
 
+/// The `addrs` that pass the SSRF policy: all of them for an `allowed` host, otherwise those
+/// `forbidden` does not refuse, capped at [`RESOLVED_ADDRS_CAP`] so `push` never overruns the
+/// fixed backing array.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        _config: &ureq::config::Config,
-        _timeout: ureq::unversioned::transport::NextTimeout,
-    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        use std::net::ToSocketAddrs;
-        let (host_port, host, port) = uri_host_port(uri).ok_or_else(|| {
-            egress_refused(format!(
-                "{SERVICE_EGRESS_REFUSED_MARKER}: request URI {uri} has no host authority to vet"
-            ))
-        })?;
-        // [OPUS-4.8] (sq-a7jw4) The allowlist check is port-scoped: a `host:port` entry permits
-        // only that host on that exact port; a bare-host entry still permits every port. `port`
-        // is the authority port that is actually dialled for every resolved address.
-        let allowed = egress_policy::is_allowed(&host, port);
-        // [OPUS-4.8] (sq-4w18) STRICT (AllowlistOnly) mode — the server's policy — refuses any
-        // host not on the allowlist BEFORE resolving DNS, so a host that is not explicitly
-        // permitted never triggers even a lookup. An empty allowlist here = deny ALL SERVICE.
-        if !allowed && egress_policy::mode() == egress_policy::Mode::AllowlistOnly {
-            return Err(egress_refused(format!(
-                "{SERVICE_EGRESS_REFUSED_MARKER}: host {host:?} is not on the SERVICE allowlist \
-                 (strict allowlist-only policy; add it via --service-allow / SPARQ_SERVICE_ALLOW \
-                 on the server, or with_service_egress_policy in an embedder)"
-            )));
-        }
-        let resolved = host_port.to_socket_addrs().map_err(ureq::Error::Io)?;
-        let mut permitted: ureq::unversioned::resolver::ResolvedSocketAddrs = arrayvec_default();
-        // `ResolvedSocketAddrs` is a fixed-capacity `ArrayVec<_, 16>`; cap to its capacity (the
-        // same `MAX_ADDRS` ureq's own resolver uses) so `push` never overruns the backing array.
-        for sa in resolved
-            .filter(|sa| allowed || !is_forbidden_ip(sa.ip()))
-            .take(RESOLVED_ADDRS_CAP)
-        {
-            permitted.push(sa);
-        }
-        if permitted.is_empty() {
-            return Err(egress_refused(format!(
-                "{SERVICE_EGRESS_REFUSED_MARKER}: {host_port} resolves only to private/internal addresses \
-                 (default-deny SSRF policy; allowlist the host via with_service_egress_allow)"
-            )));
-        }
-        Ok(permitted)
-    }
-}
-
-/// Capacity of ureq-3's [`ResolvedSocketAddrs`](ureq::unversioned::resolver::ResolvedSocketAddrs)
-/// (`ArrayVec<SocketAddr, 16>`). Matches ureq's own `MAX_ADDRS`. [OPUS-4.8] sq-g2xs.
-#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-const RESOLVED_ADDRS_CAP: usize = 16;
-
-/// An empty [`ResolvedSocketAddrs`](ureq::unversioned::resolver::ResolvedSocketAddrs) backing
-/// store (a fixed-capacity `ArrayVec`). [OPUS-4.8] sq-g2xs.
-#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-fn arrayvec_default() -> ureq::unversioned::resolver::ResolvedSocketAddrs {
+fn filter_addrs(
+    addrs: impl Iterator<Item = std::net::SocketAddr>,
+    allowed: bool,
+    forbidden: fn(std::net::IpAddr) -> bool,
+) -> ureq::unversioned::resolver::ResolvedSocketAddrs {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     // `ArrayVec::from_fn` fills the backing array, but the logical length starts at 0
     // (the same idiom ureq's `DefaultResolver::empty` uses), so it is genuinely empty.
-    ureq::unversioned::resolver::ArrayVec::from_fn(|_| {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
-    })
+    let mut permitted: ureq::unversioned::resolver::ResolvedSocketAddrs =
+        ureq::unversioned::resolver::ArrayVec::from_fn(|_| {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)
+        });
+    for sa in addrs
+        .filter(|sa| allowed || !forbidden(sa.ip()))
+        .take(RESOLVED_ADDRS_CAP)
+    {
+        permitted.push(sa);
+    }
+    permitted
 }
 
+/// Capacity of ureq-3's [`ResolvedSocketAddrs`](ureq::unversioned::resolver::ResolvedSocketAddrs)
+/// (`ArrayVec<SocketAddr, 16>`). Matches ureq's own `MAX_ADDRS`. sq-g2xs.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
-impl Transport for HttpTransport {
-    fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String> {
-        // [OPUS-4.8] sq-g2xs: ureq-3 builds an `Agent` from a `Config` + a custom resolver via
+const RESOLVED_ADDRS_CAP: usize = 16;
+
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+impl HttpTransport {
+    /// POST `query` to `endpoint` through the SSRF-guarded agent and return the response, or
+    /// the SERVICE error text for a transport failure or a non-2xx status.
+    fn post(
+        &self,
+        endpoint: &str,
+        query: &str,
+    ) -> Result<ureq::http::Response<ureq::Body>, String> {
+        // sq-g2xs: ureq-3 builds an `Agent` from a `Config` + a custom resolver via
         // `Agent::with_parts`; the resolver carries the default-deny SSRF policy exactly as in
         // ureq 2 (the resolved-and-vetted IP is the dialled IP — no DNS-rebinding re-resolve).
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .user_agent(concat!("sparq-engine/", env!("CARGO_PKG_VERSION")))
+            // No proxy from the environment: through a proxy, the proxy resolves and dials the
+            // destination, so the resolver below would vet the proxy's address instead of it.
+            .proxy(None)
             .build();
         let agent = ureq::Agent::with_parts(
             config,
@@ -2133,38 +2049,44 @@ impl Transport for HttpTransport {
         // POST with the query in an `application/x-www-form-urlencoded` `query=` field
         // (SPARQL Protocol §2.1.2 "query via POST with URL-encoded parameters") — the
         // most broadly supported method and not subject to URL-length limits.
-        let resp = agent
+        agent
             .post(endpoint)
             // Prefer JSON, but accept XML — some endpoints ignore `Accept` and only emit
-            // SPARQL-Results-XML, which `parse_results` now handles (bead sq-ycu). [OPUS-4.8]
+            // SPARQL-Results-XML, which `parse_results` now handles (bead sq-ycu).
             .header(
                 "Accept",
                 "application/sparql-results+json, application/sparql-results+xml;q=0.9",
             )
-            .send_form([("query", query)]);
-        match resp {
-            // ureq-3 caps `read_to_string` at 10 MiB by default; a federated SELECT result can
-            // exceed that, so raise the limit generously (a finite cap still bounds memory).
-            Ok(mut r) => r
-                .body_mut()
-                .with_config()
-                .limit(SERVICE_MAX_BODY_BYTES)
-                .read_to_string()
-                .map_err(|e| format!("SERVICE: reading response from {endpoint}: {e}")),
-            // ureq-3 surfaces non-2xx as `Error::StatusCode`; treat both transport and HTTP
-            // errors uniformly (the caller decides SILENT vs propagate).
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("SERVICE: endpoint {endpoint} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("SERVICE: request to {endpoint} failed: {e}")),
-        }
+            .send_form([("query", query)])
+            .map_err(|e| match e {
+                // ureq-3 surfaces non-2xx as `Error::StatusCode`; treat both transport and HTTP
+                // errors uniformly (the caller decides SILENT vs propagate).
+                ureq::Error::StatusCode(code) => {
+                    format!("SERVICE: endpoint {endpoint} returned HTTP {code}")
+                }
+                e => format!("SERVICE: request to {endpoint} failed: {e}"),
+            })
+    }
+}
+
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+impl Transport for HttpTransport {
+    fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String> {
+        // ureq-3 caps `read_to_string` at 10 MiB by default; a federated SELECT result can
+        // exceed that, so raise the limit generously (a finite cap still bounds memory).
+        self.post(endpoint, query)?
+            .body_mut()
+            .with_config()
+            .limit(SERVICE_MAX_BODY_BYTES)
+            .read_to_string()
+            .map_err(|e| format!("SERVICE: reading response from {endpoint}: {e}"))
     }
 }
 
 /// `ReaderTransport` for `HttpTransport`: returns the ureq response body as a byte
 /// stream WITHOUT calling `read_to_string`, so the body is NEVER fully buffered as a
 /// `String`. The same `SERVICE_MAX_BODY_BYTES` cap is enforced by the limit-wrapped
-/// reader. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
+/// reader. (bead sq-my8wd.5)
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 impl ReaderTransport for HttpTransport {
     fn fetch_reader<'a>(
@@ -2172,41 +2094,19 @@ impl ReaderTransport for HttpTransport {
         endpoint: &str,
         query: &str,
     ) -> Result<Box<dyn std::io::Read + 'a>, String> {
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-engine/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
-            EgressFilterResolver,
-        );
-        let resp = agent
-            .post(endpoint)
-            .header(
-                "Accept",
-                "application/sparql-results+json, application/sparql-results+xml;q=0.9",
-            )
-            .send_form([("query", query)]);
-        match resp {
-            Ok(r) => {
-                // Return the body as a capped byte reader — no `read_to_string`, no
-                // String allocation for the whole body. The limit is the same cap as
-                // the `Transport` path so the body-byte bound is preserved.
-                let reader = r.into_body().into_with_config().limit(SERVICE_MAX_BODY_BYTES).reader();
-                Ok(Box::new(reader))
-            }
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("SERVICE: endpoint {endpoint} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("SERVICE: request to {endpoint} failed: {e}")),
-        }
+        let resp = self.post(endpoint, query)?;
+        Ok(Box::new(
+            resp.into_body()
+                .into_with_config()
+                .limit(SERVICE_MAX_BODY_BYTES)
+                .reader(),
+        ))
     }
 }
 
 /// Max bytes read from a SERVICE response body. ureq-3's default `read_to_string` cap is 10 MiB;
 /// a federated SELECT can legitimately exceed that, so we raise it to a generous-but-finite bound
-/// (memory is still bounded — a runaway endpoint cannot OOM the engine). [OPUS-4.8] sq-g2xs.
+/// (memory is still bounded — a runaway endpoint cannot OOM the engine). sq-g2xs.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 const SERVICE_MAX_BODY_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -2218,8 +2118,49 @@ const SERVICE_MAX_BODY_BYTES: u64 = 1024 * 1024 * 1024;
 mod tests {
     use super::*;
 
+    /// A fully-collected remote SELECT result (`None` = unbound), for comparing parses.
+    #[derive(Debug, PartialEq)]
+    struct ServiceRelation {
+        vars: Vec<Variable>,
+        rows: Vec<Vec<Option<Term>>>,
+    }
+
+    type Sink<'a> = &'a mut dyn FnMut(Vec<Option<Term>>) -> Result<(), String>;
+
+    /// Run a streaming parse to completion, collecting its rows.
+    fn collect(
+        parse: impl FnOnce(Sink<'_>) -> Result<Vec<Variable>, String>,
+    ) -> Result<ServiceRelation, String> {
+        let mut rows = Vec::new();
+        let vars = parse(&mut |row| {
+            rows.push(row);
+            Ok(())
+        })?;
+        Ok(ServiceRelation { vars, rows })
+    }
+
+    fn eval_remote(
+        t: &dyn Transport,
+        endpoint: &str,
+        query: &str,
+    ) -> Result<ServiceRelation, String> {
+        collect(|mut sink| eval_remote_into(t, endpoint, query, &mut sink))
+    }
+
+    fn parse_results(text: &str) -> Result<ServiceRelation, String> {
+        collect(|mut sink| parse_results_into(text, &mut sink))
+    }
+
+    fn parse_srj(text: &str) -> Result<ServiceRelation, String> {
+        collect(|mut sink| parse_srj_into(text, &mut sink))
+    }
+
+    fn parse_srx(text: &str) -> Result<ServiceRelation, String> {
+        collect(|mut sink| parse_srx_into(text, &mut sink))
+    }
+
     // ---------------------------------------------------------------------
-    // [OPUS-4.8] (sq-6vshe.4 / sq-d4p) Per-request timeout wired to the QueryBudget
+    // (sq-6vshe.4 / sq-d4p) Per-request timeout wired to the QueryBudget
     // deadline. MOVED here from sparq-engine's exec.rs WITH the `HttpTransport` it
     // exercises (seam A2): `timeout_for_test` is `#[cfg(test)]`, so this test only
     // compiles in THIS crate's own test build. The caller side (`budget::remaining_timeout`
@@ -2301,7 +2242,7 @@ mod tests {
         assert_eq!(rel.rows[0][0], Some(Term::Literal(want)));
     }
 
-    /// [OPUS-4.8] sq-s955: inbound parity for the outbound `its:dir` emission. A SERVICE
+    /// sq-s955: inbound parity for the outbound `its:dir` emission. A SERVICE
     /// endpoint's results carry the RDF 1.2 base direction as a SEPARATE `its:dir` field
     /// next to the bare `xml:lang` tag; the parser must reconstruct the `dirLangString` so
     /// the direction survives INTO the local join (it was previously dropped). This mirrors
@@ -2333,7 +2274,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-4.8] sq-s955: an ABSENT or INVALID `its:dir` degrades to a PLAIN language-tagged
+    /// sq-s955: an ABSENT or INVALID `its:dir` degrades to a PLAIN language-tagged
     /// literal — the same decision `dict::split_lang_dir` / `reconstruct_ref` make for a
     /// malformed stored slot — so the inbound, stored-slot, materialised and outbound paths
     /// all AGREE on `(lang, dir)`. (An uppercase `LTR` or any other value is not a direction.)
@@ -2373,7 +2314,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // SPARQL-Results-XML (SRX) parsing [OPUS-4.8] (bead sq-ycu)
+    // SPARQL-Results-XML (SRX) parsing (bead sq-ycu)
     // ---------------------------------------------------------------------
 
     const SRX_NS: &str = "http://www.w3.org/2005/sparql-results#";
@@ -2436,6 +2377,66 @@ mod tests {
     }
 
     #[test]
+    fn srx_projection_keeps_first_column_last_binding_and_ignores_undeclared() {
+        // A duplicated <variable> fills only its first column, a repeated binding keeps the
+        // last term, a binding for an undeclared variable is dropped, and each row starts
+        // empty.
+        let body = format!(
+            r#"<sparql xmlns="{SRX_NS}">
+              <head><variable name="a"/><variable name="b"/><variable name="a"/></head>
+              <results>
+                <result>
+                  <binding name="a"><uri>http://ex/1</uri></binding>
+                  <binding name="a"><uri>http://ex/2</uri></binding>
+                  <binding name="zz"><uri>http://ex/3</uri></binding>
+                </result>
+                <result><binding name="b"><literal>x</literal></binding></result>
+              </results>
+            </sparql>"#
+        );
+        let rel = parse_srx(&body).unwrap();
+        let iri = |s: &str| Some(Term::NamedNode(NamedNode::new(s).unwrap()));
+        assert_eq!(rel.rows[0], vec![iri("http://ex/2"), None, None]);
+        let x = Some(Term::Literal(Literal::new_simple_literal("x")));
+        assert_eq!(rel.rows[1], vec![None, x, None]);
+    }
+
+    #[test]
+    fn srj_and_srx_admit_the_same_triple_term_depth() {
+        let iri = |s: &str| format!(r#"{{"type":"uri","value":"http://ex/{s}"}}"#);
+        let srj = |depth: usize| {
+            let mut t = iri("o");
+            for _ in 0..depth {
+                t = format!(
+                    r#"{{"type":"triple","value":{{"subject":{},"predicate":{},"object":{t}}}}}"#,
+                    iri("s"),
+                    iri("p")
+                );
+            }
+            format!(r#"{{"head":{{"vars":["x"]}},"results":{{"bindings":[{{"x":{t}}}]}}}}"#)
+        };
+        let srx = |depth: usize| {
+            let mut t = "<uri>http://ex/o</uri>".to_string();
+            for _ in 0..depth {
+                t = format!(
+                    "<triple><subject><uri>http://ex/s</uri></subject>\
+                     <predicate><uri>http://ex/p</uri></predicate><object>{t}</object></triple>"
+                );
+            }
+            format!(
+                r#"<sparql xmlns="{SRX_NS}"><head><variable name="x"/></head><results>
+                   <result><binding name="x">{t}</binding></result></results></sparql>"#
+            )
+        };
+        let max = MAX_SRX_TRIPLE_DEPTH;
+        assert!(parse_srj(&srj(max)).is_ok());
+        assert!(parse_srj(&srj(max + 1)).is_err());
+        assert!(parse_srx(&srx(max)).is_ok());
+        let err = parse_srx(&srx(max + 1)).unwrap_err();
+        assert!(err.contains("nests triple terms"), "{err}");
+    }
+
+    #[test]
     fn srx_typed_literal_and_bnode_and_entities() {
         let body = format!(
             r#"<sparql xmlns="{SRX_NS}">
@@ -2475,7 +2476,7 @@ mod tests {
             ("rtl", oxrdf::BaseDirection::Rtl),
         ] {
             let body = format!(
-                r#"<sparql xmlns="{SRX_NS}">
+                r#"<sparql xmlns="{SRX_NS}" xmlns:its="http://www.w3.org/2005/11/its">
                   <head><variable name="g"/></head>
                   <results><result>
                     <binding name="g"><literal xml:lang="ar" its:dir="{dir}">مرحبا</literal></binding>
@@ -2536,6 +2537,165 @@ mod tests {
         assert!(parse_srx(&body).is_err());
     }
 
+    /// Elements are matched by namespace as well as local name: one in another namespace,
+    /// or with an undeclared prefix, is ignored even when its local name is a results
+    /// element's, and a declaration stops applying when its element ends. Both readers.
+    #[test]
+    fn srx_ignores_elements_in_other_namespaces() {
+        let body = format!(
+            r#"<sparql xmlns="{SRX_NS}" xmlns:x="http://ex/other#">
+              <head><variable name="a"/><variable name="b"/><x:variable name="c"/></head>
+              <results>
+                <ext xmlns="http://ex/other#"><result/><boolean>true</boolean></ext>
+                <ext xmlns="http://ex/other#"/>
+                <its xmlns="http://www.w3.org/2005/11/its"><result>
+                  <binding name="a"><uri>http://ex/its</uri></binding>
+                </result></its>
+                <result>
+                  <binding name="a"><literal>ke<x:literal/>pt</literal></binding>
+                  <binding name="b"><x:uri>http://ex/foreign</x:uri></binding>
+                  <x:binding name="a"><uri>http://ex/foreign</uri></x:binding>
+                  <y:binding name="b"><uri>http://ex/undeclared</uri></y:binding>
+                </result>
+                <x:result><binding name="a"><uri>http://ex/foreign</uri></binding></x:result>
+              </results>
+            </sparql>"#
+        );
+        let check = |vars: &[Variable], rows: &[Vec<Option<Term>>]| {
+            let names: Vec<&str> = vars.iter().map(Variable::as_str).collect();
+            assert_eq!(names, ["a", "b"]);
+            assert_eq!(rows.len(), 1);
+            let kept = Term::Literal(Literal::new_simple_literal("kept"));
+            assert_eq!(rows[0], [Some(kept), None]);
+        };
+        let rel = parse_srx(&body).unwrap();
+        check(&rel.vars, &rel.rows);
+        let mut rows = Vec::new();
+        let vars = parse_srx_into_read(std::io::BufReader::new(body.as_bytes()), &mut |r| {
+            rows.push(r);
+            Ok(())
+        })
+        .unwrap();
+        check(&vars, &rows);
+    }
+
+    /// Parses `body` with both the in-memory and the streaming reader, checking they agree.
+    fn parse_srx_both(body: &str) -> ServiceRelation {
+        let rel = parse_srx(body).unwrap();
+        let mut rows = Vec::new();
+        let vars = parse_srx_into_read(std::io::BufReader::new(body.as_bytes()), &mut |r| {
+            rows.push(r);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!((&vars, &rows), (&rel.vars, &rel.rows));
+        rel
+    }
+
+    /// The results namespace may be bound to a prefix, or left out altogether, also by
+    /// undeclaring the default namespace with `xmlns=""`; a declaration is compared once
+    /// its character references are replaced.
+    #[test]
+    fn srx_reads_a_prefixed_or_absent_results_namespace() {
+        let prefixed = format!(
+            r#"<s:sparql xmlns:s="{SRX_NS}">
+              <s:head><s:variable name="a"/></s:head>
+              <s:results><s:result>
+                <s:binding name="a"><s:uri>http://ex/a</s:uri></s:binding>
+              </s:result></s:results>
+            </s:sparql>"#
+        );
+        let bare = r#"<sparql><head><variable name="a"/></head><results><result>
+            <binding name="a"><uri>http://ex/a</uri></binding></result></results></sparql>"#;
+        let undeclared = format!(
+            r#"<sparql xmlns="{SRX_NS}"><head><variable name="a"/></head><results>
+              <result xmlns=""><binding name="a"><uri>http://ex/a</uri></binding></result>
+            </results></sparql>"#
+        );
+        let escaped = SRX_NS.replace('#', "&#35;");
+        let referenced = [
+            format!(
+                r#"<sparql xmlns="{escaped}"><head><variable name="a"/></head><results>
+                  <result><binding name="a"><uri>http://ex/a</uri></binding></result>
+                </results></sparql>"#
+            ),
+            prefixed.replace(&format!(r#"xmlns:s="{SRX_NS}""#), &format!(r#"xmlns:s="{escaped}""#)),
+        ];
+        assert!(referenced.iter().all(|body| body.contains("&#35;")));
+        for body in [prefixed.as_str(), bare, undeclared.as_str()]
+            .into_iter()
+            .chain(referenced.iter().map(String::as_str))
+        {
+            let rel = parse_srx_both(body);
+            assert_eq!(
+                rel.rows,
+                [[Some(Term::NamedNode(NamedNode::new("http://ex/a").unwrap()))]]
+            );
+        }
+    }
+
+    /// Attributes are matched by namespace too: `name` and `datatype` only unprefixed,
+    /// `lang` only as `xml:lang`, and `dir` only in the ITS namespace (or an undeclared
+    /// `its` prefix). A foreign attribute with one of those local names changes nothing.
+    #[test]
+    fn srx_ignores_attributes_in_other_namespaces() {
+        let body = format!(
+            r#"<sparql xmlns="{SRX_NS}" xmlns:x="http://ex/other#"
+                xmlns:i="http://www.w3.org/2005/11/its">
+              <head><variable name="a"/><variable name="b"/><variable x:name="c"/></head>
+              <results><result>
+                <binding x:name="b" name="a"><literal
+                  x:lang="fr" xml:lang="en" x:dir="ltr" i:dir="rtl">t</literal></binding>
+                <binding name="b"><literal x:datatype="http://ex/dt" lang="fr">u</literal></binding>
+              </result></results>
+            </sparql>"#
+        );
+        let rel = parse_srx_both(&body);
+        let names: Vec<&str> = rel.vars.iter().map(Variable::as_str).collect();
+        assert_eq!(names, ["a", "b"]);
+        let a = Literal::new_directional_language_tagged_literal(
+            "t",
+            "en",
+            oxrdf::BaseDirection::Rtl,
+        )
+        .unwrap();
+        let b = Literal::new_simple_literal("u");
+        assert_eq!(rel.rows, [[Some(Term::Literal(a)), Some(Term::Literal(b))]]);
+    }
+
+    /// An `its:dir` whose `its` prefix is never declared is not in the ITS namespace, so
+    /// the literal keeps its language and no direction.
+    #[test]
+    fn srx_undeclared_its_dir_is_ignored() {
+        let body = format!(
+            r#"<sparql xmlns="{SRX_NS}"><head><variable name="g"/></head><results><result>
+              <binding name="g"><literal xml:lang="ar" its:dir="rtl">t</literal></binding>
+            </result></results></sparql>"#
+        );
+        let rel = parse_srx_both(&body);
+        let want = Literal::new_language_tagged_literal("t", "ar").unwrap();
+        assert_eq!(rel.rows, [[Some(Term::Literal(want))]]);
+    }
+
+    /// A namespace declaration is compared once its references are replaced, named ones
+    /// included, and one whose references cannot be replaced is an error from both readers.
+    #[test]
+    fn srx_namespace_declarations_are_decoded_or_refused() {
+        // `&amp;` decodes to a namespace that is not the results one, so nothing is read.
+        let foreign = r#"<sparql xmlns="http://ex/a&amp;b"><head><variable name="a"/></head>
+            <results><result><binding name="a"><uri>http://ex/a</uri></binding></result>
+            </results></sparql>"#;
+        let rel = parse_srx_both(foreign);
+        assert!(rel.vars.is_empty() && rel.rows.is_empty());
+        let raw = foreign.replace("&amp;", "&");
+        let bad = raw.replace("http://ex/a&b", "http://ex/a&bogus;");
+        let err = parse_srx(&bad).unwrap_err();
+        assert!(err.contains("namespace declaration"), "{err}");
+        let err = parse_srx_into_read(std::io::BufReader::new(bad.as_bytes()), &mut |_r| Ok(()))
+            .unwrap_err();
+        assert!(err.contains("namespace declaration"), "{err}");
+    }
+
     /// The core bead requirement: an endpoint that ignores `Accept` and returns XML must
     /// still be parsed (content-sniffed) by the end-to-end path, not just `parse_srj`.
     #[test]
@@ -2564,13 +2724,13 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Bind-join block-size knob direct unit tests [OPUS-4.8] (sq-sjkj)
+    // Bind-join block-size knob direct unit tests (sq-sjkj)
     // ------------------------------------------------------------------
 
     /// `bind_block_size()` returns the default when no scope is installed.
     #[test]
     fn bind_block_size_returns_default_outside_scope() {
-        // [OPUS-4.8] sq-sjkj: direct coverage for the public accessor.
+        // sq-sjkj: direct coverage for the public accessor.
         // The default is DEFAULT_BIND_BLOCK (50) when no override is active.
         let s = bind_block_size();
         assert_eq!(s, DEFAULT_BIND_BLOCK, "default bind-block size must be DEFAULT_BIND_BLOCK");
@@ -2579,7 +2739,7 @@ mod tests {
     /// `with_service_bound_join_block_size` scopes the override and restores it.
     #[test]
     fn with_service_bound_join_block_size_scopes_and_restores() {
-        // [OPUS-4.8] sq-sjkj: direct coverage for the scoped override entry point.
+        // sq-sjkj: direct coverage for the scoped override entry point.
         let before = bind_block_size();
         with_service_bound_join_block_size(999, || {
             assert_eq!(bind_block_size(), 999, "override must be active inside scope");
@@ -2591,7 +2751,7 @@ mod tests {
     /// `with_service_bound_join_block_size(0, …)` is clamped to 1.
     #[test]
     fn with_service_bound_join_block_size_zero_is_clamped_to_one() {
-        // [OPUS-4.8] sq-sjkj: a zero block size is clamped to 1 so a tuple still
+        // sq-sjkj: a zero block size is clamped to 1 so a tuple still
         // gets pushed one-per-request rather than silently disabling the knob.
         with_service_bound_join_block_size(0, || {
             assert_eq!(bind_block_size(), 1, "zero must be clamped to 1");
@@ -2599,13 +2759,13 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Per-query remote-request cap direct unit tests [OPUS-4.8] (sq-b93pv)
+    // Per-query remote-request cap direct unit tests (sq-b93pv)
     // ------------------------------------------------------------------
 
     /// `remote_request_cap()` returns `None` when no scope is installed.
     #[test]
     fn remote_request_cap_returns_none_outside_scope() {
-        // [OPUS-4.8] sq-b93pv: direct coverage for the public accessor.
+        // sq-b93pv: direct coverage for the public accessor.
         // The default is uncapped (None) when no override is active.
         let cap = remote_request_cap();
         assert_eq!(cap, None, "default remote-request cap must be None (uncapped)");
@@ -2614,7 +2774,7 @@ mod tests {
     /// `with_service_remote_request_cap` scopes the cap and restores it.
     #[test]
     fn with_service_remote_request_cap_scopes_and_restores() {
-        // [OPUS-4.8] sq-b93pv: direct coverage for the scoped cap entry point.
+        // sq-b93pv: direct coverage for the scoped cap entry point.
         assert_eq!(remote_request_cap(), None); // no prior override
         with_service_remote_request_cap(8, || {
             assert_eq!(remote_request_cap(), Some(8), "cap must be active inside scope");
@@ -2653,7 +2813,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // SSRF egress policy [OPUS-4.8] (bead sq-2v6f)
+    // SSRF egress policy (bead sq-2v6f)
     // ---------------------------------------------------------------------
 
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -2662,7 +2822,7 @@ mod tests {
         IpAddr::V4(Ipv4Addr::new(a, b, c, d))
     }
 
-    /// [OPUS-4.8] (sq-a7jw4) Host-level `is_allowed` check at a representative port. A
+    /// (sq-a7jw4) Host-level `is_allowed` check at a representative port. A
     /// host-level (no-`:port`) entry matches EVERY port, so any port reads the same — these
     /// host-level tests use 80. Port-scoping tests call `is_allowed(host, port)` directly.
     fn allowed(host: &str) -> bool {
@@ -2767,7 +2927,7 @@ mod tests {
 
     #[test]
     fn strict_allowlist_only_mode_scopes_and_restores() {
-        // [OPUS-4.8] (sq-4w18) Strict mode: only listed hosts are allowed; the mode
+        // (sq-4w18) Strict mode: only listed hosts are allowed; the mode
         // and allowlist both restore on scope exit.
         assert_eq!(egress_policy::mode(), egress_policy::Mode::DenyPrivate);
         assert!(!allowed("a.example"));
@@ -2783,7 +2943,7 @@ mod tests {
 
     #[test]
     fn suffix_wildcard_allowlist_matches_apex_and_subdomains() {
-        // [OPUS-4.8] (sq-4w18) A ".example.org" entry matches the apex and any
+        // (sq-4w18) A ".example.org" entry matches the apex and any
         // subdomain, but not a host that merely ends in the same letters.
         with_service_egress_policy(true, [".example.org".to_string()], || {
             assert!(allowed("example.org")); // apex
@@ -2818,7 +2978,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // Port-scoped allowlist entries [OPUS-4.8] (bead sq-a7jw4)
+    // Port-scoped allowlist entries (bead sq-a7jw4)
     // ---------------------------------------------------------------------
 
     #[test]
@@ -2959,7 +3119,7 @@ mod tests {
     mod resolver {
         use super::*;
 
-        /// [OPUS-4.8] sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building
+        /// sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building
         /// the `http://<netloc>/` URI the resolver parses (default `Config` + no-deadline timeout).
         fn resolve_netloc(
             netloc: &str,
@@ -3020,7 +3180,7 @@ mod tests {
             assert!(addrs[0].ip().is_loopback());
         }
 
-        // [OPUS-4.8] (sq-4w18) Strict allowlist-only mode — the server's policy.
+        // (sq-4w18) Strict allowlist-only mode — the server's policy.
 
         #[test]
         fn strict_refuses_public_host_off_the_allowlist() {
@@ -3068,7 +3228,7 @@ mod tests {
             assert_eq!(addrs.len(), 1);
         }
 
-        // [OPUS-4.8] (sq-a7jw4) Port-scoped allowlist entries at the resolver — the real
+        // (sq-a7jw4) Port-scoped allowlist entries at the resolver — the real
         // egress path, not just the `is_allowed` predicate.
 
         #[test]
@@ -3154,7 +3314,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // Streaming / bounded result consumption [FABLE-5] (bead sq-my8wd.4)
+    // Streaming / bounded result consumption (bead sq-my8wd.4)
     // ---------------------------------------------------------------------
 
     mod streaming_equivalence {
@@ -3458,7 +3618,7 @@ mod tests {
         }
 
         // ------------------------------------------------------------------
-        // Direct coverage for the reader-seam path (sq-my8wd.5) [OPUS-4.8]
+        // Direct coverage for the reader-seam path (sq-my8wd.5)
         // ------------------------------------------------------------------
 
         /// `eval_remote_into_read` round-trips through the `TransportAsReader`
@@ -3543,14 +3703,14 @@ mod tests {
         }
 
         // ------------------------------------------------------------------
-        // Reader-seam error paths (sq-my8wd.5) [OPUS-4.8]
+        // Reader-seam error paths (sq-my8wd.5)
         // ------------------------------------------------------------------
 
         /// `parse_results_into_read` on an EMPTY body returns an error matching
         /// the non-reader path, not a panic or silent empty result.
         #[test]
         fn parse_results_into_read_empty_body_is_error() {
-            // [OPUS-4.8] sq-my8wd.5 coverage: the `buf.is_empty()` early-return
+            // sq-my8wd.5 coverage: the `buf.is_empty()` early-return
             // branch in `parse_results_into_read` (the empty-response path).
             let err = parse_results_into_read(std::io::BufReader::new(b"".as_ref()),
                 &mut |_r| Ok(())).unwrap_err();
@@ -3564,7 +3724,7 @@ mod tests {
         /// returns the sniff error — mirrors `parse_results_into`'s rejection.
         #[test]
         fn parse_results_into_read_unknown_format_is_error() {
-            // [OPUS-4.8] sq-my8wd.5 coverage: the `_ => Err(…)` sniff branch in
+            // sq-my8wd.5 coverage: the `_ => Err(…)` sniff branch in
             // `parse_results_into_read` (the unrecognised-format path).
             let err = parse_results_into_read(std::io::BufReader::new(b"plain text".as_ref()),
                 &mut |_r| Ok(())).unwrap_err();
@@ -3585,7 +3745,7 @@ mod tests {
         /// routes correctly to the SRJ parser — exercises the whitespace-consume loop.
         #[test]
         fn parse_results_into_read_leading_whitespace_routes_srj() {
-            // [OPUS-4.8] sq-my8wd.5 coverage: the `None` (all-whitespace-chunk)
+            // sq-my8wd.5 coverage: the `None` (all-whitespace-chunk)
             // branch in `parse_results_into_read`, then routing to SRJ.
             let body = b"   \n\t {\"head\":{\"vars\":[\"x\"]},\"results\":{\"bindings\":[]}}";
             let mut n = 0usize;
@@ -3597,7 +3757,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // Coverage-raise tests (sq-qcnn.34) [SONNET-4.6]
+    // Coverage-raise tests (sq-qcnn.34)
     //
     // Named regions: SPARQL-Results JSON/XML parse paths, bound-join VALUES
     // rendering, HttpTransport timeout math, SSRF egress-policy scoping.
@@ -3798,7 +3958,7 @@ mod tests {
     /// The five predefined XML entities resolve to their exact characters.
     #[test]
     fn resolve_xml_entity_predefined_named_entities() {
-        // [GPT-5.6] (sq-5kh4d) Directly cover the named-entity branch rather than
+        // (sq-5kh4d) Directly cover the named-entity branch rather than
         // relying only on the SRX parser integration test.
         for (name, expected) in [
             ("amp", "&"),
@@ -4175,6 +4335,111 @@ mod tests {
             assert_eq!(host, "example.com");
             assert_eq!(port, 9090);
         }
+
+        /// `host_port` keeps the authority spelling for resolution; the allowlist key is the
+        /// lowercased, bracket-stripped host.
+        #[test]
+        fn allowlist_key_is_lowercased_and_unbracketed() {
+            let uri: ureq::http::Uri = "http://Example.ORG:8080/sparql".parse().unwrap();
+            assert_eq!(
+                super::super::uri_host_port(&uri),
+                Some(("Example.ORG:8080".to_string(), "example.org".to_string(), 8080))
+            );
+            let uri: ureq::http::Uri = "http://[::1]:8053/q".parse().unwrap();
+            assert_eq!(
+                super::super::uri_host_port(&uri),
+                Some(("::1:8053".to_string(), "::1".to_string(), 8053))
+            );
+        }
+    }
+
+    // --- resolve_vetted / filter_addrs (native-only; IP literals, no DNS) -----
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod resolve_vetted_tests {
+        use super::super::{filter_addrs, resolve_vetted, EgressRefusal};
+        use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+        const LOOP: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
+
+        fn always(_: IpAddr) -> bool {
+            true
+        }
+        fn never(_: IpAddr) -> bool {
+            false
+        }
+
+        fn uri(s: &str) -> ureq::http::Uri {
+            s.parse().expect("test URI parses")
+        }
+
+        /// The refusal reason of a `PermissionDenied` io error, or a panic.
+        fn denied(r: Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error>) -> String {
+            match r {
+                Err(ureq::Error::Io(io)) => {
+                    assert_eq!(io.kind(), std::io::ErrorKind::PermissionDenied);
+                    io.to_string()
+                }
+                other => panic!("expected Error::Io(PermissionDenied), got {other:?}"),
+            }
+        }
+
+        /// An allowlisted host keeps an address the classifier forbids (`allowed || !forbidden`).
+        #[test]
+        fn filter_addrs_allowed_bypasses_the_classifier() {
+            let got = filter_addrs([LOOP].into_iter(), true, always);
+            assert_eq!(got[..], [LOOP]);
+        }
+
+        /// Without the allowlist a forbidden address is dropped, and a permitted one kept.
+        #[test]
+        fn filter_addrs_applies_the_classifier_when_not_allowed() {
+            assert!(filter_addrs([LOOP].into_iter(), false, always).is_empty());
+            assert_eq!(filter_addrs([LOOP].into_iter(), false, never)[..], [LOOP]);
+        }
+
+        /// The result never exceeds ureq's fixed resolved-address capacity.
+        #[test]
+        fn filter_addrs_caps_at_the_resolved_capacity() {
+            let many = (0..40u16).map(|p| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), p));
+            assert_eq!(filter_addrs(many, true, never).len(), super::super::RESOLVED_ADDRS_CAP);
+        }
+
+        /// The allowlist callback sees the bare lowercased host and the dialled port.
+        #[test]
+        fn resolve_vetted_passes_host_and_port_to_the_allowlist() {
+            let mut seen = None;
+            let got = resolve_vetted(
+                &uri("http://127.0.0.1:8080/q"),
+                |h, p| {
+                    seen = Some((h.to_string(), p));
+                    true
+                },
+                false,
+                |r| unreachable!("allowlisted loopback must resolve, got {r:?}"),
+            )
+            .expect("allowlisted loopback resolves");
+            assert_eq!(seen, Some(("127.0.0.1".to_string(), 8080)));
+            assert_eq!(got[..], [LOOP]);
+        }
+
+        /// Each refusal is a hard `PermissionDenied` carrying the caller's text for its reason.
+        #[test]
+        fn resolve_vetted_refusals_are_hard_errors() {
+            let text = |r: EgressRefusal<'_>| format!("{r:?}");
+            assert_eq!(
+                denied(resolve_vetted(&uri("/no-authority"), |_, _| true, false, text)),
+                "NoAuthority"
+            );
+            assert_eq!(
+                denied(resolve_vetted(&uri("http://127.0.0.1:8080/"), |_, _| false, true, text)),
+                "NotAllowlisted { host: \"127.0.0.1\" }"
+            );
+            assert_eq!(
+                denied(resolve_vetted(&uri("http://127.0.0.1:8080/"), |_, _| false, false, text)),
+                "PrivateOnly { host_port: \"127.0.0.1:8080\" }"
+            );
+        }
     }
 
     // --- HttpTransport (native-only, minimal loopback HTTP server) -----------
@@ -4184,7 +4449,7 @@ mod tests {
     // methods — covering the ureq-3 code paths that are unreachable from the
     // canned-transport tests (`fetch`, `fetch_reader`, `Ok` arms).
     // The server is single-shot (one connection), no persistent resources.
-    // [SONNET-4.6] sq-qcnn.34
+    // sq-qcnn.34
 
     #[cfg(not(target_arch = "wasm32"))]
     mod http_transport_tests {

@@ -64,7 +64,7 @@
 //! behind the opt-in `adaptive-replan` feature, which re-uses this module's cost model via
 //! the crate-internal `cost_join_pub`. Mid-*operator* swaps remain deferred.
 //!
-//! [OPUS-4.8] sq-a35t / sq-vf7q / sq-7s4z.
+//! sq-a35t / sq-vf7q / sq-7s4z.
 
 use crate::descriptor::SourceDescriptor;
 use crate::pattern::{Bgp, Term, Var};
@@ -85,7 +85,7 @@ pub enum JoinAlgo {
     /// streaming operator emits matches as federated sub-results arrive and spills
     /// over-budget partitions instead of OOMing, while producing the identical result
     /// multiset. Same abstract cost as Hash (one scan of each side); the distinction is
-    /// the *execution discipline*, not the cost model. [OPUS-4.8] sq-vf7q.
+    /// the *execution discipline*, not the cost model. sq-vf7q.
     Streaming,
 }
 
@@ -159,13 +159,13 @@ pub struct PlanOptions {
     /// to hash joins at a smaller left cardinality. Default `1.0` (one request ≈ one
     /// retrieved row).
     pub request_cost: f64,
-    /// [OPUS-4.8] sq-vf7q. Combined-input-rows threshold above which a hash-class join is
+    /// sq-vf7q. Combined-input-rows threshold above which a hash-class join is
     /// marked [`JoinAlgo::Streaming`] (non-blocking + spill) instead of [`JoinAlgo::Hash`].
     /// When the estimated `L + R` of a hash join exceeds this, materialising a side up
     /// front is the latency/memory risk, so the streaming operator is preferred. Set to
     /// `f64::INFINITY` to always use plain hash. Default `100_000` rows.
     pub stream_threshold: f64,
-    /// [OPUS-4.8] sq-jsuzr (survey C2). Opt-in: use the candidate's per-predicate
+    /// sq-jsuzr (survey C2). Opt-in: use the candidate's per-predicate
     /// **distinct-subject / distinct-object** statistics (already carried by every
     /// [`crate::SourceDescriptor`]) for the join-key ndv in the **non-star** join estimate,
     /// instead of the coarse `max(|L|, |R|)` leaf-cardinality approximation. When `true` and
@@ -285,7 +285,7 @@ pub fn plan_bgp(
     Some(JoinTree { root, total_cost })
 }
 
-/// [OPUS-4.8] sq-7s4z. Crate-internal re-export of [`cost_join`] so the adaptive
+/// sq-7s4z. Crate-internal re-export of [`cost_join`] so the adaptive
 /// re-planner ([`crate::adaptive`]) costs a re-planned suffix with the **identical** cost
 /// model the static planner uses — there is exactly one cost function, so a re-plan and the
 /// original plan are always comparable on the same scale.
@@ -337,7 +337,7 @@ fn cost_join(
         // Try a characteristic-set star estimate first (captures predicate correlation
         // when `cand` extends a star already joined on its subject variable).
         star_estimate(bgp, joined, cand, descriptors, selection).unwrap_or_else(|| {
-            // [OPUS-4.8] sq-jsuzr (survey C2): for the non-star fallback, optionally fold the
+            // sq-jsuzr (survey C2): for the non-star fallback, optionally fold the
             // candidate's per-predicate distinct-subject/-object stats into the join-key ndv
             // (a tighter estimate than `max(|L|, |R|)`); fall back to max-leaf when the stat
             // is absent. Gated by the opt-in `use_predicate_selectivity` knob so the default
@@ -366,7 +366,7 @@ fn cost_join(
     let (algo, cost) = if bind_cost <= hash_cost {
         (JoinAlgo::Bind, bind_cost)
     } else if l + r > opts.stream_threshold {
-        // [OPUS-4.8] sq-vf7q: a large hash join runs as the non-blocking + spill operator.
+        // sq-vf7q: a large hash join runs as the non-blocking + spill operator.
         // Same abstract cost as plain hash; the choice is the execution discipline.
         (JoinAlgo::Streaming, hash_cost)
     } else {
@@ -458,7 +458,7 @@ fn independence_estimate(
     (l * r / ndv).clamp(0.0, l * r)
 }
 
-/// [OPUS-4.8] sq-jsuzr (survey C2). Predicate-selectivity-aware non-star join estimate.
+/// sq-jsuzr (survey C2). Predicate-selectivity-aware non-star join estimate.
 ///
 /// The independence fallback approximates the join-key number-of-distinct-values (`ndv`) by
 /// the larger of the two joined leaf cardinalities — coarse, and blind to predicate skew.
@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn large_hash_join_becomes_streaming() {
-        // [OPUS-4.8] sq-vf7q. Both sides large + unselective ⇒ hash class; combined rows
+        // sq-vf7q. Both sides large + unselective ⇒ hash class; combined rows
         // past stream_threshold ⇒ the planner marks it Streaming (non-blocking + spill).
         let bgp = Bgp::new(vec![
             TriplePattern::new(var("s"), iri("http://ex/p"), var("o")),
@@ -751,7 +751,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-bif.3 — correctness suite: previously-uncovered plan branches
+    // sq-bif.3 — correctness suite: previously-uncovered plan branches
     // (the disconnected/Cartesian arm, the independence-estimate non-star fallback, every
     // `star_estimate` None path, multi-source star summation, JoinNode::cardinality on a
     // leaf, total_cost accumulation, and request_cost driving the bind/hash flip). Drives
@@ -1036,7 +1036,7 @@ mod tests {
         );
     }
 
-    // ---- [OPUS-4.8] sq-bif: a DISCONNECTED candidate evaluated AFTER a connected best has
+    // ---- sq-bif: a DISCONNECTED candidate evaluated AFTER a connected best has
     //      already been chosen in the same selection round must NOT displace it — the
     //      `(connected=false, best_conn=true) => false` arm of the next-arm comparison. This is
     //      the symmetric guard to `connected_arm_preferred_over_smaller_disconnected`: there the
@@ -1075,7 +1075,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-jsuzr (survey C2) — predicate-selectivity-aware non-star cardinality.
+    // sq-jsuzr (survey C2) — predicate-selectivity-aware non-star cardinality.
     //
     // CORRECTNESS CONTRACT (load-bearing): `use_predicate_selectivity` is a COST-ESTIMATE-ONLY
     // knob. With it OFF the estimate is byte-identical to before (the A/B baseline); with it ON

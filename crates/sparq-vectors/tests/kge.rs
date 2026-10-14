@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-0wo9e.8 / P6 (epic sq-0wo9e) — integration tests for the structure-aware
+//! sq-0wo9e.8 / P6 (epic sq-0wo9e) — integration tests for the structure-aware
 //! vectorisation MEASUREMENT FOUNDATION: the thin DistMult trainer + the filtered link-prediction
 //! eval harness, exercising the REAL end-to-end path (parse → close → split → train → rank).
 //!
@@ -232,7 +232,7 @@ fn provenance_weight_changes_the_trained_model() {
 
 // ---- Phase-4 confidence-weighted POOLING ablation (sq-w2af4) -----------------------------------
 
-/// [OPUS-5] The same load-bearing NO-OP invariant for the POOLING axis: over a provenance-free
+/// The same load-bearing NO-OP invariant for the POOLING axis: over a provenance-free
 /// graph the weighted pool is the uniform mean, so both arms produce identical embeddings and the
 /// paired MRR/Hits@10 delta is EXACTLY zero. (Confidence-weighted pooling must never change a plain
 /// graph — the design's "defaulting to 1.0 when no provenance exists" guarantee.)
@@ -247,7 +247,7 @@ fn pooling_ablation_is_exact_noop_on_provenance_free_graph() {
     assert_eq!(ab.off.mrr.mean, ab.on.mrr.mean, "arms must coincide on a plain graph");
 }
 
-/// [OPUS-5] The pooling ablation runs END-TO-END on the provenance-annotated slice (parse → close →
+/// The pooling ablation runs END-TO-END on the provenance-annotated slice (parse → close →
 /// split → train once → pool OFF+ON → rank), producing a well-formed paired delta over multiple
 /// seeds. NO numeric lift is asserted — this is the instrument, not a claim; the honest verdict may
 /// be "no measured lift, abandon".
@@ -266,7 +266,7 @@ fn pooling_ablation_runs_on_provenance_slice() {
     assert_eq!(ab.mrr.n, seeds.len());
 }
 
-/// [OPUS-5] Proof the pooling weights actually BITE: on the annotated slice the two arms score
+/// Proof the pooling weights actually BITE: on the annotated slice the two arms score
 /// differently (the weighted sketch is a genuinely different augmentation, not a silently-ignored
 /// flag) — while a `blend` of `0.0` collapses both arms to the untouched model, so the delta is
 /// exactly zero by construction. Together these show the ablation measures the pooling axis and

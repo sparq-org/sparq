@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-zgbso.3 (epic sq-zgbso, issue #1582) — **id-level compiled-rule
+//! sq-zgbso.3 (epic sq-zgbso, issue #1582) — **id-level compiled-rule
 //! evaluation** for the scoped N3 subset the Solid access-control rules use, behind the
 //! opt-in `compiled-rules` feature.
 //!
@@ -75,14 +75,38 @@
 //!
 //! Full-N3 conformance stays with the text engine.
 //!
+//! # Limits
+//!
+//! Evaluation runs under the text engine's [`ClosureLimits`] (GH #6855):
+//! [`BoundRuleSet::eval_with_limits`] / [`eval_with_limits`] take them, [`eval`] uses
+//! [`ClosureLimits::default`]. A round is one semi-naive iteration of a stratum, and the
+//! fact allowance is checked against the facts held at the start of each round. Each
+//! term a builtin builds (its result, and the argument list a `( … )` subject would be
+//! in the text engine) is sized with the text engine's helpers BEFORE it is built.
+//! Conclusions copy ids the premise bound, so they build no new term. Each round's join
+//! work is charged against `max_join_rows` (GH #6938): every row a pattern join emits (the
+//! anti-join of a `log:notIncludes` included), before its repeated-variable check, and
+//! each conclusion a rule fires, as one batch before any is instantiated. The first round
+//! of a stratum is naive, as the text engine's is. Past any allowance evaluation stops
+//! with the text engine's `"forward closure limit exceeded"` error, never a truncated
+//! closure.
+//!
+//! It is bounded by the same limits as the text engine and refuses with the same error,
+//! but it does not run the same fixpoint schedule: the text engine's closing naive check
+//! round and its transitivity fast path, and its substitution checkpoints for quoted
+//! triples (which have no compiled counterpart), mean that under equal limits the two
+//! engines can accept or refuse differently near a boundary.
+//!
 //! The result-equivalence oracle is `tests/compiled_equivalence.rs`: on the WAC/ACP/
 //! ODRL-spike corpus the compiled closure equals the [`crate::reason_n3`] closure **as a
 //! set** over the same rules + facts.
 
+use super::bounded::{self, ClosureLimits, Truncation};
 use super::model::Term;
+use super::{refused_term, Derived, Func};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts};
-use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget}; // not-a-limit: unbounded-join
+use sparq_substrate::join::{self as sjoin, JoinKeys};
 use sparq_substrate::rows::{Row, NO_ID};
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
@@ -180,6 +204,8 @@ enum Step {
     Scrape {
         arg: CTerm,
         regex: usize,
+        /// The [`bounded::term_bytes`] of the regex literal (sizes the argument list).
+        pat_bytes: usize,
         out: CTerm,
         out_bound: bool,
     },
@@ -274,7 +300,8 @@ pub struct BoundRuleSet<'a> {
 ///
 /// Returns `Err` on a parse failure or on any unsupported construct (backward rules,
 /// unsupported builtins, conclusion existentials, unresolvable builtin inputs,
-/// formula-/list-valued facts, unbound conclusion variables).
+/// formula-/list-valued facts, unbound conclusion variables, or `@forAll` in a rule
+/// premise or scoped body pattern).
 ///
 /// # Examples
 ///
@@ -301,6 +328,7 @@ pub fn compile_with_cycles(
     cycles: super::NegationCycles,
 ) -> Result<CompiledRuleSet, String> {
     let parsed = super::bounded::parse_n3(src, "", &super::bounded::Truncation::top_level())?;
+    super::validate_rule_quantifiers(&parsed)?;
     if !parsed.backward_rules.is_empty() {
         return Err("compiled-rules: backward (`<=`) rules are not in the compiled subset (goal-directed resolution stays with the text engine)".into());
     }
@@ -403,10 +431,16 @@ pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> 
 }
 
 /// Bind `rules` to `dict` and evaluate the forward fixpoint over `facts` — the one-call
-/// entry shape (`eval(dict, facts, compiled rules) -> Vec<[Id; 3]>`, no text round-trip).
+/// entry shape (`eval(dict, facts, compiled rules) -> Result<Vec<[Id; 3]>, String>`, no
+/// text round-trip) — under the default [`ClosureLimits`].
 ///
 /// Returns the full ground closure (input facts + the rule document's own facts + every
 /// derivation) as a de-duplicated list; treat it as a SET (order is unspecified).
+///
+/// # Errors
+///
+/// As [`BoundRuleSet::eval_with_limits`]: a closure past its round, fact or term-size
+/// allowance is an `Err` (`"forward closure limit exceeded"`), never a truncated closure.
 ///
 /// # Examples
 ///
@@ -415,12 +449,31 @@ pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> 
 /// let rules = compile("@prefix : <http://ex/> . { ?x a :Man } => { ?x a :Mortal } .")?;
 /// let mut dict = sparq_core::dict::Dict::new();
 /// let facts = intern_facts(&mut dict, "@prefix : <http://ex/> . :Socrates a :Man .")?;
-/// let closure = eval(&mut dict, &facts, &rules);
+/// let closure = eval(&mut dict, &facts, &rules)?;
 /// assert_eq!(closure.len(), 2); // the fact + the derivation
 /// # Ok::<(), String>(())
 /// ```
-pub fn eval(dict: &mut Dict, facts: &[[Id; 3]], rules: &CompiledRuleSet) -> Vec<[Id; 3]> {
+pub fn eval(
+    dict: &mut Dict,
+    facts: &[[Id; 3]],
+    rules: &CompiledRuleSet,
+) -> Result<Vec<[Id; 3]>, String> {
     rules.bind(dict).eval(dict, facts)
+}
+
+/// [`eval`] under `limits` instead of the default [`ClosureLimits`] — the compiled
+/// counterpart of [`crate::reason_n3_with_limits`].
+///
+/// # Errors
+///
+/// As [`BoundRuleSet::eval_with_limits`].
+pub fn eval_with_limits(
+    dict: &mut Dict,
+    facts: &[[Id; 3]],
+    rules: &CompiledRuleSet,
+    limits: ClosureLimits,
+) -> Result<Vec<[Id; 3]>, String> {
+    rules.bind(dict).eval_with_limits(dict, facts, limits)
 }
 
 // ---------------------------------------------------------------------------
@@ -814,10 +867,12 @@ impl Compiler {
                         };
                         let regex = self.regexes.len();
                         self.regexes.push(super::bounded::regex_or_refuse(pat)?);
+                        let pat_bytes = bounded::term_bytes(&members[1]);
                         let (out, out_bound) = self.output(&atom[2], &mut ctx)?;
                         steps.push(Step::Scrape {
                             arg,
                             regex,
+                            pat_bytes,
                             out,
                             out_bound,
                         });
@@ -1036,7 +1091,35 @@ impl BoundRuleSet<'_> {
     /// `string:concatenation`, …) MINT terms (e.g. `urn:sparq:pair?…` principals) that
     /// must be interned into the caller's id space; join atoms never touch the
     /// dictionary.
-    pub fn eval(&self, dict: &mut Dict, facts: &[[Id; 3]]) -> Vec<[Id; 3]> {
+    ///
+    /// Runs under the default [`ClosureLimits`]; see [`BoundRuleSet::eval_with_limits`].
+    ///
+    /// # Errors
+    ///
+    /// As [`BoundRuleSet::eval_with_limits`].
+    pub fn eval(&self, dict: &mut Dict, facts: &[[Id; 3]]) -> Result<Vec<[Id; 3]>, String> {
+        self.eval_with_limits(dict, facts, ClosureLimits::default())
+    }
+
+    /// [`BoundRuleSet::eval`] under `limits`: the round, fact and term-size allowance of
+    /// the text engine's forward closure (see the module docs, "Limits"). The closure is
+    /// bounded by the same limits as the text engine's and refused with the same error;
+    /// near a boundary the two engines can accept or refuse differently, since their
+    /// fixpoint schedules differ.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` naming the limit (`"forward closure limit exceeded"`, the text
+    /// engine's error) when the closure runs past `limits.max_rounds` rounds, holds more
+    /// than `limits.max_facts` facts at the start of a round, or a builtin would build a
+    /// term past `limits.max_term_bytes`. No truncated closure is returned.
+    pub fn eval_with_limits(
+        &self,
+        dict: &mut Dict,
+        facts: &[[Id; 3]],
+        limits: ClosureLimits,
+    ) -> Result<Vec<[Id; 3]>, String> {
+        let run = Truncation::top_level_with(limits);
         let strata = &self.compiled.strata;
         let mut store = FactStore::default();
         for f in facts {
@@ -1057,12 +1140,18 @@ impl BoundRuleSet<'_> {
         // GH #6201): a single-stratum set runs exactly one loop; at each later stratum
         // boundary the whole store is the delta and round-0 handling restarts.
         let cs = self.compiled;
+        // The closure's round and fact allowance (the text engine's `ClosureRounds`).
+        let mut allowance = bounded::ClosureRounds::forward(&run);
+        // Each round's join rows and firings (the text engine's `JoinWork`).
+        let work = bounded::JoinWork::forward(&run);
         for stratum in 0..strata.n_strata {
             if stratum > 0 {
                 delta = store.list.clone();
             }
             let mut first_round = true;
             loop {
+                bounded::ClosureRounds::round(&mut allowance, store.all.len(), &run)?;
+                work.round();
                 let mut produced: Vec<[Id; 3]> = Vec::new();
                 for (ri, rule) in cs.rules.iter().enumerate() {
                     if strata
@@ -1072,17 +1161,33 @@ impl BoundRuleSet<'_> {
                     {
                         continue;
                     }
-                    if rule.needs_full || rule.join_steps.is_empty() {
+                    // A stratum's first round is NAIVE, as in the text engine: every rule
+                    // once over the whole store (its delta is the whole store, so seeding
+                    // each join position with it would find the same rows once per position).
+                    if first_round || rule.needs_full || rule.join_steps.is_empty() {
                         if rule.needs_full || first_round {
-                            self.run_rule(rule, &store, None, dict, &mut produced);
+                            self.run_rule(rule, &store, None, dict, (&run, &work), &mut produced);
                         }
                     } else {
                         // Semi-naive: once per join position, with that pattern restricted
                         // to the delta (dedup happens at store insertion).
                         for &k in &rule.join_steps {
-                            self.run_rule(rule, &store, Some((&delta, k)), dict, &mut produced);
+                            self.run_rule(
+                                rule,
+                                &store,
+                                Some((&delta, k)),
+                                dict,
+                                (&run, &work),
+                                &mut produced,
+                            );
                         }
                     }
+                }
+                // A builtin refused a term past the term-size allowance, or the round
+                // passed its join-work allowance: the round's derivations are incomplete,
+                // so the closure fails (the text engine's run refusal).
+                if let Some(e) = run.refusal() {
+                    return Err(e);
                 }
                 let mut new_delta: Vec<[Id; 3]> = Vec::new();
                 for f in produced {
@@ -1097,7 +1202,7 @@ impl BoundRuleSet<'_> {
                 delta = new_delta;
             }
         }
-        store.list
+        Ok(store.list)
     }
 
     fn resolve(&self, t: CTerm, row: &Row) -> Id {
@@ -1157,6 +1262,7 @@ impl BoundRuleSet<'_> {
         store: &FactStore,
         delta_at: Option<(&[[Id; 3]], usize)>,
         dict: &mut Dict,
+        (run, work): (&Truncation, &bounded::JoinWork),
         out: &mut Vec<[Id; 3]>,
     ) {
         let empty: Row = std::iter::repeat_n(NO_ID, rule.n_slots).collect();
@@ -1166,10 +1272,10 @@ impl BoundRuleSet<'_> {
                 Step::Pattern(p) => {
                     let delta = delta_at.and_then(|(d, k)| (k == si).then_some(d));
                     let cands = self.candidates(p, store, delta);
-                    rows = join_pattern(&rows, p, &cands, rule.n_slots);
+                    rows = join_pattern(&rows, p, &cands, rule.n_slots, (run, work));
                 }
                 Step::NotIncludes { pats, wildcards } => {
-                    rows = self.anti_join(rows, pats, wildcards, store, rule.n_slots);
+                    rows = self.anti_join(rows, pats, wildcards, store, rule.n_slots, (run, work));
                 }
                 Step::UnpackTriple { src, comps } => {
                     let mut next = Vec::with_capacity(rows.len());
@@ -1224,6 +1330,9 @@ impl BoundRuleSet<'_> {
                         let oxrdf::Term::NamedNode(n) = dict.term(id) else {
                             continue;
                         };
+                        if super::uri_refused(run, run, n.as_str(), true) {
+                            continue;
+                        }
                         let lit = dict.intern_lit(n.as_str(), XSD_STRING, None);
                         if self.unify_out(&mut row, *o, *out_bound, lit) {
                             next.push(row);
@@ -1242,6 +1351,9 @@ impl BoundRuleSet<'_> {
                         let oxrdf::Term::Literal(l) = dict.term(id) else {
                             continue;
                         };
+                        if super::uri_refused(run, run, l.value(), false) {
+                            continue;
+                        }
                         let iri = dict.intern_iri(l.value());
                         if self.unify_out(&mut row, *o, *out_bound, iri) {
                             next.push(row);
@@ -1260,7 +1372,17 @@ impl BoundRuleSet<'_> {
                         let oxrdf::Term::Literal(l) = dict.term(id) else {
                             continue;
                         };
-                        let enc = super::encode_for_uri(l.value());
+                        let v = l.value();
+                        if refused_term(
+                            run,
+                            run,
+                            Derived::Result(Func::EncodeForUri),
+                            bounded::string_term_bytes(v.len().saturating_mul(3)),
+                            || bounded::string_term_bytes(super::encode_for_uri_len(v)),
+                        ) {
+                            continue;
+                        }
+                        let enc = super::encode_for_uri(v);
                         let lit = dict.intern_lit(&enc, XSD_STRING, None);
                         if self.unify_out(&mut row, *o, *out_bound, lit) {
                             next.push(row);
@@ -1275,6 +1397,11 @@ impl BoundRuleSet<'_> {
                 } => {
                     let mut next = Vec::with_capacity(rows.len());
                     'row: for mut row in rows {
+                        // Sized before it is built, as the text engine sizes it: the
+                        // argument list, then the result.
+                        if concat_refused(dict, args, |a| self.resolve(a, &row), run) {
+                            continue;
+                        }
                         let mut s = String::new();
                         for a in args {
                             let id = self.resolve(*a, &row);
@@ -1292,6 +1419,7 @@ impl BoundRuleSet<'_> {
                 Step::Scrape {
                     arg,
                     regex,
+                    pat_bytes,
                     out: o,
                     out_bound,
                 } => {
@@ -1299,12 +1427,29 @@ impl BoundRuleSet<'_> {
                     let mut next = Vec::with_capacity(rows.len());
                     for mut row in rows {
                         let id = self.resolve(*arg, &row);
+                        // The `( str regex )` argument list, sized as the text engine
+                        // builds it.
+                        let list = bounded::TERM_NODE_BYTES
+                            .saturating_add(bounded::dict_term_bytes(dict, id))
+                            .saturating_add(*pat_bytes);
+                        if bounded::substituted_refused(run, list) {
+                            continue;
+                        }
                         let oxrdf::Term::Literal(l) = dict.term(id) else {
                             continue;
                         };
                         let Some(cap) = re.captures(l.value()).and_then(|c| c.get(1)) else {
                             continue;
                         };
+                        if refused_term(
+                            run,
+                            run,
+                            Derived::Result(Func::Scrape),
+                            bounded::string_term_bytes(l.value().len()),
+                            || bounded::string_term_bytes(cap.len()),
+                        ) {
+                            continue;
+                        }
                         let lit = dict.intern_lit(cap.as_str(), XSD_STRING, None);
                         if self.unify_out(&mut row, *o, *out_bound, lit) {
                             next.push(row);
@@ -1316,6 +1461,10 @@ impl BoundRuleSet<'_> {
             if rows.is_empty() {
                 return;
             }
+        }
+        // The rule's firings, charged before any conclusion is instantiated.
+        if !work.charge(rows.len().saturating_mul(rule.conclusion.len()), run) {
+            return;
         }
         for r in &rows {
             for c in &rule.conclusion {
@@ -1342,6 +1491,7 @@ impl BoundRuleSet<'_> {
         wildcards: &[usize],
         store: &FactStore,
         width: usize,
+        work: (&Truncation, &bounded::JoinWork),
     ) -> Vec<Row> {
         if rows.is_empty() {
             return rows;
@@ -1349,7 +1499,7 @@ impl BoundRuleSet<'_> {
         let mut sub = rows.clone();
         for p in pats {
             let cands = self.candidates(p, store, None);
-            sub = join_pattern(&sub, p, &cands, width);
+            sub = join_pattern(&sub, p, &cands, width, work);
             if sub.is_empty() {
                 return rows; // nothing matches anywhere: notIncludes holds for every row
             }
@@ -1371,7 +1521,19 @@ impl BoundRuleSet<'_> {
 /// variables' columns (a repeated new variable within the atom becomes an equality
 /// check). This is the reasoner's thin layout adapter over the generic kernels, the same
 /// pattern as `crate::substrate_join` — no third join implementation.
-fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> Vec<Row> {
+///
+/// Every row the kernel emits is charged to the round's join-work allowance
+/// ([`bounded::JoinWork`]). The kernel checks the rows left once per candidate fact it
+/// probes ([`bounded::RowsLeft`]), so it stops at most one candidate's matches past the
+/// allowance; the rows are then charged in one batch, which refuses the run exactly when
+/// they pass it.
+fn join_pattern(
+    rows: &[Row],
+    p: &PatternStep,
+    cands: &[Row],
+    width: usize,
+    (run, work): (&Truncation, &bounded::JoinWork),
+) -> Vec<Row> {
     if rows.is_empty() || cands.is_empty() {
         return Vec::new();
     }
@@ -1388,9 +1550,12 @@ fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> V
         rows,
         &tables,
         &probe_only,
-        &NoBudget, // not-a-limit: unbounded-join (the join runs to completion)
+        &work.kernel_view(),
         &mut combined,
     );
+    if !work.charge(combined.len(), run) {
+        return Vec::new();
+    }
     let mut out = Vec::with_capacity(combined.len());
     'row: for c in &combined {
         let (b, f) = c.split_at(width);
@@ -1406,12 +1571,71 @@ fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> V
     out
 }
 
-/// `string:concatenation` argument coercion, mirroring the text engine's: IRIs coerce
-/// to their text, typed literals to their canonical VALUE string (`"0"^^xsd:boolean` →
-/// `"false"`, `"07"^^xsd:integer` → `"7"`), everything else to its lexical form; a
-/// blank-node argument fails the premise. Kept in lock-step with the `Func::Concat` arm
-/// of the text engine's `eval_functional` (same `numval`/`dec_norm`/`numval_term`
-/// helpers) — the equivalence suite is the drift alarm.
+/// Whether `string:concatenation` over `args` (resolved to ids by `resolve`) is
+/// refused for its size, sized from the dictionary's borrowed records before anything is
+/// built and in the text engine's order: the `( … )` argument list it would substitute,
+/// then the result ([`super::concat_piece_bound`], and only past the limit the exact
+/// [`super::concat_piece_len`]). The refusal is recorded on `run`.
+fn concat_refused(
+    dict: &Dict,
+    args: &[CTerm],
+    resolve: impl Fn(CTerm) -> Id,
+    run: &Truncation,
+) -> bool {
+    let ids = || args.iter().map(|a| resolve(*a));
+    let list = ids()
+        .map(|id| bounded::dict_term_bytes(dict, id))
+        .fold(bounded::TERM_NODE_BYTES, usize::saturating_add);
+    if bounded::substituted_refused(run, list) {
+        return true;
+    }
+    let bound = ids()
+        .map(|id| {
+            if is_inline(id) {
+                return super::concat_piece_bound("", Some(super::parser::XSD_INTEGER));
+            }
+            match dict.term_parts(id) {
+                TermParts::Iri { prefix, suffix } => {
+                    prefix.len().saturating_add(super::concat_piece_bound(suffix, None))
+                }
+                TermParts::Lit {
+                    value, datatype, ..
+                } => super::concat_piece_bound(value, Some(datatype)),
+                TermParts::Blank(_) | TermParts::Triple(_) => 0,
+            }
+        })
+        .fold(0usize, usize::saturating_add);
+    let exact = || {
+        ids()
+            .map(|id| model_term(dict, id).and_then(|t| super::concat_piece_len(&t)).unwrap_or(0))
+            .fold(0usize, usize::saturating_add)
+    };
+    refused_term(
+        run,
+        run,
+        Derived::Result(Func::Concat),
+        bounded::string_term_bytes(bound),
+        || bounded::string_term_bytes(exact()),
+    )
+}
+
+/// The text engine's term for an IRI or literal `id` (`None` for any other term).
+fn model_term(dict: &Dict, id: Id) -> Option<Term> {
+    match dict.term(id) {
+        oxrdf::Term::NamedNode(n) => Some(Term::Iri(n.into_string())),
+        oxrdf::Term::Literal(l) => Some(Term::Lit(
+            l.value().to_owned(),
+            l.datatype().as_str().to_owned(),
+            l.language().map(str::to_owned),
+        )),
+        _ => None,
+    }
+}
+
+/// `string:concatenation` argument coercion: IRIs coerce to their text, typed literals
+/// to their canonical VALUE string (`"0"^^xsd:boolean` → `"false"`, `"07"^^xsd:integer`
+/// → `"7"`) through the text engine's own [`super::concat_piece`], everything else to its
+/// lexical form; a blank-node argument fails the premise.
 fn concat_push(dict: &Dict, id: Id, s: &mut String) -> bool {
     match dict.term(id) {
         oxrdf::Term::NamedNode(n) => {
@@ -1419,51 +1643,16 @@ fn concat_push(dict: &Dict, id: Id, s: &mut String) -> bool {
             true
         }
         oxrdf::Term::Literal(l) => {
-            let v = l.value();
-            match l
-                .datatype()
-                .as_str()
-                .strip_prefix("http://www.w3.org/2001/XMLSchema#")
-            {
-                Some("boolean") => {
-                    s.push_str(if v == "0" || v == "false" {
-                        "false"
-                    } else {
-                        "true"
-                    });
-                }
-                Some("integer" | "decimal" | "float" | "double") => {
-                    let t = Term::Lit(v.to_string(), l.datatype().as_str().to_string(), None);
-                    match super::numval(&t) {
-                        // A numeral past i128: its canonical value string, exactly.
-                        Some(super::NumVal::F64(_))
-                            if super::big_numeral_canonical(v).is_some() =>
-                        {
-                            s.push_str(&super::big_numeral_canonical(v).unwrap_or_default())
-                        }
-                        Some(super::NumVal::Int(i)) => s.push_str(&i.to_string()),
-                        Some(super::NumVal::Dec(m, sc)) => {
-                            let (m, sc) = super::dec_norm(m, sc);
-                            if sc == 0 {
-                                s.push_str(&m.to_string());
-                            } else if let Term::Lit(lex, ..) =
-                                super::numval_term(super::NumVal::Dec(m, sc))
-                            {
-                                s.push_str(&lex);
-                            }
-                        }
-                        Some(super::NumVal::F64(f)) => {
-                            if f.fract() == 0.0 && f.abs() < 9.007e15 {
-                                // not-a-cut: exact-cast (whole, below 2^53)
-                                let _ = std::fmt::Write::write_fmt(s, format_args!("{}", f as i64));
-                            } else {
-                                let _ = std::fmt::Write::write_fmt(s, format_args!("{f}"));
-                            }
-                        }
-                        None => s.push_str(v),
+            let dt = l.datatype().as_str();
+            match dt.strip_prefix("http://www.w3.org/2001/XMLSchema#") {
+                Some("boolean" | "integer" | "decimal" | "float" | "double") => {
+                    let t = Term::Lit(l.value().to_string(), dt.to_string(), None);
+                    match super::concat_piece(&t) {
+                        Some(piece) => s.push_str(&piece),
+                        None => return false,
                     }
                 }
-                _ => s.push_str(v),
+                _ => s.push_str(l.value()),
             }
             true
         }
@@ -1502,7 +1691,7 @@ mod tests {
         let rules = compile(rules_src).unwrap();
         let mut dict = Dict::new();
         let facts = intern_facts(&mut dict, facts_src).unwrap();
-        let ids = eval(&mut dict, &facts, &rules);
+        let ids = eval(&mut dict, &facts, &rules).expect("eval");
         triples_as_strings(&dict, &ids)
     }
 
@@ -2049,7 +2238,7 @@ mod tests {
         let man = dict.intern_iri("http://ex/Man");
         let ty = dict.intern_iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type");
         let socrates = dict.intern_iri("http://ex/Socrates");
-        let closure = bound.eval(&mut dict, &[[socrates, ty, man]]);
+        let closure = bound.eval(&mut dict, &[[socrates, ty, man]]).expect("eval");
         assert!(closure.contains(&[socrates, ty, mortal]));
     }
 

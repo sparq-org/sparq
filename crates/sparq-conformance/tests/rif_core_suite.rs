@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-rh4gu (epic sq-pbz04) — the RIF-Core EXPRESSIVITY ratchet for
+//! sq-rh4gu (epic sq-pbz04) — the RIF-Core EXPRESSIVITY ratchet for
 //! the `sparq-reason` RIF-Core front-end, wired into the central conformance
 //! scoreboard as a sparq-EXTENSION-shaped ratchet over the **RIF-Core (monotone
 //! Horn) subset** — NOT a full RIF-BLD/PRD or SPARQL-RIF-entailment-regime
@@ -61,7 +61,7 @@
 //! TEXTUALLY by the conformance crate's `tests/scoreboard_floors.rs` guard, so the
 //! central scoreboard's mirrored value can never silently drift.
 
-// [OPUS-4.8] When the lane feature is OFF the runner is a single self-SKIP test so
+// When the lane feature is OFF the runner is a single self-SKIP test so
 // the default + `--workspace` builds neither link the RIF front-end nor go red on a
 // fresh checkout. (cfg gate, not a runtime branch — zero RIF code compiles in the
 // default state, the lean-core invariant.)
@@ -85,23 +85,23 @@ mod gated {
     /// `tests/scoreboard_floors.rs`. It may only RISE — never lower it (raise as the
     /// RIF-Core feature coverage grows). HONESTLY a sparq EXTENSION-shaped ratchet
     /// over the RIF-Core (monotone Horn) subset, NOT a full RIF-BLD/PRD or
-    /// SPARQL-RIF-entailment conformance claim. [OPUS-4.8] sq-rh4gu
-    // [SONNET-4.6] sq-pbz04.5.2 — raised 47 → 58: 11 new assertions for the 5 new
+    /// SPARQL-RIF-entailment conformance claim. sq-rh4gu
+    // sq-pbz04.5.2 — raised 47 → 58: 11 new assertions for the 5 new
     // soundly-mapped builtins (NumericNotEqual, StringUpperCase, StringLowerCase,
     // StringEncodeForUri, ListConcatenate): 1 positive + 1 negative per builtin
     // (10 total) + 1 extra positive for NumericNotEqual = 11 net new assertions.
-    // [SONNET-4.6] sq-pbz04.5.4 — Equal-atom audit: removed the "equality lowers to
+    // sq-pbz04.5.4 — Equal-atom audit: removed the "equality lowers to
     // owl:sameAs" assertion from positive_atoms (-1, it tested buggy behaviour) and
     // added FIVE assertions in equal_atom_audit (Equal-in-fact-head rejected, closure
     // refuses it, Equal-in-rule-head rejected, ground-identity body Equal fires,
     // DistinctGroundEqual fail-closed). NB: the prior "4 added" tally undercounted by
     // one — equal_atom_audit added 5, not 4.
-    // [OPUS-4.8] sq-26vwp — raised to 73: +10 assertions for variable/mixed body Equal
+    // sq-26vwp — raised to 73: +10 assertions for variable/mixed body Equal
     // resolved by compile-time substitution/unification (V1 no over-derivation, V2
     // same-node fires, ?x=<t> substitution end-to-end, head-var bound-by-substitution,
     // chained-equality collapse, substitution-created distinct-ground fail-closed) —
     // the measured `RIF-Core expressivity assertions N` count with the new tests.
-    // [SONNET-4.6] sq-anyad — raised 73 → 76: the distinct-ground Equal item of
+    // sq-anyad — raised 73 → 76: the distinct-ground Equal item of
     // `equal_atom_audit` went from ONE fail-closed assertion to FOUR (value-equal
     // numerics validate, value-equal numerics FIRE through the closure, value-unequal
     // numerics are vacuous, non-numeric pairs still fail closed) as the NUMERIC half of
@@ -177,7 +177,7 @@ mod gated {
     }
 
     /// The string object of the (s, p, ?) frame, if present.
-    // [SONNET-4.6] sq-pbz04.5.2
+    // sq-pbz04.5.2
     fn str_obj(dict: &Dict, closure: &[[Id; 3]], s: &str, p: &str) -> Option<String> {
         use oxrdf::Term as OxT;
         let (a, b) = (id(dict, s), id(dict, p));
@@ -199,14 +199,14 @@ mod gated {
         numeric_builtins(&mut tally);
         string_builtins(&mut tally);
         list_builtins(&mut tally);
-        new_builtins(&mut tally); // [SONNET-4.6] sq-pbz04.5.2
-        equal_atom_audit(&mut tally); // [SONNET-4.6] sq-pbz04.5.4
+        new_builtins(&mut tally); // sq-pbz04.5.2
+        equal_atom_audit(&mut tally); // sq-pbz04.5.4
         monotonicity(&mut tally);
         safety_rejections(&mut tally);
         canonical_uncle(&mut tally);
         out_of_scope_genuinely_absent(&mut tally);
 
-        // [OPUS-4.8] The line a CI ratchet can grep (assertion count in field $3),
+        // The line a CI ratchet can grep (assertion count in field $3),
         // mirroring the RSP/BM25 EXTENSION ratchet shape. Positional `println!`
         // args per the CodeQL `rust/unused-variable` false-positive guard.
         println!("\nRIF-Core (monotone Horn subset) expressivity ratchet");
@@ -228,7 +228,7 @@ mod gated {
     }
 
     /// frame / membership / subclass positive atoms.
-    /// [SONNET-4.6] sq-pbz04.5.4 — removed the prior "equality lowers to owl:sameAs"
+    /// sq-pbz04.5.4 — removed the prior "equality lowers to owl:sameAs"
     /// assertion (it was testing buggy behaviour — a fact with Equal in the head,
     /// which RIF-Core now correctly rejects). Equal-atom semantics are exercised in
     /// `equal_atom_audit` instead.
@@ -696,7 +696,7 @@ mod gated {
 
     /// Tests for the 5 new soundly-mapped RIF-Core DTB builtins (sq-pbz04.5.2):
     /// `pred:numeric-not-equal`, `func:upper-case`, `func:lower-case`,
-    /// `func:encode-for-uri`, `func:concatenate`. [SONNET-4.6] sq-pbz04.5.2
+    /// `func:encode-for-uri`, `func:concatenate`. sq-pbz04.5.2
     fn new_builtins(t: &mut Tally) {
         // --- pred:numeric-not-equal → math:notEqualTo ---
         // Positive: filter keeps only the subject where value ≠ 5
@@ -1029,7 +1029,7 @@ mod gated {
             "func:concatenate: [10,20]++[30] → length 3",
         );
         // Variadic (3+ inputs): [1,2] ++ [3] ++ [4,5] → [1,2,3,4,5]; length = 5
-        // [SONNET-4.6] sq-pbz04.5.2 — exercises the args[..n_inputs] join path in
+        // sq-pbz04.5.2 — exercises the args[..n_inputs] join path in
         // lower_builtin (ListConcatenate) with n_inputs=3.
         let list_x = Term::List(vec![Term::int(1), Term::int(2)]);
         let list_y = Term::List(vec![Term::int(3)]);
@@ -1161,7 +1161,7 @@ mod gated {
     ///    chained equalities collapse correctly; a substitution-created distinct
     ///    ground fails closed.
     ///
-    /// [SONNET-4.6] sq-pbz04.5.4 / [OPUS-4.8] sq-26vwp / [SONNET-4.6] sq-anyad
+    /// sq-pbz04.5.4 / sq-26vwp / sq-anyad
     fn equal_atom_audit(t: &mut Tally) {
         // --- 1. Equal in a CONCLUSION is rejected ---
         // (a) as a fact head
@@ -1235,7 +1235,7 @@ mod gated {
         );
 
         // --- 3. Distinct ground constants in body Equal: the NUMERIC half is DECIDED,
-        // the non-numeric half stays fail-closed. [SONNET-4.6] sq-anyad
+        // the non-numeric half stays fail-closed. sq-anyad
         let xsd_prefix = "http://www.w3.org/2001/XMLSchema#";
         let lit = |lex: &str, dt: &str| Term::Lit {
             lex: lex.to_string(),
@@ -1299,7 +1299,7 @@ mod gated {
         );
 
         // --- 4. Variable / mixed body Equal via COMPILE-TIME substitution (sq-26vwp) ---
-        // [OPUS-4.8] The variable/mixed cases are resolved by substitution/unification
+        // The variable/mixed cases are resolved by substitution/unification
         // at validate/lower time, NOT by an owl:sameAs triple pattern. Exercised through
         // the REAL closure path so both defect directions are pinned.
 

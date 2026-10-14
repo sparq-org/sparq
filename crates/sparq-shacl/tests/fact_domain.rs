@@ -1,4 +1,4 @@
-//! [GPT-5.6] (sq-lsp7k.2.1) Feature-state and behavioural coverage for the
+//! (sq-lsp7k.2.1) Feature-state and behavioural coverage for the
 //! SHACL-AF validation fact-domain switch.
 
 use sparq_core::Graph;

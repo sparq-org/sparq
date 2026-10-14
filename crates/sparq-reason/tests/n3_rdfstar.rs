@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-afqnp (GH #2012) — RDF-star / RDF 1.2 quoted-triple TERMS in N3 rules.
+//! sq-afqnp (GH #2012) — RDF-star / RDF 1.2 quoted-triple TERMS in N3 rules.
 //!
 //! Fixture tests (parse / match / bind / derive / nest / non-entailment) plus a
 //! DIFFERENTIAL battery: the engine's closure must equal, as a SET, the closure

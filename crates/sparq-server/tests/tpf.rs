@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-bzh1 (epic sq-3183): e2e integration tests for the OPT-IN Triple Pattern
+//! sq-bzh1 (epic sq-3183): e2e integration tests for the OPT-IN Triple Pattern
 //! Fragments / Linked Data Fragments source endpoint (`GET /tpf`).
 //!
 //! These tests run ONLY with the `tpf` cargo feature (the whole file is gated). They spin the
@@ -229,7 +229,7 @@ async fn non_iri_predicate_is_400() {
     assert_eq!(resp.status(), 400);
 }
 
-/// [OPUS-4.8] (sq-kfel, ASVS-G3) A malformed TPF term parse error must NOT echo the caller's
+/// (sq-kfel, ASVS-G3) A malformed TPF term parse error must NOT echo the caller's
 /// offending term verbatim (the same echo-of-input info-leak class the rest of the surface
 /// sanitizes). The error body is the structured JSON envelope with a generic category; the
 /// sentinel embedded in the bad term never reaches the body.
@@ -256,7 +256,7 @@ async fn malformed_term_does_not_echo_input() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-dxhb — Hydra first/last paging controls (the fuller paging vocabulary).
+// sq-dxhb — Hydra first/last paging controls (the fuller paging vocabulary).
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -288,7 +288,7 @@ async fn fragment_carries_first_and_last_paging_controls() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-dxhb — brTPF bindings-restricted fragments (only with the `brtpf` feature).
+// sq-dxhb — brTPF bindings-restricted fragments (only with the `brtpf` feature).
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "brtpf")]
@@ -397,7 +397,7 @@ async fn brtpf_malformed_bindings_is_400_and_no_echo() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-r74h — brTPF binding-set DoS caps (mapping count + payload bytes), enforced
+// sq-r74h — brTPF binding-set DoS caps (mapping count + payload bytes), enforced
 // independently of --max-body-bytes and refusing 413 (not 400) so a client can distinguish
 // "too large" from "malformed". Only with the `brtpf` feature.
 // ---------------------------------------------------------------------------

@@ -202,7 +202,7 @@ fn duplicate_variable_is_an_error() {
     );
 }
 
-/// [GPT-5.6] Mutation witness for the inverse mapping: removing any term-kind arm or
+/// Mutation witness for the inverse mapping: removing any term-kind arm or
 /// metadata reconstruction makes this exact row-for-row identity assertion fail.
 #[test]
 fn all_term_kinds_round_trip_to_identical_query_result() {

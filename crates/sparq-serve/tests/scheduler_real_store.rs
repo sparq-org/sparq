@@ -3,7 +3,7 @@
 //! run the real `sparq_engine` evaluator — while the sequenced [`Writer`]
 //! publishes new generations concurrently.
 //!
-//! [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+//! written while Fable 5 unavailable — re-review when Fable returns.
 //!
 //! This is the brief's CORRECTNESS gate at the full-stack level (category 4):
 //! scheduling must not change RESULTS or snapshot semantics. Each scheduled job

@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-snopa.6, issue #992 FR-4) OPT-IN Solid **WAC/ACP HTTP authorization** surface.
+//! (sq-snopa.6, issue #992 FR-4) OPT-IN Solid **WAC/ACP HTTP authorization** surface.
 //!
 //! The `POST /authz/decide`, `POST /authz/wac-allow` and `POST /authz/query` endpoints — a THIN
 //! HTTP shell over the `sparq-solid` LIBRARY authoriser
@@ -20,7 +20,7 @@
 //! [`PodStore`](sparq_solid::PodStore), materialises the auth view, and maps the library verdict
 //! onto HTTP.
 //!
-//! # Which pod: `"source"` (sq-snopa.8) [SONNET-4.6]
+//! # Which pod: `"source"` (sq-snopa.8)
 //!
 //! Every endpoint takes an optional `"source"` field selecting WHICH pod it authorises over:
 //!
@@ -65,7 +65,7 @@
 //! and a grant-less / un-materialised session sees nothing. The tests exercise this directly (an
 //! unparseable dataset -> deny with a `400`; an un-materialisable view still denies).
 //!
-//! # The ODRL lane (`odrl-authz` feature, sq-lrtc3.1 + sq-3mu76) [FABLE-5]
+//! # The ODRL lane (`odrl-authz` feature, sq-lrtc3.1 + sq-3mu76)
 //!
 //! Behind the OPT-IN `odrl-authz` cargo feature, ALL THREE endpoints (`/authz/query`,
 //! `/authz/decide`, `/authz/wac-allow` — the latter two are sq-3mu76) grow an ODRL lane: when the
@@ -85,7 +85,7 @@
 //! so it does not apply to `"source":"server"` — an ODRL-carrying server store is REFUSED there
 //! (see the `"source"` section above), never authorised as if the rules were absent.
 //!
-//! ## Read-scoped advertisement (sq-3mu76) [FABLE-5]
+//! ## Read-scoped advertisement (sq-3mu76)
 //!
 //! The lane evidences ONLY the `odrl:read` action until the sq-lrtc3.2 action contract lands, so
 //! when it fires the ADVISORY mode advertisements are scoped down to what it evidenced:
@@ -119,7 +119,7 @@ pub(crate) enum AuthView {
     Acp,
 }
 
-/// [SONNET-4.6] (sq-snopa.8) WHICH POD the endpoint authorises over — the stateless/stateful
+/// (sq-snopa.8) WHICH POD the endpoint authorises over — the stateless/stateful
 /// switch, selected by the request's `"source"` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthzSource {
@@ -132,7 +132,7 @@ pub(crate) enum AuthzSource {
     Server,
 }
 
-/// [SONNET-4.6] (sq-snopa.8) The cached STATEFUL authorization view: one materialised
+/// (sq-snopa.8) The cached STATEFUL authorization view: one materialised
 /// [`PodStore`] plus the generation number and auth model it was built for. Lives in
 /// [`AppState`](crate::http::AppState) behind an `RwLock`; see that field's doc for why a
 /// generation-keyed cache beside the ring is the whole "re-materialise on ACL change" contract.
@@ -149,7 +149,7 @@ pub(crate) struct CachedAuthView {
     store: Arc<PodStore>,
 }
 
-/// [SONNET-4.6] (sq-snopa.8) Why the stateful view refused to build. A small `Send` enum rather
+/// (sq-snopa.8) Why the stateful view refused to build. A small `Send` enum rather
 /// than a [`Response`] so it crosses the `spawn_blocking` boundary cleanly; mapped to the
 /// fail-closed HTTP response by [`server_view_error_response`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,7 +164,7 @@ enum ServerViewError {
     Odrl,
 }
 
-/// [SONNET-4.6] (sq-snopa.8) The store an endpoint decides over: an owned per-request store
+/// (sq-snopa.8) The store an endpoint decides over: an owned per-request store
 /// (stateless lane) or the shared per-generation one (stateful lane). Both are read through
 /// [`get`](Self::get); only the owned variant can be mutated by the ODRL lane.
 ///
@@ -194,7 +194,7 @@ impl ResolvedStore {
 /// value the caller keeps alive; `dataset` is the owned N-Quads text.
 #[derive(Debug)]
 struct AuthzRequest {
-    /// [SONNET-4.6] (sq-snopa.8) Which pod to authorise over — the body's dataset (default) or
+    /// (sq-snopa.8) Which pod to authorise over — the body's dataset (default) or
     /// the server's own loaded store.
     source: AuthzSource,
     /// The pod dataset as N-Quads (documents + `.acl`/`.acr` control graphs), owned. EMPTY (and
@@ -314,14 +314,14 @@ fn json_response(status: StatusCode, body: String) -> Response {
 /// A `text/json` response with the given status + body, and an OPTIONAL `Link: rel="acl"`
 /// header (FR-5, sq-snopa.7). When `acl_link` is `Some(value)` the RFC 8288 link-value
 /// (`<iri>; rel="acl"`) is emitted as the `Link` response header; `None` silently omits it
-/// (fail-closed — if there is no governing ACL there is nothing to advertise). [SONNET-4.6]
+/// (fail-closed — if there is no governing ACL there is nothing to advertise).
 fn json_response_with_link(status: StatusCode, body: String, acl_link: Option<&str>) -> Response {
     let mut builder = Response::builder()
         .status(status)
         .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
         .header(header::CONTENT_LENGTH, body.len());
     if let Some(link_val) = acl_link {
-        // [SONNET-4.6] POSITIONAL format args (CodeQL rust/unused-variable guard).
+        // POSITIONAL format args (CodeQL rust/unused-variable guard).
         builder = builder.header(header::LINK, link_val);
     }
     builder
@@ -337,7 +337,7 @@ fn json_response_with_link(status: StatusCode, body: String, acl_link: Option<&s
 ///
 /// Fail-closed: a missing `dataset` is a `400` (there is nothing to authorise over), NOT an
 /// empty-dataset allow.
-// [FABLE-5] `Response` is a large type; returning it in the `Err` arm mirrors the rest of this
+// `Response` is a large type; returning it in the `Err` arm mirrors the rest of this
 // crate's handler helpers (`parse_shapes_graph`) — same `result_large_err` allow.
 #[allow(clippy::result_large_err)]
 fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
@@ -346,7 +346,7 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
     let obj = v
         .as_object()
         .ok_or_else(|| json_error(StatusCode::BAD_REQUEST, "request body must be a JSON object"))?;
-    // [SONNET-4.6] sq-snopa.8 — the stateless/stateful switch. Only an ABSENT key defaults to
+    // sq-snopa.8 — the stateless/stateful switch. Only an ABSENT key defaults to
     // `body` (the historical behaviour, byte-identical). A key that is PRESENT but not a string
     // (`null`, `false`, a number, an array/object) is a fail-closed client error, NOT an absent
     // key: this selector decides whether authorisation trusts the server's own store or a
@@ -436,7 +436,7 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
 ///
 /// Inference: `.acr` present in the dataset -> ACP; otherwise WAC. This is a convenience only; a
 /// caller that knows its model should set `"view"` explicitly.
-// [FABLE-5] `Response` is large; same `result_large_err` allow as `parse_request` / the crate's
+// `Response` is large; same `result_large_err` allow as `parse_request` / the crate's
 // other handler helpers.
 #[allow(clippy::result_large_err)]
 fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
@@ -485,7 +485,7 @@ fn infer_view(dataset: &str) -> AuthView {
     }
 }
 
-// ── [SONNET-4.6] sq-snopa.8 — the STATEFUL lane (`"source":"server"`) ──────
+// ── sq-snopa.8 — the STATEFUL lane (`"source":"server"`) ──────
 //
 // The stateless lane above materialises a throwaway `PodStore` per request. The stateful lane
 // authorises over the SERVER'S OWN loaded store instead: it pins the current generation, forks
@@ -508,7 +508,7 @@ fn infer_view(dataset: &str) -> AuthView {
 /// Is the server's own store an ACP pod? True when it holds any `.acr` control graph — the
 /// graph-level twin of [`infer_view_is_acp`] (which scans N-Quads TEXT, unavailable here). WAC
 /// is the safe fallback: an ACP pod materialised as WAC finds no `.acl` grants and denies.
-/// Pure + directly unit-tested. [SONNET-4.6] sq-snopa.8.
+/// Pure + directly unit-tested. sq-snopa.8.
 pub(crate) fn graph_view_is_acp(graph: &sparq_core::Graph) -> bool {
     graph.named.iter().any(|(name, _)| match name {
         oxrdf::Term::NamedNode(n) => n.as_str().ends_with(".acr"),
@@ -520,7 +520,7 @@ pub(crate) fn graph_view_is_acp(graph: &sparq_core::Graph) -> bool {
 /// whether either ODRL rule predicate IRI is present in the dictionary of the default graph or
 /// any named graph, not whether it is actually used in predicate position. Over-approximating
 /// REFUSES more requests, which is the fail-closed direction; under-approximating would silently
-/// drop a prohibition, which is fail-OPEN. Pure + directly unit-tested. [SONNET-4.6] sq-snopa.8.
+/// drop a prohibition, which is fail-OPEN. Pure + directly unit-tested. sq-snopa.8.
 #[cfg(feature = "odrl-authz")]
 pub(crate) fn graph_carries_odrl(graph: &sparq_core::Graph) -> bool {
     fn holds(g: &sparq_core::Graph) -> bool {
@@ -617,7 +617,7 @@ fn build_server_view(
 /// [`build_server_view`] on the blocking pool — the materialisation is a whole-store N3 run, so
 /// it must never occupy an async worker (the crate's `spawn_blocking` idiom). A join failure is
 /// a fail-closed 503: no decision is produced.
-// [SONNET-4.6] `Response` is large; same `result_large_err` allow as the rest of this module.
+// `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
 async fn server_store(
     state: &AppState,
@@ -638,7 +638,7 @@ async fn server_store(
 /// The store an endpoint decides over, per the request's [`AuthzSource`]: the stateless
 /// per-request build ([`build_store`]) or the stateful per-generation view ([`server_store`]).
 /// Both lanes are fail-closed; neither can yield a store that silently grants.
-// [SONNET-4.6] `Response` is large; same `result_large_err` allow as the rest of this module.
+// `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
 async fn resolve_store(
     state: &AppState,
@@ -654,14 +654,14 @@ async fn resolve_store(
 /// `{ "dataset": nquads, "session": { "agent"?, "client"?, "issuer"?, "now"? }, "resource": iri,
 /// "mode": "read"|"write"|"append"|"control", "view"?: "wac"|"acp", "source"?: "body"|"server" }`.
 /// With `"source":"server"` the `"dataset"` is omitted and the decision runs over the server's
-/// own loaded store ([SONNET-4.6] sq-snopa.8 — see the module doc). Returns the
+/// own loaded store (sq-snopa.8 — see the module doc). Returns the
 /// [`decision_to_json`] body with the HTTP status [`deny_status_code`] maps a DENY to (an ALLOW is
 /// always `200`).
 ///
 /// Fail-closed: an unknown mode, an unparseable dataset, or a materialisation failure all DENY
 /// (never grant). The endpoint reads the store; it is gated like any read.
 ///
-/// [FABLE-5] sq-3mu76: behind the `odrl-authz` feature, a dataset carrying ODRL policy rules
+/// sq-3mu76: behind the `odrl-authz` feature, a dataset carrying ODRL policy rules
 /// runs the [`apply_odrl_lane`] materialisation first, so a prohibition denies HERE exactly as
 /// `/authz/query` refuses to honour it — with the query lane's refusal matrix (non-read mode =>
 /// 400 until sq-lrtc3.2, anonymous session => 403) and the read-scoped `grantedModes`
@@ -703,7 +703,7 @@ pub(crate) async fn decide_endpoint(
             return json_response(StatusCode::FORBIDDEN, deny);
         }
     };
-    // [FABLE-5] sq-3mu76 — the trust dispatch below decides over its OWN store and would
+    // sq-3mu76 — the trust dispatch below decides over its OWN store and would
     // BYPASS the ODRL lane, silently dropping a prohibition (fail-OPEN through a side door).
     // Composing the two lanes is future work; until then the combination is refused up front.
     #[cfg(all(feature = "solid-authz-trust", feature = "odrl-authz"))]
@@ -717,14 +717,14 @@ pub(crate) async fn decide_endpoint(
              ODRL lane is not supported (fail-closed)",
         );
     }
-    // [SONNET-4.6] sq-pfae.17 — DOUBLE-OPT-IN stateless trust-graph extension.
+    // sq-pfae.17 — DOUBLE-OPT-IN stateless trust-graph extension.
     // Activates ONLY when BOTH (a) the `solid-authz-trust` feature is compiled AND (b) the config
     // flag is set AND (c) the request carries a "trust" JSON block. Any failure => 403 DENY
     // (fail-closed: the trust path can only narrow, never broaden, the admission gate).
     #[cfg(feature = "solid-authz-trust")]
     if state.config().solid_authz_trust {
         if let Some(trust_val) = v.get("trust") {
-            // [SONNET-4.6] sq-snopa.8 — the trust lane decides over its OWN store, built by
+            // sq-snopa.8 — the trust lane decides over its OWN store, built by
             // injecting admitted facts into the BODY dataset, so it cannot compose with the
             // stateful lane's shared per-generation view. Refuse rather than silently authorise
             // over the wrong pod.
@@ -742,14 +742,14 @@ pub(crate) async fn decide_endpoint(
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    // [FABLE-5] sq-3mu76 — the OPT-IN ODRL lane, on the ADVISORY decision endpoint too: a
+    // sq-3mu76 — the OPT-IN ODRL lane, on the ADVISORY decision endpoint too: a
     // dataset-carried prohibition must deny here exactly as `/authz/query` refuses to honour
     // it. Same refusal matrix as the query lane (non-read mode => 400 until sq-lrtc3.2,
     // anonymous => 403). Feature OFF => this block does not exist, byte-identical behaviour.
     #[cfg(feature = "odrl-authz")]
     let (store, odrl_lane_fired) = {
         let mut store = store;
-        // [SONNET-4.6] sq-snopa.8 — the lane reads the BODY dataset, so it fires only in the
+        // sq-snopa.8 — the lane reads the BODY dataset, so it fires only in the
         // stateless lane; `fired` implies `ResolvedStore::Owned` by construction (the stateful
         // lane forbids `dataset` outright). A server store that carries ODRL rules is REFUSED in
         // `build_server_view`, never silently un-enforced.
@@ -763,7 +763,7 @@ pub(crate) async fn decide_endpoint(
     };
     // Deciding is CPU-light here (the materialise already ran), so it stays inline.
     let decision = store.get().decide(&req.session(), &resource, mode);
-    // [FABLE-5] sq-3mu76 — read-scoped advertisement (module doc): when the lane fired, mask
+    // sq-3mu76 — read-scoped advertisement (module doc): when the lane fired, mask
     // the advisory `grantedModes` to the requested (read) mode — the lane evidenced no other.
     #[cfg(feature = "odrl-authz")]
     let decision = {
@@ -778,7 +778,7 @@ pub(crate) async fn decide_endpoint(
     } else {
         deny_status_code(decision.status)
     };
-    // [SONNET-4.6] sq-snopa.7 FR-5: emit the RFC 8288 `Link: <acl-iri>; rel="acl"` header from
+    // sq-snopa.7 FR-5: emit the RFC 8288 `Link: <acl-iri>; rel="acl"` header from
     // the decision's governing ACL. `acl_link_header()` returns `None` when no governing ACL was
     // discovered (fail-closed — nothing to advertise). Safe on a deny: the link tells the client
     // WHERE the ACL is, not that the request is allowed.
@@ -799,7 +799,7 @@ fn fail_closed_decision() -> WacDecision {
     }
 }
 
-// ── [SONNET-4.6] sq-pfae.17 — stateless trust-graph extension ──────────────
+// ── sq-pfae.17 — stateless trust-graph extension ──────────────
 //
 // The `trust_authz_decide` function and all its helpers are compiled ONLY behind
 // the `solid-authz-trust` feature (which implies `solid-authz` + `sparq-trust`
@@ -813,7 +813,7 @@ fn fail_closed_decision() -> WacDecision {
 //
 // POSITIONAL format args used throughout (CodeQL rust/unused-variable guard).
 
-/// [SONNET-4.6] (sq-pfae.17) A minimal admission justification returned alongside the trust-path
+/// (sq-pfae.17) A minimal admission justification returned alongside the trust-path
 /// decision: which rule sourced the deciding admit (its IRI), how many facts were admitted,
 /// and whether the decision went through the cert-graph closure.
 #[cfg(feature = "solid-authz-trust")]
@@ -828,7 +828,7 @@ struct TrustJustification {
     cert_graph_derived: bool,
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Serialise a `TrustJustification` into the JSON fragment added to
+/// (sq-pfae.17) Serialise a `TrustJustification` into the JSON fragment added to
 /// the decide response body under the `"trust"` key. POSITIONAL format args (CodeQL guard).
 #[cfg(feature = "solid-authz-trust")]
 fn justification_to_json(j: &TrustJustification) -> serde_json::Value {
@@ -839,7 +839,7 @@ fn justification_to_json(j: &TrustJustification) -> serde_json::Value {
     })
 }
 
-/// [SONNET-4.6] (sq-pfae.17) A parsed trust policy rule from the JSON wire format.
+/// (sq-pfae.17) A parsed trust policy rule from the JSON wire format.
 ///
 /// Wire schema (one element of `"trust"."rules"` array):
 /// ```json
@@ -863,7 +863,7 @@ struct WireTrustRule {
     shape_predicate_iri: String,
 }
 
-/// [SONNET-4.6] (sq-pfae.17) A parsed certification edge from the JSON wire format.
+/// (sq-pfae.17) A parsed certification edge from the JSON wire format.
 ///
 /// Wire schema (one element of `"trust"."certifications"` array):
 /// ```json
@@ -894,7 +894,7 @@ struct WireCertification {
     scope: WireCertScope,
 }
 
-/// [SONNET-4.6] (sq-sllu4) The parsed `"scopeKind"` of a wire certification — the JSON
+/// (sq-sllu4) The parsed `"scopeKind"` of a wire certification — the JSON
 /// projection of `sparq_trust::graph::CertScope`.
 ///
 /// ```json
@@ -919,7 +919,7 @@ enum WireCertScope {
     Shape { predicate_iri: String },
 }
 
-/// [SONNET-4.6] (sq-pfae.17) A parsed presented credential from the JSON wire format.
+/// (sq-pfae.17) A parsed presented credential from the JSON wire format.
 ///
 /// Wire schema (one element of `"trust"."credentials"` array):
 /// ```json
@@ -940,7 +940,7 @@ struct WireCredential {
     revoked: bool,
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Parse a `WireTrustRule` from a JSON object. Fail-closed: any
+/// (sq-pfae.17) Parse a `WireTrustRule` from a JSON object. Fail-closed: any
 /// missing/mistyped field => `Err(reason)`.
 #[cfg(feature = "solid-authz-trust")]
 fn parse_wire_rule(obj: &serde_json::Map<String, serde_json::Value>) -> Result<WireTrustRule, &'static str> {
@@ -961,7 +961,7 @@ fn parse_wire_rule(obj: &serde_json::Map<String, serde_json::Value>) -> Result<W
     Ok(WireTrustRule { source, issuer_key_hex, scope_iri, fresh_within_secs, shape_predicate_iri })
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Parse a `WireCertification` from a JSON object. Fail-closed.
+/// (sq-pfae.17) Parse a `WireCertification` from a JSON object. Fail-closed.
 #[cfg(feature = "solid-authz-trust")]
 fn parse_wire_certification(obj: &serde_json::Map<String, serde_json::Value>) -> Result<WireCertification, &'static str> {
     let certifier_iri = obj.get("certifierIri").and_then(|v| v.as_str())
@@ -989,7 +989,7 @@ fn parse_wire_certification(obj: &serde_json::Map<String, serde_json::Value>) ->
         .ok_or("certification missing 'scopeKind'")?;
     let scope = match scope_kind {
         "anyService" => WireCertScope::AnyService,
-        // [SONNET-4.6] (sq-sllu4) A shape scope MUST carry the predicate IRI it is scoped to:
+        // (sq-sllu4) A shape scope MUST carry the predicate IRI it is scoped to:
         // a "shape" kind with no predicate is not a wider scope, it is an unspecified one.
         "shape" => WireCertScope::Shape {
             predicate_iri: obj.get("scopeShapePredicateIri").and_then(|v| v.as_str())
@@ -1004,7 +1004,7 @@ fn parse_wire_certification(obj: &serde_json::Map<String, serde_json::Value>) ->
     })
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Parse a `WireCredential` from a JSON object. Fail-closed.
+/// (sq-pfae.17) Parse a `WireCredential` from a JSON object. Fail-closed.
 #[cfg(feature = "solid-authz-trust")]
 fn parse_wire_credential(obj: &serde_json::Map<String, serde_json::Value>) -> Result<WireCredential, &'static str> {
     let graph_nquads = obj.get("graphNquads").and_then(|v| v.as_str())
@@ -1023,33 +1023,17 @@ fn parse_wire_credential(obj: &serde_json::Map<String, serde_json::Value>) -> Re
     Ok(WireCredential { graph_nquads, issuer_signature_hex, salt_hex, issued_at_unix_secs, revoked })
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Decode a 64-hex-char (32-byte) salt from a hex string. Fail-closed.
+/// (sq-pfae.17) Decode a 64-hex-char (32-byte) salt from a hex string. Fail-closed.
 #[cfg(feature = "solid-authz-trust")]
 fn decode_salt_hex(hex: &str) -> Option<[u8; 32]> {
+    // Reject a wrong length before decoding allocates anything for it.
     if hex.len() != 64 {
         return None;
     }
-    let mut out = [0u8; 32];
-    for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
-        let hi = hex_nibble(chunk[0])?;
-        let lo = hex_nibble(chunk[1])?;
-        out[i] = (hi << 4) | lo;
-    }
-    Some(out)
+    sparq_core::hex::decode(hex)?.try_into().ok()
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Decode a single hex nibble. Fail-closed.
-#[cfg(feature = "solid-authz-trust")]
-fn hex_nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
-}
-
-/// [SONNET-4.6] (sq-pfae.17) Build a `sparq_trust::policy::ShapeRef` for a `trust:forPredicate`
+/// (sq-pfae.17) Build a `sparq_trust::policy::ShapeRef` for a `trust:forPredicate`
 /// IRI. This is the same desugaring `sparq_trust::policy` does internally: a single-predicate
 /// SHACL node-shape targeting subjects of `predicate_iri` and requiring it present with
 /// `sh:minCount 1`. Fail-closed if the IRI is not valid.
@@ -1067,16 +1051,16 @@ fn predicate_shape(predicate_iri: &str) -> Option<sparq_trust::policy::ShapeRef>
     )
 }
 
-/// [SONNET-4.6] (sq-sllu4) Canonical blank-node label of the shape-scope root. See
+/// (sq-sllu4) Canonical blank-node label of the shape-scope root. See
 /// [`cert_scope_predicate_shape`] for why it is FIXED rather than fresh.
 #[cfg(feature = "solid-authz-trust")]
 const CERT_SCOPE_SHAPE_LABEL: &str = "certScopeShape";
 
-/// [SONNET-4.6] (sq-sllu4) Canonical blank-node label of the shape-scope property node.
+/// (sq-sllu4) Canonical blank-node label of the shape-scope property node.
 #[cfg(feature = "solid-authz-trust")]
 const CERT_SCOPE_PROPERTY_LABEL: &str = "certScopeProperty";
 
-/// [SONNET-4.6] (sq-sllu4) Build the CANONICAL `CertScope::Shape` shape for a wire
+/// (sq-sllu4) Build the CANONICAL `CertScope::Shape` shape for a wire
 /// `"scopeKind": "shape"` certification's `scopeShapePredicateIri`.
 ///
 /// Structurally this is [`predicate_shape`] — the same single-predicate node-shape — but its
@@ -1110,7 +1094,7 @@ fn cert_scope_predicate_shape(predicate_iri: &str) -> Option<sparq_trust::policy
     )
 }
 
-/// [SONNET-4.6] (sq-sllu4) The shared single-predicate desugaring behind [`predicate_shape`]
+/// (sq-sllu4) The shared single-predicate desugaring behind [`predicate_shape`]
 /// (fresh labels) and [`cert_scope_predicate_shape`] (canonical labels) — ONE construction, so
 /// the two can never structurally drift apart. Fail-closed if the IRI is not valid.
 #[cfg(feature = "solid-authz-trust")]
@@ -1140,7 +1124,7 @@ fn predicate_shape_with_labels(
     })
 }
 
-/// [SONNET-4.6] (sq-pfae.17) The core trust-path decision handler. Called from `decide_endpoint`
+/// (sq-pfae.17) The core trust-path decision handler. Called from `decide_endpoint`
 /// ONLY when BOTH (a) `solid-authz-trust` is compiled AND (b) the config flag is set AND (c) the
 /// request carries a `"trust"` block. Returns a `Response` — always a complete HTTP response
 /// (either an enriched allow/deny carrying a `"trust"` admission justification, or a plain 403
@@ -1247,7 +1231,7 @@ fn trust_authz_decide(
         let obj = match rule_v.as_object() {
             Some(o) => o,
             None => {
-                // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+                // POSITIONAL format args (CodeQL guard).
                 return json_response(
                     StatusCode::FORBIDDEN,
                     trust_deny_json(&format!("trust rule {} is not an object", idx)),
@@ -1360,7 +1344,7 @@ fn trust_authz_decide(
         };
         let scope = match &wire.scope {
             WireCertScope::AnyService => CertScope::AnyService,
-            // [SONNET-4.6] (sq-sllu4) A shape scope is the CANONICAL single-predicate
+            // (sq-sllu4) A shape scope is the CANONICAL single-predicate
             // desugaring the certifier signed over — see `cert_scope_predicate_shape`. The
             // closure still has to PROVE it narrows the certifier's anchor; a scope that does
             // not (e.g. a predicate the anchor never covered) contributes nothing.
@@ -1521,7 +1505,7 @@ fn trust_authz_decide(
     json_response_with_link(status, body_obj.to_string(), acl_link.as_deref())
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Build a `PodStore` with admitted trust facts injected into the
+/// (sq-pfae.17) Build a `PodStore` with admitted trust facts injected into the
 /// dataset. Admitted facts are emitted into TWO positions so they reach the WAC/ACP materialiser:
 ///
 /// 1. **Named-graph position** (`resource + ".acl"` graph) — the WAC loader ONLY reads named
@@ -1535,7 +1519,7 @@ fn trust_authz_decide(
 ///    facts are also queryable as plain RDF terms. Default-graph quads do NOT reach the WAC N3
 ///    reasoner (the loader skips them), so position 1 is the operative path for WAC decisions.
 ///
-/// [SONNET-4.6] FIX (Fix 2, sq-zza2h): oxrdf's Display for `NamedOrBlankNode` (subject) and
+/// FIX (Fix 2, sq-zza2h): oxrdf's Display for `NamedOrBlankNode` (subject) and
 /// `NamedNode` (predicate) already emits the `<…>` / `_:…` wrapper, and `Term` (object) emits
 /// the correct N-Quads term. Do NOT re-wrap in `<{}>` — that would double-wrap a `NamedNode`
 /// subject as `<<…>>`, producing invalid N-Quads that the parser rejects, so admitted facts
@@ -1557,7 +1541,7 @@ fn build_store_with_admitted(
     // The ACL graph IRI for this resource (Solid naming convention: resource + ".acl").
     // Admitted facts emitted into this named graph are seen by the WAC N3 loader
     // (assemble_input processes all graphs whose name ends in ".acl").
-    // [SONNET-4.6] POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
+    // POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
     let acl_graph = format!("{}.acl", resource);
     let mut augmented = req.dataset.clone();
     for fact in admitted {
@@ -1581,7 +1565,7 @@ fn build_store_with_admitted(
     }
     // Delegate to the unchanged build_store path (WAC/ACP inference + materialisation).
     let augmented_req = AuthzRequest {
-        // [SONNET-4.6] sq-snopa.8 — the trust lane decides over THIS augmented body dataset; the
+        // sq-snopa.8 — the trust lane decides over THIS augmented body dataset; the
         // stateful lane is refused before `trust_authz_decide` is ever reached.
         source: AuthzSource::Body,
         dataset: augmented,
@@ -1594,7 +1578,7 @@ fn build_store_with_admitted(
     build_store(&augmented_req)
 }
 
-/// [SONNET-4.6] (sq-pfae.17) Serialise a 403 trust-deny JSON body. The reason string is NEVER
+/// (sq-pfae.17) Serialise a 403 trust-deny JSON body. The reason string is NEVER
 /// echoed to the client verbatim from adversarial input (the caller always passes a static string
 /// literal or a format!() from controlled values). POSITIONAL format args (CodeQL guard).
 #[cfg(feature = "solid-authz-trust")]
@@ -1614,7 +1598,7 @@ fn trust_deny_json(reason: &str) -> String {
 
 /// `POST /authz/wac-allow` — the `WAC-Allow` header VALUE for a `(session, resource)` (FR-2/FR-4).
 /// Body: `{ "dataset": nquads, "session": {..}, "resource": iri, "view"?: "wac"|"acp",
-/// "source"?: "body"|"server" }` ([SONNET-4.6] sq-snopa.8: `"server"` omits `"dataset"` and
+/// "source"?: "body"|"server" }` (sq-snopa.8: `"server"` omits `"dataset"` and
 /// advertises over the server's own loaded store). Returns
 /// `{ "wacAllow": "user=\"…\",public=\"…\"" }` — the RFC-style permission advertisement the server
 /// puts in a `WAC-Allow` response header.
@@ -1622,7 +1606,7 @@ fn trust_deny_json(reason: &str) -> String {
 /// Fail-closed: an unparseable dataset / materialisation failure is an error (never a wider
 /// advertisement); a grant-less session yields `user="",public=""`.
 ///
-/// [FABLE-5] sq-3mu76: behind the `odrl-authz` feature, a dataset carrying ODRL policy rules
+/// sq-3mu76: behind the `odrl-authz` feature, a dataset carrying ODRL policy rules
 /// runs the [`apply_odrl_lane`] materialisation (as `Mode::Read` — the endpoint has no mode
 /// field and the lane evidences only the read action) before advertising, and the value is
 /// scoped by [`read_scoped_wac_allow`]: a read prohibition is never advertised past, `user`
@@ -1664,7 +1648,7 @@ pub(crate) async fn wac_allow_endpoint(
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    // [FABLE-5] sq-3mu76 — the OPT-IN ODRL lane on the advertisement endpoint: a
+    // sq-3mu76 — the OPT-IN ODRL lane on the advertisement endpoint: a
     // dataset-carried read prohibition must not be advertised past (`user="read"` from a static
     // WAC grant that `/authz/query` would refuse to honour). The endpoint has no mode field —
     // the lane runs for `Mode::Read`, the ONLY action it evidences (sq-lrtc3.2 owns the rest),
@@ -1673,7 +1657,7 @@ pub(crate) async fn wac_allow_endpoint(
     #[cfg(feature = "odrl-authz")]
     let (store, odrl_lane_fired) = {
         let mut store = store;
-        // [SONNET-4.6] sq-snopa.8 — body-dataset lane only (see `decide_endpoint`).
+        // sq-snopa.8 — body-dataset lane only (see `decide_endpoint`).
         let fired = req.source == AuthzSource::Body && dataset_carries_odrl(&req.dataset);
         if let (true, ResolvedStore::Owned(s)) = (fired, &mut store) {
             if let Err(resp) = apply_odrl_lane(s, &req, Mode::Read) {
@@ -1682,16 +1666,16 @@ pub(crate) async fn wac_allow_endpoint(
         }
         (store, fired)
     };
-    // [SONNET-4.6] sq-snopa.7 FR-5: resolve the governing ACL for the Link header BEFORE
+    // sq-snopa.7 FR-5: resolve the governing ACL for the Link header BEFORE
     // `wac_allow` consumes the store. `resolve_acl` is a pure index lookup (no mode needed) and
     // returns `None` when no ACL was discovered — fail-closed: no header emitted in that case.
-    // [SONNET-4.6] POSITIONAL format args (CodeQL rust/unused-variable guard).
+    // POSITIONAL format args (CodeQL rust/unused-variable guard).
     let acl_link: Option<String> = store
         .get()
         .resolve_acl(&resource_iri)
         .map(|eff| format!("<{}>; rel=\"acl\"", eff.acl.as_str()));
     let value = store.get().wac_allow(&req.session(), &resource);
-    // [FABLE-5] sq-3mu76 — read-scoped advertisement (module doc): the lane materialised
+    // sq-3mu76 — read-scoped advertisement (module doc): the lane materialised
     // read-action outcomes only, so advertise at most `user="read"` and never a public mode
     // (an anonymous session is refused wherever the lane fires). Fail-closed: this can only
     // NARROW the advertisement, never widen it.
@@ -1705,7 +1689,7 @@ pub(crate) async fn wac_allow_endpoint(
     json_response_with_link(StatusCode::OK, body, acl_link.as_deref())
 }
 
-// ── [FABLE-5] sq-lrtc3.1 + sq-3mu76 — the OPT-IN ODRL lane on `/authz/*` ───
+// ── sq-lrtc3.1 + sq-3mu76 — the OPT-IN ODRL lane on `/authz/*` ───
 //
 // Everything below is compiled ONLY behind the `odrl-authz` feature (which implies
 // `solid-authz` + `sparq-solid/odrl-bridge` + `sparq-policy`). Feature OFF => zero
@@ -1731,7 +1715,7 @@ pub(crate) async fn wac_allow_endpoint(
 /// the same suffix-scan convenience shape as [`infer_view_is_acp`]. A false positive
 /// (the IRI inside a literal) parses to a rule-less policy, which materialises
 /// nothing — the lane then behaves exactly as if it had not fired (fail-closed
-/// direction). Pure + directly unit-tested. [FABLE-5] sq-lrtc3.1.
+/// direction). Pure + directly unit-tested. sq-lrtc3.1.
 #[cfg(feature = "odrl-authz")]
 pub(crate) fn dataset_carries_odrl(dataset: &str) -> bool {
     dataset.contains("http://www.w3.org/ns/odrl/2/permission>")
@@ -1742,7 +1726,7 @@ pub(crate) fn dataset_carries_odrl(dataset: &str) -> bool {
 /// query is an `odrl:read` exercise, so ONLY [`Mode::Read`] maps; every other mode is
 /// `None` and the lane refuses (fail-closed — the full query-action contract,
 /// including the deliberate non-mapping of `odrl:use`, is sq-lrtc3.2). Pure +
-/// directly unit-tested. [FABLE-5] sq-lrtc3.1.
+/// directly unit-tested. sq-lrtc3.1.
 #[cfg(feature = "odrl-authz")]
 pub(crate) fn odrl_action_for_mode(mode: Mode) -> Option<&'static str> {
     match mode {
@@ -1755,7 +1739,7 @@ pub(crate) fn odrl_action_for_mode(mode: Mode) -> Option<&'static str> {
 /// (the requested read mode) — the read-scoped-advertisement rule (module doc, sq-3mu76).
 /// The `allow` bit is untouched: it concerns exactly the requested mode, which is never
 /// masked out. Fail-closed direction only (a mode is removed from the advertisement, never
-/// added). Pure + directly unit-tested. [FABLE-5] sq-3mu76.
+/// added). Pure + directly unit-tested. sq-3mu76.
 #[cfg(feature = "odrl-authz")]
 pub(crate) fn mask_decision_to_mode(decision: &mut WacDecision, mode: Mode) {
     decision.granted_modes.retain(|m| *m == mode);
@@ -1768,7 +1752,7 @@ pub(crate) fn mask_decision_to_mode(decision: &mut WacDecision, mode: Mode) {
 /// crate-controlled fixed format `user="<modes>",public="<modes>"` where `<modes>` is a
 /// space-separated subset of the four mode names — `read` can only occur as the read-mode
 /// token, so the substring test is exact. Fail-closed: the output advertises a subset of the
-/// input's `user` field and nothing public. Pure + directly unit-tested. [FABLE-5] sq-3mu76.
+/// input's `user` field and nothing public. Pure + directly unit-tested. sq-3mu76.
 #[cfg(feature = "odrl-authz")]
 pub(crate) fn read_scoped_wac_allow(value: &str) -> String {
     let user_holds_read = value
@@ -1785,7 +1769,7 @@ pub(crate) fn read_scoped_wac_allow(value: &str) -> String {
 /// a named graph would otherwise be INVISIBLE, silently dropping its prohibitions
 /// (fail-OPEN); the union projection makes it visible. Blank-node labels are
 /// document-scoped in N-Quads, so the projection preserves node identity across graph
-/// boundaries. Directly unit-tested. [FABLE-5] sq-lrtc3.1.
+/// boundaries. Directly unit-tested. sq-lrtc3.1.
 #[cfg(feature = "odrl-authz")]
 fn union_policy_graph(dataset: &str) -> Result<sparq_core::Graph, String> {
     use std::fmt::Write as _;
@@ -1811,7 +1795,7 @@ pub(crate) const MAX_ODRL_EVALUATIONS: usize = 10_000;
 /// Returns the fail-closed 4xx [`Response`] on any input the lane cannot faithfully
 /// enforce (see the section comment above); `Ok(())` means every materialisation
 /// outcome is now in the auth view and `query_json_as` / `decide` / `wac_allow` (all
-/// three consume the same `∪ allow ∖ ∪ deny` index) can honour it. [FABLE-5]
+/// three consume the same `∪ allow ∖ ∪ deny` index) can honour it.
 /// sq-lrtc3.1 + sq-3mu76.
 ///
 /// What the stateless lane can and cannot evidence (honest scope): the request context
@@ -1944,7 +1928,7 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
 
 /// `POST /authz/query` — an ACCESS-CONTROLLED SPARQL query as `session` (FR-4). Body:
 /// `{ "dataset": nquads, "session": {..}, "mode"?: "read"|…, "query": sparql, "view"?: …,
-/// "source"?: "body"|"server" }` ([SONNET-4.6] sq-snopa.8: `"server"` omits `"dataset"` and
+/// "source"?: "body"|"server" }` (sq-snopa.8: `"server"` omits `"dataset"` and
 /// queries the server's own loaded store through the same access-controlled view).
 /// Delegates to [`PodStore::query_json_as`] (the zero-copy authorised-graph-set view path) and
 /// returns the SPARQL 1.1 JSON results serialisation. `mode` defaults to `read` (the query path).
@@ -1995,14 +1979,14 @@ pub(crate) async fn query_endpoint(
         Ok(s) => s,
         Err(resp) => return resp,
     };
-    // [FABLE-5] sq-lrtc3.1 — the OPT-IN ODRL lane: when the dataset carries ODRL policy
+    // sq-lrtc3.1 — the OPT-IN ODRL lane: when the dataset carries ODRL policy
     // rules, materialise their bridged grants/denies into the auth view BEFORE the
     // access-controlled query runs. Feature OFF => this block does not exist and the
     // endpoint is byte-identical to plain `solid-authz`.
     #[cfg(feature = "odrl-authz")]
     let store = {
         let mut store = store;
-        // [SONNET-4.6] sq-snopa.8 — body-dataset lane only (see `decide_endpoint`).
+        // sq-snopa.8 — body-dataset lane only (see `decide_endpoint`).
         let fired = req.source == AuthzSource::Body && dataset_carries_odrl(&req.dataset);
         if let (true, ResolvedStore::Owned(s)) = (fired, &mut store) {
             if let Err(resp) = apply_odrl_lane(s, &req, mode) {
@@ -2024,6 +2008,18 @@ pub(crate) async fn query_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn decode_salt_hex_requires_exactly_32_bytes() {
+        let ok = "ab".repeat(32);
+        assert_eq!(decode_salt_hex(&ok), Some([0xab; 32]));
+        assert_eq!(decode_salt_hex(&ok.to_uppercase()), Some([0xab; 32]));
+        assert_eq!(decode_salt_hex(&ok[..62]), None);
+        assert_eq!(decode_salt_hex(&format!("{ok}ab")), None);
+        assert_eq!(decode_salt_hex(&"ab".repeat(4096)), None);
+        assert_eq!(decode_salt_hex(&format!("{}zz", &ok[..62])), None);
+    }
 
     // A tiny WAC dataset: alice has Read on the root `.acl`, inherited by `notes/n1`.
     const WAC_NQUADS: &str = r#"
@@ -2128,7 +2124,7 @@ mod tests {
         assert_eq!(json["aclLink"], serde_json::Value::Null);
     }
 
-    /// [FABLE-5] sq-3mu76 — the read-scoped-advertisement mask keeps ONLY the requested mode
+    /// sq-3mu76 — the read-scoped-advertisement mask keeps ONLY the requested mode
     /// and never touches the `allow` bit.
     #[cfg(feature = "odrl-authz")]
     #[test]
@@ -2149,7 +2145,7 @@ mod tests {
         assert!(none.granted_modes.is_empty());
     }
 
-    /// [FABLE-5] sq-3mu76 — the wac-allow value is scoped to at most `user="read"`,
+    /// sq-3mu76 — the wac-allow value is scoped to at most `user="read"`,
     /// `public` always empty, and a `read` in the PUBLIC field never leaks into `user`.
     #[cfg(feature = "odrl-authz")]
     #[test]
@@ -2302,7 +2298,7 @@ mod tests {
         }
     }
 
-    // ── [SONNET-4.6] sq-snopa.8 — the stateful (`"source":"server"`) lane ──
+    // ── sq-snopa.8 — the stateful (`"source":"server"`) lane ──
 
     /// The default is the historical stateless lane: no `"source"` => `Body`, dataset required.
     #[test]
@@ -2395,7 +2391,7 @@ mod tests {
 
 }
 
-// ── [FABLE-5] sq-lrtc3.1 — unit tests for the ODRL lane helpers ─────────────
+// ── sq-lrtc3.1 — unit tests for the ODRL lane helpers ─────────────
 // One DIRECT test per new fn (coverage ratchet), plus the lane's fail-closed
 // refusal matrix and a positive/negative enforcement round-trip through the REAL
 // store. Gated on the `odrl-authz` feature (zero code otherwise).
@@ -2583,7 +2579,7 @@ mod odrl_tests {
         assert!(!reads_n1(&store, ALICE), "no grant appears from a literal marker");
     }
 
-    // ── [SONNET-4.6] sq-snopa.8 — the stateful lane's ODRL refusal ────────
+    // ── sq-snopa.8 — the stateful lane's ODRL refusal ────────
 
     /// A server store carrying ODRL rules is DETECTED, so the stateful lane can REFUSE rather
     /// than silently un-enforce a prohibition (which would be fail-OPEN); a plain WAC pod is
@@ -2625,14 +2621,14 @@ mod odrl_tests {
     }
 }
 
-// ── [SONNET-4.6] sq-sllu4 — unit tests for the `CertScope::Shape` certification wire
+// ── sq-sllu4 — unit tests for the `CertScope::Shape` certification wire
 // format. Gated on `solid-authz-trust` (zero code otherwise), one DIRECT test per new fn
 // (coverage ratchet).
 #[cfg(all(test, feature = "solid-authz-trust"))]
 mod trust_wire_tests {
     use super::*;
 
-// ── [SONNET-4.6] sq-sllu4 — the `CertScope::Shape` certification wire format ─────────
+// ── sq-sllu4 — the `CertScope::Shape` certification wire format ─────────
 //
 // Direct unit tests for the two functions the shape-scope wire format adds: the parser
 // branch and the CANONICAL desugaring. The end-to-end derivation (a signed shape-scoped
@@ -2681,7 +2677,7 @@ fn wire_cert_scope_kinds_parse_or_fail_closed() {
     .expect("shape + predicate parses");
     match shaped.scope {
         WireCertScope::Shape { ref predicate_iri } => {
-            // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+            // POSITIONAL format args (CodeQL guard).
             assert_eq!(predicate_iri, "https://schema.org/age");
         }
         _ => panic!("expected a shape scope"),

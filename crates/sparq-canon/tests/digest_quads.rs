@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-ddws7: mutation-witnessed coverage for canonical digest bytes.
+// sq-ddws7: mutation-witnessed coverage for canonical digest bytes.
 
 use oxrdf::{BlankNode, GraphName, Literal, NamedNode, Quad};
 use sha2::{Digest as _, Sha256, Sha384};

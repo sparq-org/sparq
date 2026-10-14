@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-pbz04.4.7 (epic sq-pbz04.4, design record
+// sq-pbz04.4.7 (epic sq-pbz04.4, design record
 // research/owl2-direct-semantics-scoping.md §L1): the FORWARD RDF mapping — the inverse of
 // the fail-closed reverse mapping in `crate::extract`.
 //
@@ -15,7 +15,7 @@
 // (b) **Human-readable diagnostics**: `render_to_turtle` converts the triple output back to
 //     a minimal Turtle string so a developer can inspect a structural model without a
 //     separate serialiser.
-// (c) **The L4 refutation budget fallback** ([OPUS-5] sq-pbz04.4.10): the tableau reasons over
+// (c) **The L4 refutation budget fallback** (sq-pbz04.4.10): the tableau reasons over
 //     the structural model directly, but the RL/EL profile branches consume TRIPLES, so when a
 //     refutation exhausts the tableau budget `check::refutation_profile_fallback` renders the
 //     augmented model here to re-ask those branches. That path does NOT trust this module: it
@@ -176,7 +176,7 @@ fn collect_property_ids(axiom: &Axiom, out: &mut FxHashSet<Id>) {
         Axiom::ClassAssertion { class, .. } => {
             collect_property_ids_in_ce(class, out);
         }
-        // [GPT-5.6] sq-zfwzq (opt-in `dl_transitive`): the transitive property is a named
+        // sq-zfwzq (opt-in `dl_transitive`): the transitive property is a named
         // object property — declare it like every other one.
         #[cfg(feature = "dl_transitive")]
         Axiom::TransitiveObjectProperty { property } => {
@@ -342,7 +342,7 @@ fn emit_axiom(
         // `property rdf:type owl:TransitiveProperty` — the exact shape the extractor's
         // opt-in `dl_transitive` arm reads back (round-trip closed; the property's
         // `owl:ObjectProperty` declaration is emitted by the pre-pass like every other
-        // property). [GPT-5.6] sq-zfwzq
+        // property). sq-zfwzq
         #[cfg(feature = "dl_transitive")]
         Axiom::TransitiveObjectProperty { property } => {
             let s = prop_id(property);
@@ -1037,7 +1037,7 @@ mod tests {
         assert_eq!(triples.len(), 6, "expected 6 triples for SubClassOf(S, A⊓B)");
     }
 
-    /// Opt-in transitive roles ([GPT-5.6] sq-zfwzq, feature `dl_transitive`): a
+    /// Opt-in transitive roles (sq-zfwzq, feature `dl_transitive`): a
     /// `TransitiveObjectProperty` axiom renders as `p rdf:type owl:TransitiveProperty`
     /// (plus the uniform `owl:ObjectProperty` declaration) and round-trips to an EQUAL
     /// structural model — including alongside a role assertion over the same property.

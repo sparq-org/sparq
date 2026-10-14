@@ -64,8 +64,14 @@ function trackConsoleErrors(page: Page): string[] {
 // ── §1 — /download · release fixture · Windows primary row ──────────────────────────────────────
 
 test.describe("/download · release fixture · Windows primary row", () => {
-  // Desktop Chrome UA is Windows — the fixture is the checked-in release payload.
-  test.use({ serviceWorkers: "block", github: "release" });
+  // Pin a Windows UA: the project default differs per browser (Desktop Safari's is macOS), and
+  // this row only renders for Windows. The fixture is the checked-in release payload.
+  test.use({
+    serviceWorkers: "block",
+    github: "release",
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  });
 
   test("Windows primary row: primary button href is the exact version-agnostic alias, version tag + sha256 render", async ({
     page,

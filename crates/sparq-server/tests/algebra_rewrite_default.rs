@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-7d3dj.30.13) Tripwire that the server's DEFAULT feature set keeps the
+//! (sq-7d3dj.30.13) Tripwire that the server's DEFAULT feature set keeps the
 //! engine's pre-execution algebra rewrite pass (#1735) lit — the shipped `sparq-server`
 //! binary must execute the same rewritten plans the CLI and the canonical benchmarks
 //! measure.

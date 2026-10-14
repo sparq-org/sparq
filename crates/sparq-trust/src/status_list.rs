@@ -129,12 +129,13 @@
 //!   it back as input grants nothing (no admission rule trusts a `prov:` triple; the §2.4
 //!   reserved-predicate guard is unchanged).
 //!
-//! [OPUS-4.8] sq-pfae.7 (issue #940 / gh-940, epic sq-pfae P6). Written while Fable
+//! sq-pfae.7 (issue #940 / gh-940, epic sq-pfae P6). Written while Fable
 //! unavailable — flag for re-review when Fable returns. 🤖 SPARQ agent — trust-graph
 //! live-status / revocation gate.
 
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
+use sparq_core::baseenc::{base58btc_decode, base64url_decode};
 
 /// The W3C PROV-O namespace base (the justification uses the standard terms so the graph
 /// round-trips through any PROV-O consumer — same posture as [`crate::delegation_prov`]).
@@ -303,8 +304,8 @@ pub fn decode_encoded_list<D: GzipDecoder>(
     let prefix = encoded_list.chars().next()?;
     let body = &encoded_list[prefix.len_utf8()..];
     let compressed = match prefix {
-        MULTIBASE_BASE64URL => base64url_decode(body)?,
-        MULTIBASE_BASE58BTC => base58btc_decode(body)?,
+        MULTIBASE_BASE64URL => base64url_decode(body).ok()?,
+        MULTIBASE_BASE58BTC => base58btc_decode(body).ok()?,
         _ => return None, // unknown multibase prefix ⇒ fail closed
     };
     let bits = decoder.inflate(&compressed).ok()?;
@@ -978,78 +979,10 @@ fn subject_term(s: &NamedOrBlankNode) -> Term {
     }
 }
 
-// --- dependency-free base decoders (hand-rolled, like did.rs's base58btc) ----------------
-
-/// Decode base64url-no-pad (RFC 4648 §5, no `=` padding) — the current Bitstring-Status-List
-/// multibase `u` form. Returns `None` on any non-alphabet character or a non-canonical
-/// (non-zero) final-sextet remainder.
-fn base64url_decode(input: &str) -> Option<Vec<u8>> {
-    fn val(b: u8) -> Option<u8> {
-        match b {
-            b'A'..=b'Z' => Some(b - b'A'),
-            b'a'..=b'z' => Some(b - b'a' + 26),
-            b'0'..=b'9' => Some(b - b'0' + 52),
-            b'-' => Some(62),
-            b'_' => Some(63),
-            _ => None, // including '=' (no-pad form) and base64-std '+'/'/'
-        }
-    }
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
-    let mut acc: u32 = 0;
-    let mut nbits: u32 = 0;
-    for &b in bytes {
-        let v = val(b)? as u32;
-        acc = (acc << 6) | v;
-        nbits += 6;
-        if nbits >= 8 {
-            nbits -= 8;
-            out.push((acc >> nbits) as u8);
-        }
-    }
-    // Any leftover bits beyond a partial final sextet must be zero (canonical no-pad).
-    if nbits > 0 && (acc & ((1u32 << nbits) - 1)) != 0 {
-        return None;
-    }
-    Some(out)
-}
-
-/// Decode base58btc (Bitcoin alphabet) — the legacy StatusList2021 multibase `z` form.
-/// Hand-rolled (dependency-free), matching the `did.rs` base58 decoder's semantics.
-fn base58btc_decode(input: &str) -> Option<Vec<u8>> {
-    const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    // Leading '1's encode leading zero bytes.
-    let mut leading_zeros = 0usize;
-    for &c in input.as_bytes() {
-        if c == b'1' {
-            leading_zeros += 1;
-        } else {
-            break;
-        }
-    }
-    let mut bytes: Vec<u8> = Vec::new();
-    for &c in input.as_bytes() {
-        let digit = ALPHABET.iter().position(|&a| a == c)? as u32;
-        let mut carry = digit;
-        for byte in bytes.iter_mut() {
-            carry += (*byte as u32) * 58;
-            *byte = (carry & 0xff) as u8;
-            carry >>= 8;
-        }
-        while carry > 0 {
-            bytes.push((carry & 0xff) as u8);
-            carry >>= 8;
-        }
-    }
-    // `bytes` is little-endian; reverse and prepend the leading zeros.
-    let mut out = vec![0u8; leading_zeros];
-    out.extend(bytes.iter().rev());
-    Some(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sparq_core::baseenc::base64url_encode;
 
     fn entry(index: u64) -> StatusListEntry {
         StatusListEntry {
@@ -1057,55 +990,6 @@ mod tests {
             status_list_index: index,
             purpose: StatusPurpose::Revocation,
         }
-    }
-
-    /// Encode bytes as base64url-no-pad (test helper — the encoder side of the decoder).
-    fn base64url_encode(input: &[u8]) -> String {
-        const ALPHA: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        let mut out = String::new();
-        let mut acc: u32 = 0;
-        let mut nbits: u32 = 0;
-        for &b in input {
-            acc = (acc << 8) | b as u32;
-            nbits += 8;
-            while nbits >= 6 {
-                nbits -= 6;
-                out.push(ALPHA[((acc >> nbits) & 0x3f) as usize] as char);
-            }
-        }
-        if nbits > 0 {
-            out.push(ALPHA[((acc << (6 - nbits)) & 0x3f) as usize] as char);
-        }
-        out
-    }
-
-    #[test]
-    fn base64url_round_trips() {
-        for case in [
-            &b""[..],
-            &b"f"[..],
-            &b"fo"[..],
-            &b"foo"[..],
-            &b"foob"[..],
-            &b"fooba"[..],
-            &b"foobar"[..],
-            &[0u8, 1, 2, 3, 0xff, 0x80][..],
-        ] {
-            let enc = base64url_encode(case);
-            let dec = base64url_decode(&enc).expect("decodes");
-            assert_eq!(dec, case, "round-trip for {:?}", case);
-        }
-    }
-
-    #[test]
-    fn base64url_rejects_non_alphabet_and_padding() {
-        assert!(base64url_decode("ab=c").is_none(), "'=' padding rejected");
-        assert!(base64url_decode("ab cd").is_none(), "space rejected");
-        assert!(
-            base64url_decode("ab+cd").is_none(),
-            "'+' (base64 std) rejected"
-        );
     }
 
     #[test]
@@ -1136,6 +1020,19 @@ mod tests {
         // 'm' is base64-standard multibase, which this decoder does not accept.
         assert!(decode_encoded_list("mgA", &IdentityGzipDecoder, 0).is_none());
         assert!(decode_encoded_list("", &IdentityGzipDecoder, 0).is_none());
+    }
+
+    #[test]
+    fn decode_encoded_list_rejects_malformed_bodies() {
+        // Padding, the standard-base64 alphabet, an impossible length (≡ 1 mod 4) and a
+        // second text for the same bytes (unused bits set) all fail closed.
+        for body in ["gA==", "g+", "gAAAA", "gB", "0OIl"] {
+            let prefix = if body == "0OIl" { MULTIBASE_BASE58BTC } else { MULTIBASE_BASE64URL };
+            let encoded = format!("{prefix}{body}");
+            assert!(decode_encoded_list(&encoded, &IdentityGzipDecoder, 0).is_none(), "{encoded}");
+        }
+        // The canonical form of the same byte still decodes.
+        assert!(decode_encoded_list("ugA", &IdentityGzipDecoder, 0).is_some());
     }
 
     /// An in-memory resolver mapping the one list IRI to an encoded list + as_of.

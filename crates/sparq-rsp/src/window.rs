@@ -275,7 +275,7 @@ impl<T: Clone> WindowedStream<T> {
         }
     }
 
-    /// [GPT-5.6] sq-zckkq: Inserts into the still-open event-time session, or
+    /// sq-zckkq: Inserts into the still-open event-time session, or
     /// starts a new one. With the v1 session watermark delay fixed at zero, an
     /// out-of-order event is accepted only when it joins an open session; an
     /// isolated session whose inactivity deadline is already behind the
@@ -394,7 +394,7 @@ impl<T: Clone> WindowedStream<T> {
         }
     }
 
-    /// [OPUS-4.8] Advances event time to `ts` WITHOUT inserting a triple — a
+    /// Advances event time to `ts` WITHOUT inserting a triple — a
     /// watermark heartbeat. Closes every time/session window the new watermark
     /// has reached, exactly as a gap arrival at `ts` would, but buffers nothing.
     /// Time windows empty-report skipped intervals; session windows have no
@@ -464,7 +464,7 @@ impl<T: Clone> WindowedStream<T> {
         if self.ring.len() > rows {
             self.ring.pop_front();
         }
-        // [OPUS-4.8] (sq-qmth) stable-1.96 clippy `manual_is_multiple_of` (is_multiple_of
+        // (sq-qmth) stable-1.96 clippy `manual_is_multiple_of` (is_multiple_of
         // stable since 1.87, within the 1.88 MSRV floor).
         if self.arrivals.is_multiple_of(slide as u64) {
             // Reported on arrival, so the ring is never empty here.
@@ -514,7 +514,7 @@ impl<T: Clone> WindowedStream<T> {
     /// windows (time) or the ring (count), PLUS any windows already closed but
     /// not yet taken. The complete set of payloads this stream can still surface
     /// to the caller; nothing outside it is reachable any more (the slide's
-    /// `split_off` has dropped it). Used by [OPUS-4.8] persistent-dictionary
+    /// `split_off` has dropped it). Used by persistent-dictionary
     /// compaction to compute which interned terms are still referenced by a live
     /// window — every id NOT visited here has aged out of every window and its
     /// dictionary entry is reclaimable.

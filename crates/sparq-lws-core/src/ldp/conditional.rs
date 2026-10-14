@@ -64,6 +64,24 @@ pub fn evaluate(
     if_none_match: Option<&str>,
     current: Option<&str>,
 ) -> Precondition {
+    evaluate_write(if_match, if_none_match, None, current, None)
+}
+
+/// [`evaluate`] plus `If-Unmodified-Since` (RFC 9110 §13.1.4), in the §13.2.2 order: `If-Match`
+/// first; `If-Unmodified-Since` only when `If-Match` is ABSENT; then `If-None-Match`.
+///
+/// `last_modified` is the target's recorded modification time (`None` when it does not exist or the
+/// store records none). `If-Unmodified-Since` fails the request with 412 iff the target's
+/// modification time, in whole seconds, is LATER than the header date. It is ignored, as §13.1.4
+/// requires or permits, when `If-Match` is present, when the date is not a valid IMF-fixdate, and
+/// when there is no modification time to compare (including a target that does not exist).
+pub fn evaluate_write(
+    if_match: Option<&str>,
+    if_none_match: Option<&str>,
+    if_unmodified_since: Option<&str>,
+    current: Option<&str>,
+    last_modified: Option<SystemTime>,
+) -> Precondition {
     // --- If-Match: proceed only if the current representation matches one of the listed tags, by
     // STRONG comparison (RFC 9110 §13.1.1) — a weak (`W/`) validator never satisfies If-Match.
     // Writes guard resource STATE, so the comparison is on the state part: a `+<variant>` tag a
@@ -78,6 +96,15 @@ pub fn evaluate(
             None => false,
         };
         if !ok {
+            return Precondition::Failed;
+        }
+    } else if let (Some(date), Some(lm)) = (
+        unmodified_since_applies(if_match, if_unmodified_since),
+        last_modified,
+    ) {
+        // --- If-Unmodified-Since (only without If-Match): the target must not have changed after
+        // the client's date.
+        if system_time_to_unix(lm).is_some_and(|lm_secs| lm_secs > date) {
             return Precondition::Failed;
         }
     }
@@ -168,7 +195,10 @@ pub fn evaluate_read(
     // --- If-Modified-Since (ONLY when If-None-Match is absent). 304 iff the resource's Last-Modified
     // is ≤ the client's date (the representation has not changed since). Missing/unparseable ⇒ Proceed.
     if let (Some(ims), Some(lm)) = (if_modified_since, last_modified) {
-        if let (Some(ims_secs), Some(lm_secs)) = (parse_http_date(ims), system_time_to_unix(lm)) {
+        if let (Some(ims_secs), Some(lm_secs)) = (
+            crate::http_date::parse(ims, crate::clock::now()),
+            system_time_to_unix(lm),
+        ) {
             if lm_secs <= ims_secs {
                 return ReadPrecondition::NotModified;
             }
@@ -176,6 +206,21 @@ pub fn evaluate_read(
     }
 
     ReadPrecondition::Proceed
+}
+
+/// The `If-Unmodified-Since` date, in seconds since the Unix epoch, when a write will actually
+/// evaluate it: `If-Match` is absent and the value is a valid HTTP-date ([`crate::http_date::parse`]).
+/// `pub(crate)` so the V4
+/// existence-non-disclosure guard can Read-gate exactly the requests whose outcome would depend on
+/// the target's modification time.
+pub(crate) fn unmodified_since_applies(
+    if_match: Option<&str>,
+    if_unmodified_since: Option<&str>,
+) -> Option<i64> {
+    if if_match.is_some() {
+        return None;
+    }
+    if_unmodified_since.and_then(|v| crate::http_date::parse(v, crate::clock::now()))
 }
 
 /// Whether a header value is the wildcard `*` (after trimming). `pub(crate)` so the V4
@@ -192,134 +237,6 @@ fn system_time_to_unix(t: SystemTime) -> Option<i64> {
     t.duration_since(UNIX_EPOCH)
         .ok()
         .map(|d| d.as_secs() as i64)
-}
-
-/// Parse an HTTP **IMF-fixdate** (RFC 9110 §5.6.7 — the format a sender MUST produce), e.g.
-/// `Sun, 06 Nov 1994 08:49:37 GMT`, to whole seconds since the Unix epoch.
-///
-/// STRICT: the grammar is fixed-width (exactly 29 ASCII bytes after trimming), every field is
-/// enforced at its exact position and width (two-digit day/time components, four-digit year, the
-/// literal `", "` / `" "` / `":"` separators, the `GMT` zone), the calendar is validated for real
-/// (day within the month's true length, leap years included), and the leading day-name must be the
-/// ACTUAL weekday of the date (a wrong or arbitrary day-name token is malformed — RFC 9110 §5.6.7
-/// fixes `day-name` to the day of week). Anything else — the obsolete RFC 850 / asctime forms,
-/// non-fixed-width fields, negative components, a leap-second `:60` — returns `None`, and the
-/// caller FAILS OPEN to a fresh 200 (never a spurious 304), so strictness costs at most a cache
-/// miss.
-///
-/// No third-party date crate is pulled in for this: the grammar is fixed-width and the epoch
-/// conversion is the standard days-from-civil algorithm, so a small self-contained parser is exact
-/// and keeps the dependency surface unchanged.
-fn parse_http_date(value: &str) -> Option<i64> {
-    // `Sun, 06 Nov 1994 08:49:37 GMT` — positions:
-    //  0123456789012345678901234567 8
-    //  Sun ,  06 Nov  1994 08:49:37  GMT
-    let v = value.trim();
-    if !v.is_ascii() {
-        return None; // also guarantees the byte slicing below is char-safe
-    }
-    let b = v.as_bytes();
-    if b.len() != 29
-        || &b[3..5] != b", "
-        || b[7] != b' '
-        || b[11] != b' '
-        || b[16] != b' '
-        || b[19] != b':'
-        || b[22] != b':'
-        || &b[25..29] != b" GMT"
-    {
-        return None;
-    }
-    let day = two_digits(b, 5)?;
-    let month = month_from_abbrev(&v[8..11])?;
-    let year = four_digits(b, 12)?;
-    let hh = two_digits(b, 17)?;
-    let mm = two_digits(b, 20)?;
-    let ss = two_digits(b, 23)?;
-    if day == 0 || day > days_in_month(year, month) || hh > 23 || mm > 59 || ss > 59 {
-        return None;
-    }
-    let days = days_from_civil(year, month, day);
-    if day_name_for(days) != &v[0..3] {
-        return None; // day-name inconsistent with the actual date (or not a day-name at all)
-    }
-    Some(days * 86_400 + i64::from(hh) * 3_600 + i64::from(mm) * 60 + i64::from(ss))
-}
-
-/// Exactly two ASCII digits at `b[at..at+2]`, as a number.
-fn two_digits(b: &[u8], at: usize) -> Option<u32> {
-    let (d1, d2) = (b[at], b[at + 1]);
-    if d1.is_ascii_digit() && d2.is_ascii_digit() {
-        Some(u32::from(d1 - b'0') * 10 + u32::from(d2 - b'0'))
-    } else {
-        None
-    }
-}
-
-/// Exactly four ASCII digits at `b[at..at+4]`, as a year.
-fn four_digits(b: &[u8], at: usize) -> Option<i64> {
-    let mut acc: i64 = 0;
-    for &d in &b[at..at + 4] {
-        if !d.is_ascii_digit() {
-            return None;
-        }
-        acc = acc * 10 + i64::from(d - b'0');
-    }
-    Some(acc)
-}
-
-/// The true length of `month` in `year` (proleptic Gregorian, leap years included).
-fn days_in_month(year: i64, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 0,
-    }
-}
-
-/// The IMF-fixdate day-name for a day count since the Unix epoch (1970-01-01 was a Thursday).
-fn day_name_for(days_since_epoch: i64) -> &'static str {
-    const NAMES: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-    NAMES[days_since_epoch.rem_euclid(7) as usize]
-}
-
-/// Map a three-letter English month abbreviation to its 1-based number.
-fn month_from_abbrev(m: &str) -> Option<u32> {
-    Some(match m {
-        "Jan" => 1,
-        "Feb" => 2,
-        "Mar" => 3,
-        "Apr" => 4,
-        "May" => 5,
-        "Jun" => 6,
-        "Jul" => 7,
-        "Aug" => 8,
-        "Sep" => 9,
-        "Oct" => 10,
-        "Nov" => 11,
-        "Dec" => 12,
-        _ => return None,
-    })
-}
-
-/// Days from the Unix epoch (1970-01-01) to `y-m-d` (proleptic Gregorian), by Howard Hinnant's
-/// `days_from_civil` algorithm. Exact for all civil dates; negative for dates before the epoch.
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400; // [0, 399]
-    let m = m as i64;
-    let d = d as i64;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era * 146_097 + doe - 719_468
 }
 
 /// A syntactically VALID inbound entity-tag with its validator strength preserved (RFC 9110
@@ -511,6 +428,51 @@ mod tests {
     }
 
     #[test]
+    fn if_unmodified_since_fails_only_when_modified_later() {
+        // 2000s since the epoch.
+        let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
+        let w = |date, lm: Option<u64>| evaluate_write(None, None, date, Some(TAG), lm.map(at));
+        assert_eq!(w(date, Some(3000)), Precondition::Failed);
+        assert_eq!(w(date, Some(2000)), Precondition::Proceed); // equal is "unmodified"
+        assert_eq!(w(date, Some(1000)), Precondition::Proceed);
+        // Sub-second precision below the date's resolution does not count as a later change.
+        let just_after = UNIX_EPOCH + std::time::Duration::from_millis(2_000_900);
+        assert_eq!(
+            evaluate_write(None, None, date, Some(TAG), Some(just_after)),
+            Precondition::Proceed
+        );
+        // Ignored: no modification time, a missing target, an invalid date.
+        assert_eq!(w(date, None), Precondition::Proceed);
+        assert_eq!(
+            evaluate_write(None, None, date, None, None),
+            Precondition::Proceed
+        );
+        assert_eq!(w(Some("yesterday"), Some(3000)), Precondition::Proceed);
+    }
+
+    #[test]
+    fn if_match_takes_precedence_over_if_unmodified_since() {
+        let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
+        // A matching If-Match proceeds even though the target changed after the date.
+        assert_eq!(
+            evaluate_write(Some(TAG), None, date, Some(TAG), Some(at(3000))),
+            Precondition::Proceed
+        );
+        assert_eq!(unmodified_since_applies(Some("*"), date), None);
+        assert_eq!(unmodified_since_applies(None, date), Some(2000));
+        assert_eq!(unmodified_since_applies(None, Some("bad")), None);
+    }
+
+    #[test]
+    fn if_none_match_still_applies_after_if_unmodified_since() {
+        let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
+        assert_eq!(
+            evaluate_write(None, Some("*"), date, Some(TAG), Some(at(1000))),
+            Precondition::Failed
+        );
+    }
+
+    #[test]
     fn require_maps_to_status() {
         assert!(require(Precondition::Proceed).is_ok());
         let err = require(Precondition::Failed).unwrap_err();
@@ -647,83 +609,6 @@ mod tests {
             ReadPrecondition::Proceed
         );
     }
-
-    #[test]
-    fn parse_http_date_known_values() {
-        // The canonical RFC 9110 example: 784111777 seconds since the epoch.
-        assert_eq!(
-            parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT"),
-            Some(784_111_777)
-        );
-        // The epoch itself.
-        assert_eq!(parse_http_date("Thu, 01 Jan 1970 00:00:00 GMT"), Some(0));
-        // A round-2000s value used by the tests above.
-        assert_eq!(
-            parse_http_date("Thu, 01 Jan 1970 00:33:20 GMT"),
-            Some(2_000)
-        );
-    }
-
-    #[test]
-    fn parse_http_date_rejects_malformed() {
-        assert_eq!(parse_http_date(""), None);
-        assert_eq!(parse_http_date("garbage"), None);
-        assert_eq!(parse_http_date("Sun, 06 Nov 1994 08:49:37 UTC"), None); // not GMT
-        assert_eq!(parse_http_date("Sun, 32 Nov 1994 08:49:37 GMT"), None); // bad day
-        assert_eq!(parse_http_date("Sun, 06 Foo 1994 08:49:37 GMT"), None); // bad month
-        assert_eq!(parse_http_date("Sun, 06 Nov 1994 25:49:37 GMT"), None); // bad hour
-        assert_eq!(parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT extra"), None);
-        // trailing junk
-    }
-
-    #[test]
-    fn parse_http_date_enforces_strict_imf_fixdate_grammar() {
-        // Non-fixed-width day (single digit) — the grammar is exactly 2DIGIT.
-        assert_eq!(parse_http_date("Sun, 6 Nov 1994 08:49:37 GMT"), None);
-        // Negative / non-digit components.
-        assert_eq!(parse_http_date("Sun, -6 Nov 1994 08:49:37 GMT"), None);
-        assert_eq!(parse_http_date("Sun, 06 Nov 1994 08:4x:37 GMT"), None);
-        // The obsolete RFC 850 / two-digit-year / asctime forms.
-        assert_eq!(parse_http_date("Sunday, 06-Nov-94 08:49:37 GMT"), None);
-        assert_eq!(parse_http_date("Sun, 06 Nov 94 08:49:37 GMT"), None);
-        assert_eq!(parse_http_date("Sun Nov  6 08:49:37 1994"), None);
-        // Wrong separators at the fixed positions.
-        assert_eq!(parse_http_date("Sun; 06 Nov 1994 08:49:37 GMT"), None);
-        assert_eq!(parse_http_date("Sun, 06 Nov 1994 08-49-37 GMT"), None);
-        // Case-sensitive tokens.
-        assert_eq!(parse_http_date("sun, 06 Nov 1994 08:49:37 GMT"), None);
-        assert_eq!(parse_http_date("Sun, 06 NOV 1994 08:49:37 GMT"), None);
-        // A leap-second `:60` is rejected (strict; fails open to a 200).
-        assert_eq!(parse_http_date("Sun, 06 Nov 1994 08:49:60 GMT"), None);
-        // Non-ASCII input of plausible shape must not panic (byte-slicing guard) and must fail.
-        assert_eq!(parse_http_date("Sün, 06 Nov 1994 08:49:37 GMT"), None);
-    }
-
-    #[test]
-    fn parse_http_date_validates_the_real_calendar() {
-        // Day zero / day beyond the month's true length.
-        assert_eq!(parse_http_date("Wed, 00 Nov 1994 08:49:37 GMT"), None);
-        assert_eq!(parse_http_date("Thu, 31 Nov 1994 08:49:37 GMT"), None); // Nov has 30 days
-                                                                            // Feb 29 exists only in a leap year.
-        assert_eq!(parse_http_date("Mon, 29 Feb 1999 00:00:00 GMT"), None);
-        assert_eq!(parse_http_date("Tue, 29 Feb 1900 00:00:00 GMT"), None); // century, not leap
-        assert_eq!(
-            parse_http_date("Tue, 29 Feb 2000 00:00:00 GMT"), // 400-year rule: leap
-            Some(951_782_400)
-        );
-    }
-
-    #[test]
-    fn parse_http_date_requires_the_correct_weekday() {
-        // 1994-11-06 was a Sunday: the correct day-name parses…
-        assert!(parse_http_date("Sun, 06 Nov 1994 08:49:37 GMT").is_some());
-        // …a real-but-WRONG day-name is malformed…
-        assert_eq!(parse_http_date("Mon, 06 Nov 1994 08:49:37 GMT"), None);
-        // …and an arbitrary token is malformed.
-        assert_eq!(parse_http_date("Xyz, 06 Nov 1994 08:49:37 GMT"), None);
-    }
-
-    // --- Representation-variant tags (`"<state>+<variant>"`) ---------------------------------------
 
     /// The JSON-LD variant of [`TAG`], as the handler mints for a content-negotiated response.
     fn tag_variant() -> String {

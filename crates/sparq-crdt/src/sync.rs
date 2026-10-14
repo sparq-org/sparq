@@ -1,7 +1,7 @@
 //! Peer-exchange primitives (research §6.2) and the membership-epoch /
 //! causal-stability frontier rule (research §4.3).
 //!
-//! [FABLE-5] Three pieces:
+//! Three pieces:
 //!
 //! * [`SyncHello`] — the handshake document peers exchange first (dataset id,
 //!   protocol format version, membership epoch, causal summary), with the

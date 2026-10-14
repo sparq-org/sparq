@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-xqu: per-registered-query budget plumbing — the
+//! sq-xqu: per-registered-query budget plumbing — the
 //! [`QueryBudget`] a continuous query applies to EVERY window evaluation,
 //! plus the optional per-window timeout that tightens the budget's deadline
 //! at each evaluation start (a stored `deadline` is an ABSOLUTE instant, which

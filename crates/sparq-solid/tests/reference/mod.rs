@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t58w.7 — an **independent reference evaluator** for Solid WAC + ACP.
+//! sq-t58w.7 — an **independent reference evaluator** for Solid WAC + ACP.
 //!
 //! This module is the second paradigm in the differential oracle
 //! (`tests/differential_oracle.rs`, design record `research/solid-acp-differential-oracle-design.md`

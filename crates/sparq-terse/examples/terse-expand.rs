@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-bzign (epic sq-2m6zm, Phase 5 A/B). 🤖 SPARQ agent — the deterministic
+//! sq-bzign (epic sq-2m6zm, Phase 5 A/B). 🤖 SPARQ agent — the deterministic
 //! transpile-and-echo tool the Phase-5 A/B harness (`bench/terse/`) and a sub-agent both call.
 //!
 //! It takes a terse query (arm B `K:<name>` keywords, or arm C `K:` + `V("phrase")`), loads the
@@ -31,17 +31,7 @@ use sparq_terse::{terse_to_sparql_with, ResolveCtx};
 
 fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
+    sparq_core::json::escape_into(&mut out, s);
     out
 }
 

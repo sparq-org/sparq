@@ -1,5 +1,4 @@
 //! Standalone exec-accuracy runner for the `nlq-endpoint` feature — bead sq-2m6zm.7.
-//! [SONNET-4.6]
 //!
 //! Measures end-to-end NL→SPARQL→run exec-accuracy against any OpenAI-compatible
 //! cheap-model endpoint (Ollama, llama.cpp server, vLLM, OpenRouter, OpenAI, etc.)
@@ -202,17 +201,7 @@ mod inner {
     pub fn json_str(raw: &str) -> String {
         let mut out = String::with_capacity(raw.len() + 2);
         out.push('"');
-        for c in raw.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-                c => out.push(c),
-            }
-        }
+        sparq_core::json::escape_into(&mut out, raw);
         out.push('"');
         out
     }

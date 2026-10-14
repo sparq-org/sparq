@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-hmd7l.16) RDFC-1.0 comparative-bench runner for `bench/canon/`
+//! (sq-hmd7l.16) RDFC-1.0 comparative-bench runner for `bench/canon/`
 //! — canonicalizes one N-Quads file through the PUBLIC sparq-canon API so the
 //! same-box comparison panel (vs rdf-canonize / the rdf-canon crate driven
 //! directly) exercises exactly the surface sparq ships, bridge included.

@@ -19,7 +19,7 @@ readme = "README.md"
 # core engine carries zero Solid/access-control code, deps, or runtime cost — it is
 # a dependency of NOTHING in the workspace. Design: research/solid-access-control-design.md.
 
-# [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg (for #[cfg_attr(docsrs, ...)] gating).
+# docs.rs: build with all features + the `docsrs` cfg (for #[cfg_attr(docsrs, ...)] gating).
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -27,35 +27,35 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false }
-sparq-engine = { path = "../sparq-engine", version = "0.1.5", default-features = false }
-# [SONNET-4.6] sq-zgbso.4 (epic sq-zgbso, issue #1582): the materializer evaluates the
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.6", default-features = false }
+# sq-zgbso.4 (epic sq-zgbso, issue #1582): the materializer evaluates the
 # WAC/ACP rules on the id-level COMPILED evaluator (`sparq_reason::n3::compiled`), so the
 # `compiled-rules` slice is REQUIRED, not optional — the rule text is lowered to the IR
 # once per process and the facts enter as `[Id; 3]` straight from the source `Graph`, with
 # no per-call N3 text round trip. It pulls only the `sparq-substrate` rows+join slices
 # (an in-tree path dep, no new external crate); `sparq-core`/`sparq-engine` are untouched.
-sparq-reason = { path = "../sparq-reason", version = "0.1.5", default-features = false, features = [
+sparq-reason = { path = "../sparq-reason", version = "0.1.6", default-features = false, features = [
     "compiled-rules",
 ] }
-# [OPUS-4.8] sq-h3uk: the ODRL→AUTH_GRAPH bridge. OPTIONAL + behind the `odrl-bridge`
+# sq-h3uk: the ODRL→AUTH_GRAPH bridge. OPTIONAL + behind the `odrl-bridge`
 # feature (OFF by default), so the default sparq-solid build carries zero ODRL code,
 # deps, or runtime cost — sparq-policy is NOT forced onto the default build. Research
 # track (the single-node bridge of epic sq-3183), NOT a production cutover.
-sparq-policy = { path = "../sparq-policy", version = "0.1.5", default-features = false, optional = true }
-# [OPUS-4.8] sq-pfae PoC (issue #940): the trust-graph admission gate. OPTIONAL +
+sparq-policy = { path = "../sparq-policy", version = "0.1.6", default-features = false, optional = true }
+# sq-pfae PoC (issue #940): the trust-graph admission gate. OPTIONAL +
 # behind the `trust-graph` feature (OFF by default), so the default sparq-solid build
 # carries ZERO trust-graph code, deps, or runtime cost — it behaves EXACTLY as WAC/ACP
 # do now (strict additivity, design §2.2 G6). RESEARCH prototype (`sparq-trust` is
 # publish=false; the ZK estate it composes with is externally unaudited, sq-qhy4), NOT
 # a production cutover. Path-only (no crates.io version): the `trust-graph` feature is a
 # research-only feature and is not part of sparq-solid's published feature set.
-sparq-trust = { path = "../sparq-trust", version = "0.1.5", optional = true }
+sparq-trust = { path = "../sparq-trust", version = "0.1.6", optional = true }
 # Behind `trust-graph` only (already a transitive dep of sparq-trust, so it adds no crate to
 # that graph): gives tests/trust_graph.rs the ZK signing primitives without an unconditional
 # dev-dependency on the research estate. Path-only, like sparq-trust.
-sparq-zk = { path = "../sparq-zk", version = "0.1.5", optional = true }
-# [SONNET-4.6] sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc` —
+sparq-zk = { path = "../sparq-zk", version = "0.1.6", optional = true }
+# sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc` —
 # W3C Data Integrity (`eddsa-rdfc-2022`) verification of a presented credential. OPTIONAL +
 # behind the `acp-vc` feature (OFF by default), so the default sparq-solid build carries ZERO
 # credential-verification code or crypto deps. The `acp:vc` MATCHER SEMANTICS (fail-closed
@@ -63,18 +63,18 @@ sparq-zk = { path = "../sparq-zk", version = "0.1.5", optional = true }
 # only provides the verification that populates the trusted channel. Path-only (no crates.io
 # version): `sparq-vc` is `publish = false`, so like `trust-graph` this is a research-only
 # feature and is not part of sparq-solid's published feature set.
-sparq-vc = { path = "../sparq-vc", version = "0.1.5", optional = true }
+sparq-vc = { path = "../sparq-vc", version = "0.1.6", optional = true }
 oxrdf.workspace = true
 spargebra.workspace = true
 rustc-hash.workspace = true
 
 [features]
-# [OPUS-4.8] sq-h3uk: materialize matched ODRL permissions into the AUTH_GRAPH so the
+# sq-h3uk: materialize matched ODRL permissions into the AUTH_GRAPH so the
 # existing graph-level WAC/ACP enforcement applies them. OFF by default (lean core);
 # pulls in the optional sparq-policy ODRL evaluator only when enabled.
 odrl-bridge = ["dep:sparq-policy"]
 
-# [OPUS-4.8] sq-58mh: wire sparq-policy's STATEFUL `odrl:count` enforcement THROUGH the
+# sq-58mh: wire sparq-policy's STATEFUL `odrl:count` enforcement THROUGH the
 # bridge so a bridged grant SELF-RETRACTS on exhaustion. OFF by default; implies
 # `odrl-bridge` and turns on the `count-enforcement` feature of sparq-policy (the
 # usage-counter store + the atomic `evaluate_and_exercise`). ACP is stateless — there
@@ -83,7 +83,7 @@ odrl-bridge = ["dep:sparq-policy"]
 # re-checked (read-only) on refresh, dropping the grant once the budget is spent.
 count-enforcement = ["odrl-bridge", "sparq-policy/count-enforcement"]
 
-# [OPUS-4.8] sq-pfae PoC (issue #940): the trust-graph admission stratum. OFF by
+# sq-pfae PoC (issue #940): the trust-graph admission stratum. OFF by
 # default — with the feature off, sparq-solid is BYTE-IDENTICAL to WAC/ACP today (the
 # strict-additivity property G6, design §2.2). With it on, `PodStore` gains ONE new
 # feature-gated method ([`PodStore::admit_trust_credential_and_materialize`]) that runs
@@ -95,7 +95,7 @@ count-enforcement = ["odrl-bridge", "sparq-policy/count-enforcement"]
 # SKILL for the honest scope.
 trust-graph = ["dep:sparq-trust", "dep:sparq-zk"]
 
-# [OPUS-4.8] sq-pfae.3 (issue #940): forward `sparq-trust`'s OPT-IN `did` feature so a
+# sq-pfae.3 (issue #940): forward `sparq-trust`'s OPT-IN `did` feature so a
 # sparq-solid integrator can bind a trust rule's issuer key from a `trust:issuerDid`
 # (`did:key` offline self-cert / pluggable `did:web`) via `sparq_trust::resolve_rule_keys`,
 # narrowing the operator-asserted-key forgery vector D′. Default-OFF and additive over
@@ -104,7 +104,7 @@ trust-graph = ["dep:sparq-trust", "dep:sparq-zk"]
 # only as strong as host/TLS control; no privacy).
 trust-graph-did = ["trust-graph", "sparq-trust/did"]
 
-# [FABLE-5] sq-lrtc3.3 (epic sq-lrtc3): pattern-scoped (sub-named-graph) result masking —
+# sq-lrtc3.3 (epic sq-lrtc3): pattern-scoped (sub-named-graph) result masking —
 # an ODRL target as a set of allow/deny TRIPLE PATTERNS over a source graph, enforced by
 # MATERIALIZING the masked sub-graph replica so masked triples are physically absent from
 # the evaluated dataset (oracle-equivalent under OPTIONAL/EXISTS/MINUS/aggregates/COUNT by
@@ -114,7 +114,7 @@ trust-graph-did = ["trust-graph", "sparq-trust/did"]
 # research/odrl-pattern-scoped-targets-2026-07.md; overhead JSONs in bench/pattern-scope/.
 pattern-scope = []
 
-# [OPUS-4.8] sq-gq28y (issue #1546, maintainer decision "spec compliant - empty by default"):
+# sq-gq28y (issue #1546, maintainer decision "spec compliant - empty by default"):
 # a LEGACY escape hatch that restores the pre-flip union-always default-graph semantics.
 #
 # The DEFAULT read path (`query_as`/`query_json_as`/`ask_as`) is now SPEC-COMPLIANT per the
@@ -137,7 +137,7 @@ pattern-scope = []
 # but equi-authorized) bare-pattern-scans-the-union convenience.
 legacy-union-default-graph = []
 
-# [SONNET-4.6] sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc`.
+# sq-ysv3u (issue #2935): the TRUST-THE-ISSUER backend for ACP `acp:vc`.
 #
 # READ THIS BEFORE ASSUMING THE FEATURE GATES THE SEMANTICS — it does not. `acp:vc` matcher
 # evaluation is UNCONDITIONAL: an `acp:vc` matcher is satisfied only by an agent the caller
@@ -161,12 +161,12 @@ legacy-union-default-graph = []
 # are not checked either — a holding lasts until the caller re-materializes.
 acp-vc = ["dep:sparq-vc"]
 
-# [OPUS-4.8] sq-gq28y (issue #1546): the vendored solid-sparql-query query-semantics
+# sq-gq28y (issue #1546): the vendored solid-sparql-query query-semantics
 # conformance suite runner (tests/conformance_solid_sparql_query.rs) parses the pinned
 # upstream manifest.json. serde_json is a DEV-only dependency — it does not enter the
 # runtime or published graph (the default sparq-solid build stays dependency-light).
 [dev-dependencies]
-# [SONNET-4.6] sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
+# sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
 # `publish = false`): the conformance ratchet floor this crate's test runner enforces is
 # the SAME `const` sparq-conformance's central scoreboard reports, so the two cannot
 # drift, and the dep edge puts this crate in the floors crate's reverse-dependency
@@ -175,9 +175,9 @@ acp-vc = ["dep:sparq-vc"]
 sparq-conformance-floors = { path = "../sparq-conformance-floors" }
 serde_json = "1"
 # Directory-backed stores for the update durability tests (`Graph::open`).
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false, features = ["mmap", "parallel"] }
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false, features = ["mmap", "parallel"] }
 
-# [OPUS-4.8] sq-zgbso.1 MEASURED SPIKE (issue #1582, design record
+# sq-zgbso.1 MEASURED SPIKE (issue #1582, design record
 # research/odrl-n3-compiled-rules.md): ODRL permission evaluation as N3 rules
 # (rules/odrl-spike.n3) differentially tested against the hand-written Rust path. Gated on
 # `odrl-bridge` (it drives the real `sparq_policy::evaluate` + `odrl_bridge::materialize_policy`),
@@ -187,7 +187,7 @@ sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = fal
 name = "odrl_n3_spike"
 required-features = ["odrl-bridge"]
 
-# [FABLE-5] sq-lrtc3.3: the pattern-scope measured-overhead driver (design record
+# sq-lrtc3.3: the pattern-scope measured-overhead driver (design record
 # research/odrl-pattern-scoped-targets-2026-07.md §4; committed JSONs in
 # bench/pattern-scope/, work-box numbers NON-canonical). Gated on `pattern-scope`,
 # so it is NOT built in the default (feature-OFF) state. Measurement-only.
@@ -201,7 +201,7 @@ required-features = ["pattern-scope"]
 # unconditional dev-dependency, so a default `cargo test` of this core crate never compiles
 # the research ZK estate (arkworks). Run it with `--features trust-graph`.
 
-# [OPUS-4.8] sq-7agop: wasm32 build+smoke check (regression guard for the cfg-gated
+# sq-7agop: wasm32 build+smoke check (regression guard for the cfg-gated
 # `std::time::Instant` in `materialize_*`). `tests/wasm_materialize.rs` runs the REAL
 # materialize path in a genuine wasm32 runtime via `wasm-pack test --node`, asserting it
 # no longer traps (it panicked on `Instant::now()` before the fix). These are DEV-ONLY

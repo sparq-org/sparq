@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-zgbso.3 — the IN-CRATE measurement instrument for the sq-zgbso.1 spike's
+//! sq-zgbso.3 — the IN-CRATE measurement instrument for the sq-zgbso.1 spike's
 //! open question: what fraction of a WAC/ACP-shaped `reason_n3` materialize call is the
 //! per-call FACT round-trip (id-level graph -> N3 text -> re-parse -> String-term
 //! fixpoint -> re-intern; 3x for the stratified ACP pipeline) that the id-level compiled
@@ -89,7 +89,7 @@ fn main() {
     let id_set = {
         let mut d2 = Dict::new();
         let ids2 = intern_facts(&mut d2, &facts).expect("intern");
-        let out = compiled.bind(&mut d2).eval(&mut d2, &ids2);
+        let out = compiled.bind(&mut d2).eval(&mut d2, &ids2).expect("eval");
         triples_as_strings(&d2, &out)
     };
     fixture::assert_set_equal(&text_set, &id_set, "WAC full-scale differential");
@@ -107,7 +107,7 @@ fn main() {
     });
     let (id_ms, n2) = best_of(|| {
         let mut d = dict.clone();
-        compiled.bind(&mut d).eval(&mut d, &fact_ids).len()
+        compiled.bind(&mut d).eval(&mut d, &fact_ids).expect("eval").len()
     });
     assert_eq!(n1, n2, "closure sizes must agree");
     report("WAC (1 stratum)", text_ms, id_ms, n2);
@@ -156,9 +156,9 @@ fn main() {
                    rc: &CompiledRuleSet|
      -> (Dict, Vec<[Id; 3]>) {
         let mut d = base.clone();
-        let s1 = ra.bind(&mut d).eval(&mut d, fact_ids);
-        let s2 = rb.bind(&mut d).eval(&mut d, &s1);
-        let s3 = rc.bind(&mut d).eval(&mut d, &s2);
+        let s1 = ra.bind(&mut d).eval(&mut d, fact_ids).expect("eval");
+        let s2 = rb.bind(&mut d).eval(&mut d, &s1).expect("eval");
+        let s3 = rc.bind(&mut d).eval(&mut d, &s2).expect("eval");
         (d, s3)
     };
 

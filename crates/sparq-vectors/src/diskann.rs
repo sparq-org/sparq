@@ -1,4 +1,4 @@
-//! [OPUS-4.8] A **persistent, on-disk Vamana ANN index** (`.spqg`) over a [`VectorStore`]:
+//! A **persistent, on-disk Vamana ANN index** (`.spqg`) over a [`VectorStore`]:
 //! a fixed-degree proximity graph laid out for memory-mapped, locality-friendly reads, so a
 //! built index is **saved once and reopened without a rebuild** (the gap [`ann`](crate::ann)'s
 //! in-RAM HNSW left — see that module's persistence note and this crate's open beads
@@ -43,7 +43,7 @@
 //!   vector    [dim] f32            the L2-NORMALIZED vector (search reads it here)
 //!   nbrs      [R] u32              neighbour SLOT indices; entries ≥ degree are padding
 //!
-//! [OPUS-4.8] (sq-qamd) the optional PQ_SECTION (present iff enc_tag == 1, appended after nodes):
+//! (sq-qamd) the optional PQ_SECTION (present iff enc_tag == 1, appended after nodes):
 //!   magic     b"SPQP"              4 bytes
 //!   cb_len    u64                  length of the codebook block that follows
 //!   codebook  [cb_len] bytes       ProductQuantizer::to_bytes (dim, m, k + centroids)
@@ -61,9 +61,9 @@
 //! The default build is the **Vamana on-disk graph with full-precision vectors searched from the
 //! mmap**. Full DiskANN additionally keeps a **PQ-compressed** copy of every vector resident in RAM
 //! to rank candidates without touching disk, reading full-precision vectors only to re-rank the
-//! beam. That quantization layer ([OPUS-4.8] sq-nq5,
+//! beam. That quantization layer (sq-nq5,
 //! [`quant`](crate::quant) — [`ProductQuantizer`] + [`EncodedStore`] + [`DistanceTable`])
-//! is now **wired into the search path** ([OPUS-4.8] sq-qamd): build with
+//! is now **wired into the search path** (sq-qamd): build with
 //! [`DiskAnnIndex::build_with_pq`] and the greedy search ranks each visited node's neighbours by an
 //! ADC [`DistanceTable`] lookup against the in-RAM codes (no disk), reading the full-precision
 //! vector from the mmap only for the final beam it re-ranks — DiskANN's "search on PQ, re-rank on
@@ -76,14 +76,14 @@
 //! `1` = a trailing PQ section), so the PQ variant is a backwards-compatible addition: a plain
 //! reader sees the tag and a longer file but the node-record layout is byte-identical.
 //!
-//! [OPUS-4.8] (sq-32i5) The header also carries a **graph fingerprint** (offset 32..56) binding
+//! (sq-32i5) The header also carries a **graph fingerprint** (offset 32..56) binding
 //! the index to the graph it was built against — see [`crate::fingerprint`] and
 //! [`DiskAnnIndex::check_graph`]. A query by term resolves through the caller's graph dictionary,
 //! so an index built against a different graph generation would silently mis-resolve; the checked
 //! query entry points reject that. Version-1 files (no fingerprint, 32-byte header) still open but
 //! are reported as unverifiable.
 //!
-//! [OPUS-4.8] (sq-wlzi) **ID-KEYED STALENESS CONTRACT.** Each node record stores its term's
+//! (sq-wlzi) **ID-KEYED STALENESS CONTRACT.** Each node record stores its term's
 //! build-time dictionary id, and neighbour entries are stored slots — so this index, like the
 //! [`VectorStore`] under it, is valid ONLY against the **exact graph generation it was built
 //! against**. To serve it, persist that graph (`Graph::save`) and reopen THAT graph (`Graph::open`,
@@ -96,7 +96,7 @@
 
 use crate::fingerprint::{self, Fingerprint, FINGERPRINT_LEN};
 use crate::quant::{DistanceTable, EncodedStore, PqConfig, ProductQuantizer};
-// [FABLE-5] (sq-98c) The read backing is shared with `.spqv`: a memory map on native targets,
+// (sq-98c) The read backing is shared with `.spqv`: a memory map on native targets,
 // f32-aligned owned bytes on wasm32 / `open_from_bytes` (memmap2 is target-gated out of wasm
 // builds in Cargo.toml). Every record read derefs to `[u8]`, so the paths are identical.
 use crate::store::{open_backing, Bytes, VectorStore};
@@ -109,7 +109,7 @@ use std::path::{Path, PathBuf};
 
 /// First four bytes of every `.spqg` file.
 pub const SPQG_MAGIC: [u8; 4] = *b"SPQG";
-/// Current on-disk graph format version. [OPUS-4.8] (sq-32i5) v2 adds the 24-byte graph
+/// Current on-disk graph format version. (sq-32i5) v2 adds the 24-byte graph
 /// fingerprint block at offset 32; v1 files (32-byte header) still open but cannot be verified.
 pub const SPQG_VERSION: u32 = 2;
 /// Header length of a version-1 file (no fingerprint block).
@@ -120,7 +120,7 @@ const HEADER_LEN: usize = HEADER_LEN_V1 + FINGERPRINT_LEN;
 const ENC_TAG_OFFSET: usize = 28;
 /// Encoding tag: no PQ candidate cache — the file ends at the last node record (default).
 const ENC_TAG_NONE: u32 = 0;
-/// [OPUS-4.8] (sq-qamd) Encoding tag: a **PQ candidate-cache section** follows the node records
+/// (sq-qamd) Encoding tag: a **PQ candidate-cache section** follows the node records
 /// (codebook + per-slot codes). See `PqSection` for the trailing block's layout.
 const ENC_TAG_PQ: u32 = 1;
 /// First four bytes of the trailing PQ section (a guard against a truncated/garbled tail).
@@ -390,7 +390,7 @@ const fn record_len(dim: usize, degree: usize) -> usize {
     8 + dim * 4 + degree * 4
 }
 
-/// [OPUS-4.8] (sq-qamd) The trailing PQ candidate-cache section: the fitted quantizer plus every
+/// (sq-qamd) The trailing PQ candidate-cache section: the fitted quantizer plus every
 /// vector's PQ code, ready to be appended after the node records when the encoding tag is `1`.
 struct PqSection {
     pq: ProductQuantizer,
@@ -435,7 +435,7 @@ fn write_graph(
     header[12..16].copy_from_slice(&(r as u32).to_le_bytes());
     header[16..24].copy_from_slice(&(count as u64).to_le_bytes());
     header[24..28].copy_from_slice(&b.medoid.to_le_bytes());
-    // [OPUS-4.8] (sq-qamd) Encoding tag at offset 28..32: `1` when a PQ section is appended below,
+    // (sq-qamd) Encoding tag at offset 28..32: `1` when a PQ section is appended below,
     // else `0`. (sq-32i5) Graph fingerprint at offset 32..56; `None` leaves a zeroed block, which
     // `check_graph` treats as unverifiable.
     let enc_tag = if pq.is_some() { ENC_TAG_PQ } else { ENC_TAG_NONE };
@@ -467,7 +467,7 @@ fn write_graph(
         }
         w.write_all(&rec).map_err(|e| format!("write {}: {e}", path.display()))?;
     }
-    // [OPUS-4.8] (sq-qamd) Trailing PQ candidate-cache section (encoding tag == 1).
+    // (sq-qamd) Trailing PQ candidate-cache section (encoding tag == 1).
     if let Some(section) = pq {
         w.write_all(&section.to_bytes())
             .map_err(|e| format!("write {}: {e}", path.display()))?;
@@ -494,20 +494,20 @@ pub struct DiskAnnIndex {
     medoid: u32,
     record_len: usize,
     search_beam: usize,
-    /// [OPUS-4.8] (sq-32i5) The graph fingerprint this index was built against, or `None` for a
+    /// (sq-32i5) The graph fingerprint this index was built against, or `None` for a
     /// legacy version-1 file / an index built without a graph. See [`check_graph`](Self::check_graph).
     fingerprint: Option<Fingerprint>,
     /// Byte offset where node records begin: [`HEADER_LEN`] (v2) or [`HEADER_LEN_V1`] (legacy v1).
     /// Every record read keys off this so both versions are read correctly by the same code.
     data_offset: usize,
-    /// [OPUS-4.8] (sq-qamd) The in-RAM PQ candidate cache (codebook + per-slot codes), or `None`
+    /// (sq-qamd) The in-RAM PQ candidate cache (codebook + per-slot codes), or `None`
     /// for a plain index (encoding tag `0`). When present, [`search_slots`](Self::search_slots)
     /// ranks each visited node's neighbours by an ADC table lookup against these codes and re-ranks
     /// the final beam off the mmap; when `None` it computes every distance from the mmap as before.
     pq: Option<PqCache>,
 }
 
-/// [OPUS-4.8] (sq-qamd) The decoded PQ candidate cache: the fitted quantizer and the per-slot
+/// (sq-qamd) The decoded PQ candidate cache: the fitted quantizer and the per-slot
 /// codes (slot order == node-record order, so a graph slot indexes the codes directly).
 struct PqCache {
     pq: ProductQuantizer,
@@ -534,7 +534,7 @@ impl DiskAnnIndex {
         Self::build_inner(store, path, cfg, None, None)
     }
 
-    /// [OPUS-4.8] (sq-32i5) Like [`build`](Self::build) but binds the index to `graph` (embeds its
+    /// (sq-32i5) Like [`build`](Self::build) but binds the index to `graph` (embeds its
     /// fingerprint), so [`check_graph`](Self::check_graph) / [`nearest_term_checked`](Self::nearest_term_checked)
     /// can reject a query against a different graph generation. Pass the graph whose term ids `store`
     /// is keyed by.
@@ -546,7 +546,7 @@ impl DiskAnnIndex {
         Self::build_with_for(store, path, VamanaConfig::default(), graph)
     }
 
-    /// [OPUS-4.8] (sq-32i5) Like [`build_with`](Self::build_with) but binds the index to `graph`'s
+    /// (sq-32i5) Like [`build_with`](Self::build_with) but binds the index to `graph`'s
     /// fingerprint (see [`build_for`](Self::build_for)).
     pub fn build_with_for<P: AsRef<Path>>(
         store: &VectorStore,
@@ -557,7 +557,7 @@ impl DiskAnnIndex {
         Self::build_inner(store, path, cfg, Some(Fingerprint::of(graph)), None)
     }
 
-    /// [OPUS-4.8] (sq-qamd) Builds the Vamana graph **with a PQ candidate cache**: in addition to
+    /// (sq-qamd) Builds the Vamana graph **with a PQ candidate cache**: in addition to
     /// the full-precision node records, it fits a [`ProductQuantizer`] over `store` (with `pq_cfg`),
     /// encodes every vector into the in-RAM code cache, and persists both alongside the graph (the
     /// trailing PQ section, encoding tag `1`). The opened index then searches DiskANN-style: rank
@@ -604,17 +604,17 @@ impl DiskAnnIndex {
     /// index. Validates the header and that the file size matches `count` records so no later
     /// search can read out of bounds; the records themselves page in on access.
     ///
-    /// [OPUS-4.8] (sq-32i5) A version-2 file's graph fingerprint is read for
+    /// (sq-32i5) A version-2 file's graph fingerprint is read for
     /// [`check_graph`](Self::check_graph). A legacy version-1 file (32-byte header, no fingerprint)
     /// still opens — its fingerprint is `None`, so `check_graph` reports it as unverifiable.
     ///
-    /// [FABLE-5] (sq-98c) On wasm32 (memmap2 target-gated out) this reads the whole file into
+    /// (sq-98c) On wasm32 (memmap2 target-gated out) this reads the whole file into
     /// the same f32-aligned owned backing [`open_from_bytes`](Self::open_from_bytes) uses —
     /// identical validation, no map. `wasm32-unknown-unknown` has no filesystem, so there the
     /// read fails with a clean I/O error and `open_from_bytes` is the supported path.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<DiskAnnIndex, String> {
         let path = path.as_ref();
-        // [FABLE-5] (sq-98c) Memory map on native targets; on wasm32 (memmap2 target-gated out)
+        // (sq-98c) Memory map on native targets; on wasm32 (memmap2 target-gated out)
         // `open_backing` reads the whole file into the f32-aligned owned backing instead —
         // identical validation. `wasm32-unknown-unknown` has no filesystem, so there the read
         // fails with a clean I/O error and [`open_from_bytes`](Self::open_from_bytes) is the
@@ -627,13 +627,13 @@ impl DiskAnnIndex {
     /// filesystem (the bytes were fetched, embedded, or decompressed by the caller), the
     /// `.spqg` counterpart of [`VectorStore::open_from_bytes`]. Validation is identical to
     /// [`open`](Self::open); record reads borrow the owned buffer (f32-aligned, so the vector
-    /// casts are as sound as on the page-aligned map) instead of a memory map. [FABLE-5] (sq-98c)
+    /// casts are as sound as on the page-aligned map) instead of a memory map. (sq-98c)
     pub fn open_from_bytes(bytes: Vec<u8>) -> Result<DiskAnnIndex, String> {
         Self::open_validated(Bytes::owned(bytes), "<bytes>")
     }
 
     /// Shared header/size validation behind [`open`](Self::open) and
-    /// [`open_from_bytes`](Self::open_from_bytes). [FABLE-5] (sq-98c)
+    /// [`open_from_bytes`](Self::open_from_bytes). (sq-98c)
     fn open_validated(map: Bytes, origin: &str) -> Result<DiskAnnIndex, String> {
         if cfg!(target_endian = "big") {
             return Err(".spqg is a little-endian format; big-endian targets are unsupported".into());
@@ -645,7 +645,7 @@ impl DiskAnnIndex {
             return Err(format!("{origin}: not a .spqg file (bad magic)"));
         }
         let version = u32::from_le_bytes(map[4..8].try_into().unwrap());
-        // [OPUS-4.8] (sq-32i5) Both v1 (no fingerprint, 32-byte header) and v2 (fingerprint,
+        // (sq-32i5) Both v1 (no fingerprint, 32-byte header) and v2 (fingerprint,
         // 56-byte header) open; the offset where node records begin depends on the version, so
         // every record read keys off `data_offset` below.
         let (data_offset, fingerprint): (usize, Option<Fingerprint>) = match version {
@@ -654,7 +654,7 @@ impl DiskAnnIndex {
                 if map.len() < HEADER_LEN {
                     return Err(format!("{origin}: truncated version-2 header (fingerprint block)"));
                 }
-                // [OPUS-4.8] (sq-32i5) All-zero block (a v2 index built without a graph binding)
+                // (sq-32i5) All-zero block (a v2 index built without a graph binding)
                 // → `None` ("unverifiable"), not a zero fingerprint that would surface as a
                 // spurious "DIFFERENT graph" mismatch.
                 (
@@ -683,7 +683,7 @@ impl DiskAnnIndex {
             .ok_or_else(|| {
                 format!("{origin}: dim={dim} degree={degree} count={count} overflows the file size")
             })?;
-        // [OPUS-4.8] (sq-qamd) Encoding tag at offset 28..32 (reserved bytes of the header).
+        // (sq-qamd) Encoding tag at offset 28..32 (reserved bytes of the header).
         let enc_tag =
             u32::from_le_bytes(map[ENC_TAG_OFFSET..ENC_TAG_OFFSET + 4].try_into().unwrap());
         let pq = match enc_tag {
@@ -724,7 +724,7 @@ impl DiskAnnIndex {
         })
     }
 
-    /// [OPUS-4.8] (sq-qamd) Parses the trailing PQ section (`tail` begins right after the last node
+    /// (sq-qamd) Parses the trailing PQ section (`tail` begins right after the last node
     /// record). Validates the magic, the codebook (which re-checks its own `dim`/`m`/`k`), that the
     /// codebook's `dim` matches the graph's, and that exactly `count × M` code bytes are present (no
     /// trailing slop) so a later code read is always in bounds. Errors are descriptive.
@@ -775,7 +775,7 @@ impl DiskAnnIndex {
         Ok(PqCache { pq, codes })
     }
 
-    /// [OPUS-4.8] (sq-qamd) Whether this index carries an in-RAM PQ candidate cache (built via
+    /// (sq-qamd) Whether this index carries an in-RAM PQ candidate cache (built via
     /// [`build_with_pq`](Self::build_with_pq) / persisted as the trailing PQ section). When `true`,
     /// [`nearest`](Self::nearest) ranks candidates on the codes and re-ranks the beam off the mmap;
     /// when `false` it searches full-precision throughout.
@@ -829,7 +829,7 @@ impl DiskAnnIndex {
     /// returning the `k` best `(slot, cosine)` pairs, best first. Each visited node is one
     /// contiguous record read from the map.
     ///
-    /// [OPUS-4.8] (sq-qamd) When the index carries a PQ candidate cache (built via
+    /// (sq-qamd) When the index carries a PQ candidate cache (built via
     /// [`build_with_pq`](Self::build_with_pq)) the beam is driven by RAM-only ADC distance
     /// estimates against the codes ([`search_slots_pq`](Self::search_slots_pq)) and only the final
     /// beam is re-ranked off the mmap; otherwise every candidate distance is the exact mmap
@@ -872,7 +872,7 @@ impl DiskAnnIndex {
         working.into_iter().map(|c| (c.slot, 1.0 - c.dist / 2.0)).collect()
     }
 
-    /// [OPUS-4.8] (sq-qamd) DiskANN's "search on PQ, re-rank on disk" greedy beam search. The
+    /// (sq-qamd) DiskANN's "search on PQ, re-rank on disk" greedy beam search. The
     /// frontier `working` holds **PQ-estimated** `d²` (an ADC [`DistanceTable`] lookup against the
     /// in-RAM codes — no disk touched while traversing), so the beam is ranked from RAM. After the
     /// walk, the surviving beam is **re-ranked against the full-precision mmap vectors** and the top
@@ -927,7 +927,7 @@ impl DiskAnnIndex {
         reranked.into_iter().map(|c| (c.slot, 1.0 - c.dist / 2.0)).collect()
     }
 
-    /// [OPUS-4.8] (sq-1wc1) **Filtered** greedy beam search: traverse the Vamana graph
+    /// (sq-1wc1) **Filtered** greedy beam search: traverse the Vamana graph
     /// *predicate-agnostically* (expand through every neighbour, beam-truncated toward `query` —
     /// exactly as [`search_slots`](Self::search_slots) does, so connectivity is preserved) but only
     /// **accept** into the result the slots whose dictionary id passes `accept`. ACORN / NaviX-style
@@ -992,7 +992,7 @@ impl DiskAnnIndex {
         accepted.into_iter().map(|c| (c.slot, 1.0 - c.dist / 2.0)).collect()
     }
 
-    /// [OPUS-4.8] (sq-1wc1) **Predicate-constrained (filtered) approximate top-`k`**: like
+    /// (sq-1wc1) **Predicate-constrained (filtered) approximate top-`k`**: like
     /// [`nearest`](Self::nearest) but the result is restricted to ids the `mask` permits — the
     /// RDF-native filtered-ANN path. The mask is the candidate id-set a SPARQL BGP selects (e.g.
     /// `?node a :Car`); only neighbours in it are returned, while the traversal still hops through
@@ -1018,7 +1018,7 @@ impl DiskAnnIndex {
         self.nearest_filtered_with(query, mask, store, k, crate::FilterConfig::default())
     }
 
-    /// [OPUS-4.8] (sq-1wc1) [`nearest_filtered`](Self::nearest_filtered) with an explicit
+    /// (sq-1wc1) [`nearest_filtered`](Self::nearest_filtered) with an explicit
     /// [`FilterConfig`](crate::FilterConfig) (pre-filter ↔ traversal crossover and the traversal
     /// beam factor). The `store` is needed for the pre-filter strategy (it scans the masked vectors
     /// directly); for the traversal strategy it is unused, but the method takes it unconditionally so
@@ -1067,7 +1067,7 @@ impl DiskAnnIndex {
     /// [`Term`]s. Empty if the term is absent or unembedded. Mirrors
     /// `VectorIndex::nearest_term`.
     ///
-    /// [OPUS-4.8] (sq-32i5) This does NOT verify the index/store match `graph` — pass a graph
+    /// (sq-32i5) This does NOT verify the index/store match `graph` — pass a graph
     /// whose ids have shifted since build and the results are silently WRONG. Use
     /// [`nearest_term_checked`](Self::nearest_term_checked) (or call [`check_graph`](Self::check_graph)
     /// once after open) to make a mismatch a hard error.
@@ -1088,13 +1088,13 @@ impl DiskAnnIndex {
             .collect()
     }
 
-    /// [OPUS-4.8] (sq-32i5) The graph fingerprint this index was built against, or `None` for a
+    /// (sq-32i5) The graph fingerprint this index was built against, or `None` for a
     /// legacy version-1 file / an index built without a graph. See [`check_graph`](Self::check_graph).
     pub fn fingerprint(&self) -> Option<Fingerprint> {
         self.fingerprint
     }
 
-    /// [OPUS-4.8] (sq-32i5) **Checked open guard**: verifies this index was built against `graph`
+    /// (sq-32i5) **Checked open guard**: verifies this index was built against `graph`
     /// (and, since the index is queried alongside the store, that `store` matches it too) by
     /// recomputing `graph`'s fingerprint and comparing it to BOTH stored fingerprints. Returns a
     /// descriptive `Err` on any mismatch — the index and store are keyed by `graph`'s dictionary
@@ -1109,7 +1109,7 @@ impl DiskAnnIndex {
         store.check_graph(graph)
     }
 
-    /// [OPUS-4.8] (sq-32i5) [`nearest_term`](Self::nearest_term) with the staleness check: returns
+    /// (sq-32i5) [`nearest_term`](Self::nearest_term) with the staleness check: returns
     /// `Err` if this index or `store` was built against a different graph generation than `graph`
     /// (which would otherwise return silently-wrong neighbours), else `Ok` with the neighbours.
     pub fn nearest_term_checked(
@@ -1133,7 +1133,7 @@ pub fn sibling_graph_path(store_path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod fingerprint_tests {
-    // [OPUS-4.8] (sq-32i5) Checked-open tests for the `.spqg` on-disk index: build against graph A
+    // (sq-32i5) Checked-open tests for the `.spqg` on-disk index: build against graph A
     // then (1) query against A → OK + correct neighbours, (2) query against a DIFFERENT graph B →
     // descriptive Err, (3) fingerprint survives reopen, (4) a legacy version-1 `.spqg` opens (and
     // searches) but reports as unverifiable.
@@ -1232,7 +1232,7 @@ mod fingerprint_tests {
 
     #[test]
     fn v2_index_built_without_graph_binding_is_unverifiable_not_mismatch() {
-        // [OPUS-4.8] (sq-32i5) A v2 `.spqg` built WITHOUT a graph binding writes an all-zero
+        // (sq-32i5) A v2 `.spqg` built WITHOUT a graph binding writes an all-zero
         // fingerprint block; on reopen it must decode to `None` (reported as "unverifiable"),
         // NOT a zero fingerprint that would surface as a spurious "DIFFERENT graph" mismatch.
         let ga = graph(A);

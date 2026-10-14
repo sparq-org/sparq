@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-qcnn.13 — Direct unit tests for sparq-engine eval semantics.
+//! sq-qcnn.13 — Direct unit tests for sparq-engine eval semantics.
 //!
 //! Each module exercises a specific load-bearing invariant of the engine:
 //!
@@ -24,7 +24,7 @@
 //!   `with_dp_planner` yield byte-identical results to the greedy default.
 //!
 //! All tests assert EXACT VALUES (not just row counts / no-panic), so a semantic mutant
-//! that flips a comparison or drops a branch will turn them red. [OPUS-4.8]
+//! that flips a comparison or drops a branch will turn them red.
 
 use sparq_core::Graph;
 use sparq_engine::query;
@@ -383,7 +383,7 @@ mod filter_three_valued_logic {
 
 // ─── type_error_builtins (sq-qeltv) ───────────────────────────────────────────
 
-/// [FABLE-5] (sq-qeltv) SPARQL 1.1 §17.2 / §17.4.2: the type-test builtins
+/// (sq-qeltv) SPARQL 1.1 §17.2 / §17.4.2: the type-test builtins
 /// (`isIRI`/`isBlank`/`isLiteral`/`isNumeric`) over an UNBOUND argument are a TYPE
 /// ERROR (not `false`), and `STR()` is defined over literals + IRIs ONLY (a blank
 /// node is a type error, never an engine-internal label). Differential-verified:
@@ -1150,7 +1150,7 @@ mod numeric_raw_whitespace_consistency {
     }
 }
 
-/// [FABLE-5] (sq-74oy4 + sq-6b1lj) FAST-PATH ⟺ SLOW-PATH numeric agreement.
+/// (sq-74oy4 + sq-6b1lj) FAST-PATH ⟺ SLOW-PATH numeric agreement.
 ///
 /// The numeric cache / sargable FILTER / `JKey::Num` value-join FAST path and the exact
 /// general evaluator SLOW path (`values_equal`/`value_compare_strict` → `Num::of_literal`)

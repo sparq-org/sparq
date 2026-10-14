@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.40 — the LIB-SIDE single source of truth for the six W3C
+//! sq-oy1f.40 — the LIB-SIDE single source of truth for the six W3C
 //! JSON-LD 1.1 conformance-lane ratchet FLOORS (`toRdf`, `fromRdf`, `expand`,
 //! `compact`, `flatten`, `frame`).
 //!

@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.27 — direct crate-local tests for the document-level
+//! sq-oy1f.27 — direct crate-local tests for the document-level
 //! **Compaction Algorithm** + **Value Compaction** (`sparq_jsonld::compact`).
 //!
 //! The authoritative breadth oracle is the W3C `compact` conformance lane in

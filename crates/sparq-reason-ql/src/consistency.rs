@@ -1,4 +1,4 @@
-// [FABLE-5] sq-p6yb7 (epic sq-pbz04.3, design record research/owl2-ql-cq-gate-broadening.md §8):
+// sq-p6yb7 (epic sq-pbz04.3, design record research/owl2-ql-cq-gate-broadening.md §8):
 // DL-Lite_R KB consistency checking via VIOLATION-QUERY COMPOSITION. Opt-in `ql-consistency`
 // feature (OFF by default; pulls `experimental` for the PerfectRef machinery it reuses).
 //

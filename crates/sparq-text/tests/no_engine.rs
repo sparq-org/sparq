@@ -1,4 +1,4 @@
-//! Default-OFF (pure-index, `engine` feature OFF) feature-state test. [OPUS-4.8]
+//! Default-OFF (pure-index, `engine` feature OFF) feature-state test.
 //! (sq-bif.16)
 //!
 //! `sparq-text`'s defaults are `["engine", "parallel", "engine-builtins"]`, so the

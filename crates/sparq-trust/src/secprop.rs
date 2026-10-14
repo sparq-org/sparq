@@ -35,8 +35,8 @@
 //! what pulls the (zero-dependency) leaf crate in, so the lean default build is
 //! byte-unchanged — plain `const &str` data, no new dependency, strictly additive.
 //!
-//! [OPUS-4.8] sq-5oru9 (epic sq-0dksu; design PR #972); extracted to
-//! [`sparq_secprop_vocab`] by [OPUS-5] sq-3705. 🤖 SPARQ agent —
+//! sq-5oru9 (epic sq-0dksu; design PR #972); extracted to
+//! [`sparq_secprop_vocab`] by sq-3705. 🤖 SPARQ agent —
 //! security-properties ontology.
 
 pub use sparq_secprop_vocab::*;

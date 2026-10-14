@@ -1,5 +1,5 @@
 //! Correctness tests for the response-bytes result cache (feature `result-cache`,
-//! research/concurrent-serving.md §6.3). [OPUS-4.8] sq-jluc.
+//! research/concurrent-serving.md §6.3). sq-jluc.
 //!
 //! These exercise the REAL cache path — `lease`/`get`/`fulfill` against the real
 //! `PodEpochs` invalidation type — not a mock that bypasses the logic. The
@@ -183,7 +183,7 @@ fn same_scope_collapses_regardless_of_order() {
     assert_ne!(ScopeKey::unrestricted(), ScopeKey::empty());
 }
 
-/// [OPUS-4.8] (sq-bif) The `from_raw`/`as_u64` round-trip a consumer that maintains its
+/// (sq-bif) The `from_raw`/`as_u64` round-trip a consumer that maintains its
 /// OWN stable scope id relies on (the documented `from_raw` contract: equal scopes ⇒ equal
 /// value), AND that the cache enforces scope isolation when keyed on those raw scopes — the
 /// access-control boundary must hold no matter how the scope key was derived. A regression

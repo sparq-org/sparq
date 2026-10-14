@@ -90,6 +90,15 @@ pub use sparq_engine_service::service::with_service_egress_policy;
 // keeping a second, divergent copy of the allowlist-matching logic — one source of truth.
 #[cfg(feature = "service")]
 pub use sparq_engine_service::service::{allowlist_entry_host_matches, allowlist_entry_permits};
+// The SERVICE egress address classification and SRJ term decoder, shared with
+// `sparq-fedclient` so its guard and results reader cannot drift from the engine's.
+#[cfg(feature = "service")]
+pub use sparq_engine_service::service::{is_forbidden_ip, parse_srj_into, srj_term, RowSink};
+// The ureq-3 SSRF resolve (allowlist check, strict pre-DNS refusal, private-address filter),
+// shared with `sparq-fedclient`'s HTTP clients so there is one implementation of it.
+#[cfg(all(feature = "service", not(target_arch = "wasm32")))]
+#[doc(hidden)]
+pub use sparq_engine_service::service::{resolve_vetted, EgressRefusal};
 // Bind-join (VALUES pushdown) block-size knob — the only OPT-IN tunable for the
 // SERVICE bound-join pushdown (on-by-default, correctness-preserving). [OPUS-4.8] (sq-sjkj)
 #[cfg(feature = "service")]
@@ -154,8 +163,8 @@ pub use update::{
     apply_effects, data_update_effects, parse_update_rec2013, update, update_in_place,
     update_in_place_algebra_capturing, update_in_place_algebra_with_budget,
     update_in_place_atomic, update_in_place_atomic_with_budget,
-    update_in_place_capturing, update_in_place_with_budget, with_load_base, UpdateEffect,
-    WriteAuthorizer,
+    update_in_place_capturing, update_in_place_with_budget, where_update_effects, with_load_base,
+    UpdateEffect, WriteAuthorizer,
 };
 
 /// Test/measurement hooks for sideways information passing (SIP) — the correlated

@@ -23,7 +23,7 @@
 //! This test is gated on the `fedclient` feature; with the feature off the file compiles to
 //! nothing (the whole module is `#[cfg]`-empty), so the default build is unaffected.
 //!
-//! [OPUS-4.8] sq-j27p — flagged for Fable re-review when available.
+//! sq-j27p — flagged for Fable re-review when available.
 
 #![cfg(feature = "fedclient")]
 
@@ -63,7 +63,7 @@ fn var(s: &str) -> Term {
 
 /// Build a one-source descriptor declaring each predicate in `preds` (so `select_sources`
 /// retains the single source for every pattern). The stats only steer join *order*; the
-/// result-equivalence holds for any order. [OPUS-4.8] sq-j27p.
+/// result-equivalence holds for any order. sq-j27p.
 fn descriptor(preds: &[&str]) -> SourceDescriptor {
     let mut b = SourceDescriptor::builder(SourceId::new("S")).total_triples(1000);
     for p in preds {

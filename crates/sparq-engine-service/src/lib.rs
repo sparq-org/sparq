@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-6vshe.4) Internal SPARQL-1.1-federated-query (`SERVICE`) sub-crate of
+//! (sq-6vshe.4) Internal SPARQL-1.1-federated-query (`SERVICE`) sub-crate of
 //! `sparq-engine`.
 //!
 //! **Unstable-internal.** This crate is an implementation detail of `sparq-engine`
@@ -25,7 +25,7 @@
 //! (`HttpTransport`) is additionally `cfg(not(wasm32))`-gated, so it never enters a wasm
 //! bundle even if the feature were forced on for a wasm target.
 
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-6vshe.4: the SERVICE client carries zero `unsafe` (moved verbatim from sparq-engine, which forbids it crate-wide).
+#![forbid(unsafe_code)] // sq-6vshe.4: the SERVICE client carries zero `unsafe` (moved verbatim from sparq-engine, which forbids it crate-wide).
 
 // The entire SERVICE client is behind `service`, mirroring the gating this code had inside
 // `sparq-engine` (`#[cfg(feature = "service")] mod service;`). When the feature is off (the

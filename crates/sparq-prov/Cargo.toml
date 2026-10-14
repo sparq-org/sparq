@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-ntcg (CDMC CD-1): W3C PROV-O data-lineage capture for DERIVED data.
+# sq-ntcg (CDMC CD-1): W3C PROV-O data-lineage capture for DERIVED data.
 [package]
 name = "sparq-prov"
 version.workspace = true
@@ -17,14 +17,14 @@ publish = false
 # default build and the wasm artifact are byte-identical with or without it.
 # Consumers who don't need provenance never pull it. The capability is therefore
 # OFF BY DEFAULT at the dependency level — the leanest possible gating, with zero
-# core overhead when absent. [OPUS-4.8] sq-ntcg, branch feat-prov-lineage.
+# core overhead when absent. sq-ntcg, branch feat-prov-lineage.
 
-# [OPUS-4.8] sq-m3i0: the reasoner-materialization lineage bridge is itself a
+# sq-m3i0: the reasoner-materialization lineage bridge is itself a
 # *non-default* feature, so even consumers who pull sparq-prov for CONSTRUCT
 # lineage pay nothing (no sparq-reason dep) unless they ask for `reason`.
 [features]
 default = []
-# [GPT-5.6] sq-lsp7k.17: bounded missing-answer explanation for one BGP.
+# sq-lsp7k.17: bounded missing-answer explanation for one BGP.
 # The public surface and its direct spargebra dependency do not exist unless
 # explicitly requested.
 why-not = ["dep:spargebra"]
@@ -39,7 +39,7 @@ sparq-core = { path = "../sparq-core" }
 sparq-engine = { path = "../sparq-engine" }
 oxrdf = { workspace = true }
 # Prefix-compacted Turtle output for `Derivation` and `UpdateDerivation`.
-# [GPT-5.6] sq-ijw35: promoted from the test-only dependency below; no new crate.
+# sq-ijw35: promoted from the test-only dependency below; no new crate.
 oxttl = { workspace = true }
 # Parsed BGP algebra, only for the opt-in missing-answer explainer.
 spargebra = { workspace = true, optional = true }
@@ -49,5 +49,5 @@ spargebra = { workspace = true, optional = true }
 sparq-reason = { path = "../sparq-reason", features = ["explain"], optional = true }
 
 [dev-dependencies]
-# [GPT-5.6] sq-hggpo: generate derivation shapes for structural PROV-O properties.
+# sq-hggpo: generate derivation shapes for structural PROV-O properties.
 proptest = "1"

@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-hbg7 (CI coverage ratchet): host-side unit/integration tests for
+// sq-hbg7 (CI coverage ratchet): host-side unit/integration tests for
 // the PROVER-FREE surface of sparq-zk-compose — the Prover.toml emission
 // (`toml.rs`), the manifest accessors / serde (`manifest.rs`), and the driver's
 // error / path helpers (`driver.rs`). These run with NO `nargo`/`bb` toolchain on
@@ -100,7 +100,7 @@ fn filter_f64_prover_toml_renders_b_bits_not_bound() {
     assert!(toml.contains("digits = [\"52\", \"50\"]\n"));
 }
 
-// [OPUS-4.8] sq-7lrq: the composable SIGNED xsd:integer renderer must emit the
+// sq-7lrq: the composable SIGNED xsd:integer renderer must emit the
 // member `main`'s declaration order: challenge, operand_enc, op, bound_neg, bound,
 // expected, neg, mag_digits.
 #[test]
@@ -128,7 +128,7 @@ fn filter_signed_int_prover_toml_renders_sign_split_bound_and_neg_witness() {
     assert_eq!(toml, expected);
 }
 
-// [OPUS-4.8] sq-7lrq: the composable xsd:decimal renderer must emit the member
+// sq-7lrq: the composable xsd:decimal renderer must emit the member
 // `main`'s declaration order: challenge, operand_enc, op, bound_neg, bound_scaled,
 // expected, neg, int_digits, frac_digits.
 #[test]
@@ -220,7 +220,7 @@ fn canonical_digits_are_ascii_byte_codes() {
     }
 }
 
-// [OPUS-4.8] sq-fi03 / PR #178 / sq-r2s8: `prover_toml_for` is a public fn whose
+// sq-fi03 / PR #178 / sq-r2s8: `prover_toml_for` is a public fn whose
 // `join_eq` arm now emits a real witness — BUT only when the private `JoinWitness`
 // is supplied. A `JoinEq` input with NO `join_witness` must return a recoverable
 // `Err` (NOT panic via `unimplemented!`) so a downstream caller loading a manifest
@@ -276,7 +276,7 @@ fn prover_toml_for_filter_f64_uses_b_bits() {
     assert!(toml.contains("op = \"1\"\n"), "FilterOp::Le code is 1");
 }
 
-// [OPUS-4.8] sq-7lrq: `prover_toml_for`'s signed-int / decimal arms require the
+// sq-7lrq: `prover_toml_for`'s signed-int / decimal arms require the
 // private `FilterSignedWitness`; the END-TO-END host path (build_* -> prover_toml_for)
 // must render the right member + sign-split bound + private witness.
 #[test]
@@ -337,7 +337,7 @@ fn prover_toml_for_filter_signed_without_witness_returns_err_not_panic() {
     assert_eq!(res, Err(ProverTomlError::FilterSignedMissingWitness));
 }
 
-// [OPUS-4.8] sq-7lrq: derive_* must EXACT-match the compiled member family and
+// sq-7lrq: derive_* must EXACT-match the compiled member family and
 // return None (clean error) for out-of-family shapes — the sq-wto discipline.
 #[test]
 fn derive_filter_signed_int_id_exact_match_only() {
@@ -449,7 +449,7 @@ fn circuit_id_package_names_every_member_family() {
     assert_eq!(CircuitId::Scan { k: 2, n: 4, r: 1 }.package(), "scan_k2_n4_r1");
     assert_eq!(CircuitId::FilterInt { d: 1 }.package(), "filter_int_d1");
     assert_eq!(CircuitId::FilterF64 { d: 3 }.package(), "filter_f64_d3");
-    // [OPUS-4.8] sq-7lrq: signed-int / decimal package names.
+    // sq-7lrq: signed-int / decimal package names.
     assert_eq!(
         CircuitId::FilterSignedInt { md: 2 }.package(),
         "filter_signed_int_d2"
@@ -654,7 +654,7 @@ fn attested_status_ref_committed_index_serde_omits_clear_index() {
     assert_eq!(serde_json::from_str::<AttestedStatusRef>(&cjson).unwrap(), clear);
 }
 
-/// [OPUS-5] sq-kndw: the FULLY-HIDDEN reference serializes to the two commitments
+/// sq-kndw: the FULLY-HIDDEN reference serializes to the two commitments
 /// ONLY — no list IRI, no clear index, no version — on BOTH the attested and the
 /// disclosed side, and round-trips. This is the schema half of the mode's
 /// disclosure floor.

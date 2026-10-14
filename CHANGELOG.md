@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **sparq-reason:** `MaterializedN3Graph::with_limits` builds the incremental N3 graph under
+  a `ClosureLimits` (`new` uses the default). The counting path now sizes each builtin's
+  argument list and result before building it and charges a round and fact allowance; past
+  a limit the graph rebuilds through the batch engine, which refuses with
+  `"n3: forward closure limit exceeded …"`, so the graph fails closed instead of growing a
+  term every round. (#6937)
+- **sparq-reason:** `ClosureLimits::max_join_rows` is an opt-in allowance for the
+  transient work of one round of an N3 forward closure: the binding rows its premise joins
+  produce and the times its rules fire, counted together. The default is unbounded, so
+  every closure accepted before is still accepted; set a limit to opt in. The text engine,
+  the `compiled-rules` evaluator and the incremental counting engine of
+  `MaterializedN3Graph` charge each before it is stored; a round past a set allowance
+  returns `"n3: forward closure limit exceeded … max_join_rows …"` instead of building rows
+  that multiply with each unconstrained premise pattern. `ClosureLimits` is
+  `#[non_exhaustive]`, so the new field is additive. The `compiled-rules` evaluator's
+  first round of each stratum is now naive, as the text engine's is, instead of seeding
+  each join position with the whole store. (#6951)
+
+- **sparq-core:** `net::is_forbidden_ip` is the one outbound-address classifier behind the
+  SSRF guards of SERVICE, sparq-fedclient and the LWS federation client, which re-export it
+  under the names they had; its answers are unchanged (#6927).
+  `Graph::is_directory_backed()` reports whether a graph or any named graph under it is
+  opened from a directory; it is always `false` without the `mmap` feature (#6944).
+- **sparq-solid:** an ODRL permission attached to a pod document now grants per request
+  through `sparq_policy::decide`, for a target that exists and has a full static decision:
+  Read on `odrl:read` (#6941); Write when one policy permits `odrl:modify` and
+  `odrl:delete`, and Append on `odrl:append` or wherever Write is granted (#6942), each
+  from a rule that names the action, so an `odrl:use` permission still grants Read only.
+  Write and Append are never granted on a container or a referenced group document, and
+  apply only in an update made of `INSERT DATA`, `DELETE DATA` and `DELETE`/`INSERT …
+  WHERE`: attached policies grant data changes, not graph management (`CLEAR`, `DROP`,
+  `CREATE`, `LOAD`, `COPY`, `MOVE`), and `PodStore::decide_removal` (used by the MCP
+  `resource_delete` tool) ignores them. No permission grants a create or Control, and a
+  prohibition or an explicit deny still vetoes.
+- **Security-property vocabulary:** two ordered dimensions, `secx:AdversaryModel`
+  (Malicious ⊐ Covert ⊐ SemiHonest) and `secx:CorruptionThreshold` (DishonestMajority ⊐
+  HonestMajority ⊐ SuperHonestMajority), with ODRL leftOperands
+  `secx:requiresAdversaryModel` / `secx:requiresCorruptionThreshold` and their order chains
+  in the admissibility ruleset. sparq-mpc ships a per-protocol annotation graph behind the
+  default-off `secprop-annotations` feature. The change is additive, but the serialised
+  `sparq-secprop-vocab` registry, the ODRL profile Turtle and the admissibility ruleset text
+  gain the new facts, so anything that pins those outputs byte for byte will see them
+  (#6977).
+
 ### Changed
 
 - **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
@@ -19,12 +65,232 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trees can still vary with traversal order. Ranking each round's existential firings adds a
   small per-firing cost to rules with existential conclusions (#6843). (#6749)
 
+- **sparq-reason (N3):** matching a quoted-formula pattern against a quoted-formula value
+  now has a step budget for its backtracking over statement pairings. A match that never
+  backtracks is not limited; past the budget the formula does not match and the run
+  records a cut (`formula unification exhausted its step budget`), so a negation or
+  aggregation in that run is refused. (#6953)
+- **sparq-engine / sparq-fedclient:** SERVICE and federation requests no longer use proxy
+  environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) and have no proxy support,
+  so the address the egress resolver vets is always the address that is dialled.
+- **sparq-reason (N3):** a run already refused by a `ClosureLimits` limit no longer reports
+  a negation or aggregation evaluated after the refusal ("refused a negation or aggregation
+  … over an incomplete set"); it fails with the refusal itself, which names the limit
+  (for example `… over max_term_bytes (…)`). Both are refusals: only the error text
+  changes. (#6951)
+- **sparq-reason (N3):** formula-level `@forAll` declarations keep their own scope,
+  including nested and sibling quoted formulas. Naive, compiled and incremental engines
+  reject `@forAll` in a rule's own premise or a scoped body pattern with a specific error;
+  a `log:forAllIn` / `log:collectAllIn` clause or a `log:includes` / `log:notIncludes`
+  pattern bound through a variable is checked when it is evaluated and fails the run the
+  same way. Templates and other quoted values keep their own universals at any nesting
+  depth. A document parsed by `log:parsedAsN3` / `log:semantics` declares its top-level
+  `@forAll` in the resulting formula, the same term as the inline `{ @forAll … }`.
+  Quoted formula terms retain identity matching, conclusion universals keep their own
+  scope, and closure-introduced universals are restored in the result formula.
+  Document-level `@forAll` is unchanged. Exact writers place each formula-level
+  declaration inside its formula. (#6851)
+- **Breaking (sparq-reason, `compiled-rules` feature):** `n3::compiled::eval` and
+  `BoundRuleSet::eval` now return `Result<Vec<[Id; 3]>, String>` and run under the default
+  `ClosureLimits`; new `n3::compiled::eval_with_limits` and `BoundRuleSet::eval_with_limits`
+  take a `ClosureLimits`. A compiled closure past its round, fact or term-size allowance
+  returns `Err("n3: forward closure limit exceeded …")` instead of running until memory
+  runs out. (#6934)
+- **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
+  16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
+  outside the crate. Start from the default and set fields:
+  `let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`. A forward N3 closure
+  whose rules would build a term past the limit (a string or list that doubles each round)
+  now returns `Err("n3: forward closure limit exceeded …")` instead of aborting on a failed
+  allocation. (#6833)
+- **Breaking (sparq-fedclient):** pushed-down `VALUES` cells, `ORDER BY` keys and filter
+  conjuncts are typed and checked instead of inserted as text. `render_values_block` takes
+  `&[Vec<Term>]` and returns `Result<String, RenderError>`, rendering each cell with the
+  strict term renderer; `RenderError` has a new `Values` variant; `push_group` takes
+  `&[OrderKey]` (`OrderKey::asc("x")`, `OrderKey::desc("x")`) and returns `None` for an
+  invalid key. A filter conjunct is pushed only when its text parses as exactly one SPARQL
+  expression over its declared variables, with no `EXISTS` and no `\u`/`\U` escape;
+  otherwise it is evaluated locally. A group with any local conjunct projects all its
+  variables and is sent without its `LIMIT`, so local evaluation sees every row it needs.
+  (#6949)
+- **sparq-reason (N3):** the blank nodes of a document parsed at run time
+  (`log:parsedAsN3`, `log:semantics`) are standardized apart as `__rp{k}_{key}_<label>`,
+  where the key is derived from the document's text and base with SHA-256. Before, every
+  such document's `_:a` was one node, shared with the rules document's `_:a`. The label is
+  the same on every build, in a materialization and in `why()`, and for a
+  `MaterializedN3Graph`'s whole life; re-reasoning exported output is a fixed point. A
+  text that spells a graph's caller prefix (`__bs{k}_`) is no longer refused. A run or graph
+  keeps at most 100,000 distinct runtime documents; one more fails the run. Documents with
+  no runtime parse evaluate as before. (#6867)
+- **sparq-solid:** a multi-operation update that includes a `DELETE`/`INSERT … WHERE` with a
+  `GRAPH ?var` target now runs, all-or-nothing, on a store with no directory behind it: each
+  operation is authorized against what it writes, and one unwritable target refuses the
+  whole request. A directory-backed store still refuses such a request, and its error names
+  the reason. `CLEAR NAMED`/`DROP NAMED` now also needs Write on graphs that earlier
+  operations of the same request wrote or created. (#6944)
+- **SERVICE:** both results readers build terms with one shared literal and triple-term
+  builder. An SRX triple term missing its subject or predicate reports `triple term without
+  subject` / `predicate`, as SRJ does, and an invalid one is printed with `Display`. A
+  `<binding>` whose `<variable>` is declared only after the results have started is
+  ignored. (#6905)
+- **Dependencies:** sparq-fedclient drops its unused direct `serde` dependency and
+  serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
+
 ### Fixed
 
 - **sparq-reason (N3):** a rule whose existential conclusion contains a quoted formula with
   variables (e.g. `{ ?x :p :v } => { _:e :q { ?x :r :v } }`) now fires once per distinct
   binding of those variables. Before, it could fire only once and drop the other bindings'
   conclusions, so such closures can now be larger and may reach closure limits sooner. (#6749)
+
+- **sparq-policy:** `contains` and `detect_conflicts` now prove containment and certain
+  overlap through `odrl:and` / `odrl:or` / `odrl:xone` compound constraints where the
+  runtime semantics decide it, instead of always answering `Unknown` / `Possible`; they
+  still never report `Contains` or `Certain` a compound cannot prove (#6985).
+- **sparq-solid:** blank nodes in ACL/ACR documents are skolemized on the document's IRI
+  instead of its position, so writing or deleting one document no longer renumbers another
+  document's skolem IRIs and clears the authorization cache (#6960).
+- **sparq-reason (N3):** `ClosureLimits::max_term_bytes` now also covers numeric builtin
+  results, forward and reverse, which are sized from their value before the literal is
+  rendered (#6929), and the parse behind `log:parsedAsN3` and `log:semantics`, which is
+  charged as it builds terms, so a short source whose prefixes or copied terms expand is
+  refused before the expanded formula is built (#6894). The document's own parse stays
+  uncharged.
+- **sparq-engine:** a `SELECT` whose deadline passes or that is cancelled while its result
+  terms are materialised returns the budget error instead of a complete, late result. This
+  covers `query`, `query_with_budget`, the `WHERE` step of `CONSTRUCT`/`DESCRIBE` and
+  `EXPLAIN ANALYZE`. (#6946)
+- **SERVICE (results XML):** elements and attributes are matched by namespace as well as
+  local name, so an element in another namespace or with an undeclared prefix is ignored and
+  can no longer stand in for a result, binding or term, or cut a literal short (#6932);
+  `its:dir` sets a literal's direction only when `its` is declared as the ITS namespace
+  (#6935); triple terms nested more than 61 deep are refused, the depth SRJ admits (#6916).
+- **sparq-zk:** `ZkDataset::query_traced` refuses a query with a `FROM` or `FROM NAMED`
+  clause, with the verifier's reason, instead of returning an empty trace. (#6950)
+- **sparq-solid:** a graph named by a bare `scheme://` (for example `<https://>`) is no
+  longer seeded as the container of every pod root, so its `.acl`/`.acr` no longer take part
+  in their inheritance. (#6939)
+- **LWS:** extension link relations compare case-insensitively wherever they are stored,
+  matched or searched, as RFC 8288 requires (#6899); the storage owner is notified of a
+  Delete whose prior state cannot be read, and every other non-open subscriber is still
+  refused (#6912); a listing has no `Last-Modified` when the container's or any member's
+  time is unknown, a member of unknown time lists no `modified`, and a linkset's `self`
+  entry omits `modified` instead of dating it the epoch (#6919, #6924); while a journaled
+  change is being put back, requests and subscription topic checks are decided on the
+  resource as it was before the change, so a caller only the change would admit gets `403`
+  at once instead of `503` (#6925).
+
+## [0.1.6] - 2026-10-13
+
+First release with the `sparq-rdf` PyPI wheels (the v0.1.5 wheel builds failed; npm 0.1.5
+packages were published). Publication is not implied by this entry; verify the tagged run
+and every registry and release artifact.
+
+The entries for #6869 and #6897 were added after the v0.1.6 release commit (`66bebdb3`).
+Both changes are in that commit, but its copy of this file does not list them.
+
+### Added
+
+- **sparq-lws-core:** the type index and `QUERY` type search, paged, listed in the storage
+  description. Experimental. (#6650)
+- **sparq-lws-core:** the token endpoint accepts OpenID Connect ID tokens, with DPoP proofs
+  for bound ones. (#6721)
+- **LWS authentication suites as packages:** `sparq-lws-authn` defines the suite interface;
+  `sparq-lws-authn-saml` adds SAML 2.0 subject tokens, `sparq-lws-authn-openid` holds the
+  OpenID Connect suite and `sparq-lws-authn-ssi` the did:key and controlled identifier
+  suites. A deployment chooses which suites the token endpoint offers. Experimental, not
+  published to crates.io. (#6819, #6820, #6821)
+- **CI:** hosted previews of the site, specs and papers for pull requests that change them.
+  (#6818)
+- **Research prototypes** (proof-methods/, not part of the shipped runtime): a Noir opening
+  written with field-constraint rotations and additions (#6815), and tamper checks for both
+  Noir openings plus a gate-count script (#6816).
+
+- **sparq-e2ee-ng:** `PublicGrant::check_epoch` enforces a grant's signed `max_epoch`
+  ceiling. (#6853)
+- **Research prototypes** (zk/, not part of the shipped runtime): one variable-length BLAKE3
+  opening for the 64-bit integer result circuits (#6829).
+
+### Changed
+
+- **LWS token endpoint:** a SAML 2.0 subject token is refused unless the assertion's
+  `NameID` is an http(s) URL. Every subject token's expiry is checked again just before an
+  access token is issued, still with the clock-skew allowance, so a token that expires while
+  its documents are fetched is refused. (#6819, #6821)
+- **sparq-trust (status lists):** `decode_encoded_list` now rejects a `u` (base64url) body
+  whose length is ≡ 1 mod 4 even when the leftover bits are zero (for example `ugAAAA`);
+  such a body has no byte-string meaning, and every other non-canonical form was already
+  refused. A list published by a conforming encoder is unaffected. (#6873)
+- **Breaking (sparq-fedclient):** pushed-down SPARQL renders every pattern position strictly as
+  one SPARQL term. `lower_leaf` now returns `Result<SubQuery, RenderError>`, the interpreters
+  report `InterpError::Render`, and `push_group` returns `None` for a pattern holding a
+  variable name that is not a SPARQL `VARNAME`, an IRI with a character `IRIREF` forbids, or a
+  `"`-prefixed literal that is not exactly one SPARQL literal. Pre-rendered literals are
+  re-serialised with canonical escaping. (#6877)
+- **Breaking (sparq-e2ee-ng):** `encode_secret` returns `Zeroizing<Vec<u8>>`, built in one
+  buffer that is wiped on drop (#6862). `Commit::decode` refuses a parent set that is not
+  sorted and duplicate-free, and `Commit::encode` writes it that way (#6845).
+- **Breaking (sparq-lws-core):** `parse_links` returns an iterator of `Link` values parsed on
+  demand, so the header caps bound the parsing work (#6839). The notification sender takes a
+  `Prepared` batch; `Notifier::dropped()` counts only notifications that were owed, and
+  subscriptions past the delivery bound are counted by `Notifier::unprepared()` (#6841).
+- **sparq-reason:** deleting from a materialized graph with an RDFS meta schema runs an
+  incremental DRed delete instead of rebuilding the closure. (#6842)
+- **sparq-solid:** a rules-free `DELETE`/`INSERT … WHERE` update commits without forking the
+  store. (#6830)
+- **SERVICE and sparq-fedclient** share one SPARQL results decoder and SRJ driver, one SSRF
+  resolver, and one pattern and N-Triples term renderer; sparq-fedclient parses federation
+  results with the engine's streaming SRJ reader. (#6840, #6872, #6879, #6884, #6895, #6896,
+  #6898)
+- **sparq-core:** shared hex, percent, JSON-string, civil-date, base58btc and base64url codecs
+  replace per-crate copies. (#6850, #6864, #6866, #6868, #6873)
+- **sparq-shacl:** one JS report renderer replaces the two wasm copies, with public
+  `to_js_json` and `message_text` helpers on the report. (#6856)
+- **CI:** zk-native-composition also runs when `supply-chain/config.toml` changes (#6861); the
+  LWS.NET suite's own 57 test definitions run as a ratchet (#6831).
+
+### Fixed
+
+- **Release pipeline:** release files are staged in an empty `release-assets/` directory.
+  v0.1.5 published the repository's `assets/logo.svg` as an extra asset with no provenance;
+  every other v0.1.5 asset is covered by the isolated-builder bundles. (#6812)
+- **Publish pipeline:** the `sparq-rdf` wheel build no longer passes `--release` with
+  `--profile`, which current maturin rejects, and the npm provenance checks wait for the
+  registry to serve the new version. (#6817)
+- **sparq-solid / sparq-prov (date stamps):** epoch seconds before 0000-03-01 now format to the
+  correct proleptic-Gregorian date. The previous conversion was one day late there (and could
+  emit 29 February in a non-leap year); the only dates it already got right were
+  29 February of years divisible by 400. For such instants a trust-graph grant's
+  `auth:notAfter` and its deterministic grant IRI change (for example `-62167219200` now formats
+  as `0000-01-01`, not `0000-01-02`), and years -1 to -999 are now written with four digits
+  after the sign (`-0001`, not `-001`), as XSD requires. Instants from 0000-03-01 onwards are
+  unchanged; signature inputs and PROV IRIs are unaffected. (#6864)
+- **SSRF:** the egress classifier shared by SERVICE, sparq-fedclient and the LWS federation
+  client refuses every non-global address range. (#6852, #6870)
+- **LWS:** SAML subject confirmations are alternatives, as SAML Core defines them: one
+  satisfied bearer confirmation confirms the assertion (#6827); the server checks authorization before revealing set-aside or lock state
+  (#6848); a store write that times out is treated as having an unknown outcome (#6860); the
+  server binary forbids unsafe code (#6876).
+- **sparq-mpc:** federated plans fail closed when a participant has no privacy policy. (#6825)
+- **JavaScript:** the remaining RDF and SPARQL text builders validate interpolated terms
+  against the grammar. (#6826)
+- **sparq-reason:** the N3 nesting limit fits a 2 MiB thread stack, so deeply nested input is
+  refused instead of overflowing the stack. (#6835)
+- **sparq-reason:** base-graph blank nodes stay distinct from blank labels the N3 parser
+  allocates. (#6779)
+- **sparq-reason:** the N3 evaluator bounds its stack use on untrusted input. Under the default
+  policy, terms built past 128 levels are dropped as cuts, nested closures and proof steps
+  share one stack allowance per run, and a run with cuts refuses a later negation or
+  aggregation instead of reading missing facts. (#6869)
+- **sparq-fedclient:** the ASK reachability probe keeps an endpoint's existing query string
+  and replaces only its `query` parameter. (#6897)
+- **LWS:** a type-search filter too long to page is refused as too complex (422). (#6889)
+- **sparq-shacl:** `LATERAL` blocks are covered by the SHACL-SPARQL pre-binding checks and the
+  `VALUES` push-down. (#6846)
+- **JSON-LD conformance:** the oracles compare arrays inside `@json` literals in order. (#6857)
+- **CI:** the scheduled and full-sweep runs are green again (#6824, #6837), and the nightly
+  visual sweep builds its inputs first and pushes re-minted baselines to a review branch
+  (#6858, #6887, #6890, #6892, #6893).
 
 ## [0.1.5] - 2026-10-10
 
@@ -759,7 +1025,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/sparq-org/sparq/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sparq-org/sparq/compare/v0.1.2...v0.1.3

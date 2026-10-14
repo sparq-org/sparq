@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-h3uk — bridge the `sparq-policy` ODRL evaluator into the
+//! sq-h3uk — bridge the `sparq-policy` ODRL evaluator into the
 //! `<urn:sparq:auth>` AUTH_GRAPH so the existing graph-level WAC/ACP enforcement
 //! applies a matched ODRL [`Permission`](sparq_policy::Rule).
 //!
@@ -50,14 +50,14 @@
 //!
 //! The `odrl:use` umbrella is intentionally **not** mapped to a write/control mode:
 //! `use` subsumes its sub-actions in the ODRL hierarchy (`read`/`write`/`modify`/… —
-//! everything except the disjoint `transfer` ownership subtree, [OPUS-4.8] sq-euhr3),
+//! everything except the disjoint `transfer` ownership subtree, sq-euhr3),
 //! so materializing it as a single WAC mode would have to pick the widest, violating
 //! fail-closed. A caller that wants `use → Read` should request `odrl:read` explicitly
 //! (a `use` permission in the policy still *grants* a `read` request — `odrl:use`
 //! permits its sub-actions in the evaluator — so the bridge maps the **request**
 //! action, which is concrete).
 //!
-//! ## SPARQL-query profile decision — [SONNET-4.6] sq-lrtc3.2
+//! ## SPARQL-query profile decision — sq-lrtc3.2
 //!
 //! A SPARQL query is represented by the standard `odrl:read` action; sparq does
 //! **not** mint a profile-specific query action IRI. Query execution observes graph
@@ -73,7 +73,7 @@
 //! narrow an ambiguous request and could grant the wrong capability. Callers must
 //! present SPARQL query requests as `odrl:read`.
 //!
-//! # Prohibitions → `auth:deny<Mode>` (deny-overrides) — [OPUS-4.8] sq-w693
+//! # Prohibitions → `auth:deny<Mode>` (deny-overrides) — sq-w693
 //!
 //! A matched ODRL **Prohibition** is the dual of a Permit: it carves an action out
 //! of access. [`materialize_prohibition`] materializes it as the explicit
@@ -100,7 +100,7 @@
 //! a permission and a prohibition on the same principal+target+mode emits both triples,
 //! and the deny **wins** at enforcement time.
 //!
-//! # Deny RETRACTION on prohibition withdrawal — [OPUS-4.8] sq-2pcf
+//! # Deny RETRACTION on prohibition withdrawal — sq-2pcf
 //!
 //! The sq-dpk4 [`BridgeLedger`] replays each tracked materialization on
 //! [`refresh`](BridgeLedger::refresh), dropping the ones that no longer hold. For an
@@ -150,7 +150,7 @@ use sparq_reason::NegationCycles;
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
-/// [OPUS-5] Stratum A0 — the operand/combinator-arity guard whose `odrlx:shape
+/// Stratum A0 — the operand/combinator-arity guard whose `odrlx:shape
 /// odrlx:Ambiguous` marks stratum A's and C's satisfaction rules negate. See
 /// `rules/odrl-a0.n3` for why the satisfaction rules cannot be sound without it.
 const ODRL_A0: &str = include_str!("../rules/odrl-a0.n3");
@@ -163,7 +163,7 @@ const ODRL_D: &str = include_str!("../rules/odrl-d.n3");
 /// the id-level compiled IR, once per process — the same `OnceLock` shape
 /// `crate::materialize`'s `wac_rules`/`acp_rules` use after sq-zgbso.4.
 ///
-/// [SONNET-4.6] sq-zgbso.5: compilation is deterministic over `const` rule text, so the
+/// sq-zgbso.5: compilation is deterministic over `const` rule text, so the
 /// result is cached verbatim — including a failure, which is returned as an ordinary
 /// `Err` (a rule leaving the compiled subset must surface as a materialize error and a
 /// refusal, never a panic and never a silently empty auth view).
@@ -239,7 +239,7 @@ fn mode_predicate(mode: Mode) -> &'static str {
 /// SAME predicate [`crate::AuthIndex`] parses into its deny map
 /// (`auth:denyRead|denyWrite|denyAppend|denyControl`), so a materialized deny is
 /// subtracted from the allow set by the existing `∪ allow ∖ ∪ deny` enforcement.
-/// [OPUS-4.8] sq-w693.
+/// sq-w693.
 fn deny_predicate(mode: Mode) -> &'static str {
     match mode {
         Mode::Read => "denyRead",
@@ -253,7 +253,7 @@ fn deny_predicate(mode: Mode) -> &'static str {
 ///
 /// [`materialize_permission`] sets the `granted` / `grant_triple` fields;
 /// [`materialize_prohibition`] sets the `prohibited` / `deny_triple` fields
-/// ([OPUS-4.8] sq-w693); [`materialize_policy`] may set both at once (a policy with a
+/// (sq-w693); [`materialize_policy`] may set both at once (a policy with a
 /// permission AND a prohibition for the request — the deny wins at enforcement time).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BridgeOutcome {
@@ -261,7 +261,7 @@ pub struct BridgeOutcome {
     /// `false` ⇒ no allow triple was written to the AUTH_GRAPH (fail-closed).
     pub granted: bool,
     /// Whether a matched Prohibition produced a DENY. `false` ⇒ no `auth:deny*`
-    /// triple was written (fail-closed). [OPUS-4.8] sq-w693.
+    /// triple was written (fail-closed). sq-w693.
     pub prohibited: bool,
     /// On a grant: the WAC/ACP mode the matched ODRL action mapped to. On a deny:
     /// the mode the prohibited action mapped to (`deny_triple`'s mode).
@@ -270,20 +270,20 @@ pub struct BridgeOutcome {
     /// `(principal_iri, mode_predicate_iri, graph_iri)`, for audit/justification.
     pub grant_triple: Option<(String, String, String)>,
     /// On a deny: the materialized `principal auth:deny<Mode> graph` triple, as
-    /// `(principal_iri, deny_predicate_iri, graph_iri)`. [OPUS-4.8] sq-w693.
+    /// `(principal_iri, deny_predicate_iri, graph_iri)`. sq-w693.
     pub deny_triple: Option<(String, String, String)>,
     /// Whether the whole policy was **REFUSED** as unimplementable — the bridge cannot
     /// faithfully honour its declared `odrl:conflict` strategy, so it materialised
     /// NOTHING (no grant, no deny). Distinct from a plain deny (`granted == false`): a
     /// refusal is a loud, fail-closed rejection of the policy itself, not a rule that
     /// simply did not match. The reason is in [`reasons`](BridgeOutcome::reasons). See
-    /// [`sparq_policy::conflict_admissibility`]. [OPUS-4.8] sq-ihqbl.
+    /// [`sparq_policy::conflict_admissibility`]. sq-ihqbl.
     pub refused: bool,
     /// Human-readable reason a grant/deny was NOT materialized (the ODRL decision's
     /// caveats, an unmapped action, a missing party/target, or a policy-level refusal).
     /// Empty on success.
     pub reasons: Vec<String>,
-    /// On a STATEFUL `odrl:count` grant ([OPUS-4.8] sq-58mh, via
+    /// On a STATEFUL `odrl:count` grant (sq-58mh, via
     /// [`crate::PodStore::materialize_odrl_permission_counted`]): the new consumed count
     /// (`1..=limit`) after this exercise atomically consumed one unit of budget. `None`
     /// for an uncounted permission, any non-counted bridge path, or a deny.
@@ -292,7 +292,7 @@ pub struct BridgeOutcome {
     /// The exact auth-view triples this call materialized (allow grant, deny, and/or
     /// the conditional-grant head triples), for the bridge ledger to track so a later
     /// refresh can retract precisely these. Empty when nothing was materialized.
-    /// [OPUS-4.8] sq-dpk4.
+    /// sq-dpk4.
     pub(crate) emitted: Vec<[Term; 3]>,
 }
 
@@ -302,7 +302,7 @@ impl BridgeOutcome {
     }
 
     /// A loud, fail-closed **refusal**: the policy's `odrl:conflict` strategy is one the
-    /// bridge cannot faithfully honour, so nothing is materialised. [OPUS-4.8] sq-ihqbl.
+    /// bridge cannot faithfully honour, so nothing is materialised. sq-ihqbl.
     fn refused(reason: String) -> BridgeOutcome {
         BridgeOutcome { refused: true, reasons: vec![reason], ..BridgeOutcome::default() }
     }
@@ -312,7 +312,7 @@ impl BridgeOutcome {
 /// conflict-resolution strategy is one the bridge cannot faithfully honour — the guard
 /// every materialise entry point runs FIRST. Returns `Some(refusal outcome)` to
 /// short-circuit (materialising nothing), or `None` when the strategy is admissible
-/// (deny-overrides — the one strategy the bridge implements). [OPUS-4.8] sq-ihqbl.
+/// (deny-overrides — the one strategy the bridge implements). sq-ihqbl.
 ///
 /// Silently coercing an unimplementable strategy (e.g. `odrl:perm`) into the bridge's
 /// deny-overrides would mis-apply the policy author's intent — an authorization-
@@ -387,7 +387,7 @@ pub fn materialize_permission(
     request: &Request,
 ) -> BridgeOutcome {
     // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy BEFORE evaluating —
-    //    a policy the bridge cannot faithfully honour materialises nothing. [OPUS-4.8] sq-ihqbl.
+    //    a policy the bridge cannot faithfully honour materialises nothing. sq-ihqbl.
     if let Some(refusal) = refuse_unimplementable_conflict(policy) {
         return refusal;
     }
@@ -475,7 +475,7 @@ fn allow_binding(permit: &Permit) -> Result<(Mode, &str, &str), Vec<String>> {
 /// matches (carves the request out — action permits + target/assignee agree +
 /// constraints satisfied) for a mappable action with a concrete party + target,
 /// materialize the equivalent `principal auth:deny<Mode> graph` DENY triple into the
-/// dataset's `<urn:sparq:auth>` view. [OPUS-4.8] sq-w693.
+/// dataset's `<urn:sparq:auth>` view. sq-w693.
 ///
 /// The deny is **appended** to the current auth view (any grants/denies already there
 /// are preserved). Because the session layer computes `∪ allow ∖ ∪ deny`
@@ -536,7 +536,7 @@ pub fn materialize_prohibition(
 ) -> BridgeOutcome {
     // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy first — under an
     //    unimplementable strategy we trust NONE of the policy's rules, not even a deny
-    //    (e.g. `odrl:perm` means the PERMISSION should win). [OPUS-4.8] sq-ihqbl.
+    //    (e.g. `odrl:perm` means the PERMISSION should win). sq-ihqbl.
     if let Some(refusal) = refuse_unimplementable_conflict(policy) {
         return refusal;
     }
@@ -630,7 +630,7 @@ pub(crate) fn materialize_policy_for_each(
 /// Materialize **both** sides of `policy` for `request`: the Permit allow grant (via
 /// [`materialize_permission`]) AND the matched-Prohibition deny (via
 /// [`materialize_prohibition`]), composing them into one [`BridgeOutcome`].
-/// [OPUS-4.8] sq-w693.
+/// sq-w693.
 ///
 /// A policy carrying both a permission and a prohibition for the same
 /// principal+target+mode materializes **both** triples. The deny **wins** at
@@ -647,7 +647,7 @@ pub(crate) fn materialize_policy_for_each(
 /// materialize.
 pub fn materialize_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: &Request) -> BridgeOutcome {
     // Fail-closed FIRST on an unimplementable odrl:conflict strategy — materialise
-    // nothing (neither side), rather than silently apply deny-overrides. [OPUS-4.8] sq-ihqbl.
+    // nothing (neither side), rather than silently apply deny-overrides. sq-ihqbl.
     if let Some(refusal) = refuse_unimplementable_conflict(policy) {
         return refusal;
     }
@@ -679,7 +679,7 @@ pub fn materialize_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: 
 /// **mirror it into the bridged-provenance graph** ([`AUTH_BRIDGED_GRAPH`]) so the
 /// triple is structurally marked as bridged (vs static) — see [`mirror_bridged`].
 /// Returns the emitted triple so the caller can record it in its bridge ledger
-/// ([OPUS-4.8] sq-dpk4). Idempotent: an identical grant is not duplicated.
+/// (sq-dpk4). Idempotent: an identical grant is not duplicated.
 fn append_deny(graph: &mut Graph, party: &str, mode: Mode, target: &str) -> (String, [Term; 3]) {
     let pred = format!("{AUTH_NS}{}", deny_predicate(mode));
     let triple = triple_of(party, &pred, target);
@@ -699,7 +699,7 @@ fn triple_of(subject: &str, predicate: &str, object: &str) -> [Term; 3] {
 /// `<urn:sparq:auth-bridged>` provenance graph, preserving existing triples in each
 /// and skipping duplicates (idempotent). Mirroring into the provenance graph is what
 /// lets a later refresh/static-re-materialization tell bridged triples apart from
-/// static WAC/ACP grants without ever inspecting predicate shape. [OPUS-4.8] sq-dpk4.
+/// static WAC/ACP grants without ever inspecting predicate shape. sq-dpk4.
 fn append_bridged_triples(graph: &mut Graph, new_triples: &[[Term; 3]]) {
     extend_named_graph(graph, AUTH_GRAPH, new_triples);
     extend_named_graph(graph, AUTH_BRIDGED_GRAPH, new_triples);
@@ -793,7 +793,7 @@ fn named_graph_triples(graph: &Graph, name: &str) -> Vec<[Term; 3]> {
 }
 
 // ============================================================================
-// [OPUS-4.8] sq-hiz4 — persist a FAITHFULLY-mappable ODRL constraint as an ACP
+// sq-hiz4 — persist a FAITHFULLY-mappable ODRL constraint as an ACP
 // re-checked condition (`auth:ConditionalGrant`) instead of freezing it into a
 // one-shot materialization-time allow.
 // ============================================================================
@@ -811,7 +811,7 @@ fn mode_iri(mode: Mode) -> &'static str {
 
 
 /// A faithfully-mappable `odrl:dateTime` validity window persisted onto an
-/// `auth:ConditionalGrant` as live-clock bounds. [OPUS-4.8] sq-0q7n.
+/// `auth:ConditionalGrant` as live-clock bounds. sq-0q7n.
 ///
 /// Both bounds are `xsd:dateTime` lexical strings (the constraint's right-operand,
 /// verbatim) and **inclusive**, matching [`crate::AuthIndex`]'s `window_admits`:
@@ -884,7 +884,7 @@ pub fn materialize_prohibition_conditional(
     policy: &ValidatedPolicy,
     request: &Request,
 ) -> BridgeOutcome {
-    // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy first. [OPUS-4.8] sq-ihqbl.
+    // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy first. sq-ihqbl.
     if let Some(refusal) = refuse_unimplementable_conflict(policy) {
         return refusal;
     }
@@ -956,7 +956,7 @@ fn rule_action_target_match(rule: &Rule, request: &Request, _mode: Mode, target:
 }
 
 /// The deontic force of a materialized `auth:ConditionalGrant` — selects the
-/// `auth:effect` object emitted by [`append_conditional_grants`]. [OPUS-4.8] sq-4r70.
+/// `auth:effect` object emitted by [`append_conditional_grants`]. sq-4r70.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GrantEffect {
     /// A conditional **deny** (`auth:effect auth:Deny`) — the dual: the matched
@@ -978,10 +978,10 @@ impl GrantEffect {
 /// head onto BOTH the `<urn:sparq:auth>` view and the bridged-provenance graph,
 /// preserving existing triples. Returns the `(agent, auth:effect, graph)` audit anchor
 /// of the first grant AND the full set of emitted head triples (for the bridge ledger).
-/// [OPUS-4.8] sq-dpk4 / sq-4r70.
+/// sq-dpk4 / sq-4r70.
 ///
 /// `excepts` are the principals carved OUT (the `recipient neq X` / "everyone-except"
-/// shape — [OPUS-4.8] sq-5037). Each becomes an ACP `noneOf` exception: the grant gets
+/// shape — sq-5037). Each becomes an ACP `noneOf` exception: the grant gets
 /// an `auth:exceptMatcher <m>` and the matcher `<m>` is materialized with the accept-set
 /// facts the session layer reads (`solidx:acceptsAgentP <X>` + `solidx:acceptsClientP
 /// auth:AnyClient`). [`crate::AuthIndex::cond_applies`] then suppresses the grant for any
@@ -989,7 +989,7 @@ impl GrantEffect {
 /// every other session keeps the grant. This is EXACTLY the shape the WAC/ACP `noneOf`
 /// rules (`rules/acp-c.n3`) emit, re-checked by the same code path.
 ///
-/// `effect` selects the deontic force ([OPUS-4.8] sq-4r70): [`GrantEffect::Allow`]
+/// `effect` selects the deontic force (sq-4r70): [`GrantEffect::Allow`]
 /// emits `auth:effect auth:Allow` (the conditional grant); [`GrantEffect::Deny`] emits
 /// `auth:effect auth:Deny` (the conditional deny — the dual). A conditional deny is
 /// honoured by the SAME [`crate::AuthIndex::accessible`] path: a matching deny condition
@@ -1014,7 +1014,7 @@ fn append_conditional_grants(
     let agent_p = NamedNode::new_unchecked(format!("{AUTH_NS}agent"));
     let client_p = NamedNode::new_unchecked(format!("{AUTH_NS}client"));
     let any_client = NamedNode::new_unchecked(crate::authindex::ANY_CLIENT);
-    // [OPUS-4.8] sq-3jtd.6: a bridged grant carries no issuer constraint, so it spans the
+    // sq-3jtd.6: a bridged grant carries no issuer constraint, so it spans the
     // issuer-dimension top — exactly as it spans the client top. The head MUST state this
     // explicitly: the session layer treats a conditional grant whose `auth:issuer` head is
     // absent as fail-closed (it never applies), matching the `auth:client` convention.
@@ -1028,7 +1028,7 @@ fn append_conditional_grants(
     let accepts_agent_p = NamedNode::new_unchecked(format!("{SOLIDX_NS}acceptsAgentP"));
     let accepts_client_p = NamedNode::new_unchecked(format!("{SOLIDX_NS}acceptsClientP"));
     let accepts_issuer_p = NamedNode::new_unchecked(format!("{SOLIDX_NS}acceptsIssuerP"));
-    // [OPUS-4.8] sq-0q7n: the live-clock window predicates + the xsd:dateTime datatype the
+    // sq-0q7n: the live-clock window predicates + the xsd:dateTime datatype the
     // bounds are typed with (so they round-trip as the same literal the evaluator parses).
     let not_before_p = NamedNode::new_unchecked(format!("{AUTH_NS}notBefore"));
     let not_after_p = NamedNode::new_unchecked(format!("{AUTH_NS}notAfter"));
@@ -1037,7 +1037,7 @@ fn append_conditional_grants(
     // One deterministic exception matcher per carved-out principal, shared across the
     // grant heads (its accept-set is the same regardless of which positive head it
     // attaches to). Each accepts (agent = X, client = any, issuer = any) → suppresses the
-    // grant for X. [OPUS-4.8] sq-3jtd.6: the issuer accept (auth:AnyIssuer) makes the
+    // grant for X. sq-3jtd.6: the issuer accept (auth:AnyIssuer) makes the
     // carve-out span the issuer dimension too — without it the three-dimensional
     // matcher_accepts would never fire (it requires all three dimensions to accept).
     let except_matchers: Vec<(String, [Term; 3])> = excepts
@@ -1065,7 +1065,7 @@ fn append_conditional_grants(
             .map(|(m, _)| sparq_reason::n3::encode_for_uri(m))
             .collect::<Vec<_>>()
             .join(",");
-        // [OPUS-4.8] sq-0q7n: the window is part of the grant identity — two grants for
+        // sq-0q7n: the window is part of the grant identity — two grants for
         // the same (agent, mode, graph, excepts, effect) but DIFFERENT windows must not
         // collide on the same IRI (one would silently overwrite the other's bounds).
         let grant_iri = format!(
@@ -1089,7 +1089,7 @@ fn append_conditional_grants(
             [g.clone(), Term::NamedNode(mode_p.clone()), Term::NamedNode(mode_o.clone())],
             [g.clone(), Term::NamedNode(graph_p.clone()), Term::NamedNode(graph_o.clone())],
         ];
-        // [OPUS-4.8] sq-0q7n: the live-clock window bounds (xsd:dateTime literals),
+        // sq-0q7n: the live-clock window bounds (xsd:dateTime literals),
         // re-checked against `Session::now` by `crate::AuthIndex::cond_applies`.
         if let Some(nb) = &window.not_before {
             head.push([
@@ -1134,12 +1134,12 @@ fn append_conditional_grants(
 /// `rdf:type` IRI, for the conditional-grant class triple.
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
-/// `xsd:dateTime` datatype IRI, for the live-clock window bound literals. [OPUS-4.8]
+/// `xsd:dateTime` datatype IRI, for the live-clock window bound literals.
 /// sq-0q7n.
 const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 
 // ============================================================================
-// [OPUS-4.8] sq-dpk4 — refresh / revocation of bridged ODRL grants.
+// sq-dpk4 — refresh / revocation of bridged ODRL grants.
 //
 // THE GAP this closes: the materialize_* functions above only ever APPEND. When the
 // underlying ODRL policy changes — a permission withdrawn, a time window lapsed, a
@@ -1158,7 +1158,7 @@ const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 
 /// Which bridge entry point produced a tracked grant — replayed verbatim on refresh so
 /// the SAME fail-closed evaluation re-runs (a withdrawn/lapsed/now-Denied policy emits
-/// nothing → the entry is retracted). [OPUS-4.8] sq-dpk4.
+/// nothing → the entry is retracted). sq-dpk4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BridgeKind {
     /// [`materialize_permission`] — a definite-Permit allow grant.
@@ -1171,14 +1171,14 @@ pub enum BridgeKind {
     /// one-shot fallback).
     PermissionConditional,
     /// [`materialize_prohibition_conditional`] — a re-checked conditional deny (or its
-    /// one-shot fallback). [OPUS-4.8] sq-4r70.
+    /// one-shot fallback). sq-4r70.
     ProhibitionConditional,
     /// A STATEFUL `odrl:count` allow grant (via
     /// [`crate::PodStore::materialize_odrl_permission_counted`]). The count was consumed
     /// atomically at exercise; on refresh the grant is re-checked (read-only — never
     /// consumes again) against the usage state and RETRACTED once the budget is
     /// exhausted, so the bridged grant self-retracts on exhaustion. Only ever recorded
-    /// under the `count-enforcement` feature. [OPUS-4.8] sq-58mh.
+    /// under the `count-enforcement` feature. sq-58mh.
     #[cfg(feature = "count-enforcement")]
     PermissionCounted,
 }
@@ -1186,7 +1186,7 @@ pub enum BridgeKind {
 /// One tracked bridged materialization: the originating ODRL `(policy, request, kind)`
 /// plus the auth triples it last emitted. The provenance that distinguishes a bridged
 /// grant from a static WAC/ACP one (those are never in the ledger), and the unit of
-/// retraction on refresh. [OPUS-4.8] sq-dpk4.
+/// retraction on refresh. sq-dpk4.
 #[derive(Debug, Clone)]
 pub struct BridgeEntry {
     /// The ODRL policy this grant was bridged from.
@@ -1226,7 +1226,7 @@ pub struct BridgeLedger {
     /// entry's stateful `odrl:count` budget. Set on the first counted bridge call and
     /// re-used by [`refresh`](BridgeLedger::refresh) to re-check (read-only) whether a
     /// counted grant's budget is still available — so an exhausted grant is retracted.
-    /// `None` ⇒ no counted grant was ever bridged. [OPUS-4.8] sq-58mh.
+    /// `None` ⇒ no counted grant was ever bridged. sq-58mh.
     #[cfg(feature = "count-enforcement")]
     count_store: Option<count::CounterHandle>,
 }
@@ -1296,7 +1296,7 @@ impl BridgeLedger {
     /// next [`BridgeLedger::refresh`] re-evaluates against the NEW policy / request
     /// context (a withdrawn permission, a lapsed window, a now-Deny). Returns `true` if a
     /// tracked entry matched. A no-match returns `false` and changes nothing — there is
-    /// no bridged grant to refresh for that slot. [OPUS-4.8] sq-dpk4.
+    /// no bridged grant to refresh for that slot. sq-dpk4.
     pub fn update(&mut self, policy: &ValidatedPolicy, request: &Request, kind: BridgeKind) -> bool {
         let slot = (kind, request.target.clone(), request.party.clone());
         match self.entries.iter_mut().find(|e| {
@@ -1321,7 +1321,7 @@ impl BridgeLedger {
 
     /// Re-evaluate every tracked bridged grant against its (possibly changed) ODRL
     /// policy and rebuild the auth view as `static_baseline ∪ replay(still-valid
-    /// entries)`, retracting the grants that no longer hold. [OPUS-4.8] sq-dpk4.
+    /// entries)`, retracting the grants that no longer hold. sq-dpk4.
     ///
     /// Returns the number of entries RETRACTED (re-evaluated to nothing). The caller
     /// ([`crate::PodStore::refresh_odrl_grants`]) reindexes afterward so the change
@@ -1353,7 +1353,7 @@ impl BridgeLedger {
         install_triples(graph, AUTH_BRIDGED_GRAPH, Vec::new());
 
         // 2. Replay each entry; keep only those that still materialize something. A
-        //    counted entry ([OPUS-4.8] sq-58mh) is re-checked against the usage store
+        //    counted entry (sq-58mh) is re-checked against the usage store
         //    (read-only) — exhausted ⇒ emits nothing ⇒ retracted (self-retract on
         //    exhaustion).
         #[cfg(feature = "count-enforcement")]
@@ -1376,7 +1376,7 @@ impl BridgeLedger {
     /// later [`refresh`](BridgeLedger::refresh) can re-check (read-only) whether each
     /// [`BridgeKind::PermissionCounted`] entry's budget is still available. Idempotent;
     /// the latest store wins (a caller injecting a different store re-points refresh at
-    /// it). [OPUS-4.8] sq-58mh.
+    /// it). sq-58mh.
     #[cfg(feature = "count-enforcement")]
     pub(crate) fn set_count_store(&mut self, store: &count::CounterHandle) {
         self.count_store = Some(store.clone());
@@ -1384,9 +1384,9 @@ impl BridgeLedger {
 }
 
 /// Re-run a tracked entry's original bridge function against the current graph,
-/// re-evaluating its ODRL policy and re-emitting iff it still holds. [OPUS-4.8] sq-dpk4.
+/// re-evaluating its ODRL policy and re-emitting iff it still holds. sq-dpk4.
 ///
-/// # Deny retraction is asymmetric to grant retraction — [OPUS-4.8] sq-2pcf
+/// # Deny retraction is asymmetric to grant retraction — sq-2pcf
 ///
 /// A grant replays straight through its `materialize_*`: any non-Permit (withdrawn /
 /// lapsed / now-Denied / ambiguous) emits nothing → the grant is dropped → access is
@@ -1417,7 +1417,7 @@ fn replay(graph: &mut Graph, entry: &BridgeEntry) -> BridgeOutcome {
 }
 
 /// Re-run a tracked entry's original bridge function against the current graph. The
-/// `count_store` variant ([OPUS-4.8] sq-58mh): a [`BridgeKind::PermissionCounted`] entry
+/// `count_store` variant (sq-58mh): a [`BridgeKind::PermissionCounted`] entry
 /// is re-checked (read-only) against the usage store via
 /// [`count::refresh_permission_counted`] — exhausted ⇒ emits nothing ⇒ retracted; every
 /// other kind ignores the store.
@@ -1444,7 +1444,7 @@ fn replay(
 }
 
 /// Re-evaluate a tracked **conditional deny** ([`materialize_prohibition_conditional`])
-/// on refresh. [OPUS-4.8] sq-4r70.
+/// on refresh. sq-4r70.
 ///
 /// Its heads do not depend on the tracked request beyond its action and target, and the
 /// reference deny it adds already keeps a prohibition in force on Unknown, so refresh
@@ -1460,7 +1460,7 @@ fn refresh_prohibition_conditional(
 
 /// Re-evaluate a tracked **Prohibition** deny on refresh with the fail-closed
 /// deny-retraction rule (sq-2pcf): re-emit the `auth:deny*` triple unless the
-/// prohibition is *definitely* withdrawn. [OPUS-4.8] sq-2pcf.
+/// prohibition is *definitely* withdrawn. sq-2pcf.
 ///
 /// - [`ProhibitionStatus::Applies`] — a prohibition still carves the request out:
 ///   re-emit (identical to [`materialize_prohibition`]).
@@ -1485,7 +1485,7 @@ fn refresh_prohibition(graph: &mut Graph, policy: &ValidatedPolicy, request: &Re
 /// Re-evaluate a tracked **Policy** (both sides) on refresh: the allow side keeps the
 /// fail-closed grant semantics ([`materialize_permission`]); the deny side uses the
 /// fail-closed deny-retraction rule ([`refresh_prohibition`]). Composed exactly as
-/// [`materialize_policy`] so deny-overrides still holds. [OPUS-4.8] sq-2pcf.
+/// [`materialize_policy`] so deny-overrides still holds. sq-2pcf.
 fn refresh_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: &Request) -> BridgeOutcome {
     let allow = materialize_permission(graph, policy, request);
     let deny = refresh_prohibition(graph, policy, request);
@@ -1512,7 +1512,7 @@ fn refresh_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: &Request
 /// the prohibition match — used by [`refresh_prohibition`] on an *ambiguous* re-eval to
 /// KEEP a deny we cannot prove is gone (fail-closed). The deny triple is fully
 /// determined by the request (party + action→mode + target), the same one
-/// [`materialize_prohibition`] would emit when the prohibition matched. [OPUS-4.8] sq-2pcf.
+/// [`materialize_prohibition`] would emit when the prohibition matched. sq-2pcf.
 ///
 /// If the request lacks a mappable action or a target the deny cannot be
 /// reconstructed; that emits nothing (and so retracts) — but such an entry could never
@@ -1535,7 +1535,7 @@ fn reemit_deny(graph: &mut Graph, request: &Request) -> BridgeOutcome {
 }
 
 // ============================================================================
-// [OPUS-4.8] sq-58mh — STATEFUL `odrl:count` enforcement wired THROUGH the bridge so a
+// sq-58mh — STATEFUL `odrl:count` enforcement wired THROUGH the bridge so a
 // bridged grant SELF-RETRACTS on exhaustion (the sq-zi5w follow-up).
 //
 // ACP is stateless: there is no per-session usage counter to decrement, so the count
@@ -1573,7 +1573,7 @@ pub(crate) mod count {
 
     /// A cloneable, `Debug`-able handle to the injected usage-counter store, so the
     /// [`super::BridgeLedger`] (which derives `Debug`/`Clone`/`Default`) can hold one.
-    /// [OPUS-4.8] sq-58mh.
+    /// sq-58mh.
     #[derive(Clone)]
     pub(crate) struct CounterHandle(pub(crate) Arc<dyn UsageCounterStore + Send + Sync>);
 
@@ -1587,7 +1587,7 @@ pub(crate) mod count {
     /// Evaluate `policy` against `request` and, on a grant, **atomically consume** one
     /// unit of any applicable `odrl:count` budget from `store`, materializing the
     /// equivalent `principal auth:<mode> graph` allow into the `<urn:sparq:auth>` view.
-    /// [OPUS-4.8] sq-58mh.
+    /// sq-58mh.
     ///
     /// This is the stateful-count entry point of the bridge: it routes the allow/deny
     /// decision through sparq-policy's [`evaluate_and_exercise`] (which runs the REAL
@@ -1608,7 +1608,7 @@ pub(crate) mod count {
         store: &dyn UsageCounterStore,
     ) -> BridgeOutcome {
         // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy BEFORE the
-        //    atomic exercise — a refused policy must consume no budget. [OPUS-4.8] sq-ihqbl.
+        //    atomic exercise — a refused policy must consume no budget. sq-ihqbl.
         if let Some(refusal) = refuse_unimplementable_conflict(policy) {
             return refusal;
         }
@@ -1638,7 +1638,7 @@ pub(crate) mod count {
 
     /// Re-check a tracked counted grant on refresh and re-emit it **iff** it still holds —
     /// WITHOUT consuming a unit (refresh is read-only; a refresh must never itself burn
-    /// budget). [OPUS-4.8] sq-58mh.
+    /// budget). sq-58mh.
     ///
     /// Fail-closed: the grant is re-emitted only when (a) a counter store is available,
     /// (b) the base permission STILL grants (re-evaluated with the `odrl:count`
@@ -1716,7 +1716,7 @@ pub(crate) mod count {
 }
 
 // ============================================================================
-// [SONNET-4.6] sq-zgbso.2 — N3-stratum ODRL bridge.
+// sq-zgbso.2 — N3-stratum ODRL bridge.
 // Runs the stateless ODRL core as five stratified rule evaluations
 // (rules/odrl-{a0,a,b,c,d}.n3), mirroring the WAC/ACP stratification pattern —
 // on the id-level COMPILED evaluator since sq-zgbso.5, as WAC/ACP are since
@@ -1755,12 +1755,12 @@ pub(crate) mod count {
 /// - an `odrl:conflict` strategy the bridge cannot honour (`odrl:perm`, an unknown
 ///   strategy IRI, or `odrl:invalid` with a detected conflict) makes the whole call
 ///   refuse with `Err`, via the SAME [`sparq_policy::conflict_admissibility`] verdict
-///   the Rust path's refusal uses. [OPUS-5]
+///   the Rust path's refusal uses.
 /// - a constraint node carrying more than one operand triple per position, or more than
 ///   one logical combinator, makes the whole call refuse with `Err`. Satisfaction is
 ///   keyed on the constraint NODE, so such a node would otherwise be decided from a
 ///   single cross-product combination — "some operand satisfied" where "every operand
-///   satisfied" is required. [OPUS-5]
+///   satisfied" is required.
 ///
 /// # Injection safety
 ///
@@ -1828,7 +1828,7 @@ pub fn materialize_odrl_n3(
     })?;
     let policy_triples = crate::loader::graph_triples(&policy_graph);
 
-    // 0a. [OPUS-5] Run the SAME `odrl:conflict` admissibility guard every Rust
+    // 0a. Run the SAME `odrl:conflict` admissibility guard every Rust
     //     materialise entry point runs, FIRST. This call previously skipped it entirely,
     //     so a policy declaring `odrl:conflict odrl:perm` (permissions override
     //     prohibitions — unrepresentable by the bridge's `∪ allow ∖ ∪ deny`) or an
@@ -1856,9 +1856,9 @@ pub fn materialize_odrl_n3(
     let policy_facts = triples_to_n3(&policy_triples);
     let req_n3 = serialize_request_n3(request)?;
 
-    // [SONNET-4.6] sq-zgbso.5 — the five strata, in evaluation order:
+    // sq-zgbso.5 — the five strata, in evaluation order:
     //   A0: the operand/combinator-arity guard (odrlx:shape odrlx:Ambiguous) the
-    //       stratum A/C satisfaction rules negate [OPUS-5]
+    //       stratum A/C satisfaction rules negate
     //   A:  action facts + atomicSat + lcSat(or)
     //   B:  andSubUnsat + anyRuleConstrUnsat + unconstrained prohibMatches/denies
     //   C:  lcSat(and) + CONSTRAINED prohibMatches/denies
@@ -1875,7 +1875,7 @@ pub fn materialize_odrl_n3(
     let mut dict = Dict::new();
     let mut closure = intern_facts(&mut dict, &format!("{}\n{}", policy_facts, req_n3))?;
     for stratum in rules {
-        closure = eval(&mut dict, &closure, stratum);
+        closure = eval(&mut dict, &closure, stratum)?;
     }
 
     // Extract auth:* triples from the final closure. A derived deny is kept (fail-closed);
@@ -2038,7 +2038,7 @@ const REQUEST_IRI: &str = "urn:odrl-req";
 ///    be AMBIGUOUS — several distinct `odrl:leftOperand`/`odrl:operator`/right-operand
 ///    objects, or several distinct logical combinators, on one node
 ///    (`unambiguous_operands`). This is the driver half of the stratum-A0 fail-OPEN
-///    fix and applies to BOTH rule kinds. [OPUS-5];
+///    fix and applies to BOTH rule kinds.;
 /// 4. no rule (permission or prohibition) may carry MORE THAN ONE distinct
 ///    `odrl:action`/`odrl:target`/`odrl:assignee` object — the strata bind each
 ///    attribute as a triple pattern and so match a request that agrees with ANY
@@ -2047,7 +2047,7 @@ const REQUEST_IRI: &str = "urn:odrl-req";
 ///    could therefore make an N3 grant fire (or a prohibition match) for a value
 ///    the Rust path never selected — widening. Refuse rather than decide the
 ///    rule from a subset of its attribute values (the rule-attribute analogue of
-///    the constraint-node `unambiguous_operands` guard). [OPUS-4.8];
+///    the constraint-node `unambiguous_operands` guard).;
 /// 5. every PROHIBITION must name `odrl:action`/`odrl:target`/`odrl:assignee`
 ///    (the strata match prohibitions structurally on all three; the Rust
 ///    evaluator treats a missing attribute as matching ANY request) and every
@@ -2117,7 +2117,7 @@ fn validate_policy_for_n3(triples: &[[Term; 3]]) -> Result<(), String> {
             continue;
         }
         let rule = &t[2];
-        // [OPUS-4.8] Reject a MULTI-VALUED rule attribute on EITHER rule kind. The N3
+        // Reject a MULTI-VALUED rule attribute on EITHER rule kind. The N3
         // strata bind odrl:action/target/assignee as triple patterns, so a rule asserting
         // several distinct values matches a request agreeing with ANY of them, while the
         // Rust reference evaluator selects exactly ONE (`first_str`). A second value could
@@ -2181,7 +2181,7 @@ fn validate_policy_for_n3(triples: &[[Term; 3]]) -> Result<(), String> {
                     );
                 }
             }
-            // [OPUS-5] Operand-ARITY guard on BOTH rule kinds — the driver half of the
+            // Operand-ARITY guard on BOTH rule kinds — the driver half of the
             // stratum-A0 fix. The strata key satisfaction on the constraint NODE, so a
             // node carrying several operand triples (or several combinators) is decided
             // from ONE cross-product combination. Refuse the whole call rather than
@@ -2234,7 +2234,7 @@ fn distinct_objects<'a>(
 /// AMBIGUOUS: more than one distinct `odrl:leftOperand`, `odrl:operator`, or
 /// right-operand object (`odrl:rightOperand`/`odrl:rightOperandReference`), or more
 /// than one distinct logical combinator (`odrl:and`/`odrl:or`/`odrl:xone`) on the same
-/// node. [OPUS-5] — the driver half of the stratum-A0 fail-OPEN fix.
+/// node. — the driver half of the stratum-A0 fail-OPEN fix.
 ///
 /// RDF puts no cardinality bound on a node's properties, and the strata key
 /// satisfaction on the constraint NODE rather than on an individual operand triple. A
@@ -2300,7 +2300,7 @@ fn unambiguous_operands(triples: &[[Term; 3]], c: &Term) -> Result<(), String> {
 /// a satisfied prohibition constraint the N3 side cannot see would silently drop
 /// its deny (widening access).
 ///
-/// [OPUS-5] This used to read only `.next()` of `odrl:leftOperand`/`odrl:operator` and
+/// This used to read only `.next()` of `odrl:leftOperand`/`odrl:operator` and
 /// was therefore structurally BLIND to any further operand on the node: a constraint
 /// carrying `recipient eq …` (in scope) *and* `purpose eq …` (out of scope) was waved
 /// through on its first pair alone. It now inspects EVERY operand object and declines

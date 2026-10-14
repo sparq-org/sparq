@@ -1,4 +1,4 @@
-//! [OPUS-4.8] Per-subcommand golden-output + exit-code CONTRACT table for sparq-cli.
+//! Per-subcommand golden-output + exit-code CONTRACT table for sparq-cli.
 //!
 //! Spawns the *built* `sparq-cli` binary (via `CARGO_BIN_EXE_sparq-cli`, the same
 //! mechanism as `hdt_cli.rs`) and drives it through an invocation table —
@@ -14,7 +14,7 @@
 //! These tests are intentionally datasets-tiny and self-contained: each builds its own
 //! fixtures under `CARGO_TARGET_TMPDIR` and cleans them up.
 //!
-//! NOTE on the `query` output contract (sq-l4ki — `query` is now a real query CLI). [OPUS-4.8]
+//! NOTE on the `query` output contract (sq-l4ki — `query` is now a real query CLI).
 //!
 //! `query` classifies the parsed query FORM and routes each to its executor, emitting real
 //! results (not just a count):
@@ -96,7 +96,7 @@ fn s(p: &Path) -> &str {
 
 #[test]
 fn query_select_emits_rows_nt() {
-    // [OPUS-4.8] (sq-l4ki) SELECT now prints the solution BINDINGS, not a count. The
+    // (sq-l4ki) SELECT now prints the solution BINDINGS, not a count. The
     // default format is a readable table: a header row with the projected variables and one
     // row per solution carrying the actual terms.
     let dir = scratch("select-nt");
@@ -131,7 +131,7 @@ fn query_select_turtle_and_ttl_alias_load_identically() {
 
 #[test]
 fn query_ask_prints_boolean() {
-    // [OPUS-4.8] (sq-l4ki) ASK now prints a boolean (`true`/`false`), not a 1/0 solution
+    // (sq-l4ki) ASK now prints a boolean (`true`/`false`), not a 1/0 solution
     // count. The two must be unambiguously distinguishable as booleans.
     let dir = scratch("ask");
     let data = write(&dir, "data.nt", NT);
@@ -166,7 +166,7 @@ fn query_with_reason_flag_loads() {
 
 #[test]
 fn query_count_flag_preserves_legacy_count_output() {
-    // [OPUS-4.8] (sq-l4ki) `--count` is the backward-compatible escape hatch: it restores
+    // (sq-l4ki) `--count` is the backward-compatible escape hatch: it restores
     // the historical count-only line for both SELECT (solutions) and the graph forms (triples).
     let dir = scratch("count-flag");
     let data = write(&dir, "data.nt", NT);
@@ -184,7 +184,7 @@ fn query_count_flag_preserves_legacy_count_output() {
 
 #[test]
 fn query_select_format_shapes() {
-    // [OPUS-4.8] (sq-l4ki) Each `--format` emits the right SHAPE for SELECT bindings.
+    // (sq-l4ki) Each `--format` emits the right SHAPE for SELECT bindings.
     let dir = scratch("select-formats");
     let data = write(&dir, "data.nt", NT);
     let q = "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o }";
@@ -217,7 +217,7 @@ fn query_select_format_shapes() {
 
 #[test]
 fn query_ask_format_json_xml() {
-    // [OPUS-4.8] (sq-l4ki) ASK under `--format json|xml` emits the W3C boolean documents.
+    // (sq-l4ki) ASK under `--format json|xml` emits the W3C boolean documents.
     let dir = scratch("ask-formats");
     let data = write(&dir, "data.nt", NT);
     let (cj, oj, _) = run3(&["query", s(&data), "ntriples", "ASK { ?s <http://ex/knows> ?o }", "--format", "json"]);
@@ -232,7 +232,7 @@ fn query_ask_format_json_xml() {
 
 #[test]
 fn query_unknown_format_exits_2() {
-    // [OPUS-4.8] (sq-l4ki) An unknown `--format` value is a usage error (exit 2), matching
+    // (sq-l4ki) An unknown `--format` value is a usage error (exit 2), matching
     // the CLI's flag-validation contract.
     let dir = scratch("err-outformat");
     let data = write(&dir, "data.nt", NT);
@@ -280,7 +280,7 @@ fn compressed_input_autodetect_gzip_zstd_bzip2_load_identically() {
     let q = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
     let mut counts = Vec::new();
     for f in [&raw, &gz, &bz, &zst] {
-        // [OPUS-4.8] (sq-l4ki) Use `--count` here so the assertion is on the solution COUNT
+        // (sq-l4ki) Use `--count` here so the assertion is on the solution COUNT
         // (codec-equivalence is about how many triples decoded, not the table rendering).
         let (code, stdout, stderr) = run3(&["query", s(f), "ntriples", q, "--count"]);
         assert_eq!(code, 0, "{}: stderr {stderr}", f.display());
@@ -315,7 +315,7 @@ fn save_then_query_mmap_round_trip() {
     assert_eq!(sc, 0, "save stderr: {se}");
     assert!(idx.is_dir(), "save did not create the index dir");
 
-    // [OPUS-4.8] (sq-iwyy) These round-trip tests assert the index encodes/decodes the right
+    // (sq-iwyy) These round-trip tests assert the index encodes/decodes the right
     // number of triples — codec/build equivalence, not the table rendering — so they use
     // `--count` to keep the assertion on the solution COUNT (now that a bare SELECT emits a
     // table). The default-format SELECT rendering is exercised by the dedicated parity tests
@@ -357,7 +357,7 @@ fn build_external_then_query_mmap_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] (sq-5atq) The CLI `build` of an N-Quads dataset goes through the OUT-OF-CORE
+/// (sq-5atq) The CLI `build` of an N-Quads dataset goes through the OUT-OF-CORE
 /// quad path (`build_external_quads`), so its NAMED GRAPHS must survive end-to-end: a
 /// `GRAPH <g> { ?s ?p ?o }` query over the opened index returns that graph's quads, not a
 /// flattened default graph. Before the quad-aware `build` wiring, every quad was silently
@@ -410,7 +410,7 @@ fn recompress_raw_index_then_query() {
 // ---------------------------------------------------------------------------
 // 3b. `query-mmap` OUTPUT PARITY with `query` (sq-iwyy).
 //
-// [OPUS-4.8] query-mmap shares `query`'s exact emission core, so it must emit the same
+// query-mmap shares `query`'s exact emission core, so it must emit the same
 // SHAPES: SELECT rows (default table + each `--format`), ASK boolean, CONSTRUCT/DESCRIBE
 // N-Triples, and the `--count` legacy line. These mirror the `query` happy-path cases but
 // drive the mmap path (save -> query-mmap). The unknown-`--format` usage error (exit 2) is
@@ -430,7 +430,7 @@ fn mmap_index(tag: &str) -> (PathBuf, PathBuf) {
 
 #[test]
 fn query_mmap_select_emits_rows_default_table() {
-    // [OPUS-4.8] (sq-iwyy) A bare SELECT via query-mmap now prints the solution BINDINGS in a
+    // (sq-iwyy) A bare SELECT via query-mmap now prints the solution BINDINGS in a
     // readable table (header with ?-sigil vars, one row per solution, `(K row(s))` footer) —
     // identical to `query`, not a count.
     let (dir, idx) = mmap_index("mmap-select-table");
@@ -448,7 +448,7 @@ fn query_mmap_select_emits_rows_default_table() {
 
 #[test]
 fn query_mmap_ask_prints_boolean() {
-    // [OPUS-4.8] (sq-iwyy) ASK via query-mmap prints a boolean, not a 1/0 solution count.
+    // (sq-iwyy) ASK via query-mmap prints a boolean, not a 1/0 solution count.
     let (dir, idx) = mmap_index("mmap-ask");
     let (ct, ot, et) = run3(&["query-mmap", s(&idx), "ASK { ?s <http://ex/knows> ?o }"]);
     assert_eq!(ct, 0, "stderr: {et}");
@@ -462,7 +462,7 @@ fn query_mmap_ask_prints_boolean() {
 
 #[test]
 fn query_mmap_construct_and_describe_emit_triples() {
-    // [OPUS-4.8] (sq-iwyy) The graph forms via query-mmap emit the resulting triples as
+    // (sq-iwyy) The graph forms via query-mmap emit the resulting triples as
     // N-Triples (previously query-mmap could only count).
     let (dir, idx) = mmap_index("mmap-construct");
     let (cc, oc, ec) = run3(&["query-mmap", s(&idx), "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }"]);
@@ -483,7 +483,7 @@ fn query_mmap_construct_and_describe_emit_triples() {
 
 #[test]
 fn query_mmap_select_format_shapes() {
-    // [OPUS-4.8] (sq-iwyy) Each `--format` emits the right SHAPE for SELECT bindings via the
+    // (sq-iwyy) Each `--format` emits the right SHAPE for SELECT bindings via the
     // mmap path — mirrors `query_select_format_shapes`.
     let (dir, idx) = mmap_index("mmap-formats");
     let q = "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o }";
@@ -512,7 +512,7 @@ fn query_mmap_select_format_shapes() {
 
 #[test]
 fn query_mmap_ask_format_json_xml() {
-    // [OPUS-4.8] (sq-iwyy) ASK under `--format json|xml` via query-mmap emits the W3C boolean
+    // (sq-iwyy) ASK under `--format json|xml` via query-mmap emits the W3C boolean
     // documents — mirrors `query_ask_format_json_xml`.
     let (dir, idx) = mmap_index("mmap-ask-formats");
     let (cj, oj, _) = run3(&["query-mmap", s(&idx), "ASK { ?s <http://ex/knows> ?o }", "--format", "json"]);
@@ -527,7 +527,7 @@ fn query_mmap_ask_format_json_xml() {
 
 #[test]
 fn query_mmap_count_flag_preserves_legacy_count_output() {
-    // [OPUS-4.8] (sq-iwyy) `--count` restores the historical count-only line for both SELECT
+    // (sq-iwyy) `--count` restores the historical count-only line for both SELECT
     // (solutions) and the graph forms (triples) via the mmap path.
     let (dir, idx) = mmap_index("mmap-count");
     let (cs, os, es) = run3(&["query-mmap", s(&idx), "SELECT ?s ?p ?o WHERE { ?s ?p ?o }", "--count"]);
@@ -543,7 +543,7 @@ fn query_mmap_count_flag_preserves_legacy_count_output() {
 
 #[test]
 fn query_mmap_unknown_format_exits_2() {
-    // [OPUS-4.8] (sq-iwyy) An unknown `--format` value is a usage error (exit 2) on query-mmap
+    // (sq-iwyy) An unknown `--format` value is a usage error (exit 2) on query-mmap
     // too — it shares `query`'s `out_format_flag` validation.
     let (dir, idx) = mmap_index("mmap-err-outformat");
     let (code, _o, stderr) = run3(&["query-mmap", s(&idx), "SELECT ?s WHERE { ?s ?p ?o }", "--format", "bogus"]);
@@ -554,7 +554,7 @@ fn query_mmap_unknown_format_exits_2() {
 
 #[test]
 fn query_mmap_malformed_query_exits_1() {
-    // [OPUS-4.8] (sq-iwyy) A malformed query via query-mmap is a runtime error (exit 1) with a
+    // (sq-iwyy) A malformed query via query-mmap is a runtime error (exit 1) with a
     // useful stderr — same contract as `query`.
     let (dir, idx) = mmap_index("mmap-err-badquery");
     let (code, _o, stderr) = run3(&["query-mmap", s(&idx), "SELECT ?s WHERE { this is not sparql"]);
@@ -627,7 +627,7 @@ fn bench_emits_one_tsv_line_per_query_including_construct() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] (sq-d7d) `bench --json <path>` writes a machine-readable results document
+/// (sq-d7d) `bench --json <path>` writes a machine-readable results document
 /// ALONGSIDE the unchanged STDOUT TSV. Asserts: (a) STDOUT is still exactly one TSV line per
 /// query (JSON is additive, not a replacement); (b) the file is genuinely VALID, parseable JSON
 /// (parsed with serde_json, not substring-matched); (c) it carries the expected top-level keys +
@@ -675,7 +675,7 @@ fn bench_json_flag_writes_parseable_results_with_expected_keys() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] (sq-d7d) A bare `--json` with no path is a usage error (exit 2), mirroring the
+/// (sq-d7d) A bare `--json` with no path is a usage error (exit 2), mirroring the
 /// rest of the CLI's value-flag contract.
 #[test]
 fn bench_json_flag_requires_a_path() {
@@ -733,7 +733,7 @@ fn missing_input_file_exits_nonzero() {
 
 #[test]
 fn unsupported_format_exits_nonzero() {
-    // [OPUS-4.8] Regression guard for the fixed bug: before the load_quiet format
+    // Regression guard for the fixed bug: before the load_quiet format
     // guard, an unknown format silently parsed the input as Turtle and exited 0.
     let dir = scratch("err-format");
     let data = write(&dir, "data.nt", NT);
@@ -749,7 +749,7 @@ fn unsupported_format_exits_nonzero() {
 
 #[test]
 fn build_unsupported_format_exits_nonzero() {
-    // [OPUS-4.8] `build` calls Graph::build_external directly (not load_quiet); guard against
+    // `build` calls Graph::build_external directly (not load_quiet); guard against
     // the same silent-Turtle-fallback bug there too (sq-q50l).
     let dir = scratch("err-buildformat");
     let data = write(&dir, "data.nt", NT);
@@ -762,7 +762,7 @@ fn build_unsupported_format_exits_nonzero() {
 
 #[test]
 fn construct_via_query_subcommand_emits_triples() {
-    // [OPUS-4.8] (sq-l4ki) CONSTRUCT via `query` now produces the resulting triples as
+    // (sq-l4ki) CONSTRUCT via `query` now produces the resulting triples as
     // N-Triples (it used to error with "only SELECT and ASK queries are supported", exit 1).
     let dir = scratch("construct");
     let data = write(&dir, "data.nt", NT);
@@ -780,7 +780,7 @@ fn construct_via_query_subcommand_emits_triples() {
 
 #[test]
 fn describe_via_query_subcommand_emits_triples() {
-    // [OPUS-4.8] (sq-l4ki) DESCRIBE is the other graph form — it returns the resource's
+    // (sq-l4ki) DESCRIBE is the other graph form — it returns the resource's
     // concise bounded description as N-Triples (also previously a runtime error).
     let dir = scratch("describe");
     let data = write(&dir, "data.nt", NT);
@@ -863,10 +863,10 @@ fn recompress_same_src_dst_exits_2() {
 }
 
 // ---------------------------------------------------------------------------
-// Algebra-rewrite pass is LIT in this binary (sq-7d3dj.30.13) [FABLE-5]
+// Algebra-rewrite pass is LIT in this binary (sq-7d3dj.30.13)
 // ---------------------------------------------------------------------------
 
-/// [FABLE-5] (sq-7d3dj.30.13) COMPILE-TIME + behavioral tripwire that the CLI's
+/// (sq-7d3dj.30.13) COMPILE-TIME + behavioral tripwire that the CLI's
 /// `sparq-engine` dependency keeps `algebra-rewrite` enabled (Cargo.toml dep features,
 /// like `dp-planner`). `sparq_engine::rewrite` only exists under the feature, so if a
 /// future edit drops it from the dep line this test FAILS TO COMPILE in the per-crate
@@ -900,7 +900,7 @@ fn algebra_rewrite_pass_is_lit_and_fires_on_iri_equality() {
     );
 }
 
-/// [FABLE-5] (sq-7d3dj.30.13) End-to-end through the BUILT binary: the q03-shape query
+/// (sq-7d3dj.30.13) End-to-end through the BUILT binary: the q03-shape query
 /// (`FILTER(?v = <iri>)`) returns exactly the correct rows — i.e. the rewritten plan the
 /// shipped CLI now executes is result-correct on the shape that motivated lighting it.
 #[test]
@@ -927,7 +927,7 @@ fn query_iri_equality_filter_rows_correct_through_rewrite() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] (sq-7d3dj.30.20) COMPILE-TIME tripwire that the CLI's `sparq-engine` dependency
+/// (sq-7d3dj.30.20) COMPILE-TIME tripwire that the CLI's `sparq-engine` dependency
 /// keeps the SP2Bench-q07 `antijoin-static-decline` fix enabled (Cargo.toml dep features, like
 /// `algebra-rewrite`/`dp-planner`). `theta_antijoin_testing::early_declined` only exists under
 /// that feature, so if a future edit drops it from the dep line this test FAILS TO COMPILE in

@@ -80,8 +80,8 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   (`serialize::{graph_to_turtle, graph_to_trig, graph_to_nquads, graph_to_jsonld, …}`; the `*_with`
   variants + `prefixes_from_pairs` accept a caller's prefix policy), plus deterministic **pretty**
   (indented, sorted, round-trip-correct) variants and true **W3C JSON-LD 1.1 Compaction**
-  (`graph_to_jsonld_compact`) and **Framing** (`graph_to_jsonld_framed`) — hand-rolled,
-  dependency-free, **pyld-faithful** (differentially verified; see the `serialize::write_jsonld_compact` rustdoc).
+  (`graph_to_jsonld_compact`) and **Framing** (`graph_to_jsonld_framed`) — thin adapters over the
+  dependency-free native pipeline in [`sparq-jsonld`](../sparq-jsonld), **pyld-faithful** (each expected shape in the `sparq-engine-serialize` compaction/framing regression tests is the pyld reference processor's own output for the same RDF).
   The N-Triples writer (`triples_to_ntriples`) is always on; off, zero serializer code compiles, **no
   new dependencies**. The opt-in `streaming-serialization` feature (implies `serialize-rdf`) adds
   `write_turtle_streaming`/`write_trig_streaming` (+ `graph_to_*_streaming`) — render Turtle/TriG into a

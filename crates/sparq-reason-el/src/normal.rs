@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-evb1: EL concept IR + Baader–Brandt–Lutz normalization.
+// sq-evb1: EL concept IR + Baader–Brandt–Lutz normalization.
 //
 // The classifier works over a SMALL integer index space SEPARATE from the sparq `Dict` id
 // space: a `Concept` is either a named class (carrying the original dict `Id` so the result
@@ -51,7 +51,7 @@ pub struct Names {
     role_by_dict: FxHashMap<Id, Role>,
     /// `internal Role -> dict Id`.
     role_to_dict: Vec<Id>,
-    /// [FABLE-5] sq-pbz04.2.1: `individual dict Id -> internal Concept` for nominals `{a}`
+    /// sq-pbz04.2.1: `individual dict Id -> internal Concept` for nominals `{a}`
     /// (`owl:oneOf` singletons / `owl:hasValue` values). SEPARATE from `by_dict` so a punned
     /// id (used both as a class and as an individual) yields two distinct concepts, matching
     /// OWL 2 direct-semantics punning. A nominal concept has NO dict id in `to_dict` (it must
@@ -61,7 +61,7 @@ pub struct Names {
     /// list used as the roots of the "reachable from a nominal" non-emptiness search.
     nominal_set: FxHashSet<Concept>,
     nominal_list: Vec<Concept>,
-    /// [OPUS-4.8] sq-pbz04.2.6: `role -> ∃role.Self` self-restriction concept (`owl:hasSelf`).
+    /// sq-pbz04.2.6: `role -> ∃role.Self` self-restriction concept (`owl:hasSelf`).
     /// A self-concept is a basic atom with NO dict id (like a nominal, it must never surface as a
     /// named class); the completion rules CR-Self-1/CR-Self-2 (see `classify.rs`) connect its
     /// membership `∃r.Self ∈ S(X)` to the reflexive role link `(X,X) ∈ R(r)`.
@@ -136,7 +136,7 @@ impl Names {
         c
     }
 
-    /// [FABLE-5] sq-pbz04.2.1: maps an individual's dict id to its NOMINAL concept `{a}`,
+    /// sq-pbz04.2.1: maps an individual's dict id to its NOMINAL concept `{a}`,
     /// minting one on first sight. The same individual (dict id) always yields the same
     /// concept, so `owl:hasValue :a` and `owl:someValuesFrom [owl:oneOf (:a)]` unify on one
     /// filler. The concept carries NO dict id (`dict_of` returns `None`): a nominal is not a
@@ -172,7 +172,7 @@ impl Names {
         &self.nominal_list
     }
 
-    /// [OPUS-4.8] sq-pbz04.2.6: maps a role to its self-restriction concept `∃r.Self`
+    /// sq-pbz04.2.6: maps a role to its self-restriction concept `∃r.Self`
     /// (`owl:hasSelf`), minting one on first sight. Carries NO dict id (`dict_of` returns
     /// `None`): a self-concept is a basic atom in the EL++ normal form, never a named class in
     /// the emitted lattice. The same role always yields the same concept, so `∃r.Self` on both
@@ -195,7 +195,7 @@ impl Names {
         self.self_of_concept.get(&c).copied()
     }
 
-    /// [FABLE-5] sq-8zqwb: the self-restriction concept `∃role.Self` IF one was minted for
+    /// sq-8zqwb: the self-restriction concept `∃role.Self` IF one was minted for
     /// `role` (non-minting, unlike [`Names::self_concept`]) — the CRs3 nominal-reflexivity
     /// trigger test: a SAME-NOMINAL self-link `({a},{a}) ∈ R(r)` reads off as `∃r.Self ∈
     /// S({a})`. Returns `None` on a `hasSelf`-free ontology, so that path's cost is unchanged.
@@ -215,7 +215,7 @@ impl Names {
         self.to_dict.get(c as usize).copied().flatten()
     }
 
-    /// [OPUS-4.8] sq-pbz04.2.5 (`abox`): every minted nominal as `(individual dict id, concept)`.
+    /// sq-pbz04.2.5 (`abox`): every minted nominal as `(individual dict id, concept)`.
     /// The bijection `nominal_by_dict` drives the ABox realisation readoff (per-individual typing
     /// plus the concept→individual reverse map for `owl:sameAs`); it spans BOTH the
     /// assertion-minted individuals (`abox`) and any TBox `owl:hasValue`/singleton-`owl:oneOf`
@@ -225,7 +225,7 @@ impl Names {
         self.nominal_by_dict.iter().map(|(&id, &c)| (id, c))
     }
 
-    /// [OPUS-4.8] sq-pbz04.2.5 (`abox`): the internal role for `dict_id` IF one was already
+    /// sq-pbz04.2.5 (`abox`): the internal role for `dict_id` IF one was already
     /// minted, WITHOUT minting a new one (unlike [`Names::role`]). Used to append the
     /// `owl:bottomObjectProperty` empty-role axiom only when that property actually occurs,
     /// and by the regularity check (`rbox`) to resolve `owl:topObjectProperty` only when it
@@ -235,7 +235,7 @@ impl Names {
         self.role_by_dict.get(&dict_id).copied()
     }
 
-    /// [OPUS-4.8] sq-pbz04.2.6 (`abox`): the source dict id of a role, if it is a NAMED object
+    /// sq-pbz04.2.6 (`abox`): the source dict id of a role, if it is a NAMED object
     /// property. Used by the self-loop realisation readoff (`abox`) to name the predicate of a
     /// derived `a r a` assertion, and by the role-lattice readoff (`rbox`, sq-pbz04.2.7) to map
     /// role-index pairs back to dict ids for `rdfs:subPropertyOf` emission. A fresh anonymous

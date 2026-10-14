@@ -1,11 +1,11 @@
 #![doc = include_str!("../README.md")]
-// [OPUS-4.8] MS-G2 (sq-8wbn): make `// SAFETY:` mandatory on every first-party unsafe block.
+// MS-G2 (sq-8wbn): make `// SAFETY:` mandatory on every first-party unsafe block.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
 use std::io::Read;
 use std::time::Instant;
 
-// [FABLE-5] (sq-lsp7k.8) Materializing tabular→RDF import (CSV direct mapping + the R2RML
+// (sq-lsp7k.8) Materializing tabular→RDF import (CSV direct mapping + the R2RML
 // materializing subset over CSV logical tables). The whole module exists only under the
 // opt-in `tabular` feature; the default CLI build carries none of it.
 #[cfg(feature = "tabular")]
@@ -23,7 +23,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("query") => cmd_query(&args),
         Some("reason") => cmd_reason(&args),
-        // [OPUS-5] (sq-2ch27, Phase E6) `classify` materializes the OWL 2 EL subsumption lattice
+        // (sq-2ch27, Phase E6) `classify` materializes the OWL 2 EL subsumption lattice
         // (`sparq-reason-el`, `rbox` on / `cdomain` off — complete for the E1+E2 fragment, with
         // concrete-domain axioms deferred into `skipped_axioms`) — the class hierarchy OWL 2 RL is
         // sound but silently incomplete for. Gated behind the opt-in `el` feature: the default CLI
@@ -37,7 +37,7 @@ fn main() {
         Some("save") => cmd_save(&args),
         Some("recompress") => cmd_recompress(&args),
         Some("compact") => cmd_compact(&args),
-        // [GPT-5.6] (sq-lsp7k.28) Deterministic RDF triple-set diff. The entire command
+        // (sq-lsp7k.28) Deterministic RDF triple-set diff. The entire command
         // is opt-in, so feature-OFF builds retain the previous dispatch and binary surface.
         #[cfg(feature = "diff")]
         Some("diff") => cmd_diff(&args),
@@ -47,26 +47,26 @@ fn main() {
         Some("compare-compress") => cmd_compare_compress(&args),
         Some("bench-remap") => cmd_bench_remap(&args),
         Some("scaling") => cmd_scaling(&args),
-        // [OPUS-4.8] (sq-678h) `dump` re-serializes a loaded RDF document into the writer
+        // (sq-678h) `dump` re-serializes a loaded RDF document into the writer
         // matrix (turtle / trig / nquads). Gated behind the opt-in `serialize-rdf` feature:
         // the default CLI build carries no serializer code, so the subcommand is only present
         // when built with `--features serialize-rdf`.
         #[cfg(feature = "serialize-rdf")]
         Some("dump") => cmd_dump(&args),
-        // [OPUS-4.8] (sq-vczh2) `terse` transpiles a terse query (the `K:<name>` keyword layer
+        // (sq-vczh2) `terse` transpiles a terse query (the `K:<name>` keyword layer
         // over canonical SPARQL) into the canonical SPARQL it expands to, printing the verifiable
         // JSON contract. Gated behind the opt-in `terse` feature: the default CLI build carries no
         // terse code, so the subcommand is only present when built with `--features terse`.
         #[cfg(feature = "terse")]
         Some("terse") => cmd_terse(&args),
-        // [FABLE-5] (sq-8ju74) `to-hdt` EXPORTS a loaded RDF document as a standard-layout
+        // (sq-8ju74) `to-hdt` EXPORTS a loaded RDF document as a standard-layout
         // HDT v1.0 archive via sparq-hdt's direct in-memory encoder. Gated behind the opt-in
         // `hdt-write` cargo feature (which implies `hdt`, the loader): the default CLI build
         // carries no HDT code, so the subcommand is only present when built with
         // `--features hdt-write`.
         #[cfg(feature = "hdt-write")]
         Some("to-hdt") => cmd_to_hdt(&args),
-        // [FABLE-5] (sq-lsp7k.8) `tabular` materializes RDF from CSV — direct mapping by
+        // (sq-lsp7k.8) `tabular` materializes RDF from CSV — direct mapping by
         // default, R2RML (CSV logical tables) with `--mapping` — then loads the graph (and
         // optionally queries it) or streams N-Triples to `--out`. Gated behind the opt-in
         // `tabular` feature: the default CLI build carries no CSV/R2RML code and the
@@ -244,7 +244,7 @@ fn cmd_ingest(args: &[String]) {
     } else if path.ends_with(".zst") || path.ends_with(".zstd") {
         // zstd decompresses ~12x faster than bzip2, so it stops being the ingestion
         // bottleneck; recompress a .bz2 source once with `zstd -9 -T0` to use it.
-        // [GPT-5.6] (sq-fo528) Accept frames produced with zstd's large-window mode.
+        // (sq-fo528) Accept frames produced with zstd's large-window mode.
         let mut decoder = zstd::stream::read::Decoder::new(file).unwrap_or_else(|e| {
             eprintln!("zstd decode {path}: {e}");
             std::process::exit(1);
@@ -338,7 +338,7 @@ fn subject_to_term(s: &oxrdf::NamedOrBlankNode) -> oxrdf::Term {
     }
 }
 
-// ===== [SONNET-4.6] sq-kmve2 — the SPQCPRM2 V2 emit FLAG =====
+// ===== sq-kmve2 — the SPQCPRM2 V2 emit FLAG =====
 //
 // `save … compressed --format-v2` and `recompress … --v2` select the `SPQCPRM2` on-disk block
 // stream for THIS invocation, so asking for V2 no longer means exporting `SPARQ_EMIT_FORMAT=v2`
@@ -359,7 +359,7 @@ const SAVE_USAGE: &str = "sparq-cli save <data-file> <format> <dir> [compressed]
 /// Usage line for `recompress`.
 const RECOMPRESS_USAGE: &str = "sparq-cli recompress <src-dir> <dst-dir> [--v2]   (dirs must differ)";
 
-/// [SONNET-4.6] (sq-kmve2) Splits `args` into positionals and the V2-emit flag. `--format-v2`
+/// (sq-kmve2) Splits `args` into positionals and the V2-emit flag. `--format-v2`
 /// (the `save` spelling) and `--v2` (the `recompress` spelling) are accepted interchangeably;
 /// any OTHER `--`-prefixed argument is a hard usage error, so a typo'd flag can never be
 /// silently dropped and leave the caller believing it wrote V2.
@@ -379,11 +379,11 @@ fn take_emit_v2(args: &[String], usage: &str) -> (Vec<String>, bool) {
     (positional, v2)
 }
 
-/// [SONNET-4.6] (sq-kmve2) V2 emission is compiled in — nothing to reject.
+/// (sq-kmve2) V2 emission is compiled in — nothing to reject.
 #[cfg(feature = "spqcprm2")]
 fn check_emit_v2(_v2: bool) {}
 
-/// [SONNET-4.6] (sq-kmve2) This binary cannot emit `SPQCPRM2` (the `spqcprm2` feature is off),
+/// (sq-kmve2) This binary cannot emit `SPQCPRM2` (the `spqcprm2` feature is off),
 /// so the flag is a loud error rather than a silent `SPQCPRM1` write.
 #[cfg(not(feature = "spqcprm2"))]
 fn check_emit_v2(v2: bool) {
@@ -395,14 +395,14 @@ fn check_emit_v2(v2: bool) {
     }
 }
 
-/// [SONNET-4.6] (sq-kmve2) Runs `f` (a compressed save) with this thread's emit format forced to
+/// (sq-kmve2) Runs `f` (a compressed save) with this thread's emit format forced to
 /// `SPQCPRM2` when `v2`; otherwise runs it untouched, so the default path stays bit-identical.
 #[cfg(feature = "spqcprm2")]
 fn with_emit_v2<R>(v2: bool, f: impl FnOnce() -> R) -> R {
     if v2 { sparq_core::compress::with_emit_format(sparq_core::compress::EmitFormat::V2, f) } else { f() }
 }
 
-/// [SONNET-4.6] (sq-kmve2) Feature-OFF twin: `check_emit_v2` has already exited on `v2`, so this
+/// (sq-kmve2) Feature-OFF twin: `check_emit_v2` has already exited on `v2`, so this
 /// only ever runs the closure unchanged.
 #[cfg(not(feature = "spqcprm2"))]
 fn with_emit_v2<R>(_v2: bool, f: impl FnOnce() -> R) -> R {
@@ -484,7 +484,7 @@ fn cmd_recompress(args: &[String]) {
     );
 }
 
-/// [OPUS-4.8] (sq-x32t) `compact <persist-dir>` — WAL COMPACTION / VACUUM for ERASURE-
+/// (sq-x32t) `compact <persist-dir>` — WAL COMPACTION / VACUUM for ERASURE-
 /// COMPLETENESS (epic sq-toze.33). An OFFLINE operator command: stop the server, run this on its
 /// `--persist <dir>`, restart. A logical SPARQL `DELETE` / `DROP GRAPH` retracts data from the
 /// live view but leaves the superseded bytes in earlier WAL segments until a compaction folds the
@@ -519,7 +519,7 @@ fn cmd_compact(args: &[String]) {
     });
     let before = g.len();
     let t = Instant::now();
-    // [OPUS-4.8] (sq-x32t) ERASURE-GRADE vacuum: atomic, crash-safe rewrite of the on-disk store
+    // (sq-x32t) ERASURE-GRADE vacuum: atomic, crash-safe rewrite of the on-disk store
     // to only the live triples + a fresh dictionary (so orphaned term VALUES are purged too) +
     // WAL truncate. `vacuum` re-interns; the lighter `Graph::compact` keeps the dict and would
     // leave a deleted literal's bytes on disk, which is not erasure-complete.
@@ -639,7 +639,7 @@ fn cmd_build(args: &[String]) {
     let (path, format, dir) = match (args.get(2), args.get(3), args.get(4)) {
         (Some(p), Some(f), Some(d)) => (p.as_str(), f.as_str(), d.as_str()),
         _ => {
-            // [OPUS-4.8] sq-vkz7: `SPARQ_BUILD_COMPRESSED=1` makes the external build emit
+            // sq-vkz7: `SPARQ_BUILD_COMPRESSED=1` makes the external build emit
             // block-compressed (SPQCPRM1) perms in ONE pass — skipping a later `recompress`.
             eprintln!(
                 "usage: sparq-cli build <file[.gz|.bz2]> <format> <dir> [chunk_millions]\n  \
@@ -648,7 +648,7 @@ fn cmd_build(args: &[String]) {
             std::process::exit(2);
         }
     };
-    // [OPUS-4.8] `build` calls Graph::build_external directly (not load_quiet), which shares
+    // `build` calls Graph::build_external directly (not load_quiet), which shares
     // the same Turtle catch-all — so reject an unknown format here too (bug sq-q50l). HDT is
     // not a build target (build streams text formats), so it is excluded from the accepted set.
     if !is_known_format(format) || format == "hdt" {
@@ -668,7 +668,7 @@ fn cmd_build(args: &[String]) {
     } else if path.ends_with(".zst") || path.ends_with(".zstd") {
         // zstd decompresses ~12x faster than bzip2, so it stops being the ingestion
         // bottleneck; recompress a .bz2 source once with `zstd -9 -T0` to use it.
-        // [GPT-5.6] (sq-fo528) Accept frames produced with zstd's large-window mode.
+        // (sq-fo528) Accept frames produced with zstd's large-window mode.
         let mut decoder = zstd::stream::read::Decoder::new(file).unwrap_or_else(|e| {
             eprintln!("zstd decode {path}: {e}");
             std::process::exit(1);
@@ -684,7 +684,7 @@ fn cmd_build(args: &[String]) {
     let reader = std::io::BufReader::with_capacity(1 << 22, decoded);
 
     let t = Instant::now();
-    // [OPUS-4.8] (sq-5atq) Quad formats (N-Quads / TriG) build OUT-OF-CORE *with* their named
+    // (sq-5atq) Quad formats (N-Quads / TriG) build OUT-OF-CORE *with* their named
     // graphs via `build_external_quads` (partition-by-graph + per-graph external sort, same
     // on-disk layout `save_named` emits) — a default-graph-only `build_external` would silently
     // FLATTEN every quad into the default graph, losing the dataset's named graphs (the PSS
@@ -898,7 +898,7 @@ fn load_reasoned(path: &str, format: &str, profile: sparq_reason::Profile) -> sp
             }
         }
     }
-    // [FABLE-5] (sq-7d3dj.32.2.1) The reasoned load path also honours `SPARQ_STORE_PROFILE`, so
+    // (sq-7d3dj.32.2.1) The reasoned load path also honours `SPARQ_STORE_PROFILE`, so
     // `reason` / `query --reason` inherit the store profile uniformly with the non-reasoned path.
     apply_store_profile(sparq_core::Graph::from_parts(dict, triples), store_profile_from_env())
 }
@@ -928,7 +928,7 @@ fn load_with_reasoning(path: &str, format: &str, profile: &str) -> sparq_core::G
     if profile.eq_ignore_ascii_case("n3") {
         return load_n3(path);
     }
-    // [SONNET-4.6] (sq-p4zci, design record research/stratified-datalog-rules.md §6 item 6)
+    // (sq-p4zci, design record research/stratified-datalog-rules.md §6 item 6)
     // `datalog:<rules.dlog>` is the ONLY `--reason` value that carries an argument: a Datalog
     // program is user-supplied rules, not a fixed profile, so the rules file is part of the
     // flag. Intercepted before the RL/RDFS profile parse for the same reason as `el` — it is a
@@ -948,7 +948,7 @@ fn load_with_reasoning(path: &str, format: &str, profile: &str) -> sparq_core::G
             std::process::exit(2);
         }
     }
-    // [OPUS-5] (sq-2ch27) `el` is NOT a `sparq_reason::Profile` — EL classification is a
+    // (sq-2ch27) `el` is NOT a `sparq_reason::Profile` — EL classification is a
     // different algorithm family in a different crate, so it is intercepted before the RL/RDFS
     // profile parse. Without the opt-in feature this is a hard exit-2 error naming the feature:
     // falling back to `owl` would silently hand back an INCOMPLETE class hierarchy.
@@ -974,7 +974,7 @@ fn load_with_reasoning(path: &str, format: &str, profile: &str) -> sparq_core::G
     load_reasoned(path, format, prof)
 }
 
-/// [SONNET-4.6] (sq-p4zci) Recognise the `datalog:<rules.dlog>` reasoning profile and return the
+/// (sq-p4zci) Recognise the `datalog:<rules.dlog>` reasoning profile and return the
 /// rules-file path. A bare `datalog` (no rules file) is a hard exit-2 error naming the syntax —
 /// there is no default program to guess, and falling through to the profile parser would report
 /// the far less useful "unknown reasoning profile".
@@ -996,7 +996,7 @@ fn datalog_rules_arg(profile: &str) -> Option<&str> {
     Some(rules)
 }
 
-/// [SONNET-4.6] (sq-p4zci, design record `research/stratified-datalog-rules.md` §6 item 6) The
+/// (sq-p4zci, design record `research/stratified-datalog-rules.md` §6 item 6) The
 /// `--reason datalog:<rules.dlog>` load path: parse the data file, parse the rule document,
 /// check stratifiability, run the per-stratum fixpoint, and build the graph from the closure.
 ///
@@ -1074,11 +1074,11 @@ fn load_n3(path: &str) -> sparq_core::Graph {
         std::process::exit(1);
     });
     eprintln!("reasoned [N3]: {} ground triples in closure in {:.3}s", triples.len(), t.elapsed().as_secs_f64());
-    // [FABLE-5] (sq-7d3dj.32.2.1) Honour `SPARQ_STORE_PROFILE` on the N3 path too (see `load_reasoned`).
+    // (sq-7d3dj.32.2.1) Honour `SPARQ_STORE_PROFILE` on the N3 path too (see `load_reasoned`).
     apply_store_profile(sparq_core::Graph::from_parts(dict, triples), store_profile_from_env())
 }
 
-/// [OPUS-5] (sq-2ch27, Phase E6) Parse `path` and materialize the OWL 2 EL subsumption lattice
+/// (sq-2ch27, Phase E6) Parse `path` and materialize the OWL 2 EL subsumption lattice
 /// into the parsed triples via `sparq_reason_el::classify_graph`, returning the `(Dict, triples)`
 /// pair plus the classifier's [`sparq_reason_el::Report`]. Shared by the `--reason el` load path
 /// and the `classify` subcommand so the two cannot drift.
@@ -1143,7 +1143,7 @@ fn el_classify_parts(
     (dict, triples, report)
 }
 
-/// [OPUS-5] (sq-2ch27, Phase E6) The `--reason el` load path: classify, then build the graph
+/// (sq-2ch27, Phase E6) The `--reason el` load path: classify, then build the graph
 /// from the lattice-augmented triples. The derived `rdfs:subClassOf` / `rdfs:subPropertyOf`
 /// edges are ordinary triples, so the subsequent query is plain BGP evaluation — exactly like
 /// the RL `scm-*` output, just complete for the E1+E2 fragment (see `el_classify_parts` for the
@@ -1155,7 +1155,7 @@ fn load_el_classified(path: &str, format: &str) -> sparq_core::Graph {
     apply_store_profile(sparq_core::Graph::from_parts(dict, triples), store_profile_from_env())
 }
 
-/// [OPUS-5] (sq-2ch27, Phase E6) `classify <data-file> <format> [out.nt]` — run the OWL 2 EL
+/// (sq-2ch27, Phase E6) `classify <data-file> <format> [out.nt]` — run the OWL 2 EL
 /// classifier and print the classification REPORT as `name<TAB>value` lines on stdout (the
 /// `memstat` convention); with `out.nt`, also write the lattice-augmented graph as N-Triples.
 ///
@@ -1261,7 +1261,7 @@ fn cmd_reason(args: &[String]) {
 /// store self-estimate to stderr (≈0 GB heap for the mmap'd permutations — they live in the
 /// OS page cache, not the process heap).
 ///
-/// [OPUS-4.8] (sq-iwyy) Output is at PARITY with `query`: it shares the exact same
+/// (sq-iwyy) Output is at PARITY with `query`: it shares the exact same
 /// `emit_query_results` emission core, so SELECT prints bindings (default a readable table),
 /// ASK prints a boolean, CONSTRUCT/DESCRIBE print N-Triples, `--format <table|tsv|csv|xml|
 /// json|ntriples>` selects the SELECT/ASK serialisation, and `--count` restores the old
@@ -1275,7 +1275,7 @@ fn cmd_query_mmap(args: &[String]) {
             std::process::exit(2);
         }
     };
-    // [OPUS-4.8] (sq-iwyy) Same flag surface as `query`: `--count` for the legacy count-only
+    // (sq-iwyy) Same flag surface as `query`: `--count` for the legacy count-only
     // line, `--format` for the SELECT/ASK serialisation (default table).
     let count_only = args.iter().any(|a| a == "--count");
     let out_fmt = out_format_flag(args);
@@ -1297,12 +1297,12 @@ fn cmd_query_mmap(args: &[String]) {
     emit_query_results(&g, sparql, count_only, out_fmt);
 }
 
-/// [OPUS-4.8] Whether `format` is an RDF serialization this CLI accepts. Kept in lock-step
+/// Whether `format` is an RDF serialization this CLI accepts. Kept in lock-step
 /// with the format arms in `load_quiet` / `cmd_build` and with `sparq_core::parse_to_triples`.
 /// `parse_to_triples` falls back to Turtle for ANY unrecognised string, so the CLI must
 /// gate on this set itself to honour the "unsupported format → non-zero exit" contract.
 fn is_known_format(format: &str) -> bool {
-    // [OPUS-4.8] (sq-oy1f.4) JSON-LD input is recognised in the DEFAULT build (the `jsonld`
+    // (sq-oy1f.4) JSON-LD input is recognised in the DEFAULT build (the `jsonld`
     // feature is in the CLI default set — a maintainer-directed exception). Without the feature
     // (`--no-default-features`) the `oxjsonld` parser is not linked, so the JSON-LD tokens are
     // NOT "known" and a `jsonld` input format errors (exit 2) rather than mis-parsing as Turtle.
@@ -1330,9 +1330,9 @@ fn is_known_format(format: &str) -> bool {
     )
 }
 
-/// [OPUS-4.8] Report an unknown `--format` value and exit 2 (usage error).
+/// Report an unknown `--format` value and exit 2 (usage error).
 fn die_unknown_format(format: &str) -> ! {
-    // [OPUS-4.8] (sq-oy1f.4) `jsonld` is named in the default build (the `jsonld` feature is in
+    // (sq-oy1f.4) `jsonld` is named in the default build (the `jsonld` feature is in
     // the CLI default set); a `--no-default-features` build omits it from the list.
     eprintln!(
         "unknown format '{}' (known: turtle | ntriples | nquads | trig{}{})",
@@ -1352,7 +1352,7 @@ fn open_reader(path: &str) -> std::io::Result<Box<dyn std::io::Read + Send>> {
     } else if path.ends_with(".bz2") {
         Box::new(bzip2::read::MultiBzDecoder::new(file))
     } else if path.ends_with(".zst") || path.ends_with(".zstd") {
-        // [GPT-5.6] (sq-fo528) Accept frames produced with zstd's large-window mode.
+        // (sq-fo528) Accept frames produced with zstd's large-window mode.
         let mut decoder = zstd::stream::read::Decoder::new(file)?;
         decoder.window_log_max(31)?;
         Box::new(decoder)
@@ -1366,7 +1366,7 @@ mod open_reader_tests {
     use super::open_reader;
     use std::io::{Read, Write};
 
-    /// [GPT-5.6] (sq-fo528) A streaming `--long=28` encoder advertises a 256 MiB
+    /// (sq-fo528) A streaming `--long=28` encoder advertises a 256 MiB
     /// window even for this tiny fixture. The default decoder ceiling rejects the
     /// frame, so this witnesses the raised ceiling without a large test artifact.
     #[test]
@@ -1395,7 +1395,7 @@ mod open_reader_tests {
     }
 }
 
-/// [FABLE-5] (sq-7d3dj.32.2.1) The in-RAM store profile selected by `SPARQ_STORE_PROFILE`.
+/// (sq-7d3dj.32.2.1) The in-RAM store profile selected by `SPARQ_STORE_PROFILE`.
 /// `Raw` is the default six-permutation layout; `Compressed` re-encodes into the
 /// block-compressed in-RAM mode (`Graph::into_compressed`). Read once per load from the env.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1404,7 +1404,7 @@ enum StoreProfile {
     Compressed,
 }
 
-/// [FABLE-5] (sq-7d3dj.32.2.1) Resolve the `SPARQ_STORE_PROFILE` env var into a [`StoreProfile`].
+/// (sq-7d3dj.32.2.1) Resolve the `SPARQ_STORE_PROFILE` env var into a [`StoreProfile`].
 /// Contract: unset or `raw` → [`StoreProfile::Raw`] (byte-identical current behaviour);
 /// `compressed` → [`StoreProfile::Compressed`]; ANY other value → hard error, exit 2 —
 /// fail-closed, no silent typo fall-through (a mistyped profile must never quietly select raw).
@@ -1429,7 +1429,7 @@ fn store_profile_from_env() -> StoreProfile {
     }
 }
 
-/// [FABLE-5] (sq-7d3dj.32.2.1) Apply a resolved store [`StoreProfile`] to a freshly-loaded graph.
+/// (sq-7d3dj.32.2.1) Apply a resolved store [`StoreProfile`] to a freshly-loaded graph.
 /// `Raw` returns `g` untouched (the default path is byte-identical to before this hook existed);
 /// `Compressed` re-encodes it via `Graph::into_compressed()`. Honest scope: this reduces
 /// steady-state resident footprint only — the load-time peak RSS still includes the raw perm
@@ -1449,7 +1449,7 @@ fn load_quiet(path: &str, format: &str) -> sparq_core::Graph {
     apply_store_profile(load_quiet_raw(path, format), store_profile_from_env())
 }
 
-/// [FABLE-5] (sq-7d3dj.32.2.1) The unconditional raw load — format routing + parse + index build,
+/// (sq-7d3dj.32.2.1) The unconditional raw load — format routing + parse + index build,
 /// with NO store-profile applied. Byte-identical to the pre-profile `load_quiet` body, so callers
 /// that manage their own profile decision (e.g. `memstat`, which has an explicit positional) use
 /// this to avoid a double application.
@@ -1458,7 +1458,7 @@ fn load_quiet_raw(path: &str, format: &str) -> sparq_core::Graph {
         eprintln!("error loading {path}: {e}");
         std::process::exit(1);
     };
-    // [OPUS-4.8] Reject an unknown format argument up-front (exit 2 = usage error).
+    // Reject an unknown format argument up-front (exit 2 = usage error).
     // sparq-core's `parse_to_triples` treats ANY unrecognised format string as Turtle
     // (a catch-all `_ => Turtle` arm), so without this guard a typo'd / unsupported
     // format value would SILENTLY parse the input as Turtle and exit 0 — the opposite
@@ -1486,7 +1486,7 @@ fn load_quiet_raw(path: &str, format: &str) -> sparq_core::Graph {
         use std::io::Read;
         let mut text = String::new();
         open_reader(path).and_then(|mut r| r.read_to_string(&mut text)).unwrap_or_else(|e| die(e.to_string()));
-        // N-Quads / TriG (and — [OPUS-4.8] sq-oy1f.4 — JSON-LD, whose `@graph` carries named
+        // N-Quads / TriG (and — sq-oy1f.4 — JSON-LD, whose `@graph` carries named
         // graphs) load as a DATASET so GRAPH queries and full-dataset re-serialisation (`dump …
         // jsonld`) see the named graphs instead of folding them into the default graph.
         #[cfg(feature = "jsonld")]
@@ -1525,7 +1525,7 @@ fn load(path: &str, format: &str) -> sparq_core::Graph {
     g
 }
 
-/// [FABLE-5] (sq-7d3dj.32) `memstat <data-file> <format> [compressed]` — load a document and print a
+/// (sq-7d3dj.32) `memstat <data-file> <format> [compressed]` — load a document and print a
 /// DETERMINISTIC memory-composition breakdown as `name<TAB>value` lines on stdout, plus the
 /// process RSS counters. This is the at-scale extension of the CI `store_bytes_per_triple`
 /// metric (scripts/ci-bench.sh greps the same `heap_bytes()` self-accounting off the load
@@ -1593,7 +1593,7 @@ fn cmd_memstat(args: &[String]) {
     println!("hwm_b_per_triple\t{:.2}", vm_hwm as f64 / triples as f64);
 }
 
-/// [FABLE-5] (sq-7d3dj.32) Read the process `VmRSS` / `VmHWM` (resident set + high-water mark) in
+/// (sq-7d3dj.32) Read the process `VmRSS` / `VmHWM` (resident set + high-water mark) in
 /// bytes from Linux `/proc/self/status`. Returns `(0, 0)` where the file is unavailable
 /// (non-Linux), so `memstat`'s deterministic heap lines still work there.
 fn proc_vm_bytes() -> (u64, u64) {
@@ -1611,15 +1611,15 @@ fn proc_vm_bytes() -> (u64, u64) {
     (field("VmRSS:"), field("VmHWM:"))
 }
 
-/// [OPUS-4.8] (sq-678h, sq-e3pj) `dump <file[.gz|.bz2|.zst]> <in-format> <out-format>` — load an
+/// (sq-678h, sq-e3pj) `dump <file[.gz|.bz2|.zst]> <in-format> <out-format>` — load an
 /// RDF document and re-serialize the whole graph (default + named graphs) into one of the writer
 /// matrix formats and print it to stdout. `out-format` ∈ {turtle, trig, nquads, ntriples,
 /// jsonld[-expanded|-flattened|-compacted]}. Turtle emits only the default graph (named graphs
 /// need a dataset format); trig/nquads/jsonld emit the full dataset. JSON-LD defaults to the
 /// expanded form; `jsonld-flattened` / `jsonld-compacted` select the other 1.1 document forms.
-/// [OPUS-4.8] (sq-ixc3.3) `jsonld-pretty[-expanded|-flattened|-compacted]` emit the same
+/// (sq-ixc3.3) `jsonld-pretty[-expanded|-flattened|-compacted]` emit the same
 /// JSON-LD documents in an indented, multi-line shape (whitespace-only over the minified writer).
-/// [OPUS-4.8] (sq-oy1f.5) `jsonld-compact` (+ `jsonld-compact-pretty`) emit the FULL W3C
+/// (sq-oy1f.5) `jsonld-compact` (+ `jsonld-compact-pretty`) emit the FULL W3C
 /// JSON-LD 1.1 Compaction Algorithm against a caller `@context` supplied via `--context <file>`
 /// (term definitions / `@vocab` / type-language-`@container` coercion / `@reverse` / aliasing),
 /// not the prefix-only `jsonld-compacted` form. Behind the opt-in `serialize-rdf` cargo feature.
@@ -1632,7 +1632,7 @@ fn cmd_dump(args: &[String]) {
             std::process::exit(2);
         }
     };
-    // [OPUS-4.8] (sq-oy1f.5) `--context <file>`: the JSON-LD `@context` for full 1.1 Compaction.
+    // (sq-oy1f.5) `--context <file>`: the JSON-LD `@context` for full 1.1 Compaction.
     // Scanned from the args (the CLI is positional, not clap); only the `jsonld-compact` out-
     // formats consult it. A present `--context` with no value is a usage error.
     let context_path: Option<&str> = match args.iter().position(|a| a == "--context") {
@@ -1656,7 +1656,7 @@ fn cmd_dump(args: &[String]) {
     }
     use sparq_engine::serialize::JsonLdForm;
     let serialized = match out_fmt {
-        // [OPUS-4.8] (sq-oy1f.5) FULL W3C JSON-LD 1.1 Compaction against the `--context` file.
+        // (sq-oy1f.5) FULL W3C JSON-LD 1.1 Compaction against the `--context` file.
         "jsonld-compact" | "json-ld-compact" | "jsonld-compact-pretty" | "json-ld-compact-pretty" => {
             let ctx_path = context_path.unwrap_or_else(|| {
                 eprintln!("out-format '{out_fmt}' needs a `@context`: pass --context <file.jsonld>");
@@ -1696,7 +1696,7 @@ fn cmd_dump(args: &[String]) {
         }
         "jsonld-flattened" => sparq_engine::serialize::graph_to_jsonld(&g, JsonLdForm::Flattened),
         "jsonld-compacted" => sparq_engine::serialize::graph_to_jsonld(&g, JsonLdForm::Compacted),
-        // [OPUS-4.8] (sq-ixc3.3) pretty (indented) JSON-LD — whitespace-only over the minified
+        // (sq-ixc3.3) pretty (indented) JSON-LD — whitespace-only over the minified
         // forms above. `jsonld-pretty` defaults to expanded, matching `jsonld`.
         "jsonld-pretty" | "json-ld-pretty" | "jsonld-pretty-expanded" => {
             sparq_engine::serialize::graph_to_jsonld_pretty(&g, JsonLdForm::Expanded)
@@ -1775,7 +1775,7 @@ fn dump_streaming(g: &sparq_core::Graph, out_fmt: &str) {
     }
 }
 
-/// [FABLE-5] (sq-8ju74) `to-hdt <data-file[.gz|.bz2|.zst]> <format> <out.hdt[.gz|.zst|.bz2]>` —
+/// (sq-8ju74) `to-hdt <data-file[.gz|.bz2|.zst]> <format> <out.hdt[.gz|.zst|.bz2]>` —
 /// load an RDF document through the shared load path (any ingestible format, `.hdt` itself
 /// included) and EXPORT it as a standard-layout HDT v1.0 archive (FourSectionDictionary +
 /// BitmapTriples, SPO) via `sparq_hdt::save` — the direct in-memory encoder, no temporary
@@ -1822,7 +1822,7 @@ fn cmd_to_hdt(args: &[String]) {
     eprintln!("wrote {} triples to {out} in {:.3}s", g.len(), t.elapsed().as_secs_f64());
 }
 
-/// [OPUS-4.8] (sq-vczh2, epic sq-2m6zm) `terse <terse-query>` — transpile a *terse* query into
+/// (sq-vczh2, epic sq-2m6zm) `terse <terse-query>` — transpile a *terse* query into
 /// the canonical, conformant SPARQL it expands to, printing the verifiable JSON contract
 /// (`{ canonical_sparql, keywords, resolutions, warnings, legendVersion }`) — the SAME shape the
 /// server's `POST /terse/transpile` endpoint returns.
@@ -1867,7 +1867,7 @@ fn cmd_terse(args: &[String]) {
     }
 }
 
-/// [OPUS-4.8] (sq-vczh2) Hand-build the verifiable terse-expansion JSON (the CLI runtime binary
+/// (sq-vczh2) Hand-build the verifiable terse-expansion JSON (the CLI runtime binary
 /// carries no `serde_json` — it hand-builds JSON like `bench`'s `--json`). The shape mirrors the
 /// server's `POST /terse/transpile` body so a caller gets the SAME contract from either surface.
 #[cfg(feature = "terse")]
@@ -1877,17 +1877,7 @@ fn terse_expansion_to_json(expansion: &sparq_terse::Expansion) -> String {
     // false positive on inline-captured identifiers.
     fn esc(out: &mut String, s: &str) {
         out.push('"');
-        for c in s.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-                c => out.push(c),
-            }
-        }
+        sparq_core::json::escape_into(out, s);
         out.push('"');
     }
 
@@ -1947,7 +1937,7 @@ fn terse_expansion_to_json(expansion: &sparq_terse::Expansion) -> String {
     out
 }
 
-/// [OPUS-4.8] (sq-l4ki) Output serialisation chosen by `query --format`. `Table` (the
+/// (sq-l4ki) Output serialisation chosen by `query --format`. `Table` (the
 /// human-readable default) and the four W3C SELECT result formats apply to SELECT (and,
 /// where meaningful, ASK); CONSTRUCT/DESCRIBE always emit N-Triples regardless of this.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1975,7 +1965,7 @@ impl OutFormat {
     }
 }
 
-/// [OPUS-4.8] (sq-l4ki) Pull an optional `--format <name>` flag out of the argument list,
+/// (sq-l4ki) Pull an optional `--format <name>` flag out of the argument list,
 /// defaulting to a readable `Table`. Exits 2 (usage error) on a missing/unknown value —
 /// matching the rest of the CLI's flag-validation contract.
 fn out_format_flag(args: &[String]) -> OutFormat {
@@ -1994,7 +1984,7 @@ fn out_format_flag(args: &[String]) -> OutFormat {
     }
 }
 
-/// [OPUS-4.8] (sq-l4ki) Renders a SELECT `QueryResult` as a fixed-width ASCII table —
+/// (sq-l4ki) Renders a SELECT `QueryResult` as a fixed-width ASCII table —
 /// the default human-readable `query` output. Unbound cells render empty; each term uses
 /// its SPARQL/Turtle term syntax (oxrdf's `Display`). Column widths are sized to the
 /// widest cell so columns line up; for a zero-variable result (which only ASK produces,
@@ -2056,7 +2046,7 @@ fn cmd_query(args: &[String]) {
             std::process::exit(2);
         }
     };
-    // [OPUS-4.8] (sq-l4ki) `--count` preserves the historical count-only output; otherwise
+    // (sq-l4ki) `--count` preserves the historical count-only output; otherwise
     // we emit real results. `--format` selects the SELECT/ASK serialisation (default table).
     let count_only = args.iter().any(|a| a == "--count");
     let out_fmt = out_format_flag(args);
@@ -2069,7 +2059,7 @@ fn cmd_query(args: &[String]) {
     emit_query_results(&g, sparql, count_only, out_fmt);
 }
 
-/// [OPUS-4.8] (sq-iwyy) The shared result-emission core used by BOTH `query` and
+/// (sq-iwyy) The shared result-emission core used by BOTH `query` and
 /// `query-mmap`, so the two stay at output PARITY by construction. Classifies the parsed
 /// query FORM (SELECT / ASK / CONSTRUCT / DESCRIBE) once and routes each to its executor —
 /// the engine's `query`/`query_json` run SELECT/ASK; the graph-valued forms go through
@@ -2082,7 +2072,7 @@ fn emit_query_results(g: &sparq_core::Graph, sparql: &str, count_only: bool, out
     // Parse once so we can classify the query FORM (SELECT / ASK / CONSTRUCT / DESCRIBE)
     // and route it to the matching executor — the engine's `query`/`query_json` only run
     // SELECT/ASK; the graph-valued forms go through `construct_or_describe` (the same path
-    // the `bench` runner already uses). [OPUS-4.8]
+    // the `bench` runner already uses).
     let prepared = sparq_engine::PreparedQuery::parse(sparql).unwrap_or_else(|e| {
         eprintln!("query error: {e}");
         std::process::exit(1);
@@ -2156,14 +2146,14 @@ fn emit_query_results(g: &sparq_core::Graph, sparql: &str, count_only: bool, out
     }
 }
 
-/// [OPUS-4.8] (sq-l4ki) Reports a query execution error to stderr and exits 1 (runtime
+/// (sq-l4ki) Reports a query execution error to stderr and exits 1 (runtime
 /// error) — the shared failure tail of every `query` dispatch arm.
 fn die_query(e: String) -> ! {
     eprintln!("query error: {e}");
     std::process::exit(1);
 }
 
-/// [OPUS-4.8] (sq-d7d) Extract a `--json <path>` results-emit flag (and its value) from the
+/// (sq-d7d) Extract a `--json <path>` results-emit flag (and its value) from the
 /// positional argument vector, returning `(positional_args_without_the_flag, Option<path>)`.
 /// `bench` / `bench-mmap` index their other arguments positionally (`args.get(N)`), so the
 /// flag+value pair is removed BEFORE positional parsing rather than handled inline — this keeps
@@ -2244,7 +2234,7 @@ fn cmd_bench_mmap(args: &[String]) {
 
 /// One measured row of the query suite — the same fields the TSV reports
 /// (`name`, `rows`, `min_micros`), captured so they can be serialised to JSON.
-/// [OPUS-4.8] (sq-d7d)
+/// (sq-d7d)
 struct SuiteRow {
     name: String,
     /// `Ok(min_micros)` for a successful query (with `rows`), or `Err(message)` if it failed.
@@ -2254,7 +2244,7 @@ struct SuiteRow {
 /// Runs every `*.rq` in `dir` (sorted) `iters` times in `mode`, printing one TSV line
 /// per query: `<name>\t<rows>\t<min_micros>`.
 ///
-/// [OPUS-4.8] (sq-d7d) When `json_path` is `Some`, the SAME measured fields are ALSO written
+/// (sq-d7d) When `json_path` is `Some`, the SAME measured fields are ALSO written
 /// to that path as a machine-readable JSON document (the structured-benchmark-catalog pattern,
 /// mirroring `bench/memtier` / `mpc_net_bench`'s dependency-free emit). STDOUT is byte-for-byte
 /// unchanged whether or not the flag is present — JSON is strictly additive.
@@ -2274,7 +2264,7 @@ fn run_query_suite(g: &sparq_core::Graph, dir: &str, iters: usize, mode: &str, j
     for path in entries {
         let name = path.file_stem().unwrap().to_string_lossy().to_string();
         let sparql = std::fs::read_to_string(&path).unwrap();
-        // [OPUS-4.8] Route the graph-valued forms (CONSTRUCT / DESCRIBE) through the
+        // Route the graph-valued forms (CONSTRUCT / DESCRIBE) through the
         // construct/describe executor — count()/query()/query_json() only handle SELECT/ASK.
         // This lets the operator-coverage suite (bench/operators/queries) exercise every
         // SPARQL query form through the same `bench` runner; "rows" = produced triples.
@@ -2329,7 +2319,7 @@ fn run_query_suite(g: &sparq_core::Graph, dir: &str, iters: usize, mode: &str, j
     }
 }
 
-/// [OPUS-4.8] (sq-d7d) Serialise a query-suite run to stable, dependency-free JSON — the same
+/// (sq-d7d) Serialise a query-suite run to stable, dependency-free JSON — the same
 /// hand-built `format!` convention as `mpc_net_bench::cell_json` (no serde_json dep added to the
 /// CLI). The shape mirrors the catalog pattern: a top-level object carrying the run parameters +
 /// an honest `note` (these are the numbers THIS machine measured — non-canonical), and a
@@ -2369,24 +2359,14 @@ fn suite_results_json(mode: &str, iters: usize, rows: &[SuiteRow]) -> String {
     s
 }
 
-/// [OPUS-4.8] (sq-d7d) Minimal JSON string escaper for the dependency-free emit — escapes the
+/// (sq-d7d) Minimal JSON string escaper for the dependency-free emit — escapes the
 /// characters JSON requires (`"`, `\`, and the C0 control set incl. the named whitespace
 /// escapes). Query names are file stems and error strings are engine messages, so this covers
 /// the realistic input; anything else still produces valid `\uXXXX` escapes.
 fn json_str(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() + 2);
     out.push('"');
-    for c in raw.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
+    sparq_core::json::escape_into(&mut out, raw);
     out.push('"');
     out
 }

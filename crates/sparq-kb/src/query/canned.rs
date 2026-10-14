@@ -2,7 +2,7 @@
 //! library used by the `pkg-query` helper binary (sq-2m6zm.3) and by the
 //! `query_canned` test.
 //!
-//! [OPUS-4.8] sq-2m6zm.3 (epic sq-2m6zm); design record
+//! sq-2m6zm.3 (epic sq-2m6zm); design record
 //! `research/dogfooding-sparq-knowledge-graph.md` §4.1 / §6 (PR #1063). 🤖 SPARQ agent
 //! — dogfooding sparq as a project knowledge graph. Written while Fable unavailable;
 //! flag for re-review when Fable returns.
@@ -94,7 +94,7 @@ GROUP BY ?p ORDER BY DESC(?uses)"#,
 /// **Facade identity is a decision, not a constant.** The `schema:` namespace filter
 /// below encodes the ratified schema.org-as-top choice; re-ratifying a different facade
 /// (e.g. gist) would change this FILTER and the `pkg.ttl` bridge axioms together. As of
-/// `sq-mztg8.4` no gist arm has been measured, so schema.org-as-top stands. [OPUS-5]
+/// `sq-mztg8.4` no gist arm has been measured, so schema.org-as-top stands.
 pub const FACADE_TERMS: CannedQuery = CannedQuery {
     name: "facade-terms",
     about: "INTROSPECT: the schema.org facade term each pkg: term bridges onto (the ratified read-path facade)",

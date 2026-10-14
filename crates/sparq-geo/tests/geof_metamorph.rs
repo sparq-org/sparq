@@ -1,4 +1,4 @@
-//! Metamorphic laws for the pure Simple Features operations. [GPT-5.6]
+//! Metamorphic laws for the pure Simple Features operations.
 
 use geo_types::{Coord, Geometry, LineString, Point, Polygon};
 use proptest::prelude::*;

@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-zgbso.2 — regression pins for the TWO confirmed fail-OPEN defects the
+//! sq-zgbso.2 — regression pins for the TWO confirmed fail-OPEN defects the
 //! review of PR #3458 found by execution in the N3-stratum ODRL path.
 //!
 //! This is ACCESS CONTROL: a fail-open here GRANTS access that the Rust reference path

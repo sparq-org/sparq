@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-qonbz.2 — cross-assert: OWL-RL `substrate-join` closure output is
+//! sq-qonbz.2 — cross-assert: OWL-RL `substrate-join` closure output is
 //! byte-identical to the plain (FxHashMap adjacency) path.
 //!
 //! These tests exercise all three adjacency-probe rules that sq-qonbz.2 migrates onto

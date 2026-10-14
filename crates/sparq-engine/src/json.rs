@@ -33,7 +33,7 @@ pub(crate) fn parts_to_json(s: &mut String, parts: TermParts<'_>) {
             escape_into(s, value);
             s.push('"');
             if let Some(lang) = lang {
-                // [OPUS-4.8] sq-bj7o: the stored slot folds an RDF 1.2 base direction into
+                // sq-bj7o: the stored slot folds an RDF 1.2 base direction into
                 // the tag as `lang--dir` (see `dict::lang_with_dir`). The SPARQL 1.2 JSON
                 // results format keeps them apart: `xml:lang` is the bare tag and `its:dir`
                 // the direction. Splitting here (instead of emitting `xml:lang:"en--ltr"`)
@@ -146,7 +146,7 @@ pub(crate) fn term_to_json(s: &mut String, t: &Term) {
                 s.push_str(",\"xml:lang\":\"");
                 escape_into(s, lang);
                 s.push('"');
-                // [OPUS-4.8] sq-bj7o: RDF 1.2 base direction → SPARQL 1.2 `its:dir` (kept
+                // sq-bj7o: RDF 1.2 base direction → SPARQL 1.2 `its:dir` (kept
                 // separate from `xml:lang`, matching the stored-slot fast path above). Map the
                 // two-variant `BaseDirection` enum to a `&'static str` rather than
                 // `dir.to_string()` — the latter heap-allocated a fresh `String` per
@@ -187,39 +187,7 @@ pub(crate) fn term_to_json(s: &mut String, t: &Term) {
     }
 }
 
-/// Appends `s` to `out` with JSON string escaping. Bulk-copies maximal runs of
-/// already-safe text and only handles the rare escape byte individually — the common
-/// (no-escape) value is a single `push_str`, which matters when serialising millions of
-/// result cells. Byte-level is safe: every escaped byte is ASCII (< 0x80), so UTF-8
-/// multi-byte sequences (all bytes ≥ 0x80) are never split and pass through in a run.
-pub(crate) fn escape_into(out: &mut String, s: &str) {
-    let bytes = s.as_bytes();
-    let mut start = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        let esc: &str = match b {
-            b'"' => "\\\"",
-            b'\\' => "\\\\",
-            b'\n' => "\\n",
-            b'\r' => "\\r",
-            b'\t' => "\\t",
-            0x00..=0x1f => {
-                // Other control character → \u00XX.
-                out.push_str(&s[start..i]);
-                out.push_str("\\u00");
-                const HEX: &[u8; 16] = b"0123456789abcdef";
-                out.push(HEX[(b >> 4) as usize] as char);
-                out.push(HEX[(b & 0xf) as usize] as char);
-                start = i + 1;
-                continue;
-            }
-            _ => continue,
-        };
-        out.push_str(&s[start..i]);
-        out.push_str(esc);
-        start = i + 1;
-    }
-    out.push_str(&s[start..]);
-}
+pub(crate) use sparq_core::json::escape_into;
 
 #[cfg(test)]
 mod rows_tests {
@@ -286,7 +254,7 @@ mod escape_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-bif) The materialised `term_to_json` writer through the public
+/// (sq-bif) The materialised `term_to_json` writer through the public
 /// `to_sparql_json_rows` — the SPARQL-1.1/1.2-results-JSON binding object for EACH
 /// term shape. The existing `rows_tests` only exercise the `uri` shape; these pin
 /// the `bnode`, plain/typed/language/directional literal and RDF-1.2 triple-term

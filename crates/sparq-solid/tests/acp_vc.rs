@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-ysv3u (issue #2935) — ACP `acp:vc`: credential-gated authorization.
+//! sq-ysv3u (issue #2935) — ACP `acp:vc`: credential-gated authorization.
 //!
 //! The headline guard is [`vc_matcher_denies_when_no_credential_is_presented`]: before this
 //! bead `acp:vc` was an attribute the rules did not recognize, so a matcher carrying it looked

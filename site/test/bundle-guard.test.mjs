@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   analyzeBundle,
+  firstLoadFromEntryFiles,
   HEAVY_MODULE_SUFFIXES,
   GUARDED_ROUTES,
 } from "../scripts/check-bundle.mjs";
@@ -167,4 +168,60 @@ test("fzstd is pinned as a heavy module (PRESENCE) and flagged if it leaks into 
   shared.app.pages["/surface/data-formats/page"].push(heroChunk);
   const { errors: sharedErrors } = analyzeBundle(shared);
   assert.deepEqual(sharedErrors, []);
+});
+
+// Next 16 no longer writes app-build-manifest.json; next.config.ts's EntryFilesPlugin records each
+// client entrypoint's files in .next/sparq-entry-files.json, and the root main files come from
+// build-manifest.json. The root layout is its own entrypoint and stays out, as it did before.
+const ROOT_MAIN = ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js"];
+
+test("firstLoadFromEntryFiles is the root main files plus the page entrypoint's JS and CSS", () => {
+  const entryFiles = {
+    "app/capabilities/page": [
+      "static/chunks/9568-a.js",
+      "static/css/c.css",
+      "static/chunks/app/capabilities/page-x.js",
+    ],
+    "app/layout": ["static/chunks/6525-shared.js", "static/chunks/app/layout-l.js"],
+  };
+  assert.deepEqual(firstLoadFromEntryFiles(entryFiles, ROOT_MAIN, "/capabilities/page"), {
+    chunks: [...ROOT_MAIN, ...entryFiles["app/capabilities/page"]],
+    error: null,
+  });
+});
+
+test("firstLoadFromEntryFiles flags heavy JS or CSS in the page entrypoint or a root main file", () => {
+  const cases = [
+    { "app/page": ["static/chunks/heavy-0.js", "static/chunks/app/page-x.js"] },
+    { "app/page": ["static/css/heavy.css", "static/chunks/app/page-x.js"] },
+  ];
+  for (const entryFiles of cases) {
+    const inputs = healthyInputs();
+    inputs.loadable["src -> @/components/zk-car-hire"].files.push("static/css/heavy.css");
+    inputs.app.pages["/page"] = firstLoadFromEntryFiles(entryFiles, ROOT_MAIN, "/page").chunks;
+    const { errors } = analyzeBundle(inputs);
+    assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
+  }
+  const inputs = healthyInputs();
+  inputs.app.pages["/page"] = firstLoadFromEntryFiles(
+    { "app/page": ["static/chunks/app/page-x.js"] },
+    ["static/chunks/heavy-0.js"],
+    "/page",
+  ).chunks;
+  const { errors } = analyzeBundle(inputs);
+  assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
+});
+
+test("firstLoadFromEntryFiles refuses a missing entrypoint or one without its page chunk", () => {
+  for (const entryFiles of [
+    null,
+    {},
+    { "app/page": [] },
+    { "app/page": ["static/chunks/app/try/page-x.js"] },
+    { "app/layout": ["static/chunks/app/page-x.js"] },
+  ]) {
+    const { chunks, error } = firstLoadFromEntryFiles(entryFiles, ROOT_MAIN, "/page");
+    assert.match(error ?? "", /^FIRST-LOAD: /);
+    assert.deepEqual(chunks, []);
+  }
 });

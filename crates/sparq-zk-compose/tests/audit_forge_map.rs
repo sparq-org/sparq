@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-1gir: the STANDING forge-and-verify REGRESSION MAP — one permanent test
 //! per historical audit finding (#1–#12), each constructing the SPECIFIC
 //! forgery that finding described and asserting the verifier REJECTS it with the
@@ -146,7 +146,7 @@ fn attest_full(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestatio
             version: Some(STATUS_VERSION),
             index_commitment: None,
         }),
-        holder: None, // [OPUS-4.8] sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
+        holder: None, // sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
     }
 }
 

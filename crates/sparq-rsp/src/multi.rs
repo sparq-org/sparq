@@ -1,6 +1,6 @@
-//! [OPUS-4.8] Multi-window continuous queries (sq-9u1).
-//! [SONNET-4.6] sq-2n1q3.3: 3+-window joins and ISTREAM/DSTREAM over multi-window joins.
-//! [SONNET-4.6] sq-2n1q3.5: substrate-join adoption analysis — REASONED NON-ADOPTION
+//! Multi-window continuous queries (sq-9u1).
+//! sq-2n1q3.3: 3+-window joins and ISTREAM/DSTREAM over multi-window joins.
+//! sq-2n1q3.5: substrate-join adoption analysis — REASONED NON-ADOPTION
 //! (see the "Substrate join: why it does not apply here" section below).
 //!
 //! [`ContinuousQuery`](crate::ContinuousQuery) is *one stream, one window, one
@@ -42,7 +42,7 @@
 //! contributes the empty graph — `GRAPH <w> { … }` then yields no rows, so the
 //! join correctly produces nothing until every joined window has content.
 //!
-//! ## 3+-window joins ([SONNET-4.6] sq-2n1q3.3)
+//! ## 3+-window joins (sq-2n1q3.3)
 //!
 //! The `windows` field is a `Vec<WindowState>` so `ContinuousMultiQuery` handles
 //! two, three, or any number of named windows identically: each window gets its
@@ -51,7 +51,7 @@
 //! enforces ≥ 2 windows (use `ContinuousQuery` for one); three or more require
 //! no additional code.
 //!
-//! ## ISTREAM/DSTREAM over a multi-window join ([SONNET-4.6] sq-2n1q3.3)
+//! ## ISTREAM/DSTREAM over a multi-window join (sq-2n1q3.3)
 //!
 //! At each tick the FULL join result is computed first; when the `R2S` operator
 //! is `ISTREAM` or `DSTREAM` the diff against the previous tick's full result
@@ -68,7 +68,7 @@
 //!
 //! ## Substrate join: why it does not apply here (sq-2n1q3.5 analysis)
 //!
-//! [SONNET-4.6] sq-2n1q3.5 investigated whether the cross-window join in
+//! sq-2n1q3.5 investigated whether the cross-window join in
 //! `eval_tick` / `materialize_named` should adopt
 //! `sparq_substrate::join::delta::DeltaTable` (the semi-naive probe kernel), as
 //! `eval.rs` did for its consecutive-window diff in sq-2n1q3.4.
@@ -127,7 +127,7 @@ use sparq_engine::{PreparedQuery, QueryBudget};
 use spargebra::Query;
 
 use crate::budget::BudgetSpec;
-// [SONNET-4.6] sq-2n1q3.3: import diff_rows for ISTREAM/DSTREAM support.
+// sq-2n1q3.3: import diff_rows for ISTREAM/DSTREAM support.
 use crate::query::{diff_rows, R2S, WindowResult};
 use crate::rspql::{RspqlQuery, WindowDecl};
 use crate::window::{Window, WindowedStream};
@@ -187,10 +187,10 @@ pub struct ContinuousMultiQuery {
     windows: Vec<WindowState>,
     r2s: R2S,
     output_stream: Option<NamedNode>,
-    /// [SONNET-4.6] sq-2n1q3.3: previous tick's FULL join result rows — the
+    /// sq-2n1q3.3: previous tick's FULL join result rows — the
     /// ISTREAM/DSTREAM diff base. Empty and unused when `r2s == RStream`.
     prev_rows: Vec<Vec<Option<Term>>>,
-    /// [SONNET-4.6] sq-xqu: the per-tick-evaluation resource budget
+    /// sq-xqu: the per-tick-evaluation resource budget
     /// (unlimited by default).
     budget: BudgetSpec,
 }
@@ -252,7 +252,7 @@ impl ContinuousMultiQuery {
             windows,
             r2s: parsed.r2s,
             output_stream: parsed.output_stream.clone(),
-            // [SONNET-4.6] sq-2n1q3.3: ISTREAM/DSTREAM diff base — empty until the
+            // sq-2n1q3.3: ISTREAM/DSTREAM diff base — empty until the
             // first tick fires (the first window diffs against the empty multiset,
             // so it emits everything for ISTREAM and nothing for DSTREAM).
             prev_rows: Vec::new(),
@@ -260,7 +260,7 @@ impl ContinuousMultiQuery {
         })
     }
 
-    /// [SONNET-4.6] sq-xqu: sets the per-tick-evaluation resource budget
+    /// sq-xqu: sets the per-tick-evaluation resource budget
     /// (builder style). The budget is applied to EVERY synchronized
     /// evaluation tick (the multi-window analogue of one window evaluation).
     /// Semantics as
@@ -272,7 +272,7 @@ impl ContinuousMultiQuery {
         self
     }
 
-    /// [SONNET-4.6] sq-xqu: installs a refreshed deadline for EACH
+    /// sq-xqu: installs a refreshed deadline for EACH
     /// evaluation tick (tightened to at most `now + timeout` per tick).
     /// Semantics as
     /// [`ContinuousQuery::with_window_timeout`](crate::ContinuousQuery::with_window_timeout);
@@ -313,7 +313,7 @@ impl ContinuousMultiQuery {
     /// * `R2S::DStream` — every tick emits only the rows that disappeared
     ///   (`prev ∖ cur`). The first tick always emits nothing.
     ///
-    /// [SONNET-4.6] sq-2n1q3.3: ISTREAM/DSTREAM are now wired.
+    /// sq-2n1q3.3: ISTREAM/DSTREAM are now wired.
     pub fn r2s(&self) -> R2S {
         self.r2s
     }
@@ -397,21 +397,21 @@ impl ContinuousMultiQuery {
     /// Builds the combined named-graph [`Graph`] for the current per-window
     /// snapshots and evaluates the registered query against it, then applies the
     /// configured R2S operator (RSTREAM / ISTREAM / DSTREAM) before firing the
-    /// callback. [SONNET-4.6] sq-2n1q3.3: wired ISTREAM/DSTREAM.
+    /// callback. sq-2n1q3.3: wired ISTREAM/DSTREAM.
     fn eval_tick(
         &mut self,
         tick: u64,
         on_result: &mut impl FnMut(WindowResult),
     ) -> Result<(), String> {
         let graph = self.materialize_named();
-        // [SONNET-4.6] sq-xqu: one effective budget per tick evaluation (the
+        // sq-xqu: one effective budget per tick evaluation (the
         // per-window timeout's deadline is measured from NOW).
         let result = sparq_engine::query_prepared_with_budget(
             &graph,
             &self.prepared,
             &self.budget.window_budget(),
         )?;
-        // [SONNET-4.6] sq-2n1q3.3: apply the R2S operator.
+        // sq-2n1q3.3: apply the R2S operator.
         // RSTREAM: emit the full join result.
         // ISTREAM/DSTREAM: diff the full result against the previous tick's
         // full result (reusing the single-window diff_rows helper from
@@ -423,7 +423,7 @@ impl ContinuousMultiQuery {
             }
         };
         // For RSTREAM we skip updating prev_rows — it is never
-        // read, and keeping them empty avoids a pointless clone. [SONNET-4.6]
+        // read, and keeping them empty avoids a pointless clone.
         // The reported bounds: the tick's span is the join boundary. We report
         // [start, end) where end = tick and start = the min snapshot start, so
         // the window result carries a meaningful interval for the embedder.

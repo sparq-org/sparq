@@ -16,14 +16,14 @@ categories.workspace = true
 readme = "README.md"
 # Research-stage proof-of-concept (epic sq-pfae, issue #940). The ZK estate it
 # composes with is externally UNAUDITED (sq-qhy4); this crate verifies an issuer
-# signature but does NOT deliver unlinkable/anonymous presentation. [GPT-5.6]
+# signature but does NOT deliver unlinkable/anonymous presentation.
 # Published only as the default-off dependency used by sparq-server and sparq-solid.
 
 [[example]]
 name = "admission_cost"
 required-features = ["cert-graph"]
 
-# [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg.
+# docs.rs: build with all features + the `docsrs` cfg.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -44,7 +44,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 # DID resolution + issuer-key binding (`did:key` offline self-cert + pluggable `did:web`).
 did = ["dep:serde_json"]
-# [OPUS-4.8] sq-pfae.5 — the trust-document STORAGE/AUTHORING model: server-wide vs
+# sq-pfae.5 — the trust-document STORAGE/AUTHORING model: server-wide vs
 # per-`.acr` documents (per-`.acr` NARROWS, never broadens), monotone document
 # versioning + revocation, and the admission cache key (evidence hash + policy version)
 # that composes with the sparq-solid epoch cache. Pure-Rust over the deps already
@@ -56,7 +56,7 @@ store = []
 # vendored `sec-prop:` ontology lacks (sq-5oru9; design §4.2). Dependency-free — it
 # is `const &str` data + a TTL drift test, strictly additive (no new dep, no new edge
 # onto the lean default build).
-# [OPUS-5] sq-3705: those constants + the Turtle + the drift test now live ONCE in
+# sq-3705: those constants + the Turtle + the drift test now live ONCE in
 # the ZERO-dependency `sparq-secprop-vocab` leaf (this crate depends on sparq-zk, so
 # sparq-zk could not import them back — a cycle; sparq-policy could not either without
 # giving up its lean graph). `secprop` re-exports the leaf, so the public surface
@@ -64,7 +64,7 @@ store = []
 # build" property still holds: the leaf has NO dependencies of its own and is pulled
 # in only by this default-OFF feature.
 secprop-vocab = ["dep:sparq-secprop-vocab"]
-# [FABLE-5] sq-6syab.2 — the `trustx:` certification-scope vocabulary (`framework_vocab`
+# sq-6syab.2 — the `trustx:` certification-scope vocabulary (`framework_vocab`
 # module + `trust-framework.ttl`): the trust-expression program's layer for expressing
 # framework-certified-issuer trust and issuer certification scope (issue #1592; design
 # `research/trust-expression-spec.md` §3.4). It EXTENDS the `trust:` vocabulary and
@@ -72,7 +72,7 @@ secprop-vocab = ["dep:sparq-secprop-vocab"]
 # duplicate them. Dependency-free — `const &str` data + a TTL drift test, strictly
 # additive (no new dep, no new edge onto the lean default build).
 framework-vocab = []
-# [OPUS-4.8] sq-pfae.15 — the depth-bounded certification-edge trust-graph closure
+# sq-pfae.15 — the depth-bounded certification-edge trust-graph closure
 # (`graph` module): a pure, FAIL-CLOSED, ATTENUATION-ONLY pre-processing step that derives
 # additional TrustRules from signed `trustx:Certification` edges AHEAD of — and consumed
 # verbatim by — the UNCHANGED admission gate. Every derived rule ⊆ (anchor ∩ cert scope ∩
@@ -82,7 +82,7 @@ framework-vocab = []
 # over the RDFC-1.0 signature primitive this crate already carries — NO new dependency,
 # strictly additive (the lean default build is byte-identical with it OFF).
 cert-graph = ["framework-vocab"]
-# [FABLE-5] sq-6syab.4 — holder-side trust-expression contract evaluation, CLEAR path
+# sq-6syab.4 — holder-side trust-expression contract evaluation, CLEAR path
 # (`expression` module; issue #1592, design `research/trust-expression-spec.md` §3.1–3.5):
 # parse the verifier→holder request (query + trust-requirements graph + nonce), generate
 # the §3.1 normative reference rewrite Q→Q' (conjoining issuer membership / positive
@@ -105,20 +105,20 @@ expression = [
     "dep:spargebra",
     "dep:getrandom",
 ]
-# [OPUS-4.8] sq-ufsi9 — the N3 proof-admissibility ruleset over `sparq-reason` (the
+# sq-ufsi9 — the N3 proof-admissibility ruleset over `sparq-reason` (the
 # §4.3 ODRL → admissible-proof-set reduction: strongerThan-closure / atLeast /
 # overDimension / satisfies, plus the Rust default-deny universal). Pure N3-text data
 # + a thin driver over the `sparq-reason` edge this crate already carries — NO new
 # dependency. Enables `secprop-vocab` (it reuses the secprop namespace constant). The
 # lean default build is byte-identical with it OFF.
 secprop-admissibility = ["secprop-vocab"]
-# [OPUS-4.8] sq-dt5hv — the Phase 5 property-admissibility PRE-CHECK in the admission
+# sq-dt5hv — the Phase 5 property-admissibility PRE-CHECK in the admission
 # gate (`admit::admit_with_precheck`): before the existing sig/holder checks, consult
 # the secprop reasoning to verify the presented proof method satisfies the requester's
 # ODRL privacy preference; fail-closed (default-deny) on non-satisfaction. OPT-IN: with
 # NO preference the gate is byte-identical to `admit` (strict additivity). Pure Rust over
 # the `secprop-admissibility` reduction this crate already carries — NO new dependency.
-# [OPUS-4.8] sq-nrwqs (Phase 5.1) — the pre-check now resolves the presented method's
+# sq-nrwqs (Phase 5.1) — the pre-check now resolves the presented method's
 # secprop annotation graph from the BUNDLED, drift-pinned sparq-zk `secprop-methods.ttl`
 # (the canonical source of truth) instead of trusting caller-supplied N3, so the
 # admissibility check is self-contained + tamper-resistant. That reads the bundled graph
@@ -127,7 +127,7 @@ secprop-admissibility = ["secprop-vocab"]
 # pulls — NO new dependency on the lean default build; this hardens the INPUT trust
 # boundary and makes NO new soundness claim (stays under sq-qhy4).
 secprop-precheck = ["secprop-admissibility", "sparq-zk/secprop-annotations"]
-# [OPUS-4.8] sq-pfae.6 — the delegation stratum's AUDIT half: render an invocation-bound
+# sq-pfae.6 — the delegation stratum's AUDIT half: render an invocation-bound
 # delegation chain + effective capability as a minimal W3C PROV-O audit graph
 # (`prov:actedOnBehalfOf` lineage + the effective grant as `auth:*` RDF), with the
 # human/AI principal classification §4.2 names as an attested attribute on the delegate.
@@ -136,7 +136,7 @@ secprop-precheck = ["secprop-admissibility", "sparq-zk/secprop-annotations"]
 # graph; the audit is a small fixed triple set emitted directly). Strictly additive: the
 # lean default build is byte-identical with it OFF.
 delegation-prov = []
-# [OPUS-4.8] sq-pfae.7 — live credential status / revocation over a W3C Bitstring Status
+# sq-pfae.7 — live credential status / revocation over a W3C Bitstring Status
 # List + a minimal PROV-O denial justification (the P6 status stratum). Fetch (pluggable
 # `StatusListResolver`) + decode (hand-rolled multibase base64url/base58btc over a pluggable
 # `GzipDecoder` seam) a status list, gate derivations **fail-closed on set/unknown/stale**,
@@ -152,15 +152,15 @@ status-list = []
 status-list-flate2 = ["status-list", "dep:flate2"]
 
 [dependencies]
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false }
-sparq-reason = { path = "../sparq-reason", version = "0.1.5", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false }
+sparq-reason = { path = "../sparq-reason", version = "0.1.6", default-features = false }
 # RDFC-1.0 canonical unit the ZK estate already commits over (step 1 of the gate).
-sparq-canon = { path = "../sparq-canon", version = "0.1.5" }
+sparq-canon = { path = "../sparq-canon", version = "0.1.6" }
 # The CHECKED issuer signature over the RDFC-1.0 commitment (step 2). The ZK estate
 # is research-grade and externally UNAUDITED (sq-qhy4) — see the crate docs.
-sparq-zk = { path = "../sparq-zk", version = "0.1.5" }
+sparq-zk = { path = "../sparq-zk", version = "0.1.6" }
 # The `forShape` statement-type primitive (forPredicate desugars to it; step 3).
-sparq-shacl = { path = "../sparq-shacl", version = "0.1.5", default-features = false }
+sparq-shacl = { path = "../sparq-shacl", version = "0.1.6", default-features = false }
 oxrdf.workspace = true
 # OPTIONAL — `did` feature only. Parses a fetched `did:web` DID document (JSON). The
 # `did:key` path needs no JSON; the default build pulls neither.
@@ -174,7 +174,7 @@ flate2 = { version = "1", optional = true }
 # SPARQL parser that fail-closed-scopes the supported query fragment (ASK/SELECT over one
 # basic graph pattern). default-features OFF on the engine so the opt-in build stays as lean
 # as the engine allows; the DEFAULT sparq-trust build pulls neither (strict additivity).
-sparq-engine = { path = "../sparq-engine", version = "0.1.5", optional = true, default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.6", optional = true, default-features = false }
 spargebra = { workspace = true, optional = true }
 # OPTIONAL — `expression` feature only (issue #4621). The OS CSPRNG behind
 # `ChallengeNonce::generate`, the verifier-side construction path for the
@@ -188,7 +188,7 @@ getrandom = { version = "0.4", optional = true }
 # so `sparq-zk` (which this crate depends on) and the lean `sparq-policy` can share them
 # without a cycle. It has no dependencies of its own, so the opt-in build grows by the
 # `const &str` table alone and the default build pulls nothing.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.5", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.6", optional = true }
 
 # Test-only: parse-validate the published machine-readable vocabulary
 # `ontologies/trust/trust.ttl` so the Turtle a working group reads stays valid
@@ -196,7 +196,7 @@ sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.5", opti
 [dev-dependencies]
 oxttl.workspace = true
 
-# [FABLE-5] sq-d9lzx: the runnable certification-edge closure DEMO an integrator/WG
+# sq-d9lzx: the runnable certification-edge closure DEMO an integrator/WG
 # reviewer can execute end-to-end (framework certifies issuer → attenuated effective
 # rule → fail-closed Broadening + NoAnchor rejects). Gated on `cert-graph`, so it is
 # NOT built in the default (feature-OFF) state — mirrors the sparq-solid example gating.

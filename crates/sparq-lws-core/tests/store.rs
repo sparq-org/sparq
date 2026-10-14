@@ -51,7 +51,7 @@ async fn write_then_read_round_trips_bytes_and_content_type() {
 
 #[tokio::test]
 async fn bounded_store_reports_usage_and_refuses_bytes_beyond_quota() {
-    // [GPT-5.6] Mutation witness: removing the aggregate-byte admission check makes the second write
+    // Mutation witness: removing the aggregate-byte admission check makes the second write
     // succeed, so both the error and unchanged usage assertions fail.
     let limits = InMemoryStoreLimits::new(5, 4);
     let s = CompositeStore::in_memory_with_limits(limits);
@@ -1051,6 +1051,9 @@ impl SparqClient for StaleOnceSparq {
     }
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         self.inner.remove_child(container, child).await
+    }
+    async fn fence(&self, fence: &sparq_lws_core::store::Fence) -> Result<(), SparqError> {
+        self.inner.fence(fence).await
     }
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
         self.inner.list_children(container).await

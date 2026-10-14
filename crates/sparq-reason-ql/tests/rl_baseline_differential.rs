@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-wxaas (QL track, phase Q1): the RL-MATERIALISE-THEN-QUERY acceptance oracle.
+// sq-wxaas (QL track, phase Q1): the RL-MATERIALISE-THEN-QUERY acceptance oracle.
 //
 // The crate's other oracle (`tests/oracle.rs`) checks the rewriter SYNTACTICALLY — it pins the
 // exact union of conjunctive queries PerfectRef must emit against hand-derived expectations. That

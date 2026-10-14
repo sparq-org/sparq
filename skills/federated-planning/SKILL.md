@@ -58,6 +58,14 @@ enable authority pruning, build via `.builder(..)` and call `.authorities_comple
 only when you truly enumerate every authority the source mints (a HiBISCuS-style
 capability set / `void:uriSpace` declaration).
 
+Likewise, `.char_sets_complete()` on `SourceDescriptorBuilder` declares that the served
+characteristic sets enumerate **every exact per-subject predicate set**; the descriptor's
+`char_sets_complete()` accessor defaults to `false`. Rule C2 in `sparq-fedplan-mpc` trusts
+this declaration before falling back to the unchanged per-predicate subject-count identity.
+As with authority completeness, a false declaration can drop answers (lose recall): never
+set it on a truncated summary. Both completeness declarations are **builder-only**; neither
+has an RDF parse signal, so `from_void_nt` leaves them false and introduces no new RDF term.
+
 A descriptor may also carry an **optional GenAI retrieval capability**
 (`RetrievalCapability` — declared vector/text retrieval endpoints + a per-request
 cardinality hint), served under the `sret:` vocab (`http://sparq.dev/ns/retrieval#`,
@@ -350,10 +358,16 @@ since:
     `allowlist_entry_host_matches` for the host-level "is this host on the list at all" query), so
     the **fedclient guard and the engine SERVICE guard decide every host:port case identically**
     — one source of truth, no divergent copy of the parsing (port-0/overflow/IPv6-bracket/
-    trailing-colon all fail-CLOSED). The same port-scoping flows through `EgressGuard::check_addr`
+    trailing-colon all fail-CLOSED). The address classifier is shared the same way:
+    `sparq_fedclient::is_forbidden_ip` and `discovery::is_forbidden_ip` re-export
+    `sparq_engine::is_forbidden_ip`, and remote SPARQL-Results-JSON bodies parse through
+    the engine's streaming SERVICE reader `sparq_engine::parse_srj_into` (rows handed to a
+    `sparq_engine::RowSink` closure; `sparq_fedclient::parse_srj` collects them into a
+    `Relation`), so terms decode through the same `sparq_engine::srj_term`. The same port-scoping flows through `EgressGuard::check_addr`
     / `check_endpoint` and all three native ureq SSRF resolvers (`HttpTransport` /
     `HttpFragmentTransport` / discovery `HttpFetcher`). There is no wildcard port and no global
-    bypass; default-deny stays default-deny. Use `EgressGuard::is_allowed_port(host, port)` for the
+    bypass; default-deny stays default-deny. These agents ignore `HTTP_PROXY` / `HTTPS_PROXY` /
+    `ALL_PROXY`, so the vetted address is always the dialled one. Use `EgressGuard::is_allowed_port(host, port)` for the
     port-precise check.
 - **Phase 3 planner bridge + single-source interpreter** (`sq-j27p`) — the consumer of THIS
   planner's `JoinTree`. The plan speaks pattern/source **indices** only (no endpoint-URL
@@ -361,7 +375,13 @@ since:
   resolution layer** that maps a plan `pattern: usize` → `TriplePattern` and a `source: usize`
   → a source adapter (the resolver requires the `descriptors`/`adapters` slices to be in the
   same order, and range-checks every lookup). `lower_leaf` lowers one BGP pattern to a
-  single-pattern `SELECT`; `materialize_single_source` walks the `JoinTree`, fetches each
+  single-pattern `SELECT` and returns `Result<SubQuery, RenderError>`: each position is
+  rendered strictly as one SPARQL term (a `VARNAME` variable, an IRI with no character
+  `IRIREF` forbids, a pre-rendered `"…"` literal that parses as exactly one SPARQL literal and is
+  re-serialised, or a bare value as an escaped string; literals are written with `ECHAR` escapes
+  only, and one whose value an endpoint's `\u`/`\U` preprocessing would change is refused), and anything else is a
+  `RenderError` (`InterpError::Render` in the interpreters, `None` from `push_group`) so
+  nothing is sent; `materialize_single_source` walks the `JoinTree`, fetches each
   leaf's SRJ through the Phase-2 adapter, parses it, and natural-joins in the plan's join
   order. The load-bearing property — the materialised federated result **equals** local
   `sparq-engine` evaluation of the same query (`solutions_equal` bag comparison) — is driven
@@ -386,14 +406,22 @@ since:
   member — exactly-one-source, same-source, share-a-variable, via union-find); a cross-source
   or zero-source pattern is excluded. `push_group(...)` builds the **maximal sub-algebra** per
   group: projection trimmed to the join + output vars, the FILTER conjuncts the source's
-  `FilterClass` covers AND that pass the common-variable check, `ORDER`/`LIMIT` when the
-  capability allows — a full endpoint gets the whole group as one multi-pattern `SELECT`, a
+  `FilterClass` covers AND that pass the common-variable check AND whose `Filter::expr` text
+  parses as exactly one SPARQL expression over only the conjunct's declared `vars` with no
+  `EXISTS` or `\u`/`\U` code-point escape (anything else stays a local filter, whose
+  variables the group then all stay projected), `ORDER`/`LIMIT` when the capability allows (`LIMIT`
+  only when no conjunct stays local)
+  (`ORDER BY` keys are typed `OrderKey { var, descending }` — `OrderKey::asc`/`desc` — and a key
+  whose name is not a `VARNAME` makes `push_group` return `None`) — a full endpoint gets the whole group as one multi-pattern `SELECT`, a
   fragment source answers one pattern only (no collapse, no filter pushed — honest about a
   fragment server's access unit). `common_variable_check(filter, group_vars)` is the **exact**
   check Comunica omits (#834/#609): push a conjunct only when *every* variable it references is
-  bound by the group. `render_values_block` / `bind_block_size` are the cross-group bind-join
-  block primitive (VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
-  plain TPF), mirroring `sparq-engine`'s `pub(crate)` `service.rs` helpers. Pushdown only ever
+  bound by the group. `render_values_block(vars, &[Vec<Term>])` / `bind_block_size` are the
+  cross-group bind-join block primitive (each cell goes through the same strict term renderer;
+  a variable cell, a row whose length differs from `vars`, or a bad variable name is a
+  `RenderError`; VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
+  plain TPF), mirroring the same-named helpers in the `sparq-engine-service` crate's `service`
+  module (the SERVICE transport the engine's `service` feature pulls in). Pushdown only ever
   **narrows** a source's result, so it is correctness-preserving; the FILTER model is light
   (the parsed-query FILTER algebra wiring is Phase 5).
 - **Phase 5 streaming operators** (`sq-vtba`) — the streaming counterpart of the Phase-3

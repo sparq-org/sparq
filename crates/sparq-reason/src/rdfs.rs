@@ -128,7 +128,7 @@ impl RdfsIndex {
 /// worth the overhead). Only referenced by the rayon-backed sweep, so it is gated with
 /// `parallel` — without the feature (e.g. sparq-solid's `default-features = false`
 /// dependency) it would otherwise be dead code and trip `clippy -D warnings`.
-/// [OPUS-4.8] sq-xor3: discovered while running the bead's sparq-solid clippy gate.
+/// sq-xor3: discovered while running the bead's sparq-solid clippy gate.
 #[cfg(feature = "parallel")]
 const PAR_THRESHOLD: usize = 4096;
 
@@ -228,7 +228,7 @@ pub(crate) fn emit_consequences(
     if p == v.ty {
         // rdfs9: (s type o), (o sc* d) ⊢ (s type d)
         //
-        // [FABLE-5] sq-pbz04.1.1: with the `substrate-join` feature this arm is computed in
+        // sq-pbz04.1.1: with the `substrate-join` feature this arm is computed in
         // a BATCH by the shared substrate join kernels (`sweep_type_join` — an object-keyed
         // probe with a uniform fixed-permutation combine), so it is suppressed here to avoid
         // double emission, mirroring the plain rdfs2/3/7 arm below. The `if` arm itself
@@ -242,7 +242,7 @@ pub(crate) fn emit_consequences(
         // Monotone-OWL path: rewrite the predicate AND orient through inverse/symmetric, then
         // type via domain/range of the (oriented) derived predicate.
         //
-        // [FABLE-5] sq-pbz04.1.1 DISPOSITION — PERMANENTLY hand-rolled (not a substrate-join
+        // sq-pbz04.1.1 DISPOSITION — PERMANENTLY hand-rolled (not a substrate-join
         // candidate): the per-match combine is DATA-DEPENDENT — each matched `(r, swapped)`
         // row selects its own subject/object orientation — and fans out through a SECOND
         // join, the dom/rng typing keyed on the DERIVED predicate `r` (a column that exists
@@ -260,7 +260,7 @@ pub(crate) fn emit_consequences(
         // `px.map.get(&p) → None` return used to silently drop their rdfs2/rdfs3 typing while
         // the full fixpoint path emitted it.
         //
-        // [OPUS-4.8] sq-yk6or: with the `substrate-join` feature this plain rdfs2/3/7 branch is
+        // sq-yk6or: with the `substrate-join` feature this plain rdfs2/3/7 branch is
         // computed in a BATCH by the shared substrate join kernels (see `sweep`), so it is
         // suppressed here to avoid double emission. The `is_plain_branch` partition routes
         // exactly these triples to `sweep_predicate_join` — same emitted set, different machinery.
@@ -330,7 +330,7 @@ fn emit_plain_rdfs(
 /// with every superclass `d` in the saturated subclass closure of `o`. Factored out of
 /// [`emit_consequences`] so the substrate-join path (`sweep_type_join` under the
 /// `substrate-join` feature) can compute the SAME emission in a batch through the shared
-/// `sparq_substrate::join` kernels ([FABLE-5] sq-pbz04.1.1, mirroring [`emit_plain_rdfs`]).
+/// `sparq_substrate::join` kernels (sq-pbz04.1.1, mirroring [`emit_plain_rdfs`]).
 /// The two paths emit the identical multiset (asserted by
 /// `tests::substrate_join_emits_identical_type_branch`).
 #[cfg(any(not(feature = "substrate-join"), test))]
@@ -350,7 +350,7 @@ fn emit_type_rdfs9(
 /// Whether `(s, p, o)` is routed to the plain-RDFS branch of [`emit_consequences`] (NOT the
 /// `rdf:type`/rdfs9 branch and NOT the active-`PropExpand` predicate-rewrite branch) — i.e.
 /// the branch the substrate-join path computes in a batch. Mirrors `emit_consequences`'s
-/// branch selection exactly so routing is partition-preserving. [OPUS-4.8] sq-yk6or.
+/// branch selection exactly so routing is partition-preserving. sq-yk6or.
 #[cfg(feature = "substrate-join")]
 #[inline]
 fn is_plain_branch([_s, p, _o]: [Id; 3], v: &Vocab, px: Option<&PropExpand>) -> bool {
@@ -407,9 +407,9 @@ pub(crate) fn sweep(
     out
 }
 
-/// [OPUS-4.8] sq-yk6or (epic sq-pbz04, THE SUBSTRATE PAYOFF): the ABox sweep driving the SHARED
+/// sq-yk6or (epic sq-pbz04, THE SUBSTRATE PAYOFF): the ABox sweep driving the SHARED
 /// [`sparq_substrate::join`] hash-join kernels for the plain rdfs2/3/7 predicate join and —
-/// [FABLE-5] sq-pbz04.1.1 — the `rdf:type`/rdfs9 subclass-typing join (an object-keyed probe,
+/// sq-pbz04.1.1 — the `rdf:type`/rdfs9 subclass-typing join (an object-keyed probe,
 /// `substrate_join::sweep_type_join`): the same `build_table` + `probe_emit` body the SPARQL
 /// engine drives, with the reasoner supplying its OWN `JoinKeys` + `Budget` monomorphically
 /// (NO `Box<dyn>`). Only the active-`PropExpand` predicate-rewrite branch stays on the
@@ -438,7 +438,7 @@ pub(crate) fn sweep(
     let plain: Vec<[Id; 3]> =
         triples.iter().copied().filter(|&t| is_plain_branch(t, v, px)).collect();
     crate::substrate_join::sweep_predicate_join(&plain, v.ty, sp, dom, rng, &mut out);
-    // [FABLE-5] sq-pbz04.1.1: the `rdf:type`/rdfs9 batch — the type-assertion partition
+    // sq-pbz04.1.1: the `rdf:type`/rdfs9 batch — the type-assertion partition
     // (exactly the triples `emit_consequences` routes to its `p == v.ty` arm) probed against
     // the subclass closure, object-keyed, through the SAME shared kernels.
     let typed: Vec<[Id; 3]> = triples.iter().copied().filter(|t| t[1] == v.ty).collect();
@@ -636,21 +636,27 @@ pub(crate) fn closure_derived(
     emit_dr_closure: bool,
     mono: &MonoOwl,
 ) -> Vec<[Id; 3]> {
-    let first = closure_round(original, None, v, emit_dr_closure, mono);
-    if !first.meta || first.derived.is_empty() {
-        return first.derived;
-    }
-    // Plain RDFS (no OWL axioms, no scm-dom/rng output): the semi-naive fixpoint, which is
-    // linear in the joins it performs. The round loop below stays for the OWL caller, whose
-    // monotone axioms (equivalence, inverse, symmetric) it alone understands.
-    if !emit_dr_closure && mono.is_empty() {
+    // Plain RDFS (no OWL axioms, no scm-dom/rng output) on a meta schema: the semi-naive
+    // fixpoint, which is linear in the joins it performs. Deciding "meta" needs only the
+    // subPropertyOf closure and the raw domains/ranges, so no single-pass round runs first.
+    // The round loop below stays for the OWL caller, whose monotone axioms (equivalence,
+    // inverse, symmetric) it alone understands.
+    let plain = !emit_dr_closure && mono.is_empty();
+    if plain && plain_schema_is_meta(original, v) {
         let mut d: Vec<[Id; 3]> = meta::MetaClosure::build(original, v)
             .facts
             .into_iter()
             .filter(|t| !original.contains(t))
             .collect();
+        #[cfg(feature = "parallel")]
+        rayon::slice::ParallelSliceMut::par_sort_unstable(&mut d[..]);
+        #[cfg(not(feature = "parallel"))]
         d.sort_unstable();
         return d;
+    }
+    let first = closure_round(original, None, v, emit_dr_closure, mono);
+    if !first.meta || first.derived.is_empty() {
+        return first.derived;
     }
     // Later rounds saturate the schema from its RAW edges only — the asserted schema triples
     // plus the schema triples a rule derived by sweeping (rdfs7 / the OWL property rewrite).
@@ -678,6 +684,19 @@ pub(crate) fn closure_derived(
         .collect();
     d.sort_unstable();
     d
+}
+
+/// [`schema_is_meta`] of `original`'s own schema, with no monotone-OWL axioms, read from the
+/// raw triples: a property is in the subPropertyOf closure exactly when it is an endpoint of a
+/// raw subPropertyOf triple, so no closure is built (the ordinary path builds it once, in
+/// [`closure_round`]).
+fn plain_schema_is_meta(original: &FxHashSet<[Id; 3]>, v: &Vocab) -> bool {
+    let schema_props = [v.ty, v.sub_class, v.sub_prop, v.domain, v.range];
+    let is_schema = |x: Id| schema_props.contains(&x);
+    original.iter().any(|&[s, p, o]| {
+        (p == v.sub_prop && (is_schema(s) || is_schema(o)))
+            || ((p == v.domain || p == v.range) && is_schema(s))
+    })
 }
 
 /// Whether the schema is "meta" (see [`ClosureRound::meta`]): some RDFS schema property is in
@@ -1077,7 +1096,7 @@ mod tests {
         assert_eq!(triples.len(), n, "idempotent");
     }
 
-    // ---- behavioural tests for the lowest-covered rdfs.rs paths (sq-jd5s) [OPUS-4.8] ----
+    // ---- behavioural tests for the lowest-covered rdfs.rs paths (sq-jd5s) ----
 
     /// Sort a closure map's value vecs so reachable-set comparisons are order-independent.
     fn sorted(mut m: FxHashMap<Id, Vec<Id>>) -> FxHashMap<Id, Vec<Id>> {
@@ -1273,7 +1292,7 @@ mod tests {
         assert_eq!(dupes, 1, "duplicate input collapsed in the rebuilt output");
     }
 
-    // ---- [OPUS-4.8] sq-yk6or: the shared-substrate-join adoption is BEHAVIOUR-NEUTRAL ----
+    // ---- sq-yk6or: the shared-substrate-join adoption is BEHAVIOUR-NEUTRAL ----
 
     /// The LOAD-BEARING invariant of sq-yk6or: driving the shared `sparq-substrate::join` kernels
     /// for the plain rdfs2/3/7 predicate join emits the BYTE-IDENTICAL multiset as the hand-rolled
@@ -1373,7 +1392,7 @@ mod tests {
         assert!(set.contains(&[dog, sc, animal]), "rdfs11 subclass transitivity");
     }
 
-    // ---- [FABLE-5] sq-pbz04.1.1: per-branch disposition tests (rdfs9 adopt / PropExpand retain) ----
+    // ---- sq-pbz04.1.1: per-branch disposition tests (rdfs9 adopt / PropExpand retain) ----
 
     /// The rdfs9 half of the disposition (ADOPTED): driving the shared `sparq-substrate::join`
     /// kernels for the `rdf:type`/subclass-typing join — an OBJECT-keyed probe — emits the

@@ -42,7 +42,7 @@
 //! `sq-wvne` / `sq-xc4y`). The ZK estate it composes with is externally **UNAUDITED**
 //! (`sq-qhy4`). Full scope: the `sparq-trust` crate docs + README.
 //!
-//! [OPUS-4.8] sq-pfae PoC. 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae PoC. 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 use crate::authindex::{ANY_CLIENT, ANY_ISSUER};
 use crate::{PodStore, AUTH_GRAPH, AUTH_NS};
@@ -367,29 +367,5 @@ fn mode_iri_for_auth_pred(pred: &str) -> Option<&'static str> {
     }
 }
 
-/// Epoch seconds (UTC) → an `xsd:dateTime` lexical `YYYY-MM-DDTHH:MM:SSZ`, dependency-
-/// free (the workspace carries no `chrono`/`time`). The civil-date conversion is Howard
-/// Hinnant's algorithm (the inverse of `days_from_civil`, the same one the sq-0q7n
-/// `AuthIndex` `xsd:dateTime` parser uses), so a formatted lexical parses back to the
-/// same instant the `cond_applies` window compares against. [OPUS-4.8] sq-xc4y.
-fn unix_to_xsd_datetime(epoch_secs: i64) -> String {
-    let days = epoch_secs.div_euclid(86_400);
-    let tod = epoch_secs.rem_euclid(86_400); // 0..86400, always non-negative
-    let (h, mi, s) = (tod / 3600, (tod % 3600) / 60, tod % 60);
-    let (y, m, d) = civil_from_days(days);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, h, mi, s)
-}
+use sparq_core::civil::format_utc as unix_to_xsd_datetime;
 
-/// Days-from-epoch (1970-01-01 = 0) → `(year, month, day)` (Howard Hinnant).
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
-    let doe = z - era * 146_097; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
-    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32; // [1, 12]
-    (if m <= 2 { y + 1 } else { y }, m, d)
-}

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-5enp) Streamed-equals-batch window ORACLE + window-semantics
+//! (sq-5enp) Streamed-equals-batch window ORACLE + window-semantics
 //! tests for sparq-rsp.
 //!
 //! The crate's S2R window machinery (`window.rs`), R2R materialisation

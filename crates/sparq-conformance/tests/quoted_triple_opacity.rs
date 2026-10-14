@@ -255,7 +255,7 @@ fn closure_non_interference(tally: &mut Tally, profile: Profile) {
     let combined_closure = closure_lines(profile, &format!("{BASE}\n{QUOTED_OVERLAY}"));
     let overlay = parsed_lines(QUOTED_OVERLAY);
     let overlay_closure = closure_lines(profile, QUOTED_OVERLAY);
-    // [GPT-5.6] Preserve rows shared with the base while accounting for
+    // Preserve rows shared with the base while accounting for
     // feature-gated reasoning that derives additional rows from the overlay.
     let overlay_delta: BTreeSet<String> =
         overlay_closure.difference(&base_closure).cloned().collect();

@@ -116,7 +116,7 @@ mod tests {
         assert_ne!(e[1], e[2]);
     }
 
-    // [OPUS-4.8] sq-qcnn.25: DETERMINISM value pins. These recompute the exact
+    // sq-qcnn.25: DETERMINISM value pins. These recompute the exact
     // `Enc_t` composition from the public primitives (independent of `encode_term`'s
     // body) and assert the encoder reproduces it EXACTLY — so a mutation of the
     // type-code, the `h_s`/`h_2` layering, or the argument order is caught, not just

@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-tonhr.2, epic sq-tonhr) The W3C **rdf-n-triples** / **rdf-n-quads** /
+//! (sq-tonhr.2, epic sq-tonhr) The W3C **rdf-n-triples** / **rdf-n-quads** /
 //! **rdf-trig** syntax-suite RATCHETS — the recorded floors that pin today's parser bar
 //! BEFORE any rdf-shuttle generated candidate parser lands (floors may only RISE; a
 //! candidate that changes any suite's outcome set is a regression the sq-tonhr.8/.9

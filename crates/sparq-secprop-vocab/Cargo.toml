@@ -1,4 +1,4 @@
-# [OPUS-5] sq-3705 — the SHARED `sec-prop:` vocabulary crate.
+# sq-3705 — the SHARED `sec-prop:` vocabulary crate.
 #
 # A dependency-free LEAF. It exists because the same `secx:`/`sec-prop:` IRI
 # strings were declared in THREE crates and no crate sat below all three:
@@ -38,9 +38,9 @@ description = "Shared sec-prop:/secx: security-property IRI constants and canoni
 readme = "README.md"
 # Research-stage vocabulary for an externally UNAUDITED ZK estate (sq-qhy4): it
 # RECORDS security-property claims + their epistemic basis and asserts none of
-# them. [GPT-5.6] Published as the dependency-free leaf shared by its consumers.
+# them. Published as the dependency-free leaf shared by its consumers.
 
-# [OPUS-5] docs.rs: build with all features + the `docsrs` cfg.
+# docs.rs: build with all features + the `docsrs` cfg.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

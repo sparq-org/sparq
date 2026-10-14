@@ -1,4 +1,4 @@
-# [OPUS-4.8] sparq-mpc — MPC over federated SPARQL (RQ2). Through M3.
+# sparq-mpc — MPC over federated SPARQL (RQ2). Through M3.
 # Native-only research crate. DELIBERATELY NOT a dependency of sparq-wasm:
 # the WASM bundle must stay free of any MPC/crypto surface (verify with
 # `cargo tree -p sparq-wasm` — sparq-mpc must NOT appear).
@@ -29,19 +29,29 @@ categories.workspace = true
 description = "MPC over federated SPARQL (RQ2): per-holder local sub-evaluation + invariant trait boundaries for the MPC primitive, global-IRI join, and collaborative attested-source proof. Native-only research scaffold; crypto deferred."
 publish = false
 
-# NOTHING in the workspace depends on this crate. In particular sparq-wasm does
-# NOT, so the browser bundle is untouched. (Verified by `cargo tree -p
-# sparq-wasm`.) The only real dependency is the SPARQL engine, used for the
+# The only reverse dependency is sparq-fedplan-mpc, behind its default-OFF
+# `fedplan-mpc` feature. sparq-wasm does NOT depend on this crate, so the browser
+# bundle is untouched (verify with `cargo tree -p sparq-wasm`). The only real dependency is the SPARQL engine, used for the
 # invariant "each holder evaluates locally over its own graphs" core.
 
 [features]
-# [OPUS-4.8] sq-1vt: gate exposing the DETERMINISTIC, SEEDABLE masking RNG
+# sq-1vt: gate exposing the DETERMINISTIC, SEEDABLE masking RNG
 # (`ShamirBackend::new_seeded` / `rng::InsecureTestRng`) outside `#[cfg(test)]`,
 # e.g. for an external benchmark harness that needs reproducible masks. It is
 # OFF by default, so a normal `sparq-mpc` build CANNOT construct a predictable
 # masking RNG — the real protocol always uses the OS-seeded ChaCha20 CSPRNG.
 # The feature name is the warning: turning it on opts into insecure randomness.
 insecure-test-rng = []
+# The per-protocol security-properties annotation graph (`secprop` module +
+# `ontologies/secprop-mpc-methods.ttl`): each protocol's trust model as
+# `secx:property`/`secx:level` claims on the ordered `secx:AdversaryModel` /
+# `secx:CorruptionThreshold` dimensions, so an ODRL preference requiring malicious /
+# dishonest-majority security is discharged by the SHARED admissibility reasoner
+# (`sparq_trust::admissible`) instead of resting on the inert `secx:assumption`
+# provenance (issues #3275 + #6186). OFF by default. Its only dependency is the
+# ZERO-dependency `sparq-secprop-vocab` leaf, so the opt-in build grows by a
+# `const &str` table plus the Turtle and the default build is byte-identical.
+secprop-annotations = ["dep:sparq-secprop-vocab"]
 
 [dependencies]
 # The single-holder query engine. The MPC layer's whole point is to MINIMISE
@@ -54,7 +64,7 @@ sparq-engine = { path = "../sparq-engine" }
 # re-encode its own data to hand a partial to the join layer.
 oxrdf = { workspace = true }
 
-# [OPUS-4.8] sq-1vt / sq-it50 / sq-8xug: OS-entropy seed for the secret-sharing /
+# sq-1vt / sq-it50 / sq-8xug: OS-entropy seed for the secret-sharing /
 # masking CSPRNG. The dealer's polynomial coefficients and the equality-test mask
 # MUST be unpredictable — a non-crypto PRNG there is a real confidentiality
 # weakness (sq-1vt). We own the ChaCha20 keystream generator (`crate::chacha`,
@@ -70,7 +80,7 @@ oxrdf = { workspace = true }
 # invariant intact. `getrandom` 0.4 is the workspace OS-entropy floor.
 getrandom = "0.4"
 
-# [OPUS-4.8] sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
+# sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
 # CR-G5): secret-memory hygiene (`zeroize`) + constant-time-equality PRIMITIVES
 # (`subtle`) for the secret-bearing MPC types. HYGIENE ONLY — no protocol,
 # algorithm, wire-format, or disclosure-minimisation behaviour changes. The
@@ -84,7 +94,7 @@ getrandom = "0.4"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 subtle = "2"
 
-# [OPUS-4.8] sq-dl81: a vetted cryptographic hash for the domain-separated
+# sq-dl81: a vetted cryptographic hash for the domain-separated
 # Term->Fp join-key encoder (`crate::term_encode`). The hidden-value join's
 # secret-shared field-equality is a SOUND stand-in for RDF term equality ONLY
 # if the encoding is injective on the join domain; a uniform-output hash makes
@@ -95,3 +105,22 @@ subtle = "2"
 # fold into the 61-bit Mersenne field. Pinned to the same 0.11 line sparq-engine
 # uses so the workspace resolves a single `sha2`/`digest` version.
 sha2 = "0.11"
+
+# OPTIONAL — `secprop-annotations` feature only (#3275/#6186). The shared
+# `sec-prop:`/`secx:` IRI constants, single-sourced in a ZERO-dependency leaf so the
+# annotation graph's dimension/level IRIs are pinned to the canonical
+# `secprop-ext.ttl` by a real crate edge rather than a copied string table. The
+# default build pulls nothing.
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.6", optional = true }
+
+# Test-only: the SHARED N3 admissibility reasoner the per-protocol annotation graph
+# is meant to be discharged by (#6186). The end-to-end test runs a real ODRL
+# preference through `sparq_trust::admissible` over this crate's annotation graph, so
+# the exclusion is demonstrated through the one shared reasoner — this crate ships no
+# second, crate-local exclusion predicate. A DEV-dependency only: nothing in
+# sparq-mpc's shipping graph depends on sparq-trust, and the edge direction is
+# cycle-free (sparq-trust does not depend on sparq-mpc).
+[dev-dependencies]
+sparq-trust = { path = "../sparq-trust", version = "0.1.6", features = [
+    "secprop-admissibility",
+] }

@@ -8,7 +8,7 @@
 //! Behind the default-OFF `secprop-annotations` feature — the matching feature leg
 //! exercises it (the silent-skip guard); a default build compiles this file out.
 //!
-//! [OPUS-4.8] sq-bevd3 (epic sq-0dksu; design §5a). 🤖 SPARQ agent —
+//! sq-bevd3 (epic sq-0dksu; design §5a). 🤖 SPARQ agent —
 //! security-properties ontology.
 #![cfg(feature = "secprop-annotations")]
 

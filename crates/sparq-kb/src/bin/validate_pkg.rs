@@ -5,7 +5,7 @@
 //! Reads a Turtle file, validates it against the PKG SHACL shapes, and reports
 //! the validation result. Exits with 0 if valid, 1 if invalid.
 //!
-//! [HAIKU-4.5] sq-tzars.4 — PKG ingest workflow validation
+//! sq-tzars.4 — PKG ingest workflow validation
 
 use std::env;
 use std::fs;

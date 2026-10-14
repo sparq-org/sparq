@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-o7o0 (ASVS V14.5.3) — first-party CORS origin allowlist, integration.
+//! sq-o7o0 (ASVS V14.5.3) — first-party CORS origin allowlist, integration.
 //!
 //! Boots the real hardened router and asserts the END-TO-END CORS contract:
 //!   * DEFAULT (empty allowlist) emits NO CORS headers — the historical, safe posture for
@@ -10,7 +10,7 @@
 //!     allowlisted origin only;
 //!   * allowlisting an origin does NOT relax the existing auth gate.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-pm6i2, follow-up sq-ose80.2) **BUILD-TIME-ONLY** HNSW scaling harness.
+//! (sq-pm6i2, follow-up sq-ose80.2) **BUILD-TIME-ONLY** HNSW scaling harness.
 //!
 //! `research/gap-vector-ann-simd-2026-07.md` §7.3 carries a 1M×128 build-time
 //! **extrapolation** (from a measured 200k curve), not a measured 1M point: the full 1M run

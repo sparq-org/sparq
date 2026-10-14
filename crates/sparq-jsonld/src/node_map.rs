@@ -1,7 +1,7 @@
 //! Node Map Generation (JSON-LD 1.1 API §7.2) + Merge Node Maps (§7.3) + the
 //! Generate Blank Node Identifier helper (§7.4).
 //!
-//! [FABLE-5] (sq-oy1f.26) The **node map** is the shared intermediate that the
+//! (sq-oy1f.26) The **node map** is the shared intermediate that the
 //! [`flatten`](mod@crate::flatten) module (and, later, `from_rdf`) projects from. It indexes
 //! every node object of an **expanded** document by graph name and `@id`, assigns fresh
 //! blank-node identifiers to unlabelled nodes and named graphs (in first-encounter order,
@@ -48,7 +48,7 @@ impl BlankNodeIssuer {
                 return existing.clone();
             }
         }
-        // [FABLE-5] positional format arg (avoids the CodeQL rust/unused-variable
+        // positional format arg (avoids the CodeQL rust/unused-variable
         // false positive on inline-captured identifiers).
         let label = format!("_:b{}", self.counter);
         self.counter += 1;
@@ -122,7 +122,7 @@ impl GraphMap {
     /// Adds `value` to `subject`'s `property` array unless an equal value is already
     /// there; list objects are always added (equal lists are distinct list nodes).
     fn merge(&mut self, subject: &str, property: &str, value: Json) {
-        let dedup = !is_list_object(&value);
+        let dedup = !value.is_list_object();
         let pos = self.position(subject);
         let Json::Obj(members) = &mut self.nodes[pos].1 else { return };
         let Some(slot) = members.iter_mut().find(|(k, _)| k == property) else {
@@ -136,9 +136,16 @@ impl GraphMap {
                     return;
                 }
             } else {
-                let seen = self.seen.entry((pos, property.to_string())).or_insert_with(|| {
-                    items.iter().filter(|v| !is_list_object(v)).map(value_key).collect()
-                });
+                let seen = self
+                    .seen
+                    .entry((pos, property.to_string()))
+                    .or_insert_with(|| {
+                        items
+                            .iter()
+                            .filter(|v| !v.is_list_object())
+                            .map(value_key)
+                            .collect()
+                    });
                 if !seen.insert(value_key(&value)) {
                     return;
                 }
@@ -201,7 +208,7 @@ impl NodeMap {
 /// `element` must be the output of [`crate::expand::expand`] (an array of node
 /// objects, value objects, or lists). Node-map generation performs no context processing.
 ///
-/// [FABLE-5] (sq-oy1f.26)
+/// (sq-oy1f.26)
 pub fn generate_node_map(element: &Json) -> NodeMap {
     let mut node_map = NodeMap::new();
     let mut issuer = BlankNodeIssuer::new();
@@ -255,7 +262,7 @@ fn node_map_gen(
             // A value object or a list object is a *value*, not a node — append it to the
             // active subject's property (or the active list), unchanged for a value object,
             // recursively flattened for a list.
-            if is_value_object(members) {
+            if element.is_value_object() {
                 let value = element.clone();
                 append_value(
                     node_map, active_graph, active_subject, active_property, list, value,
@@ -489,11 +496,6 @@ fn merge_into_property(
     node_map.graph_mut(active_graph).merge(subject, property, value);
 }
 
-/// True iff `value` is a list object (`{ "@list": … }`).
-fn is_list_object(value: &Json) -> bool {
-    matches!(value, Json::Obj(members) if members.iter().any(|(k, _)| k == "@list"))
-}
-
 /// Set a scalar (non-array) member such as `@index` on `subject`'s node in `active_graph`.
 fn set_scalar_member(
     node_map: &mut NodeMap,
@@ -514,11 +516,6 @@ fn as_array(value: &Json) -> Vec<Json> {
         Json::Arr(items) => items.clone(),
         other => vec![other.clone()],
     }
-}
-
-/// True iff `members` describe a JSON-LD value object (it has an `@value` member).
-fn is_value_object(members: &[(String, Json)]) -> bool {
-    members.iter().any(|(k, _)| k == "@value")
 }
 
 #[cfg(test)]

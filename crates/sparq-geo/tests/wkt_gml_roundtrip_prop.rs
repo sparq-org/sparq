@@ -1,4 +1,4 @@
-//! WKT-to-GML cross-format property coverage for every GML-SF class. [GPT-5.6]
+//! WKT-to-GML cross-format property coverage for every GML-SF class.
 
 use geo_types::{
     Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,

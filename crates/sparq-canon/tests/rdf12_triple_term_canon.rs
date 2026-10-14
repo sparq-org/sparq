@@ -596,7 +596,7 @@ fn sha384_distinguishes_non_isomorphic() {
 //    descent. These are the audit's SHARPER non-isomorphic vectors landed as
 //    permanent regression tests: a future refactor of `hash_n_degree_quads` /
 //    `hash_related_blank_node` that DID introduce a false-equal would be caught
-//    here. [OPUS-4.8]
+//    here.
 //
 //    CAUTION (the audit's own): one hand-authored audit pair had a WRONG
 //    isomorphism premise (it was non-isomorphic, not isomorphic), so its
@@ -1066,7 +1066,7 @@ fn sha384_relabels_differently_from_sha256_on_symmetric_cycle() {
 
 // ---------------------------------------------------------------------------
 // 6) Direct tests for `canonicalize_graph_content_rdf12` and the `*_with`
-//    generic — the `sparq_core::Graph`-level entry points. [OPUS-4.8] sq-qcnn.14:
+//    generic — the `sparq_core::Graph`-level entry points. sq-qcnn.14:
 //    these were the only public rdf12 functions without any test coverage.
 // ---------------------------------------------------------------------------
 
@@ -1145,7 +1145,7 @@ fn canonicalize_graph_content_rdf12_with_sha384_relabels_bnode() {
 }
 
 // ---------------------------------------------------------------------------
-// 7) Constrained ground-triple-term variant ([FABLE-5] sq-iaxd): the thin
+// 7) Constrained ground-triple-term variant (sq-iaxd): the thin
 //    error-on-nested-bnode wrappers. Contract under test:
 //    (a) on ground-triple-term input each wrapper is byte-identical to the
 //        full profile it delegates to (SHA-256 and SHA-384);
@@ -1450,7 +1450,7 @@ fn nested_blank_node_error_display() {
 }
 
 // ---------------------------------------------------------------------------
-// 8) Graph-level constrained wrappers ([FABLE-5] sq-l3pk7):
+// 8) Graph-level constrained wrappers (sq-l3pk7):
 //    `canonicalize_graph_content_rdf12_ground_terms` (+ `_with`) — the
 //    `sparq_core::Graph` parity siblings of the sq-iaxd wrapper family.
 //    Contract: (a) equivalent to composing `graph_triples` with
@@ -1556,7 +1556,7 @@ fn graph_content_ground_terms_with_sha384_matches_full_profile() {
 }
 
 // ---------------------------------------------------------------------------
-// [FABLE-5] sq-x3oj2: crate-wide triple-term nesting-depth bound.
+// sq-x3oj2: crate-wide triple-term nesting-depth bound.
 // Every profile entry point must fail closed with `TripleTermDepthExceeded`
 // on a chain one past `MAX_TRIPLE_TERM_DEPTH`, and still accept a chain
 // exactly AT the bound (so the guard is a bound, not a blanket reject).

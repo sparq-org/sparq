@@ -23,7 +23,7 @@ fn as_bytes(t: &[[Id; 3]]) -> &[u8] {
 /// actually returns the pages. Both are advisory and unmapped-range-safe; failures are
 /// ignored. The map is read-only and the range is already fully consumed, so no data
 /// can be lost — the `unchecked_advise` contract is satisfied.
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns
+// written while Fable 5 unavailable — re-review when Fable returns
 #[cfg(unix)]
 fn drop_behind(map: &memmap2::Mmap, offset: usize, len: usize) {
     if len == 0 {
@@ -39,9 +39,6 @@ fn drop_behind(map: &memmap2::Mmap, offset: usize, len: usize) {
         map.unchecked_advise_range(advice, offset, len).ok();
     }
 }
-
-#[cfg(not(unix))]
-fn drop_behind(_map: &memmap2::Mmap, _offset: usize, _len: usize) {}
 
 /// Sorts a chunk (by its stored column order) and spills it to a fresh run file under
 /// `tmp`, clearing the buffer. The caller pushes triples already in the desired key
@@ -71,7 +68,7 @@ pub fn spill_run(buf: &mut Vec<[Id; 3]>, runs: &mut Vec<PathBuf>, tmp: &Path) ->
 /// K-way merges sorted run files, deduplicating consecutive equal triples, calling `sink`
 /// for each surviving row IN SORTED ORDER. The runs are memory-mapped (paged on demand)
 /// and merged through a min-heap with drop-behind, so peak RAM is the heap (one triple per
-/// run) — independent of the dataset size. [OPUS-4.8] sq-vkz7: extracted from `kway_merge`
+/// run) — independent of the dataset size. sq-vkz7: extracted from `kway_merge`
 /// so the raw writer and the streaming COMPRESSED writer share one merge body.
 fn kway_merge_to<S: FnMut([Id; 3]) -> io::Result<()>>(runs: &[PathBuf], mut sink: S) -> io::Result<()> {
     use std::cmp::Reverse;
@@ -114,7 +111,9 @@ fn kway_merge_to<S: FnMut([Id; 3]) -> io::Result<()>>(runs: &[PathBuf], mut sink
     // instead of letting the whole merge input (GBs at 100M+ triples) sit resident.
     // `Advice::Sequential` alone does NOT shrink residency on macOS, measured: the
     // sibling-merge phase peaked at 5.7 GiB on a 100M-triple build without this.
+    #[cfg(unix)]
     const DROP_STRIDE: usize = 32 << 20;
+    #[cfg(unix)]
     let mut dropped = vec![0usize; runs.len()];
 
     let mut last: Option<[Id; 3]> = None;
@@ -139,8 +138,6 @@ fn kway_merge_to<S: FnMut([Id; 3]) -> io::Result<()>>(runs: &[PathBuf], mut sink
             }
         }
     }
-    #[cfg(not(unix))]
-    let _ = &mut dropped;
     Ok(())
 }
 
@@ -158,7 +155,7 @@ pub fn kway_merge(runs: &[PathBuf], out: &Path) -> io::Result<()> {
     w.flush()
 }
 
-/// [OPUS-4.8] sq-vkz7 — k-way merges sorted run files into a BLOCK-COMPRESSED `SPQCPRM1`
+/// sq-vkz7 — k-way merges sorted run files into a BLOCK-COMPRESSED `SPQCPRM1`
 /// permutation at `out`, streaming each deduplicated row straight into the FoR+varint
 /// block encoder. This lets the external-memory build emit compressed perms in ONE pass —
 /// no raw write followed by a separate `open` + `decode_all` + re-encode recompress pass
@@ -197,7 +194,7 @@ pub fn external_sort(
     Ok(())
 }
 
-/// [OPUS-4.8] sq-vkz7 — like [`external_sort`] but writes `out` BLOCK-COMPRESSED
+/// sq-vkz7 — like [`external_sort`] but writes `out` BLOCK-COMPRESSED
 /// (`SPQCPRM1`) via [`kway_merge_compressed`], so a sibling permutation is produced in its
 /// compressed on-disk form directly from the sort tail (no recompress second pass). The
 /// run-spill phase is identical; only the merge tail differs.
@@ -240,7 +237,7 @@ pub fn map_perm(path: &Path) -> io::Result<(memmap2::Mmap, usize)> {
 
 #[cfg(test)]
 mod tests {
-    // [OPUS-4.8] sq-j67o — behavioural tests for the out-of-core index build
+    // sq-j67o — behavioural tests for the out-of-core index build
     // (spill -> k-way merge -> raw/compressed write). These assert OBSERVABLE
     // behaviour: that the on-disk permutation is sorted in the requested column
     // order, that consecutive-equal triples are deduplicated, that the input is

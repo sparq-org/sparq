@@ -6,7 +6,7 @@
 //!
 //! Informational by default (always exits 0); `--strict` exits 1 on any FAIL
 //! so the pass rate can be ratcheted in CI once it stabilizes.
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use sparq_conformance::inference::report::{Outcome, Section, TestResult};
 use sparq_conformance::inference::{n3_suite, owl_suite, rdfmt, report, sparql_entail};
@@ -43,7 +43,7 @@ fn main() {
     let rdf_tests = root.join("rdf-tests");
     let n3_root = root.join("n3");
     let owl_export = root.join("owl2/all.rdf");
-    // [OPUS-4.8] (B4) W3C rdf-turtle suite directory inside the same rdf-tests clone.
+    // (B4) W3C rdf-turtle suite directory inside the same rdf-tests clone.
     let turtle_root = rdf_tests.join("rdf/rdf11/rdf-turtle");
     if !rdf_tests.is_dir() {
         eprintln!(
@@ -110,7 +110,7 @@ fn main() {
         sparql_entail::notes(),
         &|results| sparql_entail::run_suite(&rdf_tests, results),
     );
-    // [OPUS-4.8] sq-kuvu3 (epic sq-pbz04) — the EXPERIMENTAL OWL 2 QL (DL-Lite_R)
+    // sq-kuvu3 (epic sq-pbz04) — the EXPERIMENTAL OWL 2 QL (DL-Lite_R)
     // query-rewriting arm over the BROAD `pr:QL` `sparql11/entailment` set, opt-in
     // behind `ql-experimental`. Every row it adds is in the experimental
     // OUT-OF-SCOPE bucket (NOT a graduated conformance pass), so the section's
@@ -130,7 +130,7 @@ fn main() {
         sparql_entail::ql_experimental_notes(),
         &|results| sparql_entail::run_ql_experimental_arm(&rdf_tests, results),
     );
-    // [OPUS-4.8] (B4) W3C rdf-turtle suite through the SPARQ Turtle parser — the
+    // (B4) W3C rdf-turtle suite through the SPARQ Turtle parser — the
     // rejection/acceptance oracle that gates the Turtle T1 spike. Reuses the rdf-tests clone.
     run_section(
         "W3C rdf-turtle through the sparq Turtle parser (parse_to_triples)",

@@ -41,7 +41,7 @@
 //!
 //! When the `params` feature is off, none of this compiles; the default build is
 //! byte-identical and pulls no new dependencies (oxrdf + spargebra are already
-//! direct deps). [OPUS-4.8]
+//! direct deps).
 
 use crate::{PreparedQuery, PreparedUpdate};
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Variable};
@@ -76,7 +76,7 @@ pub enum BindError {
 impl std::fmt::Display for BindError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // Positional `{}` args (CodeQL rust/unused-variable false-positive avoidance). [OPUS-4.8]
+            // Positional `{}` args (CodeQL rust/unused-variable false-positive avoidance).
             BindError::NoSuchParameter(n) => {
                 write!(f, "no free parameter ?{} in the query template", n)
             }
@@ -683,7 +683,7 @@ mod tests {
         Graph::load_str(DATA, "turtle").unwrap()
     }
 
-    // [OPUS-4.8] The #901 injection scenario: a hostile bound *literal* that, under
+    // The #901 injection scenario: a hostile bound *literal* that, under
     // string concatenation, would break out of the literal and inject a whole UPDATE.
     // Bound through the algebra it is matched as DATA — it cannot change the query
     // structure, so it simply matches nothing (no person is named that string).

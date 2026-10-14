@@ -1,7 +1,7 @@
 //! The **deterministic grounding-resolver** — propose-then-verify (§4.3, the OPEN
 //! `sq-0wo9e.6` pattern, realised here for the fixture pipeline).
 //!
-//! [OPUS-4.8] sq-2489d.5. A cheap model **will hallucinate claims and mis-cite**. The
+//! sq-2489d.5. A cheap model **will hallucinate claims and mis-cite**. The
 //! SHACL gate checks *structure*, not *truth*; the strongest deterministic anchor we can
 //! add is to require, before a candidate Finding is allowed to be committed, that:
 //!

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3pb7f (FO-LLM-bridge Phase 3, epic sq-mztg8; design
+//! sq-3pb7f (FO-LLM-bridge Phase 3, epic sq-mztg8; design
 //! `research/fo-llm-bridge.md` §4.3 kill-criterion **K4**): the **K4 question-battery
 //! generator** for the read-path URI-hiding **accuracy** A/B.
 //!
@@ -297,17 +297,7 @@ impl Question {
 
 fn json_str(s: &str) -> String {
     let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
+    sparq_core::json::escape_into(&mut out, s);
     out.push('"');
     out
 }

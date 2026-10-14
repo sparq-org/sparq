@@ -1,4 +1,4 @@
-//! [OPUS-4.8] RSP-QL surface-syntax parser (sq-9u1, part 1): the textual
+//! RSP-QL surface-syntax parser (sq-9u1, part 1): the textual
 //! streaming-SPARQL extension (`REGISTER`, `FROM NAMED WINDOW … ON … RANGE/STEP`,
 //! `WINDOW <w> { … }`) into the crate's window/stream representation.
 
@@ -162,7 +162,7 @@ fn unicode_in_body_survives_rewrite() {
     assert_eq!(parsed.sparql.matches("GRAPH").count(), 2);
 }
 
-// ----------------------------------------------------------------- [SONNET-4.6] sq-2n1q3.2 new forms
+// ----------------------------------------------------------------- sq-2n1q3.2 new forms
 
 /// `TUMBLING RANGE r` is accepted as an explicit tumbling-window keyword:
 /// semantically equivalent to `RANGE r` (step == range).
@@ -290,7 +290,7 @@ fn rejects_now_relative_bounds() {
 /// `TUMBLING RANGE r STEP s` must fail CLOSED with a clear error mentioning
 /// "TUMBLING" and "STEP" — a `STEP` clause is contradictory with `TUMBLING`
 /// (which already implies `step == range`). Silently accepting it would produce
-/// an inconsistent window spec. [SONNET-4.6]
+/// an inconsistent window spec.
 #[test]
 fn rejects_tumbling_with_explicit_step() {
     let tumbling_step = "SELECT * WHERE { WINDOW <http://ex/w> { ?s ?p ?o } }\n\

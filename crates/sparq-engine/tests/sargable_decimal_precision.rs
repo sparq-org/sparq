@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-lr2ii — regression tests for the sargable FILTER fast path collapsing a
+//! sq-lr2ii — regression tests for the sargable FILTER fast path collapsing a
 //! high-precision `xsd:decimal` value onto its (lossy) f64 image.
 //!
 //! The engine pushes a `?v OP constant` numeric FILTER over a single pattern down into the
@@ -11,7 +11,7 @@
 //!
 //! The fix DECLINES the sargable fast path whenever the graph holds an f64-inexact decimal,
 //! routing the comparison to the exact general evaluator (which the BIND oracle below shows
-//! is correct). These assertions are RED before the fix and GREEN after. [OPUS-4.8]
+//! is correct). These assertions are RED before the fix and GREEN after.
 
 use sparq_core::Graph;
 use sparq_engine::query;

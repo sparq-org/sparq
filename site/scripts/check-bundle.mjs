@@ -21,7 +21,8 @@
 //      back to a STATIC import: its code would fold into the route-entry chunk AND vanish from the
 //      loadable manifest, so a pure "is this chunk in the entry set" test would FALSELY pass.
 //   2. ISOLATION — none of those heavy modules' code-split chunk files appear in the FIRST-LOAD
-//      set (app-build-manifest.json `pages`) of the guarded routes.
+//      set of the guarded routes (see firstLoadFromEntryFiles: Next ≤15 wrote that set to the
+//      now-removed app-build-manifest.json; next.config.ts's EntryFilesPlugin records it now).
 //   3. CONFIG — images:{unoptimized:true} and basePath prefixing are load-bearing for GitHub
 //      Pages / Tauri (bead item 4). Read straight from the build's OWN resolved artifacts
 //      (routes-manifest.basePath, images-manifest), so the check adapts to BOTH build modes
@@ -64,7 +65,7 @@ export const HEAVY_MODULE_SUFFIXES = [
 ];
 
 /**
- * The guarded surfaces. `manifestKey` is the app-build-manifest.json `pages` key;
+ * The guarded surfaces. `manifestKey` is the route's page entry (`/<route>/page`);
  * `html` is the exported document under out/ (trailingSlash:true → <route>/index.html).
  * `/` + `/capabilities` are the original sq-vw3ax.9 "route + prove in under one screen"
  * surfaces, guarded against EVERY heavy module; `/surface/data-formats` joins them
@@ -91,7 +92,7 @@ export const GUARDED_ROUTES = [
  *
  * @param {object} p
  * @param {Record<string, {files?: string[]} | string[]>} p.loadable  react-loadable-manifest.json
- * @param {{ pages: Record<string, string[]> }} p.app                 app-build-manifest.json
+ * @param {{ pages: Record<string, string[]> }} p.app                 first-load set per route
  * @param {{ basePath?: string }} p.routes                            routes-manifest.json
  * @param {{ images?: { unoptimized?: boolean } }} p.images           images-manifest.json
  * @param {Record<string, string | undefined>} p.htmlByLabel          exported HTML keyed by route label
@@ -140,8 +141,7 @@ export function analyzeBundle({ loadable, app, routes, images, htmlByLabel }) {
     const first = app?.pages?.[manifestKey];
     if (!Array.isArray(first)) {
       errors.push(
-        `ISOLATION: no first-load entry for guarded route ${label} (${manifestKey}) in ` +
-          `app-build-manifest.json — did the build write it?`,
+        `ISOLATION: no first-load set for guarded route ${label} (${manifestKey}).`,
       );
       continue;
     }
@@ -225,6 +225,38 @@ export function findSnapshotLeaks(fingerprint, chunks) {
   return chunks.filter((c) => c.text.includes(fingerprint)).map((c) => c.file);
 }
 
+/**
+ * A guarded route's first-load set: the root main files every route loads (webpack runtime,
+ * main-app and their split chunks, from build-manifest.json `rootMainFiles`) plus the JS and CSS
+ * files of the route's page entrypoint (`app/<route>/page`), which next.config.ts's
+ * EntryFilesPlugin records in `.next/sparq-entry-files.json`. Together they are what Next ≤15
+ * listed under app-build-manifest.json `pages["<route>/page"]`; the root layout is its own
+ * entrypoint and stays out, as it did there. Pure (fs-free).
+ *
+ * A missing page entrypoint, or one that does not emit its own `static/chunks/app/<route>/page`
+ * chunk, is an error: the set would not be the page's first load, and an empty one would let the
+ * isolation check pass without checking anything.
+ *
+ * @param {Record<string, string[]> | null} entryFiles  sparq-entry-files.json
+ * @param {string[]} rootMainFiles                      build-manifest.json `rootMainFiles`
+ * @param {string} manifestKey                          e.g. "/capabilities/page"
+ * @returns {{ chunks: string[], error: string | null }}
+ */
+export function firstLoadFromEntryFiles(entryFiles, rootMainFiles, manifestKey) {
+  const route = manifestKey.replace(/\/page$/, "");
+  const files = entryFiles?.[`app${manifestKey}`] ?? [];
+  const pageChunk = `static/chunks/app${route}/page`;
+  if (!files.some((f) => f.startsWith(`${pageChunk}-`) || f === `${pageChunk}.js`)) {
+    return {
+      chunks: [],
+      error:
+        `FIRST-LOAD: .next/sparq-entry-files.json has no app${manifestKey} entrypoint emitting ` +
+        `${pageChunk}-<hash>.js, so its first-load set cannot be checked.`,
+    };
+  }
+  return { chunks: [...new Set([...rootMainFiles, ...files])], error: null };
+}
+
 /** Read + JSON-parse a build manifest, or return null if it does not exist. */
 function readJson(path) {
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
@@ -248,12 +280,11 @@ function main() {
   const nextDir = join(siteRoot, ".next");
   const outDir = join(siteRoot, "out");
 
-  const app = readJson(join(nextDir, "app-build-manifest.json"));
   const loadable = readJson(join(nextDir, "react-loadable-manifest.json"));
   const routes = readJson(join(nextDir, "routes-manifest.json"));
   const images = readJson(join(nextDir, "images-manifest.json"));
 
-  if (!app || !loadable || !routes || !images) {
+  if (!loadable || !routes || !images) {
     console.error(
       "[check-bundle] Build manifests missing under site/.next — run `npm run build` first.",
     );
@@ -266,7 +297,27 @@ function main() {
     htmlByLabel[label] = existsSync(p) ? readFileSync(p, "utf8") : undefined;
   }
 
-  const { errors, summary } = analyzeBundle({ loadable, app, routes, images, htmlByLabel });
+  const entryFiles = readJson(join(nextDir, "sparq-entry-files.json"));
+  const rootMainFiles = readJson(join(nextDir, "build-manifest.json"))?.rootMainFiles ?? [];
+  const pages = {};
+  const loadErrors = [];
+  if (rootMainFiles.length === 0) {
+    loadErrors.push("FIRST-LOAD: .next/build-manifest.json lists no rootMainFiles.");
+  }
+  for (const { manifestKey } of GUARDED_ROUTES) {
+    const { chunks, error } = firstLoadFromEntryFiles(entryFiles, rootMainFiles, manifestKey);
+    if (error) loadErrors.push(error);
+    // Recorded even on error, so analyzeBundle does not report the route a second time.
+    pages[manifestKey] = chunks;
+  }
+  const { errors, summary } = analyzeBundle({
+    loadable,
+    app: { pages },
+    routes,
+    images,
+    htmlByLabel,
+  });
+  errors.push(...loadErrors);
 
   // 4. DATA ISOLATION — the server-only benchmark snapshot must not appear in ANY client chunk.
   const snapshot = readJson(join(siteRoot, "src", "data", "benchmarks.generated.json"));

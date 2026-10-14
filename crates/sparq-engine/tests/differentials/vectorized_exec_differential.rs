@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-bif.12) End-to-end differential coverage for the opt-in `vectorized`
+//! (sq-bif.12) End-to-end differential coverage for the opt-in `vectorized`
 //! (columnar / vector-at-a-time) execution path.
 //!
 //! The `chunk` module's in-`src` unit tests already cover the columnar PRIMITIVES in

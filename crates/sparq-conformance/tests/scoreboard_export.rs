@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-gum8.14 — DRIFT GUARD for the committed machine-readable
+//! sq-gum8.14 — DRIFT GUARD for the committed machine-readable
 //! conformance scoreboard, `bench/conformance-scoreboard.generated.json`.
 //!
 //! The committed artifact is a pure derivation of the central registry
@@ -16,7 +16,7 @@
 //! Hermetic and feature-independent: `scoreboard_json()` reads only the static
 //! registry (no fetched suite data, no opt-in features), so this test behaves
 //! identically in every feature state.
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use sparq_conformance::scoreboard;
 use std::path::PathBuf;

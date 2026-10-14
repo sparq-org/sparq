@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-0bxp) Integration tests for the OPT-IN per-query access audit log
+//! (sq-0bxp) Integration tests for the OPT-IN per-query access audit log
 //! (CDMC CD-2 / ISO 27001 A.8.15 / EU CRA logging).
 //!
 //! These spin the real axum server with the audit log turned on at runtime and capture the

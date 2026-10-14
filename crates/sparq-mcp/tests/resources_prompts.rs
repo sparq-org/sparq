@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-sjey1 (gh #3220) The MCP **resources** + **prompts** surfaces, end to
+//! sq-sjey1 (gh #3220) The MCP **resources** + **prompts** surfaces, end to
 //! end through the real `McpServer::handle_message` dispatch — no mock bypasses it.
 //!
 //! The load-bearing invariants asserted here:

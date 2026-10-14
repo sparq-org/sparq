@@ -14,7 +14,7 @@
 //!
 //! Compiled only under `--features trust-graph`.
 //!
-//! [OPUS-5] sq-hed3q. 🤖 SPARQ agent — trust-graph LIBRARY admission seam.
+//! sq-hed3q. 🤖 SPARQ agent — trust-graph LIBRARY admission seam.
 #![cfg(feature = "trust-graph")]
 
 use std::collections::BTreeSet;

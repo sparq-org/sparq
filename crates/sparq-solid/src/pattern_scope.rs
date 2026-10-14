@@ -1,6 +1,6 @@
 //! Pattern-scoped (sub-named-graph) result masking — the `pattern-scope` feature.
 //!
-//! [FABLE-5] Spike `sq-lrtc3.3` (epic `sq-lrtc3`): an ODRL target can denote a
+//! Spike `sq-lrtc3.3` (epic `sq-lrtc3`): an ODRL target can denote a
 //! **derived sub-graph asset** — the subset of a named graph visible under a set of
 //! allow/deny triple patterns — instead of a whole graph. Design record:
 //! `research/odrl-pattern-scoped-targets-2026-07.md`.

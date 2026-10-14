@@ -26,18 +26,17 @@
 //! - `?lit text:matchesAny "query"` — OR of tokens;
 //! - `?lit text:fuzzy "term"` — with the `fuzzy` feature, a typo-tolerant
 //!   single-token match at edit distance one by default; a same-subject
-//!   `text:maxDistance N` companion selects `0..=2`. [GPT-5.6]
+//!   `text:maxDistance N` companion selects `0..=2`.
 //! - `?lit text:phrase "foo bar"` — tokens ADJACENT and IN ORDER (a positional
-//!   phrase match; needs a positions-enabled index — see below). [OPUS-4.8]
+//!   phrase match; needs a positions-enabled index — see below).
 //! - `?lit text:near "foo bar"` — tokens IN ORDER within a bounded gap (the
 //!   proximity/slop generalisation of `text:phrase`), RELEVANCE-RANKED; the gap
 //!   budget defaults to [`DEFAULT_SLOP`] and is set by a `?lit text:slop N`
-//!   companion. Also needs a positions-enabled index. [OPUS-4.8]
+//!   companion. Also needs a positions-enabled index.
 //! - `?lit text:score ?s` — companion to exactly one scored match on the same
 //!   `?lit` in the same BGP — `text:matches`/`text:matchesAny` (the BM25 score)
 //!   or `text:near` (the proximity score `1/(1+gap)`) — binds it as an
 //!   `xsd:double`. NOT valid for `text:phrase` (boolean adjacency, unscored).
-//!   [OPUS-4.8]
 //!
 //! is REMOVED and replaced by an inline [`Values`](GraphPattern::Values)
 //! table of the index's hits — the matching literal terms (and scores),
@@ -150,7 +149,7 @@ fn rewrite_pattern(p: &mut GraphPattern, graph: &Graph, index: &TextIndex) -> Re
 /// Default proximity gap budget for `text:near` when no `text:slop` companion
 /// is given. Zero means `text:near "q"` defaults to exact adjacency — the same
 /// hits as `text:phrase "q"` — and a `text:slop N` companion only ever widens
-/// it; an explicit budget is the common case. [OPUS-4.8]
+/// it; an explicit budget is the common case.
 pub const DEFAULT_SLOP: u32 = 0;
 
 #[cfg(feature = "fuzzy")]
@@ -175,20 +174,20 @@ enum ReqKind {
     All,
     /// `text:matchesAny` — OR of tokens (BM25-scored).
     Any,
-    /// `text:fuzzy` — bounded single-token Levenshtein lookup. [GPT-5.6]
+    /// `text:fuzzy` — bounded single-token Levenshtein lookup.
     #[cfg(feature = "fuzzy")]
     Fuzzy { max_distance: Option<u8> },
-    /// `text:phrase` — adjacent, in-order tokens (positional, unscored). [OPUS-4.8]
+    /// `text:phrase` — adjacent, in-order tokens (positional, unscored).
     Phrase,
     /// `text:near` — in-order tokens within a bounded total gap, proximity-scored
     /// (`1/(1+gap)`); `slop` is `Some` once a `text:slop` companion has set it,
     /// `None` (→ [`DEFAULT_SLOP`] at execution) otherwise. The `Option` makes a
-    /// duplicate `text:slop` detectable for ANY value (including 0). [OPUS-4.8]
+    /// duplicate `text:slop` detectable for ANY value (including 0).
     Near { slop: Option<u32> },
 }
 
 /// One `text:matches`/`text:matchesAny`/`text:phrase`/`text:near` request found
-/// in a BGP. [OPUS-4.8]
+/// in a BGP.
 struct MatchReq {
     var: Variable,
     query: String,
@@ -207,7 +206,7 @@ fn rewrite_bgp(
     let mut reqs: Vec<MatchReq> = Vec::new();
     let mut scores: Vec<(Variable, Variable)> = Vec::new();
     // (subject var, parsed slop) collected from `text:slop` patterns, attached
-    // to the matching `text:near` after the scan (order-independent). [OPUS-4.8]
+    // to the matching `text:near` after the scan (order-independent).
     let mut slops: Vec<(Variable, u32)> = Vec::new();
     #[cfg(feature = "fuzzy")]
     let mut max_distances: Vec<(Variable, u8)> = Vec::new();
@@ -353,7 +352,7 @@ fn rewrite_bgp(
     }
 
     // Attach each text:slop to the single text:near request on its variable
-    // (before scores: scoring is uniform across the resolved kind). [OPUS-4.8]
+    // (before scores: scoring is uniform across the resolved kind).
     for (var, value) in slops {
         let mut owners = reqs.iter_mut().filter(|r| r.var == var);
         match (owners.next(), owners.next()) {
@@ -422,7 +421,7 @@ fn rewrite_bgp(
     for req in reqs {
         // Each hit is a matching literal id; the scored modes (BM25 and the
         // proximity `text:near`) also carry a score, the positional phrase mode
-        // is unscored (id only). [OPUS-4.8]
+        // is unscored (id only).
         let hits: Vec<(Id, Option<f32>)> = match req.kind {
             ReqKind::All => index
                 .search(&req.query)

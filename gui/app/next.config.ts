@@ -27,6 +27,9 @@ const basePath =
       : "/app";
 
 const nextConfig: NextConfig = {
+  // Next 16 `next dev` otherwise writes a Next-managed AGENTS.md into this app; the repo keeps
+  // one AGENTS.md at its root.
+  agentRules: false,
   output: "export",
   // Only emit basePath/assetPrefix when there IS a prefix. An empty basePath must not be set as
   // `assetPrefix: ""` either — leaving both unset is exactly the root-relative behaviour the

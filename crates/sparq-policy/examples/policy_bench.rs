@@ -1,6 +1,6 @@
 //! Correctness-gated, self-relative policy-evaluation micro-benchmark.
 //!
-//! [GPT-5.6] sq-gpdwc. The WAC and ACP lanes model their characteristic
+//! sq-gpdwc. The WAC and ACP lanes model their characteristic
 //! allow/deny shapes in ODRL so that all lanes exercise the same evaluator.
 //! This is not an external comparison or a security/soundness claim.
 

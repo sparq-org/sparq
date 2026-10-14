@@ -116,7 +116,7 @@ pub fn wrap_for_view(sparql: &str) -> Result<String, String> {
     serialize_with_versions(q, versions)
 }
 
-/// [OPUS-4.8] sq-gq28y (issue #1546). The spec-minted reserved IRI a client uses to opt a
+/// sq-gq28y (issue #1546). The spec-minted reserved IRI a client uses to opt a
 /// query into **union default graph mode**, per the *Access-Controlled SPARQL Query over a
 /// Solid Pod* Editor's Draft §"Union default graph mode" (`jeswr/solid-sparql-query`). When
 /// it appears among a query's default-graph IRIs — a `FROM` clause here (the
@@ -169,7 +169,7 @@ fn take_union_default_opt_in(q: &mut Query) -> bool {
     opt_in
 }
 
-/// [OPUS-4.8] sq-gq28y (issue #1546). The **spec-conformant default** read-path rewrite: the
+/// sq-gq28y (issue #1546). The **spec-conformant default** read-path rewrite: the
 /// *Access-Controlled SPARQL Query over a Solid Pod* Editor's Draft empty-default +
 /// explicit-union semantics, layered on top of [`wrap_for_view`]. This is the rewrite
 /// [`crate::PodStore::query_as`] uses by default (the `legacy-union-default-graph` feature
@@ -365,7 +365,7 @@ fn wrap_expr(e: &mut Expression, fresh: &mut Fresh, in_graph: bool) {
     }
 }
 
-// [OPUS-4.8] sq-gq28y: direct unit tests for the spec-conformant default opt-in rewrite
+// sq-gq28y: direct unit tests for the spec-conformant default opt-in rewrite
 // (`wrap_for_view_opt_in`). End-to-end enforcement (row counts through `PodStore`) is in
 // `tests/union_default_graph.rs`; these pin the STRING-rewrite contract directly.
 #[cfg(test)]

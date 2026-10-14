@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t58w.6 — the ACP parity corpus, extracted verbatim from
+//! sq-t58w.6 — the ACP parity corpus, extracted verbatim from
 //! `conformance_acp.rs` so a second test target can consume the IDENTICAL scenarios.
 //! No scenario, emitted `.acr` shape, or expected decision is changed by the move.
 //!
@@ -187,7 +187,7 @@ fn mode_independence() -> AcpScenario {
         .expect(Expect::agent(ALICE).write(ro).is(Decision::Deny))
 }
 
-/// [GPT-5.6] sq-61uvs: the ACP analogue exercises the ACR as a resource. Unlike WAC,
+/// sq-61uvs: the ACP analogue exercises the ACR as a resource. Unlike WAC,
 /// ACP does not translate Control on the governed resource into Read/Write on its ACR;
 /// nor may a member Read policy disclose the control document.
 fn acr_document_control_gate() -> AcpScenario {

@@ -16,7 +16,7 @@
 //! Needs `bench/qlever-olympics/olympics.nt` (downloaded benchmark fixture; override
 //! the path with `SPARQ_OLYMPICS_NT`).
 //!
-//! [OPUS-4.8] (sq-k5qq) Strictly-additive machine-readable emit:
+//! (sq-k5qq) Strictly-additive machine-readable emit:
 //!
 //! ```sh
 //! cargo run -p sparq-nlq --example record_olympics --release -- --json /tmp/nlq.json
@@ -192,7 +192,7 @@ impl Llm for ScriptedLlm {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-k5qq) --json <path> machine-readable results emit
+// (sq-k5qq) --json <path> machine-readable results emit
 // ---------------------------------------------------------------------------
 
 /// One captured per-question row. `rows`/`repairs` are DETERMINISTIC at the recorded
@@ -237,17 +237,7 @@ fn take_json_flag(args: Vec<String>) -> (Vec<String>, Option<String>) {
 fn json_str(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() + 2);
     out.push('"');
-    for c in raw.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
+    sparq_core::json::escape_into(&mut out, raw);
     out.push('"');
     out
 }
@@ -343,7 +333,7 @@ fn main() {
     recorder.save(out).expect("write fixture");
     println!("wrote {} exchanges to {out}", recorder.exchanges().len());
 
-    // [OPUS-4.8] (sq-k5qq) Strictly-additive JSON emit: only when `--json <path>` was given.
+    // (sq-k5qq) Strictly-additive JSON emit: only when `--json <path>` was given.
     // STDOUT above (the per-question lines + fixture write) is the unchanged human output.
     if let Some(path) = json_path {
         let doc = results_json(graph.len(), &measured);
@@ -356,7 +346,7 @@ fn main() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-k5qq) --json emit tests
+// (sq-k5qq) --json emit tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {

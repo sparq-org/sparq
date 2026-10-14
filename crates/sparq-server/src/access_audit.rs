@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-gos8, epic sq-toze) **Opt-in RICHER structured access-audit sink** — a
+//! (sq-gos8, epic sq-toze) **Opt-in RICHER structured access-audit sink** — a
 //! pluggable sink that records every enforced access decision as a structured, typed event
 //! for a security / compliance audit trail. Maps to ASVS V7 (logging) / ISO 27001 A.8.15
 //! (logging) / CDMC CD-2 (access audit).
@@ -146,7 +146,7 @@ impl Actor {
         }
     }
 
-    /// [OPUS-4.8] (sq-ljfz, sq-gos8 follow-up) Derives the actor from the *authenticated
+    /// (sq-ljfz, sq-gos8 follow-up) Derives the actor from the *authenticated
     /// session* of a fronting authorization layer, falling back to the local Bearer gate.
     ///
     /// The deployment pattern this serves is the one the bind-time warnings already name: a
@@ -420,20 +420,7 @@ fn now_rfc3339() -> String {
     format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}.{millis:03}Z")
 }
 
-/// Howard Hinnant's `civil_from_days`: days-since-1970-01-01 -> (year, month, day), proleptic
-/// Gregorian. Exact and branch-light; used only to format the audit timestamp.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64; // [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
-    (if m <= 2 { y + 1 } else { y }, m, d)
-}
+use sparq_core::civil::civil_from_days;
 
 /// A no-op sink used in tests / by an embedder that wants the call sites live but no output.
 #[derive(Debug, Default)]
@@ -495,7 +482,7 @@ mod tests {
 
     #[test]
     fn from_session_prefers_a_forwarded_webid_else_falls_back_to_the_bearer_gate() {
-        // [OPUS-4.8] sq-ljfz: a trusted front's forwarded WebID becomes Actor::WebId (the
+        // sq-ljfz: a trusted front's forwarded WebID becomes Actor::WebId (the
         // actual subject), recorded verbatim — that is the whole point of the enrichment.
         let webid = "https://alice.example/profile#me";
         assert_eq!(

@@ -20,7 +20,7 @@
 //!
 //! Run: `cargo run --release --example read_response_alloc_microbench`.
 
-#![warn(clippy::undocumented_unsafe_blocks)] // [FABLE-5] every unsafe site needs a // SAFETY:
+#![warn(clippy::undocumented_unsafe_blocks)] // every unsafe site needs a // SAFETY:
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -37,7 +37,7 @@ static ARMED: AtomicBool = AtomicBool::new(false);
 // verbatim with the caller's own arguments, so `System` discharges all of `GlobalAlloc`'s
 // obligations; the wrapper only reads the ARMED flag and bumps a Relaxed atomic counter, and never
 // dereferences, retains, or aliases any pointer `System` returns. Registered in the unsafe-count
-// ratchet: compliance/memsafety/unsafe-register.md (sq-gg0qq.2). [FABLE-5]
+// ratchet: compliance/memsafety/unsafe-register.md (sq-gg0qq.2).
 unsafe impl GlobalAlloc for CountingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if ARMED.load(Ordering::Relaxed) {

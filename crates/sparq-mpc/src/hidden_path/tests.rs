@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-py8h.2 — DIFFERENTIAL tests for the HIDDEN-intermediate
+// sq-py8h.2 — DIFFERENTIAL tests for the HIDDEN-intermediate
 // exactly-`k` bounded property-path chain.
 //! Differential acceptance suite for [`eval_exact_k_chain_hidden`].
 //!

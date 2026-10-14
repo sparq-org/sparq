@@ -33,7 +33,7 @@
 //! the channel is bounded, the resident in-flight set is capped at the channel capacity plus
 //! whatever the streaming join operator holds (itself bounded by the `StreamJoin` spill).
 //!
-//! [OPUS-4.8] sq-vtba (epic sq-dnko): Phase-5 streaming boundary. Flagged for Fable
+//! sq-vtba (epic sq-dnko): Phase-5 streaming boundary. Flagged for Fable
 //! re-review when available.
 
 use crate::source::FedError;
@@ -43,7 +43,7 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 /// One federated solution: a column header (`vars`, variable names without the leading
 /// `?`) and one cell per column, `Some(term)` bound or `None` unbound. The same shape as
 /// the Phase-3 [`Relation`](crate::operators::Relation) row, lifted to a single streamed
-/// item so it can travel a channel. [OPUS-4.8] sq-vtba.
+/// item so it can travel a channel. sq-vtba.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solution {
     /// Variable names (without `?`) in cell order. Every [`Solution`] from one stream
@@ -71,13 +71,13 @@ impl Solution {
 /// The item a [`SolutionStream`] yields: a solution, or a producer-side error (a transport
 /// refusal, an SSRF block, a malformed remote body). An error item is **terminal-ish**: the
 /// stream surfaces it to the consumer; the consumer decides whether to keep pulling (a later
-/// source may still produce). [OPUS-4.8] sq-vtba.
+/// source may still produce). sq-vtba.
 pub type StreamItem = Result<Solution, FedError>;
 
 /// The **producer half** of a [`SolutionStream`]: a bounded sender the operator threads push
 /// solutions into. Cloneable, so a fan-out operator can hand one [`SolutionSink`] to each of
 /// several producer threads (the channel multiplexes them). When the last sink is dropped
-/// the stream ends (the receiver sees the channel close). [OPUS-4.8] sq-vtba.
+/// the stream ends (the receiver sees the channel close). sq-vtba.
 #[derive(Clone)]
 pub struct SolutionSink {
     tx: SyncSender<StreamItem>,
@@ -107,7 +107,7 @@ impl SolutionSink {
 /// Construct a connected (sink, stream) pair with [`SolutionStream::bounded`]; or wrap an
 /// already-materialised set of rows with [`SolutionStream::from_rows`] (the adapter for a
 /// blocking source — e.g. a local engine eval — that has nothing to stream incrementally).
-/// [OPUS-4.8] sq-vtba.
+/// sq-vtba.
 pub struct SolutionStream {
     rx: Receiver<StreamItem>,
 }
@@ -117,7 +117,7 @@ impl SolutionStream {
     /// solutions. `capacity` is the backpressure bound: a producer `emit` blocks once that
     /// many solutions are queued un-consumed. A `capacity` of `0` is promoted to `1` (a
     /// rendezvous channel would serialise every hand-off; `1` keeps one item of slack).
-    /// [OPUS-4.8] sq-vtba.
+    /// sq-vtba.
     pub fn bounded(capacity: usize) -> (SolutionSink, SolutionStream) {
         let (tx, rx) = sync_channel(capacity.max(1));
         (SolutionSink { tx }, SolutionStream { rx })
@@ -127,7 +127,7 @@ impl SolutionStream {
     /// ends. The bridge for a source that cannot stream incrementally (the engine stays
     /// materialised, §7): its whole answer is pushed onto a buffered channel up front, so it
     /// composes with the streaming operators uniformly. Runs no thread — the rows are loaded
-    /// before the first pull. [OPUS-4.8] sq-vtba.
+    /// before the first pull. sq-vtba.
     pub fn from_rows(vars: Vec<String>, rows: Vec<Vec<Option<Term>>>) -> SolutionStream {
         // A buffered channel sized to hold every row (no producer thread to block on it).
         let (tx, rx) = sync_channel(rows.len().max(1));
@@ -141,12 +141,12 @@ impl SolutionStream {
     /// Unwrap into the underlying bounded receiver. Used by the Phase-5 streaming-join feeder
     /// in [`crate::operators`], which multiplexes two streams by readiness (`try_recv` /
     /// `recv`) without an async runtime. `pub(crate)` — the channel is an implementation
-    /// detail of the boundary, not public surface. [OPUS-4.8] sq-vtba.
+    /// detail of the boundary, not public surface. sq-vtba.
     pub(crate) fn into_rx(self) -> Receiver<StreamItem> {
         self.rx
     }
 
-    /// An empty stream (no solutions). [OPUS-4.8] sq-vtba.
+    /// An empty stream (no solutions). sq-vtba.
     pub fn empty() -> SolutionStream {
         let (_tx, rx) = sync_channel::<StreamItem>(1);
         // `_tx` drops here → the channel is closed → the receiver yields nothing.
@@ -156,7 +156,7 @@ impl SolutionStream {
     /// Pull every remaining item into a `Vec`, **blocking** until the producers finish. The
     /// materialising drain used by tests and by a caller that wants the whole answer (it is
     /// exactly the bag the streaming operators produced, just collected). Short-circuits on
-    /// the first error item. [OPUS-4.8] sq-vtba.
+    /// the first error item. sq-vtba.
     pub fn collect_solutions(self) -> Result<Vec<Solution>, FedError> {
         let mut out = Vec::new();
         for item in self {
@@ -170,7 +170,7 @@ impl Iterator for SolutionStream {
     type Item = StreamItem;
 
     /// Block until the next solution is ready, or `None` when every producer sink has been
-    /// dropped and the channel is drained. [OPUS-4.8] sq-vtba.
+    /// dropped and the channel is drained. sq-vtba.
     fn next(&mut self) -> Option<StreamItem> {
         self.rx.recv().ok()
     }
@@ -259,7 +259,7 @@ mod tests {
         assert!(stream.collect_solutions().is_err());
     }
 
-    // [OPUS-4.8] sq-qcnn.22: Additional direct unit tests for coverage ratchet
+    // sq-qcnn.22: Additional direct unit tests for coverage ratchet
     #[test]
     fn solution_get_returns_none_for_unbound() {
         let sol = Solution::new(
@@ -291,7 +291,7 @@ mod tests {
         // Capacity 0 → promoted to 1 (rendezvous → 1 item slack), so a single `emit` on this
         // thread does not block on the bound. Drop the sink before draining so the channel
         // closes and `next()` terminates (same discipline as `error_item_short_circuits_collect`);
-        // otherwise the live sender keeps the receiver blocking after the last item. [OPUS-4.8] sq-qcnn.22
+        // otherwise the live sender keeps the receiver blocking after the last item. sq-qcnn.22
         let (sink, stream) = SolutionStream::bounded(0);
         assert!(sink.emit(sol("http://ex/a")), "promoted-to-1 slack accepts one item without blocking");
         drop(sink);
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn solution_sink_clone_multiple_emits() {
-        // Cloned sink can emit independently; solutions arrive in emission order. [OPUS-4.8] sq-qcnn.22
+        // Cloned sink can emit independently; solutions arrive in emission order. sq-qcnn.22
         let (sink, stream) = SolutionStream::bounded(2);
         let sink2 = sink.clone();
         let ok1 = sink.emit(sol("http://ex/a"));

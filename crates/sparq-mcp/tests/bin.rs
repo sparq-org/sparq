@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-5xgxe, gh #3218) The shipped `sparq-mcp` binary, end to end: spawn
+//! (sq-5xgxe, gh #3218) The shipped `sparq-mcp` binary, end to end: spawn
 //! the real process, feed it a line-delimited JSON-RPC session on stdin, and read the
 //! responses off stdout. This exercises the actual startup path (argument parsing →
 //! dataset load → `serve_stdio`), not a re-implementation of it.

@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-6xasp.7: opt-in persistence for the wasm pod — a replayable mutation journal
+// sq-6xasp.7: opt-in persistence for the wasm pod — a replayable mutation journal
 // sitting behind the existing `Store` trait, plus the byte format a JS host hands to `node:fs`
 // or IndexedDB.
 //! Opt-in persistence for the wasm pod: a replayable mutation journal.
@@ -510,6 +510,12 @@ mod wasm_store {
                 });
             }
             Ok(outcome)
+        }
+
+        async fn fence(&self, fence: &sparq_lws_core::store::Fence) -> ServerResult<()> {
+            // The stores this build wraps never report a write unsettled; forwarded so that one
+            // that did could still be settled (its outcome is then read back like any other).
+            self.inner.fence(fence).await
         }
 
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

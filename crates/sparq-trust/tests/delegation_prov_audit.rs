@@ -10,7 +10,7 @@
 //! (item N), `effective_against_current` intersects it down, and the audit renders only the
 //! intersected `auth:*` actions — never the (now-stale) chain-time capability.
 //!
-//! [OPUS-4.8] sq-pfae.6: PROV-O delegation audit for human + AI agents (issue #940, #1190,
+//! sq-pfae.6: PROV-O delegation audit for human + AI agents (issue #940, #1190,
 //! epic sq-pfae P5). 🤖 SPARQ agent — trust-graph delegation PROV-O audit.
 //!
 //! This whole suite is gated on the `delegation-prov` feature (the module is feature-gated),

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-6glcr) Manifest-driven runner for the **SHACL 1.2 SPARQL** test
+//! (sq-6glcr) Manifest-driven runner for the **SHACL 1.2 SPARQL** test
 //! suite — `shacl12-test-suite/tests/sparql/manifest.ttl` (the `component/`,
 //! `node/`, `property/`, `pre-binding/`, `targets/` sub-trees).
 //!
@@ -15,7 +15,7 @@
 //! drops the pre-bound `$this`, or a `BIND` that re-binds a pre-bound variable).
 //! A conformant processor signals a *failure* (not a normal report).
 //!
-//! [OPUS-4.8] (sq-0mjfd) The crate now has that failure channel:
+//! (sq-0mjfd) The crate now has that failure channel:
 //! [`sparq_shacl::validate_strict`] returns `Err(ShaclFailure)` for exactly these
 //! constraints (the build-time pre-binding check in `PreparedSparql::build` /
 //! the component-validator path). The harness runs strict validation for an
@@ -63,23 +63,23 @@ const SH: &str = "http://www.w3.org/ns/shacl#";
 /// correctly at the pinned suite commit (`fetch-shacl-tests.sh` PIN). A
 /// regression below this fails the build; raising it is a deliberate bump.
 ///
-/// [OPUS-4.8] (sq-6glcr) Calibrated by running the harness in-worktree.
+/// (sq-6glcr) Calibrated by running the harness in-worktree.
 ///
-/// [OPUS-4.8] (sq-rnkdh) Raised 10 → 14: the SHACL-1.2 SPARQL-based node
+/// (sq-rnkdh) Raised 10 → 14: the SHACL-1.2 SPARQL-based node
 /// expressions added here — the SPARQL-valued target `sh:targetNode [ sh:select ]`
 /// (`targets/targetNode-select-001`), the SPARQL-valued value nodes
 /// `sh:values [ sh:select / sh:sparqlExpr ]` (`property/property-select-001`,
 /// `property/property-sparqlExpr-001`), and constraint-level `sh:severity`
 /// (`node/sparql-001`) — now PASS.
 ///
-/// [OPUS-4.8] (sq-mue75) Raised 14 → 17: the three remaining `pre-binding/`
+/// (sq-mue75) Raised 14 → 17: the three remaining `pre-binding/`
 /// entries — pre-binding-002 (pre-binding into both UNION branches),
 /// pre-binding-005 (into a sibling Join block) and pre-binding-007 (through a
 /// sub-SELECT projection) — now PASS via the extended `push_values_down`
 /// propagation. (The 6 `sh:sparql`-result entries are also now verified for
 /// `sh:sourceConstraint`.)
 ///
-/// [OPUS-4.8] (sq-0mjfd) Raised 17 → 24: the 7 `mf:result sht:Failure` entries
+/// (sq-0mjfd) Raised 17 → 24: the 7 `mf:result sht:Failure` entries
 /// (`pre-binding/{unsupported-sparql-001..006, pre-binding-006}`) now PASS via the
 /// real rejection channel ([`sparq_shacl::validate_strict`] returns `Err` for an
 /// unsound SHACL-SPARQL pre-binding). They were previously a distinct,
@@ -90,13 +90,13 @@ const BASELINE_PASS: usize = 24;
 /// strict-comparison FAILs. A *new* gap (a previously-correct entry breaking)
 /// pushes this above the ceiling and fails the build; closing a gap drops it.
 ///
-/// [OPUS-4.8] (sq-rnkdh) Lowered 14 → 10: the 4 SPARQL-node-expression entries
+/// (sq-rnkdh) Lowered 14 → 10: the 4 SPARQL-node-expression entries
 /// moved FAIL → PASS.
 ///
-/// [OPUS-4.8] (sq-mue75) Lowered 10 → 7: the 3 `pre-binding/` FAILs moved
+/// (sq-mue75) Lowered 10 → 7: the 3 `pre-binding/` FAILs moved
 /// FAIL → PASS, leaving only the 7 `sht:Failure` rejection entries.
 ///
-/// [OPUS-4.8] (sq-0mjfd) Lowered 7 → 0: the 7 `sht:Failure` entries now PASS via
+/// (sq-0mjfd) Lowered 7 → 0: the 7 `sht:Failure` entries now PASS via
 /// the real rejection channel, so this SHACL-1.2 SPARQL suite is fully green here.
 const BASELINE_GAP: usize = 0;
 
@@ -297,7 +297,7 @@ fn run_entry(file: &FsPath, g: &Graph, view: &GraphView, entry: &Term) -> Result
     let data_g = data.as_ref().unwrap_or(g);
     let shapes_g = shapes.as_ref().unwrap_or(g);
 
-    // [OPUS-4.8] (sq-0mjfd) `mf:result sht:Failure` — a conformant processor must
+    // (sq-0mjfd) `mf:result sht:Failure` — a conformant processor must
     // REJECT the query (an unsound SHACL-SPARQL pre-binding). The crate now has a
     // rejection channel: `validate_strict` returns `Err(ShaclFailure)` for exactly
     // these constraints. The entry PASSES when strict validation rejects, and is a
@@ -382,7 +382,7 @@ struct Expected {
     severity: Option<String>,
     component: Option<String>,
     source_shape: Option<Term>,
-    /// [OPUS-4.8] (sq-mue75) `sh:sourceConstraint` — the `sh:SPARQLConstraint`
+    /// (sq-mue75) `sh:sourceConstraint` — the `sh:SPARQLConstraint`
     /// node the result must point at (only `sh:sparql` results carry it).
     source_constraint: Option<Term>,
     messages: Vec<Term>,
@@ -448,7 +448,7 @@ impl Expected {
                 return false;
             }
         }
-        // [OPUS-4.8] (sq-mue75) when the expected report states an
+        // (sq-mue75) when the expected report states an
         // `sh:sourceConstraint`, the actual result must carry the same node.
         if let Some(sc) = &self.source_constraint {
             match &a.source_constraint {

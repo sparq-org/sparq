@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-1q9h: NON-circular soundness anchor for the SIGNED xsd:integer
+// sq-1q9h: NON-circular soundness anchor for the SIGNED xsd:integer
 // and xsd:decimal FILTER circuit members.
 //!
 //! The Noir-side tests (`compose_core/src/tests.nr`) compute `operand_enc` with

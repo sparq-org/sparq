@@ -1,7 +1,7 @@
 //! N3 formula-scope builtins — `log:includes` / `notIncludes` / `supports` / `conclusion` /
 //! `conjunction` / `parsedAsN3`, and the resolver-gated `log:semantics` / `log:content`.
 //!
-//! 🤖 SPARQ agent — sq-qcnn test-quality slice [OPUS-4.8].
+//! 🤖 SPARQ agent — sq-qcnn test-quality slice.
 //!
 //! These exercise the formula-containment + scope-closure machinery (the deepest dark region of
 //! the N3 engine). Each case is hand-derived from cwm/EYE log: builtin semantics: a forward rule

@@ -1,4 +1,4 @@
-//! End-to-end ODRL parse + evaluate tests. [OPUS-4.8] sq-r06h.
+//! End-to-end ODRL parse + evaluate tests. sq-r06h.
 //!
 //! Coverage: permission grant, prohibition-overrides-permission, constraint
 //! gating (inside/outside time window; purpose eq/neq; recipient isPartOf;
@@ -369,7 +369,7 @@ fn datetime_xsd_typed_constant_roundtrips() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-2pcf — prohibition_status: the three-valued deny-retraction dual
+// sq-2pcf — prohibition_status: the three-valued deny-retraction dual
 // of matched_prohibition (Applies / Ambiguous / Withdrawn). The bridge uses this to
 // retract a materialized deny ONLY on a DEFINITE withdrawal, never on missing evidence.
 // ---------------------------------------------------------------------------
@@ -467,7 +467,7 @@ fn prohibition_status_ambiguous_only_if_no_other_match() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-q56r — faithful odrl:purpose enforcement: a purpose constraint
+// sq-q56r — faithful odrl:purpose enforcement: a purpose constraint
 // grants ONLY when the request carries a matching purpose; a missing purpose is
 // Unprovable → fail-closed (permission does not grant; prohibition not withdrawn);
 // a mismatch is a definite no. Match is EXACT (no hierarchy/subsumption). The
@@ -680,7 +680,7 @@ fn purpose_not_constrained_when_absent() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-5037 — odrl:recipient `neq` / "everyone-except-X": a permission
+// sq-5037 — odrl:recipient `neq` / "everyone-except-X": a permission
 // (or prohibition) with `recipient neq X` matches a request iff the requesting
 // party is NOT X. Missing identity is Unprovable → fail-closed. The recipient is
 // resolved from the explicit `odrl:recipient` context OR the requesting party.
@@ -810,7 +810,7 @@ fn recipient_status_reports_what_evaluate_checks() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-5037 follow-up — COMBINED recipient `eq A AND neq B` in ONE rule.
+// sq-5037 follow-up — COMBINED recipient `eq A AND neq B` in ONE rule.
 // The per-head exception (`agents=[A]`, `except=[B]`) is structurally emitted by the
 // bridge but was untested at the evaluator level. Both constraints are ANDed: the
 // recipient must BE A and must NOT BE B. (A and B distinct, so only A is ever granted;
@@ -904,7 +904,7 @@ fn recipient_eq_a_and_neq_b_prohibition_dual() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-idnv — odrl:dateTime time-window enforcement + the `datetime_status`
+// sq-idnv — odrl:dateTime time-window enforcement + the `datetime_status`
 // audit helper (the temporal dual of purpose_status / recipient_status). A time-gated
 // rule grants ONLY when the request supplies an instant inside the window; a missing
 // time is Unprovable → fail-closed; a lapsed/early instant is a definite no.
@@ -1054,7 +1054,7 @@ fn datetime_not_constrained_when_absent() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-qj2q — mixed-offset dateTime normalization. The instant
+// sq-qj2q — mixed-offset dateTime normalization. The instant
 // 2026-06-16T12:00:00Z equals 2026-06-16T13:00:00+01:00 and is one hour LATER
 // than 2026-06-16T13:00:00+02:00 (=11:00Z). A lexical comparison gets all of
 // these wrong; the evaluator must normalize to the instant before comparing.
@@ -1206,7 +1206,7 @@ fn unparseable_datetime_falls_back_to_lexical_and_denies_order() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-z3ve — DPV/purpose-taxonomy hierarchy/subsumption matching.
+// sq-z3ve — DPV/purpose-taxonomy hierarchy/subsumption matching.
 // A purpose constraint `eq B` (or `isA B` / a member of an `isPartOf` set) is
 // satisfied by a request whose stated purpose is B *or transitively narrower
 // than B* (P ⊑ B), where the ⊑ edges are an EXPLICIT taxonomy the request
@@ -1416,7 +1416,7 @@ fn purpose_subsumption_bulk_taxonomy_builder() {
 }
 
 // ---------------------------------------------------------------------------
-// Additional correctness coverage. [OPUS-4.8] sq-bif.
+// Additional correctness coverage. sq-bif.
 //
 // These pin behaviours the suite above did not assert: the **conjunction of
 // multiple duties** (every duty must be discharged, not just one), the duty

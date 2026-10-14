@@ -154,3 +154,18 @@ secx:requiresAssurance a owl:NamedIndividual, odrl:LeftOperand, skos:Concept ;
   rdfs:isDefinedBy <https://sparq.dev/ns/odrl-secprop-profile#> ;
   skos:prefLabel "requires assurance level"@en-GB ;
   secx:overDimension secx:AssuranceLevel .
+
+# The MPC TRUST-MODEL axes (issue #6186). Before these, an MPC protocol's
+# honest-majority / semi-honest posture was recorded only as `secx:assumption`
+# PROVENANCE, which the shared admissibility reasoner keys nothing on — so no ODRL
+# preference could exclude a semi-honest protocol. These two leftOperands put the
+# posture on an ordered dimension the existing discharge rule handles.
+secx:requiresAdversaryModel a owl:NamedIndividual, odrl:LeftOperand, skos:Concept ;
+  rdfs:isDefinedBy <https://sparq.dev/ns/odrl-secprop-profile#> ;
+  skos:prefLabel "requires adversary model"@en-GB ;
+  secx:overDimension secx:AdversaryModel .
+
+secx:requiresCorruptionThreshold a owl:NamedIndividual, odrl:LeftOperand, skos:Concept ;
+  rdfs:isDefinedBy <https://sparq.dev/ns/odrl-secprop-profile#> ;
+  skos:prefLabel "requires corruption threshold"@en-GB ;
+  secx:overDimension secx:CorruptionThreshold .

@@ -1,4 +1,4 @@
-//! Property tests for the form-diff -> SPARQL Update round trip. [GPT-5.6] sq-ly6xq
+//! Property tests for the form-diff -> SPARQL Update round trip. sq-ly6xq
 //!
 //! Mutation witness: making `to_sparql_update` omit either its DELETE or INSERT
 //! triples makes `random_edits_roundtrip_without_collateral_mutation` fail.

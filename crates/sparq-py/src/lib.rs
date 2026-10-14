@@ -37,7 +37,7 @@
 //!   wheel carries no Arrow code. See the `arrow_export` module.
 //!
 //! [arrow]: https://arrow.apache.org/docs/python/generated/pyarrow.Table.html
-// [OPUS-4.8] sq-emay: the crate has zero `unsafe` EXCEPT the opt-in `arrow` C Data
+// sq-emay: the crate has zero `unsafe` EXCEPT the opt-in `arrow` C Data
 // Interface bridge (`arrow_export`), which needs one tightly-scoped `unsafe` block to
 // hand pyarrow a `PyCapsule` over an `FFI_ArrowArrayStream` pointer (the standard Arrow
 // producer pattern — see that module). So `forbid` holds for the whole default crate and
@@ -78,7 +78,7 @@ fn engine_err(e: String) -> PyErr {
 /// RDF 1.2 base direction (`"ltr"` / `"rtl"`) of a directional language string,
 /// else `None` — it is the SPARQL 1.2 `its:dir` value `Graph.query_json` emits.
 /// Non-literals have `language = datatype = direction = None`.
-// [OPUS-4.8] sq-bj7o: `direction` added so a directional language string
+// sq-bj7o: `direction` added so a directional language string
 // (`"hi"@en--ltr`) keeps its base direction through `query` — previously the
 // Term path dropped it while `query_json` kept it, so the two diverged.
 // `skip_from_py_object`: pyo3 0.29 makes the auto `FromPyObject` for Clone
@@ -95,7 +95,7 @@ struct Term {
     #[pyo3(get)]
     datatype: Option<String>,
     /// RDF 1.2 base direction (`"ltr"` / `"rtl"`) of a directional language
-    /// string; `None` for every other term. [OPUS-4.8] sq-bj7o
+    /// string; `None` for every other term. sq-bj7o
     #[pyo3(get)]
     direction: Option<String>,
 }
@@ -122,7 +122,7 @@ impl Term {
                 value: l.value().to_string(),
                 language: l.language().map(str::to_string),
                 datatype: Some(l.datatype().as_str().to_string()),
-                // [OPUS-4.8] sq-bj7o: preserve the RDF 1.2 base direction (the
+                // sq-bj7o: preserve the RDF 1.2 base direction (the
                 // SPARQL 1.2 `its:dir` value) so a directional language string
                 // round-trips through `query` at parity with `query_json`.
                 direction: l.direction().map(|d| d.to_string()),
@@ -207,7 +207,7 @@ impl QueryResult {
 /// is parsed as RDF content. The format defaults from the file extension
 /// (`.ttl` / `.nt` / `.nq` / `.trig` / `.jsonld`), falling back to `"turtle"`.
 ///
-/// [OPUS-4.8] sq-oy1f.20: the `.jsonld` extension maps to `"jsonld"` unconditionally
+/// sq-oy1f.20: the `.jsonld` extension maps to `"jsonld"` unconditionally
 /// (it is not behind a `#[cfg]`), so the mapping is feature-agnostic. With the default
 /// `jsonld` feature ON, `sparq-core` parses it; under `--no-default-features` the same
 /// `"jsonld"` string reaches `sparq-core`, which rejects the unknown format — a clean
@@ -528,7 +528,7 @@ impl Graph {
                             oxrdf::Term::Triple(_) => {
                                 return Err("RDF 1.2 triple terms cannot participate in N3 reasoning".into());
                             }
-                            // [OPUS-4.8] roborev 1961: rename this graph's blank
+                            // roborev 1961: rename this graph's blank
                             // nodes under the reserved `sparqg` prefix before
                             // composing the N3 document, so a blank-node label
                             // that also appears in the caller's `rules` cannot
@@ -667,7 +667,7 @@ impl Graph {
     /// The cached full-text index is NOT carried over: the copy starts without
     /// one and lazily rebuilds on its first `text_search` / `query_text`, exactly
     /// as a freshly loaded graph would (the same lazy-rebuild policy a mutating
-    /// swap uses). [OPUS-4.8] sq-6h8
+    /// swap uses). sq-6h8
     fn copy(&self, py: Python<'_>) -> Graph {
         let inner = &self.inner;
         // `snapshot()` yields an immutable point-in-time view; `into_graph()`
@@ -686,7 +686,7 @@ impl Graph {
         format!("Graph({} triples)", self.inner.len())
     }
 
-    // [OPUS-4.8] sq-f9tu: test-only affordance to exercise the panic SURFACE of
+    // sq-f9tu: test-only affordance to exercise the panic SURFACE of
     // the FFI boundary. The whole point of the `python-release` profile is
     // `panic = "unwind"` (workspace Cargo.toml) so that a Rust panic inside the
     // `sparq` module is caught by pyo3 and re-raised as

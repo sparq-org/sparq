@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-zgbso.3 — the compiled-rules RESULT-EQUIVALENCE oracle (bead invariant):
+//! sq-zgbso.3 — the compiled-rules RESULT-EQUIVALENCE oracle (bead invariant):
 //! on the sparq-solid WAC/ACP rule corpus + the sq-zgbso.1 ODRL spike rules, the id-level
 //! compiled evaluator's closure equals the `reason_n3` closure AS A SET over the same
 //! rules + facts — failing loudly with the full symmetric difference on any divergence.
@@ -15,9 +15,10 @@ use common::{
     ALICE, APP, BOB, CAROL, IDP, POD,
 };
 use sparq_core::dict::Dict;
-use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval, intern_facts};
+use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval, eval_with_limits, intern_facts};
+use sparq_reason::n3::ClosureLimits;
 use sparq_reason::n3::encode_for_uri;
-use sparq_reason::{reason_n3, reason_n3_with_cycles, NegationCycles};
+use sparq_reason::{reason_n3, reason_n3_with_cycles, reason_n3_with_limits, NegationCycles};
 use std::collections::BTreeSet;
 
 const AUTH: &str = "https://sparq.dev/ns/auth#";
@@ -69,7 +70,7 @@ fn compiled_closure_legacy(
     let rules = compile_with_cycles(rules_src, LEGACY).expect("compile_with_cycles");
     let mut dict = Dict::new();
     let facts = intern_facts(&mut dict, facts_src).expect("intern_facts");
-    let ids = eval(&mut dict, &facts, &rules);
+    let ids = eval(&mut dict, &facts, &rules).expect("eval");
     (dict, ids)
 }
 
@@ -77,7 +78,7 @@ fn compiled_closure(facts_src: &str, rules_src: &str) -> (Dict, Vec<[sparq_core:
     let rules = compile(rules_src).expect("compile");
     let mut dict = Dict::new();
     let facts = intern_facts(&mut dict, facts_src).expect("intern_facts");
-    let ids = eval(&mut dict, &facts, &rules);
+    let ids = eval(&mut dict, &facts, &rules).expect("eval");
     (dict, ids)
 }
 
@@ -178,9 +179,9 @@ fn acp_corpus_closure_is_identical_across_all_three_strata() {
     let rc = compile_with_cycles(&c, LEGACY).expect("compile stratum C");
     let mut dict = Dict::new();
     let f0 = intern_facts(&mut dict, &facts).expect("intern facts");
-    let s1 = eval(&mut dict, &f0, &ra);
-    let s2 = eval(&mut dict, &s1, &rb);
-    let s3 = eval(&mut dict, &s2, &rc);
+    let s1 = eval(&mut dict, &f0, &ra).expect("eval");
+    let s2 = eval(&mut dict, &s1, &rb).expect("eval");
+    let s3 = eval(&mut dict, &s2, &rc).expect("eval");
     let compiled = triples_as_strings(&dict, &s3);
 
     assert_set_equal(&text, &compiled, "ACP (3 strata: acp-a -> acp-b -> acp-c)");
@@ -530,4 +531,198 @@ fn not_includes_scope_forms_agree_or_are_refused() {
         "{PRE}{{ ?x :scope ?s . ?s log:notIncludes {{ ?x :blocked :g }} }} => {{ ?x :ok :g }} ."
     );
     assert!(compile(&bound).is_err());
+}
+
+// ---------------------------------------------------------------------------------------
+// GH #6855: the compiled evaluator runs under the text engine's `ClosureLimits` (rounds,
+// facts, term size) and refuses with the same error. Their fixpoint schedules differ,
+// so this checks agreement at the swept limits on these fixtures, not at every limit.
+// ---------------------------------------------------------------------------------------
+
+/// The GH #6771 repro: each round concatenates the literal with itself.
+const STRING_DOUBLING: &str = "@prefix : <http://ex/>.\n\
+     @prefix string: <http://www.w3.org/2000/10/swap/string#>.\n\
+     :a :p \"x\".\n\
+     { :a :p ?s. (?s ?s) string:concatenation ?t } => { :a :p ?t }.\n";
+
+/// A string that doubles once per link of a `:next` chain of `links` links: the closure
+/// is finite, and its largest term is `2^links` bytes of text.
+fn bounded_doubling(links: usize) -> String {
+    let mut doc = String::from(
+        "@prefix : <http://ex/>.\n\
+         @prefix string: <http://www.w3.org/2000/10/swap/string#>.\n\
+         :n0 :s \"x\".\n\
+         { ?x :s ?s. ?x :next ?y. (?s ?s) string:concatenation ?t } => { ?y :s ?t }.\n",
+    );
+    for i in 0..links {
+        doc.push_str(&format!(":n{i} :next :n{}.\n", i + 1));
+    }
+    doc
+}
+
+/// A linear walk of `n` links: one new fact per round, about `n` rounds.
+fn walk(n: usize) -> String {
+    let mut doc = String::from(
+        "@prefix : <http://ex/>.\n\
+         :w0 :reach :w0.\n\
+         { ?x :reach ?y. ?y :next ?z } => { ?x :reach ?z }.\n",
+    );
+    for i in 0..n {
+        doc.push_str(&format!(":w{i} :next :w{}.\n", i + 1));
+    }
+    doc
+}
+
+fn text_with(doc: &str, limits: ClosureLimits) -> Result<BTreeSet<String>, String> {
+    let mut d = Dict::new();
+    reason_n3_with_limits(&mut d, doc, NegationCycles::Reject, limits).map(|ids| triples_as_strings(&d, &ids))
+}
+
+fn compiled_with(doc: &str, limits: ClosureLimits) -> Result<BTreeSet<String>, String> {
+    let rules = compile(doc).expect("compile");
+    let mut d = Dict::new();
+    eval_with_limits(&mut d, &[], &rules, limits).map(|ids| triples_as_strings(&d, &ids))
+}
+
+fn assert_limit_error(what: &str, e: &str) {
+    assert!(e.contains("forward closure limit exceeded"), "{what}: {e}");
+}
+
+/// At this limit both engines refuse, or both return the same closure. Returns whether
+/// they refused.
+fn assert_agree(what: &str, doc: &str, limits: ClosureLimits) -> bool {
+    match (text_with(doc, limits), compiled_with(doc, limits)) {
+        (Ok(t), Ok(c)) => {
+            assert_set_equal(&t, &c, what);
+            false
+        }
+        (Err(t), Err(c)) => {
+            assert_limit_error(what, &t);
+            assert_limit_error(what, &c);
+            true
+        }
+        (t, c) => panic!(
+            "{what}: the engines disagree on refusal: text {:?}, compiled {:?}",
+            t.map(|s| s.len()),
+            c.map(|s| s.len())
+        ),
+    }
+}
+
+/// GH #6771 / #6855: the doubling repro is refused under the DEFAULT limits by both
+/// engines, with the term-size error, instead of exhausting memory.
+#[test]
+fn string_doubling_is_refused_by_both_engines() {
+    let rules = compile(STRING_DOUBLING).expect("compile");
+    let mut d = Dict::new();
+    let e = eval(&mut d, &[], &rules).expect_err("a growing term is refused");
+    assert_limit_error("compiled", &e);
+    assert!(e.contains("max_term_bytes"), "{e}");
+    let mut d = Dict::new();
+    let t = reason_n3(&mut d, STRING_DOUBLING).expect_err("a growing term is refused");
+    assert_limit_error("text", &t);
+    assert!(t.contains("max_term_bytes"), "{t}");
+}
+
+/// The term-size limit, swept byte by byte across the sizes the last doublings reach:
+/// the engines agree at the swept limits (both refuse, or both return the same closure).
+#[test]
+fn term_size_limit_agrees_at_the_boundary() {
+    let doc = bounded_doubling(10); // the largest string is 1024 bytes
+    let mut refused = 0;
+    let mut accepted = 0;
+    for bytes in (300..1500).chain([4096, 1 << 20]) {
+        let mut l = ClosureLimits::default();
+        l.max_term_bytes = bytes;
+        if assert_agree(&format!("max_term_bytes = {bytes}"), &doc, l) {
+            refused += 1;
+        } else {
+            accepted += 1;
+        }
+    }
+    assert!(refused > 0 && accepted > 0, "{refused} refused, {accepted} accepted");
+}
+
+/// The round allowance. The text engine may run one closing naive round per stratum that
+/// the compiled evaluator does not (always in a debug build; in a release build for a
+/// stratum a later scoped read depends on), so its boundary is the compiled one or one
+/// round later; the engines agree at the swept limits below the compiled boundary (both
+/// refuse) and from the text boundary on (both return the same closure).
+#[test]
+fn round_limit_agrees_at_the_boundary() {
+    let doc = walk(12);
+    let first_ok = |close: &dyn Fn(ClosureLimits) -> Result<BTreeSet<String>, String>| {
+        (0..20).find(|&rounds| {
+            let mut l = ClosureLimits::default();
+            l.max_rounds = rounds;
+            match close(l) {
+                Ok(_) => true,
+                Err(e) => {
+                    assert_limit_error(&format!("max_rounds = {rounds}"), &e);
+                    false
+                }
+            }
+        })
+    };
+    let compiled = first_ok(&|l| compiled_with(&doc, l)).expect("the walk closes");
+    let text = first_ok(&|l| text_with(&doc, l)).expect("the walk closes");
+    assert!(compiled > 1, "{compiled}");
+    assert!(text == compiled || text == compiled + 1, "text {text}, compiled {compiled}");
+    for rounds in (0..compiled).chain(text..text + 3) {
+        let mut l = ClosureLimits::default();
+        l.max_rounds = rounds;
+        assert_agree(&format!("max_rounds = {rounds}"), &doc, l);
+    }
+}
+
+/// The fact allowance: the engines agree at the swept `max_facts`.
+#[test]
+fn fact_limit_agrees_at_the_boundary() {
+    let doc = walk(12);
+    let mut first_ok = None;
+    for facts in 0..40 {
+        let mut l = ClosureLimits::default();
+        l.max_facts = facts;
+        if !assert_agree(&format!("max_facts = {facts}"), &doc, l) && first_ok.is_none() {
+            first_ok = Some(facts);
+        }
+    }
+    assert!(first_ok.is_some_and(|f| f > 12), "{first_ok:?}");
+}
+
+/// A rule set that never saturates (a fresh string every round) stops at the round
+/// allowance in both engines.
+#[test]
+fn a_non_terminating_rule_set_stops_at_the_round_limit() {
+    let doc = "@prefix : <http://ex/>.\n\
+         @prefix string: <http://www.w3.org/2000/10/swap/string#>.\n\
+         :a :p \"\".\n\
+         { :a :p ?s. (?s \"y\") string:concatenation ?t } => { :a :p ?t }.\n";
+    let mut l = ClosureLimits::default();
+    l.max_rounds = 50;
+    assert!(assert_agree("growing by one byte", doc, l));
+}
+
+/// `string:encodeForUri` (at most triples its input) and `log:uri` (copies it) over a
+/// growing chain: the engines agree at the swept term-size limits too.
+#[test]
+fn encode_and_uri_term_size_limit_agree() {
+    let mut doc = String::from(
+        "@prefix : <http://ex/>.\n\
+         @prefix string: <http://www.w3.org/2000/10/swap/string#>.\n\
+         @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+         :n0 :s \"a%\".\n\
+         { ?x :s ?s. ?x :next ?y. ?s string:encodeForUri ?t } => { ?y :s ?t }.\n\
+         { ?x :s ?s. ?i log:uri ?s } => { ?x :named ?i }.\n",
+    );
+    for i in 0..5 {
+        doc.push_str(&format!(":n{i} :next :n{}.\n", i + 1));
+    }
+    let mut refused = 0;
+    for bytes in (100..400).chain([1 << 20]) {
+        let mut l = ClosureLimits::default();
+        l.max_term_bytes = bytes;
+        refused += usize::from(assert_agree(&format!("max_term_bytes = {bytes}"), &doc, l));
+    }
+    assert!(refused > 0, "the sweep reaches the limit");
 }

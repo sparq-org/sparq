@@ -1,4 +1,4 @@
-# [FABLE-5] sq-xg6uu — OWL 2 RL differential-vs-external-oracle harness.
+# sq-xg6uu — OWL 2 RL differential-vs-external-oracle harness.
 #
 # A READ-ONLY differential test crate: it consumes sparq-reason's PUBLIC
 # `materialize(Profile::OwlRl, ..)` as a library dependency and diffs the closure
@@ -31,9 +31,9 @@ rl-oracle = ["dep:sparq-reason", "dep:sparq-core"]
 [dependencies]
 # The engine under test, via its PUBLIC API only (default features: the parallel
 # fixpoint, exactly what a library consumer gets). OPTIONAL — linked only by `rl-oracle`.
-sparq-reason = { path = "../sparq-reason", version = "0.1.5", optional = true }
+sparq-reason = { path = "../sparq-reason", version = "0.1.6", optional = true }
 # Dict/Id + the N-Triples parser (Graph::parse_to_triples) + oxrdf Term rendering.
-sparq-core = { path = "../sparq-core", version = "0.1.5", optional = true }
+sparq-core = { path = "../sparq-core", version = "0.1.6", optional = true }
 
 # The differential test itself. Compiled only with the feature it exercises, so default
 # `--all-targets` builds carry none of it (the sparq-reason [[test]] posture).

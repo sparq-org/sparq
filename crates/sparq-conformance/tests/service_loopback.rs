@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ushvx (epic sq-my8wd) — smoke test for the in-process SERVICE-federation
+//! sq-ushvx (epic sq-my8wd) — smoke test for the in-process SERVICE-federation
 //! harness ([`sparq_conformance::service_loopback`]).
 //!
 //! HERMETIC: needs no fetched W3C test data — it stands up a real `sparq-server` over an

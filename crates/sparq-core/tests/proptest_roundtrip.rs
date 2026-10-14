@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-3dyje.2 — Property-based tests for sparq-core dict bijectivity (C-2)
+// sq-3dyje.2 — Property-based tests for sparq-core dict bijectivity (C-2)
 // and N-Triples parse∘serialize round-trip fixpoint (C-4).
 //
 // SCOPE: test-only (no production-code change). Uses proptest as a [dev-dependency] only;

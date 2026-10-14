@@ -2,7 +2,7 @@
 //! vectorisation §2 row "gUFO rigidity and roles", §9.5), wired as a **UFO-provable disjointness +
 //! subsumption mask** for the [`DisjointnessOracle`].
 //!
-//! [FABLE-5] kern/ufo-priors (epic sq-0wo9e; deferred remainder noted in `taxonomy.rs`: "the
+//! kern/ufo-priors (epic sq-0wo9e; deferred remainder noted in `taxonomy.rs`: "the
 //! `gufo:Kind`/`gufo:Role` rigidity split is the design's optional/last prior … deferred"). Like
 //! every other slice of the epic it is **opt-in** (the same `structure` cargo feature, off by
 //! default) and changes **nothing** in the default `sparq-vectors` build or the core engine.

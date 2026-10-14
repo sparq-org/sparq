@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-1s2.3 (FL1 follow-up): package NATIVE per-circuit proofs into the
+// sq-1s2.3 (FL1 follow-up): package NATIVE per-circuit proofs into the
 // browser-shippable captured ProofManifest for /showcase/zk-car-hire.
 //! Browser-shippable **captured** ProofManifest packaging (sq-1s2.3 / FL1 follow-up).
 //!
