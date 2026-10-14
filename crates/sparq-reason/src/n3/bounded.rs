@@ -627,12 +627,20 @@ pub(crate) const TERM_NODE_BYTES: usize = std::mem::size_of::<Term>();
 /// of its strings plus [`TERM_NODE_BYTES`] per node, through nested lists, formulas and
 /// quoted triples (walked with an explicit stack, so a deep term cannot overflow it).
 pub(crate) fn term_bytes(t: &Term) -> usize {
+    term_bytes_with(t, || {})
+}
+
+/// [`term_bytes`], calling `on_blank` once for each blank-node occurrence it walks.
+pub(crate) fn term_bytes_with(t: &Term, mut on_blank: impl FnMut()) -> usize {
     let flat = |t: &Term| match t {
         Term::Iri(s) | Term::Blank(s) | Term::Var(s) => Some(s.len()),
         Term::Lit(v, dt, lang) => Some(v.len() + dt.len() + lang.as_ref().map_or(0, String::len)),
         Term::Formula(_) | Term::List(_) | Term::Triple(_) => None,
     };
     if let Some(n) = flat(t) {
+        if matches!(t, Term::Blank(_)) {
+            on_blank();
+        }
         return n.saturating_add(TERM_NODE_BYTES);
     }
     let mut total = 0usize;
@@ -643,7 +651,12 @@ pub(crate) fn term_bytes(t: &Term) -> usize {
             Term::Formula(ts) => stack.extend(ts.iter().flatten()),
             Term::List(ms) => stack.extend(ms),
             Term::Triple(b) => stack.extend(b.iter()),
-            leaf => total = total.saturating_add(flat(leaf).unwrap_or(0)),
+            leaf => {
+                if matches!(leaf, Term::Blank(_)) {
+                    on_blank();
+                }
+                total = total.saturating_add(flat(leaf).unwrap_or(0));
+            }
         }
     }
     total

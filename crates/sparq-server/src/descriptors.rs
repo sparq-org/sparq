@@ -160,13 +160,7 @@ fn negotiate_descriptor(accept: Option<&str>) -> GraphFormat {
 /// `*/*`, `*/*;q=0.8`, `*/* , */*;q=0.1` — all wildcard-only. A single concrete type
 /// anywhere (e.g. `text/turtle, */*`) makes it non-wildcard so the client preference wins.
 fn is_wildcard_only(accept: &str) -> bool {
-    accept
-        .split(',')
-        .filter(|r| !r.trim().is_empty())
-        .all(|range| {
-            // Strip parameters (`;q=…`, `;charset=…`) and compare the media range itself.
-            range.split(';').next().unwrap_or("").trim() == "*/*"
-        })
+    sparq_core::accept::media_ranges(accept).all(|range| range.essence == "*/*")
 }
 
 /// Serialises a triple list in the negotiated [`GraphFormat`], reusing the crate's graph

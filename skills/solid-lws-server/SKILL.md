@@ -185,10 +185,16 @@ conditional mutations. `If-Unmodified-Since` is ignored when `If-Match` is
 present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
 asctime; a date sent on several header lines is none), and for containers, whose
 listing can change without moving their recorded time. `If-Modified-Since` on a
-read accepts the same three forms. A `Range` applies only while `If-Range`, when
-sent on one header line, is the strong `ETag` of the representation selected;
-otherwise the whole body is served. As with a concrete ETag validator, a
-writer without Read on the target is refused rather than told the outcome.
+read accepts the same three forms. A `GET` or `HEAD` evaluates `If-Match` and
+`If-Unmodified-Since` too, before `If-None-Match`, and answers `412` when they
+fail; on a read `If-Match` must name the tag of the representation selected,
+not another format's. An entity-tag list may span several header lines; one that
+is not the RFC 9110 grammar (only space and tab may surround a tag) names no tag,
+so it fails `If-Match` and never triggers `If-None-Match`. A `Range` applies only
+while `If-Range`, when sent on one header line, is the strong `ETag` of the
+representation selected; otherwise the whole body is served. As with a concrete
+ETag validator, a writer without Read on the target is refused rather than told
+the outcome.
 Container reads include generated `ldp:contains` triples. A container's `ETag`
 covers its own record and its membership: a tag read in any format is a valid
 `If-Match` for the container until it or its membership changes. Creating a
