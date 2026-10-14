@@ -1692,14 +1692,27 @@ pub fn degree_reduce_through(
     shares_2t: &[Share],
 ) -> Result<Vec<Share>, MpcError> {
     let (n, t) = (source.parties(), source.threshold());
+    // The source's `(n, t)` is caller-supplied metadata: compute the recombination
+    // count without overflow and require the honest-majority bound `n >= 2t+1`
+    // before using either value.
+    let recomb = t
+        .checked_mul(2)
+        .and_then(|v| v.checked_add(1))
+        .filter(|&r| r <= n)
+        .ok_or_else(|| {
+            MpcError::Protocol(format!(
+                "degree_reduce: the randomness source reports n = {n}, t = {t}; \
+                 honest-majority reduction needs n >= 2t+1"
+            ))
+        })?;
     // Fail-closed precondition: we need n >= 2t+1 distinct party points so the
     // degree-2t polynomial is over-determined and 2t+1 recombination points
     // exist. (Equivalently: the supplied sharing must cover the full party set.)
-    if shares_2t.len() < 2 * t + 1 {
+    if shares_2t.len() < recomb {
         return Err(MpcError::Protocol(format!(
             "degree_reduce: need a degree-2t product sharing on n >= 2t+1 = {} parties, \
              got {} shares (honest-majority needs n >= 2t+1 to reduce a degree-2t product)",
-            2 * t + 1,
+            recomb,
             shares_2t.len()
         )));
     }
@@ -1735,14 +1748,14 @@ pub fn degree_reduce_through(
     // 2t+1 evaluation points. H(0) = Σ_{i=1}^{2t+1} λ_i · H(x_i), a FIXED
     // public linear map (depends only on the party points, never on secrets).
     // After the canonical-point check above, these are exactly `x = 1..=2t+1`.
-    let recomb_points: Vec<u64> = shares_2t[..2 * t + 1].iter().map(|s| s.x).collect();
+    let recomb_points: Vec<u64> = shares_2t[..recomb].iter().map(|s| s.x).collect();
     let lambdas = lagrange_zero_weights(&recomb_points);
 
     // Step 2: each of the 2t+1 recombination parties re-shares its degree-2t
     // share h_i under a FRESH, independent degree-t polynomial. Each re-sharing
     // is an n-vector of sub-shares on the canonical points x = 1..n.
-    let mut resharings: Vec<Vec<Share>> = Vec::with_capacity(2 * t + 1);
-    for s in &shares_2t[..2 * t + 1] {
+    let mut resharings: Vec<Vec<Share>> = Vec::with_capacity(recomb);
+    for s in &shares_2t[..recomb] {
         let sub = source.vss_own_input(s.y)?;
         // Fail closed on a malformed source result: the accumulation below pairs
         // sub-shares with output parties BY POSITION, so a short (or long) or
@@ -2057,8 +2070,8 @@ mod tests {
 
     #[test]
     fn degree_reduce_through_rejects_a_malformed_resharing() {
-        // The accumulation pairs sub-shares with parties by position, so a short or
-        // permuted re-sharing must be refused, not silently mis-reduced.
+        // The accumulation pairs sub-shares with parties by position, so a malformed
+        // re-sharing (any shape below) must be refused by the re-sharing check.
         for how in [
             Malformation::Short,
             Malformation::Long,
@@ -2074,13 +2087,61 @@ mod tests {
                 inner: b.dealer(),
                 how,
             };
-            assert!(
-                matches!(
-                    degree_reduce_through(&mut source, &prod),
-                    Err(MpcError::Protocol(_))
+            match degree_reduce_through(&mut source, &prod) {
+                Err(MpcError::Protocol(msg)) => assert!(
+                    msg.contains("re-sharing that is not the canonical"),
+                    "{how:?}: refused by the wrong check: {msg}"
                 ),
-                "{how:?}: a malformed re-sharing must fail closed"
-            );
+                other => panic!("{how:?}: a malformed re-sharing must fail closed, got {other:?}"),
+            }
+        }
+    }
+
+    /// A dealer-backed source that misreports its threshold.
+    struct MisreportedThresholdSource {
+        inner: ShamirDealer,
+        t: usize,
+    }
+    impl DistributedRandomness for MisreportedThresholdSource {
+        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            self.t
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_mask()
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            self.inner.vss_own_input(secret)
+        }
+    }
+
+    #[test]
+    fn degree_reduce_through_rejects_source_metadata_outside_honest_majority() {
+        // n = 5 allows t <= 2. A larger t, including one whose 2t+1 overflows,
+        // must be refused before any arithmetic or draw relies on it.
+        let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+        let mut dealer = b.dealer();
+        let prod = mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
+        for t in [3, usize::MAX / 2, usize::MAX] {
+            let mut source = MisreportedThresholdSource {
+                inner: b.dealer(),
+                t,
+            };
+            match degree_reduce_through(&mut source, &prod) {
+                Err(MpcError::Protocol(msg)) => assert!(
+                    msg.contains("needs n >= 2t+1"),
+                    "t={t}: refused by the wrong check: {msg}"
+                ),
+                other => panic!("t={t}: must fail closed, got {other:?}"),
+            }
         }
     }
 
