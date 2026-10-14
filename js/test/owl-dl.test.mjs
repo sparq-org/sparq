@@ -183,3 +183,34 @@ test('malformed options are a TypeError, never a silent default', async () => {
   assert.equal((await checkOwlDl(TBOX, undefined, { format: 'turtle', budget: {} })).consistent, true);
   assert.equal((await store.checkOwlDl(undefined, { budget: { maxNodes: 100000 } })).consistent, true);
 });
+
+test('options are read from own plain data properties only, and forwarded canonically', async () => {
+  const withProto = Object.create({ budget: { maxSteps: 1 } });
+  const hidden = {};
+  Object.defineProperty(hidden, 'budget', { value: { maxSteps: 1 }, enumerable: false });
+  const getter = { get budget() { return { maxSteps: 1 }; } };
+  class Opts { constructor() { this.budget = {}; } }
+  const bad = [
+    withProto,
+    hidden,
+    getter,
+    new Opts(),
+    { [Symbol('x')]: 1 },
+    { format: null },
+    { budget: { maxSteps: Number.NaN } },
+    { budget: Object.create({ maxSteps: 1 }) },
+  ];
+  const store = await SparqStore.fromString(TBOX, 'turtle');
+  for (const options of bad) {
+    await assert.rejects(checkOwlDl(TBOX, undefined, options), TypeError);
+    await assert.rejects(store.checkOwlDl(undefined, options), TypeError);
+  }
+  for (const options of [{ budget: { maxSteps: -1 } }, { budget: { maxNodes: 1.5 } }]) {
+    await assert.rejects(store.checkOwlDl(undefined, options), TypeError);
+  }
+  // A null-prototype object is plain; a starved budget reaches the bundle through the store.
+  const starved = Object.assign(Object.create(null), { budget: { maxSteps: 1 } });
+  const viaStore = await store.checkOwlDl(`${PRE} :alice a :Mother .`, starved);
+  const direct = await checkOwlDl(store.serialize('turtle', { pretty: false }), `${PRE} :alice a :Mother .`, starved);
+  assert.deepEqual(viaStore, direct);
+});

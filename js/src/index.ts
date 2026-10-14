@@ -36,6 +36,7 @@ export {
   type OwlDlResult,
   type OwlDlOptions,
   type OwlDlBudget,
+  type OwlDlFormat,
   type OwlDlReason,
   type OwlDlProfile,
   type OwlDlViolation,

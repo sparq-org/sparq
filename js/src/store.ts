@@ -550,9 +550,10 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    */
   async checkOwlDl(abox?: string, options?: Omit<OwlDlOptions, 'format'>): Promise<OwlDlResult> {
     // Same strict validation as the free function, but `format` is not an option here.
-    normaliseOwlDlOptions(options, ['budget']);
+    const { budget } = normaliseOwlDlOptions(options, ['budget']);
     const tbox = this.serialize('turtle', { pretty: false });
-    return checkOwlDl(tbox, abox, { ...options, format: 'turtle' });
+    // Forward the canonical, validated configuration, never the caller's object.
+    return checkOwlDl(tbox, abox, budget === undefined ? { format: 'turtle' } : { format: 'turtle', budget });
   }
 
   /**

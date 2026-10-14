@@ -96,9 +96,12 @@ export interface OwlDlBudget {
 }
 
 /** Options for {@link checkOwlDl}. */
+/** The RDF syntaxes {@link checkOwlDl} reads. */
+export type OwlDlFormat = 'turtle' | 'ntriples' | 'nquads' | 'trig';
+
 export interface OwlDlOptions {
   /** The syntax of both documents (default `'turtle'`). Named graphs are folded into the default graph. */
-  format?: 'turtle' | 'ntriples' | 'nquads' | 'trig';
+  format?: OwlDlFormat;
   budget?: OwlDlBudget;
 }
 
@@ -137,21 +140,33 @@ function budgetLimit(name: string, value: unknown): number | undefined {
   return value;
 }
 
-const FORMATS = ['turtle', 'ntriples', 'nquads', 'trig'];
+const FORMATS: readonly string[] = ['turtle', 'ntriples', 'nquads', 'trig'] satisfies OwlDlFormat[];
 
-function plainObject(value: unknown, what: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new TypeError(`checkOwlDl: ${what} must be an object`);
+/**
+ * `value` as a plain object (prototype `Object.prototype` or `null`) whose own properties are
+ * all enumerable string-keyed data properties named in `allowed`; anything else is a TypeError.
+ * Only own properties are read afterwards, so nothing inherited or hidden is ever consulted.
+ */
+function plainObject(value: unknown, allowed: readonly string[], what: string): Record<string, unknown> {
+  const proto = typeof value === 'object' && value !== null ? Object.getPrototypeOf(value) : undefined;
+  if (proto !== Object.prototype && proto !== null) {
+    throw new TypeError(`checkOwlDl: ${what} must be a plain object`);
   }
-  return value as Record<string, unknown>;
-}
-
-function onlyKeys(obj: Record<string, unknown>, allowed: readonly string[], what: string): void {
-  for (const key of Object.keys(obj)) {
-    if (!allowed.includes(key)) {
-      throw new TypeError(`checkOwlDl: unknown ${what} key ${JSON.stringify(key)} (expected ${allowed.join(', ')})`);
+  const obj = value as Record<string, unknown>;
+  for (const key of Reflect.ownKeys(obj)) {
+    const d = Object.getOwnPropertyDescriptor(obj, key);
+    if (typeof key !== 'string' || !allowed.includes(key)) {
+      throw new TypeError(`checkOwlDl: unknown ${what} key ${String(key)} (expected ${allowed.join(', ')})`);
+    }
+    if (!d || !d.enumerable || !('value' in d)) {
+      throw new TypeError(`checkOwlDl: ${what}.${key} must be a plain enumerable value`);
     }
   }
+  return obj;
+}
+
+function own(obj: Record<string, unknown>, key: string): unknown {
+  return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
 }
 
 /**
@@ -163,19 +178,23 @@ function onlyKeys(obj: Record<string, unknown>, allowed: readonly string[], what
 export function normaliseOwlDlOptions(
   options: unknown,
   allowed: readonly string[] = ['format', 'budget'],
-): { format: string; optionsJson: string | undefined } {
-  if (options === undefined) return { format: 'turtle', optionsJson: undefined };
-  const opts = plainObject(options, 'options');
-  onlyKeys(opts, allowed, 'options');
-  const format = opts.format ?? 'turtle';
+): { format: OwlDlFormat; budget: OwlDlBudget | undefined; optionsJson: string | undefined } {
+  if (options === undefined) return { format: 'turtle', budget: undefined, optionsJson: undefined };
+  const opts = plainObject(options, allowed, 'options');
+  const rawFormat = own(opts, 'format');
+  const format = rawFormat === undefined ? 'turtle' : rawFormat;
   if (typeof format !== 'string' || !FORMATS.includes(format)) {
     throw new TypeError(`checkOwlDl: options.format must be one of ${FORMATS.join(', ')}`);
   }
-  if (opts.budget === undefined) return { format, optionsJson: undefined };
-  const b = plainObject(opts.budget, 'options.budget');
-  onlyKeys(b, ['maxSteps', 'maxNodes'], 'options.budget');
-  const budget = { maxSteps: budgetLimit('maxSteps', b.maxSteps), maxNodes: budgetLimit('maxNodes', b.maxNodes) };
-  return { format, optionsJson: JSON.stringify({ budget }) };
+  const rawBudget = own(opts, 'budget');
+  if (rawBudget === undefined) return { format: format as OwlDlFormat, budget: undefined, optionsJson: undefined };
+  const b = plainObject(rawBudget, ['maxSteps', 'maxNodes'], 'options.budget');
+  const budget: OwlDlBudget = {};
+  const maxSteps = budgetLimit('maxSteps', own(b, 'maxSteps'));
+  const maxNodes = budgetLimit('maxNodes', own(b, 'maxNodes'));
+  if (maxSteps !== undefined) budget.maxSteps = maxSteps;
+  if (maxNodes !== undefined) budget.maxNodes = maxNodes;
+  return { format: format as OwlDlFormat, budget, optionsJson: JSON.stringify({ budget }) };
 }
 
 /**
