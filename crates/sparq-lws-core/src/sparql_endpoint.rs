@@ -450,18 +450,8 @@ fn require_acceptable(headers: &HeaderMap, produced: &str) -> Result<(), ServerE
     else {
         return Ok(());
     };
-    let produced_type = produced.split_once('/').map(|(kind, _)| kind).unwrap_or("");
-    let accepted = accept.split(',').any(|range| {
-        let mut parts = range.split(';');
-        let media = parts.next().unwrap_or("").trim().to_ascii_lowercase();
-        let enabled = !parts.any(|parameter| {
-            parameter
-                .trim()
-                .strip_prefix("q=")
-                .is_some_and(|value| value.trim() == "0")
-        });
-        enabled && (media == "*/*" || media == produced || media == format!("{produced_type}/*"))
-    });
+    let accepted = crate::accept::media_ranges(accept)
+        .any(|range| range.q > 0.0 && range.specificity(produced).is_some());
     if accepted || accept.trim().is_empty() {
         Ok(())
     } else {
