@@ -53,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list) can still change those keys (#6844). Existing labels are renumbered, so these keys and
   IRIs differ from those minted by earlier versions; regenerate stored ones. `why()` proof
   trees can still vary with traversal order. Ranking each round's existential firings adds a
-  per-firing cost to rules with existential conclusions, since recovered (#6843). (#6749)
+  per-firing cost to rules with existential conclusions, since reduced (#6843). (#6749)
 
 - **sparq-reason (N3):** the per-round ranking that makes existential skolem labels
   deterministic (#6749) now orders a round's firing keys by a packed prefix of the keys rather

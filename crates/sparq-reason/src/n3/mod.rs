@@ -9476,7 +9476,10 @@ mod tests {
         // same bindings kept, same `fired` set — in BOTH strategy branches (`tie_break` is
         // the proof-mode branch). Randomized over rule shapes, binding counts and the
         // carried-over `fired` set.
-        let mut covered = (0, 0, 0); // rounds compared, ranked rounds, tie-broken rounds
+        // Rounds compared, ranked rounds, tie-broken rounds (a later binding of a key the round
+        // already keeps reached the comparison), and rounds where that comparison REPLACED
+        // the first-arriving binding.
+        let mut covered = (0, 0, 0, 0);
         for seed in 0..600u64 {
             let mut r = rng(seed ^ 0x5151);
             let tie_break = seed % 2 == 0;
@@ -9488,6 +9491,19 @@ mod tests {
             // Several rounds, so keys carried over in `fired` are exercised too.
             for round in 0..3 {
                 let bindings = random_bindings(seed * 7 + round, &concl_vars, r(12) as usize);
+                // What the tie-break saw, measured on the input rather than inferred from the
+                // output: the first binding of each fresh key, and whether a later one arrived.
+                let mut first: FxHashMap<String, Binding> = FxHashMap::default();
+                let mut repeated = false;
+                for b in &bindings {
+                    let mut key = String::new();
+                    firing_key(b, &concl_vars, &mut key);
+                    if theirs.contains(&key) {
+                        continue;
+                    }
+                    repeated |= first.contains_key(&key);
+                    first.entry(key).or_insert_with(|| b.clone());
+                }
                 let want =
                     reference_new_firings(bindings.clone(), &concl_vars, &mut theirs, tie_break);
                 let got = canonical_new_firings(
@@ -9519,13 +9535,22 @@ mod tests {
                 assert_eq!(m, t, "fired keys diverged (seed {seed} round {round})");
                 covered.0 += 1;
                 covered.1 += usize::from(got.len() > 1);
-                covered.2 += usize::from(tie_break && got.len() < 12);
+                if tie_break && repeated {
+                    covered.2 += 1;
+                    let replaced = got.iter().any(|(_, b)| {
+                        let mut key = String::new();
+                        firing_key(b, &concl_vars, &mut key);
+                        first.get(&key) != Some(b)
+                    });
+                    covered.3 += usize::from(replaced);
+                }
             }
         }
         // The differential is worthless if the inputs never reach the ranking or the
-        // tie-break; pin that they do.
+        // tie-break; pin that they do, and that the tie-break both keeps and replaces.
         assert!(covered.1 > 500, "rounds that actually rank: {}", covered.1);
-        assert!(covered.2 > 500, "rounds that dedup under tie_break: {}", covered.2);
+        assert!(covered.2 > 120, "rounds that reach the tie-break: {}", covered.2);
+        assert!(covered.3 > 60, "rounds where the tie-break replaces: {}", covered.3);
     }
 
     #[test]
@@ -9533,15 +9558,45 @@ mod tests {
         // GH #6843: the packed-word ranking, against the plain comparison sort it replaces,
         // on the cases its correctness argument turns on — a long common prefix, keys that
         // differ only past the packed bytes, a key that is a prefix of another, and keys
-        // holding an escaped NUL.
+        // holding an escaped NUL, non-ASCII bytes, very long keys, and index masks of every
+        // width a small round reaches. Every set is shuffled first, so the ranking never
+        // starts from sorted input.
         let long = "Some(Iri(\"http://example.org/a/very/long/shared/path/s";
         let mut sets: Vec<Vec<String>> = vec![
             vec![format!("{long}1\"));"), format!("{long}10\"));"), format!("{long}2\"));")],
             vec!["ab".into(), "a".into(), "abc".into(), "b".into()],
             vec!["a\\u{0}b".into(), "ab".into(), "a".into()],
-            // Identical for 24 bytes past the common prefix: every key lands in one run.
-            (0..9).map(|i| format!("{long}aaaaaaaaaaaaaaaaaaaaaaaa{i}")).collect(),
+            // The common prefix ends at `a` vs `b`, so the `a…` keys are identical for 24 bytes
+            // PAST it: their packed words all tie, and only the whole-key re-sort orders them.
+            (0..9)
+                .map(|i| format!("{long}aaaaaaaaaaaaaaaaaaaaaaaa{i}"))
+                .chain([format!("{long}b")])
+                .collect(),
+            // Multi-byte UTF-8: `é` (C3 A9) and `ê` (C3 AA) share their lead byte, and `€`
+            // (E2 82 AC) sorts above both; a split character must not reorder anything.
+            ["é", "ê", "e", "€", "éé", "éê", "ée", "z", "\u{10FFFF}", "é€"]
+                .iter()
+                .map(|t| format!("{long}{t}\"));"))
+                .collect(),
+            // Very long keys that differ only in their last byte, after 10 KB in common past
+            // the common prefix of the whole set.
+            (0..6)
+                .map(|i| format!("{long}{}{i}", "x".repeat(10_000)))
+                .chain([format!("{long}y")])
+                .collect(),
         ];
+        // Index masks of every width up to 10 bits, at and either side of each power of two.
+        // The `Q` key pins the common prefix at `{long}`, so every `P…` key's packed word is
+        // `Paaaaaa` plus one varying LAST byte: the mask truncates some or all of what tells
+        // those keys apart, and the run re-sort has to finish the job.
+        for n in [1usize, 2, 3, 4, 7, 8, 9, 15, 16, 17, 255, 256, 257, 511, 512, 513] {
+            sets.push(
+                (0..n)
+                    .map(|i| format!("{long}Paaaaaa{}{i:04x}", char::from(b'0' + (i % 64) as u8)))
+                    .chain([format!("{long}Q")])
+                    .collect(),
+            );
+        }
         let mut r = rng(0xabc);
         for _ in 0..200 {
             let n = 2 + r(20) as usize;
@@ -9558,7 +9613,10 @@ mod tests {
                 sets.push(keys);
             }
         }
-        for keys in sets {
+        for mut keys in sets {
+            for i in (1..keys.len()).rev() {
+                keys.swap(i, r(i as u64 + 1) as usize);
+            }
             let mut want: Vec<usize> = (0..keys.len()).collect();
             want.sort_by(|&x, &y| keys[x].cmp(&keys[y]));
             let mut order = Vec::new();
