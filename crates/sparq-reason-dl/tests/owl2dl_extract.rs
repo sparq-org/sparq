@@ -1306,3 +1306,28 @@ fn binary_types_take_only_length_facets() {
         assert!(v.is_empty(), "{dt}: {v:?}");
     }
 }
+
+#[test]
+fn follow_ups_to_the_third_review_round() {
+    // Unqualified and owl:Thing-qualified cardinalities are distinct operands the model
+    // cannot tell apart: undecided, not a violation.
+    let body = with_decls(
+        "[ a owl:Restriction ; owl:onProperty :p ; owl:minCardinality 1 ] owl:equivalentClass [ a owl:Restriction ; owl:onProperty :p ; owl:minQualifiedCardinality \"1\"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] .",
+    );
+    assert_eq!(verdict(&body), None);
+    // A repeated member does not make a data union of two.
+    let e = err(&with_decls(
+        ":d rdfs:range [ a rdfs:Datatype ; owl:unionOf ( xsd:integer xsd:integer ) ] .",
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    // owl:rational: no whitespace at all, and a zero denominator is ill-typed whatever the
+    // numerator.
+    for lit in [
+        "\"1/3 \"^^owl:rational",
+        "\" 1/3\"^^owl:rational",
+        "\"999999999999999999999999999999999999999999/0\"^^owl:rational",
+    ] {
+        let v = violations(&with_decls(&format!(":a :d {lit} .")));
+        assert_eq!(v, vec![ViolationKind::IllTypedLiteral], "{lit}");
+    }
+}

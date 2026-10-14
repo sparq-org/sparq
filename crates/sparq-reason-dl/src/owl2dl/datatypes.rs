@@ -988,18 +988,20 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
         // rdfs:Literal and owl:real have no lexical space of their own (OWL 2 §4.1).
         RdfsLiteral | OwlReal => return Err(ValueError::IllTyped),
         OwlRational => {
-            // OWL 2 §4.1: `numerator '/' denominator`, the denominator an unsigned positive
-            // integer, with no whitespace inside the collapsed form.
-            let s = collapse(lex);
-            let (n, d) = s.split_once('/').ok_or(ValueError::IllTyped)?;
-            if s.contains(' ') || d.is_empty() || !d.bytes().all(|b| b.is_ascii_digit()) {
+            // OWL 2 §4.1: `numerator '/' denominator` with no whitespace anywhere, the
+            // numerator an integer and the denominator an unsigned positive integer. The form
+            // is validated in full before any value is computed, so an ill-typed literal is
+            // never reported as merely unsupported.
+            let (n, d) = lex.split_once('/').ok_or(ValueError::IllTyped)?;
+            let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+            if !digits(n.strip_prefix(['+', '-']).unwrap_or(n))
+                || !digits(d)
+                || d.bytes().all(|b| b == b'0')
+            {
                 return Err(ValueError::IllTyped);
             }
             let n = integer_value(n)?;
             let d = integer_value(d)?;
-            if d <= 0 {
-                return Err(ValueError::IllTyped);
-            }
             Value::Real(RationalKey(
                 Rational::new(n, d).ok_or(ValueError::Unsupported)?,
             ))

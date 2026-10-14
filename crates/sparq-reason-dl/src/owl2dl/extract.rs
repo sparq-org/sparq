@@ -1465,7 +1465,10 @@ impl<'a> Extractor<'a> {
                 used.extend(lu);
                 // Unlike classes (Mapping Table 15), data ranges have no empty or singleton
                 // form: DataIntersectionOf and DataUnionOf take at least two operands.
-                if items.len() < 2 {
+                let mut distinct_items = items.clone();
+                distinct_items.sort_unstable();
+                distinct_items.dedup();
+                if distinct_items.len() < 2 {
                     return Err(self.err(
                         ExtractErrorKind::Malformed,
                         "a data intersection or union needs at least two members",
