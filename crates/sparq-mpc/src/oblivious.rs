@@ -641,15 +641,25 @@ fn solve_waksman_level(
 /// MODELLED communication / round cost of one [`shuffle`] over `n` items, for a
 /// REAL deployment (the in-process simulation does not pay it). Counted, never
 /// measured — see the module cost note. No hard-coded numbers: derived from `n`.
+///
+/// This is also what [`crate::randomness::DistributedRandomness::oblivious_shuffle`]
+/// reports, and a source that shuffles by some other construction fills it in
+/// for ITS construction: [`crate::prss::PrssRandomness`] permutes by composed
+/// resharing, routes no switch network, and therefore reports `switches = 0`
+/// with its `C(n, t)` resharing rounds in [`Self::depth_rounds`]. Read the
+/// field docs as "what this implementor pays", not as "Waksman switches".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShuffleCost {
     /// Items shuffled.
     pub items: usize,
-    /// AS-Waksman switch count (= conditional swaps / multiplications a real
-    /// secret-control shuffle pays).
+    /// For [`shuffle`]: the AS-Waksman switch count (= conditional swaps /
+    /// multiplications a real secret-control shuffle pays). `0` for a source that
+    /// routes no switch network at all — see the type docs.
     pub switches: usize,
-    /// Network depth in switch layers (≈ communication rounds with secret control
-    /// bits; 0 extra rounds in the cleartext-control simulation).
+    /// For [`shuffle`]: network depth in switch layers (≈ communication rounds
+    /// with secret control bits; 0 extra rounds in the cleartext-control
+    /// simulation). A source with a different construction reports its own round
+    /// count here — see the type docs.
     pub depth_rounds: usize,
 }
 
