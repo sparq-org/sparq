@@ -257,7 +257,8 @@ CATALOG: list[dict] = [
         "note": (
             "Boolean value lane (sq-5xdlk, #3973), now with TWO members, one per dual-leaf "
             "version. Under dual-leaf v1 the lane REUSES `filter_value_dl_int` with a PUBLIC "
-            "boolean `datatype_const` and the value hooks {0 = false, 1 = true} inside that "
+            "boolean `datatype_const` = BLAKE3 key derivation over the xsd:boolean IRI, and "
+            "the value hooks {0 = false, 1 = true} inside that "
             "member's u64 comparison domain, so XSD's false<true order (and the degenerate "
             "LT/LE/GT/GE verdicts) falls out of the integer comparison unchanged. Under "
             "dual-leaf v2 it targets the DEDICATED `filter_value_dl_bool`, whose public layout "

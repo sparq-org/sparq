@@ -7,8 +7,9 @@
 //!
 //! # The boolean value handle (`research/zk-field-native-encoding.md` §3.3)
 //!
-//! `VALUE_HOOK = 0` (false) / `1` (true); `DATATYPE_CONST =
-//! datatype_const(xsd:boolean IRI)`; `LANG_NONE` sentinel — the §3.3 boolean row.
+//! `VALUE_HOOK = 0` (false) / `1` (true); `DATATYPE_CONST =`
+//! [`boolean_datatype_const`] (BLAKE3 key derivation over the `xsd:boolean` IRI);
+//! `LANG_NONE` sentinel — the §3.3 boolean row.
 //! The handle is injective on the two boolean VALUES but MANY-TO-ONE on the TERM
 //! (reject-list (v)): the XSD-legal spellings `"true"` and `"1"` denote the same
 //! value, so they would share the value handle, disambiguated ONLY by the
@@ -33,7 +34,7 @@
 //! external-audit obligation: gap CR-G8 / sq-qhy4. Nothing here is a soundness
 //! or privacy guarantee. Host half ONLY — no circuit/verifier change.
 
-use crate::dual_leaf::{datatype_const, DualLeafComponents, DualLeafError};
+use crate::dual_leaf::{DualLeafComponents, DualLeafError};
 use crate::field::{field_from_hash_bytes, Fr};
 use oxrdf::Literal;
 
@@ -43,6 +44,24 @@ pub const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
 
 fn blake3_field(bytes: &[u8]) -> Fr {
     field_from_hash_bytes(blake3::hash(bytes).as_bytes())
+}
+
+/// The BLAKE3 key-derivation context of the boolean lane constant.
+pub const BOOLEAN_LANE_CONTEXT: &str = "sparq dual-leaf xsd:boolean lane constant v1";
+
+/// The boolean lane's `DATATYPE_CONST`: `blake3::derive_key(BOOLEAN_LANE_CONTEXT,
+/// <xsd:boolean IRI>)`, reduced into the field.
+///
+/// The boolean FILTER reuses `filter_value_dl_int`, which range-checks the hook
+/// to `u64`, not to `{0, 1}`. A whole-graph `DualLeafV1` commitment puts
+/// `xsd:boolean` literals, and literals of any opaque datatype, on the string
+/// lane, whose `value_component` folds `VALUE_NONE` under the plain
+/// `blake3(datatype IRI bytes)`. BLAKE3's key-derivation mode is a hash domain
+/// separate from its plain mode, so the constant differs from that fold for every
+/// byte string, whether or not it is a valid IRI, and no string-lane leaf can be
+/// opened as a boolean value.
+pub fn boolean_datatype_const() -> Fr {
+    field_from_hash_bytes(&blake3::derive_key(BOOLEAN_LANE_CONTEXT, XSD_BOOLEAN.as_bytes()))
 }
 
 /// Map a CANONICAL `xsd:boolean` lexical form to its value handle: `"true"` →
@@ -82,7 +101,7 @@ pub fn encode_boolean(literal: &Literal) -> Result<DualLeafComponents, DualLeafE
         .ok_or_else(|| DualLeafError::NonCanonicalValue(literal.to_string()))?;
     Ok(DualLeafComponents {
         value_hook: Fr::from(value),
-        datatype_const: datatype_const(XSD_BOOLEAN),
+        datatype_const: boolean_datatype_const(),
         // EXACTLY the string-canonical h_s over the canonical N-Triples token,
         // so a dual-leaf graph's identity ops read the same lexical identity.
         lexical_component: blake3_field(literal.to_string().as_bytes()),
@@ -105,8 +124,8 @@ mod tests {
     fn encode_boolean_true_and_false_round_trip() {
         let t = encode_boolean(&bool_lit("true")).unwrap();
         let f = encode_boolean(&bool_lit("false")).unwrap();
-        assert_eq!(t.datatype_const, datatype_const(XSD_BOOLEAN));
-        assert_eq!(f.datatype_const, datatype_const(XSD_BOOLEAN));
+        assert_eq!(t.datatype_const, boolean_datatype_const());
+        assert_eq!(f.datatype_const, boolean_datatype_const());
         // The leaves are well-defined, stable, and distinct.
         assert_eq!(t.leaf(), t.leaf());
         assert_eq!(f.leaf(), f.leaf());
@@ -116,6 +135,34 @@ mod tests {
         let vc = poseidon2::hash(&[t.value_hook, t.datatype_const, Fr::from(LANG_NONE)]);
         let leaf = poseidon2::hash(&[vc, t.lexical_component, Fr::from(TYPE_CODE_LITERAL)]);
         assert_eq!(t.leaf(), leaf);
+    }
+
+    #[test]
+    fn lane_constant_differs_from_the_string_lane_datatype_fold() {
+        // The string lane folds the bare `datatype_const(xsd:boolean IRI)`.
+        assert_ne!(
+            boolean_datatype_const(),
+            crate::dual_leaf::datatype_const(XSD_BOOLEAN)
+        );
+    }
+
+    #[test]
+    fn lane_constant_is_not_any_datatype_iri_fold() {
+        // The plain-mode fold accepts any string, so cover strings that are not
+        // valid IRIs too.
+        for iri in [
+            XSD_BOOLEAN.to_string(),
+            format!("{XSD_BOOLEAN}@domain=bit"),
+            format!("{XSD_BOOLEAN} domain=bit"),
+            format!("{XSD_BOOLEAN}\0domain=bit"),
+            BOOLEAN_LANE_CONTEXT.to_string(),
+            format!("{BOOLEAN_LANE_CONTEXT}{XSD_BOOLEAN}"),
+        ] {
+            assert_ne!(
+                boolean_datatype_const(),
+                crate::dual_leaf::datatype_const(&iri)
+            );
+        }
     }
 
     #[test]
@@ -195,7 +242,7 @@ mod tests {
         let t = encode_boolean(&bool_lit("true")).unwrap();
         let one = DualLeafComponents {
             value_hook: Fr::from(1u64),
-            datatype_const: datatype_const(XSD_BOOLEAN),
+            datatype_const: boolean_datatype_const(),
             lexical_component: blake3_field(bool_lit("1").to_string().as_bytes()),
         };
         // Shared value handle: identical value_component.

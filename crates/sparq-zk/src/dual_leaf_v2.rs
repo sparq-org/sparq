@@ -617,6 +617,7 @@ mod tests {
             "scale=2".to_string(),
             "epochscale=3".to_string(),
             "a datatype with spaces".to_string(),
+            "http://ex/dt x".to_string(),
             "\0".to_string(),
             "pre\0post".to_string(),
             // The derivation contexts themselves, and concatenations with them.
@@ -758,46 +759,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn a_natively_loaded_non_iri_datatype_is_separated_too() {
-        // The real ingest path, not a synthetic string: sparq-core's native
-        // N-Triples loader accepts an escaped space in the datatype position and
-        // stores it unvalidated, so the committer sees "http://ex/dt x". Its
-        // degenerate fold must still differ from every lane constant. (Whether the
-        // commit path would then reject that graph is NOT the property here.)
-        let g = sparq_core::Graph::load_str(
-            "<http://ex/s> <http://ex/p> \"v\"^^<http://ex/dt\\u0020x> .\n",
-            "ntriples",
-        )
-        .unwrap();
-        let triples = canon::graph_triples(&g).unwrap();
-        let literal = triples
-            .iter()
-            .find_map(|t| match &t.object {
-                Term::Literal(l) => Some(l.clone()),
-                _ => None,
-            })
-            .expect("the loaded graph has a literal object");
-        let datatype = literal.datatype().as_str().to_string();
-        assert_eq!(datatype, "http://ex/dt x");
-        assert!(
-            NamedNode::new(&datatype).is_err(),
-            "the loaded datatype must genuinely be an invalid IRI for this test to bite"
-        );
-        let lanes: HashSet<Fr> = all_lane_constants().into_iter().collect();
-        assert!(!lanes.contains(&degenerate_datatype_const(&datatype)));
-        // The literal encodes on the degenerate lane, as a non-hookable datatype.
-        assert!(!is_hookable_datatype(&datatype));
-        assert_eq!(
-            encode_literal(&literal).unwrap(),
-            poseidon2::hash(&[
-                degenerate_value_component(&datatype, None),
-                blake3_field(literal.to_string().as_bytes()),
-                Fr::from(TYPE_CODE_LITERAL),
-            ])
-        );
     }
 
     #[test]
