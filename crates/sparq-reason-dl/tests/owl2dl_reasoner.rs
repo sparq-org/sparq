@@ -428,6 +428,85 @@ fn builtin_classes_are_recognised_without_dictionary_entries() {
 }
 
 #[test]
+fn distinct_unmentioned_classes_are_distinct() {
+    let (_, r) = reasoner(&format!("{DECL} :A rdfs:subClassOf :B ."));
+    assert_eq!(r.is_subclass_of("http://ex/X", "http://ex/Y"), Some(false));
+    assert_eq!(r.is_subclass_of("http://ex/X", "http://ex/X"), Some(true));
+    assert_eq!(r.is_satisfiable("http://ex/X"), Some(true));
+}
+
+#[test]
+fn clauses_wider_than_the_variable_cap_are_refused() {
+    // 17 disjuncts of `≤ 63 r.B` need 17 × 64 successor variables in one clause.
+    let union: String = (0..17)
+        .map(|_| max(63, ":r", ":B"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (_, r) = run(&format!(
+        "{DECL} :A rdfs:subClassOf [ a owl:Class ; owl:unionOf ( {union} ) ] ."
+    ));
+    assert!(
+        matches!(
+            &r.consistency,
+            Consistency::Unknown(UnknownReason::OutOfFragment { construct, .. })
+                if construct.contains("MAX_CLAUSE_VARS")
+        ),
+        "{:?}",
+        r.consistency
+    );
+}
+
+#[test]
+fn inner_work_and_node_budgets_answer_unknown() {
+    // The at-most clique search over 12 distinct successors is inner work: a step budget
+    // that the rule applications alone fit in still runs out.
+    let succ: String = (0..12)
+        .map(|i| format!(":i{i} a owl:NamedIndividual . :a :r :i{i} . "))
+        .collect();
+    let diff: String = (0..12)
+        .flat_map(|i| (i + 1..12).map(move |j| format!(":i{i} owl:differentFrom :i{j} . ")))
+        .collect();
+    let body = format!(
+        "{PRE}{DECL} {succ} {diff} :a a {} .",
+        max(11, ":r", "owl:Thing")
+    );
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let r = check(
+        &d,
+        &o,
+        Budget {
+            max_steps: 300,
+            max_nodes: 100_000,
+        },
+    );
+    assert_eq!(
+        r.consistency,
+        Consistency::Unknown(UnknownReason::ResourceBudget)
+    );
+    // A chain of existentials beyond the node budget.
+    let (d, t) = Graph::parse_to_triples(
+        &format!("{PRE}{DECL} :a a :A . :A rdfs:subClassOf {} .", some(":r", ":B"))
+            .replace(":B ]", "[ a owl:Class ; owl:intersectionOf ( :B [ a owl:Restriction ; owl:onProperty :r ; owl:someValuesFrom :C ] ) ] ]"),
+        "turtle",
+    )
+    .unwrap();
+    let o = extract(&d, &t).unwrap();
+    let r = check(
+        &d,
+        &o,
+        Budget {
+            max_steps: 1_000_000,
+            max_nodes: 2,
+        },
+    );
+    assert_eq!(
+        r.consistency,
+        Consistency::Unknown(UnknownReason::ResourceBudget)
+    );
+}
+
+#[test]
 fn queries_respect_inconsistency_and_imports() {
     let (_, r) = reasoner(&format!("{DECL} :A owl:disjointWith :B . :a a :A , :B ."));
     assert_eq!(r.is_satisfiable("http://ex/C"), Some(false));
@@ -897,6 +976,25 @@ fn differential(corpus: &str, generate: fn(u64) -> String, seeds: u64, recorded:
             failures.push(format!(
                 "seed {seed}:\n--- want\n{want}\n--- got\n{got}\n{body}"
             ));
+            continue;
+        }
+        // The single-query API must agree with the recorded hierarchy too.
+        if want.starts_with("CONSISTENT true") {
+            let r = Reasoner::new(&d, &o, Budget::default()).expect("decided above");
+            let lines: std::collections::BTreeSet<&str> = want.lines().collect();
+            let unsat = |c: &str| lines.contains(format!("UNSAT {c}").as_str());
+            for a in names.values() {
+                if r.is_satisfiable(a) != Some(!unsat(a)) {
+                    failures.push(format!("seed {seed}: is_satisfiable({a})\n{body}"));
+                }
+                for b in names.values() {
+                    let entailed =
+                        a == b || unsat(a) || lines.contains(format!("SUB {a} {b}").as_str());
+                    if r.is_subclass_of(a, b) != Some(entailed) {
+                        failures.push(format!("seed {seed}: is_subclass_of({a}, {b})\n{body}"));
+                    }
+                }
+            }
         }
     }
     assert!(
