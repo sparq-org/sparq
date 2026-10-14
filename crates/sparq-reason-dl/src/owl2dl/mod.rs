@@ -13,6 +13,7 @@
 //! in full or refuses it, naming the triple it could not read.
 
 pub(crate) mod clausify;
+pub mod data_ranges;
 pub mod datatypes;
 pub mod dl_profile;
 pub mod extract;

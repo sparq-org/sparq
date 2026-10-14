@@ -1202,7 +1202,9 @@ fn has_cardinality(c: &ClassExpression) -> bool {
     }
 }
 
-fn canonical_range(r: &DataRange) -> DataRange {
+/// `r` with every operand set (union, intersection, enumeration, facets) sorted and
+/// deduplicated: structurally equivalent ranges have equal canonical forms.
+pub(crate) fn canonical_range(r: &DataRange) -> DataRange {
     let set = |xs: &[DataRange]| {
         let mut v: Vec<DataRange> = xs.iter().map(canonical_range).collect();
         v.sort();

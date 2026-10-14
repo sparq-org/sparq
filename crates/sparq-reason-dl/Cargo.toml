@@ -68,6 +68,13 @@ sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = fal
 # (the same use as sparq-reason-el). rustc-hash: the structural index maps/sets.
 oxrdf.workspace = true
 rustc-hash.workspace = true
+# Data-range reasoning (owl2dl::data_ranges): exact rationals for facet bounds, and
+# automata for XSD patterns, lengths and language ranges.
+num-bigint = { version = "0.5", default-features = false, features = ["std"] }
+num-integer = { version = "0.1", default-features = false }
+num-traits = { version = "0.2", default-features = false }
+regex-automata = { version = "0.4", default-features = false, features = ["std", "syntax", "dfa-build", "dfa-search", "unicode"] }
+regex-syntax = { version = "0.8", default-features = false, features = ["std", "unicode"] }
 # sq-pbz04.4.4: optional profile-reasoner deps, pulled ONLY by the `dispatch`
 # feature (L4). `version` alongside `path`: cargo uses the path locally, the version on
 # crates.io.

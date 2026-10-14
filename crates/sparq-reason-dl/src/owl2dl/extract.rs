@@ -27,6 +27,7 @@
 //! (`owl:onProperties`), RDF 1.2 triple terms, and `owl:imports` targets (recorded, never
 //! dereferenced). Those are refused or reported, never guessed.
 
+use super::dl_profile::canonical_range;
 use super::model::{
     Annotation, AnnotationSubject, AnnotationTarget, AnnotationValue, Axiom, AxiomRecord,
     ClassExpression, DataRange, EntityKind, ExtractNote, Individual, Literal, ObjectProperty,
@@ -38,6 +39,7 @@ use super::vocab::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id, NO_ID};
+use std::cell::RefCell;
 
 /// Nesting depth past which a class expression / data range is refused (guards the
 /// recursive decoders, and the recursive passes over the model after them, against
@@ -153,6 +155,10 @@ struct Extractor<'a> {
     lists_read: FxHashSet<Id>,
     /// The head of the list each list cell read so far belongs to.
     cell_owner: FxHashMap<Id, Id>,
+    /// The members of each `owl:oneOf` node seen by the kind heuristics: `Some(true)` when
+    /// all are literals, `Some(false)` when none is, `None` otherwise. Kind inference asks
+    /// about the same nodes on every pass, so each list is walked once.
+    one_of_kind: RefCell<FxHashMap<Id, Option<bool>>>,
     /// Model nodes and provenance entries built so far.
     expanded: usize,
     visiting: FxHashSet<Id>,
@@ -211,6 +217,7 @@ impl<'a> Extractor<'a> {
             range_cache: FxHashMap::default(),
             lists_read: FxHashSet::default(),
             cell_owner: FxHashMap::default(),
+            one_of_kind: RefCell::default(),
             expanded: 0,
             visiting: FxHashSet::default(),
             ann_index: FxHashMap::default(),
@@ -558,12 +565,30 @@ impl<'a> Extractor<'a> {
             return true;
         }
         // `owl:oneOf` over literals.
-        if let Ok(Some((list, _))) = self.sp_one(node, v.one_of) {
-            if let Ok((items, _)) = self.peek_list(list) {
-                return !items.is_empty() && items.iter().all(|&m| is_literal(self.dict, m));
-            }
+        self.one_of_kind(node) == Some(true)
+    }
+
+    /// The memoised member kind of an `owl:oneOf` node (see the `one_of_kind` field).
+    fn one_of_kind(&self, node: Id) -> Option<bool> {
+        if let Some(&k) = self.one_of_kind.borrow().get(&node) {
+            return k;
         }
-        false
+        let k = self
+            .sp_one(node, self.v.one_of)
+            .ok()
+            .flatten()
+            .and_then(|(list, _)| self.peek_list(list).ok())
+            .and_then(|(items, _)| {
+                let lits = items.iter().filter(|&&m| is_literal(self.dict, m)).count();
+                match (items.is_empty(), lits) {
+                    (true, _) => None,
+                    (false, n) if n == items.len() => Some(true),
+                    (false, 0) => Some(false),
+                    _ => None,
+                }
+            });
+        self.one_of_kind.borrow_mut().insert(node, k);
+        k
     }
 
     /// Whether `node` reads as a class expression in a filler position.
@@ -578,14 +603,7 @@ impl<'a> Extractor<'a> {
         self.has_type(node, v.restriction).is_some()
             || self.has_type(node, v.owl_class).is_some()
             || !self.sp(node, v.complement_of).is_empty()
-            || self
-                .sp_one(node, v.one_of)
-                .ok()
-                .flatten()
-                .and_then(|(list, _)| self.peek_list(list).ok())
-                .is_some_and(|(items, _)| {
-                    !items.is_empty() && items.iter().all(|&m| !is_literal(self.dict, m))
-                })
+            || self.one_of_kind(node) == Some(false)
     }
 
     fn infer_property_kinds(&mut self) -> Result<()> {
@@ -1493,6 +1511,18 @@ impl<'a> Extractor<'a> {
                     let (r, ru) = self.data_range_depth(m, i, depth + 1)?;
                     used.extend(ru);
                     members.push(r);
+                }
+                // Operands form a set under structural equivalence, so distinct nodes with
+                // equal structure are one operand.
+                let mut distinct: Vec<DataRange> = members.iter().map(canonical_range).collect();
+                distinct.sort_unstable();
+                distinct.dedup();
+                if distinct.len() < 2 {
+                    return Err(self.err(
+                        ExtractErrorKind::Malformed,
+                        "a data intersection or union needs at least two distinct members",
+                        &[i],
+                    ));
                 }
                 if tag == 0 {
                     DataRange::IntersectionOf(members)
