@@ -719,7 +719,7 @@ definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
 `None` when one was not (listed in `unchecked`: `xsd:pattern` syntax, `rdf:XMLLiteral`
 content, an unloaded imports closure, anonymous individuals outside an anonymous forest,
 literal values beyond the represented range such as a year past `i64` or a language tag
-that is not well-formed BCP 47, and the facet space of a bound outside the restricted
+that is not well-formed BCP 47 (or, in an `rdf:PlainLiteral`, not a `langtag`), and the facet space of a bound outside the restricted
 datatype's value space, and whether operands with cardinality restrictions are distinct). Cardinalities must be valid non-negative `xsd:nonNegativeInteger` or
 `xsd:integer` literals; others are refused as unsupported. Lexical forms get no
 whitespace normalisation (RDF applies no `whiteSpace` facet), and with unloaded imports

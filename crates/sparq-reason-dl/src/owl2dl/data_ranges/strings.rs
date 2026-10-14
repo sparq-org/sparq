@@ -245,6 +245,15 @@ pub(crate) fn is_language_range(range: &str) -> bool {
     range == "*" || (subtag(parts.next().unwrap_or(""), true) && parts.all(|p| subtag(p, false)))
 }
 
+/// Whether the lowercase `tag` is a well-formed BCP 47 language tag, or with `plain` a
+/// `langtag` (the tags of `rdf:PlainLiteral`); `None` when its automaton could not be built.
+pub(crate) fn is_lang_tag(tag: &str, plain: bool) -> Option<bool> {
+    let dfa = cached(Key::LangTag { plain }, || {
+        Ok(if plain { langtag() } else { lang_tag() })
+    });
+    Some(dfa.ok()?.matches(tag.as_bytes()))
+}
+
 /// Whether the encoded value `v` is in `space`; `None` when its automaton could not be built.
 pub(crate) fn in_space(space: Space, v: &[u8]) -> Option<bool> {
     Some(universe(space).ok()?.matches(v))
@@ -659,6 +668,7 @@ impl Dfa {
 enum Key {
     Atom(Atom),
     Universe(Space),
+    LangTag { plain: bool },
 }
 
 thread_local! {
