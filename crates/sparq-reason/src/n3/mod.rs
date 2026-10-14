@@ -324,9 +324,13 @@ mod run_shared {
             let Some(mut ts) = parse() else { return Ok(None) };
             // Each blank label grows by the label prefix, the same length for every
             // document of the table.
-            let blanks = ts.iter().map(blank_occurrences).fold(0, usize::saturating_add);
+            // One walk sizes the parsed statements and counts their blank labels.
+            let mut blanks = 0usize;
+            let parsed = ts.iter().flatten().fold(bounded::TERM_NODE_BYTES, |n, t| {
+                n.saturating_add(bounded::term_bytes_with(t, || blanks += 1))
+            });
             let grown = blanks.saturating_mul(self.0.borrow().label_prefix_len());
-            let bytes = formula_bytes(ts.iter()).saturating_add(grown);
+            let bytes = parsed.saturating_add(grown);
             if !admit(bytes) {
                 return Ok(None);
             }
@@ -350,23 +354,6 @@ mod run_shared {
             debug_assert_eq!(formula_bytes(ts.iter()), bytes, "the admitted size is the size");
             Ok(Some(ts))
         }
-    }
-
-    /// The blank-label occurrences in `t`, through nested lists, formulas and quoted
-    /// triples (walked with an explicit stack, as [`bounded::term_bytes`] walks).
-    fn blank_occurrences(t: &[Term; 3]) -> usize {
-        let mut n = 0usize;
-        let mut stack: Vec<&Term> = t.iter().collect();
-        while let Some(t) = stack.pop() {
-            match t {
-                Term::Blank(_) => n += 1,
-                Term::List(ms) => stack.extend(ms),
-                Term::Formula(rs) => stack.extend(rs.iter().flatten()),
-                Term::Triple(tr) => stack.extend(tr.iter()),
-                _ => {}
-            }
-        }
-        n
     }
 
     /// The hex digits of a scope key in a label prefix.
