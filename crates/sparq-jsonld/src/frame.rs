@@ -1022,7 +1022,7 @@ fn match_frame(
                 continue;
             }
             for o in objects.items() {
-                if is_list_object(o) {
+                if o.is_list_object() {
                     // @list re-emit: node entries recurse with the list sub-frame,
                     // value entries copy verbatim.
                     let implicit;
@@ -1401,26 +1401,26 @@ fn filter_subject(
                     }
                     match_this = true;
                 }
-                Some(tf) if is_list_object(tf) => {
+                Some(tf) if tf.is_list_object() => {
                     let list_pattern = tf.get("@list").map(Json::items).unwrap_or_default();
                     let node_list = node_values
                         .first()
-                        .filter(|nv| is_list_object(nv))
+                        .filter(|nv| nv.is_list_object())
                         .and_then(|nv| nv.get("@list"))
                         .map(Json::items)
                         .unwrap_or_default();
                     match_this = match list_pattern.first() {
-                        Some(lp) if is_value_object(lp) => {
+                        Some(lp) if lp.is_value_object() => {
                             node_list.iter().any(|lv| value_match(lp, lv))
                         }
                         Some(lp) => any_node_match(graph_subjects, lp, node_list, flags, memo)?,
                         None => false,
                     };
                 }
-                Some(tf) if is_value_object(tf) => {
+                Some(tf) if tf.is_value_object() => {
                     match_this = node_values
                         .iter()
-                        .any(|nv| is_value_object(nv) && value_match(tf, nv));
+                        .any(|nv| nv.is_value_object() && value_match(tf, nv));
                 }
                 Some(tf) if tf.is_obj() => {
                     // A node pattern (subject / subject reference / wildcard object):
@@ -1545,7 +1545,7 @@ fn value_match(pattern: &Json, value: &Json) -> bool {
             match (p.as_str(), l1) {
                 (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
                 // A null alternative admits a language-less value.
-                _ => matches!(p, Json::Raw(r) if r == "null") && l1.is_none(),
+                _ => p.is_null() && l1.is_none(),
             }
         })
         || (l1.is_some() && l2.first().map(is_empty_obj).unwrap_or(false));
@@ -1666,7 +1666,7 @@ fn cleanup_preserve(j: Json, compact_arrays: bool) -> Json {
             items
                 .into_iter()
                 .map(|i| cleanup_preserve(i, compact_arrays))
-                .filter(|i| !matches!(i, Json::Raw(r) if r == "null"))
+                .filter(|i| !i.is_null())
                 .collect(),
         ),
         Json::Obj(members) => {
@@ -1674,14 +1674,14 @@ fn cleanup_preserve(j: Json, compact_arrays: bool) -> Json {
             if let Some(pos) = members.iter().position(|(k, _)| k == "@preserve") {
                 let preserved = members[pos].1.clone();
                 let unwrapped = match preserved {
-                    Json::Str(s) if s == "@null" => Json::Raw("null".to_string()),
+                    Json::Str(s) if s == "@null" => Json::null(),
                     Json::Arr(items) if items.len() == 1 && compact_arrays => {
                         items.into_iter().next().unwrap()
                     }
                     other => other,
                 };
                 return match unwrapped {
-                    Json::Str(s) if s == "@null" => Json::Raw("null".to_string()),
+                    Json::Str(s) if s == "@null" => Json::null(),
                     other => cleanup_preserve(other, compact_arrays),
                 };
             }
@@ -1792,21 +1792,11 @@ fn is_empty_obj(v: &Json) -> bool {
     matches!(v, Json::Obj(m) if m.is_empty())
 }
 
-/// True iff `v` is a list object (`{"@list": …}`).
-fn is_list_object(v: &Json) -> bool {
-    v.is_obj() && v.get("@list").is_some()
-}
-
-/// True iff `v` is a value object (`{"@value": …}`).
-fn is_value_object(v: &Json) -> bool {
-    v.is_obj() && v.get("@value").is_some()
-}
-
 /// The `@id` of a node object / node reference (a non-value, non-list object with an
 /// `@id`), else `None`. In an expanded document every node under a property is a
 /// reference into the node map, so this is the "recurse into subject" discriminator.
 fn subject_reference_id(v: &Json) -> Option<&str> {
-    if is_value_object(v) || is_list_object(v) {
+    if v.is_value_object() || v.is_list_object() {
         return None;
     }
     v.get("@id").and_then(Json::as_str)

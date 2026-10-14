@@ -181,7 +181,7 @@ pub(crate) fn process_inner(
     // step 5: fold each context in turn.
     for context in &contexts {
         // 5.1: a null context resets the active context.
-        if is_null(context) {
+        if context.is_null() {
             if !override_protected && result.has_protected_terms() {
                 return Err(JsonLdError::new(E::InvalidContextNullification));
             }
@@ -288,7 +288,7 @@ pub(crate) fn process_inner(
         // 5.7: @base — only for a directly-embedded (non-remote) context.
         if env.remote_contexts.is_empty() {
             if let Some(b) = context.get("@base") {
-                if is_null(b) {
+                if b.is_null() {
                     result.base_iri = None;
                 } else if let Json::Str(s) = b {
                     if is_absolute_iri(s) {
@@ -306,7 +306,7 @@ pub(crate) fn process_inner(
 
         // 5.8: @vocab.
         if let Some(v) = context.get("@vocab") {
-            if is_null(v) {
+            if v.is_null() {
                 result.vocabulary_mapping = None;
             } else if let Json::Str(s) = v {
                 // [OPUS-5] sq-gzsky — §4.1.2 step 5.8 tests the RAW value: "if value is
@@ -334,7 +334,7 @@ pub(crate) fn process_inner(
 
         // 5.9: @language.
         if let Some(v) = context.get("@language") {
-            if is_null(v) {
+            if v.is_null() {
                 result.default_language = None;
             } else if let Json::Str(s) = v {
                 result.default_language = Some(s.clone());
@@ -348,7 +348,7 @@ pub(crate) fn process_inner(
             if env.mode == ProcessingMode::JsonLd10 {
                 return Err(JsonLdError::new(E::InvalidContextEntry));
             }
-            if is_null(v) {
+            if v.is_null() {
                 result.default_base_direction = None;
             } else if let Json::Str(s) = v {
                 result.default_base_direction =
@@ -447,7 +447,7 @@ pub(crate) fn create_term_definition(
     defined.insert(term.to_string(), false);
 
     // step 3: the raw value for this term (a missing key defaults to null).
-    let raw = local.get(term).cloned().unwrap_or_else(json_null);
+    let raw = local.get(term).cloned().unwrap_or_else(Json::null);
 
     // steps 4/5: keyword handling.
     if term == "@type" {
@@ -486,7 +486,7 @@ pub(crate) fn create_term_definition(
             true,
         ),
         Json::Obj(_) => (raw.clone(), false),
-        j if is_null(j) => (Json::Obj(vec![("@id".to_string(), json_null())]), false),
+        j if j.is_null() => (Json::Obj(vec![("@id".to_string(), Json::null())]), false),
         _ => return Err(JsonLdError::new(E::InvalidTermDefinition)),
     };
 
@@ -535,7 +535,7 @@ pub(crate) fn create_term_definition(
         None => false,
     };
     if let Some(idj) = id_entry.filter(|_| id_differs) {
-        if is_null(&idj) {
+        if idj.is_null() {
             // @id: null — a retained definition with a null IRI mapping (falls through to
             // the common tail so container/index/etc. still apply, then is stored).
             def.iri = None;
@@ -692,7 +692,7 @@ fn create_reverse_definition(
     if let Some(c) = value.get("@container") {
         def.container = match c {
             Json::Str(s) if s == "@set" || s == "@index" => vec![s.clone()],
-            j if is_null(j) => vec![],
+            j if j.is_null() => vec![],
             _ => return Err(JsonLdError::new(E::InvalidReverseProperty)),
         };
     }
@@ -786,7 +786,7 @@ fn finish_definition(
     let has_type = value.get("@type").is_some();
     if let Some(l) = value.get("@language") {
         if !has_type {
-            def.language = if is_null(l) {
+            def.language = if l.is_null() {
                 Override::Null
             } else if let Json::Str(s) = l {
                 Override::Set(s.clone())
@@ -797,7 +797,7 @@ fn finish_definition(
     }
     if let Some(d) = value.get("@direction") {
         if !has_type {
-            def.direction = if is_null(d) {
+            def.direction = if d.is_null() {
                 Override::Null
             } else if let Json::Str(s) = d {
                 Override::Set(Direction::parse(s).ok_or_else(|| JsonLdError::new(E::InvalidBaseDirection))?)
@@ -943,16 +943,6 @@ fn valid_container(members: &[String], mode: ProcessingMode, raw_is_string: bool
 /// True iff `s` ends with an RFC 3986 gen-delim character (`:` `/` `?` `#` `[` `]` `@`).
 fn ends_with_gen_delim(s: &str) -> bool {
     s.ends_with([':', '/', '?', '#', '[', ']', '@'])
-}
-
-/// The `Json` representation of a JSON `null`.
-fn json_null() -> Json {
-    Json::Raw("null".to_string())
-}
-
-/// True iff `j` is a JSON `null`.
-fn is_null(j: &Json) -> bool {
-    matches!(j, Json::Raw(r) if r == "null")
 }
 
 /// Interprets a JSON boolean scalar, or `None` for any non-boolean value.
