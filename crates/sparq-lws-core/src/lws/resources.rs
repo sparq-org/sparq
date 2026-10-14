@@ -3973,8 +3973,10 @@ pub const LINKSET_PUT_SCAN_BUDGET: usize = LINKSET_COST_BUDGET / LINKSET_PUT_PAR
 /// Why [`read_linkset`] did not read a body.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum LinksetUnread {
-    /// It is not JSON (RFC 8259), or nests past what the parser reads.
+    /// It is not JSON (RFC 8259).
     NotJson,
+    /// It nests past what the parser reads.
+    TooDeep,
     /// It holds a number, which no linkset document does.
     Number,
     /// Parsing it would allocate more than the budget.
@@ -4010,10 +4012,12 @@ fn walk_linkset(body: &[u8], budget: usize, keep: bool) -> Result<(Value, usize)
         // A number too large for the parser fails before the visitor sees it: a number still.
         Err(e) => Err(why
             .get()
-            .unwrap_or(if e.to_string().starts_with("number out of range") {
-                LinksetUnread::Number
-            } else {
-                LinksetUnread::NotJson
+            .unwrap_or(match e.to_string() {
+                m if m.starts_with("number out of range") => LinksetUnread::Number,
+                // JSON nested past the parser's limit is JSON, too deep to store (as a PATCH
+                // result nested that deep is).
+                m if m.starts_with("recursion limit exceeded") => LinksetUnread::TooDeep,
+                _ => LinksetUnread::NotJson,
             })),
     }
 }
@@ -4606,8 +4610,8 @@ fn linkset_etag(doc: &Value) -> String {
     format!("\"ls-{}\"", jose::b64url(&digest[..12]))
 }
 
-/// A resource's linkset (RFC 9264): GET, HEAD and PATCH (JSON Patch). PUT is
-/// not offered, so it is 405 with the methods that are.
+/// A resource's linkset (RFC 9264): GET, HEAD, PATCH (JSON Patch) and PUT of a whole
+/// `application/linkset+json` document; any other method is 405 with the methods that are.
 async fn linkset<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -4761,7 +4765,7 @@ async fn linkset<S: Store + 'static>(
             let Some(locks) = exclusive.take().map(|guard| (guard, listing.take())) else {
                 return store_error(ServerError::Storage("the lock is not held".into()));
             };
-            store_linkset(state, req, uri, meta, patched, locks).await
+            store_linkset(state, req, uri, meta, patched, locks, true).await
         }
         Method::PUT => {
             // A whole linkset replaces the user-managed one (lws10-core 9.3.2), in one write. The
@@ -4800,6 +4804,12 @@ async fn linkset<S: Store + 'static>(
                 Err(LinksetUnread::NotJson) => {
                     return problem(StatusCode::BAD_REQUEST, Some("the body is not JSON"))
                 }
+                Err(LinksetUnread::TooDeep) => {
+                    return problem(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        Some("the linkset nests too deeply to be stored"),
+                    )
+                }
                 Err(LinksetUnread::Number) => {
                     return problem(
                         StatusCode::UNPROCESSABLE_ENTITY,
@@ -4819,11 +4829,7 @@ async fn linkset<S: Store + 'static>(
             // What is stored is not what was sent (references resolved, the server-managed links
             // restored), so a successful PUT carries no validator (RFC 9110 section 9.3.4): the
             // linkset and its tag are read with a GET.
-            let mut r = store_linkset(state, req, uri, meta, document, locks).await;
-            if r.status().is_success() {
-                r.headers_mut().remove(header::ETAG);
-            }
-            r
+            store_linkset(state, req, uri, meta, document, locks, false).await
         }
         _ => method_not_allowed(LINKSET_ALLOW),
     };
@@ -4841,7 +4847,8 @@ async fn linkset<S: Store + 'static>(
 /// user-managed links, holding `locks` (the resource's, exclusive, and its listing's) through the
 /// write. It must be a linkset ([`valid_linkset`]); relative references are resolved against the
 /// linkset's own URI, and the result is checked as it will be served and stored before anything
-/// is written. `204` with the new tag, or the refusal.
+/// is written. `204`, with the new tag when `tag` (a PATCH; a PUT's response carries none), or the
+/// refusal.
 async fn store_linkset<S, L>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -4849,6 +4856,7 @@ async fn store_linkset<S, L>(
     mut meta: ResourceMeta,
     document: Value,
     locks: L,
+    tag: bool,
 ) -> Response
 where
     S: Store + 'static,
@@ -4880,13 +4888,18 @@ where
     meta.links = links_of(&user, uri);
     meta.linkset = Some(user.into_value());
     meta.linkset_etag = None;
-    // The result is checked as it will be served, with the server-managed links (`up`,
-    // `type`, `self`) a patch may strip put back, with what the next PATCH checks its
-    // target with ([`admissible`]): a linkset is stored only if it can be patched again.
-    let rebuilt = match linkset_document(state, uri, &meta).await {
-        Ok(d) => d,
-        Err(e) => return store_error(e),
+    // The tag of the document as written: the stored links with the server-managed ones (`up`,
+    // `type`, `self`) a patch may strip put back. Only a PATCH's response carries it.
+    let new_etag = if tag {
+        match linkset_document(state, uri, &meta).await {
+            Ok(rebuilt) => Some(linkset_etag(&rebuilt)),
+            Err(e) => return store_error(e),
+        }
+    } else {
+        None
     };
+    // The result is checked with what the next PATCH checks its target with ([`admissible`]):
+    // a linkset is stored only if it can be patched again.
     let format = if uri.ends_with('/') {
         None
     } else {
@@ -4916,8 +4929,6 @@ where
             )
         }
     }
-    // The tag of the document as written, which `rebuilt` is.
-    let new_etag = linkset_etag(&rebuilt);
     // The write runs in a task that holds the lock and the listing's, and then touches
     // the container when the write may have landed (see [`hold_locks`]).
     let write = {
@@ -4938,7 +4949,9 @@ where
         Ok((Err(e), _)) | Err(e) => return store_error(e),
     }
     let mut r = StatusCode::NO_CONTENT.into_response();
-    set(r.headers_mut(), header::ETAG, &new_etag);
+    if let Some(new_etag) = new_etag {
+        set(r.headers_mut(), header::ETAG, &new_etag);
+    }
     r
 }
 
@@ -5860,6 +5873,17 @@ mod tests {
         let shape = json!({"linkset": [{"anchor": uri, "next": "n"}]}).to_string();
         assert_eq!(
             put(LINKSET_JSON, shape).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // JSON nested past what the parser reads is JSON, too deep to store: 422 as for a PATCH
+        // result, not "not JSON".
+        let deep = format!(
+            r#"{{"linkset":[{{"anchor":"{uri}","x":{}{}}}]}}"#,
+            "[".repeat(200),
+            "]".repeat(200)
+        );
+        assert_eq!(
+            put(LINKSET_JSON, deep).await,
             StatusCode::UNPROCESSABLE_ENTITY
         );
         // Past what the metadata may hold, unread.
