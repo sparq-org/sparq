@@ -1349,5 +1349,20 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
             "{label}: the bridged grant on n2's access-control document"
         );
         assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: n1 is still governed by its ACL");
+        // n1 and its own ACL are governed by that ACL, whatever its container's: a bridged
+        // grant on either applies.
+        for target in [N1, n1_acl.as_str()] {
+            let pol_t =
+                policy("permission", "read", "", Some(UNSEEN), Some(target)).expect("policy");
+            let bridged_t = Request::new(format!("{ODRL}read")).on(target).by(UNSEEN);
+            assert!(
+                s.materialize_odrl_permission(&pol_t, &bridged_t).granted,
+                "{label}: bridged"
+            );
+            assert!(
+                s.decide(&dave, target, Mode::Read).allow,
+                "{label}: the bridged grant on {target}"
+            );
+        }
     }
 }

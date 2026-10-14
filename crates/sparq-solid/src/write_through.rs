@@ -245,7 +245,11 @@ impl PodStore {
                 acl_iri, format, e
             )
         })?;
-        crate::loader::refuse_inadmissible(acl_iri, &crate::loader::graph_triples(&new_graph))
+        crate::loader::refuse_inadmissible_in(
+            &self.graph,
+            acl_iri,
+            &crate::loader::graph_triples(&new_graph),
+        )
             .map_err(|e| format!("put_acl denied: {e}"))?;
         let new_len = graph_len(&new_graph);
 

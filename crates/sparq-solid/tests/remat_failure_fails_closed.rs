@@ -181,3 +181,60 @@ fn one_controller_cannot_deny_the_whole_store() {
         .iter()
         .any(|g| g == "https://pod.ex/bob/b1"));
 }
+
+/// Under ACP, a controller cannot make its own access-control resource use a policy of one
+/// the store already rejects (which would reject it too, and with it the controller's
+/// Control): the write is refused, by update and by replace, and nothing changes.
+#[test]
+fn an_acr_cannot_take_up_a_rejected_documents_policy() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let r = "https://pod.ex/r";
+    let acr = format!("{r}.acr");
+    let other = "https://pod.ex/other.acr";
+    let nq = format!(
+        "<{r}#it> <https://ex.dev/ns#k> \"v\" <{r}> .\n\
+         <{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{ACP}apply> <{acr}#p> <{acr}> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Read> <{acr}> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Write> <{acr}> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Control> <{acr}> .\n\
+         <{acr}#p> <{ACP}anyOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{ACP}agent> <{ADMIN}> <{acr}> .\n\
+         <{acr}.acr> <{ACP}accessControl> <{acr}.acr#c> <{acr}.acr> .\n\
+         <{acr}.acr#c> <{ACP}apply> <{acr}.acr#p> <{acr}.acr> .\n\
+         <{acr}.acr#p> <{ACP}allow> <{ACL}Write> <{acr}.acr> .\n\
+         <{acr}.acr#p> <{ACP}anyOf> <{acr}.acr#m> <{acr}.acr> .\n\
+         <{acr}.acr#m> <{ACP}agent> <{ADMIN}> <{acr}.acr> .\n\
+         <{other}#p> <{ACP}allow> <{ACL}Read> <{other}> .\n\
+         <https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{other}> .\n"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    store.materialize_acp().expect("materializes");
+    let controls = |store: &PodStore| store.decide(&sess(ADMIN), r, Mode::Control).allow;
+    assert!(controls(&store), "control: ADMIN controls r");
+    let link = format!("<{acr}#c> <{ACP}apply> <{other}#p>");
+    let err = store
+        .update_as_acp(
+            &sess(ADMIN),
+            &format!("INSERT DATA {{ GRAPH <{acr}> {{ {link} }} }}"),
+        )
+        .expect_err("the update is refused");
+    assert!(err.contains("not admitted"), "{err}");
+    assert!(controls(&store), "nothing changed");
+    let doc = format!(
+        "<{acr}> <{ACP}accessControl> <{acr}#c> .\n\
+         <{acr}#c> <{ACP}apply> <{acr}#p> .\n\
+         {link} .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Read> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Write> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Control> .\n\
+         <{acr}#p> <{ACP}anyOf> <{acr}#m> .\n\
+         <{acr}#m> <{ACP}agent> <{ADMIN}> .\n"
+    );
+    let err = store
+        .put_acl_acp(&acr, &doc, "ntriples")
+        .expect_err("the replace is refused");
+    assert!(err.contains("not admitted"), "{err}");
+    assert!(controls(&store), "nothing changed");
+}

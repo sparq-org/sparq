@@ -161,13 +161,53 @@ fn admits(t: &[Term; 3], graph_iri: &str) -> bool {
 /// (see [`admits`]): the loader would reject the whole document, and its resource would be
 /// left with no grants, Control included, so the writer could not repair it. Only `added`
 /// triples are checked, so a write removing such a triple is never refused.
-pub(crate) fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
+fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
     match added.iter().find(|t| !admits(t, doc)) {
         None => Ok(()),
         Some(t) => Err(format!(
             "the access-control document <{doc}> may not state `{} {} {}`: it may describe only \
              its own nodes, in the access-control vocabularies, naming no reserved name or \
              principal; nothing was changed",
+            t[0], t[1], t[2]
+        )),
+    }
+}
+
+/// [`refuse_inadmissible`], and for an access-control resource also a statement that uses,
+/// as an access control, a policy or a matcher, a node of another access-control resource
+/// `graph` already rejects: the loader would reject this one with it.
+pub(crate) fn refuse_inadmissible_in(
+    graph: &Graph,
+    doc: &str,
+    added: &[[Term; 3]],
+) -> Result<(), String> {
+    refuse_inadmissible(doc, added)?;
+    let depends = |t: &&[Term; 3]| {
+        matches!((&t[1], &t[2]), (Term::NamedNode(p), Term::NamedNode(o))
+            if ACP_DEPENDENCY_PREDICATES.contains(&p.as_str()) && group_doc_of(o.as_str()) != doc)
+    };
+    if !doc.ends_with(ACR_SUFFIX) || !added.iter().any(|t| depends(&t)) {
+        return Ok(());
+    }
+    let control: Vec<(&str, Vec<[Term; 3]>)> = graph
+        .named
+        .iter()
+        .filter_map(|(n, g)| {
+            graph_iri(n)
+                .filter(|iri| iri.ends_with(ACR_SUFFIX))
+                .map(|iri| (iri, graph_triples(g)))
+        })
+        .collect();
+    let rejected = rejected_documents(&control, System::Acp);
+    let uses_rejected = |t: &&[Term; 3]| {
+        depends(t)
+            && matches!(&t[2], Term::NamedNode(o) if rejected.contains(group_doc_of(o.as_str())))
+    };
+    match added.iter().find(uses_rejected) {
+        None => Ok(()),
+        Some(t) => Err(format!(
+            "the access-control document <{doc}> may not state `{} {} {}`: it uses a node of an \
+             access-control document that is not admitted; nothing was changed",
             t[0], t[1], t[2]
         )),
     }
@@ -1185,7 +1225,10 @@ mod tests {
                 } else {
                     store.put_acl(doc, &body, "ntriples")
                 };
-                assert!(put.is_err(), "{system:?}: the write is refused: {put:?}");
+                assert!(
+                    put.as_ref().is_err_and(|e| e.contains("may not state")),
+                    "{system:?}: the write is refused: {put:?}"
+                );
                 check(&store, system, other, &format!("put {triple}"));
             }
 

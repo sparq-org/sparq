@@ -1680,7 +1680,7 @@ impl PodStore {
             {
                 let doc = doc.as_str();
                 if doc.ends_with(loader::ACL_SUFFIX) || doc.ends_with(loader::ACR_SUFFIX) {
-                    loader::refuse_inadmissible(doc, inserts)
+                    loader::refuse_inadmissible_in(&self.graph, doc, inserts)
                         .map_err(|e| format!("update denied: {e}"))?;
                 }
             }
