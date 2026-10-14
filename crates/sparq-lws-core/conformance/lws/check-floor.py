@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Fail unless the latest Touchstone run passes exactly as many tests in each module as floor.json
-records.
+"""Fail unless the latest Touchstone run passes exactly the tests floor.json lists, as many in each
+module as it records.
 
     check-floor.py <runs-dir> [floor.json]
     check-floor.py --self-test
 
 Modules are the first path segment of a test id (core, auth, index), except notifications/webhook.
-Raise the floor in the same change that makes more tests pass (more passes than the floor fail
-the check too, so a new pass cannot hide a lost one later); never lower it to go green.
+floor.json's "passing" lists every test that passes, by id: one of them not passing fails the
+check, and so does a pass not listed, so a new pass cannot hide a lost one. Add a new pass to the
+list and raise its module's count in the same change that earns it; never lower either to go
+green. The counts are checked against the list and the run, as a cross-check.
 
 floor.json's "supported" maps a `*-when-unsupported` test, which probes the absence of a feature
 this server supports, to the reason it must be inapplicable for: Touchstone's report that a named
@@ -112,10 +114,28 @@ def check(tests, floor_doc: dict) -> tuple:
             and valid_pattern(why["got"])
         ):
             bad.append(f"  a supported probe needs a precondition, an assertion and a got pattern: {test_id}")
+    passing = floor_doc.get("passing")
+    if not (isinstance(passing, list) and all(isinstance(i, str) for i in passing)):
+        bad.append("  floor.json's passing is not a list of test ids")
+    elif len(set(passing)) != len(passing) or set(passing) & set(supported):
+        bad.append("  floor.json's passing repeats a test, or lists a supported probe")
     if bad:
         return False, bad
     floor = floor_doc["passed"]
     ok, out = True, []
+    # Which tests pass, not only how many: a lost pass is named, whatever else passes.
+    passes = {i for i, (outcome, _, _) in results.items() if outcome == "passed" and i not in supported}
+    for lost in sorted(set(passing) - passes):
+        ok = False
+        out.append(f"  LOST      {results.get(lost, ('not run',))[0]:9} {lost}")
+    for new in sorted(passes - set(passing)):
+        ok = False
+        out.append(f"  NEW       passed    {new}: add it to floor.json's passing and raise the count")
+    listed = Counter(module(i) for i in passing) + Counter(module(i) for i in supported)
+    for m in sorted(set(listed) | set(floor)):
+        if listed[m] != floor.get(m, 0):
+            ok = False
+            out.append(f"  floor.json lists {listed[m]} {m} passes but records {floor.get(m, 0)}")
     passed, total = Counter(), Counter()
     for test_id, (outcome, _, reason) in results.items():
         m = module(test_id)
@@ -154,7 +174,11 @@ def self_test():
         "does not hold: header Allow matches expected matches /(?i)^(?!.*\\bPUT\\b)/, got GET, HEAD, PUT, PATCH"
     )
     floor_doc = load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "floor.json"))
-    floor_doc = {"supported": {probe: floor_doc["supported"][probe]}, "passed": {"core": 4}}
+    floor_doc = {
+        "supported": {probe: floor_doc["supported"][probe]},
+        "passed": {"core": 4},
+        "passing": ["core/a#x", "core/a#y", "core/a#z"],
+    }
 
     def result(test_id, outcome="passed", **kw):
         return {"id": test_id, "outcome": outcome, "level": "MUST", **kw}
@@ -231,9 +255,23 @@ def self_test():
     ):
         assert not check(tests_with(z, result(probe, "inapplicable", reason=reason)), loose)[0], reason
     assert not check(tests_with(z, inapp), {**floor_doc, "supported": [probe]})[0]
-    # Without the probe listed, a module is held to its plain pass count.
-    assert not check([result("core/a#x")], {"passed": {"core": 2}})[0]
-    assert check([result("core/a#x"), result("core/a#y")], {"passed": {"core": 2}})[0]
+    # Which tests pass is checked, not only how many: a lost pass offset by a new one fails, as
+    # does a pass not listed, a list that disagrees with the counts, or a malformed list.
+    swapped = [result("core/a#x"), result("core/a#y"), result("core/a#z", "failed"), result("core/a#w"), inapp]
+    ok, out = check(swapped, {**floor_doc, "passed": {"core": 4}})
+    assert not ok
+    assert any(line.startswith("  LOST") and line.endswith(" core/a#z") for line in out), out
+    assert any(line.startswith("  NEW") and "core/a#w:" in line for line in out), out
+    assert check(swapped, {**floor_doc, "passing": ["core/a#x", "core/a#y", "core/a#w"]})[0]
+    for passing in (["core/a#x", "core/a#y"], ["core/a#x", "core/a#y", "core/a#z", "core/a#z"],
+                    ["core/a#x", "core/a#y", "core/a#z", probe], "core/a#x", [1, 2, 3]):
+        assert not check(tests_with(z, inapp), {**floor_doc, "passing": passing})[0], passing
+    ok, out = check(tests_with(z, inapp), {**floor_doc, "passed": {"core": 3}})
+    assert not ok and any("lists 4 core passes but records 3" in line for line in out), out
+    # Without the probe listed, a module is held to its listed passes.
+    plain = {"passed": {"core": 2}, "passing": ["core/a#x", "core/a#y"]}
+    assert not check([result("core/a#x")], plain)[0]
+    assert check([result("core/a#x"), result("core/a#y")], plain)[0]
     print("check-floor self-test passed")
 
 
