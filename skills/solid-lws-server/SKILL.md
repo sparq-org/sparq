@@ -365,8 +365,11 @@ What the server exposes, all discoverable from the storage description
   values their texts denote (zero is zero whatever its sign or exponent). A number longer than
   1,024 characters, or whose power of ten does not fit 64 bits, in the patch or the resource, gets
   `422`; a resource whose text is not JSON as written gets `415`. Sizes are those of the JSON as
-  written, and a `test` is charged for what it reads of both sides. A patch that reads the content (`test`, `copy`, `move`) needs
-  Read as well as Modify. A `POST` whose request is cancelled after the member is written is
+  written, and a `test` is charged for what it reads of both sides. A patch whose outcome depends on the content needs Read as
+  well as Modify, and without it is refused (`401`/`403`) before it is applied: every operation
+  but `add`, and an `add` below the top level or at an array index. A patch of top-level `add`s
+  alone is open to a writer without Read; when it cannot apply (the document is not an object),
+  or the resource is not readable JSON, that writer is refused the same way rather than told why. A `POST` whose request is cancelled after the member is written is
   still announced; a `DELETE` that fails, and is being put back, announces nothing. `livez` and
   `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read

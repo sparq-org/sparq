@@ -2859,16 +2859,26 @@ pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
     Ok(ops)
 }
 
-/// Whether a JSON Patch observes the target's content: `test` compares a value and `copy` / `move`
-/// read one, so applying it reveals what the patcher may not be allowed to read.
+/// Whether a JSON Patch's outcome depends on the target's content, so that applying it (or failing
+/// to) tells the patcher something about it: `test` compares a value, `copy` and `move` read one,
+/// `remove` and `replace` need their path to exist, and an `add` below the top level needs its
+/// parent to. Only an `add` of one member of the document (a single segment that is not an array
+/// index) stays blind; it fails only when the document is not an object.
 pub fn json_patch_reads(ops: &Value) -> bool {
     ops.as_array().is_some_and(|ops| {
-        ops.iter().any(|op| {
-            matches!(
-                op.get("op").and_then(Value::as_str),
-                Some("test" | "copy" | "move")
-            )
-        })
+        ops.iter()
+            .any(|op| match op.get("op").and_then(Value::as_str) {
+                Some("add") => !op
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .and_then(|p| p.strip_prefix('/'))
+                    .is_some_and(|member| {
+                        !member.contains('/')
+                            && member != "-"
+                            && !(!member.is_empty() && member.bytes().all(|b| b.is_ascii_digit()))
+                    }),
+                _ => true,
+            })
     })
 }
 
@@ -3330,7 +3340,7 @@ impl Patch {
         read_json_patch(&req.body).map(Patch::Json)
     }
 
-    /// Whether applying the patch observes the target's content (see [`json_patch_reads`]).
+    /// Whether the patch's outcome depends on the target's content (see [`json_patch_reads`]).
     fn reads_content(&self) -> bool {
         matches!(self, Patch::Json(ops) if json_patch_reads(ops))
     }
@@ -3382,8 +3392,9 @@ fn patch_refused(e: PatchError) -> Response {
     }
 }
 
-/// A patch that observes content (see [`Patch::reads_content`]) needs Read as well as Modify:
-/// otherwise 403, or the challenge for an anonymous caller.
+/// A patch whose outcome depends on the content (see [`Patch::reads_content`]) needs Read as well
+/// as Modify: otherwise 403, or the challenge for an anonymous caller, before it is applied, so the
+/// refusal is the same whatever the content.
 async fn patch_read_check<S: Store + 'static>(
     state: &LwsState<S>,
     patch: &Patch,
@@ -3465,20 +3476,23 @@ async fn patch<S: Store + 'static>(
     // Its numbers are held as their text ([`NUMBER_MARK`]) while the patch applies, so the
     // content is written back with every number it does not touch as it was.
     // An empty body is not JSON either.
+    // A writer that may not read the content applies only a blind patch ([`patch_read_check`]),
+    // and is told nothing about the content when even that cannot apply: it is refused as it
+    // would be had the patch read the content. Nor does the new tag, which describes the content
+    // as patched (its length and a hash of it), go to it.
+    let reader = state.allowed(Action::Read, uri, agent).await;
+    let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
     let target = match read_numbers_as_text(&body) {
         Ok(target) => target,
-        Err(Unreadable::Number) => return number_refused(),
-        Err(Unreadable::NotJson) => return not_json(),
+        Err(Unreadable::Number) => return unread(number_refused()),
+        Err(Unreadable::NotJson) => return unread(not_json()),
     };
     let patched = match patch.apply(&target, patch_budget(state)) {
         Ok(v) => v,
-        Err(r) => return r,
+        Err(r) => return unread(r),
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
-    // The new tag describes the content as patched, which only a reader may learn (a writer that
-    // may not read it would otherwise learn its length and a hash of it).
-    let reader = state.allowed(Action::Read, uri, agent).await;
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -6422,8 +6436,11 @@ mod tests {
         let doc =
             json!({"linkset": [{"anchor": uri, "describedby": [{"href": "d.ttl"}]}]}).to_string();
         let add = r#"[{"op": "add", "path": "/a", "value": 1}]"#;
-        let link =
-            r#"[{"op": "add", "path": "/linkset/0/describedby", "value": [{"href": "d.ttl"}]}]"#;
+        // A blind patch: one that adds a top-level member, whatever the linkset holds.
+        let link = json!([{"op": "add", "path": "/linkset",
+            "value": [{"anchor": uri, "describedby": [{"href": "d.ttl"}]}]}])
+        .to_string();
+        let link = link.as_str();
         let send =
             |who: Agent, method: &'static str, path: String, h: Vec<(&'static str, String)>| {
                 let st = st.clone();
@@ -6514,7 +6531,13 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let status = send(bob.clone(), "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::CREATED);
-        let status = send(dave.clone(), "POST", c.clone(), vec![("if-match", "*".into())]).await;
+        let status = send(
+            dave.clone(),
+            "POST",
+            c.clone(),
+            vec![("if-match", "*".into())],
+        )
+        .await;
         assert_eq!(status, StatusCode::CREATED);
         // `*` asks only whether the container exists, so it reads no listing: a page past the
         // last, which a listing would answer with 404, tells a writer nothing about the members.
@@ -10465,6 +10488,87 @@ mod tests {
         assert!(json_patch(&big, &Value::Array(ops), 1024).is_ok());
     }
 
+    /// A writer that may not read a JSON resource learns nothing about its content from a patch:
+    /// one whose outcome depends on the content is refused before it is applied, the same whether
+    /// its path is there or not, and a blind one that cannot apply is refused the same way.
+    #[tokio::test]
+    async fn a_patch_tells_a_writer_without_read_nothing() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, bob) = ("https://dave.example/#me", "https://bob.example/#me");
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave));
+        st.access
+            .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob));
+        let owner = agent("https://owner.example/#me");
+        let (dave, bob) = (agent(dave), agent(bob));
+        let make = |slug: &'static str, body: &'static str| {
+            let (st, owner, root) = (st.clone(), owner.clone(), root.clone());
+            async move {
+                let req = request("POST", "/", &[("slug", slug), ("content-type", JSON)], body);
+                let r = create(&st, &req, &owner, &root).await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                path_of(&hdr(&r, "location")).to_string()
+            }
+        };
+        let doc = make("o.json", r#"{"here": 1}"#).await;
+        let list = make("l.json", "[1]").await;
+        let patch = |who: Agent, path: String, ops: Value| {
+            let st = st.clone();
+            async move {
+                let req = request(
+                    "PATCH",
+                    &path,
+                    &[("content-type", JSON_PATCH)],
+                    &ops.to_string(),
+                );
+                handle(&st, &req, &who).await.status()
+            }
+        };
+        for (op, there) in [
+            ("replace", "/here"),
+            ("replace", "/gone"),
+            ("remove", "/here"),
+            ("remove", "/gone"),
+        ] {
+            let ops = json!([{"op": op, "path": there, "value": 2}]);
+            let status = patch(dave.clone(), doc.clone(), ops.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{op} {there}");
+            // Bob may read, and is told whether it applies.
+            let applies = there == "/here";
+            let status = patch(bob.clone(), doc.clone(), ops).await;
+            assert_eq!(status.is_success(), applies, "{op} {there}: {status}");
+        }
+        let nested = json!([{"op": "add", "path": "/gone/x", "value": 1}]);
+        let status = patch(dave.clone(), doc.clone(), nested.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob.clone(), doc.clone(), nested).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // A blind add applies, and when it cannot (the document is not an object), it is the same
+        // refusal, not the 422 a reader gets.
+        let blind = json!([{"op": "add", "path": "/new", "value": 1}]);
+        let status = patch(dave.clone(), doc.clone(), blind.clone()).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let status = patch(dave.clone(), list.clone(), blind.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob, list, blind).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+    }
+
     #[tokio::test]
     async fn content_reading_patches_need_read() {
         let st = state_with(false).await;
@@ -10478,6 +10582,23 @@ mod tests {
                 &json!([{"op": op, "from": "/a", "path": "/b"}])
             ));
         }
+        // Whether these apply depends on what is there.
+        for op in [
+            json!({"op": "remove", "path": "/a"}),
+            json!({"op": "replace", "path": "/a", "value": 1}),
+            json!({"op": "add", "path": "/a/b", "value": 1}),
+            json!({"op": "add", "path": "/0", "value": 1}),
+            json!({"op": "add", "path": "/-", "value": 1}),
+            json!({"op": "add", "path": "", "value": 1}),
+        ] {
+            assert!(json_patch_reads(&json!([op])), "{op}");
+        }
+        // One member added at the top level does not, however many.
+        assert!(!json_patch_reads(&json!([
+            {"op": "add", "path": "/a", "value": 1},
+            {"op": "add", "path": "/", "value": 1},
+            {"op": "add", "path": "/0a", "value": 1},
+        ])));
         let uri = format!("{BASE}/");
         let denied = patch_read_check(&st, &reads, &uri, &anonymous)
             .await
