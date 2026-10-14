@@ -1,12 +1,13 @@
 //! GH #6936: with a FORMULA as the scope, a `log:includes` / `log:notIncludes` /
-//! `log:supports` pattern bound through a variable is matched as the formula it is bound
-//! to, fully substituted, when that formula is GROUND under the binding (blank nodes are
-//! its existentials), exactly as the same formula written in the rule. Every other bound
-//! value (a non-ground formula included), and every bound pattern with the STORE as the
-//! scope, still matches as the empty pattern, as before (GH #6943): the stratification
-//! does not read a pattern given through a variable.
+//! `log:supports` pattern given through a variable is matched as the stored formula the
+//! variable is DIRECTLY bound to, as stored, when that formula holds no variable at any
+//! depth (its blank nodes are its own existentials), exactly as the same formula written
+//! in the rule. Every other value (a formula holding a variable, so any chained binding,
+//! a non-formula value, an unbound variable), and every bound pattern with the STORE as
+//! the scope, still matches as the empty pattern, as on main (GH #6943): the
+//! stratification does not read a pattern given through a variable.
 
-use sparq_reason::n3::{parser, Term};
+use sparq_reason::n3::{parser, reason_n3_terms_with_limits, ClosureLimits, Term};
 use sparq_reason::{reason_n3_terms_with_cycles, MaterializedN3Graph, NegationCycles};
 
 const EX: &str = "http://ex/";
@@ -120,37 +121,6 @@ fn a_bound_store_scoped_pattern_derived_in_a_later_stratum_still_holds() {
     assert_eq!(text(&src, NegationCycles::Reject).expect("text"), fired("includes", "late"), "{src}");
 }
 
-/// A pattern whose nested formulas are bound through further variables is matched fully
-/// substituted, not with the nested values compared as written: `?f = { :a :p ?o }`,
-/// `?o = { :b :q ?x }`, `?x = :c` is the pattern `{ :a :p { :b :q :c } }`.
-#[test]
-fn a_bound_pattern_is_matched_fully_substituted() {
-    let src = format!(
-        "{} :cfg :f {{ :a :p ?o }}. :cfg :o {{ :b :q ?x }}. :cfg :x :c. :cfg :y :d.",
-        doc(
-            "{ :cfg :f ?f. :cfg :o ?o. :cfg :x ?x. { :a :p { :b :q :c } } log:includes ?f } => { :r :includes :nested }.
-             { :cfg :f ?f. :cfg :o ?o. :cfg :x ?x. { :a :p { :b :q :c } } log:notIncludes ?f } => { :r :notIncludes :nested }.
-             { :cfg :f ?f. :cfg :o ?o. :cfg :y ?x. { :a :p { :b :q :c } } log:notIncludes ?f } => { :r :notIncludes :other }."
-        )
-    );
-    let mut want = fired("includes", "nested");
-    want.extend(fired("notIncludes", "other"));
-    want.sort_by_key(|t| format!("{t:?}"));
-    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
-    assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
-}
-
-/// A bound pattern whose binding refers back to itself fails the run.
-#[test]
-fn a_cyclic_bound_pattern_fails_the_run() {
-    let src = format!(
-        "{} :cfg :cyc {{ :a :p ?f }}.",
-        doc("{ :cfg :cyc ?f. { :a :p :b } log:includes ?f } => { :r :includes :cycle }.")
-    );
-    let err = text(&src, NegationCycles::Reject).expect_err("refused");
-    assert!(err.contains("cyclic binding"), "{err}");
-}
-
 /// Each containment tests its pattern's blank nodes afresh: a witness found by one test is
 /// not carried into the next (on main the first witness leaked into the binding).
 #[test]
@@ -181,4 +151,115 @@ fn a_non_ground_bound_pattern_behaves_as_on_main() {
     );
     assert_eq!(text(&src, NegationCycles::Reject).expect("text"), fired("includes", "open"), "{src}");
     assert_eq!(incremental(&src).expect("incremental"), fired("includes", "open"), "{src}");
+}
+
+/// A stored formula that holds a variable is not followed through the rule's bindings:
+/// `?f = { :a :p ?o }` with `?o = :b` matches as the empty pattern, as on main, so
+/// `log:includes` holds and `log:notIncludes` fails even against a scope that does not
+/// hold `:a :p :b`.
+#[test]
+fn a_chained_binding_takes_the_empty_pattern_path() {
+    let src = format!(
+        "{} :cfg :f {{ :a :p ?o }}. :cfg :o :b.",
+        doc(
+            "{ :cfg :f ?f. :cfg :o ?o. { :a :p :c } log:includes ?f } => { :r :includes :chain }.
+             { :cfg :f ?f. :cfg :o ?o. { :a :p :c } log:notIncludes ?f } => { :r :notIncludes :chain }.
+             { :cfg :f ?f. :cfg :o ?o. { :a :p :c } log:supports ?f } => { :r :supports :chain }."
+        )
+    );
+    let mut want = fired("includes", "chain");
+    want.extend(fired("supports", "chain"));
+    want.sort_by_key(|t| format!("{t:?}"));
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+    assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+}
+
+/// The nested chain of a review: `?f = { :a :p ?o }`, `?o = { :b :q ?x }`, `?x = :c`,
+/// with the scope `{ :a :p ?o }`. The stored formula holds a variable, so the pattern is
+/// the empty one, as on main: `log:includes` holds and `log:notIncludes` fails, which is
+/// also what the inline pattern `{ :a :p ?o }` gives against that scope.
+#[test]
+fn a_formula_scope_naming_the_chain_behaves_as_on_main() {
+    let src = format!(
+        "{} :cfg :f {{ :a :p ?o }}. :cfg :o {{ :b :q ?x }}. :cfg :x :c.",
+        doc(
+            "{ :cfg :f ?f. :cfg :o ?o. :cfg :x ?x. { :a :p ?o } log:includes ?f } => { :r :includes :scope }.
+             { :cfg :f ?f. :cfg :o ?o. :cfg :x ?x. { :a :p ?o } log:notIncludes ?f } => { :r :notIncludes :scope }.
+             { :cfg :f ?f. :cfg :o ?o. :cfg :x ?x. { :a :p ?o } log:includes { :a :p ?o } } => { :r :includes :inline }."
+        )
+    );
+    let mut want = fired("includes", "inline");
+    want.extend(fired("includes", "scope"));
+    want.sort_by_key(|t| format!("{t:?}"));
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+    assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+}
+
+/// `?f = { :a :p ?o }` with `?o` bound to a blank node: the stored formula holds a
+/// variable, so nothing is substituted (the blank never becomes a pattern existential)
+/// and the pattern is the empty one, as on main.
+#[test]
+fn a_variable_bound_to_a_blank_takes_the_empty_pattern_path() {
+    let src = format!(
+        "{} :cfg :f {{ :a :p ?o }}. :cfg :o _:fixed.",
+        doc(
+            "{ :cfg :f ?f. :cfg :o ?o. { :a :p :b } log:includes ?f } => { :r :includes :blank }.
+             { :cfg :f ?f. :cfg :o ?o. { :a :p :b } log:notIncludes ?f } => { :r :notIncludes :blank }."
+        )
+    );
+    assert_eq!(text(&src, NegationCycles::Reject).expect("text"), fired("includes", "blank"), "{src}");
+    assert_eq!(incremental(&src).expect("incremental"), fired("includes", "blank"), "{src}");
+}
+
+/// A ground stored formula with a nested formula is matched as stored, the same as the
+/// formula written inline.
+#[test]
+fn a_ground_nested_bound_pattern_is_matched_as_written_inline() {
+    for (key, want_inc) in [("in", true), ("out", false)] {
+        for bound in [true, false] {
+            let pat = if key == "in" { "{ :a :p { :b :q :c } }" } else { "{ :a :p { :b :q :d } }" };
+            let obj = if bound { "?f" } else { pat };
+            let src = format!(
+                "{} :cfg :{key} {pat}.",
+                doc(&format!(
+                    "{{ :cfg :{key} ?f. {{ :a :p {{ :b :q :c }} }} log:includes {obj} }} => {{ :r :includes :{key} }}.
+                     {{ :cfg :{key} ?f. {{ :a :p {{ :b :q :c }} }} log:notIncludes {obj} }} => {{ :r :notIncludes :{key} }}."
+                ))
+            );
+            let want = if want_inc { fired("includes", key) } else { fired("notIncludes", key) };
+            assert_eq!(text(&src, NegationCycles::Reject).expect("text"), want, "{src}");
+            assert_eq!(incremental(&src).expect("incremental"), want, "{src}");
+        }
+    }
+}
+
+/// The smallest `max_join_rows` under which `src` closes.
+fn least_join_rows(src: &str) -> usize {
+    (0..10_000)
+        .find(|&rows| {
+            let mut l = ClosureLimits::default();
+            l.max_join_rows = rows;
+            reason_n3_terms_with_limits(src, None, None, NegationCycles::Reject, l).is_ok()
+        })
+        .expect("closes within the sweep")
+}
+
+/// A bound pattern is charged to the round's `max_join_rows` allowance, one row per
+/// statement it holds (nested ones included), on top of everything the same formula
+/// written inline is charged: it never costs less than the inline pattern.
+#[test]
+fn a_bound_pattern_is_charged_at_least_as_the_inline_one() {
+    let pat = "{ :a :p :b. :c :p :b. :d :p { :e :q :f } }";
+    let scope = "{ :a :p :b. :c :p :b. :d :p { :e :q :f } }";
+    let at = |obj: &str| {
+        format!(
+            "{} :cfg :big {pat}.",
+            doc(&format!("{{ :cfg :big ?f. {scope} log:includes {obj} }} => {{ :r :includes :big }}."))
+        )
+    };
+    let (bound, inline) = (at("?f"), at(pat));
+    assert_eq!(text(&bound, NegationCycles::Reject).expect("text"), fired("includes", "big"));
+    assert_eq!(text(&inline, NegationCycles::Reject).expect("text"), fired("includes", "big"));
+    let (b, i) = (least_join_rows(&bound), least_join_rows(&inline));
+    assert!(b >= i + 4, "bound {b}, inline {i}");
 }

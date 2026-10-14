@@ -2270,34 +2270,35 @@ fn match_premise_admitted(
                     continue;
                 };
                 // The pattern: the formula written in place, or (GH #6936), with a FORMULA
-                // as the scope, the formula a variable is bound to when it is ground under
-                // the binding (blank nodes are its existentials), fully substituted
-                // ([`bounded::resolve_bound_formula`]). Any other object, a non-ground
-                // bound formula included, and every object with the store as the scope,
-                // still matches as the empty pattern: the stratification does not read a
+                // as the scope, the stored formula a variable is DIRECTLY bound to when it
+                // holds no variable at any depth ([`stored_ground_statements`]). It is
+                // matched as stored, as if written in place: its blank nodes are its own
+                // existentials. Its statements are charged to the round's work allowance
+                // first. Any other object (a chained, open or non-formula value, or an
+                // unbound variable), and every object with the store as the scope, still
+                // matches as the empty pattern: the stratification does not read a
                 // pattern given through a variable (GH #6943).
-                let resolved: Vec<[Term; 3]>;
                 let formula_scope = match &scope_term {
                     Term::Formula(_) => true,
                     Term::Lit(v, _, _) => v == "true",
                     _ => false,
                 };
-                let inner: &[[Term; 3]] = if formula_scope {
-                    match bw.settle(bounded::resolve_bound_formula(&pat[2], &b, &bw.truncated)) {
-                        bounded::BoundFormula::Ground(ts) => {
-                            resolved = ts;
-                            &resolved
-                        }
-                        bounded::BoundFormula::Open => written,
-                        bounded::BoundFormula::Cyclic => {
-                            bw.nested_error.borrow_mut().get_or_insert_with(|| CYCLIC_BINDING.into());
+                let bound = match &pat[2] {
+                    Term::Var(v) if formula_scope => b.get(v).and_then(|val| match val {
+                        Term::Formula(ts) => stored_ground_statements(ts).map(|n| (ts, n)),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                let inner: &[[Term; 3]] = match bound {
+                    Some((ts, n)) => {
+                        // A spent allowance refuses the run (recorded on it): no match.
+                        if !bw.work.charge(n, &bw.truncated) {
                             continue;
                         }
-                        // A cut, recorded by `settle` (past the size limit, the run's refusal).
-                        bounded::BoundFormula::Refused => continue,
+                        ts
                     }
-                } else {
-                    written
+                    None => written,
                 };
                 let matches: Vec<Binding> = match scope_term {
                     // log:supports searches the closure in place: no term is built.
@@ -2955,11 +2956,6 @@ fn frees_quoted_universal(t: &Term) -> bool {
     go(t, 0)
 }
 
-/// A variable binding that refers back to itself, met while resolving a containment
-/// pattern bound through a variable ([`bounded::resolve_bound_formula`]).
-const CYCLIC_BINDING: &str = "N3: a containment pattern bound through a variable has a cyclic \
-    binding (a variable bound, through other bindings, to a term holding itself)";
-
 /// The refusal for a rule antecedent no engine can match soundly (GH #6754; support is
 /// tracked in GH #6882).
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
@@ -3183,6 +3179,27 @@ fn formula_statements(ts: &[[Term; 3]]) -> usize {
         }
     }
     n
+}
+
+/// The statements of the stored formula `ts` and of every formula nested in it, when it
+/// holds no variable at any depth (GH #6936); `None` when it holds one. The walk uses an
+/// explicit stack, so a deep term takes no stack per level.
+fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
+    let mut n = ts.len();
+    let mut stack: Vec<&Term> = ts.iter().flatten().collect();
+    while let Some(t) = stack.pop() {
+        match t {
+            Term::Var(_) => return None,
+            Term::Formula(rs) => {
+                n = n.saturating_add(rs.len());
+                stack.extend(rs.iter().flatten());
+            }
+            Term::List(ms) => stack.extend(ms),
+            Term::Triple(tr) => stack.extend(tr.iter()),
+            _ => {}
+        }
+    }
+    Some(n)
 }
 
 /// The search of [`formula_unify`].

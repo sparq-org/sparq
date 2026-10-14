@@ -168,17 +168,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
-  / `log:notIncludes` / `log:supports` pattern bound through a variable to a GROUND
-  formula (no variable at any depth once the rule's bindings are applied, through their
-  whole chain; blank nodes allowed) is matched as that formula, fully substituted, the
-  same as the formula written in the rule. It was matched as the empty pattern, so
-  `log:includes` held whatever the formula held and `log:notIncludes` never fired. Any
-  other bound value, a formula that still holds a variable included, and every bound
-  pattern with the store as the scope, still match as the empty pattern (#6943). A cyclic
-  binding chain fails the run; a substituted pattern past the run's term-size or
-  term-depth allowance is a cut. Each containment matches its pattern's blank nodes
-  afresh: a witness found by one `log:includes` no longer constrains the next one in the
-  premise. (refs #6936, #6943)
+  / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to
+  a stored formula that holds no variable at any depth is matched as that formula, as
+  stored (its blank nodes are its existentials), the same as the formula written in the
+  rule; its statements are charged to the round's `max_join_rows` allowance. It was
+  matched as the empty pattern, so `log:includes` held whatever the formula held and
+  `log:notIncludes` never fired. Every other value (a formula holding a variable, a
+  non-formula value, an unbound variable) and every bound pattern with the store as the
+  scope still match as the empty pattern (#6943). Each containment matches its pattern's
+  blank nodes afresh: a witness found by one `log:includes` no longer constrains the next
+  one in the premise. (refs #6936, #6943)
 
 ## [0.1.6] - 2026-10-13
 

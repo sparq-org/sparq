@@ -106,17 +106,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
-// A log:includes / log:notIncludes / log:supports PATTERN reached through a variable is
-// matched, with a { … } formula (or {}) as the scope, as the bound formula fully
-// substituted, only when that formula is GROUND under the rule's bindings (no variable at
-// any depth; blank nodes are its existentials), exactly as if written in the rule (GH
-// #6936). Any other bound value (a formula still holding a variable included), and EVERY
-// bound pattern with the STORE as the scope, matches as the EMPTY pattern (includes holds,
-// notIncludes fails) — the stratification does not read a variable pattern; full matching
-// is https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. A
-// cyclic binding chain fails the run; a substituted pattern past max_term_bytes or the
-// term-depth limit is a cut. Each containment matches its blanks afresh (no witness
-// carries over to the next containment).
+// A log:includes / log:notIncludes / log:supports PATTERN given through a variable is
+// matched, with a { … } formula (or {}) as the scope, as the stored formula the variable
+// is DIRECTLY bound to, as stored, only when that formula holds NO variable at any depth
+// (blank nodes are its existentials), exactly as if written in the rule (GH #6936); its
+// statements are charged to max_join_rows. Any other value (a formula holding a variable,
+// so a chained binding is not followed; a non-formula value; an unbound variable), and
+// EVERY bound pattern with the STORE as the scope, matches as the EMPTY pattern (includes
+// holds, notIncludes fails), as before; full matching is
+// https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. Each
+// containment matches its blanks afresh (no witness carries over to the next one).
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
