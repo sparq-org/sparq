@@ -599,15 +599,28 @@ fn float_lexical_ok(s: &str) -> bool {
 }
 
 fn double_value(lex: &str) -> Result<f64, ValueError> {
+    ieee_value::<f64>(lex, f64::INFINITY, f64::NAN)
+}
+
+/// Rounds the literal once, to the target precision (going through `f64` first can round a
+/// `float` twice).
+fn float_value(lex: &str) -> Result<f32, ValueError> {
+    ieee_value::<f32>(lex, f32::INFINITY, f32::NAN)
+}
+
+fn ieee_value<F>(lex: &str, inf: F, nan: F) -> Result<F, ValueError>
+where
+    F: std::str::FromStr + std::ops::Neg<Output = F>,
+{
     let s = collapse(lex);
     if !float_lexical_ok(&s) {
         return Err(ValueError::IllTyped);
     }
     Ok(match s.as_str() {
-        "INF" | "+INF" => f64::INFINITY,
-        "-INF" => f64::NEG_INFINITY,
-        "NaN" => f64::NAN,
-        _ => s.parse::<f64>().map_err(|_| ValueError::IllTyped)?,
+        "INF" | "+INF" => inf,
+        "-INF" => -inf,
+        "NaN" => nan,
+        _ => s.parse::<F>().map_err(|_| ValueError::IllTyped)?,
     })
 }
 
@@ -645,7 +658,11 @@ fn hex_value(lex: &str) -> Result<Vec<u8>, ValueError> {
 }
 
 fn base64_value(lex: &str) -> Result<Vec<u8>, ValueError> {
-    let s: String = lex.chars().filter(|c| !c.is_whitespace()).collect();
+    // The whiteSpace facet is `collapse`: only XML whitespace may appear.
+    let s: String = lex
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '\t' | '\n' | '\r'))
+        .collect();
     if !s.len().is_multiple_of(4) {
         return Err(ValueError::IllTyped);
     }
@@ -899,7 +916,7 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
             })
         }
         Float => {
-            let d = double_value(lex)? as f32;
+            let d = float_value(lex)?;
             Value::Float(if d.is_nan() {
                 f32::NAN.to_bits()
             } else {

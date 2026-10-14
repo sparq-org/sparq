@@ -9,8 +9,8 @@ use oxrdf::{NamedNode, Term as OTerm};
 use sparq_core::dict::{Dict, Id};
 use sparq_core::Graph;
 use sparq_reason_dl::owl2dl::model::{
-    Axiom, ClassExpression as CE, DataRange as DR, EntityKind, Individual, Literal,
-    ObjectProperty as OP,
+    AnnotationTarget, Axiom, ClassExpression as CE, DataRange as DR, EntityKind, Individual,
+    Literal, ObjectProperty as OP,
 };
 use sparq_reason_dl::owl2dl::{check_dl, extract, ExtractErrorKind, Ontology, ViolationKind};
 
@@ -944,4 +944,105 @@ fn base64_and_xml_names_follow_their_grammars() {
     // U+0301 (a combining accent) is a NameChar but not alphabetic.
     assert!(parse_value("e\u{301}", &nc, None).is_ok());
     assert!(parse_value("\u{301}e", &nc, None).is_err());
+}
+
+#[test]
+fn only_three_characteristics_declare_an_object_property() {
+    let base = ":a a owl:NamedIndividual . :b a owl:NamedIndividual . :a :p :b .";
+    for ch in [
+        "AsymmetricProperty",
+        "ReflexiveProperty",
+        "IrreflexiveProperty",
+    ] {
+        let v = violations(&format!("{base} :p a owl:{ch} ."));
+        assert!(v.contains(&ViolationKind::Undeclared), "{ch}: {v:?}");
+    }
+    for ty in ["rdfs:Class", "owl:DeprecatedClass"] {
+        let v = violations(&format!(":A a {ty} . :x a owl:NamedIndividual , :A ."));
+        assert!(v.contains(&ViolationKind::Undeclared), "{ty}: {v:?}");
+    }
+}
+
+#[test]
+fn annotations_on_axiom_nodes_are_kept_and_checked() {
+    let body = ":a a owl:NamedIndividual . :b a owl:NamedIndividual .
+        [] a owl:AllDifferent ; owl:members ( :a :b ) ; rdfs:comment \"abc\"^^xsd:integer .";
+    let (d, _, o) = ok(body);
+    assert_eq!(o.annotations.len(), 1);
+    assert!(matches!(
+        o.annotations[0].target,
+        AnnotationTarget::Axiom(_)
+    ));
+    assert!(!check_dl(&d, &o).is_dl());
+}
+
+#[test]
+fn an_ontology_annotation_can_be_annotated() {
+    let (_, _, o) = ok("<http://ex/o> a owl:Ontology ; rdfs:comment \"c\" .
+        [] a owl:Annotation ; owl:annotatedSource <http://ex/o> ; owl:annotatedProperty rdfs:comment ;
+           owl:annotatedTarget \"c\" ; rdfs:label \"x\" .");
+    assert_eq!(o.annotations.len(), 2);
+    assert_eq!(o.annotations[1].target, AnnotationTarget::Annotation(0));
+}
+
+#[test]
+fn annotation_provenance_uses_input_indices() {
+    let (d, mut t) = parse("<http://ex/o> a owl:Ontology ; rdfs:comment \"x\"^^xsd:integer .");
+    t.insert(0, t[0]);
+    let o = extract(&d, &t).unwrap();
+    let i = t
+        .iter()
+        .rposition(|x| x[1] == iri(&d, "http://www.w3.org/2000/01/rdf-schema#comment"))
+        .unwrap();
+    assert_eq!(o.annotations[0].source, vec![i]);
+}
+
+#[test]
+fn annotating_an_assertion_does_not_change_how_it_is_read() {
+    let plain = ":a a owl:NamedIndividual . :a :note \"x\" .";
+    let annotated = format!(
+        "{plain} [] a owl:Axiom ; owl:annotatedSource :a ; owl:annotatedProperty :note ;
+            owl:annotatedTarget \"x\" ; rdfs:comment \"c\" ."
+    );
+    let (_, _, a) = ok(plain);
+    let (_, _, b) = ok(&annotated);
+    assert_eq!(logical(&a), logical(&b));
+}
+
+#[test]
+fn base64_whitespace_is_xml_whitespace_only() {
+    use sparq_reason_dl::owl2dl::datatypes::parse_value;
+    let b64 = format!("{XSD}base64Binary");
+    assert!(parse_value("aG k=", &b64, None).is_ok());
+    assert!(parse_value("aGk=\u{B}", &b64, None).is_err());
+    assert!(parse_value("aG\u{A0}k=", &b64, None).is_err());
+}
+
+#[test]
+fn float_literals_round_once() {
+    use sparq_reason_dl::owl2dl::datatypes::parse_value;
+    let f = format!("{XSD}float");
+    let a = parse_value(
+        "1.000000059604644776257986737988403547205962240695953369140625",
+        &f,
+        None,
+    )
+    .unwrap();
+    assert_ne!(a, parse_value("1.0", &f, None).unwrap());
+}
+
+#[test]
+fn unshared_expressions_are_not_charged() {
+    // Deep unshared nesting: charging each first decode for its whole subtree would cost
+    // quadratically in the depth and pass the expansion cap.
+    let depth = 60;
+    let mut s = String::from(":r a owl:ObjectProperty . :B a owl:Class .\n");
+    for a in 0..1200 {
+        let mut e = ":B".to_string();
+        for _ in 0..depth {
+            e = format!("[ a owl:Restriction ; owl:onProperty :r ; owl:someValuesFrom {e} ]");
+        }
+        s.push_str(&format!(":A{a} a owl:Class ; rdfs:subClassOf {e} .\n"));
+    }
+    ok(&s);
 }

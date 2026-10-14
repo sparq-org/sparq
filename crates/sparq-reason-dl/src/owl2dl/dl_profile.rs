@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
                     ),
                     &src,
                 );
-                continue;
+                // Not declared either (a declaration of it is a violation of its own).
             }
             let has_decl = declared
                 .get(&id)
@@ -302,7 +302,8 @@ impl<'a> Checker<'a> {
                     ),
                     source: ann.source.clone(),
                 });
-            } else if !has_decl {
+            }
+            if !has_decl {
                 self.out.push(Violation {
                     kind: ViolationKind::Undeclared,
                     message: format!(

@@ -5,21 +5,23 @@
 // the check must catch (undeclared and punned entities, reserved vocabulary, non-simple
 // properties under restricted constructs, irregular chains, ill-typed literals, bad facets,
 // undefined datatypes, anonymous-individual cycles). The reference checker's verdict for each
-// seed is recorded in `tests/data/owl2dl_profile_expected.txt`. Our verdict must agree
-// whenever we give one: "unknown" (a restriction we do not check) is allowed, a different
-// definite answer is not. The one exception: where the reference accepts an ontology and every
-// violation we report is one the reference does not check (`REFERENCE_UNCHECKED`, each with
-// the restriction it skips). Each of those kinds is pinned by its own test in
-// `owl2dl_extract.rs`.
+// seed, and the kinds of violation it reports, are recorded in
+// `tests/data/owl2dl_profile_expected.txt`. Whenever we give a verdict it must agree, and so
+// must the SET of violation kinds (the reference's class names mapped onto ours by
+// `reference_kind`). "Unknown" (a restriction we do not check) is allowed, a different
+// definite answer is not. Two kinds of exception are listed, each with its reason:
+// violations the reference does not check (`REFERENCE_UNCHECKED`; each is pinned by its own
+// test in `owl2dl_extract.rs`), and per-seed kind differences that come from the reference's
+// RDF parser rather than from the profile (`REFERENCE_ARTIFACTS`).
 //
 // To regenerate the answers, dump the corpus with
 // `OWL2DL_PROFILE_DUMP=<dir> cargo test -p sparq-reason-dl --test owl2dl_profile_oracle`, run
 // the reference checker over `<dir>/*.ttl` in seed order, and write `FILE <name>` /
-// `INDL true|false` blocks.
+// `INDL true|false` / `V <violation class>` blocks.
 
 use sparq_core::Graph;
 use sparq_reason_dl::owl2dl::{check_dl, extract, ViolationKind};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 const PRE: &str = r#"@prefix : <http://ex/> .
@@ -65,6 +67,79 @@ const REFERENCE_UNCHECKED: &[(ViolationKind, &str, &str)] = &[
         "§5.8.1: the reference's RDF parser declares a property it types from a property axiom",
     ),
 ];
+
+/// Per-seed differences in violation KINDS that come from the reference's RDF parser, not
+/// from a disagreement about OWL 2 DL: (seed, kind, why).
+const REFERENCE_ARTIFACTS: &[(u64, &str, &str)] = &[
+    (
+        2,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        31,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        73,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        305,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        345,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        363,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        432,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        571,
+        "IllegalPunning",
+        PUN,
+    ),
+    (
+        23,
+        "IrregularPropertyHierarchy",
+        "r1∘r0 ⊑ r2 with r1 ≡ r2 needs r1 < r2 while r2 →* r1 (§11.2); the reference treats r1 as r2",
+    ),
+    (
+        142,
+        "InsufficientOperands",
+        "the reference's parser drops a DisjointObjectProperties axiom over an undeclared property",
+    ),
+    (
+        215,
+        "InsufficientOperands",
+        "the reference's parser drops a DisjointObjectProperties axiom over an undeclared property",
+    ),
+    (
+        516,
+        "NonSimpleProperty",
+        "the restricted property is undeclared and has a chain; the reference's parser drops the chain",
+    ),
+    (
+        592,
+        "NonSimpleProperty",
+        "the undeclared property is equivalent to a transitive one; the reference's parser drops the equivalence",
+    ),
+];
+
+const PUN: &str =
+    "the reference's parser reads an undeclared property as two kinds and reports a pun";
 
 struct Rng(u64);
 
@@ -238,16 +313,39 @@ fn ontology(seed: u64) -> String {
     out
 }
 
-fn expected() -> BTreeMap<u64, bool> {
+/// The reference checker's violation class names, as our [`ViolationKind`] names.
+fn reference_kind(name: &str) -> &'static str {
+    match name {
+        n if n.starts_with("UseOfUndeclared") => "Undeclared",
+        n if n.starts_with("UseOfReservedVocabulary") => "ReservedVocabulary",
+        n if n.starts_with("UseOfNonSimpleProperty") => "NonSimpleProperty",
+        "UseOfPropertyInChainCausesCycle" => "IrregularPropertyHierarchy",
+        "LexicalNotInLexicalSpace" => "IllTypedLiteral",
+        "InsufficientPropertyExpressions" | "InsufficientOperands" => "InsufficientOperands",
+        "UseOfIllegalFacetRestriction" => "InvalidFacet",
+        "IllegalPunning" => "IllegalPunning",
+        other => panic!("unmapped reference violation {other}"),
+    }
+}
+
+/// Per seed: the reference verdict and the kinds of violation it reports.
+fn expected() -> BTreeMap<u64, (bool, BTreeSet<&'static str>)> {
     let text = include_str!("data/owl2dl_profile_expected.txt");
-    let mut out = BTreeMap::new();
+    let mut out: BTreeMap<u64, (bool, BTreeSet<&'static str>)> = BTreeMap::new();
     let mut seed = None;
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("FILE ") {
             let stem = rest.rsplit('/').next().unwrap().trim_end_matches(".ttl");
-            seed = Some(stem.trim_start_matches("seed").parse::<u64>().unwrap());
+            let s = stem.trim_start_matches("seed").parse::<u64>().unwrap();
+            seed = Some(s);
+            out.insert(s, (false, BTreeSet::new()));
         } else if let Some(v) = line.strip_prefix("INDL ") {
-            out.insert(seed.expect("FILE first"), v == "true");
+            out.get_mut(&seed.expect("FILE first")).unwrap().0 = v == "true";
+        } else if let Some(v) = line.strip_prefix("V ") {
+            out.get_mut(&seed.expect("FILE first"))
+                .unwrap()
+                .1
+                .insert(reference_kind(v));
         }
     }
     out
@@ -272,32 +370,63 @@ fn profile_differential() {
     for seed in 0..SEEDS {
         let body = ontology(seed);
         let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").unwrap();
-        let want = *expected
+        let (want, want_kinds) = expected
             .get(&seed)
             .unwrap_or_else(|| panic!("no recorded answer for seed {seed}"));
-        let (got, why, only_unchecked_by_reference) = match extract(&d, &t) {
-            Ok(o) => {
-                let r = check_dl(&d, &o);
-                let tolerated = r.violations.iter().all(|v| {
+        let o = match extract(&d, &t) {
+            Ok(o) => o,
+            // A graph the mapping refuses is not OWL 2 DL either.
+            Err(e) => {
+                if *want {
+                    failures.push(format!(
+                        "seed {seed}: reference true, ours refused: {e}\n{body}"
+                    ));
+                } else {
+                    agree += 1;
+                }
+                continue;
+            }
+        };
+        let r = check_dl(&d, &o);
+        // A kind only we report is accepted when every violation of it is one the reference
+        // does not check.
+        // An extraction note is ours alone: it explains how a triple was read.
+        let got_kinds: BTreeSet<String> = r
+            .violations
+            .iter()
+            .filter(|v| v.kind != ViolationKind::ExtractionNote)
+            .map(|v| format!("{:?}", v.kind))
+            .collect();
+        let beyond_reference = |k: &str| {
+            r.violations
+                .iter()
+                .filter(|v| format!("{:?}", v.kind) == k)
+                .all(|v| {
                     REFERENCE_UNCHECKED
                         .iter()
-                        .any(|(k, frag, _)| v.kind == *k && v.message.contains(frag))
-                });
-                (
-                    r.verdict(),
-                    format!("{:?} {:?}", r.violations, r.unchecked),
-                    tolerated,
-                )
-            }
-            // A graph the mapping refuses is not OWL 2 DL either.
-            Err(e) => (Some(false), e.to_string(), false),
+                        .any(|(rk, frag, _)| v.kind == *rk && v.message.contains(frag))
+                })
         };
-        match got {
-            Some(v) if v == want => agree += 1,
+        let want_kinds: BTreeSet<String> = want_kinds.iter().map(|k| k.to_string()).collect();
+        let allowed = REFERENCE_ARTIFACTS
+            .iter()
+            .filter(|(s, _, _)| *s == seed)
+            .map(|(_, k, _)| k.to_string())
+            .collect::<BTreeSet<_>>();
+        let diff: BTreeSet<&String> = got_kinds
+            .difference(&want_kinds)
+            .filter(|k| !beyond_reference(k))
+            .chain(want_kinds.difference(&got_kinds))
+            .filter(|k| !allowed.contains(*k))
+            .collect();
+        let only_beyond = !got_kinds.is_empty() && got_kinds.iter().all(|k| beyond_reference(k));
+        let why = format!("{:?} {:?}", r.violations, r.unchecked);
+        match r.verdict() {
             None => unknown += 1,
-            Some(false) if want && only_unchecked_by_reference => tolerated += 1,
+            Some(v) if v == *want && diff.is_empty() => agree += 1,
+            Some(false) if *want && only_beyond => tolerated += 1,
             Some(v) => failures.push(format!(
-                "seed {seed}: reference {want}, ours {v}: {why}\n{body}"
+                "seed {seed}: reference {want}, ours {v}; kinds differ in {diff:?}: {why}\n{body}"
             )),
         }
     }
@@ -305,12 +434,12 @@ fn profile_differential() {
         failures.is_empty(),
         "{} of {SEEDS} seeds disagree ({agree} agree, {unknown} unknown, {tolerated} beyond the reference):\n{}",
         failures.len(),
-        failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n")
+        failures.iter().take(40).cloned().collect::<Vec<_>>().join("\n")
     );
     // The check must decide most of the corpus, not hide behind "unknown" or the tolerance.
-    assert!(unknown * 4 < SEEDS as usize, "{unknown} of {SEEDS} unknown");
+    assert!(unknown * 20 < SEEDS as usize, "{unknown} of {SEEDS} unknown");
     assert!(
-        agree * 4 > SEEDS as usize * 3,
+        agree * 10 > SEEDS as usize * 8,
         "only {agree} of {SEEDS} agree"
     );
 }

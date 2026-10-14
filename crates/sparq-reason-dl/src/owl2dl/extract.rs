@@ -40,8 +40,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id, NO_ID};
 
 /// Nesting depth past which a class expression / data range is refused (guards the
-/// recursive decoders against adversarially deep graphs).
-const MAX_DEPTH: usize = 256;
+/// recursive decoders, and the recursive passes over the model after them, against
+/// adversarially deep graphs on a default-sized thread stack).
+const MAX_DEPTH: usize = 64;
 
 /// Largest cardinality the mapping accepts. Larger values are refused as unsupported: the
 /// tableau would have to create that many successors.
@@ -50,8 +51,10 @@ pub const MAX_CARDINALITY: u32 = 1_000_000;
 /// A decoded expression with its provenance, and its size and height.
 type Cached<T> = ((T, Vec<usize>), usize, usize);
 
-/// The most model nodes and provenance entries extraction builds. A blank node shared by many
-/// axioms is copied into each, so without a bound a small graph could expand without limit.
+/// The most model nodes and provenance entries extraction may copy from blank nodes shared
+/// by several axioms. Each copy is a fresh expression, so without a bound a small graph
+/// could expand without limit; decoding a node the first time is not charged, as its size is
+/// bounded by its own triples.
 pub const MAX_EXPANSION: usize = 8_000_000;
 
 /// Why the mapping refused a graph.
@@ -395,14 +398,21 @@ impl<'a> Extractor<'a> {
 
     fn declarations(&mut self) -> Result<()> {
         let v = self.v.clone();
-        // Mapping Table 6: a characteristic only object properties have also declares one.
+        // Mapping Table 6: three characteristics also declare an object property.
         let mut implied: Vec<(Id, usize)> = Vec::new();
         for i in 0..self.triples.len() {
             let [s, p, o] = self.triples[i];
             if p != v.ty || !is_iri(self.dict, s) {
                 continue;
             }
-            let kind = if o == v.owl_class || o == v.rdfs_class || o == v.deprecated_class {
+            if o == v.rdfs_class || o == v.deprecated_class {
+                // Table 5 drops these typings; they read `s` as a class but declare nothing,
+                // so a class typed only this way is undeclared.
+                self.classes.insert(s);
+                self.consume(i);
+                continue;
+            }
+            let kind = if o == v.owl_class {
                 Some(EntityKind::Class)
             } else if o == v.rdfs_datatype {
                 Some(EntityKind::Datatype)
@@ -418,16 +428,11 @@ impl<'a> Extractor<'a> {
                 None
             };
             let Some(kind) = kind else {
-                // Characteristics that only object properties can have (Table 5).
-                if [
-                    v.inverse_functional,
-                    v.transitive,
-                    v.symmetric,
-                    v.asymmetric,
-                    v.reflexive,
-                    v.irreflexive,
-                ]
-                .contains(&o)
+                // Characteristics only object properties can have read `s` as one; only
+                // three of them declare it (Table 6).
+                if [v.asymmetric, v.reflexive, v.irreflexive].contains(&o) && o != NO_ID {
+                    self.add_kind(s, PropKind::Object);
+                } else if [v.inverse_functional, v.transitive, v.symmetric].contains(&o)
                     && o != NO_ID
                 {
                     self.add_kind(s, PropKind::Object);
@@ -631,11 +636,9 @@ impl<'a> Extractor<'a> {
         let mut logical_use: FxHashSet<Id> = FxHashSet::default();
         for t in &self.triples {
             let [s, p, o] = *t;
-            if p == v.on_property
-                || p == v.inverse_of
-                || p == v.assertion_property
-                || p == v.annotated_property
-            {
+            // `owl:annotatedProperty` is not a use: annotating a triple does not change how
+            // its predicate is read.
+            if p == v.on_property || p == v.inverse_of || p == v.assertion_property {
                 logical_use.insert(o);
             }
             if p == v.domain
@@ -986,7 +989,8 @@ impl<'a> Extractor<'a> {
         self.visiting.remove(&node);
         let r = r?;
         let (size, height) = class_size(&r.0);
-        self.charge(size + r.1.len(), depth, at)?;
+        // A first decode builds no more than its own triples; only copies are charged.
+        self.charge(0, depth, at)?;
         self.class_cache
             .insert(node, (r.clone(), size + r.1.len(), height));
         Ok(r)
@@ -1356,7 +1360,8 @@ impl<'a> Extractor<'a> {
         self.visiting.remove(&node);
         let r = r?;
         let (size, height) = range_size(&r.0);
-        self.charge(size + r.1.len(), depth, at)?;
+        // A first decode builds no more than its own triples; only copies are charged.
+        self.charge(0, depth, at)?;
         self.range_cache
             .insert(node, (r.clone(), size + r.1.len(), height));
         Ok(r)
@@ -1507,6 +1512,9 @@ impl<'a> Extractor<'a> {
             .filter(|t| t[1] == v.ty && t[2] == v.ontology)
             .map(|t| t[0])
             .collect();
+        // Annotations by (annotated node, property, value) → index, so an `owl:Annotation`
+        // reification can name an ontology annotation or another reified annotation.
+        let mut by_node: FxHashMap<(Id, Id, AnnotationValue), usize> = FxHashMap::default();
         for h in headers {
             for i in self.by_subject.get(&h).cloned().unwrap_or_default() {
                 let [_, p, o] = self.triples[i];
@@ -1519,17 +1527,18 @@ impl<'a> Extractor<'a> {
                     self.consume(i);
                 } else if self.is_annotation_predicate(p) {
                     let value = self.annotation_value(o, i)?;
+                    by_node.insert((h, p, value.clone()), self.out.annotations.len());
                     self.out.annotations.push(Annotation {
                         target: AnnotationTarget::Ontology(h),
                         property: p,
                         value,
-                        source: vec![i],
+                        source: self.src(&[i]),
                     });
                     self.consume(i);
                 }
             }
         }
-        self.reifications()?;
+        self.reifications(&mut by_node)?;
         // Typing triples first, so an n-ary axiom or negative assertion node is read from its
         // `rdf:type` whatever order its triples come in.
         let order: Vec<usize> = (0..self.triples.len())
@@ -1573,7 +1582,10 @@ impl<'a> Extractor<'a> {
     /// names one triple of the graph and carries its annotations; an `owl:Annotation` node
     /// names one annotation and carries annotations of it. Anything else on such a node is an
     /// error.
-    fn reifications(&mut self) -> Result<()> {
+    fn reifications(
+        &mut self,
+        by_node: &mut FxHashMap<(Id, Id, AnnotationValue), usize>,
+    ) -> Result<()> {
         let v = self.v.clone();
         let nodes = |ty: Id| -> Vec<(Id, usize)> {
             self.triples
@@ -1587,8 +1599,6 @@ impl<'a> Extractor<'a> {
         let mut nested = nodes(v.owl_annotation);
         axioms.sort_unstable();
         nested.sort_unstable();
-        // Annotations read from each reification node: (node, property, value) → index.
-        let mut by_node: FxHashMap<(Id, Id, AnnotationValue), usize> = FxHashMap::default();
         for (node, ti) in axioms {
             let (sv, si) = self.required(node, v.annotated_source, ti)?;
             let (pv, pi) = self.required(node, v.annotated_property, ti)?;
@@ -1606,9 +1616,9 @@ impl<'a> Extractor<'a> {
             };
             self.reified_annotations(
                 node,
-                AnnotationTarget::Axiom(main),
+                AnnotationTarget::Axiom(self.original[main]),
                 &[ti, si, pi, oi],
-                &mut by_node,
+                by_node,
             )?;
         }
         // Nested annotations may themselves be annotated: resolve to a fixpoint.
@@ -1626,7 +1636,7 @@ impl<'a> Extractor<'a> {
                         node,
                         AnnotationTarget::Annotation(k),
                         &[ti, si, pi, oi],
-                        &mut by_node,
+                        by_node,
                     )?,
                     None => rest.push((node, ti)),
                 }
@@ -1674,7 +1684,7 @@ impl<'a> Extractor<'a> {
                 target,
                 property: p,
                 value,
-                source: vec![i],
+                source: self.src(&[i]),
             });
             self.consume(i);
         }
@@ -2159,15 +2169,22 @@ impl<'a> Extractor<'a> {
         })
     }
 
-    /// An n-ary axiom node may carry only its typing and member triples (annotations of
-    /// the axiom are allowed and carry no logic).
+    /// An n-ary axiom node may carry only its typing and member triples, and annotations of
+    /// the axiom, which are kept with the typing triple as the axiom's main triple.
     fn only_these(&mut self, s: Id, typing: usize, used: &[usize]) -> Result<()> {
         for j in self.by_subject.get(&s).cloned().unwrap_or_default() {
             if j == typing || used.contains(&j) {
                 continue;
             }
-            let p = self.triples[j][1];
-            if self.kinds(p) == [PropKind::Annotation] {
+            let [_, p, o] = self.triples[j];
+            if self.is_annotation_predicate(p) {
+                let value = self.annotation_value(o, j)?;
+                self.out.annotations.push(Annotation {
+                    target: AnnotationTarget::Axiom(self.original[typing]),
+                    property: p,
+                    value,
+                    source: self.src(&[j]),
+                });
                 self.consume(j);
                 continue;
             }
