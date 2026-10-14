@@ -519,6 +519,62 @@ impl SecretKey {
         );
         signature_to_hex(&sig)
     }
+
+    /// Sign the METHOD-BOUND status attestation message
+    /// ([`commitment_message_with_status_and_scheme`], `ZKSIG_M3`): the audit-#12
+    /// `(C(G), salt, status_ref)` plus the commitment method's
+    /// [`scheme_iri_to_field`] digest. A verifier that authenticates the
+    /// commitment method recovers the method by finding which recognised method's
+    /// digest makes this signature verify, so the method becomes ISSUER-ATTESTED
+    /// rather than read from a prover-supplied field.
+    ///
+    /// `scheme_digest` is [`scheme_iri_to_field`]`(method.scheme_iri())`. Same
+    /// deterministic `(sk, m)` nonce discipline as [`Self::sign_commitment`].
+    /// Purely additive: it signs a DIFFERENT message from
+    /// [`Self::sign_commitment_with_status`] and changes no existing signature.
+    pub fn sign_commitment_with_status_and_scheme(
+        &self,
+        commitment: &Fr,
+        salt: &Fr,
+        status_ref: &Fr,
+        scheme_digest: &Fr,
+    ) -> String {
+        let sig = sign_deterministic(
+            self,
+            &commitment_message_with_status_and_scheme(commitment, salt, status_ref, scheme_digest),
+        );
+        signature_to_hex(&sig)
+    }
+
+    /// Sign the METHOD-BOUND **holder** attestation message
+    /// ([`commitment_message_with_holder_and_scheme`], `ZKSIG_M4`): the sq-y464
+    /// `(C(G), salt, status_ref, holder_pk_digest)` plus the commitment method's
+    /// [`scheme_iri_to_field`] digest. This is the one shape that binds a holder
+    /// key AND a commitment method into a single signed object.
+    ///
+    /// `holder_pk_digest` is [`holder_key_digest`]`(hpk)` and `scheme_digest` is
+    /// [`scheme_iri_to_field`]`(method.scheme_iri())`. Same deterministic
+    /// `(sk, m)` nonce discipline as [`Self::sign_commitment`]; purely additive.
+    pub fn sign_commitment_with_holder_and_scheme(
+        &self,
+        commitment: &Fr,
+        salt: &Fr,
+        status_ref: &Fr,
+        holder_pk_digest: &Fr,
+        scheme_digest: &Fr,
+    ) -> String {
+        let sig = sign_deterministic(
+            self,
+            &commitment_message_with_holder_and_scheme(
+                commitment,
+                salt,
+                status_ref,
+                holder_pk_digest,
+                scheme_digest,
+            ),
+        );
+        signature_to_hex(&sig)
+    }
 }
 
 /// Derive a deterministic Schnorr nonce `k` from the secret key and the message
@@ -1012,6 +1068,48 @@ pub fn commitment_message_with_status_and_scheme(
         *commitment,
         *salt,
         *status_ref,
+        *scheme_digest,
+    ])
+}
+
+/// The HOLDER-bound counterpart of [`commitment_message_with_status_and_scheme`]:
+/// [`commitment_message_with_holder`]'s `(C(G), salt_G, status_ref,
+/// holder_pk_digest)` plus the method's [`scheme_iri_to_field`] digest, under its
+/// own domain tag (`ZKSIG_M4`).
+///
+/// # Why this message exists
+/// The method-bound family had only the status-only member (`ZKSIG_M3`). A
+/// holder-bound credential signs the `ZKSIG_C4`
+/// [`commitment_message_with_holder`] message, so there was no way for an issuer
+/// to bind BOTH a holder key AND the commitment method into one signed object —
+/// a holder-bound credential could only ever be method-UNBOUND. This closes that
+/// hole so the method-bound and holder-bound axes compose: every
+/// `(status-only | holder-bound) × (method-unbound | method-bound)` combination
+/// now has exactly one signed-message shape.
+///
+/// # Purely additive
+/// It adds a NEW message shape under a NEW domain tag and changes no existing
+/// message, so every already-issued signature keeps verifying over the message it
+/// was made against. A verifier that authenticates the commitment method treats a
+/// signature over one of the method-UNBOUND shapes as carrying no attested
+/// method, never as carrying a default one.
+///
+/// Research-grade, NOT externally audited (sq-qhy4) — no soundness or privacy
+/// property is claimed as achieved.
+pub fn commitment_message_with_holder_and_scheme(
+    commitment: &Fr,
+    salt: &Fr,
+    status_ref: &Fr,
+    holder_pk_digest: &Fr,
+    scheme_digest: &Fr,
+) -> Fr {
+    const SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME: u64 = 0x5a4b_5349_475f_4d34; // "ZKSIG_M4"
+    poseidon2::hash(&[
+        Fr::from(SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME),
+        *commitment,
+        *salt,
+        *status_ref,
+        *holder_pk_digest,
         *scheme_digest,
     ])
 }
@@ -1528,6 +1626,161 @@ fn from_hex(s: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use ark_std::rand::SeedableRng;
+
+    /// The `ZKSIG_M4` message is pinned to its WIRE DEFINITION, recomputed here
+    /// from the ASCII tag bytes rather than from the implementation's constant:
+    /// the tag is the eight bytes of `"ZKSIG_M4"` big-endian, and the preimage is
+    /// `[tag, commitment, salt, status_ref, holder_pk_digest, scheme_digest]` in
+    /// that order. Pairwise distinctness alone cannot pin the tag VALUE for this
+    /// shape, because `ZKSIG_M4` is the only six-element preimage in the family —
+    /// a re-tagged `M4` would still collide with nothing and still look distinct.
+    #[test]
+    fn the_m4_message_is_poseidon2_over_the_ascii_tag_and_input_order() {
+        let c = Fr::from(7u64);
+        let salt = Fr::from(11u64);
+        let status_ref = Fr::from(13u64);
+        let holder = Fr::from(17u64);
+        let scheme = Fr::from(19u64);
+        let expected = poseidon2::hash(&[
+            Fr::from(u64::from_be_bytes(*b"ZKSIG_M4")),
+            c,
+            salt,
+            status_ref,
+            holder,
+            scheme,
+        ]);
+        assert_eq!(
+            commitment_message_with_holder_and_scheme(&c, &salt, &status_ref, &holder, &scheme),
+            expected
+        );
+    }
+
+    /// Every commitment-message shape in the family must be a DIFFERENT field
+    /// element on the SAME inputs — that is what the per-shape domain tag buys.
+    /// If two shapes collided, a signature made over one would verify as the
+    /// other, and the method-authenticating verifier could read an unbound
+    /// signature as a method-bound one (or one method's as another's).
+    ///
+    /// Driving every shape from the same `(commitment, salt, status_ref,
+    /// holder_digest, scheme_digest)` tuple is deliberate: it removes input
+    /// variation as an explanation, so the only thing separating the outputs is
+    /// the domain tag and the input arity.
+    #[test]
+    fn commitment_message_shapes_are_pairwise_distinct() {
+        let c = Fr::from(7u64);
+        let salt = Fr::from(11u64);
+        let status_ref = Fr::from(13u64);
+        let holder = Fr::from(17u64);
+        let sc_a = scheme_iri_to_field(crate::registry::ZK_SCHEME_POSEIDON2_RDFC10_V1);
+        let sc_b = scheme_iri_to_field(crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2);
+
+        let shapes: Vec<(&str, Fr)> = vec![
+            ("C1", commitment_message(&c)),
+            ("C2", commitment_message_with_salt(&c, &salt)),
+            ("C3", commitment_message_with_status(&c, &salt, &status_ref)),
+            (
+                "C4",
+                commitment_message_with_holder(&c, &salt, &status_ref, &holder),
+            ),
+            ("M2", commitment_message_with_scheme(&c, &salt, &sc_a)),
+            (
+                "M3",
+                commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &sc_a),
+            ),
+            (
+                "M4",
+                commitment_message_with_holder_and_scheme(
+                    &c,
+                    &salt,
+                    &status_ref,
+                    &holder,
+                    &sc_a,
+                ),
+            ),
+            // The SAME method-bound shapes under a DIFFERENT method digest: a
+            // method-bound message must also separate one method from another,
+            // which is what makes the recovered method unambiguous.
+            ("M2/b", commitment_message_with_scheme(&c, &salt, &sc_b)),
+            (
+                "M3/b",
+                commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &sc_b),
+            ),
+            (
+                "M4/b",
+                commitment_message_with_holder_and_scheme(
+                    &c,
+                    &salt,
+                    &status_ref,
+                    &holder,
+                    &sc_b,
+                ),
+            ),
+        ];
+
+        for (i, (name_i, m_i)) in shapes.iter().enumerate() {
+            for (name_j, m_j) in shapes.iter().skip(i + 1) {
+                assert_ne!(
+                    m_i, m_j,
+                    "commitment-message shapes {} and {} collide",
+                    name_i, name_j
+                );
+            }
+        }
+    }
+
+    /// The method-bound signing helpers must produce signatures that verify over
+    /// the matching message and ONLY over it — the property the verifier's
+    /// method authentication rests on.
+    #[test]
+    fn method_bound_signing_helpers_verify_over_their_own_message_only() {
+        let sk = SecretKey::from_seed(42);
+        let pk = sk.public_key();
+        let c = Fr::from(3u64);
+        let salt = Fr::from(5u64);
+        let status_ref = Fr::from(9u64);
+        let holder = Fr::from(21u64);
+        let sc = scheme_iri_to_field(crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2);
+        let other = scheme_iri_to_field(crate::registry::ZK_SCHEME_POSEIDON2_RDFC10_V1);
+
+        let m3_hex = sk.sign_commitment_with_status_and_scheme(&c, &salt, &status_ref, &sc);
+        let m3_sig = signature_from_hex(&m3_hex).expect("signature hex parses");
+        assert!(verify(
+            &pk,
+            &commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &sc),
+            &m3_sig
+        ));
+        // Not over the method-UNBOUND status message, and not under another method.
+        assert!(!verify(
+            &pk,
+            &commitment_message_with_status(&c, &salt, &status_ref),
+            &m3_sig
+        ));
+        assert!(!verify(
+            &pk,
+            &commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &other),
+            &m3_sig
+        ));
+
+        let m4_hex =
+            sk.sign_commitment_with_holder_and_scheme(&c, &salt, &status_ref, &holder, &sc);
+        let m4_sig = signature_from_hex(&m4_hex).expect("signature hex parses");
+        assert!(verify(
+            &pk,
+            &commitment_message_with_holder_and_scheme(&c, &salt, &status_ref, &holder, &sc),
+            &m4_sig
+        ));
+        assert!(!verify(
+            &pk,
+            &commitment_message_with_holder(&c, &salt, &status_ref, &holder),
+            &m4_sig
+        ));
+        // And an M3 signature never verifies as an M4 one over the same tuple.
+        assert!(!verify(
+            &pk,
+            &commitment_message_with_holder_and_scheme(&c, &salt, &status_ref, &holder, &sc),
+            &m3_sig
+        ));
+    }
 
     #[test]
     fn derive_nonce_matches_fixed_bytes() {

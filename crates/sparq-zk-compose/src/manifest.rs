@@ -257,6 +257,59 @@ pub struct CommitmentAttestation {
     pub holder: Option<AttestedHolderBinding>,
 }
 
+impl CommitmentAttestation {
+    /// Build the manifest attestation for a credential whose `<urn:sparq:zk>`
+    /// REGISTRY entry was issued with [`sparq_zk::registry::RegistryEntry::issued_with_status`].
+    ///
+    /// A registry entry's signature is over the METHOD-BOUND `ZKSIG_M3` message
+    /// (`sparq_zk::sig::commitment_message_with_status_and_scheme`), which folds
+    /// the recorded `zk:scheme`'s digest. So an attestation bridged from one
+    /// carries a signature the verifier can AUTHENTICATE the commitment method
+    /// from (see [`crate::method_auth`]) — whereas an attestation assembled by
+    /// hand over the method-unbound `ZKSIG_C3` message authenticates no method.
+    /// This constructor is how an issuer tool gets the method-bound form into a
+    /// manifest without re-deriving the message.
+    ///
+    /// Nothing is recomputed or re-signed: the commitment, salt, key,
+    /// cryptosuite, signature and clear status reference are copied across
+    /// verbatim. The resulting attestation is therefore exactly as valid as the
+    /// entry was, and no more — in particular this performs NO verification, and
+    /// a bridged attestation whose entry's signature is bad is refused by the
+    /// verifier exactly like any other.
+    ///
+    /// `None` when the entry is not a status-bound ATTESTED one: a missing
+    /// issuer key, signature or cryptosuite, or a missing status index or
+    /// version. Fail-closed — an unsigned or status-unbound entry cannot be
+    /// turned into a scan-covering attestation, which the verifier requires to
+    /// be both salt-bound and status-bound.
+    pub fn from_registry_entry(entry: &sparq_zk::registry::RegistryEntry) -> Option<Self> {
+        let (Some(issuer_public_key), Some(signature), Some(cryptosuite)) = (
+            entry.issuer_public_key.clone(),
+            entry.commitment_signature.clone(),
+            entry.cryptosuite.as_ref(),
+        ) else {
+            return None;
+        };
+        let (Some(index), Some(version)) = (entry.status_list_index, entry.status_list_version)
+        else {
+            return None;
+        };
+        Some(CommitmentAttestation {
+            commitment: FieldHex::from_field(&entry.commitment),
+            issuer_public_key,
+            signature,
+            cryptosuite: cryptosuite.as_str().to_string(),
+            salt: Some(FieldHex::from_field(&entry.salt)),
+            status: Some(AttestedStatusRef::clear(index, version)),
+            // A registry entry carries no holder binding, so a bridged
+            // attestation is a bearer one. A holder-bound credential's
+            // attestation is built directly, over the `ZKSIG_C4`/`ZKSIG_M4`
+            // family.
+            holder: None,
+        })
+    }
+}
+
 /// The index + version of a credential's status-list reference as bound under
 /// the issuer signature (audit #12). The list IRI is the manifest's
 /// [`RevocationStatus::status_list`]; the verifier hashes it

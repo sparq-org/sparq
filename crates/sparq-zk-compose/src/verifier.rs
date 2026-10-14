@@ -117,6 +117,13 @@ use crate::manifest::{
 use crate::derivation::{regime_admits, COMPLETENESS_UNDER_ENTAILMENT_UNBUILT};
 // sq-3e5 + sq-h2v: hidden-index revocation root derivation.
 use crate::revocation::merkle_root;
+// Verifier-side commitment-method AUTHENTICATION: the candidate-message set, the
+// pure classification rule, and the relying party's policy over the result. The
+// method is recovered from the issuer signature, never read from the manifest.
+use crate::method_auth::{
+    self, AuthenticatedMethod, AuthenticatedMethods, CommitmentMessageInputs, MethodAuthError,
+    MethodPolicy,
+};
 use sparq_zk::encode::encode_term;
 use sparq_zk::field::{field_from_hex_str, field_to_be_bytes_32, field_to_hex, Fr};
 // codex 2221 HIGH: only the SALT-BOUND `commitment_message_with_salt`
@@ -125,11 +132,13 @@ use sparq_zk::field::{field_from_hex_str, field_to_be_bytes_32, field_to_hex, Fr
 // audit #12: the STATUS-BOUND `commitment_message_with_status` is the
 // scan-verify path's signed message — a scan-covering attestation must bind the
 // status reference (status_ref_digest over the disclosed list/index/version).
-// sq-z8s7 (HolderPoP T3 / B1): the HOLDER-BOUND `commitment_message_with_holder`
-// (ZKSIG_C4) is the signed message for a holder-bound attestation, and `holder_key_digest`
-// recomputes the presented holder key's digest for the clear-key cross-check.
+// The commitment-message shapes themselves are now built by `crate::method_auth`
+// (which owns the candidate set the verifier authenticates a method against), so
+// this module imports only the signature primitives and the digest helpers.
+// `holder_key_digest` recomputes the presented holder key's digest for the
+// clear-key cross-check.
 use sparq_zk::sig::{
-    commitment_message_with_holder, commitment_message_with_status, holder_key_digest,
+    holder_key_digest,
     holder_pop_message, public_key_from_hex, signature_from_hex, status_list_id_to_field,
     status_ref_commit_digest, status_ref_digest, status_ref_fully_committed_digest,
     verify as sig_verify, PublicKey, SignatureScheme,
@@ -186,6 +195,18 @@ pub struct KeySet {
     /// member the prover used.
     // sq-z9l: opt-in hidden-issuer verification depth.
     hidden_issuer_depth: Option<u32>,
+    /// The relying party's policy over the AUTHENTICATED commitment method of
+    /// each attested commitment (see [`crate::method_auth`]). It rides the
+    /// [`KeySet`] because it is an external relying-party input of exactly the
+    /// same kind as the trusted keys themselves — never read from the manifest —
+    /// and because putting it here keeps every public verifier signature
+    /// unchanged, the same way `hidden_issuer_depth` does.
+    ///
+    /// `None` means the caller expressed no preference and
+    /// [`MethodPolicy::current`] applies, which accepts a method-UNBOUND
+    /// attestation; it is stored as an `Option` only so a `Default`/`empty()`
+    /// key set carries no opinion of its own.
+    method_policy: Option<MethodPolicy>,
 }
 
 impl KeySet {
@@ -193,7 +214,7 @@ impl KeySet {
     /// then rejected (fail closed). Useful as the explicit "no source is
     /// authoritative" policy and as a test default.
     pub fn empty() -> Self {
-        KeySet { keys: BTreeSet::new(), hidden_issuer_depth: None }
+        KeySet { keys: BTreeSet::new(), hidden_issuer_depth: None, method_policy: None }
     }
 
     /// Build a trust anchor from the relying party's trusted issuer public keys
@@ -211,7 +232,7 @@ impl KeySet {
             .into_iter()
             .filter_map(|h| public_key_from_hex(h.as_ref()).map(|_| normalize_hex(h.as_ref())))
             .collect();
-        KeySet { keys, hidden_issuer_depth: None }
+        KeySet { keys, hidden_issuer_depth: None, method_policy: None }
     }
 
     /// Enable the HIDDEN-ISSUER attestation path (sq-z9l) at Merkle depth `depth`
@@ -225,6 +246,34 @@ impl KeySet {
     pub fn with_hidden_issuer_depth(mut self, depth: u32) -> Self {
         self.hidden_issuer_depth = Some(depth);
         self
+    }
+
+    /// Set the relying party's [`MethodPolicy`] over the AUTHENTICATED commitment
+    /// method of each attested commitment (builder style, the
+    /// [`Self::with_hidden_issuer_depth`] precedent — so no public verifier
+    /// signature changes).
+    ///
+    /// The verifier does not read a commitment method from the manifest; it
+    /// RECOVERS it from which candidate issuer-signed message the attestation's
+    /// signature verifies over (see [`crate::method_auth`]). This policy decides
+    /// what to do with the answer: whether an attestation that binds NO method is
+    /// accepted ([`MethodPolicy::require_method_bound`] refuses it), and whether
+    /// an attested superseded method is admitted
+    /// ([`MethodPolicy::admit_legacy_dual_leaf_v1`]).
+    ///
+    /// Unset, [`MethodPolicy::current`] applies, which accepts a method-UNBOUND
+    /// attestation — so an existing manifest verifies exactly as it did before
+    /// method authentication existed.
+    #[must_use]
+    pub fn with_method_policy(mut self, policy: MethodPolicy) -> Self {
+        self.method_policy = Some(policy);
+        self
+    }
+
+    /// The effective [`MethodPolicy`]: the one set with
+    /// [`Self::with_method_policy`], else [`MethodPolicy::current`].
+    pub fn method_policy(&self) -> MethodPolicy {
+        self.method_policy.unwrap_or_else(MethodPolicy::current)
     }
 
     /// The [`crate::SignatureMode`]s this key set accepts: always `Revealed` (clear
@@ -1398,6 +1447,29 @@ pub enum CheckError {
     /// different commitment than declared.
     // audit #3.
     InvalidIssuerSignature { commitment: String },
+    /// More than one commitment method's METHOD-BOUND signed message verified
+    /// for the same attestation, so the authenticated commitment method is not
+    /// unique. Fail-closed: the verifier refuses rather than choosing one.
+    ///
+    /// Reaching this would mean two distinct domain-separated messages verified
+    /// under one signature. The refusal exists so the decision rule is TOTAL
+    /// without resting on that being impossible.
+    AmbiguousMethod { commitment: String },
+    /// The attestation's signature verifies only over a method-UNBOUND message
+    /// (`ZKSIG_C3` / `ZKSIG_C4`), so the issuer attested NO commitment method,
+    /// and the relying party's policy requires an authenticated one
+    /// ([`MethodPolicy::require_method_bound`]).
+    ///
+    /// Under the default [`MethodPolicy::current`] this is NOT raised: an
+    /// unbound attestation is accepted, which is what keeps every
+    /// already-issued credential verifying.
+    MethodNotAuthenticated { commitment: String },
+    /// A commitment method WAS authenticated from the issuer signature, and the
+    /// relying party's [`MethodPolicy`] does not admit it — a superseded
+    /// `DualLeafV1` without
+    /// [`MethodPolicy::admit_legacy_dual_leaf_v1`], or the `value-only`
+    /// research dial, which no policy admits.
+    MethodNotAdmitted { commitment: String, method_iri: String },
     /// An attestation's issuer key is not a member of the EXTERNAL trusted
     /// key-set `K` (audit #3, codex #1): a signature by a key outside the
     /// relying-party-supplied trusted set is rejected. The trust anchor is the
@@ -2068,6 +2140,18 @@ impl std::fmt::Display for CheckError {
                 f,
                 "commitment {commitment}: issuer signature does not verify under its declared key (forged/tampered signature or wrong commitment)"
             ),
+            CheckError::AmbiguousMethod { commitment } => write!(
+                f,
+                "commitment {commitment}: more than one commitment method's issuer-signed message verified, so the authenticated commitment method is not unique — refused"
+            ),
+            CheckError::MethodNotAuthenticated { commitment } => write!(
+                f,
+                "commitment {commitment}: the issuer signature attests no commitment method, and the relying party's policy requires an authenticated one (KeySet::with_method_policy + MethodPolicy::require_method_bound)"
+            ),
+            CheckError::MethodNotAdmitted { commitment, method_iri } => write!(
+                f,
+                "commitment {commitment}: the authenticated commitment method {method_iri} is not admitted by the relying party's policy"
+            ),
             CheckError::IssuerKeyNotInKeySet { commitment } => write!(
                 f,
                 "commitment {commitment}: attestation key is not a member of the external trusted key-set K (untrusted issuer)"
@@ -2602,6 +2686,28 @@ pub fn prefilter_manifest_structure(
     // (`skip_query_binding = false`): every stage-1 query-text gate runs, so its
     // behaviour is byte-identical with or without the `extended-fragment` feature.
     prefilter_manifest_structure_impl(manifest, trusted_key_set, revocation_policy, false)
+        .map(|p| p.required)
+}
+
+/// What the structural pre-filter establishes, for the gates that run after it.
+///
+/// `required` is what [`prefilter_manifest_structure`] has always returned (the
+/// cross-graph obligation edges). `methods` is new: the AUTHENTICATED commitment
+/// method of each referenced commitment, which the pre-filter learns while
+/// checking the issuer signatures and which later gates need in order to
+/// recompute the right issuer-signed message.
+///
+/// Crate-private deliberately. The public pre-filter signature is unchanged, so
+/// no caller's types move, and the method map does not become a new public
+/// surface before the gates that consume it exist.
+struct Prefiltered {
+    /// The required cross-graph obligation edges.
+    required: Vec<JoinEdge>,
+    /// Commitment hex (canonical) -> the method its issuer signature attests.
+    /// A commitment absent from the map had no method authenticated, which the
+    /// consumers treat as the method-UNBOUND case — i.e. exactly the behaviour
+    /// that predates method authentication.
+    methods: AuthenticatedMethods,
 }
 
 /// Shared body of [`prefilter_manifest_structure`]. `skip_query_binding` selects
@@ -2634,7 +2740,7 @@ fn prefilter_manifest_structure_impl(
     trusted_key_set: &KeySet,
     revocation_policy: &RevocationPolicy,
     skip_query_binding: bool,
-) -> Result<Vec<JoinEdge>, CheckError> {
+) -> Result<Prefiltered, CheckError> {
     // --- Stage 0: the LANE<->MEMBER pairing + the value-lane-sub-proof refusal,
     // before any other reading of the sub-proofs. A lane constant may only ride
     // the member that constrains that lane's handle domain; `datatype_const` is a
@@ -2860,7 +2966,11 @@ fn prefilter_manifest_structure_impl(
     // hidden-only commitment is no less attested than a clear one — only WHICH
     // issuer signed is hidden.
     let hidden_covered = hidden_issuer_covered_commitments(manifest, trusted_key_set);
-    bind_issuer_attestations(manifest, trusted_key_set, &hidden_covered)?;
+    // Stage 2d also AUTHENTICATES each commitment's commitment method from the
+    // issuer signature and applies the relying party's `MethodPolicy`; the map it
+    // returns is carried out of the pre-filter for the gates that must recompute
+    // an issuer-signed message later.
+    let methods = bind_issuer_attestations(manifest, trusted_key_set, &hidden_covered)?;
 
     // --- Stage 2f: revocation / freshness (audit #12). ---
     // The status reference is now issuer-bound (stage 2d); check the credential's
@@ -2894,7 +3004,7 @@ fn prefilter_manifest_structure_impl(
         bind_joins(manifest)?;
     }
 
-    Ok(required)
+    Ok(Prefiltered { required, methods })
 }
 
 /// Stage 2d: bind every committed graph a verified sub-proof draws triples from to
@@ -2952,11 +3062,128 @@ fn prefilter_manifest_structure_impl(
 /// (c) a signature by a key not in the external K (incl. the prover's own key —
 /// the forge the codex #1 test exercises). The commitment is no longer an
 /// unsigned prover-chosen public input under a prover-chosen trust anchor.
+/// Authenticate the COMMITMENT METHOD one CLEAR attestation's signature attests,
+/// and apply the relying party's [`MethodPolicy`] to the answer.
+///
+/// The single place a clear attestation's signature is turned into an
+/// [`AuthenticatedMethod`], so [`bind_issuer_attestations`] and
+/// [`verify_holder_attestation_signature`] cannot state the rule differently.
+/// It owns the cryptosuite/key/signature parse too: an unknown cryptosuite or
+/// unparseable key or signature makes NO candidate verify, which is reported as
+/// the pre-existing [`CheckError::InvalidIssuerSignature`] — so the error a
+/// manifest with a genuinely bad signature sees is unchanged.
+///
+/// `label` is the commitment hex to name in a refusal (the call sites differ:
+/// one reports the scan's spelling, the other the attestation's).
+fn authenticate_attestation_method(
+    att: &crate::manifest::CommitmentAttestation,
+    inputs: &CommitmentMessageInputs<'_>,
+    policy: &MethodPolicy,
+    label: &str,
+) -> Result<AuthenticatedMethod, CheckError> {
+    let parsed = SignatureScheme::from_cryptosuite_iri(&att.cryptosuite).and_then(|_| {
+        match (
+            public_key_from_hex(&att.issuer_public_key),
+            signature_from_hex(&att.signature),
+        ) {
+            (Some(pk), Some(sig)) => Some((pk, sig)),
+            _ => None,
+        }
+    });
+    let verifies = |m: &Fr| match &parsed {
+        Some((pk, sig)) => sig_verify(pk, m, sig),
+        None => false,
+    };
+    method_auth::authenticate(inputs, policy, verifies).map_err(|e| match e {
+        MethodAuthError::NoCandidateVerified => CheckError::InvalidIssuerSignature {
+            commitment: label.to_string(),
+        },
+        MethodAuthError::AmbiguousMethod => CheckError::AmbiguousMethod {
+            commitment: label.to_string(),
+        },
+        MethodAuthError::MethodNotAuthenticated => CheckError::MethodNotAuthenticated {
+            commitment: label.to_string(),
+        },
+        MethodAuthError::MethodNotAdmitted(m) => CheckError::MethodNotAdmitted {
+            commitment: label.to_string(),
+            method_iri: m.scheme_iri().to_string(),
+        },
+    })
+}
+
+/// Authenticate the COMMITMENT METHOD of a HIDDEN-ONLY commitment — one with no
+/// clear [`crate::manifest::CommitmentAttestation`] — by matching the hidden
+/// entry's declared public `m` against the same verifier-built candidate set.
+///
+/// `None` when there is no revocation reference to derive `status_ref` from, no
+/// hidden entry over this commitment, its `m` is malformed, or `m` is none of the
+/// candidates. In every one of those cases the caller records nothing and the
+/// later recompute keeps today's method-unbound message, so the bb hidden-issuer
+/// gate's own fail-closed refusals are reached unchanged.
+///
+/// Why matching a prover-declared value is sound here: the candidate set is
+/// computed entirely from verifier-side values (the commitment byte-bound into
+/// the proof's public inputs, the disclosed salt, the issuer-bound status
+/// reference) and the recognised method list. The prover chooses only WHICH
+/// candidate, and must then still exhibit a key-set-membership proof over that
+/// exact message under the relying party's own root — so selecting a different
+/// method does not relax any check, it changes which signature the issuer must
+/// have made.
+///
+/// Only the status-only message family is considered: a hidden-only commitment
+/// carries no attested holder binding, so there is no holder digest to fold.
+fn authenticate_hidden_only_method(
+    manifest: &ProofManifest,
+    c_fr: &Fr,
+    salt_fr: &Fr,
+) -> Option<AuthenticatedMethod> {
+    let rev = manifest.revocation.as_ref()?;
+    let status_ref = status_ref_from_revocation(rev)?;
+    let declared = manifest
+        .hidden_issuer_attestations
+        .iter()
+        .find(|hi| hi.commitment.to_field() == Some(*c_fr))?
+        .message
+        .to_field()?;
+    let inputs = CommitmentMessageInputs {
+        commitment: c_fr,
+        salt: salt_fr,
+        status_ref: &status_ref,
+        holder_digest: None,
+    };
+    method_auth::classify(&method_auth::candidate_messages(&inputs), |m| {
+        *m == declared
+    })
+    .ok()
+}
+
+/// Run stage 2d ALONE — the issuer-attestation + method-authentication gate —
+/// and return the authenticated method of each referenced commitment.
+///
+/// # ⚠️ NOT A VERIFIER
+/// It runs ONE stage. It does not check the query binding, the circuit ids, the
+/// binding edges, the revocation state or any proof. Its only caller is the
+/// value-lane pin REPORT ([`crate::value_pin::value_lane_pin_report`]), which
+/// needs the authenticated methods of a manifest the full pre-filter would
+/// refuse outright at stage 0 (a value-lane sub-proof is unconditionally
+/// refused there, and that refusal is unchanged).
+// Its only caller is the `dual-leaf` pin REPORT, which is itself test-only, so
+// no shipped build carries this.
+#[cfg(all(test, feature = "dual-leaf"))]
+pub(crate) fn authenticated_methods_for(
+    manifest: &ProofManifest,
+    trusted_key_set: &KeySet,
+) -> Result<AuthenticatedMethods, CheckError> {
+    let hidden_covered = hidden_issuer_covered_commitments(manifest, trusted_key_set);
+    bind_issuer_attestations(manifest, trusted_key_set, &hidden_covered)
+}
+
 fn bind_issuer_attestations(
     manifest: &ProofManifest,
     trusted_key_set: &KeySet,
     hidden_covered: &BTreeSet<String>,
-) -> Result<(), CheckError> {
+) -> Result<AuthenticatedMethods, CheckError> {
+    let mut authenticated_methods: AuthenticatedMethods = AuthenticatedMethods::new();
     // The prover's declared key_set may NARROW but never WIDEN the external trust
     // anchor: every key it lists must already be in the external K. (A
     // declared-but-untrusted key is the codex #1 forge: prover lists its own key.)
@@ -3035,6 +3262,52 @@ fn bind_issuer_attestations(
                         if let Some(salt_fr) = resolve_commitment_salt(manifest, &c_fr) {
                             referenced_salt
                                 .insert(field_to_hex(&c_fr), field_to_hex(&salt_fr));
+                            // A hidden-only commitment has no clear signature to
+                            // authenticate the method from. What it does have is
+                            // the hidden proof's PUBLIC `m`, which the bb gate
+                            // byte-binds. So the method is recovered the same way,
+                            // one step earlier: match that `m` against the SAME
+                            // verifier-built candidate set. The prover only
+                            // SELECTS among messages the verifier computed, so it
+                            // cannot introduce a message of its own — and whichever
+                            // it selects, the bb gate still has to produce a
+                            // membership proof over it under the relying party's
+                            // own key-set root.
+                            //
+                            // Unmatched => nothing is recorded, so the later
+                            // recompute falls back to the method-UNBOUND message
+                            // and the bb gate rejects on the message byte-compare
+                            // exactly as it does today (precedence unchanged).
+                            if let Some(authenticated) =
+                                authenticate_hidden_only_method(manifest, &c_fr, &salt_fr)
+                            {
+                                let policy = trusted_key_set.method_policy();
+                                let admitted = policy.admit(authenticated).map_err(|e| match e {
+                                    MethodAuthError::MethodNotAuthenticated => {
+                                        CheckError::MethodNotAuthenticated {
+                                            commitment: c.0.clone(),
+                                        }
+                                    }
+                                    MethodAuthError::MethodNotAdmitted(m) => {
+                                        CheckError::MethodNotAdmitted {
+                                            commitment: c.0.clone(),
+                                            method_iri: m.scheme_iri().to_string(),
+                                        }
+                                    }
+                                    // `admit` returns only the two policy
+                                    // refusals; the classification ones were
+                                    // already resolved above.
+                                    MethodAuthError::AmbiguousMethod => {
+                                        CheckError::AmbiguousMethod { commitment: c.0.clone() }
+                                    }
+                                    MethodAuthError::NoCandidateVerified => {
+                                        CheckError::InvalidIssuerSignature {
+                                            commitment: c.0.clone(),
+                                        }
+                                    }
+                                })?;
+                                authenticated_methods.insert(field_to_hex(&c_fr), admitted);
+                            }
                         }
                         continue;
                     }
@@ -3154,35 +3427,44 @@ fn bind_issuer_attestations(
             // against is the one the ISSUER signed, never a free prover JSON field. A
             // holder-bound attestation whose `holder_pk_digest` hex is malformed has
             // no reconstructable message => InvalidIssuerSignature (fail-closed).
-            let message = match att.holder.as_ref() {
-                Some(binding) => {
-                    let Some(holder_digest) = binding.digest() else {
+            let holder_digest = match att.holder.as_ref() {
+                Some(binding) => match binding.digest() {
+                    Some(d) => Some(d),
+                    None => {
                         return Err(CheckError::InvalidIssuerSignature {
                             commitment: c.0.clone(),
-                        });
-                    };
-                    commitment_message_with_holder(
-                        &commitment_fr,
-                        &salt_fr,
-                        &status_ref,
-                        &holder_digest,
-                    )
-                }
-                None => commitment_message_with_status(&commitment_fr, &salt_fr, &status_ref),
+                        })
+                    }
+                },
+                None => None,
             };
-            let ok = SignatureScheme::from_cryptosuite_iri(&att.cryptosuite).is_some()
-                && match (
-                    public_key_from_hex(&att.issuer_public_key),
-                    signature_from_hex(&att.signature),
-                ) {
-                    (Some(pk), Some(sig)) => sig_verify(&pk, &message, &sig),
-                    _ => false,
-                };
-            if !ok {
-                return Err(CheckError::InvalidIssuerSignature {
-                    commitment: c.0.clone(),
-                });
-            }
+            // The signature now also AUTHENTICATES the commitment method. Instead
+            // of recomputing one expected message, the verifier builds the
+            // candidate set — the method-BOUND message (`ZKSIG_M3`, or `ZKSIG_M4`
+            // when holder-bound) of every recognised method, plus the
+            // method-UNBOUND message this gate used before — and asks which one
+            // the presented signature verifies over. Every candidate is built
+            // from the values established above (`commitment_fr`, the
+            // issuer-attested `salt_fr`, the issuer-bound `status_ref`, the
+            // attested holder digest), so the method is RECOVERED from the
+            // signature and never read from a prover field.
+            //
+            // Back-compat: an existing attestation signs the method-unbound
+            // message, so it authenticates as `Unbound` and — under the default
+            // policy, which accepts that — is accepted exactly as before, with
+            // the same `InvalidIssuerSignature` refusal when nothing verifies.
+            let authenticated = authenticate_attestation_method(
+                att,
+                &CommitmentMessageInputs {
+                    commitment: &commitment_fr,
+                    salt: &salt_fr,
+                    status_ref: &status_ref,
+                    holder_digest: holder_digest.as_ref(),
+                },
+                &trusted_key_set.method_policy(),
+                &c.0,
+            )?;
+            authenticated_methods.insert(field_to_hex(&commitment_fr), authenticated);
             // codex 2223 LOW / sq-nlulr: record the now-verified salt for
             // this SCAN- or PATH-REFERENCED commitment. Keyed by canonical commitment
             // hex so the same graph referenced by multiple scans/paths records a
@@ -3221,7 +3503,7 @@ fn bind_issuer_attestations(
             }
         }
     }
-    Ok(())
+    Ok(authenticated_methods)
 }
 
 /// The set of commitment-hex keys (canonical `field_to_hex`) for which a CLEAR
@@ -4120,6 +4402,7 @@ fn bind_hidden_issuer_attestations(
     prover: &CircuitProver,
     work_dir: &Path,
     challenge: &FieldHex,
+    methods: &AuthenticatedMethods,
 ) -> Result<(), CheckError> {
     if manifest.hidden_issuer_attestations.is_empty() {
         // No hidden-issuer proofs; the clear-key path is the attestation gate.
@@ -4146,7 +4429,7 @@ fn bind_hidden_issuer_attestations(
     // message is `commitment_message_with_status(C(G), salt, status_ref)`, exactly
     // the clear path's signed message, recomputed from the disclosed (and, by the
     // prefilter, issuer-bound) reference + salt.
-    let referenced = scan_referenced_messages(manifest)?;
+    let referenced = scan_referenced_messages(manifest, methods)?;
 
     for (i, hi) in manifest.hidden_issuer_attestations.iter().enumerate() {
         if hi.depth != depth {
@@ -4610,8 +4893,19 @@ fn resolve_commitment_salt(manifest: &ProofManifest, c_fr: &Fr) -> Option<Fr> {
 /// salt carried on the hidden entry — sq-xxg) is also covered. Used by the
 /// hidden-issuer gate to bind each proof's PUBLIC `m` to a specific committed
 /// graph.
+///
+/// # The AUTHENTICATED message, not a fixed one
+/// `methods` is the commitment-method map the pre-filter authenticated. For a
+/// commitment whose issuer signature attested a method, the recomputed message
+/// is that method's METHOD-BOUND message (`ZKSIG_M3`); for one that attested
+/// none — and for one absent from the map — it is the method-UNBOUND
+/// `commitment_message_with_status`, i.e. byte-for-byte what this function
+/// returned before method authentication existed. So an existing manifest's
+/// hidden-issuer byte-compare is unchanged, and an `M3`-attested one becomes
+/// expressible.
 fn scan_referenced_messages(
     manifest: &ProofManifest,
+    methods: &AuthenticatedMethods,
 ) -> Result<std::collections::BTreeMap<String, Fr>, CheckError> {
     let mut out: std::collections::BTreeMap<String, Fr> = std::collections::BTreeMap::new();
     let Some(rev) = &manifest.revocation else {
@@ -4632,8 +4926,21 @@ fn scan_referenced_messages(
         for c in commitments {
             let Some(c_fr) = c.to_field() else { continue };
             let Some(salt_fr) = resolve_commitment_salt(manifest, &c_fr) else { continue };
-            let m = commitment_message_with_status(&c_fr, &salt_fr, &status_ref);
-            out.insert(field_to_hex(&c_fr), m);
+            let key = field_to_hex(&c_fr);
+            let authenticated = methods
+                .get(&key)
+                .copied()
+                .unwrap_or(AuthenticatedMethod::Unbound);
+            let m = method_auth::authenticated_message(
+                &CommitmentMessageInputs {
+                    commitment: &c_fr,
+                    salt: &salt_fr,
+                    status_ref: &status_ref,
+                    holder_digest: None,
+                },
+                authenticated,
+            );
+            out.insert(key, m);
         }
     }
     Ok(out)
@@ -5898,21 +6205,23 @@ fn verify_holder_attestation_signature(
         });
     };
 
-    let message =
-        commitment_message_with_holder(&commitment_fr, &salt_fr, &status_ref, &holder_digest);
-    let ok = SignatureScheme::from_cryptosuite_iri(&att.cryptosuite).is_some()
-        && match (
-            public_key_from_hex(&att.issuer_public_key),
-            signature_from_hex(&att.signature),
-        ) {
-            (Some(pk), Some(sig)) => sig_verify(&pk, &message, &sig),
-            _ => false,
-        };
-    if !ok {
-        return Err(CheckError::InvalidIssuerSignature {
-            commitment: commitment_hex,
-        });
-    }
+    // The same candidate set `bind_issuer_attestations` uses, through the same
+    // shared helper, so the holder tier cannot reach a different verdict about
+    // the same attestation's method. A holder-bound attestation's candidates are
+    // the `ZKSIG_M4` message of each recognised method plus the method-UNBOUND
+    // `ZKSIG_C4` one — the latter being exactly the message this check used
+    // before, so an existing holder-bound credential is unaffected.
+    authenticate_attestation_method(
+        att,
+        &CommitmentMessageInputs {
+            commitment: &commitment_fr,
+            salt: &salt_fr,
+            status_ref: &status_ref,
+            holder_digest: Some(&holder_digest),
+        },
+        &trusted_key_set.method_policy(),
+        &commitment_hex,
+    )?;
     Ok(())
 }
 
@@ -6209,7 +6518,7 @@ fn verify_manifest_impl(
     seen: &dyn SeenNonces,
     skip_query_binding: bool,
 ) -> Result<(), CheckError> {
-    prefilter_manifest_structure_impl(
+    let prefiltered = prefilter_manifest_structure_impl(
         manifest,
         trusted_key_set,
         revocation_policy,
@@ -6372,7 +6681,14 @@ fn verify_manifest_impl(
     // UNCHANGED and still runs; this is the additive privacy upgrade that lets the
     // holder NOT disclose WHICH issuer signed. The challenge fed here is the
     // verifier's nonce (audit #4), identical to the sub-proof loop's binding.
-    bind_hidden_issuer_attestations(manifest, trusted_key_set, prover, work_dir, &challenge)?;
+    bind_hidden_issuer_attestations(
+        manifest,
+        trusted_key_set,
+        prover,
+        work_dir,
+        &challenge,
+        &prefiltered.methods,
+    )?;
 
     // --- sq-c2ql: in-circuit holder Proof-of-Possession cryptographic gate (B2). ---
     // If the manifest carries in-circuit holder PoK proofs (or the policy mandates
@@ -8478,7 +8794,7 @@ mod tests {
         // with the declared/policy pair reported.
         for declared in [3u32, 5, 0, 31] {
             m.hidden_issuer_attestations = vec![mk(declared)];
-            match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a")) {
+            match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()) {
                 Err(CheckError::HiddenIssuerDepthMismatch { declared: d, policy: p }) => {
                     assert_eq!(d, declared, "the REJECTED declared depth is reported");
                     assert_eq!(p, policy_depth, "the POLICY depth is reported");
@@ -8494,7 +8810,7 @@ mod tests {
         // commitment check, which rejects for a DIFFERENT (non-depth) reason. This is
         // the half that fails if the gate is inverted (`==` instead of `!=`).
         m.hidden_issuer_attestations = vec![mk(policy_depth)];
-        match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a")) {
+        match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()) {
             Err(CheckError::HiddenIssuerUnreferencedCommitment { .. }) => {}
             other => panic!(
                 "a MATCHING declared depth must pass the depth gate and fail later on \
@@ -8507,7 +8823,7 @@ mod tests {
         m.hidden_issuer_attestations = vec![mk(policy_depth), mk(policy_depth + 1)];
         assert!(
             matches!(
-                bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a")),
+                bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()),
                 Err(CheckError::HiddenIssuerUnreferencedCommitment { .. })
                     | Err(CheckError::HiddenIssuerDepthMismatch { .. })
             ),
@@ -9104,6 +9420,73 @@ mod tests {
             holder_set_proofs: vec![],
             fully_hidden_revocation: None,
         }
+    }
+
+    /// A hidden-ONLY commitment carries no clear signature, so the commitment
+    /// method is recovered one step earlier: the hidden entry's PUBLIC `m` — the
+    /// value the bb gate byte-binds — is matched against the SAME verifier-built
+    /// candidate set. A method-bound `m` names THAT method, the method-unbound
+    /// `m` every existing manifest carries is `Unbound`, and an `m` matching no
+    /// candidate authenticates nothing (so nothing is recorded, the later
+    /// recompute uses the unbound message, and the existing message byte-compare
+    /// refuses the entry exactly as it does today).
+    #[test]
+    fn a_hidden_only_commitment_authenticates_the_method_its_message_names() {
+        use crate::manifest::HiddenIssuerAttestation;
+        use sparq_zk::commit::CommitmentMethod;
+        let c = Fr::from(7u64);
+        let salt = Fr::from(11u64);
+        let status_ref = status_ref_digest(
+            &status_list_id_to_field(TEST_STATUS_LIST),
+            TEST_STATUS_INDEX,
+            TEST_STATUS_VERSION,
+        );
+        let with = |m: &Fr| {
+            let mut mani = minimal_manifest("");
+            mani.revocation = Some(test_revocation());
+            mani.hidden_issuer_attestations = vec![HiddenIssuerAttestation {
+                commitment: fh(&field_to_hex(&c)),
+                depth: 4,
+                key_set_root: fh("0x0"),
+                message: fh(&field_to_hex(m)),
+                salt: Some(fh(&field_to_hex(&salt))),
+                proof_hex: String::new(),
+            }];
+            mani
+        };
+
+        let bound = sparq_zk::sig::commitment_message_with_status_and_scheme(
+            &c,
+            &salt,
+            &status_ref,
+            &sparq_zk::sig::scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+        );
+        assert_eq!(
+            authenticate_hidden_only_method(&with(&bound), &c, &salt),
+            Some(AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV2)),
+            "a method-bound hidden `m` names its own method"
+        );
+
+        let unbound = sparq_zk::sig::commitment_message_with_status(&c, &salt, &status_ref);
+        assert_eq!(
+            authenticate_hidden_only_method(&with(&unbound), &c, &salt),
+            Some(AuthenticatedMethod::Unbound),
+            "the pre-existing method-unbound `m` authenticates no method"
+        );
+
+        assert_eq!(
+            authenticate_hidden_only_method(&with(&Fr::from(3u64)), &c, &salt),
+            None,
+            "an `m` matching no verifier-built candidate authenticates nothing"
+        );
+
+        let mut no_rev = with(&bound);
+        no_rev.revocation = None;
+        assert_eq!(
+            authenticate_hidden_only_method(&no_rev, &c, &salt),
+            None,
+            "with no disclosed status reference there is no candidate set to match"
+        );
     }
 
     #[test]
