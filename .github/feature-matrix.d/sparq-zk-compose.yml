@@ -19,7 +19,9 @@
 # `CircuitId::FilterValueDl{,F64,Decimal}` members, the `dispatch` fail-closed
 # `(method × circuit)` matrix, the dedicated `filter_value_dl_*_prover_toml`
 # renderers, and the `#![cfg(feature = "dual-leaf")]` integration suite
-# `tests/dual_leaf_boolean_lane.rs` (the xsd:boolean lane cross-vectors) — compiles
+# `tests/dual_leaf_boolean_lane.rs` (the V1 xsd:boolean lane cross-vectors) and
+# `tests/dual_leaf_v2_lanes.rs` (the DualLeafV2 lanes + the dedicated bit-domain
+# `filter_value_dl_bool` member) — compiles
 # EMPTY there and runs ZERO of those tests. This leg is the executor that makes them
 # actually run, closing the same silent-skip class (#1171) the sparq-zk legs close.
 # The feature adds NO new dependency (it only turns on sparq-zk's `dual-leaf`).
