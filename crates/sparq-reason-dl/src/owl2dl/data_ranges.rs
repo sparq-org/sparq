@@ -28,7 +28,9 @@ mod region;
 mod strings;
 mod xsdre;
 
-use super::datatypes::{integer_range, Builtin, Facet, Value};
+use super::datatypes::{
+    in_value_space, integer_range, Builtin, Facet, Rational, RationalKey, Value,
+};
 use cuts::Cuts;
 use rat::Rat;
 use region::{f32_key, f64_key, int_range, Region, Sp};
@@ -84,13 +86,16 @@ pub fn is_empty(r: &DataRangeExpr) -> Tri {
 /// Whether `v` is in `r`.
 #[must_use]
 pub fn contains(r: &DataRangeExpr, v: &Value) -> Tri {
-    region(r).map_or(Tri::Unknown, |r| Tri::from(r.contains(v)))
+    match (region(r, 0), canonical(v)) {
+        (Ok(r), Ok(v)) => Tri::from(r.contains(&v)),
+        _ => Tri::Unknown,
+    }
 }
 
 /// Whether `r` has at least `n` values.
 #[must_use]
 pub fn has_at_least(r: &DataRangeExpr, n: u64) -> Tri {
-    region(r).map_or(Tri::Unknown, |r| at_least(&r, n))
+    region(r, 0).map_or(Tri::Unknown, |r| at_least(&r, n))
 }
 
 /// The tableau's datatype check for one node: whether there are `distinct` pairwise
@@ -109,15 +114,12 @@ pub fn conjunction_satisfiable(
     let build = || -> Result<Region, Unknown> {
         let mut acc = Region::full();
         for r in pos {
-            acc = acc.and(&region(r)?);
+            acc = acc.and(&region(r, 0)?);
         }
         for r in neg {
-            acc = acc.and(&region(r)?.not());
+            acc = acc.and(&region(r, 0)?.not());
         }
-        let taken = values
-            .iter()
-            .fold(Region::empty(), |a, v| a.or(&Region::value(v)));
-        Ok(acc.and(&taken.not()))
+        Ok(acc.and(&one_of(values)?.not()))
     };
     build().map_or(Tri::Unknown, |r| at_least(&r, distinct as u64))
 }
@@ -133,34 +135,64 @@ fn at_least(r: &Region, n: u64) -> Tri {
 /// The marker for a question this module does not answer.
 struct Unknown;
 
-fn region(r: &DataRangeExpr) -> Result<Region, Unknown> {
+/// Data ranges nested deeper than this answer Unknown, bounding the recursion.
+const MAX_DEPTH: usize = 64;
+
+/// `v` in the canonical form the parser produces (one NaN per type, lowercase language
+/// tags), or Unknown for a value no literal has (a zero or non-reduced denominator, an
+/// offset beyond ±14:00).
+fn canonical(v: &Value) -> Result<Value, Unknown> {
+    let real = |r: &RationalKey| Rational::new(r.0.num, r.0.den) == Some(r.0);
+    Ok(match v {
+        Value::Real(r) if !real(r) => return Err(Unknown),
+        Value::DateTime(d)
+            if !real(&d.seconds) || d.tz.is_some_and(|t| !(-840..=840).contains(&t)) =>
+        {
+            return Err(Unknown);
+        }
+        Value::Float(b) if f32::from_bits(*b).is_nan() => Value::Float(f32::NAN.to_bits()),
+        Value::Double(b) if f64::from_bits(*b).is_nan() => Value::Double(f64::NAN.to_bits()),
+        Value::LangString(s, t) => Value::LangString(s.clone(), t.to_ascii_lowercase()),
+        v => v.clone(),
+    })
+}
+
+fn one_of(vs: &[Value]) -> Result<Region, Unknown> {
+    vs.iter().try_fold(Region::empty(), |a, v| {
+        Ok(a.or(&Region::value(&canonical(v)?)))
+    })
+}
+
+fn region(r: &DataRangeExpr, depth: usize) -> Result<Region, Unknown> {
+    if depth > MAX_DEPTH {
+        return Err(Unknown);
+    }
+    let sub = |r| region(r, depth + 1);
     Ok(match r {
         DataRangeExpr::Datatype(b) => universe(*b),
         DataRangeExpr::Restriction(b, facets) => {
             let mut acc = universe(*b);
             for (f, v) in facets {
-                acc = acc.and(&facet_region(*b, *f, v)?);
+                acc = acc.and(&facet_region(*b, *f, &canonical(v)?)?);
             }
             acc
         }
-        DataRangeExpr::OneOf(vs) => vs
-            .iter()
-            .fold(Region::empty(), |a, v| a.or(&Region::value(v))),
+        DataRangeExpr::OneOf(vs) => one_of(vs)?,
         DataRangeExpr::And(rs) => {
             let mut acc = Region::full();
             for r in rs {
-                acc = acc.and(&region(r)?);
+                acc = acc.and(&sub(r)?);
             }
             acc
         }
         DataRangeExpr::Or(rs) => {
             let mut acc = Region::empty();
             for r in rs {
-                acc = acc.or(&region(r)?);
+                acc = acc.or(&sub(r)?);
             }
             acc
         }
-        DataRangeExpr::Not(r) => region(r)?.not(),
+        DataRangeExpr::Not(r) => sub(r)?.not(),
     })
 }
 
@@ -268,7 +300,9 @@ fn facet_region(b: Builtin, f: Facet, v: &Value) -> Result<Region, Unknown> {
         ) => {
             return Err(Unknown);
         }
-        // Order facets: the bound must come from `b`'s own family.
+        // Order facets: the bound must be in `b`'s value space (XML Schema 1.1 Part 2
+        // §4.3.7–§4.3.10; OWL 2 §4.1 for `owl:real` and `owl:rational`).
+        _ if !in_value_space(v, b) => return Err(Unknown),
         (_, Value::Real(k)) if b.families() == [super::datatypes::Family::Real] => {
             Region::ordered(Sp::Real, vec![bound(inclusive, Rat::of(&k.0)); 4])
         }

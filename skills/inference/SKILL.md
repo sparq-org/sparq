@@ -713,11 +713,12 @@ unchecked rather than definite.
 pairwise different values exist inside every range of `pos`, outside every range of `neg`
 and outside `values`. Each answer is a `Tri`: `Yes` and `No` are exact (rational bounds
 without rounding, discrete floats with `-0` and `+0` distinct, the ±14:00 rule for
-`xsd:dateTime`, and automata for XSD patterns, lengths, basic language ranges and
-well-formed BCP 47 tags), and `Unknown` covers a facet outside the datatype's facet space,
-an XSD pattern this implementation does not support (block escapes such as
-`\p{IsBasicLatin}`, or groups nested more than 64 deep), and string searches over a fixed
-automaton budget.
+`xsd:dateTime`, strings of XML characters, and automata for XSD patterns, lengths, basic
+language ranges and well-formed BCP 47 tags), and `Unknown` covers a facet outside the
+datatype's facet space (including an order bound outside its value space), a value no
+literal has, data ranges nested more than 64 deep, an XSD pattern this implementation does
+not support (block escapes such as `\p{IsBasicLatin}`, or groups nested more than 64 deep),
+and string searches over a fixed automaton budget (states, edges and automaton bytes).
 
 ## Common recipes
 

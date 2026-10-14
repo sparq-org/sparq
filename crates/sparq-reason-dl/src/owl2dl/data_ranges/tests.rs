@@ -3,7 +3,7 @@
 //! `Plus and Minus Zero are Distinct`.
 
 use super::*;
-use crate::owl2dl::datatypes::{builtin, in_value_space, parse_value};
+use crate::owl2dl::datatypes::{builtin, in_value_space, parse_value, DateTimeValue};
 use DataRangeExpr as E;
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
@@ -184,7 +184,7 @@ fn reals_are_ordered_exactly_across_layers() {
     };
     assert_eq!(is_empty(&point("owl:rational")), Tri::No);
     assert_eq!(
-        is_empty(&point("decimal")),
+        is_empty(&and(point("owl:rational"), dt("decimal"))),
         Tri::Yes,
         "1/3 is not a decimal"
     );
@@ -234,7 +234,7 @@ fn reals_are_ordered_exactly_across_layers() {
         "integer",
         &[
             ("minInclusive", v("-2", "integer")),
-            ("maxExclusive", v("2.5", "decimal")),
+            ("maxExclusive", v("3", "integer")),
         ],
     );
     assert_eq!(has_at_least(&small, 5), Tri::Yes);
@@ -574,17 +574,24 @@ fn facets_outside_the_facet_space_answer_unknown() {
         Tri::Unknown,
         "not a language range"
     );
-    // Inside the facet space, mixed numeric bounds are fine.
+    // An order bound must be in the restricted datatype's value space (XML Schema 1.1
+    // §4.3.7-§4.3.10); owl:real and owl:rational take any real.
+    let bounded = |d: &str, x: Value| is_empty(&restrict(d, &[("minInclusive", x)]));
+    assert_eq!(bounded("integer", v("1/3", "owl:rational")), Tri::Unknown);
+    assert_eq!(bounded("decimal", v("1/3", "owl:rational")), Tri::Unknown);
+    assert_eq!(bounded("integer", v("0.9", "decimal")), Tri::Unknown);
+    assert_eq!(bounded("byte", v("1000", "integer")), Tri::Unknown);
     assert_eq!(
-        is_empty(&restrict(
-            "integer",
-            &[
-                ("minInclusive", v("1/3", "owl:rational")),
-                ("maxInclusive", v("0.9", "decimal"))
-            ]
-        )),
-        Tri::Yes
+        bounded("dateTimeStamp", v("2000-01-01T00:00:00", "dateTime")),
+        Tri::Unknown
     );
+    assert_eq!(
+        bounded("decimal", v("1", "integer")),
+        Tri::No,
+        "1 is a decimal"
+    );
+    assert_eq!(bounded("owl:real", v("1/3", "owl:rational")), Tri::No);
+    assert_eq!(bounded("owl:rational", v("1/3", "owl:rational")), Tri::No);
     assert_eq!(is_empty(&dt("rdf:XMLLiteral")), Tri::No);
     assert_eq!(
         contains(
@@ -592,5 +599,95 @@ fn facets_outside_the_facet_space_answer_unknown() {
             &Value::XmlLiteral("<a/>".into())
         ),
         Tri::Yes
+    );
+}
+
+#[test]
+fn strings_are_sequences_of_xml_characters() {
+    // OWL 2 §2.3: every character matches XML `Char`.
+    let one = restrict("string", &[("length", v("1", "integer"))]);
+    let xml_chars = 3 + (0xD800 - 0x20) + (0xFFFE - 0xE000) + 0x10_0000;
+    assert_eq!(has_at_least(&one, xml_chars), Tri::Yes);
+    assert_eq!(has_at_least(&one, xml_chars + 1), Tri::No);
+    let controls = restrict("string", &[("pattern", s("[\t-\r]"))]);
+    assert_eq!(has_at_least(&controls, 3), Tri::Yes);
+    assert_eq!(has_at_least(&controls, 4), Tri::No);
+    assert_eq!(
+        is_empty(&restrict("string", &[("pattern", s("\u{FFFE}"))])),
+        Tri::Yes
+    );
+    assert_eq!(contains(&dt("string"), &s("\u{0}")), Tri::No);
+    assert_eq!(contains(&not(dt("string")), &s("\u{0}")), Tri::No);
+    assert_eq!(
+        contains(&dt("anyURI"), &Value::AnyUri("\u{B}".into())),
+        Tri::No
+    );
+    assert_eq!(is_empty(&one_of([s("a\u{1F}")])), Tri::Yes);
+}
+
+#[test]
+fn values_no_literal_has_answer_unknown() {
+    let odd_nan = Value::Float(f32::NAN.to_bits() | 1);
+    assert_eq!(
+        has_at_least(&one_of([v("NaN", "float"), odd_nan.clone()]), 2),
+        Tri::No
+    );
+    assert_eq!(contains(&one_of([v("NaN", "float")]), &odd_nan), Tri::Yes);
+    let instant = match v("2000-01-01T00:00:00Z", "dateTime") {
+        Value::DateTime(d) => d,
+        _ => unreachable!(),
+    };
+    let far = Value::DateTime(DateTimeValue {
+        tz: Some(2000),
+        ..instant
+    });
+    let point = restrict(
+        "dateTime",
+        &[
+            ("minInclusive", Value::DateTime(instant)),
+            ("maxInclusive", Value::DateTime(instant)),
+        ],
+    );
+    assert_eq!(
+        has_at_least(&and(point.clone(), not(one_of([far.clone()]))), 1),
+        Tri::Unknown
+    );
+    assert_eq!(contains(&point, &far), Tri::Unknown);
+    let unreduced = Value::Real(RationalKey(Rational { num: 2, den: 4 }));
+    assert_eq!(contains(&dt("decimal"), &unreduced), Tri::Unknown);
+    assert_eq!(
+        is_empty(&one_of([Value::Real(RationalKey(Rational {
+            num: 1,
+            den: 0
+        }))])),
+        Tri::Unknown
+    );
+    assert_eq!(
+        contains(
+            &dt("rdf:PlainLiteral"),
+            &Value::LangString("x".into(), "EN-GB".into())
+        ),
+        Tri::Yes
+    );
+}
+
+#[test]
+fn deep_ranges_answer_unknown() {
+    let nest = |n: usize| (0..n).fold(dt("integer"), |r, _| not(not(r)));
+    assert_eq!(is_empty(&nest(30)), Tri::No);
+    assert_eq!(is_empty(&nest(100)), Tri::Unknown);
+}
+
+#[test]
+fn large_enumerations_count_quickly() {
+    let words: Vec<Value> = (0..3000)
+        .map(|i| s(&format!("value-number-{i:08}")))
+        .collect();
+    let r = E::OneOf(words.clone());
+    assert_eq!(has_at_least(&r, 3000), Tri::Yes);
+    assert_eq!(has_at_least(&r, 3001), Tri::No);
+    assert_eq!(
+        conjunction_satisfiable(std::slice::from_ref(&r), &[], 1, &words),
+        Tri::No
     );
 }

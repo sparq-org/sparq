@@ -20,8 +20,12 @@ use std::rc::Rc;
 
 /// Product states explored before a check gives up.
 const STATE_BUDGET: usize = 100_000;
+/// Product-state components (states times automata) and edges one check may record.
+const CELL_BUDGET: usize = 2 << 20;
 /// Bytes one compiled automaton may occupy.
 const DFA_SIZE_LIMIT: usize = 16 << 20;
+/// Bytes all the automata of one check, and all cached automata, may occupy.
+const TOTAL_DFA_BYTES: usize = 64 << 20;
 /// The byte between a string and its language tag.
 const SEP: u8 = 0xFF;
 
@@ -144,16 +148,38 @@ impl F {
         }
     }
 
-    fn atoms<'a>(&'a self, out: &mut Vec<&'a Atom>) {
+    /// The formula over atom indices, collecting each distinct atom once into `atoms`.
+    fn index<'a>(&'a self, atoms: &mut Vec<&'a Atom>, seen: &mut HashMap<&'a Atom, usize>) -> G {
         match self {
-            F::Const(_) => {}
-            F::Atom(a) => {
-                if !out.contains(&a) {
-                    out.push(a);
-                }
-            }
-            F::Not(f) => f.atoms(out),
-            F::And(fs) | F::Or(fs) => fs.iter().for_each(|f| f.atoms(out)),
+            F::Const(b) => G::Const(*b),
+            F::Atom(a) => G::Atom(*seen.entry(a).or_insert_with(|| {
+                atoms.push(a);
+                atoms.len() - 1
+            })),
+            F::Not(f) => G::Not(Box::new(f.index(atoms, seen))),
+            F::And(fs) => G::And(fs.iter().map(|f| f.index(atoms, seen)).collect()),
+            F::Or(fs) => G::Or(fs.iter().map(|f| f.index(atoms, seen)).collect()),
+        }
+    }
+}
+
+/// A formula whose atoms are indices into a list.
+enum G {
+    Const(bool),
+    Atom(usize),
+    Not(Box<G>),
+    And(Vec<G>),
+    Or(Vec<G>),
+}
+
+impl G {
+    fn eval(&self, atom: &impl Fn(usize) -> bool) -> bool {
+        match self {
+            G::Const(b) => *b,
+            G::Atom(i) => atom(*i),
+            G::Not(g) => !g.eval(atom),
+            G::And(gs) => gs.iter().all(|g| g.eval(atom)),
+            G::Or(gs) => gs.iter().any(|g| g.eval(atom)),
         }
     }
 }
@@ -237,10 +263,18 @@ pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
         return Some(0);
     }
     let mut atoms = Vec::new();
-    f.atoms(&mut atoms);
+    let g = f.index(&mut atoms, &mut HashMap::new());
+    // One automaton per atom, except that every enumerated value shares one trie: an atom
+    // holds when its automaton accepts, or when the trie ends at the value's node.
     let mut autos = vec![Auto::Dfa(universe(space).ok()?)];
+    let mut trie = Trie::default();
+    let mut tests = Vec::with_capacity(atoms.len());
     for a in &atoms {
-        autos.push(match a {
+        let auto = match a {
+            Atom::Is(w) => {
+                tests.push(Test::Ends(trie.insert(w)));
+                continue;
+            }
             Atom::Len(lo, hi) => Auto::Len {
                 lo: *lo,
                 hi: *hi,
@@ -249,19 +283,34 @@ pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
                     None => *lo,
                 },
             },
-            Atom::Is(w) => Auto::Is(w.clone()),
             Atom::Untagged => Auto::Untagged,
             _ => Auto::Dfa(dfa(a).ok()?),
-        });
+        };
+        tests.push(Test::Accepts(autos.len()));
+        autos.push(auto);
+    }
+    let at_trie = autos.len();
+    autos.push(Auto::Trie(Box::new(trie)));
+    let dfa_bytes: usize = autos
+        .iter()
+        .map(|a| match a {
+            Auto::Dfa(d) => d.0.memory_usage(),
+            _ => 0,
+        })
+        .sum();
+    if dfa_bytes > TOTAL_DFA_BYTES {
+        return None;
     }
     let classes = byte_classes(&autos);
     let start: Vec<u32> = autos.iter().map(Auto::start).collect::<Option<_>>()?;
     let accepting = |state: &[u32]| {
-        autos[0].accepts(state[0]) && {
-            let idx = |a: &Atom| atoms.iter().position(|b| *b == a).expect("collected") + 1;
-            f.eval(&mut |a| autos[idx(a)].accepts(state[idx(a)]))
-        }
+        autos[0].accepts(state[0])
+            && g.eval(&|i| match tests[i] {
+                Test::Accepts(j) => autos[j].accepts(state[j]),
+                Test::Ends(node) => state[at_trie] == node,
+            })
     };
+    let mut cells = 0usize;
 
     // Explore the product, recording each edge with how many bytes take it.
     let mut index: HashMap<Vec<u32>, usize> = HashMap::from([(start.clone(), 0)]);
@@ -285,7 +334,8 @@ pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
             let j = match index.get(&next) {
                 Some(&j) => j,
                 None => {
-                    if states.len() >= STATE_BUDGET {
+                    cells += next.len();
+                    if states.len() >= STATE_BUDGET || cells > CELL_BUDGET {
                         return None;
                     }
                     index.insert(next.clone(), states.len());
@@ -295,6 +345,19 @@ pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
                 }
             };
             out.push((j, mult));
+        }
+        // One edge per successor, carrying every byte that leads there.
+        out.sort_unstable_by_key(|&(j, _)| j);
+        out.dedup_by(|(j, m), (k, n)| {
+            let same = j == k;
+            if same {
+                *n += *m;
+            }
+            same
+        });
+        cells += out.len();
+        if cells > CELL_BUDGET {
+            return None;
         }
         edges.resize(edges.len().max(i + 1), Vec::new());
         edges[i] = out;
@@ -372,8 +435,8 @@ fn byte_classes(autos: &[Auto]) -> Vec<(u8, u128)> {
                 Auto::Dfa(d) => u16::from(d.0.byte_classes().get(b)),
                 Auto::Len { .. } => u16::from(b == SEP) * 2 + u16::from(b & 0xC0 == 0x80),
                 Auto::Untagged => u16::from(b == SEP),
-                Auto::Is(w) => {
-                    if w.contains(&b) {
+                Auto::Trie(t) => {
+                    if t.used[usize::from(b)] {
                         u16::from(b) + 1
                     } else {
                         0
@@ -399,8 +462,50 @@ enum Auto {
     },
     /// 0 = no separator seen, 1 = seen.
     Untagged,
-    /// Bytes matched so far; `u32::MAX` = mismatch.
-    Is(Vec<u8>),
+    /// The enumerated values: the trie node of the bytes so far; `u32::MAX` = no value
+    /// has them as a prefix.
+    Trie(Box<Trie>),
+}
+
+/// How an atom is decided on a product state.
+#[derive(Clone, Copy)]
+enum Test {
+    /// The automaton at this index accepts.
+    Accepts(usize),
+    /// The trie is at this node.
+    Ends(u32),
+}
+
+/// A trie of byte strings; node 0 is the root.
+struct Trie {
+    next: Vec<HashMap<u8, u32>>,
+    used: [bool; 256],
+}
+
+impl Default for Trie {
+    fn default() -> Trie {
+        Trie {
+            next: vec![HashMap::new()],
+            used: [false; 256],
+        }
+    }
+}
+
+impl Trie {
+    /// Adds `w`, returning its end node.
+    fn insert(&mut self, w: &[u8]) -> u32 {
+        let mut node = 0usize;
+        for &b in w {
+            self.used[usize::from(b)] = true;
+            let fresh = self.next.len() as u32;
+            let n = *self.next[node].entry(b).or_insert(fresh);
+            if n == fresh {
+                self.next.push(HashMap::new());
+            }
+            node = n as usize;
+        }
+        node as u32
+    }
 }
 
 const TAGGED: u32 = 1 << 31;
@@ -410,7 +515,7 @@ impl Auto {
         match self {
             Auto::Dfa(d) => Some(d.start()),
             Auto::Len { cap, .. } => (*cap < u64::from(TAGGED)).then_some(0),
-            Auto::Untagged | Auto::Is(_) => Some(0),
+            Auto::Untagged | Auto::Trie(_) => Some(0),
         }
     }
 
@@ -427,10 +532,12 @@ impl Auto {
                 }
             }
             Auto::Untagged => s | u32::from(b == SEP),
-            Auto::Is(w) => match w.get(s as usize) {
-                Some(&x) if s != u32::MAX && x == b => s + 1,
-                _ => u32::MAX,
-            },
+            Auto::Trie(t) => t
+                .next
+                .get(s as usize)
+                .and_then(|m| m.get(&b))
+                .copied()
+                .unwrap_or(u32::MAX),
         }
     }
 
@@ -442,7 +549,7 @@ impl Auto {
                 n >= *lo && hi.is_none_or(|h| n <= h)
             }
             Auto::Untagged => s == 0,
-            Auto::Is(w) => s as usize == w.len(),
+            Auto::Trie(_) => false,
         }
     }
 
@@ -510,23 +617,30 @@ enum Key {
 }
 
 thread_local! {
-    /// Compiled automata, so each pattern and datatype is built once per thread.
-    static DFAS: RefCell<HashMap<Key, Rc<Dfa>>> = RefCell::new(HashMap::new());
+    /// Compiled automata (and failed builds), so each pattern and datatype is built once
+    /// per thread, with the bytes they hold.
+    static DFAS: RefCell<(HashMap<Key, Built>, usize)> = RefCell::new((HashMap::new(), 0));
 }
 
+/// A compiled automaton, or the failure to build one.
+type Built = Result<Rc<Dfa>, ()>;
+
 fn cached(key: Key, build: impl FnOnce() -> Result<Hir, ()>) -> Result<Rc<Dfa>, ()> {
-    if let Some(d) = DFAS.with(|m| m.borrow().get(&key).cloned()) {
-        return Ok(d);
+    if let Some(d) = DFAS.with(|m| m.borrow().0.get(&key).cloned()) {
+        return d;
     }
-    let d = Rc::new(Dfa::build(build()?)?);
+    let d = build().and_then(Dfa::build).map(Rc::new);
+    let bytes = d.as_ref().map_or(0, |d| d.0.memory_usage());
     DFAS.with(|m| {
-        let mut m = m.borrow_mut();
-        if m.len() >= 256 {
+        let (m, total) = &mut *m.borrow_mut();
+        if m.len() >= 256 || *total + bytes > TOTAL_DFA_BYTES {
             m.clear();
+            *total = 0;
         }
-        m.insert(key, Rc::clone(&d));
+        *total += bytes;
+        m.insert(key, d.clone());
     });
-    Ok(d)
+    d
 }
 
 fn class(rs: &[(char, char)]) -> Hir {
@@ -546,6 +660,21 @@ fn rep(h: Hir, min: u32, max: Option<u32>) -> Hir {
 
 fn any_text() -> Hir {
     rep(Hir::dot(Dot::AnyChar), 0, None)
+}
+
+/// Strings of XML characters (XML 1.0 `Char`), the strings of OWL 2 (§2.3).
+fn xml_text() -> Hir {
+    rep(
+        class(&[
+            ('\t', '\n'),
+            ('\r', '\r'),
+            ('\u{20}', '\u{D7FF}'),
+            ('\u{E000}', '\u{FFFD}'),
+            ('\u{10000}', '\u{10FFFF}'),
+        ]),
+        0,
+        None,
+    )
 }
 
 fn sep() -> Hir {
@@ -603,10 +732,10 @@ fn universe(space: Space) -> Result<Rc<Dfa>, ()> {
     cached(Key::Universe(space), || {
         Ok(match space {
             Space::Text => Hir::concat(vec![
-                any_text(),
+                xml_text(),
                 rep(Hir::concat(vec![sep(), lang_tag()]), 0, Some(1)),
             ]),
-            Space::Uri | Space::Xml => any_text(),
+            Space::Uri | Space::Xml => xml_text(),
         })
     })
 }
@@ -677,7 +806,8 @@ mod tests {
     #[test]
     fn counts_multiply_byte_classes() {
         // One character: every Unicode scalar value.
-        let scalars = 0x11_0000 - 0x800;
+        // XML characters: three controls and three ranges.
+        let scalars = 3 + (0xD800 - 0x20) + (0xFFFE - 0xE000) + 0x10_0000;
         assert_eq!(
             all(&plain().and(F::atom(Atom::Len(1, Some(1))))),
             Some(scalars)
