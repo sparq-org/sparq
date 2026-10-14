@@ -56,7 +56,7 @@ const VCARD_MEMBER: &str = "http://www.w3.org/2006/vcard/ns#hasMember";
 pub(crate) const RESERVED_PREFIX: &str = "urn:sparq:";
 const PAIR_DELIMITER: &str = "&client=";
 
-fn validate_principal_iri(iri: &str) -> Result<(), String> {
+pub(crate) fn validate_principal_iri(iri: &str) -> Result<(), String> {
     if iri.starts_with(RESERVED_PREFIX) || iri.contains(PAIR_DELIMITER) {
         return Err(format!(
             "agent/client/origin IRI <{iri}> is not allowed: \

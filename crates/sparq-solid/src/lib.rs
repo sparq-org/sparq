@@ -302,17 +302,29 @@ pub struct PodStore {
     /// Whether the stored provenance changed since the ACP view was last built from it (see
     /// [`PodStore::set_acp_provenance`]): the next update rebuilds the view.
     acp_provenance_pending: bool,
+    /// Whether the auth view in force was built by an ACP materialization (so a change to
+    /// the stored provenance makes it stale).
+    acp_view: bool,
 }
 
-/// Whether an update with `effects` can remove a resource (a graph it drops, clears or
-/// deletes from), so the provenance kept for the resources that remain must be checked.
+/// Whether an update with `effects` can remove a resource, so the provenance kept for the
+/// resources that remain must be checked. Only a `DROP` removes a named graph (a `CLEAR` or a
+/// delete leaves it, empty or not).
 fn may_remove_resources(effects: &[sparq_engine::UpdateEffect]) -> bool {
-    use sparq_engine::UpdateEffect;
-    effects.iter().any(|e| match e {
-        UpdateEffect::Drop(_) | UpdateEffect::Clear(_) => true,
-        UpdateEffect::Delta { deletes, .. } => !deletes.is_empty(),
-        UpdateEffect::Create(_) => false,
-    })
+    effects.iter().any(|e| matches!(e, sparq_engine::UpdateEffect::Drop(_)))
+}
+
+/// Forget in `provenance` the creator and owner of every graph `effects` drop.
+fn forget_dropped(provenance: &mut AccessProvenance, effects: &[sparq_engine::UpdateEffect]) {
+    use spargebra::algebra::GraphTarget;
+    for effect in effects {
+        let sparq_engine::UpdateEffect::Drop(target) = effect else { continue };
+        match target {
+            GraphTarget::NamedNode(n) => provenance.forget(n.as_str()),
+            GraphTarget::NamedGraphs | GraphTarget::AllGraphs => provenance.clear(),
+            GraphTarget::DefaultGraph => {}
+        }
+    }
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -482,6 +494,7 @@ impl PodStore {
             statically_covered: Arc::default(),
             acp_context: Default::default(),
             acp_provenance_pending: false,
+            acp_view: false,
         }
     }
 
@@ -511,6 +524,7 @@ impl PodStore {
         let stats = materialize_wac(&mut self.graph)?;
         self.record_static_coverage();
         self.view_dropped = false;
+        self.acp_view = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
         Ok(stats)
@@ -568,14 +582,45 @@ impl PodStore {
 
     /// Record (TRUSTED) that `creator` created `resource`, in the stored ACP context the
     /// store's own rebuilds use, for a caller that creates resources through the store
-    /// (such as the MCP server). It takes effect at the next ACP materialization, which the
-    /// next update makes if none comes first. The store keeps creator and owner facts only
-    /// for the resources its auth view holds: it forgets them once the resource is gone, at
-    /// the next rebuild or when an update drops it.
-    pub fn record_creator(&mut self, resource: &str, creator: &str) {
+    /// (such as the MCP server), after the write that creates it. When an ACP view is in
+    /// force it is rebuilt under the new provenance at once, so no decision uses the old one;
+    /// otherwise the next ACP materialization uses it. The store keeps creator and owner facts
+    /// only for the resources its auth view holds: it forgets them once the resource is gone,
+    /// at the next rebuild or when an update drops it.
+    ///
+    /// # Errors
+    ///
+    /// When `creator` is not a WebID the view accepts as a principal (as
+    /// [`PodStore::materialize_acp_with`] would refuse it), or when the rebuild fails; the
+    /// stored provenance and the view are then unchanged.
+    pub fn record_creator(&mut self, resource: &str, creator: &str) -> Result<(), String> {
+        self.record_creators(&[resource], creator)
+    }
+
+    /// [`PodStore::record_creator`] for several resources at once, with one rebuild.
+    ///
+    /// # Errors
+    ///
+    /// As [`PodStore::record_creator`].
+    pub fn record_creators<S: AsRef<str>>(
+        &mut self,
+        resources: &[S],
+        creator: &str,
+    ) -> Result<(), String> {
+        loader::validate_principal_iri(creator)?;
         let mut provenance = self.acp_context.0.clone();
-        provenance.set_creator(resource, creator);
-        self.set_acp_provenance(provenance);
+        for resource in resources {
+            provenance.set_creator(resource.as_ref(), creator);
+        }
+        self.replace_acp_provenance(provenance).map(|_| ())
+    }
+
+    /// Whether `iri` is a resource of the auth view: a stored graph that is neither reserved
+    /// nor an `.acl`/`.acr`, or a container with such a graph below it (the rule the stored
+    /// provenance is kept by). A caller that creates resources through the store checks it
+    /// before the write, so a container that already exists keeps its creator.
+    pub fn holds_resource(&self, iri: &str) -> bool {
+        loader::resources(&self.graph).contains(iri)
     }
 
     /// The creator/owner provenance in the stored ACP context.
@@ -584,14 +629,28 @@ impl PodStore {
     }
 
     /// Replace the creator/owner provenance in the stored ACP context, returning the previous
-    /// one, without rebuilding the view: it takes effect at the next ACP materialization,
-    /// which the next update makes if none comes first. For
-    /// a caller that changes resources through the store and must restore the provenance
-    /// when it rolls a change back (such as the MCP server).
-    pub fn replace_acp_provenance(&mut self, provenance: AccessProvenance) -> AccessProvenance {
+    /// one. When an ACP view is in force it is rebuilt under `provenance` (over the store as it
+    /// is now) and `provenance` is installed only if that succeeds, so no decision uses the old
+    /// one; otherwise the next ACP materialization uses it. For a caller that changes
+    /// resources through the store and must restore the provenance when it rolls a change
+    /// back (such as the MCP server).
+    ///
+    /// # Errors
+    ///
+    /// As [`PodStore::materialize_acp_with`]; the stored provenance and the view are then
+    /// unchanged.
+    pub fn replace_acp_provenance(
+        &mut self,
+        provenance: AccessProvenance,
+    ) -> Result<AccessProvenance, String> {
         let previous = self.acp_context.0.clone();
-        self.set_acp_provenance(provenance);
-        previous
+        if self.acp_view {
+            let credentials = self.acp_context.1.clone();
+            self.materialize_acp_with_scoped(&provenance, &credentials, ReindexScope::Full)?;
+        } else {
+            self.set_acp_provenance(provenance);
+        }
+        Ok(previous)
     }
 
     /// The one place the stored provenance changes outside a materialization. A change
@@ -742,6 +801,7 @@ impl PodStore {
         // Kept for exactly the resources the view was built over (see [`loader::resources`]).
         self.acp_context = (Self::existing_provenance(&self.graph, provenance), credentials.clone());
         self.acp_provenance_pending = false;
+        self.acp_view = true;
         self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
@@ -1107,8 +1167,16 @@ impl PodStore {
     /// this update or a later one) is covered only once a static materialization runs again.
     fn apply_update(&mut self, effects: &[sparq_engine::UpdateEffect]) -> Result<(), String> {
         self.forget_removed_coverage(effects);
+        let removes = !self.acp_context.0.is_empty() && may_remove_resources(effects);
+        // Forget what the update drops before applying it: should the commit stop part way,
+        // a graph it dropped and created again never keeps the old creator or owner.
+        if removes {
+            let mut provenance = self.acp_context.0.clone();
+            forget_dropped(&mut provenance, effects);
+            self.set_acp_provenance(provenance);
+        }
         sparq_engine::apply_effects(&mut self.graph, effects)?;
-        if !self.acp_context.0.is_empty() && may_remove_resources(effects) {
+        if removes {
             let provenance = Self::provenance_after(&self.graph, &self.acp_context.0, effects);
             self.set_acp_provenance(provenance);
         }
@@ -1146,16 +1214,8 @@ impl PodStore {
         provenance: &AccessProvenance,
         effects: &[sparq_engine::UpdateEffect],
     ) -> AccessProvenance {
-        use spargebra::algebra::GraphTarget;
         let mut kept = Self::existing_provenance(graph, provenance);
-        for effect in effects {
-            let sparq_engine::UpdateEffect::Drop(target) = effect else { continue };
-            match target {
-                GraphTarget::NamedNode(n) => kept.forget(n.as_str()),
-                GraphTarget::NamedGraphs | GraphTarget::AllGraphs => kept.clear(),
-                GraphTarget::DefaultGraph => {}
-            }
-        }
+        forget_dropped(&mut kept, effects);
         kept
     }
 

@@ -139,9 +139,24 @@ fn store() -> PodStore {
             format!("{docs}#mf"),
         ),
         (docs, &format!("{docs}#mf"), "vc", FLAGGED.to_owned()),
-        (docs, &format!("{docs}#c"), "apply", format!("{docs}#editor")),
-        (docs, &format!("{docs}#editor"), "allow", format!("{ACL}Write")),
-        (docs, &format!("{docs}#editor"), "anyOf", format!("{docs}#me")),
+        (
+            docs,
+            &format!("{docs}#c"),
+            "apply",
+            format!("{docs}#editor"),
+        ),
+        (
+            docs,
+            &format!("{docs}#editor"),
+            "allow",
+            format!("{ACL}Write"),
+        ),
+        (
+            docs,
+            &format!("{docs}#editor"),
+            "anyOf",
+            format!("{docs}#me"),
+        ),
         (docs, &format!("{docs}#me"), "agent", ADMIN.to_owned()),
         (
             "https://pod.ex/other.acr.acr",
@@ -395,7 +410,10 @@ fn a_container_left_with_only_its_access_control_document_is_forgotten() {
     store
         .materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())
         .expect("acp materializes");
-    assert!(store.decide(&alice(), BOX, Mode::Read).allow, "the creator reads the container");
+    assert!(
+        store.decide(&alice(), BOX, Mode::Read).allow,
+        "the creator reads the container"
+    );
 
     let x = store
         .graph
@@ -404,9 +422,13 @@ fn a_container_left_with_only_its_access_control_document_is_forgotten() {
         .position(|(n, _)| n.to_string() == format!("<{BOX}x>"))
         .expect("x is stored");
     let removed = store.graph.named.remove(x);
-    store.materialize_acp().expect("rebuild with only the .acr under the container");
+    store
+        .materialize_acp()
+        .expect("rebuild with only the .acr under the container");
     store.graph.named.push(removed);
-    store.materialize_acp().expect("rebuild with the container again");
+    store
+        .materialize_acp()
+        .expect("rebuild with the container again");
     assert!(
         !store.decide(&alice(), BOX, Mode::Read).allow,
         "a container that held only its access-control document was gone"
@@ -440,8 +462,16 @@ fn decisions_follow_a_drop_with_no_rebuild_after_it() {
 #[test]
 fn decisions_follow_a_move_onto_a_resource_with_no_rebuild_after_it() {
     let mut store = store();
-    let writes_d0 = |store: &PodStore| store.accessible(&alice(), Mode::Write).iter().any(|g| g == D0);
-    assert!(writes_d0(&store), "the creator writes d0 (and the session cache holds it)");
+    let writes_d0 = |store: &PodStore| {
+        store
+            .accessible(&alice(), Mode::Write)
+            .iter()
+            .any(|g| g == D0)
+    };
+    assert!(
+        writes_d0(&store),
+        "the creator writes d0 (and the session cache holds it)"
+    );
     store
         .update_as_acp(&admin(), &format!("MOVE <{D1}> TO <{D0}>"))
         .expect("ADMIN may move d1 onto d0");
@@ -460,17 +490,38 @@ fn decisions_follow_a_drop_and_create_in_one_update() {
 }
 
 #[test]
-fn a_creator_recorded_through_the_store_applies_at_the_next_update() {
+fn a_provenance_change_through_the_store_applies_to_the_next_decision() {
     let mut store = store();
-    store.record_creator(D1, DAVE);
-    store
-        .update_as_acp(&admin(), &format!("INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}"))
-        .expect("ADMIN may write d0");
     let dave = Session {
         agent: Some(DAVE),
         client: None,
         issuer: None,
         now: None,
     };
-    assert!(store.decide(&dave, D1, Mode::Write).allow, "the recorded creator writes d1");
+    let dave_writes_d1 =
+        |store: &PodStore| store.accessible(&dave, Mode::Write).iter().any(|g| g == D1);
+    assert!(
+        !dave_writes_d1(&store),
+        "dave writes nothing yet (and the session cache holds that)"
+    );
+    assert!(
+        store.record_creator(D1, "urn:sparq:forged").is_err(),
+        "not a principal"
+    );
+    store.record_creator(D1, DAVE).expect("a WebID");
+    assert!(
+        store.decide(&dave, D1, Mode::Write).allow,
+        "the recorded creator writes d1"
+    );
+    assert!(dave_writes_d1(&store), "and the cached set follows");
+    assert_context_in_force(&store, "the earlier provenance is kept");
+
+    let mut without_alice = store.acp_provenance().clone();
+    without_alice.forget(D0);
+    let previous = store
+        .replace_acp_provenance(without_alice)
+        .expect("rebuild");
+    assert_context_forgotten(&store, "a replaced provenance, no explicit rebuild");
+    store.replace_acp_provenance(previous).expect("rebuild");
+    assert_context_in_force(&store, "the restored provenance");
 }

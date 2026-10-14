@@ -1932,16 +1932,26 @@ fn acp_container_creator_follows_the_container() {
         };
         s.store().decide(&bob, url, sparq_solid::Mode::Read).allow
     };
-    let (text, is_err) = tool(&mut s, "container_create", json!({"url": "https://pod.ex/docs/c/"}));
+    let (text, is_err) = tool(
+        &mut s,
+        "container_create",
+        json!({"url": "https://pod.ex/docs/c/"}),
+    );
     assert!(!is_err, "bob creates /docs/c/: {text}");
-    assert!(bob_reads(&s, "https://pod.ex/docs/c/"), "bob created /docs/c/");
+    assert!(
+        bob_reads(&s, "https://pod.ex/docs/c/"),
+        "bob created /docs/c/"
+    );
     let (text, is_err) = tool(
         &mut s,
         "resource_put",
         json!({"url": "https://pod.ex/docs/a/b", "content": "<https://pod.ex/docs/a/b#it> <https://ex.dev/ns#k> \"b\" .", "content_type": "text/turtle"}),
     );
     assert!(!is_err, "bob writes /docs/a/b: {text}");
-    assert!(bob_reads(&s, "https://pod.ex/docs/a/"), "bob created /docs/a/ on the way");
+    assert!(
+        bob_reads(&s, "https://pod.ex/docs/a/"),
+        "bob created /docs/a/ on the way"
+    );
 
     // A graph under /docs/c/ that its containment listing does not name keeps /docs/c/ in
     // place as an anchor once the container's own document is deleted.
@@ -1957,10 +1967,90 @@ fn acp_container_creator_follows_the_container() {
         json!({"sparql": "DELETE DATA { GRAPH <https://pod.ex/docs/c/> { <https://pod.ex/docs/c/> <http://www.w3.org/ns/ldp#contains> <https://pod.ex/docs/c/x> } }"}),
     );
     assert!(!is_err, "bob edits the listing of /docs/c/: {text}");
-    let (text, is_err) = tool(&mut s, "resource_delete", json!({"url": "https://pod.ex/docs/c/"}));
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_delete",
+        json!({"url": "https://pod.ex/docs/c/"}),
+    );
     assert!(!is_err, "bob deletes /docs/c/: {text}");
     assert!(
         !bob_reads(&s, "https://pod.ex/docs/c/"),
         "the deleted container's creator is forgotten"
+    );
+}
+
+/// A write below a container that already exists (here as the anchor of a graph someone
+/// else stored) creates the document, not the container: the writer becomes the creator of
+/// the document only.
+#[test]
+fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    const BOB: &str = "https://bob.ex/card#me";
+    let root = "https://pod.ex/.acr";
+    let nq = format!(
+        "<https://pod.ex/e/z#it> <https://ex.dev/ns#k> \"z\" <https://pod.ex/e/z> .
+<{root}> <{ACP}accessControl> <{root}#c> <{root}> .
+<{root}> <{ACP}memberAccessControl> <{root}#c> <{root}> .
+<{root}#c> <{ACP}apply> <{root}#p> <{root}> .
+<{root}#p> <{ACP}allow> <{ACL}Read> <{root}> .
+<{root}#p> <{ACP}allow> <{ACL}Write> <{root}> .
+<{root}#p> <{ACP}anyOf> <{root}#m> <{root}> .
+<{root}#m> <{ACP}agent> <{BOB}> <{root}> .
+"
+    );
+    const CAROL: &str = "https://carol.ex/card#me";
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture parses"));
+    let mut trusted = sparq_solid::AccessProvenance::new();
+    trusted.set_creator("https://pod.ex/e/", CAROL);
+    store.materialize_acp_with(&trusted).expect("materializes");
+    let config = SolidServerConfig {
+        agent: Some(BOB.to_string()),
+        acp: true,
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    let (text, is_err) = tool(
+        &mut s,
+        "container_create",
+        json!({"url": "https://pod.ex/e/"}),
+    );
+    assert!(
+        !is_err,
+        "bob gives the structural /e/ a graph of its own: {text}"
+    );
+    assert_eq!(
+        s.store().acp_provenance().creator("https://pod.ex/e/"),
+        Some(CAROL),
+        "/e/ keeps its creator"
+    );
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/e/mine", "content": "<https://pod.ex/e/mine#it> <https://ex.dev/ns#k> \"m\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes /e/mine: {text}");
+    let prov = s.store().acp_provenance();
+    assert_eq!(
+        prov.creator("https://pod.ex/e/mine"),
+        Some(BOB),
+        "bob created /e/mine"
+    );
+    assert_eq!(
+        prov.creator("https://pod.ex/e/"),
+        Some(CAROL),
+        "/e/ already existed"
+    );
+    let (text, is_err) = tool(
+        &mut s,
+        "container_create",
+        json!({"url": "https://pod.ex/f/"}),
+    );
+    assert!(!is_err, "bob creates /f/: {text}");
+    assert_eq!(
+        s.store().acp_provenance().creator("https://pod.ex/f/"),
+        Some(BOB),
+        "a new container"
     );
 }

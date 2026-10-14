@@ -793,34 +793,53 @@ impl SolidMcpServer {
     }
 
     /// Record the session's agent as the creator of `url` and of the containers created for
-    /// it, which this call creates, for the ACP `CreatorAgent` matcher. Returns the stored
-    /// provenance before the change, for [`Self::restore_provenance`] on rollback.
-    fn record_creation(&mut self, url: &str, containers: &[Term]) -> AccessProvenance {
-        let saved = self.store.acp_provenance().clone();
-        if let (true, Some(agent)) = (self.config.acp, self.config.agent.clone()) {
-            self.store.record_creator(url, &agent);
-            for c in containers {
-                if let Term::NamedNode(c) = c {
-                    self.store.record_creator(c.as_str(), &agent);
-                }
-            }
+    /// it, which this call creates, for the ACP `CreatorAgent` matcher (the store rebuilds its
+    /// view under the new provenance). An error (an agent the view cannot take as a
+    /// principal, a failed rebuild) changes nothing and rolls the write back.
+    fn record_creation(&mut self, created: &[String]) -> Result<(), String> {
+        if let (true, Some(agent), false) = (
+            self.config.acp,
+            self.config.agent.clone(),
+            created.is_empty(),
+        ) {
+            self.store.record_creators(created, &agent)?;
         }
-        saved
+        Ok(())
     }
 
-    /// Forget the provenance of `url`, which this call deletes. Returns the stored provenance
-    /// before the change, for [`Self::restore_provenance`] on rollback.
-    fn forget_provenance(&mut self, url: &str) -> AccessProvenance {
-        let saved = self.store.acp_provenance().clone();
-        let mut kept = saved.clone();
+    /// `url` and every container above it that is not yet a resource of the store: what a
+    /// write creating `url` creates. Checked before the write, so a container that already
+    /// exists (with a graph of its own or as the anchor of others' graphs) is not among them.
+    fn not_yet_resources(&self, url: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = url.to_owned();
+        loop {
+            if !self.store.holds_resource(&cur) {
+                out.push(cur.clone());
+            }
+            let trimmed = cur.trim_end_matches('/');
+            let Some(i) = trimmed.rfind('/') else { break };
+            let parent = &trimmed[..=i];
+            if parent.ends_with("//") {
+                break;
+            }
+            cur = parent.to_owned();
+        }
+        out
+    }
+
+    /// Forget the provenance of `url`, which this call deletes (the store rebuilds its view
+    /// under the new provenance).
+    fn forget_provenance(&mut self, url: &str) -> Result<(), String> {
+        let mut kept = self.store.acp_provenance().clone();
         kept.forget(url);
-        self.store.replace_acp_provenance(kept);
-        saved
+        self.store.replace_acp_provenance(kept).map(|_| ())
     }
 
-    /// Put back the provenance a rolled-back change replaced.
+    /// Put back the provenance a rolled-back change replaced, once the store holds what it
+    /// held before the change (the store rebuilds its view under it).
     fn restore_provenance(&mut self, saved: AccessProvenance) {
-        self.store.replace_acp_provenance(saved);
+        let _ = self.store.replace_acp_provenance(saved);
     }
 
     /// (Re-)materialize the authorization view under the configured model.
@@ -1524,6 +1543,7 @@ impl SolidMcpServer {
 
         // Swap the document slot (capturing the prior content for rollback).
         let term = Term::NamedNode(name);
+        let created = self.not_yet_resources(&url);
         let prior = self.take_slot(&term);
         let existed = prior.is_some();
         self.store.graph.named.push((term.clone(), new_graph));
@@ -1541,20 +1561,18 @@ impl SolidMcpServer {
                 return Err(e);
             }
         };
-        let saved = if existed {
-            None
-        } else {
-            Some(self.record_creation(&url, &created_graphs))
-        };
+        let saved = self.store.acp_provenance().clone();
+        let created = if existed { Vec::new() } else { created };
 
         // Re-materialize so the write is visible (a created doc enters the authorized
         // sets; a replaced group document takes effect) — rollback on error.
-        if let Err(e) = self.rematerialize() {
-            if let Some(saved) = saved {
-                self.restore_provenance(saved);
-            }
+        if let Err(e) = self
+            .record_creation(&created)
+            .and_then(|_| self.rematerialize())
+        {
             self.unlink_containment(&created_graphs, &added_links);
             self.restore_slot(&term, prior);
+            self.restore_provenance(saved);
             let _ = self.rematerialize(); // restore the prior (already-valid) view
             return Err(format!("resource_put rolled back for <{url}>: {e}"));
         }
@@ -1611,9 +1629,11 @@ impl SolidMcpServer {
         let removed_link = self.unlink_parent(&url);
         // A container can still exist as the anchor of graphs stored under it, so its
         // creator and owner are forgotten here, not only when the store finds it gone.
-        let saved = self.forget_provenance(&url);
-        if let Err(e) = self.rematerialize() {
-            self.restore_provenance(saved);
+        let saved = self.store.acp_provenance().clone();
+        if let Err(e) = self
+            .forget_provenance(&url)
+            .and_then(|_| self.rematerialize())
+        {
             if let Some((pterm, t)) = &removed_link {
                 if let Some(i) = self.slot_index(pterm) {
                     let _ = self.store.graph.named[i].1.insert_triple(
@@ -1624,6 +1644,7 @@ impl SolidMcpServer {
                 }
             }
             self.restore_slot(&term, Some(prior));
+            self.restore_provenance(saved);
             let _ = self.rematerialize();
             return Err(format!("resource_delete rolled back for <{url}>: {e}"));
         }
@@ -1644,6 +1665,7 @@ impl SolidMcpServer {
             return Err(format!("container <{url}> already exists"));
         }
 
+        let created = self.not_yet_resources(&url);
         let container = container_graph(&url)?;
         self.store.graph.named.push((term.clone(), container));
         let (created_graphs, added_links) = match self.link_containment(&url) {
@@ -1653,11 +1675,14 @@ impl SolidMcpServer {
                 return Err(e);
             }
         };
-        let saved = self.record_creation(&url, &created_graphs);
-        if let Err(e) = self.rematerialize() {
-            self.restore_provenance(saved);
+        let saved = self.store.acp_provenance().clone();
+        if let Err(e) = self
+            .record_creation(&created)
+            .and_then(|_| self.rematerialize())
+        {
             self.unlink_containment(&created_graphs, &added_links);
             self.restore_slot(&term, None);
+            self.restore_provenance(saved);
             let _ = self.rematerialize();
             return Err(format!("container_create rolled back for <{url}>: {e}"));
         }
