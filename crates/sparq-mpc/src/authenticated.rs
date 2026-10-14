@@ -114,7 +114,7 @@
 //! [`ShamirDealer::new_mac_session`](crate::shamir::ShamirDealer::new_mac_session)).
 //! What is never reconstructed is the *shared* `[α]` and the MAC shares `[α·x]`.
 //! A test (`mac_key_is_never_reconstructed_*`) pins that no `α`-opening path
-//! exists. ``
+//! exists.
 
 use crate::field::Fp;
 use crate::partial::MpcError;
@@ -132,14 +132,14 @@ use crate::shamir::{add_constant, add_shares, scale, sub_shares, Share, ShareVec
 /// value's MAC `α·x`. What is never reconstructed is the *shared* `[α]` (this type)
 /// and the MAC shares `[α·x]`: `α` itself is never returned to, nor opened by, any
 /// caller (no public accessor exposes it). The same `[α]` then authenticates every
-/// value in the session via [`AuthenticatedShare`]. ``
+/// value in the session via [`AuthenticatedShare`].
 ///
 /// **`α` is structurally un-openable.** This type stores `[α]` only as its private
 /// per-party share vector and exposes NO method that reconstructs it. The only
 /// share-level accessor, `MacKey::scaled_constant_mac` (crate-private), returns a
 /// sharing of `α·c` for a PUBLIC constant `c` (the add-constant MAC term of §2.3)
 /// — a derived sharing, never `[α]` itself. This is the structural realisation of
-/// the bead's acceptance criterion (2): no code path opens `α`. ``
+/// the bead's acceptance criterion (2): no code path opens `α`.
 ///
 /// **Does NOT derive [`Debug`].** The per-party share vector `[α]` is secret key
 /// material; a derived `Debug` would print every share, and *any* `t+1` of them
@@ -147,7 +147,7 @@ use crate::shamir::{add_constant, add_shares, scale, sub_shares, Share, ShareVec
 /// `assert_eq!` failure) would leak the very key the whole construction protects.
 /// Instead [`MacKey`] has a MANUAL [`Debug`] that REDACTS the shares
 /// (`MacKey { alpha: <redacted>, .. }`), so it stays printable for diagnostics
-/// without ever exposing `[α]`. ``
+/// without ever exposing `[α]`.
 #[derive(Clone)]
 pub struct MacKey {
     /// The degree-`t` Shamir sharing `[α]` (one [`Share`] per party). Private so
@@ -194,7 +194,7 @@ impl MacKey {
     /// `α` retained — secret, in-process — inside its
     /// [`MacSession`](crate::shamir::MacSession) to mint MACs) can build one;
     /// external code cannot supply its own `[α]`. The threshold `t` is recorded so
-    /// authenticated sharings are checked to match it. ``
+    /// authenticated sharings are checked to match it.
     pub(crate) fn from_shares(shares: ShareVec, t: usize) -> Self {
         MacKey { shares, t }
     }
@@ -220,7 +220,7 @@ impl MacKey {
     /// is public, so revealing a sharing of `α·c` is no more than revealing a
     /// sharing of (public-`c`) × (secret-`α`), which is exactly the MAC of the
     /// public value `c` and is meant to be added into another MAC sharing — it is
-    /// never opened on its own here. ``
+    /// never opened on its own here.
     pub(crate) fn scaled_constant_mac(&self, c: Fp) -> ShareVec {
         scale(&self.shares, c)
     }
@@ -248,7 +248,7 @@ impl MacKey {
     /// opens it — the shares flow into [`scale`] and only the (leakage-free) `σ` is
     /// opened, never `[α]`. Kept crate-private exactly as
     /// [`AuthenticatedShare::mac_shares`] is, so no public surface can pull `[α]` out
-    /// and reconstruct `α`. ``
+    /// and reconstruct `α`.
     pub(crate) fn alpha_shares(&self) -> &[Share] {
         &self.shares
     }
@@ -256,7 +256,7 @@ impl MacKey {
     /// **Test-only.** The raw `[α]` shares, so the independence test (acceptance
     /// (3)) can argue about `≤ t` views of `α`. The `cfg` gate keeps this out of
     /// the public/production API — there is deliberately no non-test accessor that
-    /// returns the shares for reconstruction. ``
+    /// returns the shares for reconstruction.
     #[cfg(test)]
     pub(crate) fn shares_for_test(&self) -> ShareVec {
         self.shares.clone()
@@ -278,7 +278,7 @@ impl MacKey {
 /// The value `[x]` reconstructs via the existing
 /// [`ShamirBackend::reconstruct`](crate::shamir::ShamirBackend::reconstruct); the
 /// MAC `[α·x]` reconstructs the same way and equals `α · x` — the relation a
-/// later batched check (sq-km34.4) verifies WITHOUT opening `α`. ``
+/// later batched check (sq-km34.4) verifies WITHOUT opening `α`.
 ///
 /// **Does NOT derive [`Debug`].** A derived `Debug` would print the private `mac`
 /// field — the `[α·x]` shares. For `authenticated_share(1)` those are shares of `α`
@@ -288,7 +288,7 @@ impl MacKey {
 /// the `pub(crate)` restriction on `Self::mac_shares`, undermining the "α is never
 /// reconstructable" guarantee. Instead [`AuthenticatedShare`] has a MANUAL [`Debug`]
 /// that surfaces the openable value sharing `[x]` (already public via
-/// [`Self::value_shares`]) but REDACTS the MAC shares. ``
+/// [`Self::value_shares`]) but REDACTS the MAC shares.
 #[derive(Clone)]
 pub struct AuthenticatedShare {
     /// `[x]` — the degree-`t` Shamir sharing of the value.
@@ -334,7 +334,7 @@ impl AuthenticatedShare {
     /// must be on the identical party-point set (same length, same `x` per index);
     /// otherwise the linear ops below could not pair them and the MAC relation
     /// would be meaningless. `pub(crate)`: only the dealer mints these (it alone
-    /// computed `α·x` from the secret `α` it holds transiently). ``
+    /// computed `α·x` from the secret `α` it holds transiently).
     pub(crate) fn new(value: ShareVec, mac: ShareVec) -> Result<Self, MpcError> {
         if value.len() != mac.len() {
             return Err(MpcError::Protocol(
@@ -375,7 +375,7 @@ impl AuthenticatedShare {
     /// which only ever consumes it inside the random linear combination) — there is
     /// no public surface that returns the MAC shares, so the `x = 1` extraction is
     /// closed. (`value_shares()` stays public: it opens `[x]`, the value, never
-    /// `α`.) ``
+    /// `α`.)
     //
     // sq-km34.3: the `allow(dead_code)` that used to sit here is GONE.
     // Its justification was "the MAC-check machinery is NOT built yet, so this has
@@ -408,7 +408,7 @@ impl AuthenticatedShare {
 
 /// Add two authenticated sharings: `[[x]] + [[y]] = ([x]+[y], [α·x]+[α·y])`
 /// (design §2.3). FREE / local — both components add component-wise, no round.
-/// Inputs must be on the identical party-point set. ``
+/// Inputs must be on the identical party-point set.
 pub fn auth_add(
     a: &AuthenticatedShare,
     b: &AuthenticatedShare,
@@ -420,7 +420,6 @@ pub fn auth_add(
 
 /// Subtract two authenticated sharings: `[[x]] − [[y]] = ([x]−[y], [α·x]−[α·y])`
 /// (design §2.3). FREE / local. Inputs must be on the identical party-point set.
-/// ``
 pub fn auth_sub(
     a: &AuthenticatedShare,
     b: &AuthenticatedShare,
@@ -433,7 +432,7 @@ pub fn auth_sub(
 /// Multiply an authenticated sharing by a PUBLIC field constant `c`:
 /// `c · [[x]] = (c·[x], c·[α·x])` (design §2.3, since `α·(c·x) = c·(α·x)`). FREE /
 /// local. (This is scaling by a *public* scalar — NOT secret×secret multiplication,
-/// which is sq-km34.2 and needs real work.) ``
+/// which is sq-km34.2 and needs real work.)
 pub fn auth_scale(a: &AuthenticatedShare, c: Fp) -> AuthenticatedShare {
     // Route through `new` so the value/MAC point-alignment invariant is
     // enforced in exactly one place rather than re-asserted (or silently assumed)
@@ -453,7 +452,7 @@ pub fn auth_scale(a: &AuthenticatedShare, c: Fp) -> AuthenticatedShare {
 /// [`AuthenticatedShare`] does not carry its own threshold, so the threshold is not
 /// re-verified here (the dealer mints the key and the sharing at the same `t`, so a
 /// matching party set on the same session implies a matching `t`). A party-set
-/// mismatch is a protocol error. ``
+/// mismatch is a protocol error.
 pub fn auth_add_constant(
     a: &AuthenticatedShare,
     c: Fp,
@@ -495,7 +494,7 @@ pub fn auth_add_constant(
 /// All addends must be authenticated under the SAME session key `α` and shared on
 /// the identical party-point set (as [`auth_add`] requires). An empty input is a
 /// protocol error — like `run_secure`, there is no meaningful sum of zero addends
-/// to disclose, and we never invent one. ``
+/// to disclose, and we never invent one.
 pub fn auth_sum(shares: &[AuthenticatedShare]) -> Result<AuthenticatedShare, MpcError> {
     let (first, rest) = shares.split_first().ok_or_else(|| {
         MpcError::Protocol("auth_sum: no authenticated inputs to aggregate".into())
@@ -672,7 +671,7 @@ mod tests {
     /// material and only the non-secret shape (party count + threshold). We assert
     /// the redaction marker is present and that NO share's `y` value appears in the
     /// output. `MacSession`'s `Debug` delegates to this one, so the session is
-    /// covered too. ``
+    /// covered too.
     #[test]
     fn mac_key_debug_redacts_alpha_shares() {
         let backend = ShamirBackend::new_seeded(5, 0xD00D).unwrap();
@@ -701,7 +700,7 @@ mod tests {
     /// back door round the `pub(crate)` `mac_shares()` accessor. The manual [`Debug`]
     /// prints `<redacted>` for the MAC and keeps the openable value sharing `[x]`. We
     /// assert the redaction marker is present and that NO MAC share's `y` value
-    /// appears in the output. ``
+    /// appears in the output.
     #[test]
     fn authenticated_share_debug_redacts_mac_shares() {
         let backend = ShamirBackend::new_seeded(5, 0xBEEF).unwrap();
@@ -862,7 +861,7 @@ mod tests {
 
     /// `auth_sum` rejects an empty aggregate (like `run_secure`): there is no
     /// meaningful sum of zero addends to disclose, so it is a protocol error, not
-    /// a silent zero. ``
+    /// a silent zero.
     #[test]
     fn auth_sum_rejects_empty_input() {
         assert!(matches!(auth_sum(&[]), Err(MpcError::Protocol(_))));

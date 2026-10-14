@@ -271,13 +271,13 @@ mod gated {
     /// 70 → 72 positive-entailment). They previously failed closed at L1; the premise
     /// now extracts into ALCHS and the declaration-free conclusion roles reuse only the
     /// premise-confirmed role kind. The audited five-row divergence set is unchanged.
-    /// UNCHANGED at 186 by sq-fj8lj (— `dl-direct` now enables
+    /// UNCHANGED at 186 by sq-fj8lj (`dl-direct` now enables
     /// `sparq-reason-dl/dispatch_ql`, graduating the QL dispatch branch to the
     /// sparq-reason-ql DL-Lite_R checker): MEASURED at the pinned export, ZERO corpus rows
     /// dispatch to the QL branch — reaching it needs in-QL ∧ not-RL ∧ not-EL, which forces
     /// a complement shape absent from the extractable corpus (the pre-change abstention
     /// histogram carried no "QL consistency pending" entry), so no row's verdict moves.
-    /// Re-pinned by sq-pbz04.4.8 (— the guard-abstention tableau fall-through,
+    /// Re-pinned by sq-pbz04.4.8 (the guard-abstention tableau fall-through,
     /// design record §4 as amended): **+41 (186 → 227)**, composition 136 consistency +
     /// 17 inconsistency + 72 positive-entailment + 2 negative-entailment. This is the bead,
     /// and it is the largest single move this floor has made. MECHANISM: when the owning

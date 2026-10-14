@@ -807,7 +807,7 @@ mod tests {
     // replacements — are NOTICED in the helper that actually computes the
     // reconstruction, not only end-to-end where a wrong intermediate can be
     // masked. Semi-honest scope only; NO protocol logic changed, NO security
-    // claim (sq-qhy4 gates that). ``
+    // claim (sq-qhy4 gates that).
     // =====================================================================
 
     #[test]

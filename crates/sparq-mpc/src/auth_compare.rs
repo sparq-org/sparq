@@ -62,7 +62,7 @@
 //! identifiable abort, NOT GOD), AXIS-3 `HonestMajority` (degrades / refuses if
 //! `n ≤ 2t`). It does NOT enter the dishonest-majority SPDZ regime (route (b) /
 //! sq-j5ok). The exact integer operands are NEVER opened — only the 1-bit verdict,
-//! and only after the MAC-check passes. ``
+//! and only after the MAC-check passes.
 
 use crate::authenticated::{auth_add, auth_add_constant, auth_scale, auth_sub, AuthenticatedShare};
 use crate::compare::COMPARE_BITS;
@@ -199,7 +199,7 @@ fn auth_greater_than_bits(
 ///
 /// Both operands must be `< 2^`[`COMPARE_BITS`] (fail-closed). `n >= 2t+1`
 /// (fail-closed). Honest-majority, **tamper-evident-with-abort** (design §3 targets
-/// malicious-with-abort; see the module security tier). ``
+/// malicious-with-abort; see the module security tier).
 pub fn malicious_greater_than(backend: &ShamirBackend, a: Fp, b: Fp) -> Result<bool, MpcError> {
     check_party_count(backend.parties(), backend.threshold())?;
     check_in_range("a", a)?;
@@ -230,7 +230,7 @@ pub fn malicious_greater_than(backend: &ShamirBackend, a: Fp, b: Fp) -> Result<b
 /// The threshold is public, so its bits are public CONSTANTS and the per-bit products
 /// against it collapse to FREE local affine maps on the authenticated secret bits — no
 /// authenticated multiplication is spent on the threshold side, only on the `eq`/`gt`
-/// chain. Same security tier and pipeline as [`malicious_greater_than`]. ``
+/// chain. Same security tier and pipeline as [`malicious_greater_than`].
 pub fn malicious_threshold(
     backend: &ShamirBackend,
     secret: Fp,
@@ -290,7 +290,6 @@ fn auth_greater_than_public_bits(
 /// exists, like every other open) and returns the boolean. A non-boolean
 /// reconstruction is refused rather than coerced. This is the ONLY value the
 /// tamper-evident comparison path opens; the operands are never reconstructed.
-/// ``
 pub fn open_auth_verdict(
     backend: &ShamirBackend,
     verdict: &AuthenticatedShare,
@@ -302,7 +301,7 @@ pub fn open_auth_verdict(
 /// is not `0` or `1` rather than silently rounding it. Split out of
 /// [`open_auth_verdict`] so the MAC-checked paths can reuse it on the value handed back
 /// by [`MacSession::mac_check_and_open`] — they must not re-open the sharing, or the
-/// bit they act on would be bound to the checked bit only by convention. ``
+/// bit they act on would be bound to the checked bit only by convention.
 fn verdict_bit(bit: Fp) -> Result<bool, MpcError> {
     if bit == Fp::zero() {
         Ok(false)

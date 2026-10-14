@@ -13,7 +13,7 @@
 //! below, and that function's own docs for why a rename, rather than a revert, is the
 //! containment that is actually available). The prose below describes the IT-MAC
 //! construction as designed; read the residual section before treating any of it as a
-//! guarantee against an actively-deviating party. ``
+//! guarantee against an actively-deviating party.
 //!
 //! ## What this closes (sq-ka8m residual)
 //!
@@ -72,7 +72,7 @@
 //! unanimous or identifiable abort), AXIS-3 `HonestMajority`; AXIS-1 is **not** `Malicious` today. The exact sum is NEVER opened
 //! — only `c = a²` (sign-independent), the statistically-masked `c = sum + r`, and the
 //! 1-bit verdict, and the latter two only after their MAC-checks pass — so the
-//! CONFIDENTIALITY statement is unaffected by the integrity gap. ``
+//! CONFIDENTIALITY statement is unaffected by the integrity gap.
 //!
 //! ## The range-proof zero-tests are MAC-checked too (sq-m4zi / sq-e7ma)
 //!
@@ -108,7 +108,6 @@
 //! The lift closes a real gap in the MAGNITUDE dimension: this path now supports the
 //! SAME `2^60` as the semi-honest one. It does NOT lift the integrity tier — see
 //! "Integrity coverage is NOT total" below before treating it as malicious-secure.
-//! ``
 //!
 //! ## Residual (honest scope statement)
 //!
@@ -130,7 +129,7 @@
 //!   [`crate::shamir::MacSession`] gains multiplication-gate verification that binds BOTH
 //!   operands (Chida-et-al. style), treat this path as a research/semi-honest surface:
 //!   do NOT deploy it as the integrity tier against a genuinely malicious party.** See
-//!   "What the MAC-check does NOT cover" on `auth_bit_decompose_rabbit`. ``
+//!   "What the MAC-check does NOT cover" on `auth_bit_decompose_rabbit`.
 //! - **Containment applied (review round 2).** The entry point was renamed
 //!   `malicious_disclose_threshold_verdict` →
 //!   [`experimental_tamper_evident_disclose_threshold_verdict`], so the API no longer
@@ -143,8 +142,8 @@
 //!   **(b) It did not "fix" the composition in this module.** Any in-module repair is
 //!   local to one `auth_mul` call site while the adoption is a property of the
 //!   primitive, present at every gate on the chain; the honest fix is the `MacSession`
-//!   change named above, and a partial patch here would read as closure. ``
-//! - The dishonest-majority SPDZ regime (route (b) / sq-j5ok) is NOT entered. ``
+//!   change named above, and a partial patch here would read as closure.
+//! - The dishonest-majority SPDZ regime (route (b) / sq-j5ok) is NOT entered.
 
 use crate::authenticated::{auth_add, auth_add_constant, auth_scale, auth_sub, AuthenticatedShare};
 #[cfg(test)]
@@ -188,7 +187,7 @@ use crate::shamir::{MacSession, ShamirBackend, Share};
 /// verification). The containment that IS available today is the one applied here —
 /// the name and the tier statement no longer claim a guarantee the code does not
 /// deliver. Renaming is cheap and total: `sparq-mpc` is `publish = false` and nothing
-/// in the workspace depends on it, so no caller is silently retargeted. ``
+/// in the workspace depends on it, so no caller is silently retargeted.
 ///
 /// `sum_shares` is the degree-`t` sharing of the cumulative aggregate;
 /// `public_threshold` is the public bar (e.g. £100k). sq-km34.6:
@@ -204,7 +203,7 @@ use crate::shamir::{MacSession, ShamirBackend, Share};
 /// it demonstrably does not.
 ///
 /// Honest-majority, **tamper-evident-with-abort on the opened values** (design §3 aims
-/// at malicious-with-abort; the delivered tier is weaker). `` ``
+/// at malicious-with-abort; the delivered tier is weaker).
 pub fn experimental_tamper_evident_disclose_threshold_verdict(
     backend: &ShamirBackend,
     sum_shares: &[Share],
@@ -383,7 +382,7 @@ fn auth_masked_bit_decompose(
 /// [`MpcError::Protocol`] (an out-of-range / wrapping sum), and on a TAMPERED zero-test
 /// open [`MpcError::MacCheckFailed`] — so a deviating party can no longer flip
 /// "was it zero?" to smuggle an out-of-range sum past the guard. Honest-majority,
-/// tamper-evident-with-abort (see the module security tier). ``
+/// tamper-evident-with-abort (see the module security tier).
 ///
 /// sq-km34.6 — now **TEST-ONLY**: the production path range-proves the
 /// AUTHENTICATED Rabbit decomposition via [`auth_verify_value_in_range_rabbit`] (full
@@ -460,7 +459,7 @@ fn auth_verify_sum_in_range(
 /// `[[a ⊕ b]]` (logical XOR) of two AUTHENTICATED 0/1 sharings: `a + b − 2·a·b`. One
 /// [`MacSession::auth_mul`] (the `a·b` term); the rest is FREE authenticated linear
 /// ops. The IT-MAC twin of `crate::compare`'s `secret_xor`, used by the
-/// authenticated Rabbit bit-add / bit-sub circuits. ``
+/// authenticated Rabbit bit-add / bit-sub circuits.
 fn auth_xor(
     session: &mut MacSession,
     a: &AuthenticatedShare,
@@ -476,7 +475,7 @@ fn auth_xor(
 /// `deal_full_field_solved_bits`: every bit is an [`auth_square_protocol_random_bit`]
 /// (whose `a²` open is MAC-checked before it is read), and `[[r]] = Σ_k [[r_k]]·2^k`
 /// is a FREE authenticated linear combination, so `[[r]]` and the `[[r_k]]` are
-/// consistent — and MAC-consistent — by construction. ``
+/// consistent — and MAC-consistent — by construction.
 fn auth_deal_full_field_solved_bits(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -501,7 +500,7 @@ fn auth_deal_full_field_solved_bits(
 /// is decided by the first bit where `c_k = 0, r_k = 1` with all higher bits equal.
 /// `c_k` is PUBLIC, so `(1 − c_k)·r_k` and the `(c_k == r_k)` map are FREE authenticated
 /// affine ops; the only authenticated multiplications are the `eq`/`lt` chain steps.
-/// Nothing is opened here — `[[w]]` stays secret and MAC-carried. ``
+/// Nothing is opened here — `[[w]]` stays secret and MAC-carried.
 fn auth_rabbit_lt_bits_public_less_than_shared(
     session: &mut MacSession,
     c: u64,
@@ -536,7 +535,7 @@ fn auth_rabbit_lt_bits_public_less_than_shared(
 ///
 /// `konst_k · [[w]]` is a public bit times one authenticated sharing, so forming the
 /// addend is FREE; the carry chain costs two authenticated multiplications per output
-/// bit (the `x ∧ carry` term and the OR inside the majority). ``
+/// bit (the `x ∧ carry` term and the OR inside the majority).
 fn auth_rabbit_add_public_and_w_times_const(
     session: &mut MacSession,
     c: u64,
@@ -587,7 +586,7 @@ fn auth_rabbit_add_public_and_w_times_const(
 /// `rabbit_sub_shared_bits`: both operands are shared, so the result bit's XOR costs a
 /// multiplication too — five authenticated multiplications per bit position, every one
 /// of them MAC-carrying. Missing high positions read as the authenticated constant
-/// `[[0]]`. ``
+/// `[[0]]`.
 fn auth_rabbit_sub_shared_bits(
     session: &mut MacSession,
     lhs_bits: &[AuthenticatedShare],
@@ -701,7 +700,7 @@ fn auth_rabbit_sub_shared_bits(
 /// Correct only while `x < 2^`[`RABBIT_VALUE_BITS`] so the recovered low bits capture
 /// the whole value. `x` is a SHARING, so this cannot be checked here without disclosing
 /// it; the caller proves it in-protocol via [`auth_verify_value_in_range_rabbit`].
-/// Honest-majority, tamper-evident-with-abort (see the module security tier). ``
+/// Honest-majority, tamper-evident-with-abort (see the module security tier).
 fn auth_bit_decompose_rabbit(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -758,7 +757,7 @@ fn auth_bit_decompose_rabbit(
 /// zero-test answer "yes, zero" for ANY `recompose_diff`, so an out-of-range sum — or an
 /// arbitrarily corrupted decomposition — walks past this check with the MAC-check
 /// passing. Witness:
-/// `a_zeroed_zero_test_mask_defeats_the_range_proof_and_flips_the_verdict`. ``
+/// `a_zeroed_zero_test_mask_defeats_the_range_proof_and_flips_the_verdict`.
 fn auth_verify_value_in_range_rabbit(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -817,7 +816,7 @@ fn auth_verify_value_in_range_rabbit(
 /// zeroing BOTH operands defeats a both-orders check as well; the fix is
 /// multiplication-gate verification in [`MacSession`] that binds both operands. Witness:
 /// `a_zeroed_zero_test_mask_defeats_the_range_proof_and_flips_the_verdict`.
-/// Honest-majority, tamper-evident-with-abort (NOT malicious-with-abort). ``
+/// Honest-majority, tamper-evident-with-abort (NOT malicious-with-abort).
 fn auth_secret_is_zero(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -860,7 +859,7 @@ fn auth_or(
 /// `[[a]]` is a fresh nonzero authenticated value; `[[a²]] = auth_mul([[a]],[[a]])`;
 /// MAC-check `[[a²]]`; open `c = a²` (sign-independent, leaks nothing about the bit);
 /// then `[[b]] = (d⁻¹·[[a]] + 1)·2⁻¹` as FREE authenticated affine maps so the bit
-/// stays MAC-carried. ``
+/// stays MAC-carried.
 fn auth_square_protocol_random_bit(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -940,7 +939,7 @@ fn auth_greater_than_public_bits(
 /// open. The value sharing `[verdict]` is reconstructed (the MAC was consumed by the
 /// check, never opened); a non-boolean reconstruction is refused rather than coerced.
 /// This is the ONLY value this path opens besides the sign-independent `a²` and the
-/// statistically-masked `sum + r`. ``
+/// statistically-masked `sum + r`.
 fn open_auth_verdict(
     backend: &ShamirBackend,
     verdict: &AuthenticatedShare,

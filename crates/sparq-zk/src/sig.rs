@@ -2273,7 +2273,6 @@ mod tests {
     }
 
     // --- sq-1hsl: the pluggable OFF-circuit signature seam ------------------
-    //
 
     /// A second, MOCK `IssuerSignatureScheme` that exercises the open seam
     /// WITHOUT any real cryptography: it "accepts" iff the signature hex equals a

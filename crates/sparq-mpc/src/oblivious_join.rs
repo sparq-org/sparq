@@ -126,13 +126,13 @@ use std::str::FromStr;
 /// thread 1). `Fp` is the Mersenne prime `2^61 − 1` ([`crate::field::P`]), so a
 /// field element holds any 60-bit value; we pack 7 bytes (56 bits) per limb,
 /// well under the modulus, so every limb is a canonical residue with no reduction
-/// and the byte→limb→byte round-trip is exact. ``
+/// and the byte→limb→byte round-trip is exact.
 const BYTES_PER_LIMB: usize = 7;
 
 /// The fixed value packed into padding limbs (the limbs that bring a short
 /// entry up to the uniform width). The exact byte length is carried in an explicit
 /// LENGTH-PREFIX limb (see [`bytes_to_limbs`]), so padding content is irrelevant to
-/// decoding — `0` is used purely for determinism. ``
+/// decoding — `0` is used purely for determinism.
 const PAD_LIMB: u64 = 0;
 
 /// One disclosed payload row — a column vector of nullable `oxrdf` terms, the same
@@ -200,7 +200,7 @@ pub struct ObliviousOutputCost {
     /// a real secret-control shuffle pays a conditional swap per field element per
     /// switch, and the payloads now ride through the shuffle as secret limbs, so a
     /// single-element switch count would understate the work (Copilot review #93,
-    /// thread 2). ``
+    /// thread 2).
     pub shuffle: ShuffleCost,
 }
 
@@ -396,7 +396,7 @@ fn selector_sharing(dealer: &mut ShamirDealer, bit: &MatchBit) -> Result<Vec<Sha
 /// bound column the term's canonical N-Triples serialization (`Term::to_string`)
 /// as UTF-8, NUL-terminated. The N-Triples form escapes control characters
 /// (including NUL → `\u0000`), so a raw `0x00` never appears inside a term and is
-/// an unambiguous field terminator. ``
+/// an unambiguous field terminator.
 fn encode_payload_row(row: &[Option<Term>]) -> Vec<u8> {
     let mut bytes = Vec::new();
     for cell in row {
@@ -415,7 +415,7 @@ fn encode_payload_row(row: &[Option<Term>]) -> Vec<u8> {
 /// Inverse of [`encode_payload_row`]: parse a byte stream back into `arity`
 /// nullable terms. Fails closed ([`MpcError::Protocol`]) on any malformed encoding
 /// (truncated stream, non-UTF-8, unparseable term) — a corrupted shuffle entry must
-/// not silently yield a wrong or partial row. ``
+/// not silently yield a wrong or partial row.
 fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, MpcError> {
     let mut out = Vec::with_capacity(arity);
     let mut pos = 0usize;
@@ -467,7 +467,6 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
 /// endian within a limb), each `< 2^56`. The length prefix removes the trailing-
 /// zero ambiguity a sentinel/implicit-length scheme has (a final partial limb is
 /// zero-padded to 7 bytes; the prefix tells the decoder exactly how many to keep).
-/// ``
 fn bytes_to_limbs(bytes: &[u8]) -> Vec<Fp> {
     let mut limbs = Vec::with_capacity(1 + bytes.len().div_ceil(BYTES_PER_LIMB));
     limbs.push(Fp::new(bytes.len() as u64));
@@ -482,7 +481,7 @@ fn bytes_to_limbs(bytes: &[u8]) -> Vec<Fp> {
 }
 
 /// The number of limbs [`bytes_to_limbs`] produces for a `byte_len`-byte stream:
-/// one length-prefix limb plus `⌈byte_len / 7⌉` data limbs. ``
+/// one length-prefix limb plus `⌈byte_len / 7⌉` data limbs.
 fn limb_count_for(byte_len: usize) -> usize {
     1 + byte_len.div_ceil(BYTES_PER_LIMB)
 }
@@ -492,7 +491,7 @@ fn limb_count_for(byte_len: usize) -> usize {
 /// Fails closed ([`MpcError::Protocol`]) if the length prefix is missing, if it
 /// claims more bytes than the data limbs can supply, or if a data limb's value
 /// exceeds the 7-byte range — any of which signals a corrupted shuffle entry rather
-/// than a recoverable payload. ``
+/// than a recoverable payload.
 fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     let len_limb = limbs.first().ok_or_else(|| {
         MpcError::Protocol("limbs_to_bytes: empty limb block (missing length prefix)".to_string())
@@ -1111,7 +1110,6 @@ mod tests {
 
     /// The encode→limbs→bytes→decode pipeline round-trips a mix of IRIs, simple
     /// and typed literals, special characters, and unbound `None` cells exactly.
-    /// ``
     #[test]
     fn payload_row_encode_decode_round_trips() {
         let rows: Vec<Vec<Option<Term>>> = vec![
@@ -1137,7 +1135,7 @@ mod tests {
     /// oblivious output path (carried through the shuffle as secret limbs), and the
     /// real multiset is shuffle-invariant across seeds. This is the regression test
     /// for the L2-leak fix — payloads no longer ride as cleartext reordered by an
-    /// opened permutation. ``
+    /// opened permutation.
     #[test]
     fn rich_payloads_survive_shuffle_without_opening_permutation() {
         let cands = public_candidates(&[
@@ -1182,7 +1180,7 @@ mod tests {
     /// The modelled shuffle switch count scales with the packed-entry width
     /// (tag + payload limbs), not one element per item (Copilot #93, thread 2).
     /// A wider payload (more limbs) yields a strictly larger switch count than a
-    /// narrow one at the same slot count. ``
+    /// narrow one at the same slot count.
     #[test]
     fn shuffle_cost_scales_with_payload_width() {
         let backend = ShamirBackend::new_seeded(3, 5).unwrap();
@@ -1207,7 +1205,7 @@ mod tests {
 
     /// A `MatchBit::SecretShared` selector that is NOT a sharing of 0/1 makes the
     /// opened tag fall outside `{0, REAL_TAG}`; rather than silently dropping it as
-    /// a dummy, the path FAILS CLOSED with a typed `Tampered` error. ``
+    /// a dummy, the path FAILS CLOSED with a typed `Tampered` error.
     #[test]
     fn out_of_set_tag_fails_closed() {
         let backend = ShamirBackend::new_seeded(3, 7).unwrap();
