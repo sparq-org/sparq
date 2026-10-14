@@ -52,14 +52,16 @@ records identify GPT-6 and their exact measurement provenance separately.
 
 ## Re-measure result evidence
 
-Keep the four destination evidence files clean against `HEAD`, in both the
-working tree and the index. Follow the two clean-archive `measure` runs and the
+Keep the four destination evidence files and `gate_counts_latest.json` clean
+against `HEAD`, in both the working tree and the index. Follow the two clean-archive `measure` runs and the
 `apply` command in
 [`remeasure_result_evidence.py`](scripts/remeasure_result_evidence.py)'s docstring.
 Pass `--baseline-commit <pre-change-commit>` to `apply` to name the commit whose
 evidence is the pre-change baseline (it defaults to `HEAD`). `apply` reads those
-files from that commit with `git show`, never from the working tree, and refuses
-a baseline whose `prepared_by` differs from the destination file's.
+files from that commit with `git show`, never from the working tree. It refuses
+a baseline whose `prepared_by` differs from the destination file's, and a baseline
+that differs from the destination in any field `apply` does not re-measure or
+rewrite, since that field would otherwise be silently replaced.
 
 `apply` refuses staged or unstaged destination edits, checking each separately,
 and fails closed if Git cannot check against `HEAD`. On replacement failure, it
