@@ -442,7 +442,7 @@ mod tests {
     use crate::owl2dl::datatypes::{Rational, RationalKey};
 
     fn real(n: i128) -> Value {
-        Value::Real(RationalKey(Rational::int(n)))
+        Value::Real(RationalKey(Rational::int(n).unwrap()))
     }
 
     fn ints(lo: i128, hi: i128) -> Region {

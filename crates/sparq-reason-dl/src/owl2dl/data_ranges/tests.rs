@@ -324,7 +324,10 @@ fn string_ranges_combine_patterns_lengths_and_languages() {
     );
     // Tags are well-formed BCP 47 tags: `en-a` has a singleton with no extension subtag.
     assert_eq!(
-        contains(&dt("rdf:PlainLiteral"), &lang("x", "en-a")),
+        contains(
+            &dt("rdf:PlainLiteral"),
+            &Value::LangString("x".into(), "en-a".into())
+        ),
         Tri::No
     );
     assert_eq!(
@@ -663,21 +666,28 @@ fn values_no_literal_has_answer_unknown() {
         "seconds are decimal"
     );
     assert_eq!(has_at_least(&one_of([third]), 1), Tri::Unknown);
-    let min = Value::Real(RationalKey(Rational::int(i128::MIN)));
-    assert_eq!(contains(&dt("integer"), &min), Tri::Yes);
-    let max = Value::Real(RationalKey(Rational::int(i128::MAX)));
-    assert_eq!(contains(&dt("integer"), &max), Tri::Yes);
-    assert_eq!(contains(&dt("long"), &max), Tri::No);
-    // Reduced, but `Rational`'s comparison would overflow on it.
-    let edge = Value::Real(RationalKey(Rational {
-        num: i128::MIN + 1,
-        den: 3,
+    let min = Value::Real(RationalKey(Rational {
+        num: i128::MIN,
+        den: 1,
     }));
     assert_eq!(
-        has_at_least(&one_of([edge.clone(), v("1/3", "owl:rational")]), 2),
-        Tri::Unknown
+        contains(&dt("integer"), &min),
+        Tri::Unknown,
+        "outside `Rational`'s range"
     );
-    assert_eq!(contains(&dt("owl:rational"), &edge), Tri::Unknown);
+    let max = Value::Real(RationalKey(Rational::int(i128::MAX).unwrap()));
+    assert_eq!(contains(&dt("integer"), &max), Tri::Yes);
+    assert_eq!(contains(&dt("long"), &max), Tri::No);
+    // Extreme negative non-integers compare and count exactly.
+    let edge = Value::Real(RationalKey(Rational::new(i128::MIN + 1, 3).unwrap()));
+    let near = Value::Real(RationalKey(Rational::new(i128::MIN + 2, 3).unwrap()));
+    let both = one_of([edge.clone(), near.clone(), v("1/3", "owl:rational")]);
+    assert_eq!(has_at_least(&both, 3), Tri::Yes);
+    assert_eq!(has_at_least(&both, 4), Tri::No);
+    assert_eq!(contains(&dt("owl:rational"), &edge), Tri::Yes);
+    let above = restrict("owl:rational", &[("minExclusive", edge.clone())]);
+    assert_eq!(contains(&above, &near), Tri::Yes);
+    assert_eq!(contains(&above, &edge), Tri::No);
     let negative_den = Value::Real(RationalKey(Rational { num: 1, den: -1 }));
     assert_eq!(contains(&dt("integer"), &negative_den), Tri::Unknown);
     let unreduced = Value::Real(RationalKey(Rational { num: 2, den: 4 }));

@@ -28,7 +28,9 @@ mod region;
 mod strings;
 mod xsdre;
 
-use super::datatypes::{in_value_space, integer_range, Builtin, Facet, RationalKey, Value};
+use super::datatypes::{
+    in_value_space, integer_range, Builtin, Facet, Rational, RationalKey, Value,
+};
 use cuts::Cuts;
 use rat::Rat;
 use region::{f32_key, f64_key, int_range, Region, Sp};
@@ -157,24 +159,9 @@ fn canonical(v: &Value) -> Result<Value, Unknown> {
     })
 }
 
-/// Whether `r` is in lowest terms with a positive denominator, as parsed values are, and
-/// `Rational`'s comparison (which forms `num - floor * den`) cannot overflow on it.
+/// Whether `r` is in the normal form `Rational::new` gives, as parsed values are.
 fn reduced(r: &RationalKey) -> bool {
-    let (mut a, mut b) = (r.0.num.unsigned_abs(), r.0.den.unsigned_abs());
-    if r.0.den <= 0
-        || r.0
-            .num
-            .div_euclid(r.0.den)
-            .checked_mul(r.0.den)
-            .and_then(|p| r.0.num.checked_sub(p))
-            .is_none()
-    {
-        return false;
-    }
-    while b != 0 {
-        (a, b) = (b, a % b);
-    }
-    a == 1
+    Rational::new(r.0.num, r.0.den) == Some(r.0)
 }
 
 fn one_of(vs: &[Value]) -> Result<Region, Unknown> {
