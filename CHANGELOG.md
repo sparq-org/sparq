@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Distinct premise universals need distinct store universals, and no other variable of the
   firing may mention one, at any depth, or bind a value holding a blank node (an
   existential whose witness may depend on it). A ground fact never proves it. Supported where the
-  universal is a subject or object (or in a list or quoted triple there) of a
+  universal is a subject or object (or in a list or triple term there) of a
   stored-predicate atom, in a document with no backward rules; every other placement (or a
   premise that also holds a blank constant, as a rule inside a closed formula can), and
   an N3 query document, is still refused with the same error. The `compiled-rules` engine
