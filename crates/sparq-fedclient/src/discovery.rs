@@ -706,7 +706,7 @@ fn probe_url(endpoint: &str, query: &str) -> String {
     for param in params.split('&') {
         // Match the name as a server decodes it (`%71uery` is `query`); keep the text verbatim.
         let name = param.split_once('=').map_or(param, |(name, _)| name);
-        if !param.is_empty() && percent_encoding::percent_decode_str(name).ne("query".bytes()) {
+        if !param.is_empty() && sparq_core::percent::decode(name, false) != "query" {
             url.push_str(param);
             url.push('&');
         }
