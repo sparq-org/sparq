@@ -3,7 +3,7 @@ name = "sparq-lws-core"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"
-description = "EXPERIMENTAL Solid/LDP server core (imported from jeswr/solid-server-rs). SPARQ-authoritative for RDF + access-control; object_store/S3 backup-only for bytes."
+description = "EXPERIMENTAL Solid/LDP server core (imported from jeswr/solid-server-rs). SPARQ-authoritative for RDF + access-control; bytes behind a BlobStore seam."
 license = "MIT OR Apache-2.0"
 repository.workspace = true
 homepage.workspace = true
@@ -117,8 +117,6 @@ tower = "0.5"
 oxrdf.workspace = true
 oxttl.workspace = true
 oxjsonld.workspace = true
-# Blob storage seam: object_store gives one trait over S3/GCS/Azure/Local (spike §4).
-# Declared for native targets below.
 # Async trait support for the Store / SparqClient / BlobStore seams.
 async-trait = "0.1"
 bytes = "1"
@@ -269,7 +267,6 @@ sparq-trust = { path = "../sparq-trust", optional = true }
 # normal dep rather than an unconditional dev-dep keeps the research ZK estate out of the
 # default `cargo test` of this core crate. Run with `--features trust-graph`.
 sparq-zk = { path = "../sparq-zk", version = "0.1.6", optional = true }
-object_store = "0.14"
 pin-project-lite = "0.2"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio", "server-auto", "server-graceful"] }
