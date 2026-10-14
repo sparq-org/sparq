@@ -204,6 +204,15 @@ impl Dec {
         if self.mant.unsigned_abs() <= 1 << 53 && (self.scale as usize) < POW10.len() {
             return self.mant as f64 / POW10[self.scale as usize];
         }
+        // |mant| <= 2^127 (including i128::MIN). The smallest f64 subnormal is
+        // 2^-1074, so magnitudes strictly below its half, 2^-1075, round to zero.
+        // At scale >= 362, |value| <= 2^127 / 10^362 < 2^-1075 because
+        // 2^1202 < 10^362. Thus return signed zero without an O(scale) lexical;
+        // scale 361 still permits nonzero subnormals and must use the exact route.
+        const ZERO_SCALE: u32 = 362;
+        if self.scale >= ZERO_SCALE {
+            return if self.mant < 0 { -0.0 } else { 0.0 };
+        }
         match self.lexical().parse::<f64>() {
             Ok(f) => f,
             // Unreachable (`Dec::lexical` writes `[-]digits[.digits]`); stay total.
@@ -1641,6 +1650,85 @@ mod tests {
             assert_eq!(parse_xsd_f32(lexical).unwrap().to_bits(), exact.to_bits());
             assert_eq!(Num::Double(value).f32().to_bits(), exact.to_bits());
         }
+    }
+
+    #[test]
+    fn dec_f64_matches_exact_route_across_scales() {
+        let mantissas = [
+            0,
+            1,
+            -1,
+            (1i128 << 53) + 1,
+            i128::MAX,
+            i128::MIN,
+            1_180_591_691_086_155_481_089,
+            46_116_862_933_052_948_481,
+        ];
+        for scale in 0..=400 {
+            for mant in mantissas {
+                let d = Dec { mant, scale };
+                assert_eq!(
+                    d.f64().to_bits(),
+                    d.lexical().parse::<f64>().unwrap().to_bits(),
+                    "{d:?}"
+                );
+            }
+        }
+        // Scale 361 still reaches the subnormal range: i128::MAX / 10^361 is about
+        // 1.7e-323, between the smallest subnormals 2^-1074 * 3 and * 4.
+        for mant in [i128::MAX, i128::MIN] {
+            let d = Dec { mant, scale: 361 };
+            assert_ne!(d.f64(), 0.0, "{d:?}");
+            assert_eq!(
+                d.f64().to_bits(),
+                d.lexical().parse::<f64>().unwrap().to_bits()
+            );
+        }
+        assert_eq!(
+            Dec {
+                mant: -1,
+                scale: 362
+            }
+            .f64()
+            .to_bits(),
+            (-0.0f64).to_bits()
+        );
+        assert_eq!(
+            Dec {
+                mant: 0,
+                scale: 362
+            }
+            .f64()
+            .to_bits(),
+            0.0f64.to_bits()
+        );
+    }
+
+    #[test]
+    fn dec_f64_large_scale_skips_lexical() {
+        // Check the cutoff first so reverting the fast path fails before the
+        // u32::MAX case could try to allocate a multi-gigabyte lexical.
+        for scale in [362, 2_000_001, i32::MAX as u32 + 1, u32::MAX] {
+            for mant in [i128::MIN, -1, 0, 1, i128::MAX] {
+                let calls = LEXICAL_CALLS.get();
+                let d = Dec { mant, scale };
+                assert_eq!(d.f64().to_bits(), if mant < 0 { 1 << 63 } else { 0 });
+                assert_eq!(Num::Dec(d).f64().to_bits(), d.f64().to_bits());
+                assert_eq!(
+                    LEXICAL_CALLS.get(),
+                    calls,
+                    "promotion must skip the O(scale) lexical"
+                );
+            }
+        }
+        // The counter observes the retained exact conversion below 362.
+        let calls = LEXICAL_CALLS.get();
+        Dec {
+            mant: 1,
+            scale: 361,
+        }
+        .f64();
+        assert_eq!(LEXICAL_CALLS.get(), calls + 1);
     }
 
     #[test]
