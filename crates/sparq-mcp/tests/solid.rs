@@ -1792,9 +1792,13 @@ fn acl_put_cannot_extend_another_documents_authorization() {
     put(&mut s, &own);
     let (text, is_err) = tool(&mut s, "resource_get", json!({"url": "https://pod.ex/m/x"}));
     assert!(!is_err, "the document's own authorization applies: {text}");
-    put(
-        &mut s,
-        &format!("{own}<https://pod.ex/.acl#owner> <{ACL}agent> <{MALLORY}> .\n"),
+    let args = json!({"url": "https://pod.ex/m/.acl",
+                      "content": format!("{own}<https://pod.ex/.acl#owner> <{ACL}agent> <{MALLORY}> .\n"),
+                      "content_type": "application/n-triples"});
+    let (text, is_err) = tool(&mut s, "resource_put", args);
+    assert!(
+        is_err && text.contains("may not state"),
+        "the write is refused: {text}"
     );
     let (text, is_err) = tool(
         &mut s,
@@ -1806,5 +1810,5 @@ fn acl_put_cannot_extend_another_documents_authorization() {
         "a statement about the root authorization granted access: {text}"
     );
     let (text, is_err) = tool(&mut s, "resource_get", json!({"url": "https://pod.ex/m/x"}));
-    assert!(is_err, "the document that made it grants nothing: {text}");
+    assert!(!is_err, "mallory's own ACL is unchanged: {text}");
 }

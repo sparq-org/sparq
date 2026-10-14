@@ -177,26 +177,34 @@ fn auth_view_is_pure_function_of_final_acl_state() {
 // --- atomic rollback: a rejected new ACL leaves the store EXACTLY as it was -------------
 
 #[test]
-fn put_acl_naming_a_reserved_principal_governs_with_no_grants() {
+fn put_acl_rolls_back_on_reserved_principal() {
     let mut store = empty_pod();
     // Establish a known-good grant first.
     store
         .put_acl("https://pod.ex/.acl", &root_acl_read(ALICE), "ntriples")
         .expect("good put");
     assert_eq!(store.accessible(&sess(ALICE), Mode::Read).len(), 2);
+    let prior_acl_len = graph_len(&store, "https://pod.ex/.acl");
 
-    // A body naming a RESERVED-encoding agent is stored, and the loader rejects the whole
-    // document: it governs the root with no authorizations (fail-closed), and the reserved
-    // name is never a principal.
+    // A body naming a RESERVED-encoding agent is refused before anything changes.
     let bad = format!(
         "{}<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#agent> <urn:sparq:evil> .\n",
         root_acl_read(ALICE)
     );
-    store
+    let err = store
         .put_acl("https://pod.ex/.acl", &bad, "ntriples")
-        .expect("the write is stored");
-    assert!(store.accessible(&sess(ALICE), Mode::Read).is_empty(), "the rejected ACL grants nothing");
-    assert!(store.accessible(&sess("urn:sparq:evil"), Mode::Read).is_empty());
+        .expect_err("reserved-encoding principal must be refused");
+    assert!(err.contains("may not state"), "{err}");
+    assert_eq!(
+        graph_len(&store, "https://pod.ex/.acl"),
+        prior_acl_len,
+        "prior .acl kept"
+    );
+    assert_eq!(
+        store.accessible(&sess(ALICE), Mode::Read).len(),
+        2,
+        "alice's prior grant still stands after the refused put"
+    );
 }
 
 // --- input validation ------------------------------------------------------------------

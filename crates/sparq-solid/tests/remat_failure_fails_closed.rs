@@ -95,25 +95,50 @@ const REVOKE_AND_BREAK: &str = "DELETE DATA { GRAPH <https://pod.ex/.acl> { \
 const REVOKE: &str = "DELETE DATA { GRAPH <https://pod.ex/.acl> { \
     <https://pod.ex/.acl#team> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/groups#team> } }";
 
-/// An ACL naming a reserved agent is admitted as content and rejected whole by the loader:
-/// the write goes through, and the document governs with no authorizations (fail-closed),
-/// so a revocation in the same write still takes effect.
+/// An ACL write naming a reserved agent is refused before anything changes, so the writer
+/// keeps the rules (and the Control) it had; the same revocation without it goes through.
 #[test]
-fn rules_naming_a_reserved_agent_govern_with_no_grants() {
+fn rules_naming_a_reserved_agent_are_refused() {
     let mut store = store();
     assert!(reads(&store, ALICE), "control: the team reads");
-    store
+    let err = store
         .update_as(&sess(ADMIN), REVOKE_AND_BREAK)
-        .expect("the write is stored");
+        .expect_err("the write is refused");
+    assert!(err.contains("may not state"), "{err}");
+    assert!(reads(&store, ALICE), "nothing changed");
+    assert!(reads(&store, ADMIN));
+    store.update_as(&sess(ADMIN), REVOKE).expect("sound rules");
     assert!(!reads(&store, ALICE), "the revocation took effect");
-    assert!(!reads(&store, ADMIN), "the rejected root ACL grants nothing");
+    assert!(reads(&store, ADMIN));
+}
+
+/// Loaded data naming a reserved agent in an ACL is rejected whole by the loader instead: the
+/// document governs with no authorizations (fail-closed), and nothing else is affected.
+#[test]
+fn a_loaded_acl_naming_a_reserved_agent_governs_with_no_grants() {
+    let mut store = store();
+    let iri = |s: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(s));
+    let slot = store
+        .graph
+        .named
+        .iter()
+        .position(|(n, _)| *n == iri("https://pod.ex/bob/.acl"))
+        .expect("bob's acl");
+    let _ = store.graph.named[slot].1.insert_triple(
+        iri("https://pod.ex/bob/.acl#bad"),
+        iri("http://www.w3.org/ns/auth/acl#agent"),
+        iri("urn:sparq:forged"),
+    );
+    store.materialize_wac().expect("rejected, not fatal");
+    assert!(reads(&store, ALICE));
+    assert!(reads(&store, ADMIN));
     assert!(store.accessible(&sess("urn:sparq:forged"), Mode::Read).is_empty());
     assert!(
-        store
+        !store
             .accessible(&sess(BOB), Mode::Read)
             .iter()
             .any(|g| g == "https://pod.ex/bob/b1"),
-        "bob's own ACL still governs his container"
+        "bob's rejected ACL governs his container with no grants"
     );
 }
 
@@ -139,8 +164,8 @@ fn a_rule_change_that_fails_part_way_changes_nothing() {
 }
 
 /// Review finding: a controller of one access-control document could write rules that fail
-/// to materialize, and the store dropped its whole view, denying every pod. Such rules now
-/// reject only their own document; everyone else's access is untouched.
+/// to materialize, and the store dropped its whole view, denying every pod. Such a write is
+/// refused; everyone else's access, and bob's own, is untouched.
 #[test]
 fn one_controller_cannot_deny_the_whole_store() {
     let mut store = store();
@@ -148,14 +173,11 @@ fn one_controller_cannot_deny_the_whole_store() {
         <https://pod.ex/bob/.acl#bad> <http://www.w3.org/ns/auth/acl#agent> <urn:sparq:forged> } }";
     store
         .update_as(&sess(BOB), break_own)
-        .expect("bob may write his own ACL");
+        .expect_err("the write is refused");
     assert!(reads(&store, ALICE));
     assert!(reads(&store, ADMIN));
-    assert!(
-        !store
-            .accessible(&sess(BOB), Mode::Read)
-            .iter()
-            .any(|g| g == "https://pod.ex/bob/b1"),
-        "bob's rejected ACL governs his container with no grants"
-    );
+    assert!(store
+        .accessible(&sess(BOB), Mode::Read)
+        .iter()
+        .any(|g| g == "https://pod.ex/bob/b1"));
 }

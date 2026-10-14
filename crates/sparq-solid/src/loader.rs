@@ -157,6 +157,22 @@ fn admits(t: &[Term; 3], graph_iri: &str) -> bool {
         && speaks_for(t, graph_iri)
 }
 
+/// Refuse a write that would make the access-control document `doc` state a triple it may not
+/// (see [`admits`]): the loader would reject the whole document, and its resource would be
+/// left with no grants, Control included, so the writer could not repair it. Only `added`
+/// triples are checked, so a write removing such a triple is never refused.
+pub(crate) fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
+    match added.iter().find(|t| !admits(t, doc)) {
+        None => Ok(()),
+        Some(t) => Err(format!(
+            "the access-control document <{doc}> may not state `{} {} {}`: it may describe only \
+             its own nodes, in the access-control vocabularies, naming no reserved name or \
+             principal; nothing was changed",
+            t[0], t[1], t[2]
+        )),
+    }
+}
+
 /// Whether `t` names, as an agent, group member, origin, client or issuer, a principal the
 /// view keeps for itself: one of its own `auth:`/`solidx:` principals (`auth:Public`,
 /// `auth:AnyClient`, …), a name in the reserved or skolem space, or one containing the pair
@@ -406,28 +422,19 @@ pub(crate) fn assemble_facts(
     for b in &blocked {
         out.push([named(b), named(crate::authindex::WITHHELD), xsd_true()]);
     }
-    // WAC: each resource whose governing ACL (its own, or the nearest ancestor's) was
-    // rejected is withheld from the other grant sources the same way. Only that resource:
-    // one below it with an ACL of its own is governed by that ACL.
+    // WAC: a resource whose own ACL was rejected is marked, and so (when any was) is each
+    // resource whose own ACL was accepted, so the index can tell which ACL governs any
+    // resource, stored or not, and withhold every grant source from those a rejected ACL
+    // governs.
     if system == System::Wac && !rejected.is_empty() {
-        let acls: FxHashSet<&str> = control_graphs.iter().map(|(iri, _)| *iri).collect();
-        for r in &resources {
-            let mut cur = r.as_str();
-            loop {
-                let acl = format!("{cur}{ACL_SUFFIX}");
-                if acls.contains(acl.as_str()) {
-                    if rejected.contains(acl.as_str()) {
-                        out.push([
-                            named(r),
-                            named(crate::authindex::WITHHELD_RESOURCE),
-                            xsd_true(),
-                        ]);
-                    }
-                    break;
-                }
-                let Some(parent) = parent_iri(cur) else { break };
-                cur = parent;
-            }
+        for (iri, _) in &control_graphs {
+            let r = &iri[..iri.len() - suffix.len()];
+            let mark = if rejected.contains(iri) {
+                crate::authindex::REJECTED_ACL
+            } else {
+                crate::authindex::ACCEPTED_ACL
+            };
+            out.push([named(r), named(mark), xsd_true()]);
         }
     }
 
@@ -468,6 +475,7 @@ pub(crate) fn assemble_facts(
             if iri.starts_with(RESERVED_PREFIX)
                 || iri.starts_with(SKOLEM_PREFIX)
                 || !group_docs.contains(iri)
+                || rejected.contains(iri)
             {
                 continue;
             }
@@ -1172,12 +1180,12 @@ mod tests {
                     .collect();
                 body.push_str(&format!("{triple} .\n"));
                 let mut store = fresh();
-                if acp {
+                let put = if acp {
                     store.put_acl_acp(doc, &body, "ntriples")
                 } else {
                     store.put_acl(doc, &body, "ntriples")
-                }
-                .unwrap();
+                };
+                assert!(put.is_err(), "{system:?}: the write is refused: {put:?}");
                 check(&store, system, other, &format!("put {triple}"));
             }
 
@@ -1189,14 +1197,62 @@ mod tests {
                 now: None,
             };
             let insert = format!("INSERT DATA {{ GRAPH <{doc}> {{ {triple} }} }}");
-            if acp {
+            let updated = if acp {
                 store.update_as_acp(&session, &insert)
             } else {
                 store.update_as(&session, &insert)
+            };
+            if doc.ends_with(".acl") || doc.ends_with(".acr") {
+                let e =
+                    updated.expect_err("a control-document statement it may not make is refused");
+                assert!(e.contains("may not state"), "{system:?}: {e}");
+            } else {
+                updated.unwrap_or_else(|e| panic!("{system:?}: the update is authorized: {e}"));
             }
-            .unwrap_or_else(|e| panic!("{system:?}: the update is authorized: {e}"));
             check(&store, system, other, &format!("update {triple}"));
         }
+    }
+
+    /// A rejected control document lists no group members either, so it grants nothing
+    /// through an accepted ACL that names a group in it.
+    #[test]
+    fn a_rejected_control_document_is_no_group_document() {
+        const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+        const VCARD: &str = "http://www.w3.org/2006/vcard/ns#";
+        use super::RDF_TYPE;
+        let (root, x, bob) = (
+            "https://pod.ex/.acl",
+            "https://pod.ex/x.acl",
+            "https://bob.ex/me",
+        );
+        let base = format!(
+            "<https://pod.ex/n#it> <https://ex.dev/ns#t> \"t\" <https://pod.ex/n> .\n\
+             <{root}#r> <{RDF_TYPE}> <{ACL}Authorization> <{root}> .\n\
+             <{root}#r> <{ACL}default> <https://pod.ex/> <{root}> .\n\
+             <{root}#r> <{ACL}accessTo> <https://pod.ex/> <{root}> .\n\
+             <{root}#r> <{ACL}mode> <{ACL}Read> <{root}> .\n\
+             <{root}#r> <{ACL}agentGroup> <{x}#g> <{root}> .\n\
+             <{x}#g> <{VCARD}hasMember> <{bob}> <{x}> .\n"
+        );
+        let reads = |nq: &str| {
+            let mut s = PodStore::new(Graph::load_dataset(nq, "nquads").unwrap());
+            s.materialize_wac().unwrap();
+            let bob = Session {
+                agent: Some(bob),
+                client: None,
+                issuer: None,
+                now: None,
+            };
+            s.accessible(&bob, Mode::Read)
+                .iter()
+                .any(|g| g.as_str() == "https://pod.ex/n")
+        };
+        assert!(reads(&base), "control: the group grants bob Read");
+        let stray = format!("<https://other.ex/n> <https://ex.dev/ns#p> \"o\" <{x}> .\n");
+        assert!(
+            !reads(&format!("{base}{stray}")),
+            "the rejected document lists no members"
+        );
     }
 
     /// Loaded data cannot name the IRI a document's blank node is skolemized to: a group

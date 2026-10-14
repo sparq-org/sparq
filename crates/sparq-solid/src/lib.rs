@@ -473,10 +473,11 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if any agent / group-member / origin IRI in the ACL or group
-    /// documents collides with the reserved principal encoding (starts with
-    /// `urn:sparq:` or contains the literal `&client=`), or if the N3 reasoner fails.
-    /// On error the previous auth view (if any) is left in place.
+    /// Returns `Err` if the N3 reasoner fails. On error the previous auth view (if any) is
+    /// left in place. A document stating a triple it may not (one about a node outside it, a
+    /// minted name, a reserved principal such as a `urn:sparq:` IRI or one containing
+    /// `&client=`, or view vocabulary) is not an error: the loader rejects it whole and the
+    /// resources it governs get no grant from any source.
     pub fn materialize_wac(&mut self) -> Result<MaterializeStats, String> {
         self.materialize_wac_scoped(ReindexScope::Full)
     }
@@ -523,8 +524,8 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// As [`PodStore::materialize_wac`] (reserved-encoding collisions in
-    /// agent/client IRIs; reasoner failure).
+    /// As [`PodStore::materialize_wac`]; also a reserved name in trusted provenance or
+    /// credentials.
     pub fn materialize_acp(&mut self) -> Result<MaterializeStats, String> {
         self.materialize_acp_with(&AccessProvenance::new())
     }
@@ -1668,6 +1669,22 @@ impl PodStore {
         // in force before it.
         let wrote_rules =
             update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &odrl)?;
+        // A statement an access-control document may not make is refused here, rather than
+        // left for the loader to reject the whole document (and with it its writer's Control).
+        for effect in &effects {
+            if let sparq_engine::UpdateEffect::Delta {
+                slot: Some(Term::NamedNode(doc)),
+                inserts,
+                ..
+            } = effect
+            {
+                let doc = doc.as_str();
+                if doc.ends_with(loader::ACL_SUFFIX) || doc.ends_with(loader::ACR_SUFFIX) {
+                    loader::refuse_inadmissible(doc, inserts)
+                        .map_err(|e| format!("update denied: {e}"))?;
+                }
+            }
+        }
         let rules_changed = permit.rematerialize || auth_input || wrote_rules;
         // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
         // update, and nothing is changed, so no writer of one access-control document can take

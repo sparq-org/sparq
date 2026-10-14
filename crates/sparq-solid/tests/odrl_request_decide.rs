@@ -963,7 +963,8 @@ fn control_and_rules_are_untouched() {
         );
     }
     assert!(s.decide(&alice, "https://pod.ex/.acl", Mode::Write).allow);
-    let acl_write = "INSERT DATA { GRAPH <https://pod.ex/.acl> { <urn:x> <urn:y> 1 } }";
+    let acl_write =
+        "INSERT DATA { GRAPH <https://pod.ex/.acl> { <https://pod.ex/.acl#x> <urn:y> 1 } }";
     s.update_as(&alice, acl_write)
         .expect("alice still edits her rules");
 }
@@ -1319,6 +1320,32 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
         assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant");
         s.materialize_wac().expect("wac again");
         assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant, replayed");
+        // A resource the rejected ACL governs that does not exist yet is withheld too.
+        let fresh = format!("{NOTES}not-yet");
+        let pol_new = policy("permission", "read", "", Some(UNSEEN), Some(&fresh)).expect("policy");
+        let bridged_new = Request::new(format!("{ODRL}read")).on(&fresh).by(UNSEEN);
+        assert!(
+            s.materialize_odrl_permission(&pol_new, &bridged_new)
+                .granted,
+            "{label}: bridged"
+        );
+        assert_eq!(
+            s.decide(&dave, &fresh, Mode::Read).allow,
+            usable,
+            "{label}: the bridged grant on a resource not created yet"
+        );
+        // So is the access-control document of a resource it governs.
+        let n2_acl = format!("{N2}.acl");
+        let pol_acl =
+            policy("permission", "read", "", Some(UNSEEN), Some(&n2_acl)).expect("policy");
+        let bridged_acl = Request::new(format!("{ODRL}read")).on(&n2_acl).by(UNSEEN);
+        let out = s.materialize_odrl_permission(&pol_acl, &bridged_acl);
+        if out.granted {
+            assert!(
+                usable || !s.decide(&dave, &n2_acl, Mode::Read).allow,
+                "{label}: a grant on n2's access-control document"
+            );
+        }
         assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: n1 is still governed by its ACL");
     }
 }

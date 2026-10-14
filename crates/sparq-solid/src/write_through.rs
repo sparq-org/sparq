@@ -33,15 +33,15 @@
 //! 2. the prior control-graph slot is captured, then the new content is swapped in (or the
 //!    slot removed, for `delete_acl`);
 //! 3. the auth view is re-materialized. On success the store reflects the new rules.
-//! 4. **on any re-materialization error** (e.g. the new ACL names a reserved-encoding
-//!    principal) the captured prior slot is RESTORED and the auth view rebuilt from it, so
+//! 4. **on any re-materialization error** the captured prior slot is RESTORED and the auth view rebuilt from it, so
 //!    the call leaves the store exactly as it found it and returns `Err` — never a control
 //!    graph updated without its matching auth view, and never a partial write.
 //!
 //! # Fail-closed
 //!
 //! Every error path leaves the PRIOR (already-validated) authorization in force, never a
-//! wider one: a rejected content parse, a reserved-encoding principal, or a non-control
+//! wider one: a rejected content parse, a document stating a triple it may not (one about a
+//! node outside it, a minted name, a reserved principal or view vocabulary), or a non-control
 //! target IRI all return `Err` with the previous auth view intact. A successful `delete_acl`
 //! REMOVES grants (it can only narrow access — the deleted rules no longer grant anything),
 //! and a successful `put_acl` replaces the old rules wholesale with the new ones.
@@ -99,10 +99,10 @@ impl PodStore {
     ///
     /// # Atomicity & fail-closed
     ///
-    /// All-or-nothing: the content is parsed FIRST (a malformed document is rejected before
-    /// anything mutates), then the graph is swapped and the view rebuilt. If
-    /// re-materialization fails (e.g. the new ACL names a reserved-encoding principal) the
-    /// PRIOR control graph + auth view are RESTORED and `Err` is returned — the store is left
+    /// All-or-nothing: the content is parsed FIRST (a malformed document, or one stating a
+    /// triple it may not, is rejected before anything mutates), then the graph is swapped and
+    /// the view rebuilt. If re-materialization fails the PRIOR control graph + auth view are
+    /// RESTORED and `Err` is returned — the store is left
     /// exactly as it was, and the previous (already-validated) authorization stays in force.
     ///
     /// For an **ACP** pod (`.acr` documents, three-stratum view) use
@@ -111,7 +111,7 @@ impl PodStore {
     /// # Errors
     ///
     /// `Err` if `acl_iri` is not an `.acl`/`.acr` document IRI, if `content` does not parse
-    /// in `format`, or if re-materializing the resulting view fails (the store is rolled back
+    /// in `format` or states a triple the document may not, or if re-materializing the resulting view fails (the store is rolled back
     /// to its prior state first).
     ///
     /// # Examples
@@ -245,6 +245,8 @@ impl PodStore {
                 acl_iri, format, e
             )
         })?;
+        crate::loader::refuse_inadmissible(acl_iri, &crate::loader::graph_triples(&new_graph))
+            .map_err(|e| format!("put_acl denied: {e}"))?;
         let new_len = graph_len(&new_graph);
 
         // Capture the prior slot (for rollback) and swap the new content in.

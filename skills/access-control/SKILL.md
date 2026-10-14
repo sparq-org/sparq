@@ -109,11 +109,17 @@ Materialize the authorization view from the access-control documents, then enfor
   `acp:OwnerAgent` matchers against per-resource creator/owner WebIDs supplied by the
   TRUSTED caller. `AccessProvenance::set_creator(resource, webid)` /
   `set_owner(resource, webid)` build the map; the loader synthesizes
-  `<r> solidx:creator|owner <w>` facts from THAT map ONLY. The loader hard-rejects any
-  control-document triple whose predicate is in the derivation-internal `solidx:` namespace
-  (§2.4), so a writer who embeds `<r> solidx:creator <self>` in a content document OR in the
-  `.acr` they control cannot self-grant (this also blocks forged `solidx:appliesToResource`
-  policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
+  `<r> solidx:creator|owner <w>` facts from THAT map ONLY. A control document may describe
+  only its own nodes (subject a blank node or an IRI in the document), name no minted
+  `urn:skolem:`/`urn:sparq:` IRI anywhere, name no reserved principal (`auth:`/`solidx:`, or
+  an IRI containing `&client=`) as agent, member, origin, client or issuer, and use no
+  `auth:`/`solidx:` predicate or class. `put_acl*` and `update_as*` refuse a write that would
+  add such a triple (nothing changes); a stored document holding one is rejected whole by
+  the loader, and the resources it governs (ACP: the resource and everything below it; WAC:
+  everything the rejected ACL governs, stored or not) get no grant from any source, static,
+  attached, bridged or trust. So a writer who embeds `<r> solidx:creator <self>` in a
+  content document OR in the `.acr` they control cannot self-grant (this also blocks forged
+  `solidx:appliesToResource` policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
   granted `R2`) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
   `materialize_acp()` is `materialize_acp_with(&AccessProvenance::new())` — no provenance ⇒
   no `CreatorAgent`/`OwnerAgent` grant (fail-closed).
@@ -242,9 +248,9 @@ Materialize the authorization view from the access-control documents, then enfor
   primitive. Replaces (or removes) the `.acl`/`.acr` GRAPH and re-materializes
   `<urn:sparq:auth>` as ONE **atomic, fail-closed** unit, so SPARQ stays the source of
   truth (the auth view is always a pure function of the present `.acl` graphs — no stale
-  grant survives a rule change). `content` is parsed FIRST (malformed ⇒ `Err`, nothing
-  mutated); a re-materialization failure (e.g. a reserved-encoding principal) ROLLS BACK to
-  the prior content + prior auth view (all-or-nothing). A non-`.acl`/`.acr` target IRI is
+  grant survives a rule change). `content` is parsed FIRST (malformed, or stating a triple
+  the document may not — see above — ⇒ `Err`, nothing mutated); a re-materialization
+  failure ROLLS BACK to the prior content + prior auth view (all-or-nothing). A non-`.acl`/`.acr` target IRI is
   rejected (write content graphs through `update_as`). It performs **NO session
   authorization** — the server authorizes the request itself (e.g. `decide(.., Mode::Control)`)
   and `update_as` remains the session-checked write path. Always-present API (no cargo gate;

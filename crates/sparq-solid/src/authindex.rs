@@ -269,19 +269,69 @@ struct ConditionalGrant {
 /// ```
 /// The auth-view predicate marking a resource whose ACP access-control document the loader
 /// rejected (`<r> auth:withheld true`), covering what is below it too; only the loader emits
-/// it. (A WAC resource whose governing `.acl` was rejected is marked with
-/// [`WITHHELD_RESOURCE`] instead.)
+/// it. (WAC uses [`REJECTED_ACL`] and [`ACCEPTED_ACL`] instead.)
 pub(crate) const WITHHELD: &str = "https://sparq.dev/ns/auth#withheld";
-/// The auth-view predicate marking ONE resource (not what is below it) whose WAC ACL, its own
-/// or the nearest ancestor's, the loader rejected (`<r> auth:withheldResource true`).
-pub(crate) const WITHHELD_RESOURCE: &str = "https://sparq.dev/ns/auth#withheldResource";
+/// The auth-view predicate marking a resource whose own WAC ACL the loader rejected
+/// (`<r> auth:rejectedAcl true`). It governs the resource and everything below it down to
+/// the next resource with an ACL of its own, whether or not those exist yet.
+pub(crate) const REJECTED_ACL: &str = "https://sparq.dev/ns/auth#rejectedAcl";
+/// The auth-view predicate marking a resource whose own WAC ACL the loader accepted
+/// (`<r> auth:acceptedAcl true`), emitted when some ACL was rejected: where the walk up from
+/// a resource to its governing ACL stops.
+pub(crate) const ACCEPTED_ACL: &str = "https://sparq.dev/ns/auth#acceptedAcl";
 
-/// Whether `graph` is in `withheld` or below a withheld container, or in `exact`.
-fn is_withheld_in(withheld: &FxHashSet<String>, exact: &FxHashSet<String>, graph: &str) -> bool {
-    exact.contains(graph)
-        || (!withheld.is_empty()
-            && (withheld.contains(graph)
-                || graph.match_indices('/').any(|(i, _)| withheld.contains(&graph[..=i]))))
+/// The resources withheld from every grant source.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Withheld {
+    /// ACP: resources (and, for a container, everything below it) whose access-control
+    /// document was rejected.
+    acp: FxHashSet<String>,
+    /// WAC: resources whose own ACL was rejected.
+    rejected_acl: FxHashSet<String>,
+    /// WAC: resources whose own ACL was accepted (only kept when an ACL was rejected).
+    accepted_acl: FxHashSet<String>,
+}
+
+impl Withheld {
+    fn is_empty(&self) -> bool {
+        self.acp.is_empty() && self.rejected_acl.is_empty()
+    }
+
+    /// Whether `graph` (stored or not) is withheld: in or below a withheld ACP resource, or
+    /// governed by a rejected WAC ACL (the nearest one at or above it, as WAC resolves it). An
+    /// access-control document counts as the resource it controls.
+    fn holds(&self, graph: &str) -> bool {
+        // An access-control document is governed through the resource it controls (Control
+        // on that resource reads and writes it).
+        let graph = graph
+            .strip_suffix(crate::loader::ACL_SUFFIX)
+            .or_else(|| graph.strip_suffix(crate::loader::ACR_SUFFIX))
+            .unwrap_or(graph);
+        if !self.acp.is_empty()
+            && (self.acp.contains(graph)
+                || graph
+                    .match_indices('/')
+                    .any(|(i, _)| self.acp.contains(&graph[..=i])))
+        {
+            return true;
+        }
+        if self.rejected_acl.is_empty() {
+            return false;
+        }
+        let mut cur = graph;
+        loop {
+            if self.rejected_acl.contains(cur) {
+                return true;
+            }
+            if self.accepted_acl.contains(cur) {
+                return false;
+            }
+            match crate::loader::parent_iri(cur) {
+                Some(parent) => cur = parent,
+                None => return false,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -311,11 +361,9 @@ pub struct AuthIndex {
     matcher_clients: FxHashMap<String, FxHashSet<String>>,
     /// sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
     matcher_issuers: FxHashMap<String, FxHashSet<String>>,
-    /// Resources (and, for a container, everything below it) whose ACP access-control
-    /// document the loader rejected: no grant applies to them, whichever source installed it.
-    withheld: FxHashSet<String>,
-    /// Single resources whose governing WAC ACL the loader rejected, withheld the same way.
-    withheld_exact: FxHashSet<String>,
+    /// Resources whose access-control document the loader rejected: no grant applies to
+    /// them, whichever source installed it.
+    withheld: Withheld,
 }
 
 impl AuthIndex {
@@ -338,13 +386,20 @@ impl AuthIndex {
                 Term::NamedNode(n) => n.as_str().to_owned(),
                 _ => continue,
             };
-            if p.as_str() == WITHHELD {
-                ix.withheld.insert(subj);
-                continue;
-            }
-            if p.as_str() == WITHHELD_RESOURCE {
-                ix.withheld_exact.insert(subj);
-                continue;
+            match p.as_str() {
+                WITHHELD => {
+                    ix.withheld.acp.insert(subj);
+                    continue;
+                }
+                REJECTED_ACL => {
+                    ix.withheld.rejected_acl.insert(subj);
+                    continue;
+                }
+                ACCEPTED_ACL => {
+                    ix.withheld.accepted_acl.insert(subj);
+                    continue;
+                }
+                _ => {}
             }
             if let Some((mode, is_allow)) = Mode::from_pred(p.as_str()) {
                 if let Term::NamedNode(g) = &t[2] {
@@ -402,10 +457,9 @@ impl AuthIndex {
             ix.cond.entry(origin).or_default().push(g);
         }
         // Withheld resources get no grant from any source; denies stay.
-        if !ix.withheld.is_empty() || !ix.withheld_exact.is_empty() {
+        if !ix.withheld.is_empty() {
             let withheld = std::mem::take(&mut ix.withheld);
-            let exact = std::mem::take(&mut ix.withheld_exact);
-            let open = |g: &NamedNode| !is_withheld_in(&withheld, &exact, g.as_str());
+            let open = |g: &NamedNode| !withheld.holds(g.as_str());
             for buckets in ix.allow.values_mut() {
                 for graphs in buckets.values_mut() {
                     graphs.retain(open);
@@ -415,7 +469,6 @@ impl AuthIndex {
                 grants.retain(|g| !g.allow || g.graph.as_ref().is_none_or(open));
             }
             ix.withheld = withheld;
-            ix.withheld_exact = exact;
         }
         ix
     }
@@ -424,7 +477,7 @@ impl AuthIndex {
     /// it, was rejected, so no grant applies to it whatever its source.
     #[cfg_attr(not(feature = "odrl-bridge"), allow(dead_code))]
     pub(crate) fn is_withheld(&self, graph: &str) -> bool {
-        is_withheld_in(&self.withheld, &self.withheld_exact, graph)
+        self.withheld.holds(graph)
     }
 
     /// The session's agent-dimension principals (most-specific last).
@@ -643,7 +696,6 @@ impl AuthIndex {
             && self.matcher_clients == other.matcher_clients
             && self.matcher_issuers == other.matcher_issuers
             && self.withheld == other.withheld
-            && self.withheld_exact == other.withheld_exact
     }
 
     /// Whether the auth view explicitly denies `mode` on `graph` to this session: a deny
