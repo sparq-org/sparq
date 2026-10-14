@@ -370,12 +370,12 @@ mod tamper {
         );
     }
 
-    /// **END-TO-END guarantee (D) at the production API boundary
+    /// **END-TO-END reconstruction hardening at the production API boundary
     /// (sq-uu0u).** The tests above exercise the RS checker via `reconstruct` /
     /// `reconstruct_degree`. This one drives the WHOLE public [`MpcBackend`]
     /// pipeline a federation actually calls — `run_secure` then
     /// `reconstruct_disclosed` (the disclosed-output trait method, NOT the helper)
-    /// — and proves guarantee (D) is wired all the way THROUGH that surface: a
+    /// — and proves the RS hardening is wired all the way THROUGH that surface: a
     /// tampered share in the result sharing is (a) RS-corrected back to the true
     /// disclosed integer within the budget, and (b) detect-and-aborts with
     /// [`MpcError::Tampered`] beyond it — never a silently wrong disclosed answer.
@@ -1477,7 +1477,7 @@ mod no_fake_crypto {
         // And the honest path still really works (the table doesn't break it).
         assert_eq!(b.reconstruct(&shares).unwrap(), fp(5));
         // The real backend declares its honest guarantees: honest-majority, and
-        // the PRECISE active-security level WI-1's RS-checked reconstruction
+        // the PRECISE reconstruction-hardening level WI-1's RS-checked reconstruction
         // delivers for THIS `(n, t)` — no over-claim, no under-claim. At n=3,
         // t=1 there is one redundant share (n > t+1) but the correction budget
         // e = ⌊(n−t−1)/2⌋ = 0, so the honest guarantee is detect-and-abort.

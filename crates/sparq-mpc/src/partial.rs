@@ -90,7 +90,8 @@ pub enum MpcError {
     /// the deferral auditable at the call site.
     NotYetImplemented { what: String, gated_on: String },
     /// **Active tampering detected** during a consistency-checked / robust
-    /// reconstruction (guarantee (D), malicious-honest-majority abort — sq-m34i).
+    /// reconstruction (honest-majority tamper-evident detect-and-abort toward
+    /// guarantee (D) — NOT malicious security; sq-m34i).
     /// Returned when redundant Shamir shares (`n > t+1`) do NOT all lie on one
     /// degree-`t` polynomial and the inconsistency exceeds the correctable error
     /// budget `e = ⌊(n−t−1)/2⌋`. This is **not** a precondition bug
