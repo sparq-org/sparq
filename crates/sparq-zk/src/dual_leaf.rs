@@ -258,7 +258,7 @@ pub fn encode_literal(literal: &Literal) -> Result<DualLeafComponents, DualLeafE
 /// Canonical = ASCII digits only, no sign, no leading zero (except the single
 /// digit "0"), value `< 2^64`. Returns `None` for any non-canonical / signed /
 /// overflowing form (the §6 fail-closed predicate).
-fn canonical_nonneg_u64(lexical: &str) -> Option<u64> {
+pub(crate) fn canonical_nonneg_u64(lexical: &str) -> Option<u64> {
     if lexical.is_empty() || !lexical.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -337,7 +337,7 @@ pub fn encode_decimal(literal: &Literal) -> Result<DualLeafComponents, DualLeafE
 
 /// Parse a canonical `xsd:double` lexical form to its IEEE-754 `u64` bit pattern.
 /// Returns `None` for any non-canonical or unrepresentable form (fail-closed).
-fn parse_xsd_double_bits(lexical: &str) -> Option<u64> {
+pub(crate) fn parse_xsd_double_bits(lexical: &str) -> Option<u64> {
     let v = match lexical {
         "INF" => f64::INFINITY,
         "-INF" => f64::NEG_INFINITY,
@@ -389,7 +389,7 @@ fn parse_xsd_double_bits(lexical: &str) -> Option<u64> {
 /// `None` for any non-canonical / integer-only / overflowing form (the §6
 /// fail-closed predicate, mirroring the `filter_signed::filter_decimal_check`
 /// canonical-form discipline).
-fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
+pub(crate) fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
     let (neg, rest) = match lexical.strip_prefix('-') {
         Some(r) => (true, r),
         None => (false, lexical),

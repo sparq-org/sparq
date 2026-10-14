@@ -60,12 +60,18 @@ use std::collections::HashMap;
 /// - [`StringCanonicalV1`](Self::StringCanonicalV1): the conservative default and
 ///   back-compat anchor — the only method implemented end-to-end today. The
 ///   in-circuit INV-VL invariant holds for its value-FILTER lane.
-/// - [`DualLeafV1`](Self::DualLeafV1): the value-optimised method for new issuance
-///   (#769). It **REMOVES INV-VL** — value<->lexical agreement rests on trusted-
-///   issuer honesty (machine-enforced -> issuer-honesty downgrade), accepted at
-///   research grade per #769 and registered as an **open external-audit obligation**
-///   (gap CR-G8 / sq-qhy4). The leaf encoding itself is NOT implemented here (config
-///   only; impl is sq-j506).
+/// - [`DualLeafV2`](Self::DualLeafV2): the value-optimised method for NEW issuance
+///   (#769), in its versioned form — framed value-lane constant derivation plus an
+///   out-of-band no-value sentinel. It **REMOVES INV-VL** — value<->lexical
+///   agreement rests on trusted-issuer honesty (machine-enforced -> issuer-honesty
+///   downgrade), accepted at research grade per #769 and registered as an **open
+///   external-audit obligation** (gap CR-G8 / sq-qhy4).
+/// - [`DualLeafV1`](Self::DualLeafV1): the FIRST dual-leaf version, SUPERSEDED by
+///   `DualLeafV2`. Still recognised and verifiable, but no longer selectable for new
+///   issuance: its value-lane constants are plain folds of the datatype bytes and
+///   its no-value sentinel lies inside the reachable value-handle band, so it does
+///   not meet the `research/zk-field-native-encoding.md` §14.1 reserved-tag
+///   requirement. Same INV-VL downgrade as V2.
 /// - `ValueOnlyV1` (feature `commitment-value-only` only): a **benchmark / research
 ///   dial**, never a production default (§10 default (2)). It loses term identity
 ///   entirely (no lexical component). It is **compiled out by default**; the feature
@@ -82,6 +88,18 @@ pub enum CommitmentMethod {
     /// CR-G8 / sq-qhy4). Config-only here; the leaf encoding is sq-j506 (NOT
     /// implemented).
     DualLeafV1,
+    /// (iii-b) `dual-leaf` **v2** (`zk:poseidon2-dualleaf-v2`): the VERSIONED
+    /// dual-leaf scheme — value-lane constants derived in BLAKE3's
+    /// key-derivation mode over length-framed `(datatype, params)`, a no-value
+    /// sentinel asserted outside the reachable value-handle band (the
+    /// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement),
+    /// and a bit-domain boolean member. The dual-leaf method a NEW issuance
+    /// selects ([`Self::is_production_selectable`] is `true` only for this one,
+    /// of the two dual-leaf versions). It carries exactly the same INV-VL
+    /// downgrade as [`Self::DualLeafV1`] — the versioning changes constant
+    /// derivation, not the trust model (#769 accepted at research grade; CR-G8 /
+    /// sq-qhy4). Host encoding: `crate::dual_leaf_v2` (the `dual-leaf` feature).
+    DualLeafV2,
     /// (ii) `value-only` (`zk:poseidon2-valuehook-v1`): a single value-first leaf;
     /// the lexical hash is **dropped**, so term identity is lost entirely. A
     /// **benchmark / research comparison dial only** — never select for real
@@ -107,6 +125,7 @@ impl CommitmentMethod {
                 crate::registry::ZK_SCHEME_POSEIDON2_RDFC10_V1
             }
             CommitmentMethod::DualLeafV1 => crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1,
+            CommitmentMethod::DualLeafV2 => crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2,
             #[cfg(feature = "commitment-value-only")]
             CommitmentMethod::ValueOnlyV1 => crate::registry::ZK_SCHEME_POSEIDON2_VALUEHOOK_V1,
         }
@@ -124,6 +143,7 @@ impl CommitmentMethod {
                 Some(CommitmentMethod::StringCanonicalV1)
             }
             crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1 => Some(CommitmentMethod::DualLeafV1),
+            crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2 => Some(CommitmentMethod::DualLeafV2),
             #[cfg(feature = "commitment-value-only")]
             crate::registry::ZK_SCHEME_POSEIDON2_VALUEHOOK_V1 => {
                 Some(CommitmentMethod::ValueOnlyV1)
@@ -149,7 +169,14 @@ impl CommitmentMethod {
     /// this; it does **not** assert any cryptographic property.
     pub const fn is_production_selectable(self) -> bool {
         match self {
-            CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV1 => true,
+            CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV2 => true,
+            // `DualLeafV1` is SUPERSEDED by `DualLeafV2`: it stays recognised and
+            // verifiable (an already-issued V1 credential keeps verifying) but is
+            // no longer selectable for NEW issuance, because its value-lane
+            // constants and its in-band no-value sentinel do not meet the
+            // `research/zk-field-native-encoding.md` §14.1 reserved-tag
+            // requirement that V2 discharges.
+            CommitmentMethod::DualLeafV1 => false,
             #[cfg(feature = "commitment-value-only")]
             CommitmentMethod::ValueOnlyV1 => false,
         }
@@ -165,7 +192,7 @@ impl CommitmentMethod {
     pub const fn removes_inv_vl(self) -> bool {
         match self {
             CommitmentMethod::StringCanonicalV1 => false,
-            CommitmentMethod::DualLeafV1 => true,
+            CommitmentMethod::DualLeafV1 | CommitmentMethod::DualLeafV2 => true,
             #[cfg(feature = "commitment-value-only")]
             CommitmentMethod::ValueOnlyV1 => true,
         }
@@ -376,15 +403,47 @@ mod tests {
 
     #[test]
     fn method_dual_leaf_records_inv_vl_downgrade() {
-        // Honest per-method posture: dual-leaf REMOVES INV-VL (issuer-honesty
-        // downgrade, #769 accepted, CR-G8); string-canonical retains it.
+        // Honest per-method posture: BOTH dual-leaf versions REMOVE INV-VL
+        // (issuer-honesty downgrade, #769 accepted, CR-G8); string-canonical
+        // retains it. The versioning changes constant derivation, not the trust
+        // model.
         assert!(!CommitmentMethod::StringCanonicalV1.removes_inv_vl());
         assert!(CommitmentMethod::DualLeafV1.removes_inv_vl());
-        // dual-leaf is still production-selectable (the #769-accepted method), even
-        // though it carries the downgrade — `is_production_selectable` is NOT an
-        // audit/soundness claim, only "not a research-only dial".
+        assert!(CommitmentMethod::DualLeafV2.removes_inv_vl());
+        // V2 is the production-selectable dual-leaf method, even though it carries
+        // the downgrade — `is_production_selectable` is NOT an audit/soundness
+        // claim, only "not a research-only dial and not superseded".
         assert!(CommitmentMethod::StringCanonicalV1.is_production_selectable());
-        assert!(CommitmentMethod::DualLeafV1.is_production_selectable());
+        assert!(CommitmentMethod::DualLeafV2.is_production_selectable());
+    }
+
+    #[test]
+    fn dual_leaf_v1_is_recognised_but_not_selectable_for_new_issuance() {
+        // V1 is SUPERSEDED: it must stay parseable from its recorded scheme IRI
+        // (so an already-issued V1 credential keeps verifying) while refusing to
+        // be chosen for new issuance.
+        assert!(!CommitmentMethod::DualLeafV1.is_production_selectable());
+        assert_eq!(
+            CommitmentMethod::from_scheme_iri(
+                crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1
+            ),
+            Some(CommitmentMethod::DualLeafV1),
+            "a recorded V1 scheme must still be recognised, never rejected"
+        );
+        // V2 carries its own distinct scheme IRI.
+        assert_eq!(
+            CommitmentMethod::DualLeafV2.scheme_iri(),
+            "https://sparq.dev/ns/zk#poseidon2-dualleaf-v2"
+        );
+        assert_ne!(
+            CommitmentMethod::DualLeafV1.scheme_iri(),
+            CommitmentMethod::DualLeafV2.scheme_iri()
+        );
+        // And V1's IRI is unchanged, byte for byte.
+        assert_eq!(
+            CommitmentMethod::DualLeafV1.scheme_iri(),
+            "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1"
+        );
     }
 
     // value-only is the research dial: gated OFF by default. With the feature ON it
@@ -416,7 +475,11 @@ mod tests {
     /// feature-state-aware set the round-trip/distinctness tests sweep).
     fn commitment_methods_in_build() -> Vec<CommitmentMethod> {
         #[allow(unused_mut)]
-        let mut v = vec![CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV1];
+        let mut v = vec![
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ];
         #[cfg(feature = "commitment-value-only")]
         v.push(CommitmentMethod::ValueOnlyV1);
         v

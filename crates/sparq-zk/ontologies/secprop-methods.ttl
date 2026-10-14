@@ -86,22 +86,84 @@ zk:poseidon2-rdfc10-v1
       sig-impl:justification "no nullifier / anti-replay primitive exists in the estate (CR-G6 / trust-graph §5.3(3)); Replayable is a settled NEGATIVE result"@en-GB ] .
 
 # ════════════════════════════════════════════════════════════════════════════
-# (iii) zk:poseidon2-dualleaf-v1 — the `dual-leaf` method.
-# The value-optimised method for new issuance (#769). Config-only today (the leaf /
-# circuit are unbuilt, sq-j506). Production-selectable, BUT selecting it accepts the
-# documented INV-VL DOWNGRADE: value↔lexical agreement is no longer machine-enforced
-# — it rests on the `secx:IssuerHonesty` assumption (CR-G8 / sq-qhy4). The downgrade
-# is recorded as a property assertion, not hidden. `is_production_selectable()` true
-# means ONLY "not a research dial" — NOT an audit / soundness claim.
+# (iii) zk:poseidon2-dualleaf-v1 — the FIRST `dual-leaf` version, SUPERSEDED.
+# Still recognised and verifiable (an already-issued v1 credential keeps verifying),
+# but NO LONGER production-selectable for new issuance — so the completeness guard no
+# longer requires this block; it is retained because the method stays verifiable and a
+# caller surfacing its posture needs the reason.
+#
+# THE RECORDED UNMET REQUIREMENT, stated exactly: v1's value-lane constants are plain
+# folds of the datatype bytes, and its reserved no-value sentinel lies inside the
+# reachable value-handle band [0, 2^64) u (p - 2^64, p) that every value-lane member
+# range-checks. So v1 does not meet the research/zk-field-native-encoding.md §14.1
+# reserved-tag requirement (a domain-separated constant asserted OUTSIDE that band).
+# zk:poseidon2-dualleaf-v2 derives both differently and discharges it. This records an
+# unmet requirement of the v1 DERIVATION; it is not a claim about either version's
+# audited security.
+#
+# Selecting either dual-leaf version accepts the documented INV-VL DOWNGRADE:
+# value<->lexical agreement is no longer machine-enforced — it rests on the
+# `secx:IssuerHonesty` assumption (CR-G8 / sq-qhy4). The downgrade is recorded as a
+# property assertion, not hidden. `is_production_selectable()` true means ONLY "not a
+# research dial and not superseded" — NOT an audit / soundness claim.
 # ════════════════════════════════════════════════════════════════════════════
 
 zk:poseidon2-dualleaf-v1
+  rdfs:comment "SUPERSEDED by zk:poseidon2-dualleaf-v2 and not production-selectable for new issuance; recognised and verifiable for already-issued credentials. Its value-lane constants are plain folds of the datatype bytes and its reserved no-value sentinel lies inside the reachable value-handle band, so the research/zk-field-native-encoding.md §14.1 reserved-tag requirement is unmet; v2 discharges it. Same INV-VL downgrade as v2; not externally audited (sq-qhy4)."@en-GB ;
   secx:hasProperty
     [ secx:property secx:ZeroKnowledgeType ; secx:level secx:ComputationalZK ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
     # the headline INV-VL downgrade: soundness of the value lane is CONDITIONAL on
     # issuer honesty — a positive property, so still Claimed (never Proven), and it
     # carries the assumption explicitly.
+    [ secx:property secx:Soundness ; secx:level secx:KnowledgeSound ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
+      secx:assumption secx:IssuerHonesty ;
+      secx:auditEvidence <https://github.com/sparq-org/sparq/blob/main/compliance/cryptoreview/gap-register.md> ] ,
+    [ secx:property secx:Completeness ; secx:level secx:Complete ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
+    [ secx:property secx:UnlinkabilityScope ; secx:level secx:PerPresentation ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
+    [ secx:property secx:Anonymity ; secx:level secx:Identified ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
+    [ secx:property secx:Setup ; secx:level secx:Transparent ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
+    [ secx:property secx:Interactivity ; secx:level secx:NonInteractive ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
+    # negative — Proven
+    [ secx:property secx:PostQuantumForgery ; secx:level secx:PQForgeable ;
+      secx:assurance secx:Proven ;
+      sig-impl:justification "discrete-log issuer signature; PQ-forgeable is a settled NEGATIVE result"@en-GB ] ,
+    [ secx:property secx:SingleUse ; secx:level secx:Replayable ;
+      secx:assurance secx:Proven ;
+      sig-impl:justification "no nullifier primitive; Replayable is a settled NEGATIVE result"@en-GB ] .
+
+# ════════════════════════════════════════════════════════════════════════════
+# (iii-b) zk:poseidon2-dualleaf-v2 — the VERSIONED `dual-leaf` method.
+# The dual-leaf method a NEW issuance selects, and the only production-selectable one
+# of the two versions. Its value-lane constants are derived in BLAKE3's
+# key-derivation mode over a length-framed (datatype, params) pair, its reserved
+# no-value sentinel is derived under its own context and asserted OUTSIDE the
+# reachable value-handle band (discharging the research/zk-field-native-encoding.md
+# §14.1 reserved-tag requirement), and the xsd:boolean lane has a dedicated member
+# that constrains its handle and bound to {0, 1} in-circuit.
+#
+# The SECURITY POSTURE IS THE SAME AS v1's: the versioning changes constant derivation,
+# not the trust model. v2 carries the identical INV-VL DOWNGRADE — value<->lexical
+# agreement on the value-FILTER lane rests on the `secx:IssuerHonesty` assumption
+# (#769 accepted at research grade; CR-G8 / sq-qhy4) — so every positive property
+# stays `secx:Claimed` + `secx:ExternalSignOffPending`, exactly as for v1. Discharging
+# a derivation requirement is NOT an audit result and must not be recorded as one.
+# ════════════════════════════════════════════════════════════════════════════
+
+zk:poseidon2-dualleaf-v2
+  rdfs:comment "The versioned dual-leaf scheme: value-lane constants derived in BLAKE3 key-derivation mode over a length-framed (datatype, params) pair, a no-value sentinel asserted outside the reachable value-handle band, and a bit-domain xsd:boolean member. Discharges the research/zk-field-native-encoding.md §14.1 reserved-tag requirement that v1 leaves unmet. Same INV-VL downgrade and the same unaudited posture as v1 (CR-G8 / sq-qhy4)."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:ZeroKnowledgeType ; secx:level secx:ComputationalZK ;
+      secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ] ,
+    # the headline INV-VL downgrade: soundness of the value lane is CONDITIONAL on
+    # issuer honesty — a positive property, so still Claimed (never Proven), and it
+    # carries the assumption explicitly. UNCHANGED from v1.
     [ secx:property secx:Soundness ; secx:level secx:KnowledgeSound ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
       secx:assumption secx:IssuerHonesty ;

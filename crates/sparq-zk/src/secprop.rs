@@ -427,11 +427,35 @@ pub fn production_method_iris() -> Vec<&'static str> {
     [
         CommitmentMethod::StringCanonicalV1,
         CommitmentMethod::DualLeafV1,
+        CommitmentMethod::DualLeafV2,
     ]
     .into_iter()
     .filter(|m| m.is_production_selectable())
     .map(|m| m.scheme_iri())
     .collect()
+}
+
+/// The `dual-leaf` **v1** method's posture, returned in prose: it is SUPERSEDED by
+/// `dual-leaf` v2 and no longer production-selectable, so it is not required to carry
+/// an annotation block — but one is retained, because an already-issued V1 credential
+/// stays recognised and verifiable and a caller surfacing its posture needs the
+/// reason it is not selectable for new issuance.
+///
+/// The reason, stated exactly: V1's value-lane constants are plain folds of the
+/// datatype bytes and its reserved no-value sentinel lies INSIDE the reachable
+/// value-handle band `[0, 2^64) ∪ (p − 2^64, p)`, so V1 does not meet the
+/// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement (a
+/// domain-separated constant asserted outside that band). V2 derives both
+/// differently and discharges it. This is a recorded UNMET REQUIREMENT of the V1
+/// derivation, not a claim about either method's audited security: both carry the
+/// same INV-VL downgrade and the estate is NOT externally audited (sq-qhy4).
+pub const fn dual_leaf_v1_posture() -> &'static str {
+    "dual-leaf v1 (zk:poseidon2-dualleaf-v1): SUPERSEDED by dual-leaf v2 and NOT \
+     production-selectable for new issuance; recognised and verifiable for already-issued \
+     credentials. Its value-lane constants are plain folds of the datatype bytes and its \
+     reserved no-value sentinel lies INSIDE the reachable value-handle band, so the \
+     research/zk-field-native-encoding.md §14.1 reserved-tag requirement is UNMET; v2 \
+     discharges it. Same INV-VL downgrade as v2; NOT externally audited (sq-qhy4)"
 }
 
 /// The least-safe research dial `value-only`'s posture, returned in prose (it is NOT
@@ -671,33 +695,67 @@ mod tests {
         assert!(v.is_empty(), "unexpected transfer violation: {:?}", v);
     }
 
-    /// The dual-leaf method records the INV-VL downgrade as an explicit
-    /// `secx:IssuerHonesty` assumption on its soundness claim (honest encoding of the
-    /// #769-accepted downgrade), and it stays `Claimed` (never `Proven`).
+    /// BOTH dual-leaf versions record the INV-VL downgrade as an explicit
+    /// `secx:IssuerHonesty` assumption on their soundness claim (honest encoding of
+    /// the #769-accepted downgrade), and it stays `Claimed` (never `Proven`). The
+    /// versioning changes constant derivation, not the trust model, so neither
+    /// version may drop the assumption.
     #[test]
     fn dual_leaf_records_issuer_honesty_assumption() {
         use sparq_secprop_vocab::{
             SECX_ISSUER_HONESTY as ISSUER_HONESTY, SECX_SOUNDNESS as SOUNDNESS,
         };
         let ann = parse_annotations();
-        let dl = ann
-            .get(crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1)
-            .expect("dual-leaf annotated");
-        let soundness = dl
-            .assertions
-            .iter()
-            .find(|a| a.property == SOUNDNESS)
-            .expect("dual-leaf has a soundness assertion");
-        assert_eq!(
-            soundness.assumption.as_deref(),
-            Some(ISSUER_HONESTY),
-            "the dual-leaf INV-VL downgrade must be recorded as an IssuerHonesty assumption",
+        for iri in [
+            crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1,
+            crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2,
+        ] {
+            let dl = ann.get(iri).unwrap_or_else(|| panic!("{} annotated", iri));
+            let soundness = dl
+                .assertions
+                .iter()
+                .find(|a| a.property == SOUNDNESS)
+                .unwrap_or_else(|| panic!("{} has a soundness assertion", iri));
+            assert_eq!(
+                soundness.assumption.as_deref(),
+                Some(ISSUER_HONESTY),
+                "{}: the INV-VL downgrade must be recorded as an IssuerHonesty assumption",
+                iri,
+            );
+            assert_eq!(
+                soundness.assurance,
+                Assurance::Claimed,
+                "{}: the soundness claim must stay Claimed (never Proven)",
+                iri,
+            );
+        }
+    }
+
+    /// The v1 entry records its UNMET §14.1 reserved-tag requirement — in the
+    /// annotation graph's prose AND in the posture accessor — and v2 is the
+    /// production-selectable dual-leaf method the completeness guard requires.
+    #[test]
+    fn dual_leaf_v1_records_the_unmet_reserved_tag_requirement() {
+        let posture = dual_leaf_v1_posture();
+        for fragment in ["SUPERSEDED", "no-value sentinel", "§14.1", "UNMET"] {
+            assert!(
+                posture.contains(fragment),
+                "the v1 posture must state {fragment:?}: {posture}"
+            );
+        }
+        // The same statement is carried in the annotation graph itself, on the v1
+        // subject, so a consumer reading the Turtle sees it too.
+        assert!(
+            METHODS_TTL.contains("reserved-tag requirement")
+                && METHODS_TTL.contains("inside the reachable value-handle band"),
+            "the annotation graph must record v1's unmet reserved-tag requirement"
         );
-        assert_eq!(
-            soundness.assurance,
-            Assurance::Claimed,
-            "the dual-leaf soundness claim must stay Claimed (never Proven)",
-        );
+        // v1 is no longer required by the completeness guard; v2 is.
+        let required = production_method_iris();
+        assert!(!required.contains(&crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1));
+        assert!(required.contains(&crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2));
+        // But v1 keeps its annotation block, because it stays verifiable.
+        assert!(parse_annotations().contains_key(crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1));
     }
 
     /// `value-only` is NOT a graph subject (it is the OFF-by-default research dial),

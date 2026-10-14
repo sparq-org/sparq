@@ -95,6 +95,14 @@ pub const ZK_SCHEME_POSEIDON2_RDFC10_V1: &str = "https://sparq.dev/ns/zk#poseido
 // sq-zzxt: configurable-commitment scheme IRIs (design
 // `research/zk-configurable-commitment-design.md` §2.1).
 pub const ZK_SCHEME_POSEIDON2_DUALLEAF_V1: &str = "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1";
+/// The `dual-leaf` **v2** commitment scheme id —
+/// [`crate::commit::CommitmentMethod::DualLeafV2`]. The versioned dual-leaf
+/// scheme: value-lane constants derived in BLAKE3's key-derivation mode over
+/// length-framed `(datatype, params)`, an out-of-band no-value sentinel, and a
+/// bit-domain boolean member. This is the dual-leaf method a new issuance
+/// selects; `DualLeafV1` stays recognised and verifiable but is no longer
+/// production-selectable.
+pub const ZK_SCHEME_POSEIDON2_DUALLEAF_V2: &str = "https://sparq.dev/ns/zk#poseidon2-dualleaf-v2";
 /// The `value-only` commitment scheme id (value handle only, lexical hash
 /// dropped) — `CommitmentMethod::ValueOnlyV1`, a
 /// **benchmark / research dial** (§10 default (2)). The IRI const is always
