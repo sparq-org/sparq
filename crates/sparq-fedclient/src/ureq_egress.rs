@@ -106,13 +106,16 @@ impl GuardedHttp {
         }
     }
 
-    /// A ureq agent with the global timeout, the sparq-fedclient user agent and the SSRF
-    /// resolver. ureq connects only to the addresses the resolver returns, so the vetted IP is
+    /// A ureq agent with the global timeout, the sparq-fedclient user agent, no environment
+    /// proxy and the SSRF resolver. ureq connects only to the addresses the resolver returns, so the vetted IP is
     /// the dialled IP and there is no DNS-rebinding re-resolve window (sq-25xk, sq-g2xs).
     pub(crate) fn agent(&self) -> ureq::Agent {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
+            // No proxy from the environment, so the vetted address is the dialled address (a
+            // proxy would resolve the destination itself, past the resolver).
+            .proxy(None)
             .build();
         let resolver = EgressFilterResolver {
             allow_private: std::sync::Arc::clone(&self.allow_private),

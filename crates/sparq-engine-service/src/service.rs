@@ -2037,6 +2037,9 @@ impl HttpTransport {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .user_agent(concat!("sparq-engine/", env!("CARGO_PKG_VERSION")))
+            // No proxy from the environment: through a proxy, the proxy resolves and dials the
+            // destination, so the resolver below would vet the proxy's address instead of it.
+            .proxy(None)
             .build();
         let agent = ureq::Agent::with_parts(
             config,
