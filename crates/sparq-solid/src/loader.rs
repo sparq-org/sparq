@@ -719,9 +719,10 @@ mod tests {
             store
                 .cache
                 .with_entry(&(None, None, None, None, Mode::Read), |entry| {
+                    let entry = entry.expect("the warmed anonymous session survives the write");
                     assert!(
-                        entry.is_some(),
-                        "the warmed anonymous session survives the write"
+                        entry.memo.is_some() && entry.dirty.is_empty(),
+                        "an unrelated write leaves the warmed session's memo intact"
                     );
                 });
             assert_blank_matcher_decisions(&store);
