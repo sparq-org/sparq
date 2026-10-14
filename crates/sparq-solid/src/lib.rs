@@ -1578,7 +1578,13 @@ impl PodStore {
         if let Some(reads) = &reads {
             update::scope_reads(&upd, reads)?;
         }
-        let odrl = |mode: Mode, g: &str, granted: bool| self.odrl_gate(s, mode, g, granted);
+        // Attached policies grant changes to data only: in a request that also manages graphs
+        // (`CLEAR`, `DROP`, `CREATE`, `LOAD`, `COPY`, `MOVE`), every write rests on the static
+        // view, and a prohibition can still remove it.
+        let grants = update::changes_data_only(&upd);
+        let odrl = |mode: Mode, g: &str, granted: bool| {
+            (grants || granted) && self.odrl_gate(s, mode, g, granted)
+        };
         let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs(), &odrl)?;
         // An update made only of INSERT DATA / DELETE DATA has effects its text alone gives,
         // on exactly the graphs the static check just authorized (with the same needs). When it

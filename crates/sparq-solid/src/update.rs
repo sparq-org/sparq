@@ -233,6 +233,21 @@ fn analyze(upd: &Update) -> WriteReqs {
     reqs
 }
 
+/// Whether every operation of `upd` changes data only (`INSERT DATA`, `DELETE DATA`,
+/// `DELETE`/`INSERT … WHERE`): no `CLEAR`, `DROP`, `CREATE` or `LOAD`, nor a `COPY` or
+/// `MOVE`, which the parser lowers to a `DROP` (an `ADD` lowers to an `INSERT … WHERE`
+/// alone). Attached policies grant changes only in such a request.
+pub(crate) fn changes_data_only(upd: &Update) -> bool {
+    upd.operations.iter().all(|op| {
+        matches!(
+            op,
+            GraphUpdateOperation::InsertData { .. }
+                | GraphUpdateOperation::DeleteData { .. }
+                | GraphUpdateOperation::DeleteInsert { .. }
+        )
+    })
+}
+
 /// Does the session have `need` on the concrete graph `g`? `odrl` turns the static
 /// view's verdict into the effective one (the store's request-time ODRL layer, issue
 /// #6743).
@@ -587,14 +602,9 @@ pub(crate) fn check_effects(
 ) -> Result<bool, String> {
     use sparq_engine::UpdateEffect;
     let mut rules = false;
-    // A write to a graph an earlier effect of this request dropped re-creates it, so only the
-    // static view can authorize it: an attached ODRL grant covers only a graph that exists,
-    // and is checked against the store before the request.
-    let static_only = |m: Mode, g: &str, granted: bool| granted && odrl(m, g, granted);
-    let mut need_on = |n: &NamedNode, base: Need, recreates: bool| -> Result<(), String> {
+    let mut need_on = |n: &NamedNode, base: Need| -> Result<(), String> {
         let need = need_for_graph(n.as_str(), base);
-        let gate: &Gate<'_> = if recreates { &static_only } else { odrl };
-        if !allowed(auth, session, n, need, gate) {
+        if !allowed(auth, session, n, need, odrl) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(need),
@@ -612,12 +622,8 @@ pub(crate) fn check_effects(
             .to_owned()
     };
     // Graphs earlier effects of this request wrote or created: a later `CLEAR`/`DROP NAMED`
-    // empties them too, though the store before the request did not hold them. A graph
-    // leaves this list when a later effect drops it, and comes back if one writes it again.
+    // empties them too, though the store before the request did not hold them.
     let mut written: Vec<&NamedNode> = Vec::new();
-    // Graphs earlier effects dropped; `dropped_all` after a `DROP NAMED`.
-    let mut dropped: FxHashSet<&str> = FxHashSet::default();
-    let mut dropped_all = false;
     for effect in effects {
         match effect {
             UpdateEffect::Delta { slot, deletes, .. } => match slot {
@@ -627,58 +633,28 @@ pub(crate) fn check_effects(
                     } else {
                         Need::Write
                     };
-                    need_on(n, base, dropped_all || dropped.contains(n.as_str()))?;
+                    need_on(n, base)?;
                     written.push(n);
                 }
                 Some(_) => return Err("update denied: a graph name that is not an IRI".into()),
                 None => return Err(default_denied()),
             },
-            UpdateEffect::Clear(target) | UpdateEffect::Drop(target) => {
-                match target {
-                    GraphTarget::NamedNode(n) => {
-                        let was_dropped = dropped_all || dropped.contains(n.as_str());
-                        // A graph this request dropped and has not written since is gone:
-                        // clearing or dropping it again changes nothing.
-                        if !was_dropped || written.contains(&n) {
-                            need_on(n, Need::Write, was_dropped)?;
-                        }
+            UpdateEffect::Clear(target) | UpdateEffect::Drop(target) => match target {
+                GraphTarget::NamedNode(n) => need_on(n, Need::Write)?,
+                GraphTarget::DefaultGraph | GraphTarget::AllGraphs => return Err(default_denied()),
+                GraphTarget::NamedGraphs => {
+                    // Each graph it empties is checked, the auth-view inputs among them included.
+                    for g in store_named_graphs(graph) {
+                        need_on(&g, Need::Write)?;
                     }
-                    GraphTarget::DefaultGraph | GraphTarget::AllGraphs => {
-                        return Err(default_denied())
-                    }
-                    GraphTarget::NamedGraphs => {
-                        // Each graph it empties is checked, the auth-view inputs among them
-                        // included. A graph this request already dropped is gone, so there
-                        // is nothing to empty unless a later effect wrote it again (then it
-                        // is in `written`).
-                        for g in store_named_graphs(graph) {
-                            if dropped_all || dropped.contains(g.as_str()) {
-                                continue;
-                            }
-                            need_on(&g, Need::Write, false)?;
-                        }
-                        for g in &written {
-                            need_on(g, Need::Write, dropped_all || dropped.contains(g.as_str()))?;
-                        }
+                    for g in &written {
+                        need_on(g, Need::Write)?;
                     }
                 }
-                if let UpdateEffect::Drop(target) = effect {
-                    match target {
-                        GraphTarget::NamedNode(n) => {
-                            dropped.insert(n.as_str());
-                            written.retain(|w| *w != n);
-                        }
-                        GraphTarget::NamedGraphs => {
-                            dropped_all = true;
-                            written.clear();
-                        }
-                        GraphTarget::DefaultGraph | GraphTarget::AllGraphs => {}
-                    }
-                }
-            }
+            },
             UpdateEffect::Create(Term::NamedNode(n)) => {
                 // `CREATE` needs `Write`, as [`analyze`] requires of its static target.
-                need_on(n, Need::Write, dropped_all || dropped.contains(n.as_str()))?;
+                need_on(n, Need::Write)?;
                 written.push(n);
             }
             UpdateEffect::Create(_) => {

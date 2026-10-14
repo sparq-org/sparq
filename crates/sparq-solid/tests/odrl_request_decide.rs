@@ -569,21 +569,25 @@ fn change_permissions_grant_existing_resources_only() {
         let ins = format!("INSERT DATA {{ GRAPH <{fresh}> {{ <urn:x> <urn:y> 1 }} }}");
         assert!(s.update_as(&bob, &ins).is_err(), "no create of {fresh}");
     }
-    // Dropping the graph and writing it again in one request re-creates it: a grant
-    // covers only a graph that exists, so only the static view can authorize that.
-    let recreate = "DROP GRAPH <https://pod.ex/notes/n2> ; \
-                    INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } }";
-    assert!(s.update_as(&bob, recreate).is_err(), "no re-create through a grant");
-    let created = "DROP GRAPH <https://pod.ex/notes/n2> ; CREATE GRAPH <https://pod.ex/notes/n2>";
-    assert!(s.update_as(&bob, created).is_err(), "no CREATE after a DROP through a grant");
-    let regraph = "DROP GRAPH <https://pod.ex/notes/n2> ; \
-                   INSERT { GRAPH ?g { <urn:x> <urn:y> 4 } } \
-                   WHERE { VALUES ?g { <https://pod.ex/notes/n2> } }";
-    assert!(s.update_as(&bob, regraph).is_err(), "no re-create through GRAPH ?g either");
-    let copy = "COPY <https://pod.ex/notes/n1> TO <https://pod.ex/notes/n2>";
-    assert!(s.update_as(&bob, copy).is_err(), "COPY drops and re-creates its destination");
+    // Graph management rests on the static view: no grant applies in a request that drops,
+    // clears, creates, loads, copies or moves a graph.
+    let managed = [
+        "DROP GRAPH <https://pod.ex/notes/n2>",
+        "CLEAR GRAPH <https://pod.ex/notes/n2>",
+        "DROP GRAPH <https://pod.ex/notes/n2> ; \
+         INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } }",
+        "DROP GRAPH <https://pod.ex/notes/n2> ; CREATE GRAPH <https://pod.ex/notes/n2>",
+        "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 3 } } ; \
+         DROP GRAPH <https://pod.ex/notes/n2>",
+        "COPY <https://pod.ex/notes/n1> TO <https://pod.ex/notes/n2>",
+        "MOVE <https://pod.ex/notes/n1> TO <https://pod.ex/notes/n2>",
+    ];
+    for upd in managed {
+        assert!(s.update_as(&bob, upd).is_err(), "{upd}");
+    }
     let alice = session(Some(ALICE), None);
     let mut owner = bare_store_with(container);
+    let recreate = managed[2];
     owner.update_as(&alice, recreate).expect("the static grant re-creates");
     owner
         .attach_odrl_policy(
@@ -591,13 +595,6 @@ fn change_permissions_grant_existing_resources_only() {
         )
         .expect("attach");
     assert!(owner.update_as(&alice, recreate).is_err(), "a prohibition still applies");
-    s.update_as(&bob, "CLEAR GRAPH <https://pod.ex/notes/n2>").expect("granted Write clears");
-    s.update_as(
-        &bob,
-        "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 3 } } ; \
-         DROP GRAPH <https://pod.ex/notes/n2>",
-    )
-    .expect("granted Write may write and then drop");
 }
 
 /// `odrl:use` permits every action under `decide`, but grants `Read` only here: the
@@ -647,34 +644,44 @@ fn drop_then_wildcard_stays_open_to_a_static_writer() {
     s.update_as(&session(Some(ALICE), None), wipe).expect("alice may drop every graph");
 }
 
-/// A grant-only writer may repeat a `DROP` of a graph the request already dropped (a
-/// no-op), but a static `Append` never stands in for the `Write` a re-`CREATE` needs.
+/// In a request that also manages a graph, a grant authorizes none of its writes, while a
+/// data-only request combines grants with the static view.
 #[test]
-fn dropped_graphs_need_static_write_to_come_back() {
-    let bob_appends = format!(
+fn graph_management_requests_use_static_grants_only() {
+    let bob_writes_n3 = format!(
         "{CONTAINER}\
-<https://pod.ex/.acl#bob> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#bob> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#bob> <http://www.w3.org/ns/auth/acl#agent> <{BOB}> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Append> <https://pod.ex/.acl> .
+<https://pod.ex/notes/n3.acl#bob> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/notes/n3.acl> .
+<https://pod.ex/notes/n3.acl#bob> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/notes/n3> <https://pod.ex/notes/n3.acl> .
+<https://pod.ex/notes/n3#it> <https://ex.dev/ns#title> \"mine\" <https://pod.ex/notes/n3> .
+<https://pod.ex/notes/n3.acl#bob> <http://www.w3.org/ns/auth/acl#agent> <{BOB}> <https://pod.ex/notes/n3.acl> .
+<https://pod.ex/notes/n3.acl#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/notes/n3.acl> .
+<https://pod.ex/notes/n3.acl#bob> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/notes/n3.acl> .
 "
     );
     let bob = session(Some(BOB), None);
-    let mut s = bare_store_with(&bob_appends);
+    let mut s = bare_store_with(&bob_writes_n3);
     s.attach_odrl_policy(change_policy()).expect("attach");
-    assert!(holds(&s, &bob, N2, Mode::Write), "Write through the grant");
-    let recreate = "DROP GRAPH <https://pod.ex/notes/n2> ; CREATE GRAPH <https://pod.ex/notes/n2>";
-    assert!(s.update_as(&bob, recreate).is_err(), "static Append does not re-create");
-    s.update_as(
-        &bob,
-        "DROP GRAPH <https://pod.ex/notes/n2> ; DROP SILENT GRAPH <https://pod.ex/notes/n2>",
-    )
-    .expect("dropping a dropped graph again changes nothing");
-    let rewrite = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } } ; \
-                   DROP GRAPH <https://pod.ex/notes/n2> ; \
-                   INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } } ; \
-                   DROP NAMED";
-    assert!(s.update_as(&bob, rewrite).is_err(), "no re-create, and no wildcard, by a grant");
+    assert!(holds(&s, &bob, N2, Mode::Write), "Write on n2 through the grant");
+    let data = "DELETE DATA { GRAPH <https://pod.ex/notes/n2> { <https://pod.ex/notes/n2#it> \
+                <https://ex.dev/ns#title> \"private\" } } ; \
+                INSERT DATA { GRAPH <https://pod.ex/notes/n3> { <urn:x> <urn:y> 1 } }";
+    s.update_as(&bob, data).expect("grant and static write combine in a data-only request");
+    let mixed = [
+        "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } } ; \
+         DROP GRAPH <https://pod.ex/notes/n3>",
+        "CLEAR GRAPH <https://pod.ex/notes/n3> ; \
+         INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } }",
+        "CREATE SILENT GRAPH <https://pod.ex/notes/n3> ; \
+         INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } }",
+    ];
+    for upd in mixed {
+        assert!(s.update_as(&bob, upd).is_err(), "{upd}");
+    }
+    assert!(s.update_as(&bob, "DROP NAMED").is_err(), "no wildcard through a grant");
+    s.update_as(&bob, "CLEAR GRAPH <https://pod.ex/notes/n3> ; DROP GRAPH <https://pod.ex/notes/n3>")
+        .expect("static Write manages n3");
+    s.update_as(&bob, "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 4 } }")
+        .expect("the grant still applies to a later data-only request");
 }
 
 /// `Write` needs `odrl:modify` and `odrl:delete` from one policy; `Append` alone never
