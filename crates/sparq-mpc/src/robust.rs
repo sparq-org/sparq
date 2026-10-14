@@ -30,8 +30,8 @@
 //! ## Threat model (honest-majority, information-theoretic)
 //!
 //! This adds detect-and-abort (and, where the bound allows, robust correction)
-//! against ACTIVE tampering of share *values* — guarantee (D) at the Shamir
-//! layer. It needs no PKI, broadcast, or preprocessing. It does NOT defend:
+//! against ACTIVE tampering of share *values* at reconstruction — a step toward
+//! guarantee (D) at the Shamir layer, not malicious security. It needs no PKI, broadcast, or preprocessing. It does NOT defend:
 //!
 //! - **Exactly `t+1` shares (no redundancy).** Any `t+1` arbitrary points define
 //!   *some* degree-`t` polynomial, so a single forged share just selects a

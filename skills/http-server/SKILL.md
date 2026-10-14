@@ -1612,6 +1612,9 @@ quota:
    (DNS-rebinding-safe), uniformly across queries / ASK / CONSTRUCT/DESCRIBE / subscriptions
    / federated `INSERT … WHERE`. An entry may be **port-scoped** (`host:port`) to permit a
    host on exactly one port — strictly narrower than the bare host (`sq-a7jw4`).
+   The SERVICE agent ignores `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`: it always
+   connects directly to the vetted address, so a proxy can never stand in for the
+   destination the allowlist checked (#7012).
 
 Library callers set these on `ServerConfig` (`query_timeout`, `max_query_rows`,
 `max_query_bytes`, `max_decompress_ratio`, `service_allow`). Embedders driving the engine
