@@ -24,5 +24,15 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(gh api -X PATCH repos/sparq-org/sparq/issues/*)",
+      "Bash(gh api -X POST repos/sparq-org/sparq/actions/runs/*/cancel)",
+      "Bash(gh issue close *)",
+      "Bash(gh pr close *)",
+      "Bash(gh run cancel *)",
+      "Edit(.github/workflows/**)"
+    ]
   }
 }
