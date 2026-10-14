@@ -1058,9 +1058,12 @@ the language-tag domain rather than on a check, and it stays an assumption until
 fail-closed ingest/circuit assert §14.1 names actually ships. No soundness or privacy
 property is claimed for any of the three, pending the external sign-off.
 
-The band-exclusion rule itself is **met by `DualLeafV2`** (§14.5) as an asserted,
-checkable invariant; `DualLeafV1` retains the in-band tag (§14.4). Registration under
-CR-G8 / sq-qhy4 is unchanged either way — being checkable is not being audited.
+The band-exclusion rule itself is **met by `DualLeafV2` on the HOST side** (§14.5) as an
+asserted, checkable invariant; `DualLeafV1` retains the in-band tag (§14.4). The
+qualifier is load-bearing: no Noir global or assert names the V2 sentinel, so in-circuit
+a V2 degenerate handle is refused only because it cannot be witnessed through a member's
+range decomposition (§14.5). Registration under CR-G8 / sq-qhy4 is unchanged either way
+— being checkable is not being audited.
 
 ### 14.4 The shipped `DualLeafV1` host builder (sq-vvfte)
 
