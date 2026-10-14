@@ -230,7 +230,12 @@ for hidden aggregate variables. It does not provide query-visible randomness.
 The separate `sparq-deterministic-paths` parser feature is enabled only by the
 detached evaluator and supplies its existential path intermediates.
 
-The mandatory CI lane exports the accepted executable, actual synthetic receipts
+The `zk-exact-evaluator` CI lane is advisory (`ci-fast` is the only required
+check). It runs on pull requests that touch the zk inputs (this workspace,
+`bench/zk-bindings`, `sparq-canon`, `sparq-query-protocol`, the vendored
+parser and SDK, and three engine test fixtures), and after merge on every push
+to `main` that touches any evaluator input, engine crates and `Cargo.*`
+included. It exports the accepted executable, actual synthetic receipts
 and source/toolchain/HAL evidence using the [campaign evidence contract](../../skills/zk-query-proofs/references/evaluator-evidence.md). Partial uploads are not success records.
 
 The shared raw-literal boundary checks numeric/boolean typed lexicals
