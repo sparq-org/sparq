@@ -176,8 +176,8 @@ pub const DECOMP_MASK_BITS: usize = 60;
 /// value EXACTLY through the modular wrap instead of avoiding it, so it has no
 /// value/mask slack and supports the full field width. `disclose_threshold_verdict`
 /// now routes through that path; this masked-open primitive is retained for the
-/// (lower-magnitude) malicious twin in [`crate::auth_disclose`] and the differential
-/// regression tests.
+/// (lower-magnitude) authenticated (tamper-evident) twin in [`crate::auth_disclose`]
+/// and the differential regression tests.
 pub const DECOMP_VALUE_BITS: usize = DECOMP_MASK_BITS - DECOMP_STAT_SECURITY_BITS;
 
 /// The exclusive upper bound a sum must respect for the in-MPC bit-decomposition
@@ -663,7 +663,8 @@ fn secret_or(
 /// modular wrap (no statistical slack) and so supports the full
 /// [`RABBIT_VALUE_BITS`] = 60 magnitude rather than this path's
 /// [`DECOMP_VALUE_BITS`] = 20. Retained for the masked-open regression tests and as
-/// the semi-honest reference of the malicious twin [`crate::auth_disclose`].
+/// the semi-honest reference of the authenticated (tamper-evident) twin
+/// [`crate::auth_disclose`].
 #[cfg(test)]
 fn secure_bit_decompose(
     source: &mut dyn DistributedRandomness,
@@ -1111,8 +1112,8 @@ fn secret_is_zero(source: &mut dyn DistributedRandomness, v: &[Share]) -> Result
 /// sq-bgsn — now TEST-ONLY: the production `disclose_threshold_verdict`
 /// path range-proves the Rabbit decomposition via `verify_value_in_range_rabbit`
 /// (full field width). This masked-open range proof is retained as the regression
-/// reference and as the semi-honest model of the malicious twin's
-/// `auth_disclose::auth_verify_sum_in_range`.
+/// reference and as the semi-honest model of the authenticated (tamper-evident)
+/// twin's `auth_disclose::auth_verify_sum_in_range`.
 #[cfg(test)]
 fn verify_sum_in_range(
     source: &mut dyn DistributedRandomness,
@@ -2412,7 +2413,8 @@ mod tests {
         // sq-bgsn — the masked-open `secure_bit_decompose` +
         // `verify_sum_in_range` path is now TEST-ONLY (the production
         // `disclose_threshold_verdict` uses the Rabbit path), but it remains the
-        // semi-honest REFERENCE of the malicious twin `auth_disclose::auth_verify_sum_in_range`.
+        // semi-honest REFERENCE of the authenticated (tamper-evident) twin
+        // `auth_disclose::auth_verify_sum_in_range`.
         // Pin its contract directly: an in-range sum (< 2^DECOMP_VALUE_BITS) passes the
         // masked-open range proof; an out-of-range sum (>= 2^DECOMP_VALUE_BITS, or one
         // whose masked open wraps the field) is REJECTED fail-closed.
