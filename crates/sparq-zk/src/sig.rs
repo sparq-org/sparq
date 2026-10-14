@@ -537,16 +537,21 @@ fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     // A distinct domain tag from the challenge so the nonce-PRF output can never
     // collide with / be mistaken for a challenge value.
     const SIG_DOMAIN_NONCE: u64 = 0x5a4b_5349_475f_4e31; // "ZKSIG_N1"
-    // Map the secret scalar into the base field via its big-endian bytes. The
-    // base field (BN254 scalar field) is larger than the Baby-JubJub scalar
-    // field, so this reduction is injective on canonical sk encodings.
-    // Secret-bearing intermediates are zeroized on drop.
-    let sk_be = Zeroizing::new(sk.0.into_bigint().to_bytes_be());
-    let sk_base = Fr::from_be_bytes_mod_order(&sk_be);
-    let nonce_input = Zeroizing::new([Fr::from(SIG_DOMAIN_NONCE), sk_base, *m]);
-    let k_base: Fr = poseidon2::hash(&*nonce_input);
-    let k_be = Zeroizing::new(k_base.into_bigint().to_bytes_be());
-    let k = JjScalar::from_be_bytes_mod_order(&k_be);
+
+    // Every secret-bearing intermediate (integers, field elements, hash inputs and the
+    // sponge state) is held in a `Zeroizing` wrapper, and the conversions between the
+    // two fields go through 64-bit limbs and field arithmetic only, so no byte buffer
+    // and no heap copy of `sk` or the nonce is ever made. Register and stack temporaries
+    // inside the field arithmetic itself are not scrubbed; Rust gives no way to.
+    //
+    // Map the secret scalar into the base field. The base field (BN254 scalar field) is
+    // larger than the Baby-JubJub scalar field, so this is injective on canonical sk.
+    let sk_int = Zeroizing::new(sk.0.into_bigint());
+    let sk_base = Zeroizing::new(reduce_limbs::<Fr>(&sk_int.0));
+    let nonce_input = Zeroizing::new([Fr::from(SIG_DOMAIN_NONCE), *sk_base, *m]);
+    let k_base = Zeroizing::new(poseidon2::hash_secret(&*nonce_input));
+    let k_base_int = Zeroizing::new(k_base.into_bigint());
+    let k = Zeroizing::new(reduce_limbs::<JjScalar>(&k_base_int.0));
 
     // [OPUS-4.8] sq-8jv7: guard the degenerate `k == 0` (would make `R` the
     // identity) WITHOUT a secret-dependent branch in our own code. The old
@@ -560,22 +565,32 @@ fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
     // arkworks scalar arithmetic `e·sk.0` and the underlying field ops, which
     // sparq does NOT assert constant-time — see the module CONSTANT-TIME POSTURE
     // note and `compliance/cryptoreview/side-channel-analysis.md` §2.2.)
-    let nonce2_input = Zeroizing::new([Fr::from(SIG_DOMAIN_NONCE), k_base, *m]);
-    let k2_base: Fr = poseidon2::hash(&*nonce2_input);
-    let k2_be = Zeroizing::new(k2_base.into_bigint().to_bytes_be());
-    let k2 = JjScalar::from_be_bytes_mod_order(&k2_be);
-    // Constant-time "is k zero?" over the canonical little-endian scalar bytes,
-    // then a branchless byte-wise select of `k` vs `k2` keyed on that Choice.
-    let k_le = Zeroizing::new(k.into_bigint().to_bytes_le());
-    let zero_le = JjScalar::zero().into_bigint().to_bytes_le();
-    let k_is_zero = k_le.ct_eq(&zero_le);
-    let mut sel = k_le;
-    let k2_le = Zeroizing::new(k2.into_bigint().to_bytes_le());
-    debug_assert_eq!(sel.len(), k2_le.len());
-    for (dst, src) in sel.iter_mut().zip(k2_le.iter()) {
-        *dst = u8::conditional_select(dst, src, k_is_zero);
+    let nonce2_input = Zeroizing::new([Fr::from(SIG_DOMAIN_NONCE), *k_base, *m]);
+    let k2_base = Zeroizing::new(poseidon2::hash_secret(&*nonce2_input));
+    let k2_base_int = Zeroizing::new(k2_base.into_bigint());
+    let k2 = Zeroizing::new(reduce_limbs::<JjScalar>(&k2_base_int.0));
+    // Constant-time "is k zero?" over the canonical limbs, then a branchless limb-wise
+    // select of `k` vs `k2` keyed on that Choice.
+    let mut sel = Zeroizing::new(k.into_bigint());
+    let k2_int = Zeroizing::new(k2.into_bigint());
+    let k_is_zero = sel.0.ct_eq(&JjScalar::zero().into_bigint().0);
+    for (dst, src) in sel.0.iter_mut().zip(k2_int.0.iter()) {
+        *dst = u64::conditional_select(dst, src, k_is_zero);
     }
-    JjScalar::from_le_bytes_mod_order(&sel)
+    reduce_limbs::<JjScalar>(&sel.0)
+}
+
+/// The integer with little-endian 64-bit `limbs`, reduced into `F` by Horner's rule in
+/// field arithmetic. Unlike `from_be_bytes_mod_order`, this makes no byte buffer or
+/// heap copy of its (secret) input.
+fn reduce_limbs<F: PrimeField>(limbs: &[u64]) -> F {
+    let base = F::from(1u128 << 64);
+    let mut acc = F::zero();
+    for &limb in limbs.iter().rev() {
+        acc *= base;
+        acc += F::from(limb);
+    }
+    acc
 }
 
 /// Sign `m` with `sk` using a DETERMINISTIC nonce derived from `(sk, m)` (no

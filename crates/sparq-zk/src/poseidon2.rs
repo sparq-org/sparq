@@ -130,9 +130,18 @@ pub fn permutation(inputs: &[Fr; T]) -> [Fr; T] {
 /// `Poseidon2::hash(input, input.len())`: sponge with rate 3 and IV
 /// `len * 2^64` in the capacity lane.
 pub fn hash(inputs: &[Fr]) -> Fr {
+    sponge(inputs, &mut [Fr::from(0u64); T])
+}
+
+/// [`hash`] for secret inputs: the sponge state is zeroized when it is dropped.
+/// Temporaries inside [`permutation`] are not scrubbed.
+pub(crate) fn hash_secret(inputs: &[Fr]) -> Fr {
+    sponge(inputs, &mut zeroize::Zeroizing::new([Fr::from(0u64); T]))
+}
+
+fn sponge(inputs: &[Fr], state: &mut [Fr; T]) -> Fr {
     let two_pow_64 = Fr::from(1u128 << 64);
     let iv = Fr::from(inputs.len() as u64) * two_pow_64;
-    let mut state = [Fr::from(0u64); T];
     state[RATE] = iv;
 
     let mut chunks = inputs.chunks_exact(RATE);
@@ -140,7 +149,7 @@ pub fn hash(inputs: &[Fr]) -> Fr {
         for (i, x) in chunk.iter().enumerate() {
             state[i] += x;
         }
-        state = permutation(&state);
+        *state = permutation(state);
     }
     let rem = chunks.remainder();
     // A final permutation runs iff the input is empty or has a partial
@@ -149,7 +158,7 @@ pub fn hash(inputs: &[Fr]) -> Fr {
         for (i, x) in rem.iter().enumerate() {
             state[i] += x;
         }
-        state = permutation(&state);
+        *state = permutation(state);
     }
     state[0]
 }

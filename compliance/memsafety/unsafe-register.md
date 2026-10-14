@@ -49,7 +49,7 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**97 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
+**102 `unsafe` sites** across 10 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
@@ -165,6 +165,23 @@ re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 | `src/verifier.rs:967` | `libc::flock(LOCK_EX)` | `fd` is a valid open fd owned by `file` for the call | the `MutexGuard` keeps `file` (hence `fd`) alive; an error fails closed (`return false`). |
 | `src/verifier.rs:975` | `libc::flock(LOCK_UN)` | same valid, locked fd | unlock helper run on every return path so the advisory lock is never leaked (a leak would deadlock the next caller). |
 | `src/driver.rs:144` | `libc::flock(LOCK_EX)` | the private `NargoCacheLock` exclusively owns the valid open file descriptor across the call | no pointer arguments or descriptor ownership transfer; errors reject, and scope-owned `File` closure releases the lock on return/unwind. Four-process exclusion and real concurrent compilation regressions exercise OS behavior; Miri does not model this external OS lock. |
+
+### `sparq-zk` — 5 sites (test-only scanning global allocator)
+
+The library is free of `unsafe`. These 5 sites are the `#[global_allocator]` of one
+**integration test**, `tests/derive_nonce_scrub.rs`, which checks that deterministic signing
+never frees a heap block still holding the secret key or the secret nonce. A global
+allocator unavoidably requires `unsafe`; this one forwards to `System` like the counting
+allocators above, and additionally READS each block it frees (never writes or retains it)
+while a flag is armed. TEST-only, not a B5 surface.
+
+| File:line | Kind | Invariant relied on | Why sound / how bounded |
+|---|---|---|---|
+| `tests/derive_nonce_scrub.rs:24` | `unsafe impl GlobalAlloc for ScanningAllocator` | forward-to-`System` | both methods delegate to `System` with the same args, so `System` upholds the trait contract. |
+| `tests/derive_nonce_scrub.rs:25` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged. |
+| `tests/derive_nonce_scrub.rs:27` | `unsafe { System.alloc }` | as above | the single forwarding call. |
+| `tests/derive_nonce_scrub.rs:30` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | holds because every `alloc` forwarded to `System`; `realloc` is the trait default (alloc, copy, dealloc through these methods). |
+| `tests/derive_nonce_scrub.rs:34` | `slice::from_raw_parts` read + `System.dealloc` | the block is live and `layout.size()` bytes long until `System.dealloc` returns | read as `&[u8]` only (every bit pattern is a valid `u8`), nothing retained past the call, then returned to `System` with the same arguments. |
 
 ### `sparq-bench` — 1 site (peak-RSS measurement; non-shipping bench binary)
 
