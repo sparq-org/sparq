@@ -350,6 +350,12 @@ and the crate remains research-grade and externally unaudited (`sq-qhy4` pending
    selectable end-to-end. Deployment acceptance must then be tied to the validated PRSS /
    coin-toss constructions themselves (an unforgeable construction boundary), not to the
    descriptive `RandomnessModel` label a source self-reports.
+   **Status: IN PROGRESS** (#6117). The seam reports `parties()` / `threshold()`, and
+   `degree_reduce` draws its re-sharings through it (`shamir::degree_reduce_through`, via
+   `vss_own_input`); the single-dealer output is unchanged and a PRSS source fails closed.
+   `secure_equal`, `share_private_input` and the oblivious-shuffle control bits still call the
+   dealer. No entry point is gated on `require_deployable()` yet, because it refuses every
+   source today.
 
 ---
 
