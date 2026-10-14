@@ -22,7 +22,7 @@
     doap:name "sparq-lws-core" ;
     doap:release <sparq-lws-core#release> ;
     doap:homepage <https://github.com/sparq-org/sparq> ;
-    doap:description "EXPERIMENTAL Solid/LDP server core: axum/hyper/tokio, SPARQ-authoritative metadata + access-control, object_store-backup bytes, DPoP/Solid-OIDC auth via solid-oidc-verifier."@en ;
+    doap:description "EXPERIMENTAL Solid/LDP server core: axum/hyper/tokio, SPARQ-authoritative metadata + access-control, bytes behind a BlobStore seam, DPoP/Solid-OIDC auth via solid-oidc-verifier."@en ;
     doap:programming-language "Rust" ;
 
     # --- Feature groups deliberately skipped (not applicable / unimplementable in this setup) -------
