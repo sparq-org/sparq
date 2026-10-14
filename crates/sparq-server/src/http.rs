@@ -3962,16 +3962,11 @@ fn tpf_base(headers: &HeaderMap) -> String {
 /// [OPUS-4.8] sq-bzh1: percent-encodes a query-parameter VALUE for building the `hydra:next` /
 /// `hydra:previous` page URLs: the RFC 3986 unreserved set passes through, everything else is
 /// uppercase `%XX` per UTF-8 byte, so an N-Triples term value (`<`, `>`, `"`, spaces, …)
-/// round-trips through the URL back to the same term. The SAME `percent-encoding` set as
-/// sparq-fedclient's `pct_encode` (the client that reads these links) — #3712.
+/// round-trips through the URL back to the same term. Uses [`sparq_core::percent::encode`],
+/// byte-identical to sparq-fedclient's fragment transport and discovery ASK probe (#3712).
 #[cfg(feature = "tpf")]
 fn pct_encode(value: &str) -> String {
-    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
-        .remove(b'-')
-        .remove(b'.')
-        .remove(b'_')
-        .remove(b'~');
-    percent_encoding::utf8_percent_encode(value, UNRESERVED).to_string()
+    sparq_core::percent::encode(value)
 }
 
 #[cfg(all(test, feature = "tpf"))]
@@ -3982,6 +3977,9 @@ mod pct_encode_tests {
     /// RFC 3986 unreserved set passes through; the rest is uppercase `%XX` per UTF-8 byte.
     #[test]
     fn pct_encode_pins_the_unreserved_set() {
+        assert_eq!(pct_encode(""), "");
+        assert_eq!(pct_encode("aZ09-_.~ +/%"), "aZ09-_.~%20%2B%2F%25");
+        assert_eq!(pct_encode("\0\x7f中"), "%00%7F%E4%B8%AD");
         let all: String = (0x20u8..0x7f)
             .map(char::from)
             .chain("\t\né😀".chars())

@@ -1029,9 +1029,9 @@ impl HttpFragmentTransport {
 /// Percent-encode a query-parameter VALUE (RFC 3986 unreserved set passes through; everything
 /// else is `%XX`-escaped, uppercase hex per UTF-8 byte), so an N-Triples term (`<`, `>`, `"`,
 /// spaces, newlines in a brTPF block) round-trips through the URL back to the same term. The
-/// server's TPF `hydra:next` builder uses the SAME `percent-encoding` set, so the link the
-/// transport builds is read identically server-side; the discovery ASK probe shares this one
-/// definition too (#3712).
+/// server's TPF `hydra:next` builder uses the byte-identical `sparq_core::percent::encode`,
+/// so the link the transport builds is read identically server-side; the discovery ASK probe
+/// shares this helper too (#3712).
 pub(crate) fn pct_encode(value: &str) -> String {
     const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
         .remove(b'-')
@@ -1505,6 +1505,9 @@ mod tests {
     /// RFC 3986 unreserved set passes through; the rest is uppercase `%XX` per UTF-8 byte.
     #[test]
     fn pct_encode_pins_the_unreserved_set() {
+        assert_eq!(pct_encode(""), "");
+        assert_eq!(pct_encode("aZ09-_.~ +/%"), "aZ09-_.~%20%2B%2F%25");
+        assert_eq!(pct_encode("\0\x7f中"), "%00%7F%E4%B8%AD");
         let all: String = (0x20u8..0x7f)
             .map(char::from)
             .chain("\t\né😀".chars())
@@ -2482,28 +2485,8 @@ mod tests {
         assert!(url.contains("&values="), "the brTPF block rides `values`");
         // The encoded `values` payload decodes back to the server's text wire (s=<…>\ns=<…>).
         let encoded = url.split("values=").nth(1).unwrap();
-        let decoded = pct_decode_for_test(encoded);
+        let decoded = sparq_core::percent::decode(encoded, false);
         assert_eq!(decoded, "s=<http://ex/alice>\ns=<http://ex/bob>");
-    }
-
-    /// Decode a percent-encoded string (test helper — the inverse of `pct_encode`). [OPUS-4.8].
-    #[cfg(not(target_arch = "wasm32"))]
-    fn pct_decode_for_test(s: &str) -> String {
-        let bytes = s.as_bytes();
-        let mut out = Vec::with_capacity(bytes.len());
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                let hi = (bytes[i + 1] as char).to_digit(16).unwrap();
-                let lo = (bytes[i + 2] as char).to_digit(16).unwrap();
-                out.push((hi * 16 + lo) as u8);
-                i += 3;
-            } else {
-                out.push(bytes[i]);
-                i += 1;
-            }
-        }
-        String::from_utf8(out).unwrap()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
