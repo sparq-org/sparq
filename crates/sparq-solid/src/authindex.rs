@@ -267,6 +267,17 @@ struct ConditionalGrant {
 /// assert!(index.accessible(&alice, Mode::Write).is_empty()); // fail-closed
 /// # Ok::<(), String>(())
 /// ```
+/// The auth-view predicate marking a resource whose access-control document the loader
+/// rejected (`<r> auth:withheld true`); only the loader emits it.
+pub(crate) const WITHHELD: &str = "https://sparq.dev/ns/auth#withheld";
+
+/// Whether `graph` is in `withheld` or below a withheld container.
+fn is_withheld_in(withheld: &FxHashSet<String>, graph: &str) -> bool {
+    !withheld.is_empty()
+        && (withheld.contains(graph)
+            || graph.match_indices('/').any(|(i, _)| withheld.contains(&graph[..=i])))
+}
+
 #[derive(Debug, Default)]
 pub struct AuthIndex {
     /// (principal IRI, mode) → per-graph-ORIGIN → graphs, for simple allow / deny triples.
@@ -294,6 +305,9 @@ pub struct AuthIndex {
     matcher_clients: FxHashMap<String, FxHashSet<String>>,
     /// sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
     matcher_issuers: FxHashMap<String, FxHashSet<String>>,
+    /// Resources (and, for a container, everything below it) whose access-control document
+    /// the loader rejected: no grant applies to them, whichever source installed it.
+    withheld: FxHashSet<String>,
 }
 
 impl AuthIndex {
@@ -316,6 +330,10 @@ impl AuthIndex {
                 Term::NamedNode(n) => n.as_str().to_owned(),
                 _ => continue,
             };
+            if p.as_str() == WITHHELD {
+                ix.withheld.insert(subj);
+                continue;
+            }
             if let Some((mode, is_allow)) = Mode::from_pred(p.as_str()) {
                 if let Term::NamedNode(g) = &t[2] {
                     let map = if is_allow { &mut ix.allow } else { &mut ix.deny };
@@ -371,7 +389,27 @@ impl AuthIndex {
             let origin = g.graph.as_ref().map(|n| crate::loader::iri_origin(n.as_str()).to_owned()).unwrap_or_default();
             ix.cond.entry(origin).or_default().push(g);
         }
+        // Withheld resources get no grant from any source; denies stay.
+        if !ix.withheld.is_empty() {
+            let withheld = std::mem::take(&mut ix.withheld);
+            let open = |g: &NamedNode| !is_withheld_in(&withheld, g.as_str());
+            for buckets in ix.allow.values_mut() {
+                for graphs in buckets.values_mut() {
+                    graphs.retain(open);
+                }
+            }
+            for grants in ix.cond.values_mut() {
+                grants.retain(|g| !g.allow || g.graph.as_ref().is_none_or(open));
+            }
+            ix.withheld = withheld;
+        }
         ix
+    }
+
+    /// Whether `graph` is withheld: its access-control document, or a container's above
+    /// it, was rejected, so no grant applies to it whatever its source.
+    pub(crate) fn is_withheld(&self, graph: &str) -> bool {
+        is_withheld_in(&self.withheld, graph)
     }
 
     /// The session's agent-dimension principals (most-specific last).
@@ -589,6 +627,7 @@ impl AuthIndex {
         self.matcher_agents == other.matcher_agents
             && self.matcher_clients == other.matcher_clients
             && self.matcher_issuers == other.matcher_issuers
+            && self.withheld == other.withheld
     }
 
     /// Whether the auth view explicitly denies `mode` on `graph` to this session: a deny

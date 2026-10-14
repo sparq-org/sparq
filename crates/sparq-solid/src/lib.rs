@@ -1000,6 +1000,7 @@ impl PodStore {
             self.odrl.grants(session, m, target) && !self.auth.denies(session, m, target)
         };
         self.statically_covered.contains(target)
+            && !self.auth.is_withheld(target)
             && (mode == Mode::Read || !self.group_docs().contains(target))
             && match mode {
                 // `Append` through a `Write` grant needs that grant to stand, an explicit deny

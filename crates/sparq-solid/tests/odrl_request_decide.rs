@@ -1242,3 +1242,39 @@ fn policies_in_pod_data_are_never_attached() {
         .expect("attach");
     assert!(reads(&s, &bob, N2), "the attached policy grants access");
 }
+
+/// A resource whose access control document cannot be used gets no grant from any source:
+/// not from an attached ODRL permission, and not from one bridged into the view.
+#[test]
+fn a_rejected_access_control_document_withholds_every_grant_source() {
+    let acp = "http://www.w3.org/ns/solid/acp#";
+    let acl = "http://www.w3.org/ns/auth/acl#";
+    let (root, acr) = ("https://pod.ex/.acr", format!("{N2}.acr"));
+    let pod = format!(
+        "<{N1}#it> <https://ex.dev/ns#title> \"hello\" <{N1}> .\n\
+         <{N2}#it> <https://ex.dev/ns#title> \"private\" <{N2}> .\n\
+         <{root}> <{acp}memberAccessControl> <{root}#c> <{root}> .\n\
+         <{root}#c> <{acp}apply> <{root}#all> <{root}> .\n\
+         <{root}#all> <{acp}allow> <{acl}Read> <{root}> .\n\
+         <{root}#all> <{acp}anyOf> <{root}#pub> <{root}> .\n\
+         <{root}#pub> <{acp}agent> <{acp}PublicAgent> <{root}> .\n\
+         <{acr}> <{acp}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#deny> <{acr}> .\n\
+         <{acr}#deny> <{acp}deny> <{acl}Read> <{acr}> .\n\
+         <{acr}#deny> <{acp}allOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{acp}agent> <{UNSEEN}> <{acr}> .\n"
+    );
+    let stray = format!("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{acr}> .\n");
+    let dave = session(Some(UNSEEN), None);
+    let pol = policy("permission", "read", "", Some(UNSEEN), Some(N2)).expect("policy");
+    for (nq, label) in [(pod.clone(), "usable"), (format!("{pod}{stray}"), "rejected")] {
+        let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+        s.materialize_acp().expect("acp");
+        assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: the root policy applies");
+        assert!(!reads(&s, &dave, N2), "{label}: no static grant");
+        s.attach_odrl_policy(pol.clone()).expect("attach");
+        assert!(!reads(&s, &dave, N2), "{label}: no attached grant");
+        let _ = s.materialize_odrl_permission(&pol, &request("read", N2, Some(UNSEEN), None));
+        assert!(!reads(&s, &dave, N2), "{label}: no bridged grant");
+    }
+}
