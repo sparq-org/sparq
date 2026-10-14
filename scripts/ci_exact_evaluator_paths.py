@@ -21,6 +21,8 @@ EXACT_FILES = {
     "scripts/ci_exact_evaluator_evidence.py",
     "scripts/tests/test_ci_exact_evaluator_evidence.py",
     "scripts/tests/test_ci_exact_evaluator_paths.py",
+    # Imported by test_ci_exact_evaluator_paths.py, which this job runs.
+    "scripts/tests/_workflow_trigger_paths.py",
     "crates/sparq-conformance/examples/proof_corpus.rs",
     # Read by the job's bench/zk-bindings regression tests.
     "bench/differential-divergences.json", "crates/sparq-bench/src/fuzz.rs",
