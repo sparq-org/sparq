@@ -901,7 +901,7 @@ async fn serve_read_once<S: Store>(
             accept,
         )
         .await?;
-        let etag = representation_etag(&body);
+        let etag = representation_etag(&content_type, &body);
         (Some((body, content_type)), etag)
     } else {
         let etag = negotiated_validator(&resource.meta.etag, &resource.meta.content_type, accept)?;
@@ -2023,18 +2023,27 @@ async fn render_container<S: Store>(
     Ok((Bytes::from(bytes), negotiated.content_type()))
 }
 
-/// A STRONG ETag computed from a rendered representation's BYTES — `"<len>-<hash>"`.
+/// A STRONG ETag computed from a rendered representation's media type and BYTES — `"<len>-<hash>"`.
 ///
 /// Used for a container response, whose body is generated from live membership (not stored bytes), so
 /// the validator must track the actual representation: it changes whenever the serialised body changes
-/// (a child added/removed, or the negotiated format differs). The same body computed for GET and HEAD
-/// yields the same validator, so the two methods agree. This is a non-cryptographic content hash
-/// (FNV-1a over the bytes), sufficient for a cache validator — collisions across distinct
-/// representations are vanishingly unlikely and the length prefix further disambiguates.
-fn representation_etag(body: &[u8]) -> String {
-    // FNV-1a 64-bit over the serialised representation.
+/// (a child added/removed) or the negotiated `Content-Type` differs. The media type is hashed too
+/// because two formats can render identical bytes (N-Triples and default-graph N-Quads always do, and
+/// a one-triple Turtle body can match them), and a validator must never 304 a request for one of them
+/// with the other's tag. The same body computed for GET and HEAD yields the same validator, so the two
+/// methods agree. This is a non-cryptographic content hash (FNV-1a), sufficient for a cache validator
+/// — collisions across distinct representations are vanishingly unlikely and the length prefix
+/// further disambiguates.
+fn representation_etag(content_type: &str, body: &[u8]) -> String {
+    // FNV-1a 64-bit over the media type, a 0xFF separator (never part of a header value), and the
+    // serialised representation.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in body {
+    let bytes = content_type
+        .as_bytes()
+        .iter()
+        .chain(std::iter::once(&0xFF))
+        .chain(body);
+    for &b in bytes {
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -5103,6 +5112,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn container_validators_are_distinct_across_formats_with_identical_bytes() {
+        // #4879 review: N-Triples and default-graph N-Quads render identical bytes, and a one-triple
+        // Turtle listing can too, so the container validator must carry the format: each format's
+        // tag 304s only a request for that same format, on GET and HEAD alike.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let formats = [
+            "text/turtle",
+            "application/n-triples",
+            "application/n-quads",
+        ];
+        let mut tags = Vec::new();
+        for media in formats {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            tags.push(etag_of(&resp));
+        }
+        for (i, held) in tags.iter().enumerate() {
+            for (j, media) in formats.iter().enumerate() {
+                for verb in ["GET", "HEAD"] {
+                    let mut cond = HeaderMap::new();
+                    cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                    cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(held).unwrap());
+                    let uri: axum::http::Uri = "/alice/".parse().unwrap();
+                    let (s, t) = (State(state.clone()), Extension(owner_token()));
+                    let resp = match verb {
+                        "GET" => get_handler(s, t, uri, cond).await,
+                        _ => head_handler(s, t, uri, cond).await,
+                    }
+                    .unwrap();
+                    let expected = if i == j {
+                        StatusCode::NOT_MODIFIED
+                    } else {
+                        StatusCode::OK
+                    };
+                    assert_eq!(
+                        resp.status(),
+                        expected,
+                        "{verb} {media} holding the {} tag",
+                        formats[i]
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn unauthorized_caller_gets_denial_not_304_no_existence_leak() {
         // A stranger with NO read access must get the auth failure (403 authenticated), NOT a 304 —
         // a 304 would leak that the resource exists to a caller who cannot read it. Auth runs BEFORE
@@ -5288,6 +5345,69 @@ mod tests {
         assert_eq!(
             negotiated_validator(stored, "text/turtle", Some("application/ld+json")).unwrap(),
             "\"5-abc123+jsonld\""
+        );
+    }
+
+    #[tokio::test]
+    async fn get_ntriples_and_nquads_are_served_with_their_own_validators() {
+        // #4879: an explicit N-Triples or N-Quads Accept is served in that format (no longer the
+        // Turtle fallback), with a validator distinct from every other representation that 304s
+        // only for its own type.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let turtle_tag =
+            etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let expected = format!("{COND_DOC}\n");
+        let mut tags = vec![turtle_tag];
+        for media in ["application/n-triples", "application/n-quads"] {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/doc", accept.clone()).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), media);
+            let tag = etag_of(&resp);
+            assert!(
+                !tags.contains(&tag),
+                "{media} reuses another representation's tag"
+            );
+            // A single default-graph triple: the N-Quads line carries no graph label, so both
+            // bodies are the one canonical line.
+            assert_eq!(body_bytes(resp).await, expected.as_bytes(), "{media}");
+
+            let mut cond = accept;
+            cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&tag).unwrap());
+            let not_mod = get_with(&state, owner_token(), "/alice/doc", cond).await;
+            assert_eq!(not_mod.status(), StatusCode::NOT_MODIFIED, "{media}");
+            for other in &tags {
+                let mut cond = HeaderMap::new();
+                cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(other).unwrap());
+                let resp = get_with(&state, owner_token(), "/alice/doc", cond).await;
+                assert_eq!(resp.status(), StatusCode::OK, "{media} 304'd for {other}");
+            }
+            tags.push(tag);
+        }
+    }
+
+    #[tokio::test]
+    async fn get_container_as_ntriples_lists_its_children() {
+        // #4879: the container listing path negotiates the same formats as a plain resource.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let mut accept = HeaderMap::new();
+        accept.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/n-triples"),
+        );
+        let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/n-triples"
+        );
+        let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+        assert!(
+            body.lines().any(|l| l
+                == "<https://pod.example/alice/> <http://www.w3.org/ns/ldp#contains> <https://pod.example/alice/doc> ."),
+            "{body}"
         );
     }
 

@@ -186,12 +186,21 @@ are themselves protected by `acl:Control`.
 
 ## Negotiate RDF representations
 
-Request Turtle or JSON-LD:
+Request Turtle, JSON-LD, N-Triples or N-Quads:
 
 ```sh
 curl -H 'Accept: text/turtle' https://solid.example/alice/profile/card
 curl -H 'Accept: application/ld+json' https://solid.example/alice/profile/card
+curl -H 'Accept: application/n-triples' https://solid.example/alice/profile/card
 ```
+
+N-Triples and N-Quads are read formats only. A PUT or POST body sent with
+either media type is stored as an opaque non-RDF resource, not parsed as RDF,
+and PATCH refuses them with 415. A resource is one default graph, so its
+N-Quads lines carry no graph label.
+`text/n3` is not produced and falls back to Turtle. When q-values tie, the
+stored format wins, then Turtle, JSON-LD, N-Triples, N-Quads in that order,
+so `application/*` still yields JSON-LD.
 
 The JSON-LD reader also recognizes the canonical expanded and compacted
 profile parameters and echoes the honored profile in `Content-Type`. Its
