@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::iri::{expand_iri_in_context, is_absolute_iri, is_blank_node, resolve_iri};
 use super::{has_keyword_form, is_keyword, ActiveContext, Direction, Override, TermDefinition};
+use crate::cache::Lru;
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::json::Json;
 use crate::loader::DocumentLoader;
@@ -52,17 +53,17 @@ impl ActiveContext {
         options: &JsonLdOptions,
     ) -> Result<ActiveContext, JsonLdError> {
         // A self-contained context processed over a fresh active context always yields the
-        // same result, so the last one is reused: framing processes the frame's context
+        // same result, so recent ones are reused: framing processes the frame's context
         // for expansion and again for compaction.
         let cacheable = self.is_initial() && crate::compact::self_contained(local_context);
-        let key = |e: &LastProcessed| {
+        let key = |e: &ProcessedContext| {
             e.base == self.base_iri
                 && e.base_url.as_deref() == base_url
                 && e.mode == options.processing_mode
                 && e.local == *local_context
         };
         if cacheable {
-            if let Some(hit) = LAST_PROCESSED.with(|last| last.borrow().as_ref().filter(|e| key(e)).map(|e| e.result.clone())) {
+            if let Some(hit) = PROCESSED_CACHE.with(|cache| cache.borrow_mut().get(key).map(|e| e.result.clone())) {
                 return Ok(hit);
             }
         }
@@ -75,8 +76,8 @@ impl ActiveContext {
         };
         let result = super::budget::with_budget(|| process_inner(self, local_context, false, true, &mut env))?;
         if cacheable {
-            LAST_PROCESSED.with(|last| {
-                *last.borrow_mut() = Some(LastProcessed {
+            PROCESSED_CACHE.with(|cache| {
+                cache.borrow_mut().insert(ProcessedContext {
                     base: self.base_iri.clone(),
                     base_url: base_url.map(str::to_string),
                     mode: options.processing_mode,
@@ -129,9 +130,9 @@ impl ActiveContext {
     }
 }
 
-/// The last self-contained context processed over a fresh active context on this thread
+/// A self-contained context processed over a fresh active context on this thread
 /// ([`ActiveContext::process`]).
-struct LastProcessed {
+struct ProcessedContext {
     base: Option<String>,
     base_url: Option<String>,
     mode: ProcessingMode,
@@ -140,7 +141,7 @@ struct LastProcessed {
 }
 
 thread_local! {
-    static LAST_PROCESSED: std::cell::RefCell<Option<LastProcessed>> = const { std::cell::RefCell::new(None) };
+    static PROCESSED_CACHE: std::cell::RefCell<Lru<ProcessedContext>> = const { std::cell::RefCell::new(Lru::new()) };
 }
 
 /// The recursive core of Context Processing (§4.1.2). `override_protected` disables the
@@ -181,7 +182,7 @@ pub(crate) fn process_inner(
     // step 5: fold each context in turn.
     for context in &contexts {
         // 5.1: a null context resets the active context.
-        if is_null(context) {
+        if context.is_null() {
             if !override_protected && result.has_protected_terms() {
                 return Err(JsonLdError::new(E::InvalidContextNullification));
             }
@@ -288,7 +289,7 @@ pub(crate) fn process_inner(
         // 5.7: @base — only for a directly-embedded (non-remote) context.
         if env.remote_contexts.is_empty() {
             if let Some(b) = context.get("@base") {
-                if is_null(b) {
+                if b.is_null() {
                     result.base_iri = None;
                 } else if let Json::Str(s) = b {
                     if is_absolute_iri(s) {
@@ -306,7 +307,7 @@ pub(crate) fn process_inner(
 
         // 5.8: @vocab.
         if let Some(v) = context.get("@vocab") {
-            if is_null(v) {
+            if v.is_null() {
                 result.vocabulary_mapping = None;
             } else if let Json::Str(s) = v {
                 // [OPUS-5] sq-gzsky — §4.1.2 step 5.8 tests the RAW value: "if value is
@@ -334,7 +335,7 @@ pub(crate) fn process_inner(
 
         // 5.9: @language.
         if let Some(v) = context.get("@language") {
-            if is_null(v) {
+            if v.is_null() {
                 result.default_language = None;
             } else if let Json::Str(s) = v {
                 result.default_language = Some(s.clone());
@@ -348,7 +349,7 @@ pub(crate) fn process_inner(
             if env.mode == ProcessingMode::JsonLd10 {
                 return Err(JsonLdError::new(E::InvalidContextEntry));
             }
-            if is_null(v) {
+            if v.is_null() {
                 result.default_base_direction = None;
             } else if let Json::Str(s) = v {
                 result.default_base_direction =
@@ -447,7 +448,7 @@ pub(crate) fn create_term_definition(
     defined.insert(term.to_string(), false);
 
     // step 3: the raw value for this term (a missing key defaults to null).
-    let raw = local.get(term).cloned().unwrap_or_else(json_null);
+    let raw = local.get(term).cloned().unwrap_or_else(Json::null);
 
     // steps 4/5: keyword handling.
     if term == "@type" {
@@ -486,7 +487,7 @@ pub(crate) fn create_term_definition(
             true,
         ),
         Json::Obj(_) => (raw.clone(), false),
-        j if is_null(j) => (Json::Obj(vec![("@id".to_string(), json_null())]), false),
+        j if j.is_null() => (Json::Obj(vec![("@id".to_string(), Json::null())]), false),
         _ => return Err(JsonLdError::new(E::InvalidTermDefinition)),
     };
 
@@ -535,7 +536,7 @@ pub(crate) fn create_term_definition(
         None => false,
     };
     if let Some(idj) = id_entry.filter(|_| id_differs) {
-        if is_null(&idj) {
+        if idj.is_null() {
             // @id: null — a retained definition with a null IRI mapping (falls through to
             // the common tail so container/index/etc. still apply, then is stored).
             def.iri = None;
@@ -692,7 +693,7 @@ fn create_reverse_definition(
     if let Some(c) = value.get("@container") {
         def.container = match c {
             Json::Str(s) if s == "@set" || s == "@index" => vec![s.clone()],
-            j if is_null(j) => vec![],
+            j if j.is_null() => vec![],
             _ => return Err(JsonLdError::new(E::InvalidReverseProperty)),
         };
     }
@@ -786,7 +787,7 @@ fn finish_definition(
     let has_type = value.get("@type").is_some();
     if let Some(l) = value.get("@language") {
         if !has_type {
-            def.language = if is_null(l) {
+            def.language = if l.is_null() {
                 Override::Null
             } else if let Json::Str(s) = l {
                 Override::Set(s.clone())
@@ -797,7 +798,7 @@ fn finish_definition(
     }
     if let Some(d) = value.get("@direction") {
         if !has_type {
-            def.direction = if is_null(d) {
+            def.direction = if d.is_null() {
                 Override::Null
             } else if let Json::Str(s) = d {
                 Override::Set(Direction::parse(s).ok_or_else(|| JsonLdError::new(E::InvalidBaseDirection))?)
@@ -945,21 +946,95 @@ fn ends_with_gen_delim(s: &str) -> bool {
     s.ends_with([':', '/', '?', '#', '[', ']', '@'])
 }
 
-/// The `Json` representation of a JSON `null`.
-fn json_null() -> Json {
-    Json::Raw("null".to_string())
-}
-
-/// True iff `j` is a JSON `null`.
-fn is_null(j: &Json) -> bool {
-    matches!(j, Json::Raw(r) if r == "null")
-}
-
 /// Interprets a JSON boolean scalar, or `None` for any non-boolean value.
 fn as_bool(j: &Json) -> Option<bool> {
     match j {
         Json::Raw(r) if r == "true" => Some(true),
         Json::Raw(r) if r == "false" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use crate::NoopLoader;
+    use std::sync::Arc;
+
+    fn parse(s: &str) -> Json {
+        Json::parse(s).unwrap()
+    }
+
+    #[test]
+    fn processed_cache_reuses_alternating_contexts_and_evicts() {
+        PROCESSED_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let contexts: Vec<_> = (0..9).map(|i| parse(&format!(r#"{{"p":"http://ex/{i}"}}"#))).collect();
+        let process = |c: &Json| ActiveContext::new(None).process(c, None, &NoopLoader, &JsonLdOptions::default()).unwrap();
+        let a = process(&contexts[0]);
+        let b = process(&contexts[1]);
+        assert!(Arc::ptr_eq(&a.term_definitions, &process(&contexts[0]).term_definitions));
+        assert!(Arc::ptr_eq(&b.term_definitions, &process(&contexts[1]).term_definitions));
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 2);
+        for c in &contexts[2..8] {
+            process(c);
+        }
+        process(&contexts[0]); // Promote the oldest; the second must now be evicted.
+        process(&contexts[8]);
+        assert!(Arc::ptr_eq(&a.term_definitions, &process(&contexts[0]).term_definitions));
+        assert!(!Arc::ptr_eq(&b.term_definitions, &process(&contexts[1]).term_definitions));
+    }
+
+    #[test]
+    fn processed_cache_separates_both_bases_and_processing_mode() {
+        PROCESSED_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let local = parse(r#"{"p":{"@id":"http://ex/p","@context":{"q":"http://ex/q"}}}"#);
+        let process = |base, url, mode| {
+            ActiveContext::new(base).process(&local, url, &NoopLoader, &JsonLdOptions {
+                processing_mode: mode, ..JsonLdOptions::default()
+            }).unwrap()
+        };
+        let variants = [
+            (Some("http://ex/a/"), Some("http://ex/context-a"), ProcessingMode::JsonLd11),
+            (Some("http://ex/b/"), Some("http://ex/context-a"), ProcessingMode::JsonLd11),
+            (Some("http://ex/a/"), Some("http://ex/context-b"), ProcessingMode::JsonLd11),
+        ];
+        let results: Vec<_> = variants.iter().map(|&(base, url, mode)| process(base, url, mode)).collect();
+        assert_eq!(results[0].base_iri(), Some("http://ex/a/"));
+        assert_eq!(results[1].base_iri(), Some("http://ex/b/"));
+        assert_eq!(results[2].term_definition("p").unwrap().base_url.as_deref(), Some("http://ex/context-b"));
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 0);
+        for (&(base, url, mode), expected) in variants.iter().zip(&results) {
+            assert!(Arc::ptr_eq(&expected.term_definitions, &process(base, url, mode).term_definitions));
+        }
+        // A cached 1.1-only context must still be rejected in 1.0 mode.
+        let local = parse(r#"{"@version":1.1,"p":"http://ex/p"}"#);
+        let initial = ActiveContext::new(None);
+        initial.process(&local, None, &NoopLoader, &JsonLdOptions::default()).unwrap();
+        let opts = JsonLdOptions { processing_mode: ProcessingMode::JsonLd10, ..JsonLdOptions::default() };
+        assert_eq!(initial.process(&local, None, &NoopLoader, &opts).unwrap_err().code(), E::ProcessingModeConflict);
+    }
+
+    #[test]
+    fn processed_cache_bypasses_non_initial_and_loader_dependent_contexts() {
+        PROCESSED_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let initial = ActiveContext::new(None);
+        let opts = JsonLdOptions::default();
+        let local = parse(r#"{"p":"http://ex/p"}"#);
+        initial.process(&local, None, &NoopLoader, &opts).unwrap();
+        let other = initial.process(&parse(r#"{"q":"http://ex/q"}"#), None, &NoopLoader, &opts).unwrap();
+        let combined = other.process(&local, None, &NoopLoader, &opts).unwrap();
+        assert!(combined.term_definition("q").is_some());
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 0);
+        for local in [
+            parse(r#""http://ex/context""#),
+            parse(r#"{"@import":"http://ex/context"}"#),
+            parse(r#"{"p":{"@id":"http://ex/p","@context":"http://ex/context"}}"#),
+        ] {
+            assert!(!crate::compact::self_contained(&local));
+            // Scoped contexts may defer dereferencing until use, but none may hit here.
+            let _ = initial.process(&local, None, &NoopLoader, &opts);
+            let _ = initial.process(&local, None, &NoopLoader, &opts);
+        }
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 0);
     }
 }

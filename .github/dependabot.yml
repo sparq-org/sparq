@@ -32,6 +32,12 @@ updates:
           - patch
     # Security updates are NOT grouped (applies-to: security-updates omitted),
     # so each advisory remediation lands as its own PR.
+    ignore:
+      # uuid 1.27+ declares rust-version 1.89, above the workspace floor (root
+      # Cargo.toml rust-version = "1.88") that the MSRV job checks, so Cargo.lock
+      # holds uuid at 1.26.x (#6824). Drop this entry when the floor moves to 1.89.
+      - dependency-name: "uuid"
+        versions: [">= 1.27"]
 
   # ---- GitHub Actions ----
   - package-ecosystem: github-actions

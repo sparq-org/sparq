@@ -15,6 +15,7 @@
 //!
 //! One `#[test]` drives every case in turn, so no other test thread allocates while a
 //! case is measured.
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,6 +29,8 @@ static PEAK: AtomicUsize = AtomicUsize::new(0);
 /// Bytes allocated (counting a reallocation's growth) since the mark.
 static TOTAL: AtomicUsize = AtomicUsize::new(0);
 
+// SAFETY: every method forwards to `System` with the caller's arguments unchanged, so
+// `System` upholds the `GlobalAlloc` contract; the wrapper only updates byte counters.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: forwards the caller's layout to the system allocator unchanged.

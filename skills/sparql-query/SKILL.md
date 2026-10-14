@@ -816,13 +816,13 @@ SPARQL Update `USING` identity behavior.
   `SERVICE` response is dominated by the id-level relation the join itself needs — a
   large/adversarial remote result can no longer amplify to a large multiple of its wire size.
   Behaviour-neutral by test: a frozen DOM-reference oracle pins identical rows, multiplicity, ORDER
-  and errors (`service.rs` `streaming_equivalence` tests).
+  and errors (the `sparq-engine-service` crate's `service.rs` `streaming_equivalence` tests).
   **Reader-seam transport** (`sq-my8wd.5`): the `sparq-engine-service` crate's `ReaderTransport`
   trait extends the `Transport` seam so the HTTP body is NEVER buffered into a full `String` —
   `HttpTransport` implements it by returning the ureq response body reader directly. The
   `TransportAsReader<'t, T>` adapter wraps any `Transport` implementation as a `ReaderTransport`
   (useful for test mocks). The `eval_remote_into_read` function is the reader-seam entry point —
-  it is used internally by the engine's `exec.rs` SERVICE evaluator. These three items
+  it is used internally by the engine's `exec/dispatch.rs` SERVICE evaluator. These three items
   (`ReaderTransport`, `TransportAsReader`, `eval_remote_into_read`) live in
   `sparq_engine_service::service` and are not re-exported through the `sparq-engine` facade (they
   are implementation-internal); test transports continue to implement `Transport` and are wrapped

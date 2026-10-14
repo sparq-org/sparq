@@ -7,7 +7,7 @@ Each control in [`controls.md`](./controls.md) is backed here by the **exact** f
 test, or CI job, plus the command an auditor re-runs to confirm it. Paths are
 repo-relative. No timing is recorded (NON-CANONICAL EC2 box).
 
-## MS-1 — confined unsafe surface (50 `forbid` crates, 9 unsafe-bearing crates, 60 total)
+## MS-1 — confined unsafe surface (50 `forbid` crates, 10 unsafe-bearing crates, 60 total)
 
 ```sh
 grep -rl 'forbid(unsafe_code)' crates/ --include='*.rs' | sed 's#crates/##;s#/.*##' | sort -u | wc -l
@@ -21,12 +21,14 @@ single Arrow FFI block is allowed with a `// SAFETY:` note.)
 ls -d crates/*/ | wc -l       # → 60 total crates
 ```
 Accounting (**the crates do NOT partition cleanly — the two sets overlap, so do not add them**):
-of **60 total** crates, **50** carry a source `forbid(unsafe_code)` and **9** are unsafe-bearing
+of **60 total** crates, **50** carry a source `forbid(unsafe_code)` and **10** are unsafe-bearing
 in `bench/unsafe-snapshot.json` (sparq-core, sparq-vectors, sparq-engine, sparq-py, sparq-cli,
-sparq-zk-compose, sparq-bench, sparq-lws-core, sparq-lws-wasm). TWO crates appear in BOTH sets:
+sparq-zk-compose, sparq-bench, sparq-lws-core, sparq-lws-wasm, sparq-reason). THREE crates appear in BOTH sets:
 **sparq-py** (conditional `forbid`, above), and
 **sparq-lws-core** (src + bin `forbid`-clean; its 8 counted sites are EXAMPLE-only counting
-allocators under `examples/`, likewise outside the crate-root `forbid` — sq-gg0qq.2 [FABLE-5]).
+allocators under `examples/`, likewise outside the crate-root `forbid` — sq-gg0qq.2 [FABLE-5]), and
+**sparq-reason** (lib `forbid`-clean; its 7 counted sites are a test-only counting allocator in
+`tests/n3_builtin_alloc.rs`, outside the crate-root `forbid` — GH #6833).
 The remaining 4 crates carry neither a source `forbid` nor counted unsafe (dev/bench helpers:
 sparq-acbench, sparq-difftest, sparq-kb, sparq-metamorph). `sparq-engine` is now an
 unsafe-bearing library: its four shipped cancellation-pointer sites plus four test-only allocator

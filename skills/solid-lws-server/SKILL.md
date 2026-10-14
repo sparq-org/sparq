@@ -31,9 +31,12 @@ base URL unless configured otherwise. The default Cargo features are:
 
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
 - `sparql-endpoint`, which mounts the query-only `/sparql` route.
+- `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
+  authentication suites (§ *Run the LWS 1.0 protocol* below). `authn-saml` is off.
 
 Use `--no-default-features` for the engine-free Solid core tier; that tier keeps
-LDP and WAC but does not expose `/sparql`.
+LDP and WAC but does not expose `/sparql`, and it compiles in no authentication
+suite, so LWS mode offers none.
 
 For a deployed instance, set at least:
 
@@ -186,12 +189,21 @@ are themselves protected by `acl:Control`.
 
 ## Negotiate RDF representations
 
-Request Turtle or JSON-LD:
+Request Turtle, JSON-LD, N-Triples or N-Quads:
 
 ```sh
 curl -H 'Accept: text/turtle' https://solid.example/alice/profile/card
 curl -H 'Accept: application/ld+json' https://solid.example/alice/profile/card
+curl -H 'Accept: application/n-triples' https://solid.example/alice/profile/card
 ```
+
+N-Triples and N-Quads are read formats only. A PUT or POST body sent with
+either media type is stored as an opaque non-RDF resource, not parsed as RDF,
+and PATCH refuses them with 415. A resource is one default graph, so its
+N-Quads lines carry no graph label.
+`text/n3` is not produced and falls back to Turtle. When q-values tie, the
+stored format wins, then Turtle, JSON-LD, N-Triples, N-Quads in that order,
+so `application/*` still yields JSON-LD.
 
 The JSON-LD reader also recognizes the canonical expanded and compacted
 profile parameters and echoes the honored profile in `Content-Type`. Its
