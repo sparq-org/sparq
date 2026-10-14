@@ -558,8 +558,10 @@ What the server exposes, all discoverable from the storage description
   `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
-  outcome would have been. A bare `*` asks only whether the target exists and needs no Read (nor
-  reads a listing, so a page past the last is no `404` then). A conditional `POST` to the storage
+  outcome would have been. A bare `*` asks only whether the target exists and needs no Read. A
+  precondition that compares no state (`*`, or a field the write ignores or cannot read) is
+  evaluated on the target's existence alone, without its listing, so neither a page past the last
+  nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
   root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
   that may read the result; a linkset `PUT`'s `204` carries none.
