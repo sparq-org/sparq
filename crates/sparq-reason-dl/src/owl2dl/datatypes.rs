@@ -1180,6 +1180,15 @@ mod tests {
         let lo = Rational::new(i128::MIN + 1, 2).unwrap();
         assert_eq!(lo.ceil(), (i128::MIN + 2) / 2);
         assert_eq!(lo.floor(), i128::MIN / 2);
+        // A non-integral negative third near the bound: truncation rounds toward zero, so
+        // the floor is one below it, and the order is exact against the neighbours.
+        let third = Rational::new(i128::MIN + 1, 3).unwrap();
+        let q = (i128::MIN + 1) / 3;
+        assert_eq!((third.floor(), third.ceil()), (q - 1, q));
+        assert!(Rational::int(q - 1).unwrap() < third && third < Rational::int(q).unwrap());
+        assert!(lo < third && third < Rational::new(i128::MIN + 1, 4).unwrap());
+        assert!(third < Rational::new(i128::MIN + 2, 3).unwrap());
+        assert_eq!(Rational::new(i128::MAX, -3), Some(third));
         let dec = |s: &str| val(s, "decimal").unwrap();
         assert!(
             dec("-17014118346046923173168730371588410572.7")

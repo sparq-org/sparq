@@ -1259,6 +1259,49 @@ fn rejects_singleton_data_unions_and_intersections() {
 }
 
 #[test]
+fn data_operands_are_distinct_by_structure_not_by_node() {
+    // Two blank nodes with the same structure (in any operand order) are one operand.
+    for c in ["unionOf", "intersectionOf"] {
+        let e = err(&with_decls(&format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:{c} ( \
+             [ a rdfs:Datatype ; owl:unionOf ( xsd:integer xsd:string ) ] \
+             [ a rdfs:Datatype ; owl:unionOf ( xsd:string xsd:integer ) ] ) ] ."
+        )));
+        assert_eq!(e.kind, ExtractErrorKind::Malformed, "{c}");
+    }
+    // Different structure stays two operands.
+    let (_, _, o) = ok(&with_decls(
+        ":d rdfs:range [ a rdfs:Datatype ; owl:unionOf ( \
+         [ a rdfs:Datatype ; owl:datatypeComplementOf xsd:integer ] \
+         [ a rdfs:Datatype ; owl:datatypeComplementOf xsd:string ] ) ] .",
+    ));
+    assert!(!o.axioms.is_empty());
+}
+
+#[test]
+fn one_of_kinds_settle_property_kinds_for_long_lists() {
+    // Many undeclared properties ranging over one long enumeration of literals: each is a
+    // data property (the enumeration is read once per node, however many uses ask).
+    let lits: Vec<String> = (0..2000).map(|i| format!("\"v{i}\"")).collect();
+    let mut body = format!("_:e owl:oneOf ( {} ) .\n", lits.join(" "));
+    for i in 0..200 {
+        body.push_str(&format!(":q{i} rdfs:range _:e .\n"));
+    }
+    let (_, _, o) = ok(&with_decls(&body));
+    let ranges = o
+        .axioms
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.axiom,
+                sparq_reason_dl::owl2dl::model::Axiom::DataPropertyRange(..)
+            )
+        })
+        .count();
+    assert_eq!(ranges, 200);
+}
+
+#[test]
 fn operand_distinctness_ignores_set_order() {
     let v = violations(&with_decls(
         "[ owl:unionOf ( :A :B ) ] owl:equivalentClass [ owl:unionOf ( :B :A ) ] .",
