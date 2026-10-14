@@ -37,6 +37,7 @@
 //!
 //! Spec: <https://www.w3.org/TR/json-ld11-framing/>.
 
+use crate::cache::Lru;
 use crate::compact::compact_expanded;
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::expand;
@@ -189,12 +190,11 @@ fn frame_match_inner(
 }
 
 thread_local! {
-    /// The last frame expanded on this thread, its options and its expansion, so callers
-    /// framing many documents with one frame expand it once.
-    static LAST_FRAME: RefCell<Option<(Json, JsonLdOptions, Rc<Json>)>> = const { RefCell::new(None) };
+    /// Recently expanded self-contained frames, with their full processing options.
+    static FRAME_CACHE: RefCell<Lru<(Json, JsonLdOptions, Rc<Json>)>> = const { RefCell::new(Lru::new()) };
 }
 
-/// `frame_doc` expanded in `frameExpansion` mode, reusing [`LAST_FRAME`] when it matches.
+/// `frame_doc` expanded in `frameExpansion` mode, reusing [`FRAME_CACHE`] when it matches.
 /// Only frames whose contexts (and `expandContext`) cannot reach the loader are cached,
 /// since a loader may resolve the same IRI differently between calls.
 fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn DocumentLoader) -> Result<Rc<Json>, JsonLdError> {
@@ -204,10 +204,9 @@ fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn Docume
             .as_ref()
             .is_none_or(|c| crate::compact::self_contained(c.get("@context").unwrap_or(c)) && contexts_self_contained(c));
     if cacheable {
-        let hit = LAST_FRAME.with(|last| {
-            last.borrow()
-                .as_ref()
-                .filter(|(f, o, _)| f == frame_doc && o == options)
+        let hit = FRAME_CACHE.with(|cache| {
+            cache.borrow_mut()
+                .get(|(f, o, _)| f == frame_doc && o == options)
                 .map(|(_, _, e)| Rc::clone(e))
         });
         if let Some(expanded) = hit {
@@ -218,8 +217,8 @@ fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn Docume
     fr_opts.frame_expansion = true;
     let expanded = Rc::new(expand(frame_doc, &fr_opts, loader)?);
     if cacheable {
-        LAST_FRAME.with(|last| {
-            *last.borrow_mut() = Some((frame_doc.clone(), options.clone(), Rc::clone(&expanded)));
+        FRAME_CACHE.with(|cache| {
+            cache.borrow_mut().insert((frame_doc.clone(), options.clone(), Rc::clone(&expanded)));
         });
     }
     Ok(expanded)
@@ -1819,6 +1818,65 @@ mod tests {
 
     fn parse(s: &str) -> Json {
         Json::parse(s).expect("valid JSON fixture")
+    }
+
+    #[test]
+    fn alternating_frames_hit_cache_with_identical_bytes() {
+        FRAME_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let input = parse(r#"[{"@id":"http://ex/s","http://ex/p":[{"@value":"v"}]}]"#);
+        let frames = [
+            parse(r#"{"@context":{"p":"http://ex/p"},"p":{}}"#),
+            parse(r#"{"@context":{"q":"http://ex/p"},"q":{}}"#),
+        ];
+        let render = |f: &Json| {
+            let out = frame(&input, f, &JsonLdOptions::default(), &FrameOptions::default(), &NoopLoader).unwrap();
+            let mut bytes = String::new();
+            out.write(&mut bytes);
+            bytes
+        };
+        let cold: Vec<_> = frames.iter().map(render).collect();
+        assert_ne!(cold[0], cold[1]);
+        let before = FRAME_CACHE.with(|cache| cache.borrow().hits);
+        for _ in 0..3 {
+            for (f, expected) in frames.iter().zip(&cold) {
+                assert_eq!(render(f), *expected);
+            }
+        }
+        assert_eq!(FRAME_CACHE.with(|cache| cache.borrow().hits) - before, 6);
+    }
+
+    #[test]
+    fn frame_cache_evicts_the_least_recent_frame() {
+        FRAME_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let opts = JsonLdOptions::default();
+        let frames: Vec<_> = (0..9).map(|i| parse(&format!(r#"{{"@id":"http://ex/{i}"}}"#))).collect();
+        let first: Vec<_> = frames[..8].iter().map(|f| expanded_frame(f, &opts, &NoopLoader).unwrap()).collect();
+        assert!(Rc::ptr_eq(&first[0], &expanded_frame(&frames[0], &opts, &NoopLoader).unwrap()));
+        expanded_frame(&frames[8], &opts, &NoopLoader).unwrap();
+        assert!(Rc::ptr_eq(&first[0], &expanded_frame(&frames[0], &opts, &NoopLoader).unwrap()));
+        assert!(!Rc::ptr_eq(&first[1], &expanded_frame(&frames[1], &opts, &NoopLoader).unwrap()));
+    }
+
+    #[test]
+    fn frame_cache_separates_base_and_options() {
+        FRAME_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let f = parse(r#"{"@id":"child","@type":"T"}"#);
+        let a = JsonLdOptions {
+            base: Some("http://ex/a/".into()),
+            expand_context: Some(parse(r#"{"T":"http://ex/A"}"#)),
+            ..JsonLdOptions::default()
+        };
+        let b = JsonLdOptions { base: Some("http://ex/b/".into()), ..a.clone() };
+        let c = JsonLdOptions { expand_context: Some(parse(r#"{"T":"http://ex/B"}"#)), ..a.clone() };
+        let d = JsonLdOptions { processing_mode: ProcessingMode::JsonLd10, ..a.clone() };
+        let results: Vec<_> = [&a, &b, &c, &d].iter().map(|o| expanded_frame(&f, o, &NoopLoader).unwrap()).collect();
+        assert_ne!(results[0], results[1]);
+        assert_ne!(results[0], results[2]);
+        assert!(!Rc::ptr_eq(&results[0], &results[3]));
+        assert_eq!(FRAME_CACHE.with(|cache| cache.borrow().hits), 0);
+        for (o, expected) in [&a, &b, &c, &d].iter().zip(&results) {
+            assert!(Rc::ptr_eq(expected, &expanded_frame(&f, o, &NoopLoader).unwrap()));
+        }
     }
 
     /// `FrameOptions::default` resolves the mode-dependent defaults per spec.
