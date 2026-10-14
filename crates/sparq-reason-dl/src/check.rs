@@ -1,6 +1,6 @@
 //! L4 — fragment-dispatch Direct-Semantics checker + entailment-by-refutation.
 //!
-//! 🤖 SPARQ agent [FABLE-5]. Bead sq-pbz04.4.4 (epic sq-pbz04.4, design record
+//! 🤖 SPARQ agent. Bead sq-pbz04.4.4 (epic sq-pbz04.4, design record
 //! `research/owl2-direct-semantics-scoping.md` §4 — the SPEC; its soundness arguments are
 //! binding on this module). Feature-gated behind `dispatch`, which pulls the existing
 //! profile reasoners (`sparq-reason` RL, `sparq-reason-el` EL) as optional dependencies.
@@ -14,14 +14,14 @@
 //! |---|--------|--------|--------------|----------------|------------|
 //! | 1 | RL (L2 says in-RL) | `sparq_reason::materialize(Profile::OwlRl)` + `inconsistencies()` | only past the **divergence guard** | sound via **Theorem PR1** (preconditions CHECKED, not assumed) | [`UnknownReason::RlPr1Preconditions`], [`UnknownReason::RlDivergenceGuard`] |
 //! | 2 | EL (in-EL) | `sparq_reason_el::Classifier::classify` | only for a pure ⊤-free EL+⊥ TBox (argument below) | never (see the ⊤ guard) | [`UnknownReason::ElSkippedAxioms`], [`UnknownReason::ElUnappliedAxioms`], [`UnknownReason::ElTopGuard`] |
-//! | 3 | QL (in-QL) | `sparq_reason_ql::check_consistency` (opt-in feature `dispatch_ql`, [FABLE-5] sq-fj8lj); without it, none — deferred | only past the QL crate's own capture accounting (see §"QL branch soundness") | sound at any capture level (monotonicity) | [`UnknownReason::QlCaptureGap`]; without `dispatch_ql`, [`UnknownReason::QlConsistencyPending`] (always) |
+//! | 3 | QL (in-QL) | `sparq_reason_ql::check_consistency` (opt-in feature `dispatch_ql`, sq-fj8lj); without it, none — deferred | only past the QL crate's own capture accounting (see §"QL branch soundness") | sound at any capture level (monotonicity) | [`UnknownReason::QlCaptureGap`]; without `dispatch_ql`, [`UnknownReason::QlConsistencyPending`] (always) |
 //! | 4 | ALCH (everything else L1 extracted) | the L3 tableau | complete for the fragment | complete for the fragment | [`UnknownReason::ResourceBudget`] |
 //! | 4′ | any of 1–3 that ABSTAINED (except PR1 punning) | the same L3 tableau | complete for the fragment | complete for the fragment | the ORIGINAL branch's abstention, kept verbatim |
 //! | — | extraction failed | none | never | never | [`UnknownReason::OutOfFragment`] |
 //!
-//! Row 4′ is the guard-abstention fall-through ([SONNET-4.6] sq-pbz04.4.8) — see below.
+//! Row 4′ is the guard-abstention fall-through (sq-pbz04.4.8) — see below.
 //!
-//! **Opt-in transitive roles ([GPT-5.6] sq-zfwzq, feature `dl_transitive`):** an ontology
+//! **Opt-in transitive roles (sq-zfwzq, feature `dl_transitive`):** an ontology
 //! declaring `owl:TransitiveProperty` (the feature-gated `TransitiveObjectProperty` axiom
 //! kind) routes STRAIGHT to the ALCH+S tableau before the profile dispatch — the only
 //! branch whose soundness/completeness argument covers transitivity (tableau module docs
@@ -33,7 +33,7 @@
 //! [`Branch`] that produced it (the traceability invariant), and every guard fails CLOSED:
 //! uncertainty is [`UnknownReason`], never a guessed `Consistent`/`Inconsistent`.
 //!
-//! ## Guard-abstention tableau fall-through ([SONNET-4.6] sq-pbz04.4.8)
+//! ## Guard-abstention tableau fall-through (sq-pbz04.4.8)
 //!
 //! When the OWNING profile branch ABSTAINS, the dispatch re-asks the SAME ontology of the
 //! L3 ALCH tableau (`tableau_fall_through`) and prefers its definitive verdict, attributed
@@ -41,7 +41,7 @@
 //! mapping accepts is inside the §3 fragment by construction (that is exactly what licenses
 //! branch 4 as the catch-all), and the tableau is sound AND complete for it — so an
 //! in-profile ontology is no harder for the tableau than a profile-free one. It is the
-//! mirror image of the refutation budget fallback below ([OPUS-5] sq-pbz04.4.10), which
+//! mirror image of the refutation budget fallback below (sq-pbz04.4.10), which
 //! re-asks the profile branches when the TABLEAU abstains.
 //!
 //! Rules, all of them the dispatch's own:
@@ -114,7 +114,7 @@
 //! GCI/equivalence/disjointness holds. This branch never returns `Inconsistent` (a pure
 //! ⊤-free EL+⊥ TBox is always consistent; anything else is guarded away).
 //!
-//! ## QL branch soundness (opt-in `dispatch_ql`, [FABLE-5] sq-fj8lj)
+//! ## QL branch soundness (opt-in `dispatch_ql`, sq-fj8lj)
 //!
 //! With the `dispatch_ql` feature the QL branch reconstructs the ORIGINAL input triples from
 //! the dict (a faithful id-to-term rendering of exactly the graph L1 extracted — nothing is
@@ -174,7 +174,7 @@
 //! - `ObjectPropertyDomain(R, C)` / `ObjectPropertyRange(R, C)` — the `∃R.⊤ ⊑ C` /
 //!   `⊤ ⊑ ∀R.C` desugarings (record §3), then the GCI refutation.
 //! - `SubObjectPropertyOf(R, S)` — `O ∪ {R(a,b), B(b), (∀S.¬B)(a)}` with `a`, `b` FRESH
-//!   individuals and `B` a FRESH class name ([FABLE-5] sq-pbz04.4.9; record §4 as amended —
+//!   individuals and `B` a FRESH class name (sq-pbz04.4.9; record §4 as amended —
 //!   the role-subsumption lift of the fresh-class trick). Sound AND complete: if every
 //!   model of `O` has `Rᴵ ⊆ Sᴵ`, then in any model of the union `(a,b) ∈ R ⊆ S` makes `b`
 //!   an `S`-successor of `a`, so `a ∈ ∀S.¬B` forces `b ∈ ¬B`, clashing with `B(b)` — the
@@ -185,7 +185,7 @@
 //!   holds because its `∀`-rule fires modulo the role hierarchy (`System::is_subrole`,
 //!   reflexive-transitive), so the `R`-edge `a → b` is seen by `∀S` exactly when
 //!   `O ⊢ R ⊑* S`. All three additions stay inside the L1 fragment.
-//! - `TransitiveObjectProperty(R)` (opt-in `dl_transitive`, [GPT-5.6] sq-zfwzq) —
+//! - `TransitiveObjectProperty(R)` (opt-in `dl_transitive`, sq-zfwzq) —
 //!   `O ∪ {R(a,b), R(b,c), B(c), (∀R.¬B)(a)}` with `a`, `b`, `c` FRESH individuals and
 //!   `B` a FRESH class name: the two-step-chain lift of the fresh-class trick. Sound AND
 //!   complete: if `O ⊨ Trans(R)`, then in any model of the union `Rᴵ` is transitive, so
@@ -208,7 +208,7 @@
 //! `Entailed`. Fresh names are minted as `urn:` IRIs checked against every id occurring in
 //! the premise AND conclusion models.
 //!
-//! ## Refutation budget fallback ([OPUS-5] sq-pbz04.4.10)
+//! ## Refutation budget fallback (sq-pbz04.4.10)
 //!
 //! The tableau OWNS every refutation: it is the only branch complete for the whole L1
 //! fragment, so routing there FIRST loses no verdict. What it can lose is a verdict to its
@@ -267,7 +267,7 @@
 //! improvement. This note exists so nobody re-derives the measurement or over-claims the
 //! mechanism; narrowing the RL divergence guard, not more routing, is what would move those 7.
 //!
-//! ## Conclusion anonymous individuals ([OPUS-4.8] sq-pbz04.4.13)
+//! ## Conclusion anonymous individuals (sq-pbz04.4.13)
 //!
 //! Official OWL 2 Direct-Semantics entailment reads a blank-node individual in the CONCLUSION
 //! EXISTENTIALLY (`a p _:x` means "`a` has *some* `p`-successor", not "`a p c` for a specific
@@ -284,7 +284,7 @@
 //! free-existential root — abstains fail-closed ([`UnknownReason::ConclusionAnonymousIndividual`]),
 //! NEVER a skolem-constant `NotEntailed`.
 //!
-//! **Declaration-free conclusion roles ([GPT-5.6] sq-zfwzq).** OWL declarations have no
+//! **Declaration-free conclusion roles (sq-zfwzq).** OWL declarations have no
 //! Direct-Semantics consequences, and W3C conclusion documents commonly omit an
 //! `owl:ObjectProperty` declaration for a role already typed by the premise. In the
 //! `dl_transitive` extension, L1 deliberately refuses an otherwise-ambiguous RDF predicate,
@@ -307,7 +307,7 @@
 use crate::extract::{extract, extract_rewriting_bottom};
 use crate::model::{Axiom, ClassExpression, ObjectPropertyExpression, Ontology};
 use crate::profile::profiles;
-// [OPUS-5] sq-pbz04.4.10: the L1 forward renderer is the Ontology→triples encoder the
+// sq-pbz04.4.10: the L1 forward renderer is the Ontology→triples encoder the
 // refutation budget fallback needs to hand an augmented model to the triple-consuming RL/EL
 // branches (module docs §"Refutation budget fallback").
 use crate::render::render_to_triples;
@@ -341,10 +341,10 @@ pub enum Branch {
     QlDeferred,
     /// OWL 2 QL DL-Lite_R consistency by violation-query composition
     /// (`sparq_reason_ql::check_consistency`, sq-p6yb7) — produced only under the opt-in
-    /// `dispatch_ql` feature (module docs §"QL branch soundness"). [FABLE-5] sq-fj8lj
+    /// `dispatch_ql` feature (module docs §"QL branch soundness"). sq-fj8lj
     QlConsistency,
     /// The L3 ALCH completion-forest tableau (complete for the L1 fragment). Produced both
-    /// for an ontology in NO profile and — since [SONNET-4.6] sq-pbz04.4.8 — for one whose
+    /// for an ontology in NO profile and — since sq-pbz04.4.8 — for one whose
     /// owning profile branch abstained and whose verdict the tableau then supplied (module
     /// docs §"Guard-abstention tableau fall-through").
     AlchTableau,
@@ -375,14 +375,14 @@ pub enum UnknownReason {
     /// The ontology dispatched to the QL branch with the `dispatch_ql` feature OFF: the
     /// Direct-Semantics consistency procedure lives in sparq-reason-ql (sq-p6yb7) and is
     /// engaged only opt-in — never duplicated here. Produced only without `dispatch_ql`
-    /// ([FABLE-5] sq-fj8lj graduated the feature-on path).
+    /// (sq-fj8lj graduated the feature-on path).
     QlConsistencyPending,
     /// The QL branch ran the sparq-reason-ql DL-Lite_R checker (feature `dispatch_ql`) and
     /// it abstained: its own extraction accounting could not certify full capture of the KB
     /// (`fully_captured()` false, or a structurally-uncaptured negative axiom such as
     /// `owl:complementOf`), so a `Consistent` claim would be unsound and no violation query
     /// matched. The payload carries the QL crate's gap accounting. Fail-closed.
-    /// [FABLE-5] sq-fj8lj
+    /// sq-fj8lj
     QlCaptureGap(String),
     /// The ALCH tableau exhausted its deterministic count budget mid-search.
     ResourceBudget(ExhaustedBudget),
@@ -392,7 +392,7 @@ pub enum UnknownReason {
     /// `TransitiveObjectProperty` kind gained the two-step-chain lift under sq-zfwzq), so
     /// this reason is not produced today — it is RETAINED fail-closed for future model
     /// growth (a new axiom kind abstains here until its encoding is argued in the design
-    /// record). [GPT-5.6]
+    /// record).
     UnencodedConclusion(String),
     /// Entailment only: the CONCLUSION ontology mentions a blank-node individual in a shape
     /// that does NOT roll up into a tree-shaped existential class assertion (it is shared
@@ -400,7 +400,7 @@ pub enum UnknownReason {
     /// existential root). Official OWL 2 Direct-Semantics entailment reads a conclusion
     /// blank node EXISTENTIALLY, so the L1 skolem-constant reading would be UNSOUND for a
     /// `NotEntailed` verdict — the checker abstains fail-closed instead (sq-pbz04.4.13).
-    /// The payload names the first offending anonymous individual. [OPUS-4.8]
+    /// The payload names the first offending anonymous individual.
     ConclusionAnonymousIndividual(String),
 }
 
@@ -486,7 +486,7 @@ pub struct EntailmentOutcome {
     /// abstentions (e.g. `UnencodedConclusion`, where the verdict is `Unknown` and no
     /// refutation was attempted); [`Branch::Extraction`] when an input graph was refused.
     /// [`Branch::RlMaterialization`] / [`Branch::ElClassification`] appear when the
-    /// refutation budget fallback (module docs; [OPUS-5] sq-pbz04.4.10) decided a component
+    /// refutation budget fallback (module docs; sq-pbz04.4.10) decided a component
     /// the tableau had abandoned to its budget — a mixed-provenance verdict is attributed to
     /// the first profile branch that broke the tie, i.e. the branch WITHOUT which the outcome
     /// would have been an `Unknown(ResourceBudget)` abstention.
@@ -552,7 +552,7 @@ impl DirectChecker {
                 }
             }
         };
-        // [GPT-5.6] sq-zfwzq (opt-in `dl_transitive`): an ontology declaring a TRANSITIVE
+        // sq-zfwzq (opt-in `dl_transitive`): an ontology declaring a TRANSITIVE
         // role routes STRAIGHT to the ALCH+S tableau — the only branch whose soundness /
         // completeness argument covers transitivity (tableau module docs §5a). Although a
         // transitive ontology can be syntactically in-RL/in-EL, the RL rule set's documented
@@ -591,7 +591,7 @@ impl DirectChecker {
         } else if ps.el.is_in() {
             Some(el_branch(dict, triples, &onto))
         } else if ps.ql.is_in() {
-            // [FABLE-5] sq-fj8lj: with `dispatch_ql` the QL branch delegates to the
+            // sq-fj8lj: with `dispatch_ql` the QL branch delegates to the
             // sparq-reason-ql DL-Lite_R checker over the RAW input triples (module docs
             // §"QL branch soundness" — the QL crate's OWN capture accounting owns the
             // verdict; L2's `In` only routes). Without the feature, deferred as before.
@@ -651,10 +651,10 @@ impl DirectChecker {
             Ok((onto, _)) => onto,
             Err(e) => return unknown_extraction(format!("premise: {}", e)),
         };
-        // [GPT-5.6] sq-zfwzq: declarations have no Direct-Semantics import. Seed the
+        // sq-zfwzq: declarations have no Direct-Semantics import. Seed the
         // conclusion extraction with declarations for premise-confirmed roles so a bare
         // conclusion role assertion is classifiable without weakening L1 globally.
-        // [SONNET-4.6] Role declarations are needed only by the transitive-role extension.
+        // Role declarations are needed only by the transitive-role extension.
         let conclusion_for_extraction = conclusion.to_vec();
         #[cfg(feature = "dl_transitive")]
         let conclusion_for_extraction = {
@@ -688,7 +688,7 @@ impl DirectChecker {
             Ok((onto, _)) => onto,
             Err(e) => return unknown_extraction(format!("conclusion: {}", e)),
         };
-        // [OPUS-4.8] sq-pbz04.4.13 — conclusion anonymous individuals are EXISTENTIAL under
+        // sq-pbz04.4.13 — conclusion anonymous individuals are EXISTENTIAL under
         // the official OWL 2 Direct-Semantics entailment reading. L1 maps a conclusion blank
         // node to an ordinary (skolem) constant; that reading is entailment-preserving on the
         // PREMISE side but UNSOUND on the conclusion side (it would certify a `NotEntailed`
@@ -708,7 +708,7 @@ impl DirectChecker {
         };
         let mut fresh = FreshNames::new(dict, [&prem, &concl]);
         let mut first_unknown: Option<UnknownReason> = None;
-        // [OPUS-5] sq-pbz04.4.10: the first PROFILE branch that decided a budget-exhausted
+        // sq-pbz04.4.10: the first PROFILE branch that decided a budget-exhausted
         // refutation, if any — the traceability attribution (see `EntailmentOutcome::branch`).
         let mut fallback_branch: Option<Branch> = None;
         for axiom in &concl_axioms {
@@ -767,7 +767,7 @@ impl DirectChecker {
                 tableau::Verdict::Unsatisfiable => {} // this component is entailed
                 tableau::Verdict::Satisfiable => return AxiomVerdict::NotEntailed(fallback_branch),
                 tableau::Verdict::Unknown(tableau::UnknownReason::ResourceBudget(b)) => {
-                    // [OPUS-5] sq-pbz04.4.10 — budget robustness: the tableau ran out on THIS
+                    // sq-pbz04.4.10 — budget robustness: the tableau ran out on THIS
                     // refutation, so re-ask the profile branches under their own guards
                     // (module docs §"Refutation budget fallback"). Any abstention there keeps
                     // the ORIGINAL `ResourceBudget` reason: the tableau is what ran out.
@@ -807,7 +807,7 @@ impl DirectChecker {
 /// Per-conclusion-axiom tri-state (internal aggregation of one axiom's refutation checks).
 ///
 /// The definitive arms carry the PROFILE branch that decided a budget-exhausted refutation
-/// component, if any ([OPUS-5] sq-pbz04.4.10); `None` means every component of this axiom was
+/// component, if any (sq-pbz04.4.10); `None` means every component of this axiom was
 /// decided by the tableau itself.
 enum AxiomVerdict {
     Entailed(Option<Branch>),
@@ -816,7 +816,7 @@ enum AxiomVerdict {
 }
 
 /// Re-ask a BUDGET-EXHAUSTED refutation of the profile branches (module docs
-/// §"Refutation budget fallback"; [OPUS-5] sq-pbz04.4.10).
+/// §"Refutation budget fallback"; sq-pbz04.4.10).
 ///
 /// Returns `Some` only for a DEFINITIVE verdict produced past the branch's own guards — the
 /// identical guard discipline [`DirectChecker::consistency`] applies, because these are the
@@ -1001,7 +1001,7 @@ fn pr1_punning_violation(onto: &Ontology) -> Option<String> {
                 properties.insert(property.named());
                 individuals.extend([*source, *target]);
             }
-            // [GPT-5.6] sq-zfwzq: a transitivity declaration uses its subject as a property.
+            // sq-zfwzq: a transitivity declaration uses its subject as a property.
             #[cfg(feature = "dl_transitive")]
             Axiom::TransitiveObjectProperty { property } => {
                 properties.insert(property.named());
@@ -1044,7 +1044,7 @@ fn pr1_punning_violation(onto: &Ontology) -> Option<String> {
 /// construct the model touches, or `None` when "no clash" may soundly read as consistent.
 fn rl_divergence_guard(onto: &Ontology) -> Option<String> {
     for axiom in onto.axioms() {
-        // [GPT-5.6] sq-zfwzq: the documented RL divergences implicate transitivity, so "no
+        // sq-zfwzq: the documented RL divergences implicate transitivity, so "no
         // clash" must not certify consistency here. Defence in depth only — dispatch routes
         // transitive ontologies to the ALCH+S tableau BEFORE this branch can match.
         #[cfg(feature = "dl_transitive")]
@@ -1148,7 +1148,7 @@ fn el_unapplied_kind(onto: &Ontology) -> Option<String> {
         Axiom::ObjectPropertyRange { .. } => Some("ObjectPropertyRange".to_string()),
         Axiom::ClassAssertion { .. } => Some("ClassAssertion".to_string()),
         Axiom::ObjectPropertyAssertion { .. } => Some("ObjectPropertyAssertion".to_string()),
-        // [GPT-5.6] sq-zfwzq: the EL classifier does not apply transitivity — abstain
+        // sq-zfwzq: the EL classifier does not apply transitivity — abstain
         // (defence in depth; dispatch routes transitive ontologies to the tableau first).
         #[cfg(feature = "dl_transitive")]
         Axiom::TransitiveObjectProperty { .. } => Some("TransitiveObjectProperty".to_string()),
@@ -1169,7 +1169,7 @@ fn ce_mentions_thing(ce: &ClassExpression) -> bool {
 }
 
 // -------------------------------------------------------------------------------------------
-// QL branch ([FABLE-5] sq-fj8lj, opt-in `dispatch_ql`)
+// QL branch (sq-fj8lj, opt-in `dispatch_ql`)
 // -------------------------------------------------------------------------------------------
 
 /// The QL branch (module docs §"QL branch soundness"): reconstruct the raw input triples and
@@ -1223,7 +1223,7 @@ fn ql_kb(dict: &Dict, triples: &[[Id; 3]]) -> Result<Vec<oxrdf::Triple>, String>
 // ALCH branch
 // -------------------------------------------------------------------------------------------
 
-/// Guard-abstention fall-through ([SONNET-4.6] sq-pbz04.4.8; module docs
+/// Guard-abstention fall-through (sq-pbz04.4.8; module docs
 /// §"Guard-abstention tableau fall-through", design record §4 as amended).
 ///
 /// `owner` is the abstaining outcome of the profile branch the in-order dispatch selected.
@@ -1303,7 +1303,7 @@ impl<'d> FreshNames<'d> {
     }
 
     /// The dict the fresh names are interned into, reborrowed for the refutation budget
-    /// fallback (which must render the augmented model back to triples). [OPUS-5] sq-pbz04.4.10
+    /// fallback (which must render the augmented model back to triples). sq-pbz04.4.10
     fn dict_mut(&mut self) -> &mut Dict {
         self.dict
     }
@@ -1429,7 +1429,7 @@ fn refutation_checks(conclusion: &Axiom, fresh: &mut FreshNames) -> Option<Vec<V
             ]])
         }
         // The fresh-individual-pair role-subsumption trick (module docs; record §4 as
-        // amended by sq-pbz04.4.9 — sound AND complete). [FABLE-5]
+        // amended by sq-pbz04.4.9 — sound AND complete).
         Axiom::SubObjectPropertyOf { sub, sup } => {
             let a = fresh.mint();
             let b = fresh.mint();
@@ -1456,7 +1456,7 @@ fn refutation_checks(conclusion: &Axiom, fresh: &mut FreshNames) -> Option<Vec<V
             ]])
         }
         // The two-step-chain lift of the fresh-class trick for a TRANSITIVITY conclusion
-        // (module docs; [GPT-5.6] sq-zfwzq — sound AND complete): `O ⊨ Trans(R)` iff
+        // (module docs; sq-zfwzq — sound AND complete): `O ⊨ Trans(R)` iff
         // `O ∪ {R(a,b), R(b,c), B(c), (∀R.¬B)(a)}` is unsatisfiable, with `a`/`b`/`c`/`B`
         // fresh. A non-transitive witness chain `(u,v), (v,w) ∈ Rᴵ, (u,w) ∉ Rᴵ` in some
         // model of `O` is exactly what keeps the union satisfiable (`B = {w}`).
@@ -1496,7 +1496,7 @@ fn refutation_checks(conclusion: &Axiom, fresh: &mut FreshNames) -> Option<Vec<V
 }
 
 // -------------------------------------------------------------------------------------------
-// Conclusion anonymous-individual rolling ([OPUS-4.8] sq-pbz04.4.13)
+// Conclusion anonymous-individual rolling (sq-pbz04.4.13)
 // -------------------------------------------------------------------------------------------
 //
 // Official OWL 2 Direct-Semantics entailment reads a blank-node individual in the CONCLUSION
@@ -1717,7 +1717,7 @@ fn roll_bnode(
 }
 
 // -------------------------------------------------------------------------------------------
-// Direct unit tests for the transitive defence-in-depth guards ([GPT-5.6] sq-zfwzq).
+// Direct unit tests for the transitive defence-in-depth guards (sq-zfwzq).
 // The dispatch routes transitive ontologies to the tableau BEFORE the RL/EL branches, so
 // these private guard arms are unreachable end-to-end BY DESIGN — they exist so a future
 // dispatch change cannot silently hand a transitive ontology to an incomplete branch. The
@@ -1754,7 +1754,7 @@ mod transitive_guard_tests {
 
     #[test]
     fn refutation_budget_fallback_never_owns_a_transitive_refutation() {
-        // [OPUS-5] sq-pbz04.4.10: only the ALCH+S tableau's argument covers transitivity, so
+        // sq-pbz04.4.10: only the ALCH+S tableau's argument covers transitivity, so
         // the budget fallback must decline a transitivity-bearing augmented ontology OUTRIGHT —
         // the same ownership rule `consistency` applies before its own profile dispatch.
         let mut dict = Dict::new();
@@ -1784,7 +1784,7 @@ mod transitive_guard_tests {
 }
 
 // -------------------------------------------------------------------------------------------
-// Direct unit tests for the refutation budget fallback ([OPUS-5] sq-pbz04.4.10).
+// Direct unit tests for the refutation budget fallback (sq-pbz04.4.10).
 //
 // The end-to-end RL recovery / guard-refusal contract is pinned by the integration suite
 // (`tests/check.rs`, `entailment_budget_fallback_*`). These cover the arms that suite cannot

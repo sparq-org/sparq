@@ -61,7 +61,7 @@
 //! carries **no** operand values, **no** result rows and **no** cardinalities, and it runs no MPC.
 //! It therefore widens the declared leakage envelope by nothing.
 //!
-//! `` sq-1fo4 — Phase 5, canonicalisation half only; the soundness half stays audit-gated.
+//! sq-1fo4 — Phase 5, canonicalisation half only; the soundness half stays audit-gated.
 
 use std::collections::BTreeSet;
 

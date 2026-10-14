@@ -1,4 +1,4 @@
-//! ODRL static policy analysis: conflict + containment detection. [OPUS-4.8] sq-zabv.
+//! ODRL static policy analysis: conflict + containment detection. sq-zabv.
 //!
 //! Candidate #7 (research/feature-research-odrl-policy.md): detect
 //! permission/prohibition **conflicts** (a permission a prohibition carves out)
@@ -463,7 +463,7 @@ fn tighter_numeric_bound_is_not_claimed() {
 }
 
 // ---------------------------------------------------------------------------
-// COMPOUND-CONSTRAINT DEGRADATION (the sq-a0zef fail-OPEN guards). [OPUS-4.8] sq-bif.
+// COMPOUND-CONSTRAINT DEGRADATION (the sq-a0zef fail-OPEN guards). sq-bif.
 //
 // Since sq-93rgp the analyser DOES reason through a compound `odrl:LogicalConstraint`
 // where the combinator semantics prove the implication (the per-operator rules and the

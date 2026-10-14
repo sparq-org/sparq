@@ -120,7 +120,6 @@ const OBJECT_VAR: &str = "__pp_b";
 /// `|E|` and `k` are PUBLIC, the count is computable in closed form WITHOUT touching
 /// any secret key, so we reject an over-cap path BEFORE any crypto runs. A protocol
 /// guard, not a tuning knob: a path that exceeds it is abusive for this regime.
-/// ``
 pub const MAX_CHAIN_TUPLES: u64 = 1 << 18; // 262_144
 
 /// One node of the secret graph: its PRIVATE join key (an `F_p` element — the
@@ -175,7 +174,6 @@ impl HiddenEdges {
 
 /// `|E|^k` (the edge-tuple count), checked against `u64` overflow so the caller can
 /// reject the path with a controlled error instead of risking a huge allocation.
-/// ``
 fn projected_tuple_count(edge_count: usize, k: usize) -> Option<u64> {
     let e = edge_count as u64;
     let mut total: u64 = 1;
@@ -398,7 +396,7 @@ pub fn eval_exact_k_chain_hidden_slots(
 /// DISCLOSED predicate label. The predicate is public (it is named in the public
 /// query plan, design §1.2/§4.1) and is used ONLY to select which alternation branch
 /// an edge may serve at a hop position; the node *keys* stay private exactly as in
-/// [`HiddenEdge`]. ``
+/// [`HiddenEdge`].
 #[derive(Debug, Clone)]
 pub struct PredicatedEdge {
     /// The (public) predicate IRI this edge belongs to.
@@ -414,7 +412,7 @@ pub struct PredicatedEdge {
 /// `(predicate, subject, object)` edges; only the candidate-tuple COUNT and the
 /// matched endpoint TERMS are ever disclosed. Mirrors [`HiddenEdges`] but tags each
 /// edge with its (public) predicate so a hop can be restricted to one alternation
-/// branch. ``
+/// branch.
 #[derive(Debug, Clone)]
 pub struct PredicatedEdges {
     edges: Vec<PredicatedEdge>,
@@ -465,7 +463,7 @@ impl PredicatedEdges {
 /// The bounds are PUBLIC plan parameters; an OPEN upper bound (`+`/`*`/`{m,}`) is NOT
 /// representable here by construction (`max` is a concrete `usize`) — the
 /// fail-closed refusal of a hidden unbounded path is a planner concern (sq-py8h.5),
-/// not this operator. ``
+/// not this operator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HiddenBoundedPath {
     /// The (public) alternation predicates a single hop may traverse. Non-empty.
@@ -516,7 +514,7 @@ impl HiddenBoundedPath {
 /// the one `length`-long sequence. Grows the chain set amortised (no
 /// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll);
 /// the genuine size limit is enforced upstream by [`check_bounded_params`] BEFORE this
-/// runs. ``
+/// runs.
 fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> {
     let mut chains: Vec<Vec<String>> = vec![Vec::new()];
     for _ in 0..length {
@@ -540,7 +538,7 @@ fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> 
 /// predicate gate is a fully public decision: a tuple whose predicates do not match
 /// the alternation branch contributes a constant shared `0` (no secure multiplication
 /// at all) and is OR-folded away. The intermediate node KEYS are fed to the secure
-/// equality but never reconstructed. ``
+/// equality but never reconstructed.
 fn predicated_tuple_chain_bit(
     backend: &ShamirBackend,
     dealer: &mut ShamirDealer,
@@ -572,7 +570,7 @@ fn predicated_tuple_chain_bit(
 /// enumerated edge-tuples across the whole union — `Σ_ℓ (a^ℓ · |E|^ℓ)` — must be
 /// within [`MAX_CHAIN_TUPLES`], all from PUBLIC parameters before any crypto runs
 /// (the same public, statically-computable guard discipline as the exactly-k
-/// operator). ``
+/// operator).
 fn check_bounded_params(
     backend: &ShamirBackend,
     edges: &PredicatedEdges,
@@ -635,7 +633,7 @@ fn check_bounded_params(
 }
 
 /// The controlled over-cap refusal shared by [`check_bounded_params`]'s overflow and
-/// over-limit branches. ``
+/// over-limit branches.
 fn oversized_bounded<T>(edges: &PredicatedEdges, form: &HiddenBoundedPath) -> Result<T, MpcError> {
     Err(MpcError::Protocol(format!(
         "hidden bounded path {{{},{}}} over |E|={} edges and a {}-way alternation would \
@@ -660,7 +658,6 @@ fn oversized_bounded<T>(edges: &PredicatedEdges, form: &HiddenBoundedPath) -> Re
 /// node in the domain with the constant shared `1` chain bit (design §2.3 — every node
 /// reaches itself by the empty path), OR-folded in exactly like a length-ℓ chain so a
 /// node that is also reachable from itself by a longer chain still appears once.
-/// ``
 fn build_bounded_candidates(
     backend: &ShamirBackend,
     dealer: &mut ShamirDealer,
@@ -762,7 +759,7 @@ fn build_bounded_candidates(
 /// `bound` is the public padded bound `B`; it must cover the distinct-endpoint-pair
 /// candidate count (fail-closed in [`oblivious_set_output`] — never truncates a
 /// match). Security tier is identical to [`eval_exact_k_chain_hidden`]:
-/// honest-majority, semi-honest, no new assumption. ``
+/// honest-majority, semi-honest, no new assumption.
 pub fn eval_bounded_path_hidden(
     backend: &ShamirBackend,
     edges: &PredicatedEdges,
@@ -782,7 +779,7 @@ pub fn eval_bounded_path_hidden(
 
 /// Like [`eval_bounded_path_hidden`] but returns the raw oblivious output (the `B`
 /// shuffled slots + modelled cost) — the transcript-level view that witnesses the
-/// revealed slot count is exactly the public `B`. ``
+/// revealed slot count is exactly the public `B`.
 pub fn eval_bounded_path_hidden_slots(
     backend: &ShamirBackend,
     edges: &PredicatedEdges,
@@ -798,7 +795,7 @@ pub fn eval_bounded_path_hidden_slots(
 /// Planner guard + cost-model wiring for the hidden bounded property-path operator
 /// (`sq-py8h.5`): reject statically-large unrolls, refuse a hidden UNBOUNDED path
 /// fail-closed via [`MpcError::NoBackendSatisfies`], and emit the operator's modelled
-/// communication cost through [`crate::metrics::CommCounter`]. ``
+/// communication cost through [`crate::metrics::CommCounter`].
 pub mod planner;
 
 #[cfg(test)]

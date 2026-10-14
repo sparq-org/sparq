@@ -1,5 +1,5 @@
 //! Static (policy-vs-policy) ODRL analysis: **conflict** and **containment**
-//! detection. [OPUS-4.8] sq-zabv.
+//! detection. sq-zabv.
 //!
 //! Where [`crate::evaluate`] answers *"may THIS request go through?"* against one
 //! policy, this module answers two **request-free** questions about the policies
@@ -105,7 +105,7 @@ use crate::model::{
 use crate::validate::ValidatedPolicy;
 
 /// How strongly two rules overlap — the three-valued result of the conflict test.
-/// [OPUS-4.8] sq-zabv.
+/// sq-zabv.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Overlap {
     /// The rules provably overlap for **every** request the permission grants: the
@@ -121,7 +121,7 @@ pub enum Overlap {
 }
 
 /// A detected permission/prohibition conflict: a permission whose granted requests
-/// a prohibition (wholly or partly) carves out. [OPUS-4.8] sq-zabv.
+/// a prohibition (wholly or partly) carves out. sq-zabv.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Conflict {
     /// The conflicting permission's [`Rule::id`].
@@ -141,7 +141,7 @@ pub struct Conflict {
 }
 
 /// Whether `outer` permits everything `inner` permits — the three-valued
-/// containment / refinement verdict. [OPUS-4.8] sq-zabv.
+/// containment / refinement verdict. sq-zabv.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Containment {
     /// Proven: every request `inner` permits, `outer` also permits (and no `outer`
@@ -158,7 +158,7 @@ pub enum Containment {
 }
 
 /// Detect every permission/prohibition pair in `policy` that overlaps — the ODRL
-/// conflict lint. [OPUS-4.8] sq-zabv. See the module-level docs for the soundness
+/// conflict lint. sq-zabv. See the module-level docs for the soundness
 /// contract.
 ///
 /// A pair is reported when the permission and prohibition *could* both apply to
@@ -203,7 +203,7 @@ pub fn detect_conflicts(policy: &Policy) -> Vec<Conflict> {
 
 /// Decide whether sparq can faithfully honour `policy`'s declared `odrl:conflict`
 /// conflict-resolution strategy — the fail-closed authorization guard the bridge
-/// consults before it materialises **any** grant or deny. [OPUS-4.8] sq-ihqbl.
+/// consults before it materialises **any** grant or deny. sq-ihqbl.
 ///
 /// The bridge implements exactly one ODRL conflict strategy — `odrl:prohibit`
 /// (deny-overrides): the session layer subtracts `∪ deny` from `∪ allow`, so a matching
@@ -279,7 +279,7 @@ pub fn conflict_admissibility(policy: &Policy) -> Result<(), String> {
 }
 
 /// Does `outer` permit everything `inner` permits? See the module-level docs for
-/// the soundness contract. [OPUS-4.8] sq-zabv.
+/// the soundness contract. sq-zabv.
 ///
 /// Returns [`Containment::NotContained`] when a request built from an unconstrained,
 /// duty-free `inner` permission is granted by [`decide`] under `inner` and not under
@@ -659,7 +659,7 @@ fn overlap_action(perm: &Rule, proh: &Rule) -> Option<String> {
 }
 
 /// The conflict test for one permission/prohibition pair. Returns `None` if they
-/// provably never overlap; else the [`Overlap`] strength. [OPUS-4.8] sq-zabv.
+/// provably never overlap; else the [`Overlap`] strength. sq-zabv.
 fn rule_overlap(perm: &Rule, proh: &Rule) -> Option<Overlap> {
     // Only disjoint actions prove the rules never meet. Unequal targets or assignees
     // do not: a request's membership evidence can place one inside the other.

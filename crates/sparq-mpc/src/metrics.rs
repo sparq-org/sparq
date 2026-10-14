@@ -60,7 +60,7 @@
 /// limb, so the on-wire encoding is **8 bytes** — the per-party-per-open cost the
 /// design record fixes (§5.2: "each `F_p` opened = 8 bytes/party"). Deriving it
 /// from `size_of::<u64>()` keeps the figure tied to the representation rather than
-/// a hard-coded literal. ``
+/// a hard-coded literal.
 pub const FIELD_BYTES: usize = {
     // Compile-time assertion that the field value fits one u64 limb (so the
     // 8-byte wire width is correct). `Fp::value()` returns `u64`.
@@ -75,7 +75,7 @@ pub const FIELD_BYTES: usize = {
 /// This is threaded through the harness's instrumented wrappers (see
 /// [`crate::bench`]); it deliberately lives OUTSIDE the protocol primitives so the
 /// counting tier adds no invasive edits to `shamir.rs` / `backend.rs` /
-/// `oblivious.rs` (sibling-bead ownership). ``
+/// `oblivious.rs` (sibling-bead ownership).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CommCounter {
     /// Number of compute parties `n` this accounting is for (so a per-party
@@ -97,7 +97,7 @@ pub struct CommCounter {
     /// Independent operations that COULD be batched into a single network round on
     /// a real deployment (e.g. the `|L|·|R|` equality tests of an all-pairs join
     /// are mutually independent). Used to derive a batched round LOWER bound so the
-    /// round structure is not over-stated. ``
+    /// round structure is not over-stated.
     pub batchable_ops: u64,
 }
 
@@ -151,7 +151,7 @@ impl CommCounter {
     /// not by looping `record_deal`/`record_mult`/`record_open` `k` times — the
     /// loop would make the *instrument* `O(k)` and let it dominate the harness at
     /// the larger `|L|·|R|` join scales. The totals are identical to `k`
-    /// applications of those primitives. ``
+    /// applications of those primitives.
     pub fn record_independent_equalities(&mut self, k: u64) {
         // Per equality: 3 deals (key_L, key_R, mask r) + 1 mult + 1 open. Each
         // deal sends `parties` shares; opens/mults are 1 logical op each. Fold the
@@ -195,7 +195,7 @@ impl CommCounter {
     /// independent (the all-pairs join), this collapses to a small constant; when
     /// ops are dependency-chained (a sort network's layers), it equals the
     /// sequential count. Reported alongside [`Self::total_rounds`] so neither bound
-    /// is mistaken for the other. ``
+    /// is mistaken for the other.
     pub fn batched_rounds(&self) -> u64 {
         let sequential = self.total_rounds();
         if self.batchable_ops == 0 {
@@ -219,7 +219,7 @@ impl CommCounter {
     /// JSON/table report and the round counters use) and applying the `× parties`
     /// fan-out only here keeps the on-wire model symmetric with deals and makes
     /// `total_bytes` scale with `N` (design record §5.2: "8 bytes/party per open"
-    /// over `n` broadcasters ⇒ `8·n` total bytes per open). ``
+    /// over `n` broadcasters ⇒ `8·n` total bytes per open).
     fn wire_field_elements(&self) -> u64 {
         self.field_elements_opened * self.parties as u64 + self.field_elements_shared
     }
@@ -234,7 +234,7 @@ impl CommCounter {
     /// equal slice in a symmetric protocol). For one open at `n` parties this is
     /// `(1·n)·8 / n = 8` — the per-open-per-party figure the design record fixes
     /// (§5.2), no longer undercounted. Returns `0` when no party count is set
-    /// (nothing recorded). ``
+    /// (nothing recorded).
     pub fn bytes_per_party(&self) -> u64 {
         if self.parties == 0 {
             return 0;

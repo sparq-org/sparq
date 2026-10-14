@@ -110,7 +110,7 @@ pub enum Message {
     /// (`a`, `b`) is data-INDEPENDENT (a function of the row count only — the
     /// obliviousness substrate); only the boolean varies, and for the shuffle it is
     /// a fresh random permutation's routing bit, for the disclosed-key sort the
-    /// public comparator outcome. ``
+    /// public comparator outcome.
     Swap { a: u32, b: u32, swap: bool },
     /// Either direction: protocol is done for this cell; close cleanly.
     Done,

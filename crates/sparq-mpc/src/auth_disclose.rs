@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-6fv7 (sq-ka8m residual; design Hole 4): route the THREE disclose
+// sq-6fv7 (sq-ka8m residual; design Hole 4): route the THREE disclose
 // path opens — the square-protocol `a²`, the masked open `c = sum + r`, and the
 // boolean `verdict` — through the §2.5 batched IT-MAC check, the IT-MAC-hardened
 // twin of `compare::disclose_threshold_verdict`.
@@ -13,7 +13,7 @@
 //! below, and that function's own docs for why a rename, rather than a revert, is the
 //! containment that is actually available). The prose below describes the IT-MAC
 //! construction as designed; read the residual section before treating any of it as a
-//! guarantee against an actively-deviating party. `[SONNET-4.6]`
+//! guarantee against an actively-deviating party.
 //!
 //! ## What this closes (sq-ka8m residual)
 //!
@@ -72,7 +72,7 @@
 //! unanimous or identifiable abort), AXIS-3 `HonestMajority`; AXIS-1 is **not** `Malicious` today. The exact sum is NEVER opened
 //! — only `c = a²` (sign-independent), the statistically-masked `c = sum + r`, and the
 //! 1-bit verdict, and the latter two only after their MAC-checks pass — so the
-//! CONFIDENTIALITY statement is unaffected by the integrity gap. `[SONNET-4.6]`
+//! CONFIDENTIALITY statement is unaffected by the integrity gap.
 //!
 //! ## The range-proof zero-tests are MAC-checked too (sq-m4zi / sq-e7ma)
 //!
@@ -90,7 +90,7 @@
 //! **MAC-checks the product `[[v·r]]` before its open is read** — so a tampered zero-test
 //! open aborts with [`MpcError::MacCheckFailed`] like the other three.
 //!
-//! ## [OPUS-4.8] sq-km34.6 — the production path is now the AUTHENTICATED RABBIT chain
+//! ## sq-km34.6 — the production path is now the AUTHENTICATED RABBIT chain
 //!
 //! Everything above describes the *masked-open* construction, which capped this path's
 //! sum at `2^`[`crate::compare::DECOMP_VALUE_BITS`]` = 2^20` — a 40-bit gap behind the
@@ -108,7 +108,6 @@
 //! The lift closes a real gap in the MAGNITUDE dimension: this path now supports the
 //! SAME `2^60` as the semi-honest one. It does NOT lift the integrity tier — see
 //! "Integrity coverage is NOT total" below before treating it as malicious-secure.
-//! `[SONNET-4.6]`
 //!
 //! ## Residual (honest scope statement)
 //!
@@ -130,7 +129,7 @@
 //!   [`crate::shamir::MacSession`] gains multiplication-gate verification that binds BOTH
 //!   operands (Chida-et-al. style), treat this path as a research/semi-honest surface:
 //!   do NOT deploy it as the integrity tier against a genuinely malicious party.** See
-//!   "What the MAC-check does NOT cover" on `auth_bit_decompose_rabbit`. `[SONNET-4.6]`
+//!   "What the MAC-check does NOT cover" on `auth_bit_decompose_rabbit`.
 //! - **Containment applied (review round 2).** The entry point was renamed
 //!   `malicious_disclose_threshold_verdict` →
 //!   [`experimental_tamper_evident_disclose_threshold_verdict`], so the API no longer
@@ -143,8 +142,8 @@
 //!   **(b) It did not "fix" the composition in this module.** Any in-module repair is
 //!   local to one `auth_mul` call site while the adoption is a property of the
 //!   primitive, present at every gate on the chain; the honest fix is the `MacSession`
-//!   change named above, and a partial patch here would read as closure. `[SONNET-4.6]`
-//! - The dishonest-majority SPDZ regime (route (b) / sq-j5ok) is NOT entered. `[OPUS-4.8]`
+//!   change named above, and a partial patch here would read as closure.
+//! - The dishonest-majority SPDZ regime (route (b) / sq-j5ok) is NOT entered.
 
 use crate::authenticated::{auth_add, auth_add_constant, auth_scale, auth_sub, AuthenticatedShare};
 #[cfg(test)]
@@ -163,7 +162,7 @@ use crate::shamir::{MacSession, ShamirBackend, Share};
 ///
 /// # ⚠ EXPERIMENTAL — NOT malicious-secure; not an integrity tier
 ///
-/// [SONNET-4.6] Review round 1 demonstrated an end-to-end break:
+/// Review round 1 demonstrated an end-to-end break:
 /// [`crate::shamir::MacSession::auth_mul`] ADOPTS a value tamper on its second operand,
 /// and the range proof's zero-test mask sits in exactly that slot, so a deviating party
 /// can neutralise the range proof and make this function return a WRONG verdict instead
@@ -188,10 +187,10 @@ use crate::shamir::{MacSession, ShamirBackend, Share};
 /// verification). The containment that IS available today is the one applied here —
 /// the name and the tier statement no longer claim a guarantee the code does not
 /// deliver. Renaming is cheap and total: `sparq-mpc` is `publish = false` and nothing
-/// in the workspace depends on it, so no caller is silently retargeted. `[SONNET-4.6]`
+/// in the workspace depends on it, so no caller is silently retargeted.
 ///
 /// `sum_shares` is the degree-`t` sharing of the cumulative aggregate;
-/// `public_threshold` is the public bar (e.g. £100k). [OPUS-4.8] sq-km34.6:
+/// `public_threshold` is the public bar (e.g. £100k). sq-km34.6:
 /// `public_threshold` must be `< 2^`[`RABBIT_VALUE_BITS`]` = 2^60` (fail-closed up
 /// front) — the FULL width, at parity with the semi-honest path, because this now
 /// routes through the AUTHENTICATED Rabbit decomposition rather than the 20-bit-capped
@@ -204,7 +203,7 @@ use crate::shamir::{MacSession, ShamirBackend, Share};
 /// it demonstrably does not.
 ///
 /// Honest-majority, **tamper-evident-with-abort on the opened values** (design §3 aims
-/// at malicious-with-abort; the delivered tier is weaker). `[OPUS-4.8]` `[SONNET-4.6]`
+/// at malicious-with-abort; the delivered tier is weaker).
 pub fn experimental_tamper_evident_disclose_threshold_verdict(
     backend: &ShamirBackend,
     sum_shares: &[Share],
@@ -231,7 +230,7 @@ fn experimental_tamper_evident_threshold_over_sum(
     public_threshold: u64,
 ) -> Result<bool, MpcError> {
     check_party_count(backend.parties(), backend.threshold())?;
-    // Fail closed on the public threshold BEFORE any protocol work. [OPUS-4.8]
+    // Fail closed on the public threshold BEFORE any protocol work.
     // sq-km34.6 — the bound is now the FULL `2^RABBIT_VALUE_BITS = 2^60`, at parity
     // with the semi-honest `compare::disclose_threshold_verdict`: this routes through
     // the AUTHENTICATED Rabbit decomposition, which recovers the sum exactly through
@@ -255,7 +254,7 @@ fn experimental_tamper_evident_threshold_over_sum(
     // 1. Authenticate the EXISTING sum sharing (no reconstruction).
     let auth_sum = session.authenticate_existing(sum_shares)?;
 
-    // 2. [OPUS-4.8] sq-km34.6 — AUTHENTICATED Rabbit bit-decomposition: every product
+    // 2. sq-km34.6 — AUTHENTICATED Rabbit bit-decomposition: every product
     //    and every degree-reduce in the wrap-recovery chain (solved bits, LTBits,
     //    bit-add, bit-sub) is a `MacSession::auth_mul`, and the single masked open
     //    `c = (sum + r) mod p` is MAC-checked before `c` is read. The recovered
@@ -268,7 +267,7 @@ fn experimental_tamper_evident_threshold_over_sum(
     //    which would otherwise let an out-of-range sum masquerade as in-range,
     //    bypassing the fail-closed guard — aborts with `MpcError::MacCheckFailed`
     //    rather than letting the verdict be derived from a corrupted decomposition.
-    //    [SONNET-4.6] But NOT a tampered zero-test MASK: it sits in `auth_mul`'s adopted
+    //    But NOT a tampered zero-test MASK: it sits in `auth_mul`'s adopted
     //    second operand slot, so zeroing it defeats this whole step and the pipeline
     //    returns a wrong verdict. See the module docs' "Integrity coverage is NOT total".
     auth_verify_value_in_range_rabbit(&mut session, backend, &auth_sum, &auth_sum_bits)?;
@@ -296,7 +295,7 @@ fn experimental_tamper_evident_threshold_over_sum(
 /// `c ⊖ [[r]]` runs over the public `c` bits and the authenticated `[[r_k]]`, each
 /// AND an [`MacSession::auth_mul`], so the recovered sum bits stay MAC-carried.
 ///
-/// [OPUS-4.8] sq-km34.6 — now **TEST-ONLY**: superseded on the production
+/// sq-km34.6 — now **TEST-ONLY**: superseded on the production
 /// [`experimental_tamper_evident_disclose_threshold_verdict`] path by the authenticated Rabbit
 /// [`auth_bit_decompose_rabbit`], which recovers the sum exactly through the modular
 /// wrap (no statistical value/mask slack) and so supports the full
@@ -363,7 +362,7 @@ fn auth_masked_bit_decompose(
     Ok((out, r_bits))
 }
 
-/// [OPUS-4.8] sq-m4zi/sq-e7ma — **MAC-checked in-protocol range proof of the
+/// sq-m4zi/sq-e7ma — **MAC-checked in-protocol range proof of the
 /// secret-shared sum**, the IT-MAC twin of the semi-honest
 /// `crate::compare::verify_sum_in_range` (sq-nx0s; that masked-open reference is
 /// now test-only after the sq-bgsn Rabbit lift on the semi-honest production path).
@@ -383,9 +382,9 @@ fn auth_masked_bit_decompose(
 /// [`MpcError::Protocol`] (an out-of-range / wrapping sum), and on a TAMPERED zero-test
 /// open [`MpcError::MacCheckFailed`] — so a deviating party can no longer flip
 /// "was it zero?" to smuggle an out-of-range sum past the guard. Honest-majority,
-/// tamper-evident-with-abort (see the module security tier). `[OPUS-4.8]`
+/// tamper-evident-with-abort (see the module security tier).
 ///
-/// [OPUS-4.8] sq-km34.6 — now **TEST-ONLY**: the production path range-proves the
+/// sq-km34.6 — now **TEST-ONLY**: the production path range-proves the
 /// AUTHENTICATED Rabbit decomposition via [`auth_verify_value_in_range_rabbit`] (full
 /// field width). Retained as the masked-open regression reference.
 #[cfg(test)]
@@ -438,7 +437,7 @@ fn auth_verify_sum_in_range(
 }
 
 // =============================================================================
-// [OPUS-4.8] sq-km34.6 — the AUTHENTICATED Rabbit chain (design §3 + Hole 4).
+// sq-km34.6 — the AUTHENTICATED Rabbit chain (design §3 + Hole 4).
 //
 // The IT-MAC twin of `compare`'s sq-bgsn Rabbit path. The masked-open
 // decomposition above caps the malicious path's value at 2^DECOMP_VALUE_BITS = 2^20
@@ -460,7 +459,7 @@ fn auth_verify_sum_in_range(
 /// `[[a ⊕ b]]` (logical XOR) of two AUTHENTICATED 0/1 sharings: `a + b − 2·a·b`. One
 /// [`MacSession::auth_mul`] (the `a·b` term); the rest is FREE authenticated linear
 /// ops. The IT-MAC twin of `crate::compare`'s `secret_xor`, used by the
-/// authenticated Rabbit bit-add / bit-sub circuits. `[OPUS-4.8]`
+/// authenticated Rabbit bit-add / bit-sub circuits.
 fn auth_xor(
     session: &mut MacSession,
     a: &AuthenticatedShare,
@@ -476,7 +475,7 @@ fn auth_xor(
 /// `deal_full_field_solved_bits`: every bit is an [`auth_square_protocol_random_bit`]
 /// (whose `a²` open is MAC-checked before it is read), and `[[r]] = Σ_k [[r_k]]·2^k`
 /// is a FREE authenticated linear combination, so `[[r]]` and the `[[r_k]]` are
-/// consistent — and MAC-consistent — by construction. `[OPUS-4.8]`
+/// consistent — and MAC-consistent — by construction.
 fn auth_deal_full_field_solved_bits(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -501,7 +500,7 @@ fn auth_deal_full_field_solved_bits(
 /// is decided by the first bit where `c_k = 0, r_k = 1` with all higher bits equal.
 /// `c_k` is PUBLIC, so `(1 − c_k)·r_k` and the `(c_k == r_k)` map are FREE authenticated
 /// affine ops; the only authenticated multiplications are the `eq`/`lt` chain steps.
-/// Nothing is opened here — `[[w]]` stays secret and MAC-carried. `[OPUS-4.8]`
+/// Nothing is opened here — `[[w]]` stays secret and MAC-carried.
 fn auth_rabbit_lt_bits_public_less_than_shared(
     session: &mut MacSession,
     c: u64,
@@ -536,7 +535,7 @@ fn auth_rabbit_lt_bits_public_less_than_shared(
 ///
 /// `konst_k · [[w]]` is a public bit times one authenticated sharing, so forming the
 /// addend is FREE; the carry chain costs two authenticated multiplications per output
-/// bit (the `x ∧ carry` term and the OR inside the majority). `[OPUS-4.8]`
+/// bit (the `x ∧ carry` term and the OR inside the majority).
 fn auth_rabbit_add_public_and_w_times_const(
     session: &mut MacSession,
     c: u64,
@@ -587,7 +586,7 @@ fn auth_rabbit_add_public_and_w_times_const(
 /// `rabbit_sub_shared_bits`: both operands are shared, so the result bit's XOR costs a
 /// multiplication too — five authenticated multiplications per bit position, every one
 /// of them MAC-carrying. Missing high positions read as the authenticated constant
-/// `[[0]]`. `[OPUS-4.8]`
+/// `[[0]]`.
 fn auth_rabbit_sub_shared_bits(
     session: &mut MacSession,
     lhs_bits: &[AuthenticatedShare],
@@ -616,7 +615,7 @@ fn auth_rabbit_sub_shared_bits(
     Ok(out)
 }
 
-/// [OPUS-4.8] sq-km34.6 — **AUTHENTICATED Rabbit-style FULL-FIELD in-MPC
+/// sq-km34.6 — **AUTHENTICATED Rabbit-style FULL-FIELD in-MPC
 /// bit-decomposition** of an EXISTING authenticated sharing `[[x]]` into its
 /// [`RABBIT_VALUE_BITS`] AUTHENTICATED bits (LSB-first), WITHOUT ever reconstructing
 /// `x`. The IT-MAC twin of `crate::compare`'s
@@ -679,7 +678,7 @@ fn auth_rabbit_sub_shared_bits(
 /// goes red if the primitive is ever fixed. The design record's §2.5 "closes all four
 /// holes" phrasing is therefore **stronger than what the code delivers today**.
 ///
-/// **This is EXPLOITABLE on this path, not merely theoretical** [SONNET-4.6]:
+/// **This is EXPLOITABLE on this path, not merely theoretical**:
 /// [`auth_verify_value_in_range_rabbit`]'s zero-test hands its mask to `auth_mul` in
 /// precisely the adopted second slot, so a zeroed mask neutralises the range proof — the
 /// one check that catches a corrupted `[[b_k]]` — and the pipeline then returns the
@@ -701,7 +700,7 @@ fn auth_rabbit_sub_shared_bits(
 /// Correct only while `x < 2^`[`RABBIT_VALUE_BITS`] so the recovered low bits capture
 /// the whole value. `x` is a SHARING, so this cannot be checked here without disclosing
 /// it; the caller proves it in-protocol via [`auth_verify_value_in_range_rabbit`].
-/// Honest-majority, tamper-evident-with-abort (see the module security tier). `[OPUS-4.8]`
+/// Honest-majority, tamper-evident-with-abort (see the module security tier).
 fn auth_bit_decompose_rabbit(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -734,7 +733,7 @@ fn auth_bit_decompose_rabbit(
     Ok(x_bits)
 }
 
-/// [OPUS-4.8] sq-km34.6 — **MAC-checked in-protocol range proof for the AUTHENTICATED
+/// sq-km34.6 — **MAC-checked in-protocol range proof for the AUTHENTICATED
 /// Rabbit path**: PROVES `value ∈ [0, 2^`[`RABBIT_VALUE_BITS`]`)` from the recovered
 /// authenticated bits WITHOUT reconstructing the value. The IT-MAC twin
 /// of `crate::compare`'s `verify_value_in_range_rabbit`.
@@ -752,13 +751,13 @@ fn auth_bit_decompose_rabbit(
 /// returns [`MpcError::MacCheckFailed`]. Only the uniform-nonzero `v·r` mask product is
 /// opened — the value is never reconstructed.
 ///
-/// **⚠ This guard is NOT sound against a malicious party** [SONNET-4.6]: it is only as
+/// **⚠ This guard is NOT sound against a malicious party**: it is only as
 /// strong as [`auth_secret_is_zero`], whose mask occupies [`MacSession::auth_mul`]'s
 /// ADOPTED second operand slot. Forcing that mask to a sharing of `0` makes the
 /// zero-test answer "yes, zero" for ANY `recompose_diff`, so an out-of-range sum — or an
 /// arbitrarily corrupted decomposition — walks past this check with the MAC-check
 /// passing. Witness:
-/// `a_zeroed_zero_test_mask_defeats_the_range_proof_and_flips_the_verdict`. `[OPUS-4.8]`
+/// `a_zeroed_zero_test_mask_defeats_the_range_proof_and_flips_the_verdict`.
 fn auth_verify_value_in_range_rabbit(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -790,7 +789,7 @@ fn auth_verify_value_in_range_rabbit(
     Ok(())
 }
 
-/// [OPUS-4.8] sq-m4zi/sq-e7ma — **MAC-checked secret zero-test**: returns `true` iff the
+/// sq-m4zi/sq-e7ma — **MAC-checked secret zero-test**: returns `true` iff the
 /// AUTHENTICATED `[[v]]` reconstructs to `0`, WITHOUT reconstructing `v`, the
 /// IT-MAC twin of [`crate::compare`] `secret_is_zero` (sq-nx0s). Draw a
 /// fresh NONZERO authenticated mask `[[r]]`, form `[[m]] = [[v]]·[[r]]` via
@@ -807,7 +806,7 @@ fn auth_verify_value_in_range_rabbit(
 /// consistent degree-`t` codeword of a DIFFERENT value, undetectable by Reed–Solomon at
 /// `n = 2t+1`) makes `σ ≠ 0` and aborts with [`MpcError::MacCheckFailed`].
 ///
-/// **⚠ A deviating party CAN still flip the zero-test result** [SONNET-4.6]: the mask
+/// **⚠ A deviating party CAN still flip the zero-test result**: the mask
 /// `[[r]]` is passed as [`MacSession::auth_mul`]'s SECOND operand, whose value tamper the
 /// primitive ADOPTS (it recomputes `[α·m]` from the tampered value). Substituting a
 /// consistent sharing of `0` for `[[r]]` therefore yields `m = 0` with a MATCHING MAC for
@@ -817,7 +816,7 @@ fn auth_verify_value_in_range_rabbit(
 /// zeroing BOTH operands defeats a both-orders check as well; the fix is
 /// multiplication-gate verification in [`MacSession`] that binds both operands. Witness:
 /// `a_zeroed_zero_test_mask_defeats_the_range_proof_and_flips_the_verdict`.
-/// Honest-majority, tamper-evident-with-abort (NOT malicious-with-abort). `[OPUS-4.8]`
+/// Honest-majority, tamper-evident-with-abort (NOT malicious-with-abort).
 fn auth_secret_is_zero(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -860,7 +859,7 @@ fn auth_or(
 /// `[[a]]` is a fresh nonzero authenticated value; `[[a²]] = auth_mul([[a]],[[a]])`;
 /// MAC-check `[[a²]]`; open `c = a²` (sign-independent, leaks nothing about the bit);
 /// then `[[b]] = (d⁻¹·[[a]] + 1)·2⁻¹` as FREE authenticated affine maps so the bit
-/// stays MAC-carried. `[OPUS-4.8]`
+/// stays MAC-carried.
 fn auth_square_protocol_random_bit(
     session: &mut MacSession,
     backend: &ShamirBackend,
@@ -940,7 +939,7 @@ fn auth_greater_than_public_bits(
 /// open. The value sharing `[verdict]` is reconstructed (the MAC was consumed by the
 /// check, never opened); a non-boolean reconstruction is refused rather than coerced.
 /// This is the ONLY value this path opens besides the sign-independent `a²` and the
-/// statistically-masked `sum + r`. `[OPUS-4.8]`
+/// statistically-masked `sum + r`.
 fn open_auth_verdict(
     backend: &ShamirBackend,
     verdict: &AuthenticatedShare,
@@ -1170,7 +1169,7 @@ mod tests {
     }
 
     /// Out-of-range threshold/sum are descriptive errors, not silent wrong verdicts.
-    /// [OPUS-4.8] sq-km34.6 — the bound is now the FULL `2^RABBIT_VALUE_BITS`, not the
+    /// sq-km34.6 — the bound is now the FULL `2^RABBIT_VALUE_BITS`, not the
     /// masked-open path's `2^DECOMP_VALUE_BITS`.
     #[test]
     fn fails_closed_on_bad_inputs() {
@@ -1249,7 +1248,7 @@ mod tests {
 
     /// The MAC-checked range proof on the PRODUCTION path ACCEPTS in-range sums (incl.
     /// edges) and REJECTS out-of-range / field-wrapping sums fail-closed.
-    /// [OPUS-4.8] sq-km34.6 — the supported width is now the FULL
+    /// sq-km34.6 — the supported width is now the FULL
     /// `2^RABBIT_VALUE_BITS`, so the accept set includes magnitudes the masked-open
     /// range proof rejected and the reject set starts at `2^60`, not `2^20`.
     #[test]
@@ -1561,7 +1560,7 @@ mod tests {
         WrapIndicator,
         /// One recovered sum bit `[[b_k]]`, the output of the ripple-borrow chain.
         RecoveredBit(usize),
-        /// [SONNET-4.6] The ADVERSARIAL COMPOSITION (review round 1): raise the
+        /// The ADVERSARIAL COMPOSITION (review round 1): raise the
         /// honestly-zero recovered bit `k` to `1` (a still-BOOLEAN corruption, so the
         /// comparator downstream stays well-formed and the verdict actually FLIPS) AND
         /// force the range proof's zero-test MASK — which sits in `auth_mul`'s adopted
@@ -1607,7 +1606,7 @@ mod tests {
     /// is why the range proof is load-bearing for INTEGRITY here, not only for the
     /// magnitude bound.
     ///
-    /// [SONNET-4.6] **Scope of this guarantee:** it holds only while the range proof's
+    /// **Scope of this guarantee:** it holds only while the range proof's
     /// own zero-test is intact. An adversary that ALSO zeroes that zero-test's mask
     /// switches the range proof off and this abort does not happen — see
     /// `a_zeroed_zero_test_mask_defeats_the_range_proof_and_flips_the_verdict`.
@@ -1688,7 +1687,7 @@ mod tests {
         );
     }
 
-    /// [SONNET-4.6] **THE EXPLOIT WITNESS (review round 1): the adopted second-operand
+    /// **THE EXPLOIT WITNESS (review round 1): the adopted second-operand
     /// tamper is NOT confined to an unrelated intermediate — it defeats the in-protocol
     /// range proof end to end, and the pipeline returns a WRONG verdict instead of
     /// aborting.**
@@ -1865,7 +1864,7 @@ mod tests {
         crate::authenticated::AuthenticatedShare::new(value, av.mac_shares().to_vec()).unwrap()
     }
 
-    /// [SONNET-4.6] Replay [`auth_verify_value_in_range_rabbit`]'s zero-test with the
+    /// Replay [`auth_verify_value_in_range_rabbit`]'s zero-test with the
     /// mask's VALUE sharing forced to a consistent sharing of `0` (its MAC `[α·r]`
     /// untouched — the canonical Hole-2 deviation) and return the zero-test's answer.
     ///

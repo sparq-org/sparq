@@ -1688,7 +1688,7 @@ pub struct MaterializedN3Graph {
     /// Sticky runtime disqualification: evaluation met data outside the builtin-parity
     /// whitelist; every rebuild stays in fallback (always correct).
     data_fallback: Option<String>,
-    /// [OPUS-4.8] NON-sticky fallback cause: the base currently contains `log:implies`-family
+    /// NON-sticky fallback cause: the base currently contains `log:implies`-family
     /// triples (rules-as-data), which the batch engine would parse as RULES, so counting is
     /// forced off this rematerialize. Recomputed every `rematerialize`; cleared when the
     /// implies-data is removed and counting resumes. Keeps `fallback_reason()`'s
@@ -2364,7 +2364,7 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
             atoms.push(N3Atom::Plain { pat: pat.clone(), plain_ix: n_plain });
             n_plain += 1;
         }
-        // [OPUS-4.8] Counting propagation seeds emissions ONLY from N3Atom::Plain premise atoms
+        // Counting propagation seeds emissions ONLY from N3Atom::Plain premise atoms
         // (see `propagate` / the rematerialize seed). A rule with NO plain join atom — an empty
         // premise `{}` rule or a builtin/guard-only premise — would therefore never fire in
         // counting mode, so its conclusions would be missing from the maintained closure even
@@ -2853,7 +2853,7 @@ impl MaterializedN3Graph {
             .base
             .iter()
             .any(|t| n3_pred_iri(&t[1]).is_some_and(|p| implies.iter().any(|i| i == p)));
-        // [OPUS-4.8] Record (or clear) the non-sticky data-rule fallback cause so fallback_reason()
+        // Record (or clear) the non-sticky data-rule fallback cause so fallback_reason()
         // reports it instead of silently returning None. See review 1868.
         self.data_rule_fallback = data_rules.then(|| {
             "base contains log:implies-family triples (rules-as-data); the batch engine reasons \
@@ -3362,7 +3362,7 @@ impl MaterializedN3Graph {
     /// rules-as-data or formula values with variables in the base, or a counting run cut short
     /// while the rules negate. `None` ⇔ the counting path is active. See review 1868.
     pub fn fallback_reason(&self) -> Option<&str> {
-        // [OPUS-4.8] Include the data-rule cause so the documented `None ⇔ counting` contract
+        // Include the data-rule cause so the documented `None ⇔ counting` contract
         // holds even when fallback is forced by implies-as-data rather than rule analysis.
         self.data_fallback
             .as_deref()
@@ -4168,7 +4168,7 @@ mod tests {
         assert_matches_oracle(&g, &mut dict, &set);
         assert_eq!(g.full_rebuilds(), 0, "new() is not a fallback rebuild");
         assert_eq!(g.base_len(), base.len());
-        // [OPUS-4.8] sq-qcnn.16: exercise base_triples() iterator (previously uncovered).
+        // sq-qcnn.16: exercise base_triples() iterator (previously uncovered).
         let base_via_iter: FxHashSet<[Id; 3]> = g.base_triples().collect();
         assert_eq!(base_via_iter, set, "base_triples() iterator yields the exact asserted set");
     }

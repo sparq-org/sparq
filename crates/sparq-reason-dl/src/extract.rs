@@ -1,4 +1,4 @@
-// [FABLE-5] sq-pbz04.4.1 (epic sq-pbz04.4, design record
+// sq-pbz04.4.1 (epic sq-pbz04.4, design record
 // research/owl2-direct-semantics-scoping.md §L1): the FAIL-CLOSED reverse RDF mapping.
 //
 // 🤖 SPARQ agent. Reads an OWL ontology in the ALCH fragment out of the `(Dict, [[Id; 3]])`
@@ -41,7 +41,7 @@ pub enum ExtractError {
     /// cardinality / qualified cardinality, nominals (`owl:oneOf`/`owl:hasValue`),
     /// `owl:hasSelf`, inverse properties (`owl:inverseOf`), property characteristics
     /// (`owl:TransitiveProperty` — recognised in-fragment instead under the opt-in
-    /// `dl_transitive` feature, [GPT-5.6] sq-zfwzq — / `owl:FunctionalProperty` / symmetry /
+    /// `dl_transitive` feature, sq-zfwzq — / `owl:FunctionalProperty` / symmetry /
     /// reflexivity / …),
     /// `owl:sameAs` / `owl:differentFrom`, property chains, keys, `owl:disjointUnionOf`,
     /// equivalent / disjoint properties, and the n-ary `owl:AllDifferent` /
@@ -146,11 +146,11 @@ fn extract_with(
     rewrite_bottom: bool,
 ) -> Result<(Ontology, bool), ExtractError> {
     let v = Vocab::intern(dict);
-    // [OPUS-4.8] Fix 1 + Fix 3: Index::build now returns Err on a branching list,
+    // Fix 1 + Fix 3: Index::build now returns Err on a branching list,
     // duplicate backbone value, or cross-type punned declaration.
     let idx = Index::build(triples, &v, rewrite_bottom)?;
 
-    // [OPUS-4.8] sq-pbz04.4.12 — M4 fail-closed validation:
+    // sq-pbz04.4.12 — M4 fail-closed validation:
     // Orphan/cyclic list cells and unconsumed class-expression backbones are NOT inert.
     // The original comment was WRONG: a bare `rdf:first`/`rdf:rest` cell that is never
     // consumed by an axiom, or a backbone node (`owl:unionOf` etc.) that is never
@@ -182,7 +182,7 @@ fn extract_with(
         classify_triple(dict, &v, &idx, s, p, o, &mut onto)?;
     }
 
-    // [SONNET-4.6] sq-pbz04.4.11 — named-composite EquivalentClasses pass.
+    // sq-pbz04.4.11 — named-composite EquivalentClasses pass.
     //
     // CORRECTNESS GAP (M1, discovered by the conformance arm):
     // When a NAMED class IRI carries an inline backbone definition — `:A owl:intersectionOf
@@ -309,7 +309,7 @@ fn emit_named_composite_equiv(
 
 /// Validates that no structural (backbone) node is orphaned — i.e., every ANONYMOUS
 /// blank-node carrying class-expression or list backbone predicates is reachable from
-/// at least one non-backbone axiom triple. [OPUS-4.8] sq-pbz04.4.12 — the M4 fix.
+/// at least one non-backbone axiom triple. sq-pbz04.4.12 — the M4 fix.
 ///
 /// # Soundness rationale
 ///
@@ -342,7 +342,7 @@ fn emit_named_composite_equiv(
 /// list cells → members, etc.). Any anonymous blank structural node NOT reachable is an
 /// orphan → refused.
 ///
-/// **Ignorable declaration/annotation triples do NOT seed reachability** ([OPUS-4.8]
+/// **Ignorable declaration/annotation triples do NOT seed reachability** (
 /// sq-pbz04.4.12): a triple whose only relationship to a structural node is a declaration
 /// typing (`rdf:type` → an ignorable `DECLARATION_TYPE_LOCALS` meta-class such as `rdf:List`)
 /// or an annotation predicate produces NO axiom in `classify_type`/`classify_triple`, so it
@@ -407,7 +407,7 @@ fn validate_no_orphan_structural_nodes(
     //     is the SUBJECT of the axiom triple `rdfs:subClassOf`.
     //   - Object: e.g. `:C rdfs:subClassOf _:x` — `_:x` is an OBJECT.
     //
-    // [OPUS-4.8] sq-pbz04.4.12 — SOUNDNESS FIX: an IGNORABLE declaration or annotation
+    // sq-pbz04.4.12 — SOUNDNESS FIX: an IGNORABLE declaration or annotation
     // triple is NOT a consumer and must NOT seed reachability. Crucially `_:list a rdf:List`
     // (rdf:type whose object is an ignorable DECLARATION_TYPE_LOCALS meta-class, exactly the
     // WebOnt-I5.5-006/-007 encoding) produces NO axiom in `classify_type` — treating it as a
@@ -502,7 +502,7 @@ fn validate_no_orphan_structural_nodes(
 
 /// Whether a non-backbone triple `_ p o` actually CONSUMES a structural node — i.e. places it
 /// in an axiom or class-expression position — for the orphan-reachability seeding in
-/// [`validate_no_orphan_structural_nodes`]. [OPUS-4.8] sq-pbz04.4.12.
+/// [`validate_no_orphan_structural_nodes`]. sq-pbz04.4.12.
 ///
 /// It is `false` for exactly the triples `classify_triple`/`classify_type` treat as IGNORABLE
 /// (produce no axiom):
@@ -539,7 +539,7 @@ fn classify_triple(
     onto: &mut Ontology,
 ) -> Result<(), ExtractError> {
     // --- Hoisted punned-predicate guard — fires BEFORE the axiom-dispatch arms ----------
-    // [SONNET-4.6] sq-pbz04.4.1 soundness closure: a predicate simultaneously declared as
+    // sq-pbz04.4.1 soundness closure: a predicate simultaneously declared as
     // AnnotationProperty AND ObjectProperty (or any other cross-type punning) is
     // Unclassifiable — the downstream checker must never reason over an axiom whose
     // classification was ambiguous. Hoisted here so no axiom is produced from an
@@ -713,7 +713,7 @@ fn classify_type(
     if v.declaration_types.contains(&o) {
         return Ok(());
     }
-    // [GPT-5.6] sq-zfwzq (opt-in `dl_transitive`): `s rdf:type owl:TransitiveProperty` is an
+    // sq-zfwzq (opt-in `dl_transitive`): `s rdf:type owl:TransitiveProperty` is an
     // in-fragment RBox axiom — `TransitiveObjectProperty(s)`. The subject goes through the
     // same `decode_object_property` chokepoint as every other property position (refusing
     // literals, blank nodes, triple terms, inverse expressions, and punned IRIs), so a
@@ -781,7 +781,7 @@ fn role_assertion(
             "RDF 1.2 triple term as a role-assertion individual".to_string(),
         ));
     }
-    // [SONNET-4.6] sq-pbz04.4.8: this path builds the property expression directly rather
+    // sq-pbz04.4.8: this path builds the property expression directly rather
     // than through `decode_object_property`, so the built-in fixed-extension refusal is
     // applied here too — the check is only sound if it is UNIFORM over property positions.
     if let Some(err) = builtin_property_refusal(dict, p) {
@@ -875,7 +875,7 @@ fn decode_class_inner(
             "RDF 1.2 triple term in a class-expression position".to_string(),
         ));
     }
-    // [FABLE-5] sq-pbz04.4.9: a bare OWL 2 datatype-map IRI (`xsd:integer`, `rdfs:Literal`, …)
+    // sq-pbz04.4.9: a bare OWL 2 datatype-map IRI (`xsd:integer`, `rdfs:Literal`, …)
     // in a class-expression position — including an `rdfs:range` / `rdfs:domain` object — carries
     // concrete-domain meaning the datatype-free ALCH fragment cannot model. Reading it as an
     // opaque object class would silently drop that meaning (e.g. `p rdfs:range xsd:integer` +
@@ -944,7 +944,7 @@ fn decode_class_inner(
         )));
     }
     if shape_count == 0 {
-        // [SONNET-4.6] sq-pbz04.4.1 bare-blank fix (Copilot thread 4): blank nodes in a
+        // sq-pbz04.4.1 bare-blank fix (Copilot thread 4): blank nodes in a
         // class-expression position with no backbone predicates have no sound OWL mapping.
         // Per the W3C OWL 2 RDF Mapping tables, blank nodes denote *structured* anonymous
         // class expressions; a bare blank node has no recoverable class expression to decode.
@@ -971,7 +971,7 @@ fn decode_class_inner(
     }
     let result = if is_inter {
         let head = idx.intersection_of[&id];
-        // [FABLE-5] sq-pbz04.4.16 — singleton `owl:intersectionOf` normalization (M7).
+        // sq-pbz04.4.16 — singleton `owl:intersectionOf` normalization (M7).
         // The OWL-1-era RDF encoding `_:B owl:intersectionOf ( :A )` — a one-member operand
         // list — denotes the class `⊓{A}`, whose Direct-Semantics interpretation is EXACTLY
         // that of its sole member `A` (OWL 2 Structural Specification §8.1: the extension of a
@@ -1164,7 +1164,7 @@ fn decode_object_property(
             "literal in an object-property position".to_string(),
         ));
     }
-    // [OPUS-4.8] Fix 2: blank nodes and triple terms are not named object properties.
+    // Fix 2: blank nodes and triple terms are not named object properties.
     // The ALCH fragment admits ONLY named (IRI) object properties — model.rs:20-33.
     if is_triple_term(dict, id) {
         return Err(ExtractError::Unclassifiable(
@@ -1183,7 +1183,7 @@ fn decode_object_property(
             term_iri(dict, id)
         )));
     }
-    // [SONNET-4.6] sq-pbz04.4.1 soundness closure: structural chokepoint for punned IRIs
+    // sq-pbz04.4.1 soundness closure: structural chokepoint for punned IRIs
     // arriving in the property-ARGUMENT position (domain/range subject, subPropertyOf
     // operands, owl:onProperty object). A property IRI declared under multiple property
     // types is Unclassifiable at this call site — the downstream checker must never reason
@@ -1214,7 +1214,7 @@ fn decode_object_property(
 /// everything (domains are non-empty). Under the opaque-role reading both look satisfiable.
 /// Refuse fail-closed, uniformly at every property position — the same discipline as the
 /// datatype-map IRI refusal ([`datatype_iri_name`], sq-pbz04.4.9), which addressed the
-/// identical failure mode for built-in DATATYPE IRIs. [SONNET-4.6] sq-pbz04.4.8
+/// identical failure mode for built-in DATATYPE IRIs. sq-pbz04.4.8
 fn builtin_property_refusal(dict: &Dict, id: Id) -> Option<ExtractError> {
     if is_inline(id) {
         return None;
@@ -1294,7 +1294,7 @@ struct Vocab {
     owl_datatype_property: Id,
     owl_annotation_property: Id,
     /// `owl:TransitiveProperty` — recognised as an in-fragment axiom typing ONLY under the
-    /// opt-in `dl_transitive` feature ([GPT-5.6] sq-zfwzq); with the feature OFF it stays in
+    /// opt-in `dl_transitive` feature (sq-zfwzq); with the feature OFF it stays in
     /// [`Vocab::out_of_fragment_types`] and is refused fail-closed, exactly as before.
     #[cfg(feature = "dl_transitive")]
     owl_transitive_property: Id,
@@ -1348,7 +1348,7 @@ const DECLARATION_TYPE_LOCALS: &[(&str, &str)] = &[
     (OWL, "Ontology"),
     (OWL, "Restriction"),
     (OWL, "OntologyProperty"),
-    // [OPUS-4.8] Fix 4: owl:DeprecatedClass and owl:DeprecatedProperty are structural
+    // Fix 4: owl:DeprecatedClass and owl:DeprecatedProperty are structural
     // meta-classes (OWL 2 §11.2) with no logical content in ALCH — treat as ignorable
     // declarations rather than producing a spurious ClassAssertion.
     (OWL, "DeprecatedClass"),
@@ -1362,7 +1362,7 @@ const DECLARATION_TYPE_LOCALS: &[(&str, &str)] = &[
 /// `rdf:type` objects that are out-of-fragment meta-classes (property characteristics / n-ary
 /// collections). `TransitiveProperty` is a member ONLY when the opt-in `dl_transitive`
 /// feature is OFF — with the feature ON it is an in-fragment axiom typing recognised by
-/// [`classify_type`] instead ([GPT-5.6] sq-zfwzq).
+/// [`classify_type`] instead (sq-zfwzq).
 const OUT_OF_FRAGMENT_TYPE_LOCALS: &[&str] = &[
     #[cfg(not(feature = "dl_transitive"))]
     "TransitiveProperty",
@@ -1534,7 +1534,7 @@ struct Index {
     annotation_props: FxHashSet<Id>,
     /// Entities declared as MORE THAN ONE property type (e.g. both AnnotationProperty and
     /// ObjectProperty) — a punning clash that makes their use in triples Unclassifiable.
-    /// [OPUS-4.8] Fix 3.
+    /// Fix 3.
     punned_props: FxHashSet<Id>,
     /// #4762: whether this extraction may rewrite the empty built-in roles (set only by
     /// `extract_rewriting_bottom`; [`extract`] leaves it `false` and refuses them).
@@ -1544,7 +1544,7 @@ struct Index {
 }
 
 impl Index {
-    // [OPUS-4.8] Fix 1 + Fix 3: returns Err on a branching list / duplicate backbone
+    // Fix 1 + Fix 3: returns Err on a branching list / duplicate backbone
     // value (different value for same functional-position predicate on same node), or on a
     // cross-type punned declaration. Identical re-assertion (same value) is silently allowed.
     fn build(triples: &[[Id; 3]], v: &Vocab, rewrite_bottom: bool) -> Result<Index, ExtractError> {
@@ -1580,7 +1580,7 @@ impl Index {
                     }
                 }
                 idx.structural_nodes.insert(s);
-                // [SONNET-4.6] sq-pbz04.4.1 order-asymmetry fix: when usage-typing would
+                // sq-pbz04.4.1 order-asymmetry fix: when usage-typing would
                 // add `o` to object_props, check whether `o` is already in annotation_props
                 // or data_props (a declaration that arrived earlier in the triples slice).
                 // Symmetric to the declaration arms: records the pun so the verdict is
@@ -1695,7 +1695,7 @@ impl Index {
                     }
                     idx.annotation_props.insert(s);
                 }
-                // [GPT-5.6] sq-zfwzq (opt-in `dl_transitive`): `s a owl:TransitiveProperty`
+                // sq-zfwzq (opt-in `dl_transitive`): `s a owl:TransitiveProperty`
                 // types `s` as an OBJECT property (OWL 2 RDF mapping — the typing declares an
                 // object property), with the same symmetric cross-type pun-check as the
                 // declaration arms above so the Unclassifiable verdict is order-independent.
@@ -1717,7 +1717,7 @@ impl Index {
             } else if p == v.sub_property_of || p == v.domain || p == v.range {
                 // A property used in an object-property axiom position is known to be an
                 // object property (usage-based typing) — but only the subject/relevant operand.
-                // [SONNET-4.6] sq-pbz04.4.1 order-asymmetry fix: symmetric pun-check for
+                // sq-pbz04.4.1 order-asymmetry fix: symmetric pun-check for
                 // each IRI being typed as object property via usage, matching the on_property arm.
                 if p == v.sub_property_of {
                     if idx.annotation_props.contains(&s) || idx.data_props.contains(&s) {
@@ -1767,7 +1767,7 @@ fn term_iri(dict: &Dict, id: Id) -> String {
     }
 }
 
-/// The XSD namespace: every IRI under it is an OWL 2 datatype-map datatype ([FABLE-5]
+/// The XSD namespace: every IRI under it is an OWL 2 datatype-map datatype (
 /// sq-pbz04.4.9, per the escalated soundness verdict).
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
@@ -1816,7 +1816,7 @@ fn is_owl2_datatype_map_iri(dict: &Dict, id: Id) -> bool {
 /// opaque object class would SILENTLY DROP that meaning (design record §5 defers datatypes
 /// pending a concrete-domain oracle). Detected by IRI identity, so a datatype reaching ANY
 /// class-expression position fails closed uniformly — the same discipline as the literal /
-/// `owl:onDatatype` / declared-datatype-property refusals. [FABLE-5] sq-pbz04.4.9
+/// `owl:onDatatype` / declared-datatype-property refusals. sq-pbz04.4.9
 fn datatype_iri_name(dict: &Dict, id: Id) -> Option<String> {
     if is_inline(id) {
         return None;
@@ -1900,7 +1900,7 @@ mod tests {
         assert!(term_iri(&dict, lit).contains("lit"));
     }
 
-    /// Direct unit test of `datatype_iri_name` ([FABLE-5] sq-pbz04.4.9): `xsd:*` IRIs and the
+    /// Direct unit test of `datatype_iri_name` (sq-pbz04.4.9): `xsd:*` IRIs and the
     /// named non-XSD datatype-map members are recognised; an ordinary class IRI, a literal, and
     /// `owl:Thing` are NOT.
     #[test]
@@ -1935,7 +1935,7 @@ mod tests {
         assert_eq!(datatype_iri_name(&dict, lit), None);
     }
 
-    /// End-to-end fail-closed refusal ([FABLE-5] sq-pbz04.4.9): a datatype IRI reaching a
+    /// End-to-end fail-closed refusal (sq-pbz04.4.9): a datatype IRI reaching a
     /// class-expression position (an `rdfs:range` object here, but the check is position-uniform)
     /// refuses extraction as a `DataConstruct` — it is NOT read as an opaque object class. This
     /// is the WebOnt-I5.3-015 mechanism (two disjoint datatype ranges must not silently extract

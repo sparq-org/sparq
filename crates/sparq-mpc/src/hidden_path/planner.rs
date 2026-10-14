@@ -66,7 +66,7 @@ use crate::partial::MpcError;
 /// of this type is that it can REPRESENT an open/unbounded upper bound (`+`/`*`/
 /// `{m,}`) — which [`HiddenBoundedPath`] deliberately cannot — so the planner can
 /// inspect it and refuse the unbounded case fail-closed instead of the type system
-/// silently making it unrepresentable. ``
+/// silently making it unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathUpperBound {
     /// A finite, PUBLIC maximum hop count `k`. The tractable, bounded slice.
@@ -81,7 +81,7 @@ pub enum PathUpperBound {
 /// before it is known whether the engine can serve it. Unlike [`HiddenBoundedPath`]
 /// (which is bounded by construction) this can carry an [`PathUpperBound::Open`]
 /// upper bound, so [`plan_hidden_bounded_path`] can make the fail-closed decision
-/// explicit. ``
+/// explicit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HiddenPathRequest {
     /// The (public) alternation predicates one hop may traverse (`a == 1` is a bare
@@ -119,14 +119,14 @@ impl HiddenPathRequest {
 /// [`MAX_CHAIN_TUPLES`] cap is "statically large" — admissible, but a caller running
 /// under a tighter dataset cap may choose to refuse it. We warn once the projected
 /// tuple count exceeds `MAX_CHAIN_TUPLES / 16` (the top ~6% of the admissible
-/// range). ``
+/// range).
 const WARN_TUPLES_THRESHOLD: u64 = MAX_CHAIN_TUPLES >> 4;
 
 /// A successfully PLANNED hidden bounded path: the bounded operator form to run, the
 /// statically-projected enumeration size, and whether that size is large enough to
 /// warrant a planner warning. Produced by [`plan_hidden_bounded_path`]; carries the
 /// public cost inputs so [`BoundedPathPlan::comm_counter`] can model the operator's
-/// communication WITHOUT re-deriving anything secret. ``
+/// communication WITHOUT re-deriving anything secret.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoundedPathPlan {
     /// The bounded operator form to dispatch to [`super::eval_bounded_path_hidden`].
@@ -150,7 +150,7 @@ pub struct BoundedPathPlan {
 /// contributes `ℓ−1` internal-hop secure equalities. Returns `None` on `u64`
 /// overflow so the caller refuses with a controlled error (never a wrapping count).
 /// Mirrors `super::check_bounded_params`' tuple sum, extended with the per-tuple
-/// equality count for the cost model. ``
+/// equality count for the cost model.
 fn project_bounded(
     edge_count: usize,
     alternatives: usize,
@@ -195,7 +195,7 @@ fn project_bounded(
 ///   admissible range.
 ///
 /// `edge_count` is the PUBLIC federated edge count `|E|`; it gates only the cost
-/// projection, never any secret key. ``
+/// projection, never any secret key.
 pub fn plan_hidden_bounded_path(
     req: &HiddenPathRequest,
     edge_count: usize,
@@ -283,7 +283,6 @@ impl BoundedPathPlan {
     ///
     /// `bound` is the PUBLIC padded output bound `B`; it must be `>= 1` (the operator
     /// reveals exactly `B` slots). `parties` is the compute-party count `n`.
-    /// ``
     pub fn comm_counter(&self, parties: usize, bound: usize) -> CommCounter {
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS

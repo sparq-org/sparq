@@ -83,6 +83,7 @@ pub mod authz;
 pub mod body_limit;
 mod clock;
 pub mod error;
+pub(crate) mod http_date;
 /// Provider-issued WebIDs hosted OUTSIDE the pod — the identity host (the RSS adaptation of PSS
 /// `decisions/0020`; design in `research/lws-design-records.md` §4). The id-docs live in a reserved
 /// namespace the LDP surface refuses outright (no `.acl` can ever exist ⇒ no WAC grant can ever

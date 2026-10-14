@@ -992,11 +992,49 @@ fn corruption_satisfies(desc: CorruptionThreshold, req: CorruptionThreshold) -> 
     threshold_rank(desc) >= threshold_rank(req) && desc.threshold() >= req.threshold()
 }
 
+/// Inclusive offline preprocessing ceilings for a caller-declared workload.
+///
+/// Estimates use [`BackendInfo::requires_preprocessing`], not measured spending.
+/// A set ceiling rejects unknown estimates (including arithmetic overflow).
+/// An unset ceiling imposes no restriction on that quantity; both unset impose
+/// no cost restriction. Callers must update the workload when the plan changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreprocessingBudget {
+    /// Modeled multiplications, including those used by comparisons.
+    pub multiplications: u64,
+    /// Modeled ordering comparisons; their item costs are additional.
+    pub comparisons: u64,
+    /// Maximum offline items, or `None` for no item ceiling.
+    pub max_items: Option<u64>,
+    /// Maximum offline bytes per compute party, or `None` for no byte ceiling.
+    pub max_bytes_per_party: Option<u64>,
+}
+
+impl PreprocessingBudget {
+    fn refusal(&self, cost: PreprocessingCost) -> Option<String> {
+        let items = cost.estimate_items(self.multiplications, self.comparisons);
+        let bytes = cost.estimate_bytes_per_party(self.multiplications, self.comparisons);
+        let items_fit = self
+            .max_items
+            .is_none_or(|max| items.is_some_and(|n| n <= max));
+        let bytes_fit = self
+            .max_bytes_per_party
+            .is_none_or(|max| bytes.is_some_and(|n| n <= max));
+        if items_fit && bytes_fit {
+            None
+        } else {
+            Some(format!(
+                "items={items:?}, bytes-per-party={bytes:?} (None means unknown or overflow)"
+            ))
+        }
+    }
+}
+
 /// A federation's **security requirement**, stated UP FRONT, that a backend must
 /// meet before it is allowed to run any part of the SPARQL pipeline (research
-/// §1.3(b)). Each field is a *floor* on one axis of the three-axis
+/// §1.3(b)). The security fields are *floors* on the three-axis
 /// [`SecurityDescriptor`]; [`SecurityRequirement::satisfies`] checks a concrete
-/// [`BackendInfo`] against all of them at once.
+/// [`BackendInfo`] against all of them and the optional preprocessing ceiling.
 ///
 /// The whole point is **fail-closed negotiation**: a federation can REQUEST any
 /// requirement — including one no shipped backend can honour (dishonest-majority
@@ -1031,6 +1069,9 @@ pub struct SecurityRequirement {
     /// verifiable by an external party who did not run it (PVC certificate or a
     /// publicly-verifiable collaborative-zk proof).
     pub require_public_verifiability: bool,
+    /// Optional offline cost ceilings for a stated workload. `None` preserves
+    /// security-only selection; constructors default to `None`.
+    pub max_preprocessing: Option<PreprocessingBudget>,
 }
 
 impl SecurityRequirement {
@@ -1048,6 +1089,7 @@ impl SecurityRequirement {
             max_corruption: CorruptionThreshold::HonestMajority { t: 1 },
             require_cheater_attribution: false,
             require_public_verifiability: false,
+            max_preprocessing: None,
         }
     }
 
@@ -1067,6 +1109,7 @@ impl SecurityRequirement {
             max_corruption: CorruptionThreshold::DishonestMajority { t: 1 },
             require_cheater_attribution: true,
             require_public_verifiability: false,
+            max_preprocessing: None,
         }
     }
 
@@ -1075,7 +1118,8 @@ impl SecurityRequirement {
     /// adversary, output guarantee, corruption regime, plus the attribution and
     /// public-verifiability flags. This is the per-descriptor core shared by
     /// [`SecurityRequirement::satisfies`] (backend-level) and the per-operator
-    /// path. `[OPUS-4.8]`
+    /// path. This checks security only: a descriptor contains no preprocessing
+    /// cost. Use [`SecurityRequirement::satisfies`] or the registry for budgets.
     pub fn satisfied_by(&self, desc: &SecurityDescriptor) -> bool {
         // AXIS-1 honours the covert deterrence ε (not just the coarse tier rank)
         // and AXIS-3 honours the concrete corruption count `t` (not just the
@@ -1092,12 +1136,16 @@ impl SecurityRequirement {
 
     /// Check a backend's [`BackendInfo`] (its PRIMARY/headline reconstruction
     /// path) against this requirement. Equivalent to
-    /// [`SecurityRequirement::satisfied_by`] on `info.security`. For an operator
-    /// whose guarantee differs from the headline (the Shamir degree-`2t` equality
+    /// [`SecurityRequirement::satisfied_by`] on `info.security`, plus the optional
+    /// preprocessing budget. For an operator whose guarantee differs from the
+    /// headline (the Shamir degree-`2t` equality
     /// open), match against [`MpcBackend::operator_security`] instead — see
     /// [`BackendRegistry::select_for_operator`]. `[OPUS-4.8]`
     pub fn satisfies(&self, info: &BackendInfo) -> bool {
         self.satisfied_by(&info.security)
+            && self
+                .max_preprocessing
+                .is_none_or(|budget| budget.refusal(info.requires_preprocessing).is_none())
     }
 
     /// A compact human-readable rendering of the requirement, for the
@@ -1142,7 +1190,8 @@ impl SecurityRequirement {
 /// `B: MpcBackend` (research §1.3(b)). A federation registers the backends it is
 /// willing to run, then states a [`SecurityRequirement`];
 /// [`BackendRegistry::select`] returns the STRONGEST registered backend that
-/// meets it, or refuses with [`MpcError::NoBackendSatisfies`] — it NEVER returns
+/// meets it, or refuses with [`MpcError::NoBackendSatisfies`] or
+/// [`MpcError::PreprocessingBudgetRefused`] — it NEVER returns
 /// a backend that fails the requirement.
 ///
 /// Generic over the concrete backend type `B` (not `dyn MpcBackend`): the trait
@@ -1188,16 +1237,17 @@ impl<B: MpcBackend> BackendRegistry<B> {
         self.backends.is_empty()
     }
 
-    /// **Select the strongest registered backend that satisfies `req`, or FAIL
-    /// CLOSED.** Matches each backend's headline [`BackendInfo`] against `req`
-    /// (research §1.3(b)); among those that pass, returns the one whose
-    /// descriptor ranks highest (so a federation that asks only for the minimum
-    /// still gets the best available). If NONE passes — e.g. a
-    /// dishonest-majority-malicious request when only the semi-honest Shamir
-    /// backend is registered — returns [`MpcError::NoBackendSatisfies`] carrying
-    /// the unmet requirement and the number of backends rejected. It NEVER
-    /// downgrades: an unsatisfiable request is refused, not silently served.
-    /// `[OPUS-4.8]`
+    /// Select the strongest backend meeting the security floor and preprocessing budget.
+    ///
+    /// Matches each backend's headline [`BackendInfo`] against `req`; among
+    /// those that pass, returns the one whose descriptor ranks highest. Without
+    /// a budget, selection and registration-order tie breaking are unchanged.
+    /// An unsatisfiable request is refused, never silently downgraded.
+    ///
+    /// # Errors
+    /// Returns [`MpcError::NoBackendSatisfies`] if no backend meets the security
+    /// floor. Returns [`MpcError::PreprocessingBudgetRefused`] if security-qualified
+    /// backends all exceed a set ceiling or have unknown/overflowing estimates.
     pub fn select(&self, req: &SecurityRequirement) -> Result<&B, MpcError> {
         self.select_by(req, |b| b.info().security)
     }
@@ -1211,6 +1261,11 @@ impl<B: MpcBackend> BackendRegistry<B> {
     /// [`OperatorClass::LinearAggregate`] is robust, so a robustness requirement
     /// that the aggregate meets may be (correctly) refused for the equality join.
     /// Same fail-closed contract. `[OPUS-4.8]`
+    /// The backend's declared cost is evaluated for the budget's full workload;
+    /// the operator changes only the security descriptor used for selection.
+    ///
+    /// # Errors
+    /// Returns the same typed security or budget refusals as [`Self::select`].
     pub fn select_for_operator(
         &self,
         req: &SecurityRequirement,
@@ -1231,10 +1286,18 @@ impl<B: MpcBackend> BackendRegistry<B> {
         descriptor_of: impl Fn(&B) -> SecurityDescriptor,
     ) -> Result<&B, MpcError> {
         let mut best: Option<(&B, (u8, u8, u8))> = None;
+        let mut rejected = Vec::new();
         for b in &self.backends {
             let desc = descriptor_of(b);
             if !req.satisfied_by(&desc) {
                 continue;
+            }
+            if let Some(budget) = req.max_preprocessing {
+                let info = b.info();
+                if let Some(reason) = budget.refusal(info.requires_preprocessing) {
+                    rejected.push(format!("{}: {reason}", info.name));
+                    continue;
+                }
             }
             let rank = (
                 output_guarantee_rank(desc.output_guarantee),
@@ -1246,11 +1309,20 @@ impl<B: MpcBackend> BackendRegistry<B> {
                 _ => best = Some((b, rank)),
             }
         }
-        best.map(|(b, _)| b)
-            .ok_or_else(|| MpcError::NoBackendSatisfies {
-                requirement: req.describe(),
-                considered: self.backends.len(),
-            })
+        best.map(|(b, _)| b).ok_or_else(|| {
+            if let Some(budget) = req.max_preprocessing.filter(|_| !rejected.is_empty()) {
+                MpcError::PreprocessingBudgetRefused {
+                    requirement: req.describe(),
+                    budget,
+                    rejected,
+                }
+            } else {
+                MpcError::NoBackendSatisfies {
+                    requirement: req.describe(),
+                    considered: self.backends.len(),
+                }
+            }
+        })
     }
 }
 
@@ -1526,6 +1598,7 @@ mod selection_tests {
         name: &'static str,
         desc: SecurityDescriptor,
         robust_cheaters: usize,
+        cost: PreprocessingCost,
     }
 
     impl DescBackend {
@@ -1534,6 +1607,7 @@ mod selection_tests {
                 name,
                 desc,
                 robust_cheaters: 0,
+                cost: PreprocessingCost::None,
             }
         }
     }
@@ -1541,7 +1615,9 @@ mod selection_tests {
     impl MpcBackend for DescBackend {
         type Share = ();
         fn info(&self) -> BackendInfo {
-            BackendInfo::new(self.name, self.desc, self.robust_cheaters)
+            let mut info = BackendInfo::new(self.name, self.desc, self.robust_cheaters);
+            info.requires_preprocessing = self.cost;
+            info
         }
         fn share_private_input(&self, _h: &Holder) -> Result<Vec<()>, MpcError> {
             Err(MpcError::not_yet("secret-share private input", "stub"))
@@ -1594,6 +1670,231 @@ mod selection_tests {
         }
     }
 
+    fn budget() -> PreprocessingBudget {
+        // 3 * 2 + 2 * 5 = 16 items; 16 * 8 = 128 bytes per party.
+        PreprocessingBudget {
+            multiplications: 3,
+            comparisons: 2,
+            max_items: Some(16),
+            max_bytes_per_party: Some(128),
+        }
+    }
+
+    fn cost(bytes: Option<u64>) -> PreprocessingCost {
+        PreprocessingCost::PerOperation {
+            items_per_multiplication: 2,
+            items_per_comparison: 5,
+            bytes_per_item_per_party: bytes,
+        }
+    }
+
+    fn budget_registry(cost: PreprocessingCost) -> BackendRegistry<DescBackend> {
+        let mut reg = BackendRegistry::new();
+        let mut backend = DescBackend::new("candidate", honest_semi_abort());
+        backend.cost = cost;
+        reg.register(backend);
+        reg
+    }
+
+    fn budget_requirement(budget: PreprocessingBudget) -> SecurityRequirement {
+        SecurityRequirement {
+            max_preprocessing: Some(budget),
+            ..SecurityRequirement::v1_honest_majority_semi_honest()
+        }
+    }
+
+    fn assert_selected(reg: &BackendRegistry<DescBackend>, req: &SecurityRequirement, name: &str) {
+        assert_eq!(reg.select(req).unwrap().info().name, name);
+        assert_eq!(
+            reg.select_for_operator(req, OperatorClass::Comparison)
+                .unwrap()
+                .info()
+                .name,
+            name
+        );
+    }
+
+    fn assert_budget_refused(reg: &BackendRegistry<DescBackend>, req: &SecurityRequirement) {
+        for result in [
+            reg.select(req),
+            reg.select_for_operator(req, OperatorClass::Comparison),
+        ] {
+            let err = result.expect_err("cost must fail closed before selecting a backend");
+            assert!(err.to_string().contains("preprocessing budget"));
+            match err {
+                MpcError::PreprocessingBudgetRefused {
+                    requirement,
+                    budget,
+                    rejected,
+                } => {
+                    assert_eq!(requirement, req.describe());
+                    assert_eq!(Some(budget), req.max_preprocessing);
+                    assert_eq!(rejected.len(), 1);
+                    assert!(rejected[0].starts_with("candidate: items="));
+                    assert!(rejected[0].contains("bytes-per-party="));
+                }
+                other => panic!("expected a typed budget refusal, got {other:?}"),
+            }
+        }
+        assert!(!req.satisfies(&reg.backends[0].info()));
+        // Cost does not change whether the security-only descriptor meets the floor.
+        assert!(req.satisfied_by(&reg.backends[0].desc));
+    }
+
+    #[test]
+    fn preprocessing_no_budget_preserves_strength_and_tie_order() {
+        let mut reg = budget_registry(cost(Some(u64::MAX)));
+        for name in ["first-strong", "second-strong"] {
+            let mut backend = DescBackend::new(name, honest_malicious_god());
+            backend.cost = cost(None);
+            reg.register(backend);
+        }
+        let req = SecurityRequirement::v1_honest_majority_semi_honest();
+        assert_eq!(req.max_preprocessing, None);
+        assert_eq!(
+            SecurityRequirement::dishonest_majority_malicious().max_preprocessing,
+            None
+        );
+        assert_selected(&reg, &req, "first-strong");
+        assert!(req.satisfies(&reg.backends[1].info()));
+    }
+
+    #[test]
+    fn preprocessing_budget_satisfied_at_inclusive_ceilings() {
+        let reg = budget_registry(cost(Some(8)));
+        let req = budget_requirement(budget());
+        assert_selected(&reg, &req, "candidate");
+        assert!(req.satisfies(&reg.backends[0].info()));
+    }
+
+    #[test]
+    fn preprocessing_item_ceiling_exceeded_is_typed_refusal() {
+        let reg = budget_registry(cost(Some(8)));
+        let req = budget_requirement(PreprocessingBudget {
+            max_items: Some(15),
+            ..budget()
+        });
+        assert_budget_refused(&reg, &req);
+    }
+
+    #[test]
+    fn preprocessing_byte_ceiling_exceeded_is_typed_refusal() {
+        let reg = budget_registry(cost(Some(8)));
+        let req = budget_requirement(PreprocessingBudget {
+            max_bytes_per_party: Some(127),
+            ..budget()
+        });
+        assert_budget_refused(&reg, &req);
+    }
+
+    #[test]
+    fn preprocessing_unknown_bytes_with_ceiling_is_typed_refusal() {
+        let reg = budget_registry(cost(None));
+        assert_budget_refused(&reg, &budget_requirement(budget()));
+        // Even a zero workload cannot turn an unmodeled byte cost into known zero.
+        let zero = PreprocessingBudget {
+            multiplications: 0,
+            comparisons: 0,
+            ..budget()
+        };
+        assert_budget_refused(&reg, &budget_requirement(zero));
+    }
+
+    #[test]
+    fn preprocessing_unknown_bytes_without_byte_ceiling_is_selectable() {
+        let reg = budget_registry(cost(None));
+        let req = budget_requirement(PreprocessingBudget {
+            max_bytes_per_party: None,
+            ..budget()
+        });
+        assert_selected(&reg, &req, "candidate");
+        assert!(req.satisfies(&reg.backends[0].info()));
+    }
+
+    #[test]
+    fn preprocessing_only_fitting_backend_is_selected() {
+        let mut reg = budget_registry(cost(Some(9)));
+        let mut fitting = DescBackend::new("fits", honest_semi_abort());
+        fitting.cost = cost(Some(8));
+        reg.register(fitting);
+        let mut strongest = DescBackend::new("strong-but-unknown", honest_malicious_god());
+        strongest.cost = cost(None);
+        reg.register(strongest);
+        assert_selected(&reg, &budget_requirement(budget()), "fits");
+    }
+
+    #[test]
+    fn preprocessing_overflow_is_typed_refusal() {
+        for (multiplications, comparisons, bytes) in [
+            (u64::MAX, 0, Some(1)),     // multiplication estimate overflows
+            (0, u64::MAX, Some(1)),     // comparison estimate overflows
+            (u64::MAX / 2, 1, Some(1)), // sum overflows
+            (3, 2, Some(u64::MAX)),     // only byte estimate overflows
+        ] {
+            let reg = budget_registry(cost(bytes));
+            let workload = PreprocessingBudget {
+                multiplications,
+                comparisons,
+                max_items: Some(u64::MAX),
+                max_bytes_per_party: Some(u64::MAX),
+            };
+            assert_budget_refused(&reg, &budget_requirement(workload));
+            // A byte-only ceiling must also refuse an overflowing item estimate.
+            assert_budget_refused(
+                &reg,
+                &budget_requirement(PreprocessingBudget {
+                    max_items: None,
+                    ..workload
+                }),
+            );
+        }
+    }
+
+    #[test]
+    fn preprocessing_unset_ceilings_and_no_preprocessing_are_selectable() {
+        let reg = budget_registry(cost(None));
+        let unrestricted = PreprocessingBudget {
+            multiplications: u64::MAX,
+            comparisons: u64::MAX,
+            max_items: None,
+            max_bytes_per_party: None,
+        };
+        assert_selected(&reg, &budget_requirement(unrestricted), "candidate");
+        let reg = budget_registry(PreprocessingCost::None);
+        assert_selected(
+            &reg,
+            &budget_requirement(PreprocessingBudget {
+                max_items: Some(0),
+                max_bytes_per_party: Some(0),
+                ..unrestricted
+            }),
+            "candidate",
+        );
+    }
+
+    #[test]
+    fn preprocessing_budget_does_not_replace_security_refusal() {
+        let mut reg = budget_registry(PreprocessingCost::None);
+        let req = SecurityRequirement {
+            max_preprocessing: Some(budget()),
+            ..SecurityRequirement::dishonest_majority_malicious()
+        };
+        for empty in [false, true] {
+            if empty {
+                reg.backends.clear();
+            }
+            for result in [
+                reg.select(&req),
+                reg.select_for_operator(&req, OperatorClass::Comparison),
+            ] {
+                assert!(
+                    matches!(result, Err(MpcError::NoBackendSatisfies { considered, .. })
+                    if considered == reg.len())
+                );
+            }
+        }
+    }
+
     // === satisfies() per-axis matrix ========================================
 
     #[test]
@@ -1623,6 +1924,7 @@ mod selection_tests {
             max_corruption: CorruptionThreshold::DishonestMajority { t: 1 },
             require_cheater_attribution: false,
             require_public_verifiability: false,
+            max_preprocessing: None,
         };
         assert!(
             !req.satisfies(&honest),
@@ -1667,6 +1969,7 @@ mod selection_tests {
             max_corruption: CorruptionThreshold::HonestMajority { t: 1 },
             require_cheater_attribution: false,
             require_public_verifiability: false,
+            max_preprocessing: None,
         };
         // Without the flags, the plain semi-honest backend passes.
         let plain = BackendInfo::new("plain", honest_semi_abort(), 0);
@@ -1787,6 +2090,7 @@ mod selection_tests {
             name: "strong",
             desc: honest_malicious_god(),
             robust_cheaters: 1,
+            cost: PreprocessingCost::None,
         }); // GOD
         let req = SecurityRequirement {
             min_adversary: AdversaryModel::SemiHonest,
@@ -1794,6 +2098,7 @@ mod selection_tests {
             max_corruption: CorruptionThreshold::HonestMajority { t: 1 },
             require_cheater_attribution: false,
             require_public_verifiability: false,
+            max_preprocessing: None,
         };
         let chosen = reg.select(&req).expect("both satisfy the minimal floor");
         assert_eq!(
@@ -1839,6 +2144,7 @@ mod selection_tests {
             max_corruption: CorruptionThreshold::HonestMajority { t: 1 },
             require_cheater_attribution: false,
             require_public_verifiability: false,
+            max_preprocessing: None,
         };
 
         // Aggregate: satisfied (unanimous-abort meets the unanimous-abort floor).
@@ -1877,6 +2183,7 @@ mod selection_tests {
             max_corruption: CorruptionThreshold::HonestMajority { t: 1 },
             require_cheater_attribution: false,
             require_public_verifiability: false,
+            max_preprocessing: None,
         };
         let mk = |adv| {
             BackendInfo::new(
@@ -1915,6 +2222,7 @@ mod selection_tests {
             max_corruption: CorruptionThreshold::HonestMajority { t: 3 },
             require_cheater_attribution: false,
             require_public_verifiability: false,
+            max_preprocessing: None,
         };
         let mk = |threshold| {
             BackendInfo::new(

@@ -1,4 +1,4 @@
-//! SPARQL 1.1 Federated Query — `SERVICE` evaluation. [OPUS-4.8]
+//! SPARQL 1.1 Federated Query — `SERVICE` evaluation.
 //!
 //! `SERVICE <endpoint> { pattern }` evaluates `pattern` against a *remote* SPARQL
 //! endpoint and joins the returned solutions back into the surrounding query, per
@@ -100,7 +100,7 @@ use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple, Varia
 /// Shorthand for the streaming row-sink contract (bead sq-my8wd.4): called once per
 /// parsed solution row, positionally projected over the result's variables (`None` =
 /// unbound). Returning `Err` ABORTS the parse and the error string is propagated to
-/// the caller VERBATIM (so a sink can enforce its own resource policy). [FABLE-5]
+/// the caller VERBATIM (so a sink can enforce its own resource policy).
 ///
 /// A closure bound rather than a trait object: every call site is monomorphised, so
 /// the per-row delivery adds no dynamic dispatch (the #1303 perf-neutrality stance).
@@ -116,7 +116,7 @@ pub trait Transport {
 
 /// Streaming transport seam: returns the raw HTTP response body as a `Read` handle
 /// so the parser can consume it incrementally WITHOUT buffering it into a `String`
-/// first. (bead sq-my8wd.5) [OPUS-4.8] / [FABLE-5]
+/// first. (bead sq-my8wd.5) /
 ///
 /// The production `HttpTransport` implements this by handing back the ureq response
 /// body reader directly (with the same `SERVICE_MAX_BODY_BYTES` body cap enforced by
@@ -143,7 +143,7 @@ pub trait ReaderTransport {
 
 /// Adapter: wraps any `Transport` as a `ReaderTransport` by calling `fetch()` and
 /// returning an `io::Cursor` over the owned `String` body.  This gives test mocks the
-/// streaming path without any changes. [OPUS-4.8] (sq-my8wd.5)
+/// streaming path without any changes. (sq-my8wd.5)
 #[cfg(feature = "service")]
 pub struct TransportAsReader<'t, T: ?Sized>(pub &'t T);
 
@@ -164,7 +164,7 @@ impl<T: Transport + ?Sized> ReaderTransport for TransportAsReader<'_, T> {
 /// content-sniff + parse the response incrementally, and return the projected
 /// variable list. SILENT handling is the caller's responsibility (it owns the
 /// join-identity fallback, and must discard whatever the sink accumulated when this
-/// returns `Err`). [FABLE-5]
+/// returns `Err`).
 pub fn eval_remote_into<F: RowSink>(
     transport: &dyn Transport,
     endpoint: &str,
@@ -179,7 +179,7 @@ pub fn eval_remote_into<F: RowSink>(
 /// `transport`, receive the response body as a `Read` stream (NOT buffered into a
 /// `String`), content-sniff + parse it incrementally, and call `on_row` for each
 /// parsed solution. Peak memory stays below the response body size — the body is
-/// never materialised in full. [OPUS-4.8] (bead sq-my8wd.5) [FABLE-5]
+/// never materialised in full. (bead sq-my8wd.5)
 ///
 /// SILENT handling is the caller's responsibility (it owns the join-identity fallback,
 /// and must discard whatever the sink accumulated when this returns `Err`).
@@ -202,7 +202,7 @@ const NOT_A_RESULTS_DOCUMENT: &str =
 
 /// Parse a remote SELECT results document incrementally, content-sniffing JSON vs
 /// XML, delivering each row to `on_row` and returning the projected variables.
-/// [OPUS-4.8] / streaming form [FABLE-5] (sq-my8wd.4)
+/// / streaming form (sq-my8wd.4)
 ///
 /// The SPARQL Protocol lets a client advertise an `Accept` preference, but a server MAY
 /// ignore it; in practice some endpoints always emit SPARQL-Results-XML even when we ask
@@ -227,7 +227,7 @@ pub(crate) fn parse_results_into<F: RowSink>(
 /// Parse a remote SELECT results document from a `BufRead` stream WITHOUT buffering
 /// the full body. Content-sniffs the first non-whitespace byte (identical dispatch
 /// logic to [`parse_results_into`]) then delegates to the reader-based JSON or XML
-/// parser. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
+/// parser. (bead sq-my8wd.5)
 ///
 /// The `reader` is consumed incrementally; at no point is the whole body held in
 /// memory. A mid-stream I/O error is reported as a SERVICE failure.
@@ -273,7 +273,7 @@ pub(crate) fn parse_results_into_read<R: std::io::BufRead, F: RowSink>(
 }
 
 // ---------------------------------------------------------------------------
-// Bind-join (VALUES pushdown) into SERVICE — block size knob [OPUS-4.8] (sq-sjkj)
+// Bind-join (VALUES pushdown) into SERVICE — block size knob (sq-sjkj)
 // ---------------------------------------------------------------------------
 //
 // When a SERVICE sub-query is the right side of a join whose join variables are
@@ -342,7 +342,7 @@ mod bind_block {
     }
 }
 
-/// The bind-join block size in force for the current scope. [OPUS-4.8] (sq-sjkj)
+/// The bind-join block size in force for the current scope. (sq-sjkj)
 #[cfg(feature = "service")]
 pub fn bind_block_size() -> usize {
     bind_block::current()
@@ -372,7 +372,7 @@ pub fn with_service_bound_join_block_size<R>(n: usize, f: impl FnOnce() -> R) ->
 }
 
 // ---------------------------------------------------------------------------
-// Per-query remote-request cap for high-cardinality `SERVICE ?ep` [OPUS-4.8] (sq-b93pv)
+// Per-query remote-request cap for high-cardinality `SERVICE ?ep` (sq-b93pv)
 // ---------------------------------------------------------------------------
 //
 // A `SERVICE ?ep { P }` whose endpoint variable binds to MANY distinct endpoint IRIs
@@ -400,7 +400,7 @@ pub fn with_service_bound_join_block_size<R>(n: usize, f: impl FnOnce() -> R) ->
 // `SPARQ_SERVICE_REMOTE_CAP` env var.
 
 /// Stable marker substring embedded in the engine error string when a `SERVICE ?ep`
-/// query is refused for exceeding the per-query remote-request cap. [OPUS-4.8] (sq-b93pv)
+/// query is refused for exceeding the per-query remote-request cap. (sq-b93pv)
 ///
 /// Mirrors [`SERVICE_EGRESS_REFUSED_MARKER`]: a network-exposed host (`sparq-server`)
 /// can `contains()`-classify the refusal as a deliberate resource-policy decision (an
@@ -450,14 +450,14 @@ mod remote_cap {
 }
 
 /// The per-query SERVICE remote-request cap in force for the current scope, or `None`
-/// when no cap is active (the default). [OPUS-4.8] (sq-b93pv)
+/// when no cap is active (the default). (sq-b93pv)
 #[cfg(feature = "service")]
 pub fn remote_request_cap() -> Option<usize> {
     remote_cap::current()
 }
 
 /// Runs `f` with a ceiling of `n` distinct remote endpoints per `SERVICE ?ep`
-/// evaluation. [OPUS-4.8] (sq-b93pv)
+/// evaluation. (sq-b93pv)
 ///
 /// A `SERVICE ?ep { P }` whose endpoint variable binds to MANY distinct endpoint IRIs
 /// dispatches one remote bind-join per distinct endpoint. This OPT-IN cap bounds that
@@ -492,7 +492,7 @@ pub fn with_service_remote_request_cap<R>(n: usize, f: impl FnOnce() -> R) -> R 
 }
 
 /// Renders a `VALUES` block that binds `vars` to each tuple in `tuples`, in the
-/// SPARQL 1.1 syntax accepted inside a group graph pattern. [OPUS-4.8] (sq-sjkj)
+/// SPARQL 1.1 syntax accepted inside a group graph pattern. (sq-sjkj)
 ///
 /// Each term is emitted via its canonical N-Triples/Turtle form (oxrdf `Display`),
 /// which is valid SPARQL term syntax for IRIs and literals (the only kinds the
@@ -536,7 +536,7 @@ pub fn render_values_block(vars: &[Variable], tuples: &[Vec<Term>]) -> String {
 }
 
 /// Whether a `Term` may be pushed as a `VALUES` data value into a remote query.
-/// [OPUS-4.8] (sq-sjkj)
+/// (sq-sjkj)
 ///
 /// IRIs and literals are pushable (their `Display` is valid SPARQL term syntax and
 /// their identity is global). A **blank node** is NOT: blank-node labels are scoped
@@ -562,7 +562,7 @@ pub fn pushable_term(t: &Term) -> bool {
 /// positionally over `head.vars` and handed to `on_row` immediately, and the
 /// projected variables are returned. ASK results (`{"boolean": …}`) are reported as
 /// an error — `SERVICE { … }` always wraps a SELECT in our forwarding, so a boolean
-/// body indicates a misbehaving endpoint. [FABLE-5]
+/// body indicates a misbehaving endpoint.
 ///
 /// Result-equivalent to the previous whole-DOM parse (same rows, order, multiplicity
 /// and errors — pinned by the `streaming_equivalence` tests), with two documented
@@ -581,7 +581,7 @@ pub fn parse_srj_into<F: RowSink>(
 /// from a `Read` stream WITHOUT buffering the body, calling `on_row` per solution.
 /// Uses `serde_json::Deserializer::from_reader`, so the only in-memory state is one
 /// binding object at a time — identical streaming guarantees to [`parse_srj_into`],
-/// extended to the HTTP body read. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
+/// extended to the HTTP body read. (bead sq-my8wd.5)
 ///
 /// Result-semantics are IDENTICAL to [`parse_srj_into`] on the same byte sequence:
 /// same rows, order, multiplicity, and errors (the `srj_stream` seed logic is shared).
@@ -617,7 +617,7 @@ fn parse_srj_with<'de, R: serde_json::de::Read<'de>, F: RowSink>(
     st.finish()
 }
 
-/// Streaming serde seeds for SPARQL-Results-JSON (bead sq-my8wd.4). [FABLE-5]
+/// Streaming serde seeds for SPARQL-Results-JSON (bead sq-my8wd.4).
 ///
 /// The document shape is `{"head": {"vars": […]}, "results": {"bindings": […]}}`.
 /// Only the `bindings` ARRAY is result-sized, so that is the one place a streaming
@@ -941,7 +941,7 @@ pub fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
 /// A literal from a results binding's lexical value and its optional `xml:lang`, `its:dir`
 /// and `datatype`, shared by the SRJ and SRX readers.
 ///
-/// [OPUS-4.8] sq-s955: a SPARQL 1.2 result carries the RDF 1.2 base direction as a separate
+/// sq-s955: a SPARQL 1.2 result carries the RDF 1.2 base direction as a separate
 /// `its:dir` next to the bare language tag, so a language-tagged value with a valid direction
 /// becomes a `dirLangString`. The direction is validated by `dict::parse_base_direction`, the
 /// same rule the stored-slot, materialised and outbound paths use; an absent or invalid
@@ -993,7 +993,7 @@ fn triple_term(subject: Term, predicate: Term, object: Term) -> Result<Term, Str
 }
 
 // ---------------------------------------------------------------------------
-// SPARQL-Results-XML (SRX) parsing [OPUS-4.8] (bead sq-ycu)
+// SPARQL-Results-XML (SRX) parsing (bead sq-ycu)
 // ---------------------------------------------------------------------------
 //
 // The JSON path (`parse_srj`) is the preferred format, but some endpoints ignore the
@@ -1010,7 +1010,7 @@ fn triple_term(subject: Term, predicate: Term, object: Term) -> Result<Term, Str
 /// Resolve one XML entity reference name (as quick-xml 0.40 hands it out in a
 /// `Event::GeneralRef`, i.e. WITHOUT the surrounding `&`/`;`) to its replacement text:
 /// the five predefined named entities (`amp`/`lt`/`gt`/`quot`/`apos`) and numeric
-/// character references (`#38` decimal, `#x26` hex). [OPUS-4.8]
+/// character references (`#38` decimal, `#x26` hex).
 #[cfg(feature = "service")]
 fn resolve_xml_entity(name: &str) -> Result<String, String> {
     if let Some(rep) = quick_xml::escape::resolve_predefined_entity(name) {
@@ -1070,7 +1070,7 @@ impl SrxValue {
 /// `<boolean>` bodies are rejected (SERVICE always wraps a SELECT in our forwarding).
 /// The quick-xml event loop was already streaming; the only sq-my8wd.4 change is that
 /// a finished row goes to the sink instead of a collected `Vec` — same projection,
-/// same order, same errors. [FABLE-5]
+/// same order, same errors.
 ///
 /// In memory this borrows events straight from `text`; [`parse_srx_into_read`] runs the
 /// same loop over a `BufRead` stream, so a response body is never buffered into a
@@ -1392,7 +1392,7 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
                 }
             }
             // A `&amp;` / `&lt;` / numeric `&#38;` / `&#x26;` reference inside the open
-            // value element's text. (boolean bodies never carry references.) [OPUS-4.8]
+            // value element's text. (boolean bodies never carry references.)
             Event::GeneralRef(r) => {
                 if let Some(v) = cur_val.as_mut() {
                     let name = r.decode().map_err(|e| e.to_string())?;
@@ -1457,10 +1457,10 @@ fn parse_srx_events<E: SrxEvents, F: RowSink>(
 }
 
 // ---------------------------------------------------------------------------
-// SSRF egress policy (default-deny private / internal ranges) [OPUS-4.8]
+// SSRF egress policy (default-deny private / internal ranges)
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] (sq-iu0c) Stable marker substring embedded in EVERY engine error string
+/// (sq-iu0c) Stable marker substring embedded in EVERY engine error string
 /// for a SERVICE egress refusal (a host blocked by the allowlist / default-deny SSRF
 /// policy). It survives the transport-error wrapping in `HttpTransport::fetch`, so a
 /// network-exposed host (e.g. `sparq-server`) can `contains()`-classify the refusal as a
@@ -1500,7 +1500,7 @@ pub use sparq_core::net::is_forbidden_ip;
 /// as written in the SERVICE IRI authority) on this list is exempt from
 /// [`is_forbidden_ip`] — its resolved addresses are permitted even when private.
 ///
-/// ## Port scoping ([OPUS-4.8] sq-a7jw4)
+/// ## Port scoping (sq-a7jw4)
 ///
 /// An allowlist entry may be **host-level** (`sparql.internal`, `127.0.0.1`,
 /// `.example.org`) or **port-scoped** (`127.0.0.1:8053`, `sparql.internal:8443`,
@@ -1535,13 +1535,13 @@ pub use sparq_core::net::is_forbidden_ip;
 /// policy) preserves the original behaviour: public allowed, private denied.
 /// Installed for a scope via [`with_service_egress_allow`] /
 /// [`with_service_egress_policy`], mirroring `update.rs`'s `with_load_base`
-/// thread-local allowlist pattern. [OPUS-4.8] (sq-4w18)
+/// thread-local allowlist pattern. (sq-4w18)
 #[cfg(feature = "service")]
 pub(crate) mod egress_policy {
     use std::cell::RefCell;
     use std::collections::HashSet;
 
-    /// How the allowlist is interpreted for hosts NOT on it. [OPUS-4.8] (sq-4w18)
+    /// How the allowlist is interpreted for hosts NOT on it. (sq-4w18)
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) enum Mode {
         /// Hosts off the allowlist are reachable iff they resolve to a *public*
@@ -1585,7 +1585,7 @@ pub(crate) mod egress_policy {
         POLICY.with(|p| Guard(Some(std::mem::replace(&mut *p.borrow_mut(), next))))
     }
 
-    /// Split one allowlist entry into its `(host_pattern, port_constraint)`. [OPUS-4.8] (sq-a7jw4)
+    /// Split one allowlist entry into its `(host_pattern, port_constraint)`. (sq-a7jw4)
     ///
     /// An entry is **port-scoped** (`Some(port)`) only when it carries an *unambiguous*
     /// trailing `:port`; otherwise it is **host-level** (`None` = every port). The split is
@@ -1626,7 +1626,7 @@ pub(crate) mod egress_policy {
     }
 
     /// True iff `host_pattern` (an entry's host part, already lower-cased) matches the
-    /// lower-cased connect host `h`: exact, or a leading-dot suffix wildcard. [OPUS-4.8]
+    /// lower-cased connect host `h`: exact, or a leading-dot suffix wildcard.
     ///   * **exact** — the pattern equals the host (`"sparql.example.org"`).
     ///   * **suffix wildcard** — a pattern beginning with a dot (`".example.org"`)
     ///     matches any host ending in that suffix INCLUDING the bare apex
@@ -1640,7 +1640,7 @@ pub(crate) mod egress_policy {
         }
     }
 
-    /// True if `(host, port)` is permitted by the active allowlist. [OPUS-4.8] (sq-a7jw4)
+    /// True if `(host, port)` is permitted by the active allowlist. (sq-a7jw4)
     ///
     /// `host` is the SERVICE IRI authority host (case-insensitive); `port` is the
     /// authority's port (its explicit `:port` or the scheme default — the SAME port that is
@@ -1666,7 +1666,7 @@ pub(crate) mod egress_policy {
 
     /// True iff the single allowlist `entry` permits the lower-cased connect host `h` on
     /// `port` — the pure per-entry predicate `is_allowed`'s `.any(…)` closure applies to
-    /// every stored entry. [OPUS-4.8] (sq-a7jw4)
+    /// every stored entry. (sq-a7jw4)
     ///
     /// Factored out so the host:port parsing + matching semantics (port-0/overflow/
     /// IPv6-bracket/trailing-colon all handled by [`split_entry`]) live in ONE place and can
@@ -1680,7 +1680,7 @@ pub(crate) mod egress_policy {
     }
 
     /// True iff the allowlist `entry`'s HOST part matches the lower-cased connect host `h`,
-    /// IGNORING any port constraint — i.e. "is `h` named by this entry on *some* port". [OPUS-4.8]
+    /// IGNORING any port constraint — i.e. "is `h` named by this entry on *some* port".
     /// (sq-vbnyc). The fedclient guard's backward-compatible "is this host allowlisted at all"
     /// query reuses this so the host-pattern parsing (bracket-stripping, suffix wildcard) lives in
     /// ONE place rather than being re-derived client-side.
@@ -1695,7 +1695,7 @@ pub(crate) mod egress_policy {
     }
 }
 
-/// True iff a single SSRF-allowlist `entry` permits connecting to `host` on `port`. [OPUS-4.8] (sq-vbnyc)
+/// True iff a single SSRF-allowlist `entry` permits connecting to `host` on `port`. (sq-vbnyc)
 ///
 /// This is the engine's SERVICE-egress per-entry matching rule, exposed so the
 /// **`sparq-fedclient`** crate's independent host-level egress guard can adopt the SAME
@@ -1721,7 +1721,7 @@ pub fn allowlist_entry_permits(entry: &str, host: &str, port: u16) -> bool {
 }
 
 /// True iff a single SSRF-allowlist `entry`'s HOST part names `host`, IGNORING any port
-/// constraint — "is `host` reachable through this entry on *some* port". [OPUS-4.8] (sq-vbnyc)
+/// constraint — "is `host` reachable through this entry on *some* port". (sq-vbnyc)
 ///
 /// Companion to [`allowlist_entry_permits`] for the `sparq-fedclient` guard's backward-compatible
 /// "is this host allowlisted at all" query (where the dialled port is not yet known), so the
@@ -1816,7 +1816,7 @@ pub struct HttpTransport {
 
 /// The transport's own finite default round-trip timeout, used when no per-query
 /// budget deadline constrains it further. A slow/unreachable endpoint cannot hang the
-/// engine past this; SILENT then turns the timeout into an empty result. [OPUS-4.8]
+/// engine past this; SILENT then turns the timeout into an empty result.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 pub(crate) const DEFAULT_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -1824,14 +1824,14 @@ pub(crate) const DEFAULT_SERVICE_TIMEOUT: std::time::Duration = std::time::Durat
 /// within a few ms) would otherwise yield a zero/near-zero socket timeout that fails
 /// every dial instantly; we still give the round-trip a brief window, and the engine's
 /// own cooperative budget check (`exec::budget::check`) reports the over-deadline query
-/// as `"query budget exceeded (timeout)"` either way. [OPUS-4.8] (sq-d4p)
+/// as `"query budget exceeded (timeout)"` either way. (sq-d4p)
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 pub(crate) const MIN_SERVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(50);
 
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 impl HttpTransport {
     /// Construct a transport whose per-request timeout is the active query budget's
-    /// remaining time, capped by the built-in `DEFAULT_SERVICE_TIMEOUT`. [OPUS-4.8] (sq-d4p)
+    /// remaining time, capped by the built-in `DEFAULT_SERVICE_TIMEOUT`. (sq-d4p)
     ///
     /// `remaining` is the time left until the `QueryBudget`
     /// deadline (from `exec::budget::remaining_timeout`):
@@ -1862,7 +1862,7 @@ impl HttpTransport {
 /// ureq [`Resolver`](ureq::unversioned::resolver::Resolver) wrapper that enforces the SSRF egress
 /// policy on the *resolved* addresses (DNS-rebinding-safe), through [`resolve_vetted`] with the
 /// thread's active SERVICE allowlist and mode. A refusal surfaces to the caller as a SERVICE
-/// failure (and an empty result under SILENT). [OPUS-4.8]
+/// failure (and an empty result under SILENT).
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 #[derive(Debug)]
 struct EgressFilterResolver;
@@ -1875,7 +1875,7 @@ impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
         _config: &ureq::config::Config,
         _timeout: ureq::unversioned::transport::NextTimeout,
     ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        // [OPUS-4.8] (sq-4w18) STRICT (AllowlistOnly) mode — the server's policy — refuses any
+        // (sq-4w18) STRICT (AllowlistOnly) mode — the server's policy — refuses any
         // host not on the allowlist BEFORE resolving DNS. An empty allowlist = deny ALL SERVICE.
         let strict = egress_policy::mode() == egress_policy::Mode::AllowlistOnly;
         resolve_vetted(uri, egress_policy::is_allowed, strict, |refusal| match refusal {
@@ -1915,7 +1915,7 @@ pub enum EgressRefusal<'a> {
 }
 
 /// The SSRF-vetted addresses for a ureq-3 resolver: the one implementation behind the engine's
-/// SERVICE transport and every sparq-fedclient HTTP client. [OPUS-4.8] sq-g2xs / sq-a7jw4.
+/// SERVICE transport and every sparq-fedclient HTTP client. sq-g2xs / sq-a7jw4.
 ///
 /// Derives `host:port` from the URI authority (scheme default port when absent), asks
 /// `allowed(host, port)` whether the bare lowercased host is allowlisted on the port actually
@@ -1958,7 +1958,7 @@ pub fn resolve_vetted(
 /// `host:port` (for resolution) + bare host (for the allowlist key, IPv6 brackets stripped,
 /// lowercased) + the numeric `port` (for the port-scoped allowlist check, sq-a7jw4) from a
 /// ureq-3 request [`Uri`](ureq::http::Uri). `port` falls back to the scheme default (443 for
-/// https, 80 otherwise). [OPUS-4.8] sq-g2xs / sq-a7jw4.
+/// https, 80 otherwise). sq-g2xs / sq-a7jw4.
 ///
 /// The returned `port` is exactly the port `to_socket_addrs(host:port)` dials for EVERY
 /// resolved address, so a port-scoped allowlist entry is checked against the port actually
@@ -1983,7 +1983,7 @@ fn uri_host_port(uri: &ureq::http::Uri) -> Option<(String, String, u16)> {
 }
 
 /// Wrap a refusal reason as a `PermissionDenied` [`ureq::Error::Io`], preserving both the kind
-/// (the egress tests assert on it) and the reason text. [OPUS-4.8].
+/// (the egress tests assert on it) and the reason text.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 fn egress_refused(reason: String) -> ureq::Error {
     ureq::Error::Io(std::io::Error::new(
@@ -2018,7 +2018,7 @@ fn filter_addrs(
 }
 
 /// Capacity of ureq-3's [`ResolvedSocketAddrs`](ureq::unversioned::resolver::ResolvedSocketAddrs)
-/// (`ArrayVec<SocketAddr, 16>`). Matches ureq's own `MAX_ADDRS`. [OPUS-4.8] sq-g2xs.
+/// (`ArrayVec<SocketAddr, 16>`). Matches ureq's own `MAX_ADDRS`. sq-g2xs.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 const RESOLVED_ADDRS_CAP: usize = 16;
 
@@ -2031,12 +2031,15 @@ impl HttpTransport {
         endpoint: &str,
         query: &str,
     ) -> Result<ureq::http::Response<ureq::Body>, String> {
-        // [OPUS-4.8] sq-g2xs: ureq-3 builds an `Agent` from a `Config` + a custom resolver via
+        // sq-g2xs: ureq-3 builds an `Agent` from a `Config` + a custom resolver via
         // `Agent::with_parts`; the resolver carries the default-deny SSRF policy exactly as in
         // ureq 2 (the resolved-and-vetted IP is the dialled IP — no DNS-rebinding re-resolve).
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .user_agent(concat!("sparq-engine/", env!("CARGO_PKG_VERSION")))
+            // No proxy from the environment: through a proxy, the proxy resolves and dials the
+            // destination, so the resolver below would vet the proxy's address instead of it.
+            .proxy(None)
             .build();
         let agent = ureq::Agent::with_parts(
             config,
@@ -2049,7 +2052,7 @@ impl HttpTransport {
         agent
             .post(endpoint)
             // Prefer JSON, but accept XML — some endpoints ignore `Accept` and only emit
-            // SPARQL-Results-XML, which `parse_results` now handles (bead sq-ycu). [OPUS-4.8]
+            // SPARQL-Results-XML, which `parse_results` now handles (bead sq-ycu).
             .header(
                 "Accept",
                 "application/sparql-results+json, application/sparql-results+xml;q=0.9",
@@ -2083,7 +2086,7 @@ impl Transport for HttpTransport {
 /// `ReaderTransport` for `HttpTransport`: returns the ureq response body as a byte
 /// stream WITHOUT calling `read_to_string`, so the body is NEVER fully buffered as a
 /// `String`. The same `SERVICE_MAX_BODY_BYTES` cap is enforced by the limit-wrapped
-/// reader. (bead sq-my8wd.5) [OPUS-4.8] [FABLE-5]
+/// reader. (bead sq-my8wd.5)
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 impl ReaderTransport for HttpTransport {
     fn fetch_reader<'a>(
@@ -2103,7 +2106,7 @@ impl ReaderTransport for HttpTransport {
 
 /// Max bytes read from a SERVICE response body. ureq-3's default `read_to_string` cap is 10 MiB;
 /// a federated SELECT can legitimately exceed that, so we raise it to a generous-but-finite bound
-/// (memory is still bounded — a runaway endpoint cannot OOM the engine). [OPUS-4.8] sq-g2xs.
+/// (memory is still bounded — a runaway endpoint cannot OOM the engine). sq-g2xs.
 #[cfg(all(feature = "service", not(target_arch = "wasm32")))]
 const SERVICE_MAX_BODY_BYTES: u64 = 1024 * 1024 * 1024;
 
@@ -2157,7 +2160,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // [OPUS-4.8] (sq-6vshe.4 / sq-d4p) Per-request timeout wired to the QueryBudget
+    // (sq-6vshe.4 / sq-d4p) Per-request timeout wired to the QueryBudget
     // deadline. MOVED here from sparq-engine's exec.rs WITH the `HttpTransport` it
     // exercises (seam A2): `timeout_for_test` is `#[cfg(test)]`, so this test only
     // compiles in THIS crate's own test build. The caller side (`budget::remaining_timeout`
@@ -2239,7 +2242,7 @@ mod tests {
         assert_eq!(rel.rows[0][0], Some(Term::Literal(want)));
     }
 
-    /// [OPUS-4.8] sq-s955: inbound parity for the outbound `its:dir` emission. A SERVICE
+    /// sq-s955: inbound parity for the outbound `its:dir` emission. A SERVICE
     /// endpoint's results carry the RDF 1.2 base direction as a SEPARATE `its:dir` field
     /// next to the bare `xml:lang` tag; the parser must reconstruct the `dirLangString` so
     /// the direction survives INTO the local join (it was previously dropped). This mirrors
@@ -2271,7 +2274,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-4.8] sq-s955: an ABSENT or INVALID `its:dir` degrades to a PLAIN language-tagged
+    /// sq-s955: an ABSENT or INVALID `its:dir` degrades to a PLAIN language-tagged
     /// literal — the same decision `dict::split_lang_dir` / `reconstruct_ref` make for a
     /// malformed stored slot — so the inbound, stored-slot, materialised and outbound paths
     /// all AGREE on `(lang, dir)`. (An uppercase `LTR` or any other value is not a direction.)
@@ -2311,7 +2314,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // SPARQL-Results-XML (SRX) parsing [OPUS-4.8] (bead sq-ycu)
+    // SPARQL-Results-XML (SRX) parsing (bead sq-ycu)
     // ---------------------------------------------------------------------
 
     const SRX_NS: &str = "http://www.w3.org/2005/sparql-results#";
@@ -2721,13 +2724,13 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Bind-join block-size knob direct unit tests [OPUS-4.8] (sq-sjkj)
+    // Bind-join block-size knob direct unit tests (sq-sjkj)
     // ------------------------------------------------------------------
 
     /// `bind_block_size()` returns the default when no scope is installed.
     #[test]
     fn bind_block_size_returns_default_outside_scope() {
-        // [OPUS-4.8] sq-sjkj: direct coverage for the public accessor.
+        // sq-sjkj: direct coverage for the public accessor.
         // The default is DEFAULT_BIND_BLOCK (50) when no override is active.
         let s = bind_block_size();
         assert_eq!(s, DEFAULT_BIND_BLOCK, "default bind-block size must be DEFAULT_BIND_BLOCK");
@@ -2736,7 +2739,7 @@ mod tests {
     /// `with_service_bound_join_block_size` scopes the override and restores it.
     #[test]
     fn with_service_bound_join_block_size_scopes_and_restores() {
-        // [OPUS-4.8] sq-sjkj: direct coverage for the scoped override entry point.
+        // sq-sjkj: direct coverage for the scoped override entry point.
         let before = bind_block_size();
         with_service_bound_join_block_size(999, || {
             assert_eq!(bind_block_size(), 999, "override must be active inside scope");
@@ -2748,7 +2751,7 @@ mod tests {
     /// `with_service_bound_join_block_size(0, …)` is clamped to 1.
     #[test]
     fn with_service_bound_join_block_size_zero_is_clamped_to_one() {
-        // [OPUS-4.8] sq-sjkj: a zero block size is clamped to 1 so a tuple still
+        // sq-sjkj: a zero block size is clamped to 1 so a tuple still
         // gets pushed one-per-request rather than silently disabling the knob.
         with_service_bound_join_block_size(0, || {
             assert_eq!(bind_block_size(), 1, "zero must be clamped to 1");
@@ -2756,13 +2759,13 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // Per-query remote-request cap direct unit tests [OPUS-4.8] (sq-b93pv)
+    // Per-query remote-request cap direct unit tests (sq-b93pv)
     // ------------------------------------------------------------------
 
     /// `remote_request_cap()` returns `None` when no scope is installed.
     #[test]
     fn remote_request_cap_returns_none_outside_scope() {
-        // [OPUS-4.8] sq-b93pv: direct coverage for the public accessor.
+        // sq-b93pv: direct coverage for the public accessor.
         // The default is uncapped (None) when no override is active.
         let cap = remote_request_cap();
         assert_eq!(cap, None, "default remote-request cap must be None (uncapped)");
@@ -2771,7 +2774,7 @@ mod tests {
     /// `with_service_remote_request_cap` scopes the cap and restores it.
     #[test]
     fn with_service_remote_request_cap_scopes_and_restores() {
-        // [OPUS-4.8] sq-b93pv: direct coverage for the scoped cap entry point.
+        // sq-b93pv: direct coverage for the scoped cap entry point.
         assert_eq!(remote_request_cap(), None); // no prior override
         with_service_remote_request_cap(8, || {
             assert_eq!(remote_request_cap(), Some(8), "cap must be active inside scope");
@@ -2810,7 +2813,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // SSRF egress policy [OPUS-4.8] (bead sq-2v6f)
+    // SSRF egress policy (bead sq-2v6f)
     // ---------------------------------------------------------------------
 
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -2819,7 +2822,7 @@ mod tests {
         IpAddr::V4(Ipv4Addr::new(a, b, c, d))
     }
 
-    /// [OPUS-4.8] (sq-a7jw4) Host-level `is_allowed` check at a representative port. A
+    /// (sq-a7jw4) Host-level `is_allowed` check at a representative port. A
     /// host-level (no-`:port`) entry matches EVERY port, so any port reads the same — these
     /// host-level tests use 80. Port-scoping tests call `is_allowed(host, port)` directly.
     fn allowed(host: &str) -> bool {
@@ -2924,7 +2927,7 @@ mod tests {
 
     #[test]
     fn strict_allowlist_only_mode_scopes_and_restores() {
-        // [OPUS-4.8] (sq-4w18) Strict mode: only listed hosts are allowed; the mode
+        // (sq-4w18) Strict mode: only listed hosts are allowed; the mode
         // and allowlist both restore on scope exit.
         assert_eq!(egress_policy::mode(), egress_policy::Mode::DenyPrivate);
         assert!(!allowed("a.example"));
@@ -2940,7 +2943,7 @@ mod tests {
 
     #[test]
     fn suffix_wildcard_allowlist_matches_apex_and_subdomains() {
-        // [OPUS-4.8] (sq-4w18) A ".example.org" entry matches the apex and any
+        // (sq-4w18) A ".example.org" entry matches the apex and any
         // subdomain, but not a host that merely ends in the same letters.
         with_service_egress_policy(true, [".example.org".to_string()], || {
             assert!(allowed("example.org")); // apex
@@ -2975,7 +2978,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // Port-scoped allowlist entries [OPUS-4.8] (bead sq-a7jw4)
+    // Port-scoped allowlist entries (bead sq-a7jw4)
     // ---------------------------------------------------------------------
 
     #[test]
@@ -3116,7 +3119,7 @@ mod tests {
     mod resolver {
         use super::*;
 
-        /// [OPUS-4.8] sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building
+        /// sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building
         /// the `http://<netloc>/` URI the resolver parses (default `Config` + no-deadline timeout).
         fn resolve_netloc(
             netloc: &str,
@@ -3177,7 +3180,7 @@ mod tests {
             assert!(addrs[0].ip().is_loopback());
         }
 
-        // [OPUS-4.8] (sq-4w18) Strict allowlist-only mode — the server's policy.
+        // (sq-4w18) Strict allowlist-only mode — the server's policy.
 
         #[test]
         fn strict_refuses_public_host_off_the_allowlist() {
@@ -3225,7 +3228,7 @@ mod tests {
             assert_eq!(addrs.len(), 1);
         }
 
-        // [OPUS-4.8] (sq-a7jw4) Port-scoped allowlist entries at the resolver — the real
+        // (sq-a7jw4) Port-scoped allowlist entries at the resolver — the real
         // egress path, not just the `is_allowed` predicate.
 
         #[test]
@@ -3311,7 +3314,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // Streaming / bounded result consumption [FABLE-5] (bead sq-my8wd.4)
+    // Streaming / bounded result consumption (bead sq-my8wd.4)
     // ---------------------------------------------------------------------
 
     mod streaming_equivalence {
@@ -3615,7 +3618,7 @@ mod tests {
         }
 
         // ------------------------------------------------------------------
-        // Direct coverage for the reader-seam path (sq-my8wd.5) [OPUS-4.8]
+        // Direct coverage for the reader-seam path (sq-my8wd.5)
         // ------------------------------------------------------------------
 
         /// `eval_remote_into_read` round-trips through the `TransportAsReader`
@@ -3700,14 +3703,14 @@ mod tests {
         }
 
         // ------------------------------------------------------------------
-        // Reader-seam error paths (sq-my8wd.5) [OPUS-4.8]
+        // Reader-seam error paths (sq-my8wd.5)
         // ------------------------------------------------------------------
 
         /// `parse_results_into_read` on an EMPTY body returns an error matching
         /// the non-reader path, not a panic or silent empty result.
         #[test]
         fn parse_results_into_read_empty_body_is_error() {
-            // [OPUS-4.8] sq-my8wd.5 coverage: the `buf.is_empty()` early-return
+            // sq-my8wd.5 coverage: the `buf.is_empty()` early-return
             // branch in `parse_results_into_read` (the empty-response path).
             let err = parse_results_into_read(std::io::BufReader::new(b"".as_ref()),
                 &mut |_r| Ok(())).unwrap_err();
@@ -3721,7 +3724,7 @@ mod tests {
         /// returns the sniff error — mirrors `parse_results_into`'s rejection.
         #[test]
         fn parse_results_into_read_unknown_format_is_error() {
-            // [OPUS-4.8] sq-my8wd.5 coverage: the `_ => Err(…)` sniff branch in
+            // sq-my8wd.5 coverage: the `_ => Err(…)` sniff branch in
             // `parse_results_into_read` (the unrecognised-format path).
             let err = parse_results_into_read(std::io::BufReader::new(b"plain text".as_ref()),
                 &mut |_r| Ok(())).unwrap_err();
@@ -3742,7 +3745,7 @@ mod tests {
         /// routes correctly to the SRJ parser — exercises the whitespace-consume loop.
         #[test]
         fn parse_results_into_read_leading_whitespace_routes_srj() {
-            // [OPUS-4.8] sq-my8wd.5 coverage: the `None` (all-whitespace-chunk)
+            // sq-my8wd.5 coverage: the `None` (all-whitespace-chunk)
             // branch in `parse_results_into_read`, then routing to SRJ.
             let body = b"   \n\t {\"head\":{\"vars\":[\"x\"]},\"results\":{\"bindings\":[]}}";
             let mut n = 0usize;
@@ -3754,7 +3757,7 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // Coverage-raise tests (sq-qcnn.34) [SONNET-4.6]
+    // Coverage-raise tests (sq-qcnn.34)
     //
     // Named regions: SPARQL-Results JSON/XML parse paths, bound-join VALUES
     // rendering, HttpTransport timeout math, SSRF egress-policy scoping.
@@ -3955,7 +3958,7 @@ mod tests {
     /// The five predefined XML entities resolve to their exact characters.
     #[test]
     fn resolve_xml_entity_predefined_named_entities() {
-        // [GPT-5.6] (sq-5kh4d) Directly cover the named-entity branch rather than
+        // (sq-5kh4d) Directly cover the named-entity branch rather than
         // relying only on the SRX parser integration test.
         for (name, expected) in [
             ("amp", "&"),
@@ -4446,7 +4449,7 @@ mod tests {
     // methods — covering the ureq-3 code paths that are unreachable from the
     // canned-transport tests (`fetch`, `fetch_reader`, `Ok` arms).
     // The server is single-shot (one connection), no persistent resources.
-    // [SONNET-4.6] sq-qcnn.34
+    // sq-qcnn.34
 
     #[cfg(not(target_arch = "wasm32"))]
     mod http_transport_tests {

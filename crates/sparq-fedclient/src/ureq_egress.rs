@@ -1,4 +1,4 @@
-//! Shared ureq-3 SSRF-resolver helpers. [OPUS-4.8] sq-g2xs.
+//! Shared ureq-3 SSRF-resolver helpers. sq-g2xs.
 //!
 //! ureq 3 (the migration off the unmaintained `rustls-pemfile`, RUSTSEC-2025-0134) changed the
 //! [`Resolver`](ureq::unversioned::resolver::Resolver) trait: it now takes a parsed
@@ -21,7 +21,7 @@
 /// SSRF resolvers call this instead of a bare `allow.contains(host)`, so a PORT-SCOPED allowlist
 /// entry (`host:port`) re-opens a private host ONLY on its exact dialled port — byte-for-byte the
 /// same host:port matching the engine guard applies (one source of truth, bead sq-vbnyc). A
-/// host-level entry (no `:port`) still re-opens every port (backward compatible). [OPUS-4.8].
+/// host-level entry (no `:port`) still re-opens every port (backward compatible).
 pub(crate) fn allowlist_permits(
     allow: &std::collections::HashSet<String>,
     host: &str,
@@ -106,13 +106,16 @@ impl GuardedHttp {
         }
     }
 
-    /// A ureq agent with the global timeout, the sparq-fedclient user agent and the SSRF
-    /// resolver. ureq connects only to the addresses the resolver returns, so the vetted IP is
+    /// A ureq agent with the global timeout, the sparq-fedclient user agent, no environment
+    /// proxy and the SSRF resolver. ureq connects only to the addresses the resolver returns, so the vetted IP is
     /// the dialled IP and there is no DNS-rebinding re-resolve window (sq-25xk, sq-g2xs).
     pub(crate) fn agent(&self) -> ureq::Agent {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(self.timeout))
             .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
+            // No proxy from the environment, so the vetted address is the dialled address (a
+            // proxy would resolve the destination itself, past the resolver).
+            .proxy(None)
             .build();
         let resolver = EgressFilterResolver {
             allow_private: std::sync::Arc::clone(&self.allow_private),
@@ -157,7 +160,7 @@ impl GuardedHttp {
     }
 }
 
-// [FABLE-5] sq-3dyje.6 (mutation-kill): direct unit tests for this `pub(crate)` module. The
+// sq-3dyje.6 (mutation-kill): direct unit tests for this `pub(crate)` module. The
 // shared resolve's own tests (URI parse, address filter, refusal kinds) live with
 // `resolve_vetted` in sparq-engine-service.
 #[cfg(test)]
