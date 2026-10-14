@@ -48,8 +48,8 @@ use sparq_zk_compose::build::{
 };
 use sparq_zk_compose::driver::{CircuitProver, DriverError};
 use sparq_zk_compose::dispatch::{
-    check_lane_const_for_member, check_lane_member_pairing, resolve_circuit,
-    resolve_circuit_for_use, DispatchError,
+    check_lane_const_for_member, check_lane_member_pairing, check_lane_member_pairing_for_use,
+    resolve_circuit, resolve_circuit_for_use, DispatchError,
 };
 use sparq_zk_compose::manifest::{
     boolean_datatype_const, boolean_lane_const_v2, CircuitId, FieldHex, FilterOp, ProofInputs,
@@ -1662,4 +1662,49 @@ fn the_prefilter_rejects_a_value_lane_sub_proof_no_query_edge_binds() {
         Err(CheckError::UnboundValueLaneSubProof { proof }) => assert_eq!(proof, 0),
         other => panic!("expected the unbound-value-lane refusal, got {:?}", other),
     }
+}
+
+/// `check_lane_member_pairing_for_use` is the `ProofInputs`-level form of the
+/// decision, and the use axis is live in it: the V1 boolean lane's inputs are
+/// accepted for re-proving an already-issued graph and refused for a fresh one,
+/// while the V2 boolean lane's inputs are accepted either way.
+#[test]
+fn the_inputs_level_pairing_check_is_use_aware() {
+    let v1 = ProofInputs::FilterValueDl {
+        id: CircuitId::FilterValueDl,
+        operand_enc: FieldHex(field_to_hex(&Fr::from(1u64))),
+        op: FilterOp::Eq,
+        bound: 1,
+        datatype_const: boolean_datatype_const(),
+        expected: true,
+    };
+    assert_eq!(
+        check_lane_member_pairing_for_use(&v1, MethodUse::LegacyAlreadyIssued),
+        Ok(())
+    );
+    assert!(matches!(
+        check_lane_member_pairing_for_use(&v1, MethodUse::NewIssuance),
+        Err(DispatchError::LegacyLaneConstForIssuance { .. })
+    ));
+
+    let v2 = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
+        .expect("the V2 boolean builder accepts a canonical literal")
+        .inputs;
+    for use_ in [MethodUse::LegacyAlreadyIssued, MethodUse::NewIssuance] {
+        assert_eq!(check_lane_member_pairing_for_use(&v2, use_), Ok(()));
+    }
+
+    // A non-value-lane input carries no datatype_const, so there is no pairing to
+    // decide and it is accepted under both uses.
+    let scan_free = ProofInputs::FilterInt {
+        id: CircuitId::FilterInt { d: 2 },
+        operand_enc: FieldHex(field_to_hex(&Fr::from(5u64))),
+        op: FilterOp::Lt,
+        bound: 50,
+        expected: true,
+    };
+    assert_eq!(
+        check_lane_member_pairing_for_use(&scan_free, MethodUse::NewIssuance),
+        Ok(())
+    );
 }
