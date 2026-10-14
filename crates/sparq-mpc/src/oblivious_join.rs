@@ -310,9 +310,10 @@ pub fn oblivious_set_output(
 /// ([`shamir::degree_reduce_through`]) before the shuffle, with step 5's open
 /// moved to degree `t` to match. That path is **unreachable today** — the only
 /// dealer-less source refuses `vss_own_input`, so this function already fails
-/// closed on the selector sharing long before the shuffle — and it is a tracked
-/// follow-up for when dealer-less VSS lands. The dealer path is deliberately left
-/// un-reduced: adding a reduction there would change what the simulation draws.
+/// closed on the selector sharing long before the shuffle — and it is a
+/// prerequisite of the dealer-less VSS step (#6117), not work this stage can do
+/// on its own. The dealer path is deliberately left un-reduced: adding a
+/// reduction there would change what the simulation draws.
 pub(crate) fn oblivious_set_output_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
