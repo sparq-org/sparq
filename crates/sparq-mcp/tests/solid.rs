@@ -2086,10 +2086,10 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
 }
 
 /// A writer who empties a container whose access-control resource outlives it, and then
-/// writes into it again, is not the container's creator: the surviving rules keep
-/// governing it, and their `acp:CreatorAgent` grants go to nobody.
+/// writes into it again, is not the container's creator: its creator is kept with that
+/// resource, and keeps the Control its rules give the creator.
 #[test]
-fn acp_a_container_brought_back_under_its_surviving_rules_has_no_new_creator() {
+fn acp_a_container_brought_back_under_its_surviving_rules_keeps_its_creator() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
     const ACL: &str = "http://www.w3.org/ns/auth/acl#";
     const ALICE: &str = "https://alice.ex/card#me";
@@ -2148,12 +2148,25 @@ fn acp_a_container_brought_back_under_its_surviving_rules_has_no_new_creator() {
     assert!(!is_err, "bob writes /a/y: {text}");
     assert_eq!(
         s.store().acp_provenance().creator("https://pod.ex/a/"),
-        None
+        Some(ALICE),
+        "/a/ keeps its creator with its access-control resource"
     );
     assert!(
         !s.store()
             .decide(&bob, "https://pod.ex/a/", sparq_solid::Mode::Control)
             .allow,
         "bob gains no Control on /a/"
+    );
+    let alice = sparq_solid::Session {
+        agent: Some(ALICE),
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    assert!(
+        s.store()
+            .decide(&alice, "https://pod.ex/a/", sparq_solid::Mode::Control)
+            .allow,
+        "alice keeps Control on /a/"
     );
 }

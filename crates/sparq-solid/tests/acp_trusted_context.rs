@@ -398,7 +398,7 @@ fn a_resource_removed_outside_an_update_is_forgotten_at_the_next_rebuild() {
 }
 
 #[test]
-fn a_container_left_with_only_its_access_control_document_is_forgotten() {
+fn a_container_left_with_only_its_access_control_document_keeps_its_creator() {
     const BOX: &str = "https://pod.ex/box/";
     let acr = format!("{BOX}.acr");
     let data = format!("<{BOX}x#it> <https://ex.dev/ns#k> \"v\" <{BOX}x> .\n");
@@ -436,8 +436,8 @@ fn a_container_left_with_only_its_access_control_document_is_forgotten() {
         .materialize_acp()
         .expect("rebuild with the container again");
     assert!(
-        !store.decide(&alice(), BOX, Mode::Read).allow,
-        "a container that held only its access-control document was gone"
+        store.decide(&alice(), BOX, Mode::Read).allow,
+        "the container's creator is kept with its access-control document"
     );
 }
 

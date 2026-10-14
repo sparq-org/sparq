@@ -4294,6 +4294,9 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
+    /// Set when a refused append could not be cut back: the journal may then hold a frame
+    /// that was reported as not committed, so it takes no further frame until reopened.
+    poisoned: bool,
 }
 
 #[cfg(feature = "mmap")]
@@ -4309,8 +4312,14 @@ impl TxnJournal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(Self::path(dir))?;
-        Ok(TxnJournal { file })
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(Self::path(dir))?;
+        Ok(TxnJournal {
+            file,
+            poisoned: false,
+        })
     }
 
     /// Frames `records` (each `(is_insert, slot, triple)`) into ONE checksummed frame and fsyncs —
@@ -4345,14 +4354,26 @@ impl TxnJournal {
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
         // A refused commit leaves no frame behind for a later replay to apply: cut the journal
-        // back to where it was (best effort; replay still discards a torn tail).
+        // back to where it was. Should that fail too, the journal refuses every later frame
+        // (until it is reopened and replayed), so nothing is appended after what it holds.
+        if self.poisoned {
+            return Err(std::io::Error::other(
+                "txn journal holds a frame it could not cut back; reopen the graph",
+            ));
+        }
         let start = self.file.metadata()?.len();
         let written = self
             .file
             .write_all(&buf)
             .and_then(|()| self.file.sync_data());
-        if written.is_err() && self.file.set_len(start).is_ok() {
-            let _ = self.file.sync_data();
+        if written.is_err()
+            && self
+                .file
+                .set_len(start)
+                .and_then(|()| self.file.sync_data())
+                .is_err()
+        {
+            self.poisoned = true;
         }
         written
     }

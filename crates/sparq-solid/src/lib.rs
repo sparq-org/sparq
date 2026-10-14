@@ -606,9 +606,11 @@ impl PodStore {
     /// Rebuild the auth view (ACP when `acp`, else WAC) after a caller changed `graph`
     /// directly since it took `before` ([`PodStore::stored_graphs`]), such as the MCP server
     /// creating or deleting a resource. The stored provenance follows the change's net
-    /// effect as an update's does: a resource that existed before it and does not after it
-    /// loses its creator and owner, and every resource that exists after it and did not
-    /// before gets `creator` (the acting agent, when the view takes it as a principal). The view and the provenance are
+    /// effect as an update's does: a resource that existed before it and
+    /// does not after it loses its creator and owner unless its own access-control document
+    /// is still stored, and every resource that exists after it and did not before gets
+    /// `creator` (the acting agent, when the view takes it as a principal) unless its own
+    /// access-control document was stored before it. The view and the provenance are
     /// installed together, and only if the rebuild succeeds.
     ///
     /// # Errors
@@ -637,11 +639,13 @@ impl PodStore {
     }
 
     /// `provenance` for only the resources the auth view of `graph` holds (the loader's own
-    /// resource enumeration, [`loader::resources`]).
+    /// resource enumeration, [`loader::resources`]) and those whose own access-control
+    /// document is stored (see [`lifecycle`]).
     fn existing_provenance(graph: &Graph, provenance: &AccessProvenance) -> AccessProvenance {
         let resources = loader::resources(graph);
+        let controlled = loader::controlled_resources(graph);
         let mut kept = provenance.clone();
-        kept.retain(|r| resources.contains(r));
+        kept.retain(|r| resources.contains(r) || controlled.contains(r));
         kept
     }
 
@@ -656,8 +660,8 @@ impl PodStore {
     /// <self>` in a document they control cannot thereby grant themselves access (design
     /// doc §2.4). The store keeps `provenance`, with no credentials, for the ACP rebuilds it
     /// makes itself (after an access-control write or an update, and
-    /// [`PodStore::materialize_acp`]), and forgets a resource's facts once that resource no
-    /// longer exists; call again when it changes.
+    /// [`PodStore::materialize_acp`]), and forgets a resource's facts once neither that
+    /// resource nor its own access-control document exists; call again when it changes.
     ///
     /// # Errors
     ///

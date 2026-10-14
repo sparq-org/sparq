@@ -125,8 +125,11 @@ Materialize the authorization view from the access-control documents, then enfor
   change to which graphs exist, staged with the change and installed only once it
   commits. Only the net effect counts: a resource that existed before an update and does
   not after it (a document whose graph is dropped, a container left with no graph below it)
-  loses its creator and owner, and one that exists before and after keeps both, whatever
-  happens in between. A SPARQL update never records a creator. A commit refused at its
+  loses its creator and owner unless its own `.acl`/`.acr` is still stored (they are kept
+  with it and come back with the resource), and one that exists before and after keeps
+  both, whatever happens in between. A SPARQL update never records a creator; a direct
+  edit (below) records its agent as creator of a new resource whose own `.acl`/`.acr` was
+  not already stored. A commit refused at its
   commit point changes nothing; one that fails after it (part of the update may be applied)
   drops the view, and `materialize_acp()`
   refuses until the context is passed again. A caller that edits `store.graph` directly
@@ -134,8 +137,8 @@ Materialize the authorization view from the access-control documents, then enfor
   `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does), which
   applies the same rule and installs the view and provenance together only on success.
   `store.acp_provenance()` reads the stored provenance. A resource removed by editing
-  `store.graph` without that call is forgotten at the next rebuild, so rebuild before
-  creating it again. The view is rebuilt for a provenance change only when its `.acr`
+  `store.graph` without that call is forgotten at the next rebuild (unless its own
+  `.acl`/`.acr` is stored), so rebuild before creating it again. The view is rebuilt for a provenance change only when its `.acr`
   documents name `acp:CreatorAgent` or `acp:OwnerAgent`.
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.

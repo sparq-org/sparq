@@ -1075,8 +1075,10 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplyError {
     /// `false` when the commit point refused the effects: nothing is applied in memory, and
-    /// the journal is cut back to where it was (best effort); `true` when a failure came
-    /// after it, with part of the effects possibly applied in memory.
+    /// the journal is cut back to where it was (should that fail too, the journal takes no
+    /// further commit until the graph is reopened, when it may replay the refused one);
+    /// `true` when a failure came after it, with part of the effects possibly applied in
+    /// memory.
     pub applied: bool,
     /// The failure.
     pub message: String,

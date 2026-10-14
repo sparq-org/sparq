@@ -493,6 +493,17 @@ fn is_control_graph(iri: &str) -> bool {
 }
 
 /// The resource an access-control document `iri` governs.
+/// The resources whose own access-control document (`.acl` or `.acr`) is stored in `graph`.
+pub(crate) fn controlled_resources(graph: &Graph) -> FxHashSet<&str> {
+    graph
+        .named
+        .iter()
+        .filter_map(|(n, _)| graph_iri(n))
+        .filter(|iri| iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX))
+        .map(control_target)
+        .collect()
+}
+
 fn control_target(iri: &str) -> &str {
     iri.strip_suffix(ACL_SUFFIX)
         .or_else(|| iri.strip_suffix(ACR_SUFFIX))

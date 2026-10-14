@@ -5,9 +5,11 @@
 //! resources exist ([`ResourceGraphs`], the loader's own enumeration), and only its net
 //! effect counts. A resource that existed before the change and does not after it (a
 //! document whose graph is removed, a container left with no graph below it) loses its
-//! creator and owner; one that exists after it and did not before gets the acting agent as
-//! its creator, when there is one (a SPARQL update records none) and the resource has no
-//! access-control document stored from an earlier life. A resource that exists
+//! creator and owner, unless its own access-control document (`<r>.acl`/`<r>.acr`) is still
+//! stored: they are kept with that document and come back with the resource. One that
+//! exists after the change and did not before gets the acting agent as its creator, when
+//! there is one (a SPARQL update records none) and its own access-control document was not
+//! stored before the change. A resource that exists
 //! before and after keeps both, whatever happens in between. The result is staged with the
 //! change and installed only once the change commits.
 
@@ -105,7 +107,8 @@ pub(crate) fn edit_events<'a>(
 
 /// `provenance` after `events` change `before` (the store's graphs before them), with
 /// `creator` (the acting agent, when the view would take it as a principal) recorded as the
-/// creator of every resource that exists after them and did not before; `None` when the
+/// creator of every resource that exists after them and did not before, unless its own
+/// access-control document was stored before them (see the module docs); `None` when the
 /// events change no resource's life (most updates), so nothing is copied.
 pub(crate) fn provenance_after(
     before: &Graph,
@@ -116,21 +119,18 @@ pub(crate) fn provenance_after(
     if events.is_empty() {
         return None;
     }
-    let controlled = |r: &str| {
-        let stored = |name: String| {
-            before
-                .named
-                .iter()
-                .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
-        };
-        stored(format!("{r}{ACL_SUFFIX}")) || stored(format!("{r}{ACR_SUFFIX}"))
+    let stored = |name: &str| {
+        before
+            .named
+            .iter()
+            .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
     };
     replay(
         ResourceGraphs::of(before),
         events,
         provenance,
         creator,
-        controlled,
+        stored,
     )
 }
 
@@ -144,15 +144,13 @@ pub(crate) fn provenance_after_names(
     if events.is_empty() {
         return None;
     }
-    let controlled = |r: &str| {
-        before.contains(&format!("{r}{ACL_SUFFIX}")) || before.contains(&format!("{r}{ACR_SUFFIX}"))
-    };
+    let stored = |name: &str| before.contains(name);
     replay(
         ResourceGraphs::from_names(before.iter().map(String::as_str)),
         events,
         provenance,
         creator,
-        controlled,
+        stored,
     )
 }
 
@@ -161,34 +159,67 @@ fn replay(
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
-    controlled: impl Fn(&str) -> bool,
+    stored_before: impl Fn(&str) -> bool,
 ) -> Option<AccessProvenance> {
     // Each resource the change touches, with whether it was one before the change (the first
     // time the change touches it says which). Only the net effect counts: a resource that
     // exists before and after keeps its creator and owner, whatever happens in between.
     let mut touched: FxHashMap<String, bool> = FxHashMap::default();
+    // The access-control documents the change adds or removes, and whether it removes every
+    // graph, to tell which are stored after it.
+    let mut control: FxHashMap<&str, bool> = FxHashMap::default();
+    let mut cleared = false;
+    let is_control = |n: &str| n.ends_with(ACL_SUFFIX) || n.ends_with(ACR_SUFFIX);
     for event in events {
         match *event {
-            GraphEvent::Added(name) => graphs.add(name, |r| {
-                touched.entry(r.to_owned()).or_insert(false);
-            }),
-            GraphEvent::Removed(name) => graphs.remove(name, |r| {
-                touched.entry(r.to_owned()).or_insert(true);
-            }),
-            GraphEvent::RemovedAll => graphs.clear(|r| {
-                touched.entry(r.to_owned()).or_insert(true);
-            }),
+            GraphEvent::Added(name) => {
+                if is_control(name) {
+                    control.insert(name, true);
+                }
+                graphs.add(name, |r| {
+                    touched.entry(r.to_owned()).or_insert(false);
+                });
+            }
+            GraphEvent::Removed(name) => {
+                if is_control(name) {
+                    control.insert(name, false);
+                }
+                graphs.remove(name, |r| {
+                    touched.entry(r.to_owned()).or_insert(true);
+                });
+            }
+            GraphEvent::RemovedAll => {
+                control.clear();
+                cleared = true;
+                graphs.clear(|r| {
+                    touched.entry(r.to_owned()).or_insert(true);
+                });
+            }
         }
     }
+    let stored_after = |name: &str| {
+        control
+            .get(name)
+            .copied()
+            .unwrap_or_else(|| !cleared && stored_before(name))
+    };
+    let own_control = |r: &str, stored: &dyn Fn(&str) -> bool| {
+        stored(&format!("{r}{ACL_SUFFIX}")) || stored(&format!("{r}{ACR_SUFFIX}"))
+    };
     let creator = creator.filter(|c| validate_principal_iri(c).is_ok());
     let mut ended = Vec::new();
     let mut began = Vec::new();
     for (r, was) in &touched {
         match (*was, graphs.holds(r)) {
-            (true, false) if provenance.knows(r) => ended.push(r),
-            // A resource whose access-control document outlived an earlier life keeps that
-            // document's rules: whoever brings it back is not their creator.
-            (false, true) if creator.is_some() && !controlled(r) => began.push(r),
+            // A resource whose own access-control document is still stored keeps its creator
+            // and owner: they come back with it, under that document's rules.
+            (true, false) if provenance.knows(r) && !own_control(r, &stored_after) => {
+                ended.push(r);
+            }
+            // So whoever brings such a resource back is not its creator.
+            (false, true) if creator.is_some() && !own_control(r, &stored_before) => {
+                began.push(r);
+            }
             _ => {}
         }
     }
@@ -201,6 +232,7 @@ fn replay(
     }
     if let Some(creator) = creator {
         for r in began {
+            kept.forget(r);
             kept.set_creator(r.as_str(), creator);
         }
     }
@@ -287,6 +319,37 @@ mod tests {
             "x.acl outlived x"
         );
         assert_eq!(after.creator("https://pod.ex/b/"), Some(BOB), "new");
+    }
+
+    #[test]
+    fn a_resource_whose_access_control_document_survives_keeps_its_creator() {
+        let before = store(&["https://pod.ex/a/x", "https://pod.ex/a/.acr"]);
+        let prov = created_by(&["https://pod.ex/a/", "https://pod.ex/a/x"], ALICE);
+        let gone = [GraphEvent::Removed("https://pod.ex/a/x")];
+        let after = provenance_after(&before, &gone, &prov, Some(BOB)).expect("a change");
+        assert_eq!(
+            after.creator("https://pod.ex/a/"),
+            Some(ALICE),
+            "kept with /a/.acr"
+        );
+        assert_eq!(
+            after.creator("https://pod.ex/a/x"),
+            None,
+            "x had no document of its own"
+        );
+        let both = [
+            GraphEvent::Removed("https://pod.ex/a/x"),
+            GraphEvent::Removed("https://pod.ex/a/.acr"),
+        ];
+        let after = provenance_after(&before, &both, &prov, Some(BOB)).expect("a change");
+        assert_eq!(
+            after.creator("https://pod.ex/a/"),
+            None,
+            "its document went too"
+        );
+        let all = [GraphEvent::RemovedAll];
+        let after = provenance_after(&before, &all, &prov, Some(BOB)).expect("a change");
+        assert!(after.is_empty(), "everything went: {after:?}");
     }
 
     #[test]
