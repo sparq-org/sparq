@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+# One run per PR or branch and event; a newer push cancels the superseded run.
+concurrency:
+  group: deploy-lint-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
 jobs:
   helm-validate:
     name: Helm lint, render, and schema validation (advisory)

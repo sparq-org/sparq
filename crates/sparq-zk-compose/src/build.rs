@@ -299,7 +299,7 @@ pub struct BuiltScan {
     pub witness: ScanWitness,
 }
 
-fn hexf(f: &Fr) -> FieldHex {
+pub(crate) fn hexf(f: &Fr) -> FieldHex {
     FieldHex(field_to_hex(f))
 }
 
@@ -468,128 +468,6 @@ pub fn boolean_verdict(value: bool, op: FilterOp, bound: bool) -> bool {
     }
 }
 
-/// A built DUAL-LEAF `xsd:boolean` value-lane FILTER (sq-5xdlk): the public
-/// [`ProofInputs`] plus the member's two PRIVATE field witnesses.
-///
-/// The witnesses are the dual-leaf components `sparq_zk::dual_leaf_boolean::
-/// encode_boolean` produced for the committed literal, so `inputs.operand_enc`
-/// is by construction the leaf those witnesses rebind to in-circuit.
-// sq-5xdlk: boolean value-lane host wiring. Opt-in, NOT-yet-sound.
-#[cfg(feature = "dual-leaf")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BuiltFilterValueDlBoolean {
-    /// Public inputs for the shared [`CircuitId::FilterValueDl`] member, carrying
-    /// the BOOLEAN `datatype_const` and `bound ∈ {0, 1}`.
-    pub inputs: ProofInputs,
-    /// PRIVATE: the boolean `VALUE_HOOK` (`0` = false, `1` = true) as a field.
-    pub value_hook: FieldHex,
-    /// PRIVATE: the OFF-circuit blake3 lexical hash, carried as a free witness.
-    pub lexical_component: FieldHex,
-}
-
-/// Build a DUAL-LEAF `xsd:boolean` value-lane FILTER over the committed literal
-/// `literal` under operator `op` against the constant `bound` (sq-5xdlk — the
-/// circuit half of the boolean lane whose host encoder is sq-hh7a4).
-///
-/// NO new Noir member is involved: this targets the EXISTING
-/// [`CircuitId::FilterValueDl`] (`filter_value_dl_int`) with
-/// `datatype_const = `[`crate::manifest::boolean_datatype_const`]`()` and the
-/// boolean hooks `{0, 1}` inside its `u64` domain (see that function's docs for
-/// why the lanes cannot cross).
-///
-/// The disclosed verdict is COMPUTED here ([`boolean_verdict`]) rather than taken
-/// from the caller, so an honest host cannot accidentally disclose a verdict the
-/// member will refuse to prove; a test constructing the LYING case builds the
-/// [`ProofInputs::FilterValueDl`] variant directly with a flipped `expected`.
-///
-/// Returns the encoder's `Err` unchanged when `literal` is not a canonical
-/// `xsd:boolean` (`"true"`/`"false"`): the §6 fail-closed co-binding rejects the
-/// non-canonical XSD-legal spellings `"1"`/`"0"` and every non-boolean datatype,
-/// so a desynced leaf is never built here.
-///
-/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
-/// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
-// sq-5xdlk: boolean value-lane host wiring. Opt-in, NOT-yet-sound.
-///
-/// `use_` is the CHECKED method boundary: this builder builds a `DualLeafV1`
-/// proof, and V1 is SUPERSEDED, so
-/// [`sparq_zk::commit::MethodUse::NewIssuance`] is REFUSED with
-/// [`BuildValueDlV1Error::MethodNotSelectable`]. Building a proof over an
-/// ALREADY-ISSUED V1 graph passes
-/// [`sparq_zk::commit::MethodUse::LegacyAlreadyIssued`] and is accepted. A new
-/// boolean-lane proof uses [`build_filter_value_dl_bool`] (the V2 member).
-#[cfg(feature = "dual-leaf")]
-pub fn build_filter_value_dl_boolean(
-    literal: &oxrdf::Literal,
-    op: FilterOp,
-    bound: bool,
-    use_: sparq_zk::commit::MethodUse,
-) -> Result<BuiltFilterValueDlBoolean, BuildValueDlV1Error> {
-    sparq_zk::commit::CommitmentMethod::DualLeafV1
-        .checked_for(use_)
-        .map_err(BuildValueDlV1Error::MethodNotSelectable)?;
-    let components = sparq_zk::dual_leaf_boolean::encode_boolean(literal)?;
-    // The encoder maps ONLY the canonical lexicals, so the hook is exactly {0, 1}.
-    let value = components.value_hook != Fr::from(0u64);
-    let inputs = ProofInputs::FilterValueDl {
-        id: CircuitId::FilterValueDl,
-        operand_enc: hexf(&components.leaf()),
-        op,
-        bound: u64::from(bound),
-        datatype_const: crate::manifest::boolean_datatype_const(),
-        expected: boolean_verdict(value, op, bound),
-    };
-    // Nothing leaves a value-lane builder unchecked: the assembled inputs go
-    // through the ONE pairing function the renderers, the prover and the
-    // verifier's pre-filter also use, under the caller's `use_`.
-    crate::dispatch::check_lane_member_pairing_for_use(&inputs, use_)
-        .map_err(BuildValueDlV1Error::Pairing)?;
-    Ok(BuiltFilterValueDlBoolean {
-        inputs,
-        value_hook: hexf(&components.value_hook),
-        lexical_component: hexf(&components.lexical_component),
-    })
-}
-
-/// Why a `DualLeafV1` value-lane builder refused.
-///
-/// Two independent reasons, kept apart so a caller can tell a LITERAL it cannot
-/// encode from a METHOD it may not select for a new proof.
-#[cfg(feature = "dual-leaf")]
-#[derive(Debug, PartialEq, Eq)]
-pub enum BuildValueDlV1Error {
-    /// `DualLeafV1` is superseded and not selectable for new issuance, and the
-    /// caller asked for `MethodUse::NewIssuance`.
-    MethodNotSelectable(sparq_zk::commit::MethodNotSelectable),
-    /// The host encoder refused the literal (the §6 fail-closed co-binding).
-    Encode(sparq_zk::dual_leaf::DualLeafError),
-    /// The assembled public inputs did not pass the LANE↔MEMBER pairing check
-    /// (`crate::dispatch::check_lane_member_pairing_for_use`) — the builder
-    /// re-checks its own output rather than trusting its assembly.
-    Pairing(crate::dispatch::DispatchError),
-}
-
-#[cfg(feature = "dual-leaf")]
-impl From<sparq_zk::dual_leaf::DualLeafError> for BuildValueDlV1Error {
-    fn from(e: sparq_zk::dual_leaf::DualLeafError) -> Self {
-        BuildValueDlV1Error::Encode(e)
-    }
-}
-
-#[cfg(feature = "dual-leaf")]
-impl std::fmt::Display for BuildValueDlV1Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BuildValueDlV1Error::MethodNotSelectable(e) => write!(f, "{}", e),
-            BuildValueDlV1Error::Encode(e) => write!(f, "{}", e),
-            BuildValueDlV1Error::Pairing(e) => write!(f, "{}", e),
-        }
-    }
-}
-
-#[cfg(feature = "dual-leaf")]
-impl std::error::Error for BuildValueDlV1Error {}
-
 /// A built `DualLeafV2` BIT-DOMAIN `xsd:boolean` value-lane FILTER: the public
 /// [`ProofInputs`] plus the member's two PRIVATE field witnesses.
 ///
@@ -617,7 +495,7 @@ pub struct BuiltFilterValueDlBool {
 /// (`filter_value_dl_bool`) with
 /// `datatype_const = `[`crate::manifest::boolean_lane_const_v2`]`()`. The
 /// `DualLeafV1` boolean lane — which shares the integer member — is
-/// [`build_filter_value_dl_boolean`] and is unchanged.
+/// [`crate::legacy_v1::build_filter_value_dl_boolean`].
 ///
 /// The disclosed verdict is COMPUTED here ([`boolean_verdict`], the host mirror of
 /// the member's `bit_verdict`) rather than taken from the caller, so an honest host
@@ -665,6 +543,26 @@ pub fn build_filter_value_dl_bool(
     })
 }
 
+#[cfg(feature = "dual-leaf")]
+impl BuiltFilterValueDlBool {
+    /// The typed inputs of the checked prove entry
+    /// (`crate::driver::CircuitProver::prove_value_lane`), assembled from this
+    /// build's public inputs and witness by
+    /// [`crate::value_lane::ValueLaneProof::from_inputs`] — so a public field
+    /// edited after the build is re-checked rather than trusted.
+    pub fn lane_proof(
+        &self,
+    ) -> Result<crate::value_lane::ValueLaneProof, crate::dispatch::DispatchError> {
+        crate::value_lane::ValueLaneProof::from_inputs(
+            &self.inputs,
+            crate::value_lane::LaneWitness::Hook(crate::value_lane::HookWitness {
+                value_hook: self.value_hook.clone(),
+                lexical_component: self.lexical_component.clone(),
+            }),
+        )
+    }
+}
+
 /// The SIGN-AWARE scaled comparison verdict for `value <op> bound` over two
 /// `(neg, magnitude)` operands on ONE scaled timeline (sq-wz99x) — the host
 /// mirror of the Noir member's UNCHANGED `signed_scaled_verdict`
@@ -705,7 +603,7 @@ pub fn signed_epoch_verdict(v_neg: bool, v_mag: u64, b_neg: bool, b_mag: u64, op
 /// §13.4 predicate rejects a magnitude overflowing `u64`), so callers surface it
 /// fail-closed rather than assuming.
 #[cfg(feature = "dual-leaf")]
-fn split_signed_hook(hook: &Fr) -> Option<(bool, u64)> {
+pub(crate) fn split_signed_hook(hook: &Fr) -> Option<(bool, u64)> {
     fn as_u64(f: &Fr) -> Option<u64> {
         let b = field_to_be_bytes_32(f);
         // A u64 occupies the low 8 big-endian bytes; anything above means the
@@ -744,12 +642,30 @@ pub struct BuiltFilterValueDlDateTime {
     pub lexical_component: FieldHex,
 }
 
-/// Build a DUAL-LEAF `xsd:dateTime` value-lane FILTER over the committed literal
-/// `literal` under operator `op` against the constant instant `bound` (sq-wz99x —
-/// the circuit half of the §13 lane whose host encoder is sq-we9vs).
+#[cfg(feature = "dual-leaf")]
+impl BuiltFilterValueDlDateTime {
+    /// The typed inputs of the checked prove entry, as
+    /// [`BuiltFilterValueDlBool::lane_proof`].
+    pub fn lane_proof(
+        &self,
+    ) -> Result<crate::value_lane::ValueLaneProof, crate::dispatch::DispatchError> {
+        crate::value_lane::ValueLaneProof::from_inputs(
+            &self.inputs,
+            crate::value_lane::LaneWitness::Signed(crate::value_lane::SignedWitness {
+                value_neg: self.value_neg,
+                value_hook_scaled: self.value_hook_scaled.clone(),
+                lexical_component: self.lexical_component.clone(),
+            }),
+        )
+    }
+}
+
+/// Build a `DualLeafV2` `xsd:dateTime` value-lane FILTER over the committed
+/// literal `literal` under operator `op` against the constant instant `bound`
+/// (sq-wz99x; the §13 lane).
 ///
-/// BOTH operands go through `sparq_zk::dual_leaf_datetime::encode_datetime`, so
-/// the disclosed `bound_scaled_epoch` is derived from the SAME §13.4 fail-closed
+/// BOTH operands go through `sparq_zk::dual_leaf_v2::encode_datetime`, so the
+/// disclosed `bound_scaled_epoch` is derived from the SAME §13.4 fail-closed
 /// canonical predicate and the SAME scaled-epoch mapping as the hidden value —
 /// the host cross-vector that makes the comparison meaningful. A `bound` outside
 /// the hookable domain (bare / non-`Z` offset / `24:00:00` / leap second /
@@ -760,82 +676,79 @@ pub struct BuiltFilterValueDlDateTime {
 /// Requiring both operands on the SAME lane is what makes a cross-lane
 /// (`xsd:date` vs `xsd:dateTime`) comparison structurally inexpressible through
 /// this API — matching the in-circuit lane separation, which is the public
-/// `datatype_const` and only that (see
-/// [`crate::manifest::date_datatype_const`]).
+/// `datatype_const` and only that.
 ///
 /// The disclosed verdict is COMPUTED here ([`signed_epoch_verdict`]) rather than
 /// taken from the caller, so an honest host cannot accidentally disclose a verdict
-/// the member will refuse to prove.
+/// the member will refuse to prove. The `DualLeafV1` form, for an already-issued
+/// V1 graph, is [`crate::legacy_v1::build_filter_value_dl_datetime`].
 ///
 /// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted),
 /// and the §13 rule set is itself an OPEN external-audit obligation (CR-G8 /
 /// sq-qhy4). NOT externally audited; no soundness / privacy claim.
-// sq-wz99x: dateTime lane host wiring. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn build_filter_value_dl_datetime(
     literal: &oxrdf::Literal,
     op: FilterOp,
     bound: &oxrdf::Literal,
-    use_: sparq_zk::commit::MethodUse,
-) -> Result<BuiltFilterValueDlDateTime, BuildValueDlV1Error> {
-    let value = sparq_zk::dual_leaf_datetime::encode_datetime(literal)?;
-    let bound_components = sparq_zk::dual_leaf_datetime::encode_datetime(bound)?;
-    build_dl_datetime_common(
-        literal,
-        bound,
-        op,
-        value,
-        bound_components,
-        crate::manifest::datetime_datatype_const(),
-        use_,
-    )
+) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    let value = sparq_zk::dual_leaf_v2::encode_datetime(literal)?;
+    let bound_components = sparq_zk::dual_leaf_v2::encode_datetime(bound)?;
+    let built = assemble_dl_datetime(literal, bound, op, value, bound_components)?;
+    v2_self_check(&built.inputs);
+    Ok(built)
 }
 
-/// Build a DUAL-LEAF `xsd:date` value-lane FILTER — the same member, the same
-/// scaled-epoch timeline, the DATE lane constant (sq-wz99x, §13.3).
+/// Build a `DualLeafV2` `xsd:date` value-lane FILTER — the same member, the same
+/// scaled-epoch timeline, the V2 DATE lane constant (sq-wz99x, §13.3).
 ///
 /// A date's value handle is the scaled epoch of its STARTING instant (midnight
 /// UTC), so it is numerically equal to the dateTime hook of that same instant;
-/// [`crate::manifest::date_datatype_const`] is what keeps the two lanes apart. As
-/// with [`build_filter_value_dl_datetime`], both operands go through
-/// `sparq_zk::dual_leaf_datetime::encode_date`, so a bare date bound (order-
-/// INDETERMINATE per §13.2) is rejected fail-closed rather than compared.
+/// the lane constant is what keeps the two lanes apart. As with
+/// [`build_filter_value_dl_datetime`], both operands go through
+/// `sparq_zk::dual_leaf_v2::encode_date`, so a bare date bound (order-
+/// INDETERMINATE per §13.2) is rejected fail-closed rather than compared. The
+/// `DualLeafV1` form is [`crate::legacy_v1::build_filter_value_dl_date`].
 ///
 /// DOCUMENTED RISK: as [`build_filter_value_dl_datetime`] (CR-G8 / sq-qhy4).
-// sq-wz99x: date lane host wiring. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn build_filter_value_dl_date(
     literal: &oxrdf::Literal,
     op: FilterOp,
     bound: &oxrdf::Literal,
-    use_: sparq_zk::commit::MethodUse,
-) -> Result<BuiltFilterValueDlDateTime, BuildValueDlV1Error> {
-    let value = sparq_zk::dual_leaf_datetime::encode_date(literal)?;
-    let bound_components = sparq_zk::dual_leaf_datetime::encode_date(bound)?;
-    build_dl_datetime_common(
-        literal,
-        bound,
-        op,
-        value,
-        bound_components,
-        crate::manifest::date_datatype_const(),
-        use_,
-    )
+) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    let value = sparq_zk::dual_leaf_v2::encode_date(literal)?;
+    let bound_components = sparq_zk::dual_leaf_v2::encode_date(bound)?;
+    let built = assemble_dl_datetime(literal, bound, op, value, bound_components)?;
+    v2_self_check(&built.inputs);
+    Ok(built)
 }
 
-/// The lane-agnostic remainder shared by the dateTime and date builders — ONE
-/// member, ONE assembly; only the `datatype_const` differs (sq-wz99x, §13.5).
+/// The V2 builders' self-check: the assembled inputs pass the pairing check
+/// under `NewIssuance`. `expect` is sound — the constant is the encoder's own V2
+/// lane constant and the member is fixed, neither supplied by a caller — and is
+/// pinned by the builders' tests.
 #[cfg(feature = "dual-leaf")]
-#[allow(clippy::too_many_arguments)]
-fn build_dl_datetime_common(
+fn v2_self_check(inputs: &ProofInputs) {
+    crate::dispatch::check_lane_member_pairing_for_use(
+        inputs,
+        sparq_zk::commit::MethodUse::NewIssuance,
+    )
+    .expect("a V2 encoder's lane constant pairs with its own member");
+}
+
+/// The version-agnostic assembly shared by the V2 builders here and the
+/// `crate::legacy_v1` ones — ONE member, ONE assembly; the lane constant is the
+/// encoder's own `datatype_const` (sq-wz99x, §13.5). No pairing check: each
+/// caller runs the one for its version.
+#[cfg(feature = "dual-leaf")]
+pub(crate) fn assemble_dl_datetime(
     literal: &oxrdf::Literal,
     bound: &oxrdf::Literal,
     op: FilterOp,
     value: sparq_zk::dual_leaf::DualLeafComponents,
     bound_components: sparq_zk::dual_leaf::DualLeafComponents,
-    datatype_const: FieldHex,
-    use_: sparq_zk::commit::MethodUse,
-) -> Result<BuiltFilterValueDlDateTime, BuildValueDlV1Error> {
+) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
     // The encoder's §13.4 predicate already rejects a magnitude overflowing u64,
     // so this split cannot fail on encoder output — surface it fail-closed anyway
     // rather than unwrapping an invariant the type system does not carry.
@@ -850,11 +763,9 @@ fn build_dl_datetime_common(
         op,
         bound_neg,
         bound_scaled_epoch: bound_mag,
-        datatype_const,
+        datatype_const: hexf(&value.datatype_const),
         expected: signed_epoch_verdict(value_neg, value_mag, bound_neg, bound_mag, op),
     };
-    crate::dispatch::check_lane_member_pairing_for_use(&inputs, use_)
-        .map_err(BuildValueDlV1Error::Pairing)?;
     Ok(BuiltFilterValueDlDateTime {
         inputs,
         value_neg,

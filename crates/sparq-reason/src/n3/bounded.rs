@@ -1251,6 +1251,23 @@ pub(crate) fn parse_n3_with_extra(
     settle(cuts, parsed)
 }
 
+/// As [`parse_n3_with_extra`], with `facts` in place of the document's own facts
+/// ([`super::parser::parse_rules_with_facts_checked`]).
+pub(crate) fn parse_n3_rules_with_facts(
+    src: &str,
+    base: &str,
+    facts: impl IntoIterator<Item = [super::Term; 3]>,
+    cuts: &impl Sink,
+) -> Result<super::parser::Parsed, String> {
+    use super::parser::{parse_rules_with_facts_checked, ParseFailure};
+    let parsed = match parse_rules_with_facts_checked(src, base, facts) {
+        Ok(p) => Bounded::complete(Ok(p)),
+        Err(ParseFailure::Syntax(m)) => Bounded::complete(Err(m)),
+        Err(ParseFailure::Resource(e)) => Bounded::cut(Err(e.message), e.why),
+    };
+    settle(cuts, parsed)
+}
+
 /// Why a builtin's parse was stopped by [`ClosureLimits::max_term_bytes`].
 const PARSE_TERM_CUT: &str = "forward closure limit exceeded (a parsed formula)";
 

@@ -37,7 +37,7 @@
 //! match-graph leak is closed *at the decision*, not merely at the output). The
 //! `k − 1` internal-hop bits are AND-ed into a single per-tuple **chain bit** by
 //! one [`crate::shamir::mul_shares_raw`] + one
-//! [`crate::shamir::ShamirDealer::degree_reduce`] per AND — the BGW reshare-and-
+//! [`crate::shamir::degree_reduce_through`] per AND — the BGW reshare-and-
 //! recombine round (sq-dvuc, the keystone this bead depends on) that lets a
 //! degree-`2t` product be reshared back to degree `t` so the next AND can chain.
 //! For `k = 1` every edge is a trivially-connected length-1 chain, so the chain bit
@@ -78,7 +78,7 @@
 //!
 //! Honest-majority, semi-honest ONLY — inherits the [`crate::shamir::ShamirBackend`]
 //! / [`crate::compare`] model and adds no new assumption. Every multiplication
-//! routes through [`crate::shamir::ShamirDealer::degree_reduce`], whose reshare has
+//! routes through [`crate::shamir::degree_reduce_through`], whose reshare has
 //! no in-protocol check that a deviating party reshared honestly, so this is **NOT**
 //! maliciously secure (the same degree-`2t`-at-`n=2t+1` residual the rest of the
 //! backend documents; sq-6d6g / sq-km34 IT-MAC is the named fix). The
@@ -97,14 +97,28 @@
 //! **sq-py8h.4** (needs the secure-sort comparator). Planner guards / cost wiring is
 //! **sq-py8h.5**. Here the endpoint dedup is over the DISCLOSED endpoint terms,
 //! which is exactly the headline case (the endpoints are the disclosed result).
+//!
+//! ## Randomness (sq-yyro, issue #6117)
+//!
+//! The chain / union stage draws every sharing through the
+//! [`crate::randomness::DistributedRandomness`] seam: each hop equality via the
+//! [`crate::compare`] `*_through` chain and each AND / OR via
+//! [`crate::shamir::degree_reduce_through`]. The single-dealer simulation draws
+//! exactly what it drew before (seeded pin tests); a source that cannot share a
+//! holder's own input (PRSS today) can still run the draw-free shapes (`k = 1`
+//! with distinct endpoint pairs, `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair) but makes every path
+//! that needs a secure equality or an OR-fold fail closed. The final oblivious
+//! output stage ([`crate::oblivious_join::oblivious_set_output`]) still mints its
+//! own dealer.
 
-use crate::compare::secure_equal_to_bit;
+use crate::compare::secure_equal_to_bit_through;
 use crate::field::Fp;
 use crate::oblivious_join::{
     oblivious_join_output, oblivious_set_output, Candidate, MatchBit, ObliviousOutput,
 };
 use crate::partial::{MpcError, PartialResult};
-use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
+use crate::randomness::{require_source_matches, DistributedRandomness};
+use crate::shamir::{self, ShamirBackend, Share};
 use oxrdf::{Term, Variable};
 use std::collections::BTreeMap;
 
@@ -194,33 +208,42 @@ fn const_sharing(n: usize, c: Fp) -> Vec<Share> {
 
 /// Secret AND of two secret-shared 0/1 bits: `[a ∧ b] = [a]·[b]`. One
 /// [`shamir::mul_shares_raw`] (degree `2t`) followed by one
-/// [`ShamirDealer::degree_reduce`] back to a fresh degree-`t` sharing — the BGW
-/// multiplication-chain step (sq-dvuc) that lets the `k` hop bits chain. (Same
+/// [`shamir::degree_reduce_through`] back to a fresh degree-`t` sharing — the BGW
+/// multiplication-chain step (sq-dvuc) that lets the `k` hop bits chain, its
+/// re-sharing randomness drawn through the [`DistributedRandomness`] seam. (Same
 /// construction as `compare.rs`'s `secret_and`; local to keep file-lane discipline.)
-fn secret_and(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
+fn secret_and(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
     let prod_2t = shamir::mul_shares_raw(a, b)?;
-    dealer.degree_reduce(&prod_2t)
+    shamir::degree_reduce_through(source, &prod_2t)
 }
 
 /// Secret OR of two secret-shared 0/1 bits via De Morgan: `[a ∨ b] = a + b − a·b`.
 /// One secure multiplication (the `a·b` term); the rest is local affine ops. Used
 /// to OR-fold the per-tuple chain bits of the chains that reach the same endpoint
 /// pair into one connected-bit (design §2.5).
-fn secret_or(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec<Share>, MpcError> {
-    let and = secret_and(dealer, a, b)?;
+fn secret_or(
+    source: &mut dyn DistributedRandomness,
+    a: &[Share],
+    b: &[Share],
+) -> Result<Vec<Share>, MpcError> {
+    let and = secret_and(source, a, b)?;
     let sum = shamir::add_shares(a, b)?;
     shamir::sub_shares(&sum, &and)
 }
 
 /// The chain bit of ONE edge-tuple `(e_1, …, e_k)`: the secret-shared AND over the
 /// `k − 1` internal hop equalities `[e_i.object_key == e_{i+1}.subject_key]`, each a
-/// [`secure_equal_to_bit`] (secret-shared, never opened). For `k = 1` there is no
-/// internal hop, so the bit is the constant shared `1` (every edge is a length-1
-/// chain). The intermediate node KEYS are passed to the secure equality but never
-/// reconstructed.
+/// [`crate::compare::secure_equal_to_bit`] (secret-shared, never opened; drawn
+/// through the seam). For `k = 1` there is no internal hop, so the bit is the
+/// constant shared `1` (every edge is a length-1 chain). The intermediate node KEYS
+/// are passed to the secure equality but never reconstructed.
 fn tuple_chain_bit(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     tuple: &[&HiddenEdge],
 ) -> Result<Vec<Share>, MpcError> {
     let n = backend.parties();
@@ -231,8 +254,8 @@ fn tuple_chain_bit(
         // The internal hop join: e_i.object must equal e_{i+1}.subject. Both keys
         // are PRIVATE intermediate node values — the equality verdict stays a
         // secret-shared bit, never opened (closes the per-hop L2 leak at source).
-        let hop = secure_equal_to_bit(dealer, w[0].object.key, w[1].subject.key)?;
-        bit = secret_and(dealer, &bit, &hop)?;
+        let hop = secure_equal_to_bit_through(source, w[0].object.key, w[1].subject.key)?;
+        bit = secret_and(source, &bit, &hop)?;
     }
     Ok(bit)
 }
@@ -254,7 +277,7 @@ fn endpoint_key(a: &Term, b: &Term) -> String {
 /// secret-shared and never opened here.
 fn build_candidates(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     edges: &HiddenEdges,
     k: usize,
 ) -> Result<Vec<Candidate>, MpcError> {
@@ -270,14 +293,14 @@ fn build_candidates(
     loop {
         // Materialise the current tuple as edge references.
         let tuple: Vec<&HiddenEdge> = idx.iter().map(|&i| &edges.edges[i]).collect();
-        let chain_bit = tuple_chain_bit(backend, dealer, &tuple)?;
+        let chain_bit = tuple_chain_bit(backend, source, &tuple)?;
         let a_term = tuple[0].subject.term.clone();
         let b_term = tuple[k - 1].object.term.clone();
         let key = endpoint_key(&a_term, &b_term);
         match by_pair.get_mut(&key) {
             Some((_, _, acc)) => {
                 // OR this tuple's chain bit into the running connected-bit.
-                let folded = secret_or(dealer, acc, &chain_bit)?;
+                let folded = secret_or(source, acc, &chain_bit)?;
                 *acc = folded;
             }
             None => {
@@ -379,9 +402,29 @@ pub fn eval_exact_k_chain_hidden_slots(
     k: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)
+}
+
+/// [`eval_exact_k_chain_hidden_slots`] with the chain stage's randomness drawn
+/// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117): every hop
+/// equality via the [`crate::compare`] `*_through` chain and every AND / OR via
+/// [`shamir::degree_reduce_through`]. The single-dealer simulation draws exactly
+/// what the public function always drew, so its output is unchanged. A source
+/// whose `(n, t)` differs from `backend`'s is refused
+/// ([`require_source_matches`]); a source that cannot share a holder's own input
+/// (PRSS today) makes any path that needs a secure equality or an OR-fold fail
+/// closed with that source's error. The oblivious output stage still mints its
+/// own dealer from `backend`.
+pub(crate) fn eval_exact_k_chain_hidden_slots_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    edges: &HiddenEdges,
+    k: usize,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    require_source_matches(source, backend)?;
     check_params(backend, edges, k)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_candidates(backend, &mut dealer, edges, k)?;
+    let candidates = build_candidates(backend, source, edges, k)?;
     // Payload arity is 2 (the endpoint pair). Route through the slot-returning path.
     oblivious_set_output(backend, &candidates, 2, bound)
 }
@@ -533,15 +576,15 @@ fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> 
 
 /// The chain bit of ONE edge-tuple against a FIXED predicate sequence `chain`: it is
 /// the secret-shared AND of (a) every internal hop equality `[e_i.object == e_{i+1}.
-/// subject]` ([`secure_equal_to_bit`], never opened — exactly [`tuple_chain_bit`]) and
-/// (b) a PUBLIC predicate-match gate per hop (`e_i.predicate == chain[i]`). The
-/// predicate gate is a fully public decision: a tuple whose predicates do not match
-/// the alternation branch contributes a constant shared `0` (no secure multiplication
-/// at all) and is OR-folded away. The intermediate node KEYS are fed to the secure
+/// subject]` ([`crate::compare::secure_equal_to_bit`], never opened — exactly
+/// [`tuple_chain_bit`]) and (b) a PUBLIC predicate-match gate per hop
+/// (`e_i.predicate == chain[i]`). The predicate gate is a fully public decision: a
+/// tuple whose predicates do not match the alternation branch contributes a
+/// constant shared `0` (no secure multiplication at all) and is OR-folded away. The intermediate node KEYS are fed to the secure
 /// equality but never reconstructed.
 fn predicated_tuple_chain_bit(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     tuple: &[&PredicatedEdge],
     chain: &[String],
 ) -> Result<Vec<Share>, MpcError> {
@@ -559,8 +602,8 @@ fn predicated_tuple_chain_bit(
     // exactly-k chain's `tuple_chain_bit`. Length-1 has no internal hop → shared 1.
     let mut bit = const_sharing(n, Fp::one());
     for w in tuple.windows(2) {
-        let hop = secure_equal_to_bit(dealer, w[0].object.key, w[1].subject.key)?;
-        bit = secret_and(dealer, &bit, &hop)?;
+        let hop = secure_equal_to_bit_through(source, w[0].object.key, w[1].subject.key)?;
+        bit = secret_and(source, &bit, &hop)?;
     }
     Ok(bit)
 }
@@ -660,7 +703,7 @@ fn oversized_bounded<T>(edges: &PredicatedEdges, form: &HiddenBoundedPath) -> Re
 /// node that is also reachable from itself by a longer chain still appears once.
 fn build_bounded_candidates(
     backend: &ShamirBackend,
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
     edges: &PredicatedEdges,
     form: &HiddenBoundedPath,
 ) -> Result<Vec<Candidate>, MpcError> {
@@ -670,7 +713,7 @@ fn build_bounded_candidates(
 
     // OR this chain bit into the connected-bit of endpoint pair (a, b).
     fn fold(
-        dealer: &mut ShamirDealer,
+        source: &mut dyn DistributedRandomness,
         by_pair: &mut BTreeMap<String, (Term, Term, Vec<Share>)>,
         a: Term,
         b: Term,
@@ -679,7 +722,7 @@ fn build_bounded_candidates(
         let key = endpoint_key(&a, &b);
         match by_pair.get_mut(&key) {
             Some((_, _, acc)) => {
-                let folded = secret_or(dealer, acc, &bit)?;
+                let folded = secret_or(source, acc, &bit)?;
                 *acc = folded;
             }
             None => {
@@ -693,7 +736,7 @@ fn build_bounded_candidates(
     if form.min == 0 {
         for node in edges.node_domain() {
             fold(
-                dealer,
+                source,
                 &mut by_pair,
                 node.clone(),
                 node,
@@ -712,10 +755,10 @@ fn build_bounded_candidates(
                 loop {
                     let tuple: Vec<&PredicatedEdge> =
                         idx.iter().map(|&i| &edges.edges[i]).collect();
-                    let bit = predicated_tuple_chain_bit(backend, dealer, &tuple, &chain)?;
+                    let bit = predicated_tuple_chain_bit(backend, source, &tuple, &chain)?;
                     let a_term = tuple[0].subject.term.clone();
                     let b_term = tuple[length - 1].object.term.clone();
-                    fold(dealer, &mut by_pair, a_term, b_term, bit)?;
+                    fold(source, &mut by_pair, a_term, b_term, bit)?;
 
                     // Advance the base-|E| odometer (least-significant = idx[len-1]).
                     let mut pos = length;
@@ -786,9 +829,24 @@ pub fn eval_bounded_path_hidden_slots(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)
+}
+
+/// [`eval_bounded_path_hidden_slots`] with the union stage's randomness drawn
+/// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117). Same routing,
+/// source checks and fail-closed behaviour as
+/// [`eval_exact_k_chain_hidden_slots_through`]; the single-dealer simulation's
+/// output is unchanged.
+pub(crate) fn eval_bounded_path_hidden_slots_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    edges: &PredicatedEdges,
+    form: &HiddenBoundedPath,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    require_source_matches(source, backend)?;
     check_bounded_params(backend, edges, form)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_bounded_candidates(backend, &mut dealer, edges, form)?;
+    let candidates = build_bounded_candidates(backend, source, edges, form)?;
     oblivious_set_output(backend, &candidates, 2, bound)
 }
 

@@ -110,7 +110,7 @@ exact relation-panic rejection for capacity, domain and admission failures.
 `real_graph_results.rs` requires three genuine Succinct receipts: a holder-declared
 bag, verifier-agreed CONSTRUCT and holder-declared DESCRIBE. Independent request,
 nonce, authority, policy, journal and cross-version substitutions must reject.
-Changes to `sparq-canon` trigger the mandatory actual guest job. The helper retains
+Changes to `sparq-canon` trigger the advisory actual guest job on pull requests. The helper retains
 every V1/V2 receipt and requires all three V3 exports,
 with the same independently checked artifact throughout. [Local d7 evidence](../../../zk/sparql-evaluator/proof-evidence-v3.json)
 records eight receipts and later known follow-ups; it is not a blanket conformance claim.
