@@ -410,21 +410,7 @@ impl ValidationReport {
 /// Returns a JSON-safe string body without surrounding quotes.
 fn escape_json(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\u{08}' => escaped.push_str("\\b"),
-            '\u{0C}' => escaped.push_str("\\f"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            control if control.is_control() => {
-                let _ = write!(escaped, "\\u{:04X}", control as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
+    sparq_core::json::escape_into(&mut escaped, value);
     escaped
 }
 
@@ -686,6 +672,7 @@ mod tests {
         );
         assert!(!json.contains("quoted \"line\"\nnext"));
         assert_eq!(escape_json("\\\t\u{1}"), "\\\\\\t\\u0001");
+        assert_eq!(escape_json("\u{8}\u{c}\u{7f}"), "\\u0008\\u000c\u{7f}");
         assert_eq!(
             term_to_json_string(&Term::NamedNode(NamedNode::new_unchecked(
                 "http://example.org/node"

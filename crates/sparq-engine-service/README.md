@@ -51,7 +51,9 @@ let _ = out;
   join). Result-preserving; falls back to the bare pattern when it does not apply.
 - **SSRF egress policy** — a deny-by-default allowlist enforced on the **resolved** IP
   (DNS-rebinding-safe, via a ureq `Resolver` wrapper) and mirrored as a pure
-  `allowlist_entry_permits` predicate the server + federation client reuse.
+  `allowlist_entry_permits` predicate the server + federation client reuse. The agent
+  ignores proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), so the
+  address the resolver vets is always the address it dials.
 - **`service`** *(feature, off by default)* — gates the whole client. When off, the crate
   compiles **empty** and pulls in **zero** dependencies, so the default and wasm builds of
   `sparq-engine` are byte-identical to before the split.
