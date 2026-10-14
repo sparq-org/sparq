@@ -115,9 +115,10 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
   honest-majority now, configurable long-term). The four flatmates *cooperate*
   among themselves to prove an aggregate to an external landlord — the regime
   Shamir serves. LAN secret-sharing chosen (the aggregate is linear → zero-round
-  under Shamir; WAN garbled-circuit unneeded for v1). The *adversary model* is no
-  longer purely semi-honest on integrity: tamper-detection / robust-correction
-  (guarantee (D)) is now wired through the reconstruction layer (see the "Security
+  under Shamir; WAN garbled-circuit unneeded for v1). The *adversary model* stays
+  semi-honest; what is wired through the reconstruction layer is reconstruction-only
+  tamper-detection / robust-correction of opened shares (a step toward guarantee
+  (D), not malicious security) (see the "Security
   model" bullet), so the exact integrity guarantee a given `(n, t)` delivers is
   reported by the `MaliciousSecurity` enum rather than asserted as a blanket
   "semi-honest" label here.
@@ -202,8 +203,10 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
   (zero published data points).
 
 #### Deferred malicious-security seams (sq-uu0u WI-4, bead sq-6d6g) [OPUS-4.8]
-The RS detect-and-abort / robust path (WI-1/2/3) closes guarantee (D) **in the
-honest-majority, redundancy-present regime** (`reconstruct` at degree `t`; the
+The RS detect-and-abort / robust path (WI-1/2/3) gives reconstruction-only
+detection / correction of opened shares **in the honest-majority,
+redundancy-present regime** (it does NOT close guarantee (D): a cheat inside a
+re-sharing or multiplication round is not checked) (`reconstruct` at degree `t`; the
 degree-`2t` equality open when `n > 2t+1`). Two gaps are explicitly NOT covered
 by RS redundancy and are deferred to dedicated future backends behind the SAME
 `MpcBackend` trait — recorded here so the boundary is a documented design seam,

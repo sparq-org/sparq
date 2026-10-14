@@ -547,10 +547,12 @@ pub enum TrustModel {
     DishonestMajority,
 }
 
-/// The malicious-security guarantee a backend delivers against *actively*
-/// deviating parties — guarantee (D) of §4.2, orthogonal to [`TrustModel`]'s
-/// majority axis. A `bool` is too coarse: WI-1/WI-2 gave the honest-majority
-/// Shamir backend two *distinct* active-security levels depending on how much
+/// The reconstruction-hardening level a backend reports against *actively*
+/// deviating parties — a step toward guarantee (D) of §4.2, NOT malicious
+/// security (the adversary model stays `SemiHonest`; only opened shares are
+/// checked), orthogonal to [`TrustModel`]'s majority axis. A `bool` is too
+/// coarse: WI-1/WI-2 gave the honest-majority Shamir backend two *distinct*
+/// reconstruction-hardening levels depending on how much
 /// reconstruction redundancy a given `(n, t)` configuration carries, and a
 /// federation inspecting [`BackendInfo`] needs to tell them apart. The variants
 /// are ordered from weakest to strongest. `[OPUS-4.8]`
