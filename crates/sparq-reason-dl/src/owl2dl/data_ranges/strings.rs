@@ -280,8 +280,14 @@ fn chars(bytes: &[u8]) -> u64 {
 /// (`u128::MAX` also stands for infinitely many). `None` = the automata or the walk
 /// outgrew their budgets.
 pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
-    if let F::Const(false) = f {
-        return Some(0);
+    match (f, space) {
+        (F::Const(false), _) => return Some(0),
+        // Infinitely many XML literals are well-balanced (any text without markup), but
+        // which strings are, and how they canonicalise, is not checked: only the whole
+        // space is counted.
+        (F::Const(true), Space::Xml) => return Some(u128::MAX),
+        (_, Space::Xml) => return None,
+        _ => {}
     }
     let mut budget = MAX_FORMULA_NODES;
     if !f.within(&mut budget) {
@@ -738,13 +744,10 @@ fn dash_then(h: Hir) -> Hir {
     Hir::concat(vec![Hir::literal(*b"-"), h])
 }
 
-/// A well-formed lowercase BCP 47 language tag (RFC 5646 §2.1 `Language-Tag`), the tags
-/// of `rdf:PlainLiteral` values.
+/// A lowercase BCP 47 `langtag` (RFC 5646 §2.1), the tags of `rdf:PlainLiteral` values
+/// (its §2); private-use and grandfathered tags are not `langtag`s.
 fn lang_tag() -> Hir {
     const PRIVATE: &str = "x(-[a-z0-9]{1,8})+";
-    const GRANDFATHERED: &str = "en-gb-oed|i-ami|i-bnn|i-default|i-enochian|i-hak|i-klingon|\
-        i-lux|i-mingo|i-navajo|i-pwn|i-tao|i-tay|i-tsu|sgn-be-fr|sgn-be-nl|sgn-ch-de|\
-        art-lojban|cel-gaulish|no-bok|no-nyn|zh-guoyu|zh-hakka|zh-min|zh-min-nan|zh-xiang";
     let langtag = [
         "([a-z]{2,3}(-[a-z]{3}){0,3}|[a-z]{4}|[a-z]{5,8})",
         "(-[a-z]{4})?",
@@ -754,9 +757,7 @@ fn lang_tag() -> Hir {
     ]
     .concat()
         + &format!("(-{PRIVATE})?");
-    let grandfathered = GRANDFATHERED.replace(char::is_whitespace, "");
-    regex_syntax::parse(&format!("{langtag}|{PRIVATE}|{grandfathered}"))
-        .expect("a fixed regular expression")
+    regex_syntax::parse(&langtag).expect("a fixed regular expression")
 }
 
 /// The tags a basic language range matches (RFC 4647 §3.3.1): `*` matches every tag;
@@ -895,8 +896,6 @@ mod tests {
             "de-ch-1901",
             "sl-rozaj-biske",
             "en-a-bbb-x-ccc",
-            "x-whatever",
-            "i-klingon",
             "zh-min-nan",
             "es-419",
             "zh-yue-hk",
@@ -911,6 +910,8 @@ mod tests {
             "en-x",
             "a-bbb",
             "en-12",
+            "x-whatever",
+            "i-klingon",
         ] {
             assert_eq!(tagged(bad), Some(0), "{bad}");
         }

@@ -420,7 +420,9 @@ impl Region {
             Some((space, enc)) if !strings::in_space(space, &enc)? => Some(false),
             Some((Space::Text, enc)) => strings::holds(&self.text, &enc),
             Some((Space::Uri, enc)) => strings::holds(&self.uri, &enc),
-            Some((Space::Xml, enc)) => strings::holds(&self.xml, &enc),
+            // Whether an XML literal is well-balanced XML is not checked, so only a range
+            // with no XML literals answers.
+            Some((Space::Xml, _)) => matches!(self.xml, F::Const(false)).then_some(false),
             None => {
                 let (sp, ..) = key(v).expect("ordered value");
                 Some(self.ord[sp.index()].contains(v))

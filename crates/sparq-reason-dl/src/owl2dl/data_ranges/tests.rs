@@ -595,14 +595,37 @@ fn facets_outside_the_facet_space_answer_unknown() {
     );
     assert_eq!(bounded("owl:real", v("1/3", "owl:rational")), Tri::No);
     assert_eq!(bounded("owl:rational", v("1/3", "owl:rational")), Tri::No);
+}
+
+#[test]
+fn xml_literal_content_is_unchecked_so_answers_unknown() {
+    // Whether a lexical form is well-balanced XML is not checked: only questions about
+    // the whole space, or none of it, answer.
+    let xml = |x: &str| Value::XmlLiteral(x.into());
     assert_eq!(is_empty(&dt("rdf:XMLLiteral")), Tri::No);
-    assert_eq!(
+    assert_eq!(has_at_least(&dt("rdf:XMLLiteral"), u64::MAX), Tri::Yes);
+    assert_eq!(contains(&dt("rdf:XMLLiteral"), &xml("<")), Tri::Unknown);
+    assert_eq!(contains(&one_of([xml("<a/>")]), &xml("<a/>")), Tri::Unknown);
+    assert_eq!(is_empty(&one_of([xml("<")])), Tri::Unknown);
+    assert_eq!(contains(&dt("string"), &xml("<a/>")), Tri::No);
+    assert_eq!(is_empty(&and(dt("rdf:XMLLiteral"), dt("string"))), Tri::Yes);
+}
+
+#[test]
+fn plain_literal_tags_are_langtags() {
+    // rdf:PlainLiteral §2: tags are BCP 47 `langtag`s, not private-use or grandfathered.
+    let range = |r: &str| is_empty(&restrict("rdf:PlainLiteral", &[("langRange", s(r))]));
+    assert_eq!(range("i-klingon"), Tri::Yes);
+    assert_eq!(range("x-foo"), Tri::Yes);
+    assert_eq!(range("en"), Tri::No);
+    let tagged = |t: &str| {
         contains(
-            &one_of([Value::XmlLiteral("<a/>".into())]),
-            &Value::XmlLiteral("<a/>".into())
-        ),
-        Tri::Yes
-    );
+            &dt("rdf:PlainLiteral"),
+            &Value::LangString("x".into(), t.into()),
+        )
+    };
+    assert_eq!(tagged("i-klingon"), Tri::No);
+    assert_eq!(tagged("en-x-foo"), Tri::Yes);
 }
 
 #[test]
