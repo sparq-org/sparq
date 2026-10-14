@@ -203,6 +203,22 @@ fn an_ordinary_variable_must_not_carry_the_store_universal_in_a_value() {
 }
 
 #[test]
+fn an_ordinary_variable_must_not_bind_an_existential_witness() {
+    // `∀z ∃b. z :p b` does not give `∃y ∀x. x :p y`: the witness may depend on `:z`.
+    assert!(!hits("@forAll :z. :z :p _:b. { @forAll :x. :x :p ?y } => { :hit :by :rule }."));
+    assert!(!hits("@forAll :z. :z :p [ :q :r ]. { @forAll :x. :x :p ?y } => { :hit :by :rule }."));
+    // A blank anywhere in the value, matched in either order.
+    for value in ["( _:b )", "{ _:b :r :s }", "<<( _:b :r :s )>>"] {
+        let src = format!("@forAll :z. :z :p {value}. {{ @forAll :x. :x :p ?y }} => {{ :hit :by :rule }}.");
+        assert!(!hits(&src), "{src}");
+        let src = format!("@forAll :z. :z :p {value}. :z :q :c. {{ @forAll :x. :x :p ?y. :x :q :c }} => {{ :hit :by :rule }}.");
+        assert!(!hits(&src), "{src}");
+    }
+    // A premise blank is a variable too: it may not bind the witness either.
+    assert!(!hits("@forAll :z. :z :p _:b. { @forAll :x. :x :p _:y } => { :hit :by :rule }."));
+}
+
+#[test]
 fn distinct_premise_universals_need_distinct_store_universals() {
     // `∀z. z :p z` does not give `∀x ∀y. x :p y` (EYE agrees)...
     assert!(!hits("@forAll :z. :z :p :z. { @forAll :x, :y. :x :p :y } => { :hit :by :rule }."));

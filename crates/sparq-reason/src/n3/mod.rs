@@ -3174,7 +3174,11 @@ fn premise_universals_matchable(premise: &[[Term; 3]]) -> bool {
 ///   parameter of the closed formula, not a universal of its statements;
 /// * a DIFFERENT store universal for each premise universal (injective);
 /// * a store universal no other variable of the binding mentions, at any depth: a value
-///   that mentions it depends on it, so the premise was matched for one value only.
+///   that mentions it depends on it, so the premise was matched for one value only;
+/// * no other variable bound to a value with a blank node in it, at any depth. A blank is
+///   an existential, which N3 scopes inside the universals of its formula (`∀z ∃b`), so
+///   its witness may depend on the store universal: `@forAll :z. :z :p _:b.` does not
+///   prove `{ @forAll :x. :x :p ?y }`. Refusing every blank is conservative.
 ///
 /// The check reads the complete binding, so the order the atoms were matched in does not
 /// matter.
@@ -3188,9 +3192,17 @@ fn independent_firing(b: &Binding, universals: &[String], own: &str) -> bool {
             _ => return false,
         }
     }
-    b.iter()
-        .filter(|(k, _)| !premise_universal(k))
-        .all(|(_, v)| !mentions_var(v, &|x| targets.contains(&x)))
+    fn depends(t: &Term, targets: &[&str]) -> bool {
+        match t {
+            Term::Var(v) => targets.contains(&v.as_str()),
+            Term::Blank(_) => true,
+            Term::List(ms) => ms.iter().any(|m| depends(m, targets)),
+            Term::Triple(tr) => tr.iter().any(|m| depends(m, targets)),
+            Term::Formula(ts) => ts.iter().flatten().any(|m| depends(m, targets)),
+            _ => false,
+        }
+    }
+    b.iter().filter(|(k, _)| !premise_universal(k)).all(|(_, v)| !depends(v, &targets))
 }
 
 /// [`unify_term_in`] under a fresh [`bounded::StepBudget::unification`]. When the budget
