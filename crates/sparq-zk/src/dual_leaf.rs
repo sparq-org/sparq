@@ -485,16 +485,14 @@ pub fn lang_const(language: &str) -> Fr {
 /// joined here — joining them is a follow-on, because it narrows what a
 /// DualLeafV1 graph may CONTAIN (e.g. the XSD-legal but non-canonical
 /// `"1"^^xsd:boolean` becomes uncommittable) and re-bases those leaves. Until
-/// they join, those literals take the degenerate string lane. Each of those lanes
-/// folds a tagged `DATATYPE_CONST` that is not the bare `blake3(iri)` the
-/// degenerate component folds, so the consts are disjoint outright and a
-/// string-lane leaf cannot be opened on a value lane whatever hook the lane's
-/// member accepts:
-/// - `xsd:boolean`: `blake3("<iri>@domain=bit")`
-///   (`dual_leaf_boolean::boolean_datatype_const`);
-/// - `xsd:dateTime`/`xsd:date`: `blake3("<iri>@epochscale=3")`.
-///
-/// Any further lane left on the string lane needs the same tagged constant.
+/// they join, those literals take the degenerate string lane, whose component
+/// folds `blake3(datatype IRI)`. A value-lane member range-checks the hook to
+/// `u64`, so a lane constant must never equal that fold for any datatype IRI.
+/// The boolean lane's constant
+/// (`dual_leaf_boolean::boolean_datatype_const`, `blake3("<iri> domain=bit")`)
+/// hashes a tag containing a space, which no IRI can contain, so no string-lane
+/// leaf can be opened on it whatever hook the member accepts. The
+/// `xsd:dateTime`/`xsd:date` lanes fold `blake3("<iri>@epochscale=3")`.
 pub fn is_hookable_datatype(datatype_iri: &str) -> bool {
     matches!(datatype_iri, XSD_INTEGER | XSD_DECIMAL | XSD_DOUBLE)
 }
@@ -1198,10 +1196,9 @@ mod tests {
     fn unrouted_lane_hooks_cannot_collide_the_degenerate_component() {
         // The §3.2 no-collision obligation for the lanes NOT yet routed (the
         // documented seam). Every such lane folds a tagged DATATYPE_CONST that is
-        // not the bare `blake3(IRI)` its degenerate form folds, so the consts are
-        // disjoint outright and no hook value, VALUE_NONE included, can bridge
-        // them. The value-lane members range-check hooks to u64, so a shared const
-        // would let a degenerate leaf open with hook VALUE_NONE.
+        // not the bare `blake3(IRI)` its degenerate form folds. The value-lane
+        // members range-check hooks to u64, so a shared const would let a
+        // degenerate leaf open with hook VALUE_NONE.
         let boolean_iri = crate::dual_leaf_boolean::XSD_BOOLEAN;
         assert!(!is_hookable_datatype(boolean_iri));
         let boolean_const = crate::dual_leaf_boolean::boolean_datatype_const();

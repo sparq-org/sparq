@@ -1414,7 +1414,7 @@ impl ProofInputs {
 }
 
 /// The PUBLIC `datatype_const` of the DUAL-LEAF `xsd:boolean` value lane
-/// (sq-5xdlk) — `blake3_field("<xsd:boolean IRI>@domain=bit")`, exactly the
+/// (sq-5xdlk) — `blake3_field("<xsd:boolean IRI> domain=bit")`, exactly the
 /// constant `sparq_zk::dual_leaf_boolean::encode_boolean` (the host half,
 /// sq-hh7a4) folds into the committed leaf's `value_component`.
 ///
@@ -1436,9 +1436,10 @@ impl ProofInputs {
 /// DIFFERENT leaf under this constant and fails the member's
 /// `assert_eq(leaf, operand_enc)` binding — and symmetrically for a boolean leaf
 /// under the integer constant. The member range-checks the hook to `u64`, not to
-/// `{0, 1}`, so the constant also differs from the bare `blake3(xsd:boolean)` a
-/// string-lane leaf folds with `VALUE_NONE`; that leaf cannot be opened as a
-/// boolean value. That is a BINDING argument resting on Poseidon2
+/// `{0, 1}`, so the constant also differs from the `blake3(datatype IRI)` any
+/// string-lane leaf folds with `VALUE_NONE`: its tag contains a space, which no
+/// IRI can contain, so neither an `xsd:boolean` nor an opaque-datatype leaf can
+/// be opened as a boolean value. That is a BINDING argument resting on Poseidon2
 /// preimage resistance (a prover free to search preimages is out of scope of this
 /// statement), NOT an audited soundness claim.
 ///

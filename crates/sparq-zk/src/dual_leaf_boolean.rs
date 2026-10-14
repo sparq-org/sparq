@@ -8,7 +8,7 @@
 //! # The boolean value handle (`research/zk-field-native-encoding.md` §3.3)
 //!
 //! `VALUE_HOOK = 0` (false) / `1` (true); `DATATYPE_CONST =`
-//! [`boolean_datatype_const`] (`blake3_field("<xsd:boolean IRI>@domain=bit")`);
+//! [`boolean_datatype_const`] (`blake3_field("<xsd:boolean IRI> domain=bit")`);
 //! `LANG_NONE` sentinel — the §3.3 boolean row.
 //! The handle is injective on the two boolean VALUES but MANY-TO-ONE on the TERM
 //! (reject-list (v)): the XSD-legal spellings `"true"` and `"1"` denote the same
@@ -46,16 +46,17 @@ fn blake3_field(bytes: &[u8]) -> Fr {
     field_from_hash_bytes(blake3::hash(bytes).as_bytes())
 }
 
-/// The boolean lane's `DATATYPE_CONST`: `blake3_field("<xsd:boolean IRI>@domain=bit")`.
+/// The boolean lane's `DATATYPE_CONST`: `blake3_field("<xsd:boolean IRI> domain=bit")`.
 ///
 /// The boolean FILTER reuses `filter_value_dl_int`, which range-checks the hook
 /// to `u64`, not to `{0, 1}`. A whole-graph `DualLeafV1` commitment puts
-/// `xsd:boolean` literals on the string lane, whose `value_component` folds
-/// `VALUE_NONE` under the bare `datatype_const(xsd:boolean IRI)`. Tagging the lane
-/// constant keeps the two disjoint, so a string-lane leaf can never be opened as a
-/// boolean value, the same construction the dateTime and decimal lanes use.
+/// `xsd:boolean` literals, and literals of any opaque datatype, on the string
+/// lane, whose `value_component` folds `VALUE_NONE` under `blake3(datatype IRI)`.
+/// The hashed tag contains a space, which no IRI can contain (RFC 3987), so no
+/// string-lane fold hashes the same bytes and no string-lane leaf can be opened
+/// as a boolean value.
 pub fn boolean_datatype_const() -> Fr {
-    blake3_field(format!("{XSD_BOOLEAN}@domain=bit").as_bytes())
+    blake3_field(format!("{XSD_BOOLEAN} domain=bit").as_bytes())
 }
 
 /// Encodes an `xsd:boolean` literal under the dual-leaf method, with fail-closed
@@ -127,6 +128,25 @@ mod tests {
             boolean_datatype_const(),
             crate::dual_leaf::datatype_const(XSD_BOOLEAN)
         );
+    }
+
+    #[test]
+    fn lane_constant_is_not_any_datatype_iri_fold() {
+        // The hashed tag is not an IRI, so no opaque datatype can fold it.
+        let tag = format!("{XSD_BOOLEAN} domain=bit");
+        assert!(oxrdf::NamedNode::new(tag.as_str()).is_err());
+        // Datatype IRIs that look like a lane tag are ordinary opaque datatypes.
+        for iri in [
+            format!("{XSD_BOOLEAN}@domain=bit"),
+            format!("{XSD_BOOLEAN}%20domain=bit"),
+            format!("{XSD_BOOLEAN}domain=bit"),
+        ] {
+            assert!(oxrdf::NamedNode::new(iri.as_str()).is_ok());
+            assert_ne!(
+                boolean_datatype_const(),
+                crate::dual_leaf::datatype_const(&iri)
+            );
+        }
     }
 
     #[test]

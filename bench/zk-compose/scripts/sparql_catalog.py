@@ -257,7 +257,7 @@ CATALOG: list[dict] = [
         "note": (
             "Boolean value lane (sq-5xdlk, #3973) — it adds NO new Noir member: it REUSES "
             "`filter_value_dl_int` with the PUBLIC boolean `datatype_const` = "
-            "blake3_field(xsd:boolean) and the value hooks {0 = false, 1 = true} inside that "
+            "blake3_field(\"<xsd:boolean IRI> domain=bit\") and the value hooks {0 = false, 1 = true} inside that "
             "member's u64 comparison domain, so XSD's false<true order (and the degenerate "
             "LT/LE/GT/GE verdicts) falls out of the integer comparison unchanged. Lane separation "
             "is the public datatype_const and only that: an integer leaf recomputed under the "
