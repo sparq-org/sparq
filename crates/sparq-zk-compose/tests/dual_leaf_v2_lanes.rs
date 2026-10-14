@@ -337,7 +337,7 @@ fn every_v2_value_lane_rebinds_under_its_own_constant_and_no_other() {
 /// constant. Iterated over opaque datatype byte strings built WITHOUT IRI
 /// validation.
 #[test]
-fn a_v2_string_lane_leaf_does_not_rebind_under_any_lane_constant() {
+fn a_v2_string_lane_literal_is_separated_from_every_value_lane() {
     let opaque = [
         "http://example.org/opaque",
         "http://www.w3.org/2001/XMLSchema#boolean@=bit",
