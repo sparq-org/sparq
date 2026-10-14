@@ -23,6 +23,8 @@ pub mod extract;
 pub mod model;
 
 pub mod nnf;
+// #7031: the full OWL 2 structural model, its RDF mapping and the OWL 2 DL profile check.
+pub mod owl2dl;
 pub mod profile;
 pub mod render;
 pub mod tableau;
