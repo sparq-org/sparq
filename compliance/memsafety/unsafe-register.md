@@ -172,16 +172,16 @@ The library is free of `unsafe`. These 5 sites are the `#[global_allocator]` of 
 **integration test**, `tests/derive_nonce_scrub.rs`, which checks that deterministic signing
 never frees a heap block still holding the secret key or the secret nonce. A global
 allocator unavoidably requires `unsafe`; this one forwards to `System` like the counting
-allocators above, and additionally READS each block it frees (never writes or retains it)
-while a flag is armed. TEST-only, not a B5 surface.
+allocators above, except that it allocates every block zeroed (so all bytes are initialised) and
+READS each block it frees (never writes or retains it) while a flag is armed. TEST-only, not a B5 surface.
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `tests/derive_nonce_scrub.rs:24` | `unsafe impl GlobalAlloc for ScanningAllocator` | forward-to-`System` | both methods delegate to `System` with the same args, so `System` upholds the trait contract. |
-| `tests/derive_nonce_scrub.rs:25` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc(layout)` unchanged. |
-| `tests/derive_nonce_scrub.rs:27` | `unsafe { System.alloc }` | as above | the single forwarding call. |
-| `tests/derive_nonce_scrub.rs:30` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | holds because every `alloc` forwarded to `System`; `realloc` is the trait default (alloc, copy, dealloc through these methods). |
-| `tests/derive_nonce_scrub.rs:34` | `slice::from_raw_parts` read + `System.dealloc` | the block is live and `layout.size()` bytes long until `System.dealloc` returns | read as `&[u8]` only (every bit pattern is a valid `u8`), nothing retained past the call, then returned to `System` with the same arguments. |
+| `tests/derive_nonce_scrub.rs:26` | `unsafe impl GlobalAlloc for ScanningAllocator` | forward-to-`System` | both methods delegate to `System` with the same args, so `System` upholds the trait contract. |
+| `tests/derive_nonce_scrub.rs:27` | `unsafe fn alloc` | caller's `layout` contract forwarded | `System.alloc_zeroed(layout)`; zeroing initialises every byte, which the scan relies on. |
+| `tests/derive_nonce_scrub.rs:30` | `unsafe { System.alloc_zeroed }` | as above | the single forwarding call. |
+| `tests/derive_nonce_scrub.rs:33` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | holds because every allocation goes through `alloc` (the default `alloc_zeroed` and `realloc` call these methods). |
+| `tests/derive_nonce_scrub.rs:38` | `slice::from_raw_parts` read + `System.dealloc` | the block is live, fully initialised (allocated zeroed) and `layout.size()` bytes long until `System.dealloc` returns | read as `&[u8]` only, nothing retained past the call, then returned to `System` with the same arguments. |
 
 ### `sparq-bench` — 1 site (peak-RSS measurement; non-shipping bench binary)
 

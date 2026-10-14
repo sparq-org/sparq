@@ -18,18 +18,22 @@ static HITS: AtomicUsize = AtomicUsize::new(0);
 static PATTERNS: OnceLock<[[u8; 32]; 4]> = OnceLock::new();
 
 // SAFETY: both methods forward to `System` with the caller's arguments unchanged, so `System`
-// discharges `GlobalAlloc`'s obligations. `dealloc` additionally READS the block it is
-// handed before forwarding it; the block is live and `layout.size()` bytes long until
-// `System.dealloc` returns, and nothing is written or retained.
+// discharges `GlobalAlloc`'s obligations. Every block is allocated zeroed, so all of its bytes
+// are initialised from the start (the default `realloc` goes through these two methods and
+// copies into a zeroed block). `dealloc` READS the block it is handed before forwarding it;
+// the block is live, initialised and `layout.size()` bytes long until `System.dealloc`
+// returns, and nothing is written or retained.
 unsafe impl GlobalAlloc for ScanningAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // SAFETY: the caller's `layout` contract is forwarded to `System.alloc` unchanged.
-        unsafe { System.alloc(layout) }
+        // SAFETY: the caller's `layout` contract is forwarded to `System.alloc_zeroed`
+        // unchanged. Zeroing initialises every byte, which `dealloc`'s read relies on.
+        unsafe { System.alloc_zeroed(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: `ptr` came from `System` (via `alloc` above) with `layout`, so it points
-        // to `layout.size()` live, initialised-or-not bytes that are only read as `u8`
+        // SAFETY: `ptr` came from `System.alloc_zeroed` (via `alloc` above, or the default
+        // `alloc_zeroed`/`realloc`, which call it) with `layout`, so it points to
+        // `layout.size()` live bytes that are all initialised; they are only read as `u8`
         // before the block is returned to `System` with the same arguments.
         unsafe {
             if ARMED.load(Ordering::SeqCst) {

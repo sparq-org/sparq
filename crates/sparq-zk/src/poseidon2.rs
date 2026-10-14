@@ -96,16 +96,22 @@ fn internal_m_multiplication(input: &mut [Fr; T]) {
 /// `poseidon2_permutation` blackbox.
 pub fn permutation(inputs: &[Fr; T]) -> [Fr; T] {
     let mut state = *inputs;
+    permute_in_place(&mut state);
+    state
+}
 
+/// [`permutation`] applied to `state` itself, so a caller's guarded state is the only
+/// copy the rounds work on.
+fn permute_in_place(state: &mut [Fr; T]) {
     // 1st linear layer.
-    matrix_multiplication_4x4(&mut state);
+    matrix_multiplication_4x4(state);
 
     // First half of the external rounds.
     let rf_first = ROUNDS_F / 2;
     for r in 0..rf_first {
-        add_round_constants(&mut state, r);
-        s_box(&mut state);
-        matrix_multiplication_4x4(&mut state);
+        add_round_constants(state, r);
+        s_box(state);
+        matrix_multiplication_4x4(state);
     }
 
     // Internal rounds (S-box on lane 0 only).
@@ -113,17 +119,15 @@ pub fn permutation(inputs: &[Fr; T]) -> [Fr; T] {
     for r in rf_first..p_end {
         state[0] += ROUND_CONSTANT[r][0];
         state[0] = single_box(state[0]);
-        internal_m_multiplication(&mut state);
+        internal_m_multiplication(state);
     }
 
     // Remaining external rounds.
     for r in p_end..(ROUNDS_F + ROUNDS_P) {
-        add_round_constants(&mut state, r);
-        s_box(&mut state);
-        matrix_multiplication_4x4(&mut state);
+        add_round_constants(state, r);
+        s_box(state);
+        matrix_multiplication_4x4(state);
     }
-
-    state
 }
 
 /// Variable-length Poseidon2 hash, identical to noir-lang/poseidon's
@@ -133,8 +137,8 @@ pub fn hash(inputs: &[Fr]) -> Fr {
     sponge(inputs, &mut [Fr::from(0u64); T])
 }
 
-/// [`hash`] for secret inputs: the sponge state is zeroized when it is dropped.
-/// Temporaries inside [`permutation`] are not scrubbed.
+/// [`hash`] for secret inputs: the permutation runs in place on a sponge state that is
+/// zeroized when it is dropped. Compiler and field-arithmetic temporaries are not scrubbed.
 pub(crate) fn hash_secret(inputs: &[Fr]) -> Fr {
     sponge(inputs, &mut zeroize::Zeroizing::new([Fr::from(0u64); T]))
 }
@@ -149,7 +153,7 @@ fn sponge(inputs: &[Fr], state: &mut [Fr; T]) -> Fr {
         for (i, x) in chunk.iter().enumerate() {
             state[i] += x;
         }
-        *state = permutation(state);
+        permute_in_place(state);
     }
     let rem = chunks.remainder();
     // A final permutation runs iff the input is empty or has a partial
@@ -158,7 +162,7 @@ fn sponge(inputs: &[Fr], state: &mut [Fr; T]) -> Fr {
         for (i, x) in rem.iter().enumerate() {
             state[i] += x;
         }
-        *state = permutation(state);
+        permute_in_place(state);
     }
     state[0]
 }

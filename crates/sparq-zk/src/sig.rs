@@ -585,12 +585,12 @@ fn derive_nonce(sk: &SecretKey, m: &Fr) -> JjScalar {
 /// heap copy of its (secret) input.
 fn reduce_limbs<F: PrimeField>(limbs: &[u64]) -> F {
     let base = F::from(1u128 << 64);
-    let mut acc = F::zero();
+    let mut acc = zeroize::Zeroizing::new(F::zero());
     for &limb in limbs.iter().rev() {
-        acc *= base;
-        acc += F::from(limb);
+        *acc *= base;
+        *acc += F::from(limb);
     }
-    acc
+    *acc
 }
 
 /// Sign `m` with `sk` using a DETERMINISTIC nonce derived from `(sk, m)` (no
