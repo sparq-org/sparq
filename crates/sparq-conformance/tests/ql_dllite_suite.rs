@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-qo1a9 (epic sq-pbz04, the LAST conformance bead) — the GRADUATED
+//! sq-qo1a9 (epic sq-pbz04, the LAST conformance bead) — the GRADUATED
 //! OWL 2 QL (DL-Lite_R) certain-answer oracle ratchet.
 //!
 //! ## What this GRADUATES — and the honest scope
@@ -52,7 +52,7 @@
 //! `QL_DLLITE_FLOOR` is read TEXTUALLY by `tests/scoreboard_floors.rs`, so the
 //! central scoreboard's mirrored value can never silently drift.
 
-// [OPUS-4.8] When the lane feature is OFF the runner is a single self-SKIP test so
+// When the lane feature is OFF the runner is a single self-SKIP test so
 // the default + `--workspace` builds neither link the QL rewriter nor go red. (cfg
 // gate, not a runtime branch — zero QL code compiles in the default state, the
 // lean-core invariant.)
@@ -79,7 +79,7 @@ mod gated {
     /// `tests/scoreboard_floors.rs`. It may only RISE — never lower it (raise as the
     /// DL-Lite_R oracle corpus grows). HONESTLY a sparq EXTENSION-shaped ratchet over
     /// the DL-Lite_R certain-answer oracle, NOT a full-OWL-2-QL-conformance claim.
-    /// [OPUS-4.8] sq-qo1a9
+    /// sq-qo1a9
     pub const QL_DLLITE_FLOOR: usize = 11;
 
     #[test]
@@ -99,7 +99,7 @@ mod gated {
             }
         }
 
-        // [OPUS-4.8] The line a CI ratchet can grep (sound-and-complete count in
+        // The line a CI ratchet can grep (sound-and-complete count in
         // field $3), mirroring the RIF/RSP/BM25 EXTENSION ratchet shape. Positional
         // `println!` args per the CodeQL `rust/unused-variable` false-positive guard.
         println!("\nOWL 2 QL (DL-Lite_R) certain-answer oracle ratchet (sq-qo1a9)");

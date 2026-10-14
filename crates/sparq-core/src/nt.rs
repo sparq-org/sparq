@@ -7,7 +7,7 @@
 //!
 //! Blank-node labels are kept verbatim (file-scoped, as the loader folds one document).
 //!
-//! [OPUS-4.8] (sq-hxgb) RDF 1.2 triple terms `<<( s p o )>>` are accepted in the OBJECT
+//! (sq-hxgb) RDF 1.2 triple terms `<<( s p o )>>` are accepted in the OBJECT
 //! position (object-only, may nest), interned structurally to agree with the Turtle loader
 //! and the engine's CONSTRUCT N-Triples serializer (which emits this form). The fast plain-
 //! triple path is unchanged: a triple term is only looked for when the object byte is `<`
@@ -16,7 +16,7 @@
 use crate::dict::{Dict, Id, NO_ID};
 use std::borrow::Cow;
 
-/// [OPUS-4.8] (sq-7d3dj.2) Rough average N-Triples line length, in bytes, used ONLY to pre-size
+/// (sq-7d3dj.2) Rough average N-Triples line length, in bytes, used ONLY to pre-size
 /// the per-chunk triple `Vec` (here) and the per-chunk partial `Dict` (in `parse_block`) before
 /// filling them — killing the reallocation/rehash churn the ingest profile flagged (~5% of the
 /// parallel load). It is a pure capacity HINT: `bytes / AVG_NT_LINE_BYTES` estimates the triple
@@ -34,7 +34,7 @@ use std::borrow::Cow;
 /// capacity and never bounds the parsed count.
 pub(crate) const AVG_NT_LINE_BYTES: usize = 64;
 
-/// [OPUS-4.8] (sq-53s1, ASVS V5.5.2) Maximum nesting depth of RDF 1.2 triple terms
+/// (sq-53s1, ASVS V5.5.2) Maximum nesting depth of RDF 1.2 triple terms
 /// `<<( s p o )>>` accepted by the byte-level N-Triples/N-Quads parser before it returns a
 /// clean parse error instead of recursing until the native stack overflows and aborts the
 /// process. `object_term`/`triple_term` (and the no-intern `span_object`/`span_triple_term`
@@ -45,7 +45,7 @@ pub(crate) const AVG_NT_LINE_BYTES: usize = 64;
 /// Kept in step with spargebra's `MAX_RECURSION_DEPTH` (the SPARQL side of the same control).
 const MAX_TRIPLE_TERM_DEPTH: usize = 128;
 
-/// [OPUS-4.8] (sq-25r3) The identity of an N-Quads quad's GRAPH field (4th term): an absolute
+/// (sq-25r3) The identity of an N-Quads quad's GRAPH field (4th term): an absolute
 /// IRI or a blank-node label, decoded (escapes resolved) so two byte-different-but-equal graph
 /// references route to the SAME graph. `None` (the default graph) is represented by the absence
 /// of a key, not a variant here. Used purely as a routing key by the chunk-parallel N-Quads
@@ -72,7 +72,7 @@ impl GraphKey {
     }
 }
 
-/// [OPUS-4.8] (sq-25r3) Relabels an error raised by the SHARED N-Triples term parsers (`term`,
+/// (sq-25r3) Relabels an error raised by the SHARED N-Triples term parsers (`term`,
 /// `object_term`, `scan_delim`, `decode`, …) so it reads `N-Quads:` when surfaced from the
 /// N-Quads fast path — the shared code emits the `N-Triples:` prefix, which is misleading to a
 /// caller that handed in N-Quads. Only the leading prefix is rewritten; the byte offset and the
@@ -85,7 +85,7 @@ fn as_nquads_err(e: String) -> String {
     }
 }
 
-/// [OPUS-4.8] (sq-25r3) Parses a slice of complete N-QUADS lines, ROUTING each quad's triple to a
+/// (sq-25r3) Parses a slice of complete N-QUADS lines, ROUTING each quad's triple to a
 /// per-graph partial bucket keyed by its 4th (graph) field — the byte-level analogue of
 /// [`parse_chunk`] for datasets. N-Quads is one statement per line, so a byte buffer can be split
 /// at newline boundaries and each range parsed independently; this is the per-range worker.
@@ -101,7 +101,7 @@ fn as_nquads_err(e: String) -> String {
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Vec<[Id; 3]>)>, String> {
-    // [OPUS-5] (sq-7d3dj.21) Establish the module's `CHUNK-UTF8` invariant ONCE, before any byte
+    // (sq-7d3dj.21) Establish the module's `CHUNK-UTF8` invariant ONCE, before any byte
     // is scanned — the safety precondition of every `str_of` span extraction below. See `str_of`.
     validate_chunk_utf8(bytes, "N-Quads")?;
     // `buckets` is in first-occurrence order of graph keys (push-on-first-sight); `index` maps a
@@ -174,7 +174,7 @@ pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Ve
     Ok(buckets)
 }
 
-/// [OPUS-4.8] (sq-25r3) Parses just the graph (4th) field of an N-Quads quad into a [`GraphKey`]
+/// (sq-25r3) Parses just the graph (4th) field of an N-Quads quad into a [`GraphKey`]
 /// (an absolute IRI or a blank-node label), decoding escapes so the key is the graph's true
 /// identity. Literals are NOT valid in graph position and are rejected.
 #[cfg(feature = "parallel")]
@@ -182,8 +182,7 @@ fn graph_key(b: &[u8], i: usize) -> Result<GraphKey, String> {
     match b.get(i) {
         Some(b'<') => {
             let (start, end, esc, _next) = scan_iri(b, i).map_err(as_nquads_err)?;
-            let s = decode(&b[start..end], esc).map_err(as_nquads_err)?;
-            check_absolute(&s, i).map_err(as_nquads_err)?;
+            let s = iri_text(&b[start..end], esc, i).map_err(as_nquads_err)?;
             Ok(GraphKey::Iri(s.into_owned()))
         }
         Some(b'_') => {
@@ -198,13 +197,13 @@ fn graph_key(b: &[u8], i: usize) -> Result<GraphKey, String> {
     }
 }
 
-/// [OPUS-4.8] (sq-25r3) Returns the index just past a term WITHOUT interning — used to locate the
+/// (sq-25r3) Returns the index just past a term WITHOUT interning — used to locate the
 /// optional graph field before deciding which bucket dict to intern S/P/O into (the caller then
 /// re-scans from the start offset to intern). Mirrors [`term`]'s grammar.
 #[cfg(feature = "parallel")]
 fn span_term(b: &[u8], i: usize) -> Result<usize, String> {
     match b.get(i) {
-        // [OPUS-4.8] (sq-87bq) Triple terms are OBJECT-ONLY (RDF 1.2); a `<<(` reaching the
+        // (sq-87bq) Triple terms are OBJECT-ONLY (RDF 1.2); a `<<(` reaching the
         // subject/predicate (or graph) span walk is a non-object triple term — reject with a
         // precise message, mirroring `term`. See the grammar note there (prods. [7]/[8]/[9]).
         Some(b'<') if b.get(i + 1) == Some(&b'<') && b.get(i + 2) == Some(&b'(') => Err(format!(
@@ -226,14 +225,14 @@ fn span_term(b: &[u8], i: usize) -> Result<usize, String> {
     }
 }
 
-/// [OPUS-4.8] (sq-25r3) Index just past an OBJECT-position term (which may be an RDF 1.2 triple
+/// (sq-25r3) Index just past an OBJECT-position term (which may be an RDF 1.2 triple
 /// term `<<( … )>>`). Mirrors [`object_term`]'s grammar.
 #[cfg(feature = "parallel")]
 fn span_object(b: &[u8], i: usize) -> Result<usize, String> {
     span_object_depth(b, i, 0)
 }
 
-/// [OPUS-4.8] (sq-53s1) `span_object` carrying the triple-term nesting `depth` so the no-intern
+/// (sq-53s1) `span_object` carrying the triple-term nesting `depth` so the no-intern
 /// graph-scan walk is bounded identically to the interning path (`object_term_depth`).
 #[cfg(feature = "parallel")]
 fn span_object_depth(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
@@ -244,11 +243,11 @@ fn span_object_depth(b: &[u8], i: usize, depth: usize) -> Result<usize, String> 
     }
 }
 
-/// [OPUS-4.8] (sq-25r3) Index just past an RDF 1.2 triple term `<<( s p o )>>`, recursing through
+/// (sq-25r3) Index just past an RDF 1.2 triple term `<<( s p o )>>`, recursing through
 /// its nested object. Mirrors [`triple_term`].
 #[cfg(feature = "parallel")]
 fn span_triple_term(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
-    // [OPUS-4.8] (sq-53s1, ASVS V5.5.2) Mirror the interning path's depth bound (`triple_term`).
+    // (sq-53s1, ASVS V5.5.2) Mirror the interning path's depth bound (`triple_term`).
     if depth >= MAX_TRIPLE_TERM_DEPTH {
         return Err(format!(
             "N-Quads: RDF 1.2 triple term nested more than {MAX_TRIPLE_TERM_DEPTH} levels deep at byte {i}"
@@ -270,7 +269,7 @@ fn span_triple_term(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
     }
 }
 
-/// [OPUS-4.8] (sq-25r3) Span of a literal (value + optional `^^<dt>` / `@lang`), returning the
+/// (sq-25r3) Span of a literal (value + optional `^^<dt>` / `@lang`), returning the
 /// index just past it. Mirrors [`literal`]'s grammar without interning.
 #[cfg(feature = "parallel")]
 fn span_literal(b: &[u8], i: usize) -> Result<usize, String> {
@@ -296,7 +295,7 @@ fn span_literal(b: &[u8], i: usize) -> Result<usize, String> {
     }
 }
 
-/// [SONNET-4.6] (sq-7d3dj.31.3) Maximum byte length of a subject/predicate token stored
+/// (sq-7d3dj.31.3) Maximum byte length of a subject/predicate token stored
 /// in the inline intern caches of [`parse_chunk`]. Tokens longer than this threshold fall
 /// through to the normal `term()` intern path with no caching overhead.
 ///
@@ -310,10 +309,10 @@ pub(crate) const SUBJ_PRED_CACHE_LEN: usize = 128;
 /// Parses a slice of complete N-Triples lines, interning each term and returning the
 /// id-triples. Errors carry the byte offset.
 pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String> {
-    // [OPUS-5] (sq-7d3dj.21) Establish the module's `CHUNK-UTF8` invariant ONCE, before any byte
+    // (sq-7d3dj.21) Establish the module's `CHUNK-UTF8` invariant ONCE, before any byte
     // is scanned — the safety precondition of every `str_of` span extraction below. See `str_of`.
     validate_chunk_utf8(bytes, "N-Triples")?;
-    // [OPUS-4.8] (sq-7d3dj.2) Pre-size the id-triple output from the chunk's byte length so the
+    // (sq-7d3dj.2) Pre-size the id-triple output from the chunk's byte length so the
     // Vec does not re-grow (and copy) through ~log2(triples) doublings while parsing. Pure
     // capacity hint (see `AVG_NT_LINE_BYTES`); a tiny chunk (`< AVG_NT_LINE_BYTES` bytes) yields
     // `with_capacity(0)` == no allocation, and any slack is dropped with this Vec once the caller
@@ -321,7 +320,7 @@ pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String
     let mut out = Vec::with_capacity(bytes.len() / AVG_NT_LINE_BYTES);
     let n = bytes.len();
     let mut i = 0;
-    // [SONNET-4.6] (sq-7d3dj.31.3) Subject and predicate intern caches. Grouped N-Triples
+    // (sq-7d3dj.31.3) Subject and predicate intern caches. Grouped N-Triples
     // (the common dump shape: SP2Bench, WatDiv, DBpedia) repeat the same subject across
     // consecutive lines; the same small predicate set recurs throughout. Caching the last-seen
     // raw bytes and their interned id lets us skip the hash_iri + hash-table probe on a
@@ -427,7 +426,7 @@ pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String
             }
         };
         i = skip_hws(bytes, i);
-        // [OPUS-4.8] (sq-hxgb) Only the OBJECT position may be an RDF 1.2 triple term
+        // (sq-hxgb) Only the OBJECT position may be an RDF 1.2 triple term
         // `<<( s p o )>>` (matching the Turtle loader / RDF 1.2 grammar — triple terms
         // are object-only and may nest through their own object).
         let (o, j) = object_term(bytes, i, dict)?;
@@ -479,7 +478,7 @@ fn next_line(b: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// [OPUS-5] (sq-7d3dj.21) Establishes the module's `CHUNK-UTF8` invariant: proves the WHOLE
+/// (sq-7d3dj.21) Establishes the module's `CHUNK-UTF8` invariant: proves the WHOLE
 /// chunk buffer is valid UTF-8 in ONE contiguous pass, so every subsequent span extraction
 /// (`str_of`) is O(1) instead of O(span). This is the safety precondition of the whole
 /// module — see the `CHUNK-UTF8` block on `str_of` — and is called at the TOP of both public
@@ -503,7 +502,7 @@ fn next_line(b: &[u8], mut i: usize) -> usize {
 fn validate_chunk_utf8(bytes: &[u8], format: &str) -> Result<(), String> {
     if let Err(e) = std::str::from_utf8(bytes) {
         // Positional `format!` args: the CodeQL `rust/unused-variable` query false-positives on
-        // inline captures. [OPUS-5]
+        // inline captures.
         return Err(format!("{}: invalid UTF-8 at byte {}", format, e.valid_up_to()));
     }
     Ok(())
@@ -570,7 +569,7 @@ fn str_of(raw: &[u8]) -> &str {
 
 fn term(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     match b.get(i) {
-        // [OPUS-4.8] (sq-87bq) A `<<(` here is an RDF 1.2 triple term in a NON-object
+        // (sq-87bq) A `<<(` here is an RDF 1.2 triple term in a NON-object
         // position (subject, predicate, or a triple term's own subject/predicate). The RDF
         // 1.2 N-Triples grammar makes triple terms OBJECT-ONLY — `subject ::= IRIREF |
         // BLANK_NODE_LABEL` (prod. [7]) and `predicate ::= IRIREF` (prod. [8]); only
@@ -589,14 +588,14 @@ fn term(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     }
 }
 
-/// [OPUS-4.8] (sq-hxgb) Parses a term in the OBJECT position, where (and only where) RDF 1.2
+/// (sq-hxgb) Parses a term in the OBJECT position, where (and only where) RDF 1.2
 /// N-Triples permits a triple term `<<( s p o )>>`. The `<<(` opener disambiguates a triple
 /// term from a plain IRIREF (`<…>`); anything else falls through to the shared [`term`] path.
 fn object_term(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     object_term_depth(b, i, dict, 0)
 }
 
-/// [OPUS-4.8] (sq-53s1) `object_term` carrying the current triple-term nesting `depth` so a
+/// (sq-53s1) `object_term` carrying the current triple-term nesting `depth` so a
 /// pathologically nested `<<( … )>>` chain returns a clean parse error at `MAX_TRIPLE_TERM_DEPTH`
 /// instead of overflowing the stack. `depth` is the number of `<<(` openers already entered above
 /// this call (0 at the top-level object position).
@@ -608,14 +607,14 @@ fn object_term_depth(b: &[u8], i: usize, dict: &mut Dict, depth: usize) -> Resul
     }
 }
 
-/// [OPUS-4.8] (sq-hxgb) Parses an RDF 1.2 triple term `<<( s p o )>>` and interns it
+/// (sq-hxgb) Parses an RDF 1.2 triple term `<<( s p o )>>` and interns it
 /// STRUCTURALLY (subject/predicate/object interned first, then the triple by their ids — the
 /// same `Dict::intern_triple_ids` path `intern(&Term::Triple(_))` and the Turtle loader take,
 /// so the two loaders content-address triple terms identically). The subject is an IRI or
 /// blank node, the predicate an IRI, and the object any term — including a NESTED triple term
 /// (recursion through `object_term`). Returns the interned id and the index past the `>>`.
 fn triple_term(b: &[u8], i: usize, dict: &mut Dict, depth: usize) -> Result<(Id, usize), String> {
-    // [OPUS-4.8] (sq-53s1, ASVS V5.5.2) Bound the triple-term nesting before recursing into the
+    // (sq-53s1, ASVS V5.5.2) Bound the triple-term nesting before recursing into the
     // object, so deeply-nested input yields a clean parse error rather than a stack overflow.
     if depth >= MAX_TRIPLE_TERM_DEPTH {
         return Err(format!(
@@ -831,7 +830,34 @@ fn decode<'a>(raw: &'a [u8], esc: bool) -> Result<Cow<'a, str>, String> {
     }
 }
 
-// [OPUS-4.8] (sq-7d3dj.18) Per-thread `scheme://authority/` prefix memo for the opt-in IRI
+/// The decoded text of an `IRIREF` body scanned by [`scan_iri`] at `at`, validated the way
+/// every IRI position (subject, predicate, object, datatype, graph) needs. [`scan_iri`] already
+/// rejects a forbidden raw byte, but a `\u` / `\U` escape can decode to one, so an escaped IRI
+/// is re-checked after decoding (W3C `nt-syntax-bad-uri-02`/`-03`); the IRI must be absolute,
+/// and under the opt-in `iri-fast` feature it is also validated against RFC 3987.
+#[inline]
+fn iri_text<'a>(raw: &'a [u8], esc: bool, at: usize) -> Result<Cow<'a, str>, String> {
+    let s = if esc {
+        Cow::Owned(unescape_iri(str_of(raw), at)?)
+    } else {
+        Cow::Borrowed(str_of(raw))
+    };
+    check_absolute(&s, at)?;
+    // (sq-7d3dj.18) When the opt-in `iri-fast` feature is on, validate every IRIREF
+    // against RFC-3987 (fast path in front of `oxiri`) so the byte-level loader rejects the
+    // malformed IRIs the serial oxttl path already rejects — reaching conformance parity at
+    // fast-path cost. OFF by default: the loader keeps its current unvalidated-fast behaviour.
+    #[cfg(feature = "iri-fast")]
+    {
+        let valid = IRI_MEMO.with(|m| m.borrow_mut().validate(&s));
+        if !valid {
+            return Err(format!("N-Triples: invalid IRI <{}> at byte {}", s, at));
+        }
+    }
+    Ok(s)
+}
+
+// (sq-7d3dj.18) Per-thread `scheme://authority/` prefix memo for the opt-in IRI
 // validation fast path. A thread-local is sound under the rayon chunk-parallel loader — each
 // worker keeps its own ring — and needs no clearing between parses: every memoized prefix was
 // accepted by `oxiri`, and IRI validity is a pure function of the bytes, so a retained (or
@@ -844,19 +870,7 @@ thread_local! {
 
 fn iri(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     let (start, end, esc, next) = scan_iri(b, i)?;
-    let s = decode(&b[start..end], esc)?;
-    check_absolute(&s, i)?;
-    // [OPUS-4.8] (sq-7d3dj.18) When the opt-in `iri-fast` feature is on, validate every IRIREF
-    // against RFC-3987 (fast path in front of `oxiri`) so the byte-level loader rejects the
-    // malformed IRIs the serial oxttl path already rejects — reaching conformance parity at
-    // fast-path cost. OFF by default: the loader keeps its current unvalidated-fast behaviour.
-    #[cfg(feature = "iri-fast")]
-    {
-        let valid = IRI_MEMO.with(|m| m.borrow_mut().validate(&s));
-        if !valid {
-            return Err(format!("N-Triples: invalid IRI <{}> at byte {}", s, i));
-        }
-    }
+    let s = iri_text(&b[start..end], esc, i)?;
     Ok((dict.intern_iri(&s), next))
 }
 
@@ -932,7 +946,7 @@ const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
 const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 const RDF_DIR_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#dirLangString";
 
-/// [OPUS-4.8] (sq-langcase / #1119) ASCII-lowercases a parsed language tag, BORROWING the input
+/// (sq-langcase / #1119) ASCII-lowercases a parsed language tag, BORROWING the input
 /// when it is already all-lowercase (the common case) so the no-uppercase fast path stays
 /// allocation-free. RDF language tags are ASCII (`(PN_CHARS_BASE)('-' alnum*)*` plus the RDF 1.2
 /// `--ltr`/`--rtl` direction), so `make_ascii_lowercase` is the correct, locale-independent fold —
@@ -987,8 +1001,7 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
                 return Err(format!("N-Triples: bad datatype at byte {open}"));
             }
             let (dstart, dend, desc, next) = scan_iri(b, open)?;
-            let dt = decode(&b[dstart..dend], desc)?;
-            check_absolute(&dt, open)?;
+            let dt = iri_text(&b[dstart..dend], desc, open)?;
             // A language-tagged string needs its tag (W3C `ntriples-langdir-bad-3` / `-5`).
             if dt == RDF_LANG_STRING || dt == RDF_DIR_LANG_STRING {
                 return Err(format!(
@@ -1011,7 +1024,7 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
                 return Err(format!("N-Triples: invalid language tag at byte {lstart}"));
             }
             let dt = if raw.contains("--") { RDF_DIR_LANG_STRING } else { RDF_LANG_STRING };
-            // [OPUS-4.8] (sq-langcase / KamiQuasi #1119) NORMALISE the language tag to ASCII
+            // (sq-langcase / KamiQuasi #1119) NORMALISE the language tag to ASCII
             // lowercase, matching the oxttl/oxrdf paths (`Literal::new_language_tagged_literal`
             // lowercases via `make_ascii_lowercase`; oxttl's Turtle/N-Quads/TriG recognisers call
             // `language.to_ascii_lowercase()` before interning). RDF 1.1/1.2 language tags are
@@ -1030,6 +1043,21 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
         // simple literal -> xsd:string
         _ => Ok((dict.intern_lit(&value, XSD_STRING, None), after)),
     }
+}
+
+/// [`unescape`] for an escaped `IRIREF` body, refusing a decoded character the IRIREF
+/// production forbids. Kept out of line: escaped IRIs are the rare case.
+#[cold]
+#[inline(never)]
+fn unescape_iri(raw: &str, at: usize) -> Result<String, String> {
+    let s = unescape(raw)?;
+    if s.bytes().any(|c| IRI_CLASS[c as usize] != 0) {
+        return Err(format!(
+            "N-Triples: invalid escaped IRI character in <{}> at byte {}",
+            s, at
+        ));
+    }
+    Ok(s)
 }
 
 /// Decodes N-Triples ECHAR (`\t \b \n \r \f \" \' \\`) and UCHAR (`\uXXXX`, `\UXXXXXXXX`).
@@ -1067,7 +1095,7 @@ fn hex(it: &mut std::str::Chars<'_>, n: usize) -> Result<char, String> {
     char::from_u32(cp).ok_or_else(|| "N-Triples: invalid code point".into())
 }
 
-// [OPUS-4.8] (sq-hxgb) Triple-term parsing in the OBJECT position: structural interning,
+// (sq-hxgb) Triple-term parsing in the OBJECT position: structural interning,
 // nesting, blank-node components, fast-path-unchanged, and the rejection cases.
 #[cfg(test)]
 mod tests {
@@ -1516,7 +1544,7 @@ mod tests {
         assert_eq!(d.term(t[1][2]), Term::Literal(Literal::new_simple_literal("v")));
     }
 
-    // [OPUS-4.8] (sq-langcase / KamiQuasi #1119) The byte-level N-Triples/N-Quads parser
+    // (sq-langcase / KamiQuasi #1119) The byte-level N-Triples/N-Quads parser
     // NORMALISES language tags to ASCII lowercase, matching every oxttl path (the Turtle /
     // N-Quads / TriG recognisers + `oxrdf::Literal::new_language_tagged_literal`). Previously the
     // byte path PRESERVED the written case (`en-US`) while oxttl lowercased it (`en-us`), giving a
@@ -1600,7 +1628,7 @@ mod tests {
 
     #[test]
     fn triple_term_only_in_object_position() {
-        // [OPUS-4.8] (sq-87bq) RDF 1.2 makes triple terms OBJECT-ONLY (N-Triples grammar:
+        // (sq-87bq) RDF 1.2 makes triple terms OBJECT-ONLY (N-Triples grammar:
         // `subject ::= IRIREF | BLANK_NODE_LABEL` [7], `predicate ::= IRIREF` [8], only
         // `object` [9] admits a `tripleTerm` [11]). The parser must REJECT a `<<( … )>>` in
         // subject OR predicate position with a precise, position-aware message — not misparse
@@ -1635,7 +1663,7 @@ mod tests {
         assert!(parse_chunk(obj, &mut d).is_ok(), "the same triple term in object position must parse");
     }
 
-    // [OPUS-4.8] (sq-53s1, ASVS V5.5.2) Builds one N-Triples line whose OBJECT is `depth` levels
+    // (sq-53s1, ASVS V5.5.2) Builds one N-Triples line whose OBJECT is `depth` levels
     // of nested RDF 1.2 triple terms `<<( s p <<( … )>> )>>`. Each level wraps the previous object
     // in a fresh triple term; the innermost object is a plain IRI.
     fn nested_triple_term_line(depth: usize) -> Vec<u8> {
@@ -1688,7 +1716,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] (sq-53s1) The N-Quads fast path uses a separate no-intern span walk
+    // (sq-53s1) The N-Quads fast path uses a separate no-intern span walk
     // (`span_object`/`span_triple_term`) to locate the graph field; it must be bounded too.
     #[cfg(feature = "parallel")]
     #[test]
@@ -1713,7 +1741,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] (sq-cpm) The N-Quads 4th field is an OPTIONAL `graphLabel`, and the RDF 1.2
+    // (sq-cpm) The N-Quads 4th field is an OPTIONAL `graphLabel`, and the RDF 1.2
     // N-Quads grammar restricts it to `IRIREF | BLANK_NODE_LABEL` (prod. `graphLabel`) — a
     // literal or a triple term in graph position is a syntax error, not a fourth quad component.
     // `parse_quads_chunk` resolves the graph bucket via `graph_key` (IRI/blank only) and
@@ -1789,7 +1817,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.2) The `Dict` capacity is a PURE hint: parsing the same bytes into a
+    /// (sq-7d3dj.2) The `Dict` capacity is a PURE hint: parsing the same bytes into a
     /// `Dict::new()` vs a `Dict::with_capacity(BIG)` must yield byte-identical triples AND an
     /// identical term↔id bijection (same distinct-term count, same `term(id)` for every id) —
     /// the reserved capacity changes the allocation, never the parsed result or id-assignment
@@ -1829,7 +1857,7 @@ mod tests {
         }
     }
 
-    // [SONNET-4.6] (sq-7d3dj.31.3) Subject/predicate intern-cache tests.
+    // (sq-7d3dj.31.3) Subject/predicate intern-cache tests.
 
     /// A grouped N-Triples corpus (many triples per subject) exercises the cache hit path.
     /// We verify: (a) the correct triples are parsed, (b) the subject cache produces the same
@@ -1967,7 +1995,7 @@ mod tests {
     }
 
     #[test]
-    // [SONNET-4.6] (sq-7d3dj.31.3) Verify that subjects/predicates longer than
+    // (sq-7d3dj.31.3) Verify that subjects/predicates longer than
     // SUBJ_PRED_CACHE_LEN bytes are parsed correctly even though they bypass the stack-buffer
     // cache (the else branch that sets cache_s_len=0 / cache_s_id=NO_ID).  Two consecutive
     // triples with the same oversized subject must receive the SAME interned id.
@@ -2014,7 +2042,7 @@ mod tests {
     /// Multi-byte UTF-8 pressed directly against EVERY span delimiter the parser cuts on
     /// (`<`/`>`, `"`/`"`, `_:`, `^^<>`), round-tripping byte-exactly. If any span end were
     /// mis-computed to land mid-codepoint, `str_of`'s `debug_assert!` fires here (and Miri
-    /// reports UB in a release-shaped interpretation). [OPUS-5]
+    /// reports UB in a release-shaped interpretation).
     #[test]
     fn multibyte_spans_at_every_delimiter_round_trip() {
         // `é` (U+00E9, 2 bytes), `→` (U+2192, 3 bytes), `𝔄` (U+1D504, 4 bytes) — one of each
@@ -2046,7 +2074,7 @@ mod tests {
 
     /// The escape slow path (`decode` with `esc == true`) over a span that ALSO carries raw
     /// multi-byte bytes: the `\` skip in `scan_delim` must not move the closer match off a
-    /// character boundary. [OPUS-5]
+    /// character boundary.
     #[test]
     fn escaped_and_multibyte_literal_span_round_trips() {
         let input = "<http://ex/s> <http://ex/p> \"caf\\u00E9 → \\\"é\\\"\" .\n";
@@ -2061,7 +2089,7 @@ mod tests {
     /// A language tag terminated by a MULTI-BYTE byte is the one span end that is not an ASCII
     /// delimiter but the index OF a non-ASCII lead byte — still a character boundary. The parse
     /// must fail CLEANLY (the byte is not a valid statement terminator), never trip the
-    /// `debug_assert!` and never mis-slice. [OPUS-5]
+    /// `debug_assert!` and never mis-slice.
     #[test]
     fn language_tag_terminated_by_multibyte_errors_cleanly() {
         let input = "<http://ex/s> <http://ex/p> \"x\"@ené .\n";
@@ -2074,7 +2102,7 @@ mod tests {
     /// span is taken, with the offending byte offset. Covers a bad byte inside an IRI, inside a
     /// literal, and — the deliberately STRICTER case — inside a comment, i.e. outside any term
     /// span. N-Triples documents are defined to be UTF-8, so all three are conformant
-    /// rejections and match what the serial `oxttl` loader does. [OPUS-5]
+    /// rejections and match what the serial `oxttl` loader does.
     #[test]
     fn parse_chunk_rejects_invalid_utf8() {
         // (label, prefix, the invalid byte, suffix) — the expected `valid_up_to` offset is
@@ -2105,7 +2133,7 @@ mod tests {
         }
     }
 
-    /// The N-Quads entry point carries the SAME validation, labelled for its own grammar. [OPUS-5]
+    /// The N-Quads entry point carries the SAME validation, labelled for its own grammar.
     #[cfg(feature = "parallel")]
     #[test]
     fn parse_quads_chunk_rejects_invalid_utf8() {
@@ -2122,7 +2150,7 @@ mod tests {
     }
 
     /// The N-Quads path takes spans through its own `graph_key` / re-scan route; multi-byte
-    /// graph names and terms must survive it byte-exactly. [OPUS-5]
+    /// graph names and terms must survive it byte-exactly.
     #[cfg(feature = "parallel")]
     #[test]
     fn parse_quads_chunk_multibyte_graph_and_terms_round_trip() {
@@ -2139,5 +2167,78 @@ mod tests {
         );
         assert_eq!(buckets[0].1.term(buckets[0].2[0][2]), Term::Literal(Literal::new_simple_literal("é")));
         assert_eq!(buckets[1].1.term(buckets[1].2[0][0]), Term::BlankNode(BlankNode::new_unchecked("é")));
+    }
+
+    /// A `\u` / `\U` escape that decodes to a character the IRIREF production forbids
+    /// (`` [#x00-#x20<>"{}|^`\] ``) is rejected in every IRI position, as the serial oxttl
+    /// parser rejects it; an escape decoding to an allowed character is still accepted.
+    #[test]
+    fn escaped_forbidden_iri_characters_are_rejected_in_every_position() {
+        let escapes = [
+            "\\u0020",
+            "\\u003C",
+            "\\u003E",
+            "\\u0022",
+            "\\u007B",
+            "\\u007D",
+            "\\u007C",
+            "\\u005E",
+            "\\u0060",
+            "\\u005C",
+            "\\u0001",
+            "\\U00000020",
+        ];
+        for esc in escapes {
+            let bad = format!("http://ex/a{esc}b");
+            let docs = [
+                ("subject", format!("<{bad}> <http://ex/p> <http://ex/o> .\n")),
+                ("predicate", format!("<http://ex/s> <{bad}> <http://ex/o> .\n")),
+                ("object", format!("<http://ex/s> <http://ex/p> <{bad}> .\n")),
+                ("datatype", format!("<http://ex/s> <http://ex/p> \"v\"^^<{bad}> .\n")),
+                (
+                    "triple-term object",
+                    format!("<http://ex/s> <http://ex/p> <<( <http://ex/a> <http://ex/b> <{bad}> )>> .\n"),
+                ),
+            ];
+            for (pos, doc) in docs {
+                let mut d = Dict::new();
+                assert!(
+                    parse_chunk(doc.as_bytes(), &mut d).is_err(),
+                    "{esc} in the {pos} IRI must be rejected: {doc}"
+                );
+                assert!(
+                    oxttl::NTriplesParser::new()
+                        .for_slice(doc.as_bytes())
+                        .any(|r| r.is_err()),
+                    "oxttl rejects {esc} in the {pos} IRI too: {doc}"
+                );
+            }
+            #[cfg(feature = "parallel")]
+            {
+                let quad = format!("<http://ex/s> <http://ex/p> <http://ex/o> <{bad}> .\n");
+                assert!(
+                    quad_graph_keys(quad.as_bytes()).is_err(),
+                    "{esc} in the graph IRI must be rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn escaped_allowed_iri_characters_are_accepted_and_decoded() {
+        let doc = b"<http://ex/s\\u00E9> <http://ex/p> \"v\"^^<http://ex/dt\\u0041\\U0001D504> .\n";
+        let mut d = Dict::new();
+        let triples = parse_chunk(doc, &mut d).expect("escaped allowed characters parse");
+        assert_eq!(
+            d.term(triples[0][0]),
+            Term::NamedNode(NamedNode::new_unchecked("http://ex/s\u{E9}"))
+        );
+        assert_eq!(
+            d.term(triples[0][2]),
+            Term::Literal(Literal::new_typed_literal(
+                "v",
+                NamedNode::new_unchecked("http://ex/dtA\u{1D504}")
+            ))
+        );
     }
 }

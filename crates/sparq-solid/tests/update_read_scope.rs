@@ -261,8 +261,11 @@ const VARIABLE_TARGETS: &[(&str, Option<&[&str]>)] = &[
     ("INSERT { GRAPH ?g { <urn:f> <urn:p> ?n } } WHERE { { SELECT ?g (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } GROUP BY ?g HAVING (?g = <https://pod.ex/out>) } }", Some(OUT)),
     ("DELETE { GRAPH ?g { ?s ?p ?o } } WHERE { GRAPH ?g { ?s ?p ?o } }", None),
     ("DELETE { GRAPH ?g { ?s ?p ?o } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { ?s ?p ?o } }", Some(OUT)),
-    // A variable target inside a multi-operation request is refused outright.
+    // In a multi-operation request, a variable target bob cannot write refuses the whole
+    // request, whichever operation comes first; one he can write is applied with the rest.
     ("INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> 1 } } ; INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } }", None),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } } ; INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> 1 } }", None),
+    ("INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> 1 } } ; INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }", Some(OUT)),
 ];
 
 /// The graphs a `GRAPH ?var` template writes are the graphs authorized: a permitted update
@@ -304,9 +307,9 @@ fn reopen(dir: &std::path::Path) -> PodStore {
     s
 }
 
-/// A variable-target update is durable, and so are later writes. A multi-operation
-/// request that includes one is refused and changes neither memory nor disk, while a
-/// multi-operation request with static targets still runs.
+/// A variable-target update is durable, and so are later writes. On a directory-backed
+/// store a multi-operation request that includes one is refused and changes neither memory
+/// nor disk, while a multi-operation request with static targets still runs.
 #[test]
 fn variable_target_updates_stay_durable() {
     let (mut s, dir) = durable_store("ok");
@@ -339,7 +342,7 @@ fn variable_target_updates_stay_durable() {
              INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
         )
         .expect_err("a variable target must be sent on its own");
-    assert!(e.contains("request of its own"), "{e}");
+    assert!(e.contains("directory-backed store"), "{e}");
     assert_eq!(out(&s), before, "memory changed");
     drop(s);
     assert_eq!(out(&reopen(&dir)), before, "disk changed");
@@ -363,4 +366,105 @@ fn unreadable_and_absent_sources_are_refused_alike() {
         e.replace(g, "<graph>")
     };
     assert_eq!(refusal("https://pod.ex/private"), refusal("https://pod.ex/absent"));
+}
+
+/// `CLEAR NAMED` needs write on every graph it empties, including one an earlier operation of
+/// the same request created: the owner may write every existing graph but only append to
+/// `new`, so creating `new` and then clearing every graph is refused.
+#[test]
+fn clearing_every_graph_covers_graphs_created_earlier_in_the_request() {
+    const OWNER: &str = "https://owner.ex/card#me";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let rule = |doc: &str, target: &str, scope: &str, modes: &[&str]| {
+        let mut nq = format!(
+            "<{doc}#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL}Authorization> <{doc}> .\n\
+             <{doc}#r> <{ACL}{scope}> <{target}> <{doc}> .\n\
+             <{doc}#r> <{ACL}agent> <{OWNER}> <{doc}> .\n"
+        );
+        for m in modes {
+            nq += &format!("<{doc}#r> <{ACL}mode> <{ACL}{m}> <{doc}> .\n");
+        }
+        nq
+    };
+    let mut nq = String::from("<urn:s> <urn:p> \"kept\" <https://pod.ex/a> .\n");
+    nq += &rule("https://pod.ex/.acl", "https://pod.ex/", "default", &["Read", "Write", "Control"]);
+    nq += &rule("https://pod.ex/.acl", "https://pod.ex/", "accessTo", &["Read", "Write", "Control"]);
+    nq += &rule("https://pod.ex/new.acl", "https://pod.ex/new", "accessTo", &["Append", "Control"]);
+    let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+    s.materialize_wac().expect("wac");
+    let owner = Session { agent: Some(OWNER), client: None, issuer: None, now: None };
+    let before = snapshot(&s);
+    s.update_as(&owner, "CLEAR NAMED").expect("write on every existing graph");
+    let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+    s.materialize_wac().expect("wac");
+    let e = s
+        .update_as(
+            &owner,
+            "INSERT DATA { GRAPH <https://pod.ex/new> { <urn:n> <urn:p> 1 } } ; CLEAR NAMED",
+        )
+        .expect_err("new is append-only");
+    assert!(e.contains("https://pod.ex/new"), "{e}");
+    assert_eq!(snapshot(&s), before, "nothing applied");
+}
+
+/// On a store with no directory behind it, a multi-operation request with a variable target
+/// is all-or-nothing, graph removal included: a target bob cannot write in the last
+/// operation leaves the graphs earlier operations dropped and wrote untouched,
+/// and the same request with a writable target applies every operation.
+#[test]
+fn in_memory_multi_operation_requests_are_all_or_nothing() {
+    let request = |using: &str| {
+        format!(
+            "DROP GRAPH <https://pod.ex/wonly> ; \
+             INSERT DATA {{ GRAPH <https://pod.ex/out> {{ <urn:m> <urn:p> \"multi\" }} }} ; \
+             INSERT {{ GRAPH ?g {{ <urn:f> <urn:p> \"var\" }} }} {using} WHERE {{ GRAPH ?g {{ }} }}"
+        )
+    };
+    let mut s = store();
+    let before = snapshot(&s);
+    s.update_as(&bob(), &request("")).expect_err("pub is not writable");
+    assert_eq!(snapshot(&s), before, "nothing applied");
+
+    s.update_as(&bob(), &request("USING NAMED <https://pod.ex/out>"))
+        .expect("every target is writable");
+    let after = snapshot(&s);
+    assert!(!after.contains_key("<https://pod.ex/wonly>"), "{after:?}");
+    let text = out(&s);
+    assert!(text.contains("multi") && text.contains("var"), "{text}");
+}
+
+/// An in-memory dataset holding one durable named graph counts as directory-backed: a
+/// multi-operation request with a variable target is refused there with the same error, and
+/// nothing is applied in memory or on disk.
+#[test]
+fn a_durable_named_graph_keeps_the_single_operation_rule() {
+    let dir = std::env::temp_dir().join(format!("sparq_update_scope_mixed_{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    Graph::load_str("<urn:o> <urn:p> \"out\" .", "ntriples")
+        .expect("loads")
+        .save(&dir)
+        .expect("saves");
+    let mut g = Graph::load_dataset(&small_dataset(), "nquads").expect("loads");
+    let out_graph = g
+        .named
+        .iter()
+        .position(|(n, _)| n.to_string() == "<https://pod.ex/out>")
+        .expect("out exists");
+    g.named[out_graph].1 = Graph::open(&dir).expect("opens");
+    let mut s = PodStore::new(g);
+    s.materialize_wac().expect("wac");
+    let before = snapshot(&s);
+    let e = s
+        .update_as(
+            &bob(),
+            "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
+             INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
+        )
+        .expect_err("a durable named graph makes the store directory-backed");
+    assert!(e.contains("directory-backed store"), "{e}");
+    assert_eq!(snapshot(&s), before, "memory changed");
+    drop(s);
+    let back = Graph::open(&dir).expect("reopens");
+    assert_eq!(back.len(), 1, "disk changed");
+    std::fs::remove_dir_all(&dir).ok();
 }

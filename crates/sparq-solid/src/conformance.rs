@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3jtd.9 — a library-level **ACP conformance harness**.
+//! sq-3jtd.9 — a library-level **ACP conformance harness**.
 //!
 //! # What this is (and the decision behind it)
 //!
@@ -146,7 +146,7 @@ impl Expect {
         self.decision
     }
 
-    /// The requestor's agent WebID (`None` = anonymous). [OPUS-4.8] sq-3jtd.8 — exposed so
+    /// The requestor's agent WebID (`None` = anonymous). sq-3jtd.8 — exposed so
     /// the sibling WAC harness ([`crate::wac_conformance`]) can build a [`crate::Session`]
     /// from a shared [`Expect`]. (Named `req_*` so it does not shadow the [`Expect::agent`]
     /// *constructor*.)
@@ -154,17 +154,17 @@ impl Expect {
         self.agent.as_deref()
     }
 
-    /// The requestor's client identifier (`None` = any client). [OPUS-4.8] sq-3jtd.8.
+    /// The requestor's client identifier (`None` = any client). sq-3jtd.8.
     pub fn req_client(&self) -> Option<&str> {
         self.client.as_deref()
     }
 
-    /// The access mode this expectation is about. [OPUS-4.8] sq-3jtd.8.
+    /// The access mode this expectation is about. sq-3jtd.8.
     pub fn req_mode(&self) -> Mode {
         self.mode
     }
 
-    /// The resource (named graph) this expectation is about. [OPUS-4.8] sq-3jtd.8.
+    /// The resource (named graph) this expectation is about. sq-3jtd.8.
     pub fn req_resource(&self) -> &str {
         &self.resource
     }
@@ -522,7 +522,7 @@ impl AcpScenario {
     }
 
     /// The scenario's accumulated N-Quads corpus (its `.acr` graphs + document
-    /// placeholders). [OPUS-4.8] sq-t58w.7 — exposed read-only so a SECOND consumer (the
+    /// placeholders). sq-t58w.7 — exposed read-only so a SECOND consumer (the
     /// differential oracle, `tests/differential_oracle.rs`) can feed the IDENTICAL RDF to
     /// an **independent** procedural ACP evaluator without re-emitting it. This is the raw
     /// input the engine's [`AcpScenario::run`] loads via `Graph::load_dataset`; a
@@ -532,7 +532,7 @@ impl AcpScenario {
     }
 
     /// The scenario's expected `(agent, client, mode, resource) → decision` table.
-    /// [OPUS-4.8] sq-t58w.7 — exposed read-only so the differential oracle can use the hand
+    /// sq-t58w.7 — exposed read-only so the differential oracle can use the hand
     /// table as a THIRD decider alongside the engine and the reference evaluator.
     pub fn expects(&self) -> &[Expect] {
         &self.expects
@@ -557,12 +557,12 @@ impl AcpScenario {
             let session = Session {
                 agent: e.req_agent(),
                 client: e.req_client(),
-                // [OPUS-4.8] sq-3jtd.9: this harness exercises the agent/client matcher
+                // sq-3jtd.9: this harness exercises the agent/client matcher
                 // dimensions; the issuer dimension (sq-3jtd.6, ACP `acp:issuer`) is left
                 // unconstrained (`None` ⇒ AnyIssuer), so issuer-blind decision parity is
                 // unaffected by the (agent, client, issuer) principal model.
                 issuer: None,
-                // [OPUS-4.8] sq-0q7n: no time-windowed grant in the ACP conformance
+                // sq-0q7n: no time-windowed grant in the ACP conformance
                 // scenarios → the clock dimension is irrelevant here.
                 now: None,
             };
@@ -601,7 +601,7 @@ impl ScenarioReport {
     /// Build a report by asking `granted` whether the engine grants each expectation's
     /// `(agent, client, mode, resource)` request, comparing it to the expected [`Decision`].
     ///
-    /// [OPUS-4.8] sq-3jtd.8 — the shared comparison/reporting core for both the ACP harness
+    /// sq-3jtd.8 — the shared comparison/reporting core for both the ACP harness
     /// ([`AcpScenario::run`]) and the WAC harness ([`crate::wac_conformance::WacScenario::run`]):
     /// only the *engine* differs (which auth view `granted` consults), not the
     /// decision-parity machinery. `granted` returns `true` when the resource is in the

@@ -35,7 +35,7 @@
 //! `bench/geo/expected.tsv` (exit 1 on drift), and forwards the same three-column
 //! contract to the ci-bench hook (which harvests the `_us` columns as advisory
 //! `geo_<name>_us` trend metrics). Correctness lives in `expected.tsv`, NOT in
-//! the binary — exactly like LUBM / SHACL. [OPUS-4.8] (sq-tf8n)
+//! the binary — exactly like LUBM / SHACL. (sq-tf8n)
 //!
 //! ## Mode 3 — `nearest-ids <corpus.nt> <k>`
 //!
@@ -53,13 +53,13 @@
 //! `count` = the COUNT scalar of a COUNT-wrapped query, else the row count —
 //! the identical comparable-size convention as
 //! `scripts/bench-adapters/http_sparql_adapter.py`, so the result-set-size
-//! cross-check against an HTTP competitor is like-for-like). [FABLE-5]
+//! cross-check against an HTTP competitor is like-for-like).
 //! (sq-hmd7l.29)
 
 use std::time::Instant;
 
 use geo_types::Point;
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{rngs::StdRng, RngExt, SeedableRng};
 use sparq_core::Graph;
 use sparq_geo::geof::lex;
@@ -102,7 +102,7 @@ fn main() {
     match args.first().map(String::as_str) {
         // `gen [N]` — write the deterministic corpus N-Triples to stdout. bench/geo/gen.sh
         // shells out to THIS so the committed corpus is byte-identical to the in-process
-        // fallback (no risk of f64-formatting drift between Rust and shell). [OPUS-4.8]
+        // fallback (no risk of f64-formatting drift between Rust and shell).
         Some("gen") => {
             let n = args.get(1).and_then(|a| a.parse().ok()).unwrap_or(CORPUS_N);
             print!("{}", generate_corpus(n));
@@ -118,7 +118,7 @@ fn main() {
 ///
 /// This path is deliberately untimed: benchmark timings continue to come from
 /// `bench`, while the harness uses these sorted IDs as a correctness oracle.
-/// [SONNET-4.6] (sq-6jl8z)
+/// (sq-6jl8z)
 fn nearest_ids_mode(args: &[String]) {
     let usage = "usage: bench_geo nearest-ids <corpus.nt> <k>";
     let (corpus_path, k) = match (args.first(), args.get(1).and_then(|s| s.parse().ok())) {
@@ -146,7 +146,7 @@ fn nearest_ids_mode(args: &[String]) {
 }
 
 /// Mode 4: run one pinned SPARQL query file over a corpus with the `geof:`
-/// registry installed; emit `stem\tcount\tus`. [FABLE-5] (sq-hmd7l.29)
+/// registry installed; emit `stem\tcount\tus`. (sq-hmd7l.29)
 #[cfg(feature = "engine")]
 fn query_mode(args: &[String]) {
     let usage = "usage: bench_geo query <corpus.nt> <query.rq> [iters]";
@@ -197,7 +197,7 @@ fn query_mode(args: &[String]) {
 /// yields the SCALAR; anything else yields the row count. Mirrors
 /// `parse_sparql_json` in `scripts/bench-adapters/http_sparql_adapter.py` so
 /// sparq's number and an HTTP competitor's number measure the same thing.
-/// [FABLE-5] (sq-hmd7l.29)
+/// (sq-hmd7l.29)
 #[cfg(feature = "engine")]
 fn comparable_count(r: &sparq_engine::QueryResult) -> usize {
     if r.vars.len() == 1 && r.rows.len() == 1 {
@@ -397,7 +397,7 @@ fn emit(name: &str, count: usize, us: f64) {
 // over WKT operands, mirroring crates/sparq-geo/tests/ogc_compliance_ratchet.rs. The
 // example reports the PASS COUNT (a deterministic integer); bench/geo/run.sh asserts it
 // and the perf-baseline ratchet gates the DEFICIT (max - passed), so coverage may only
-// tighten. PASS/FAIL only — never a coordinate value. [OPUS-4.8]
+// tighten. PASS/FAIL only — never a coordinate value.
 // ----------------------------------------------------------------------------------------
 
 type Rel = fn(&str, &str) -> Result<bool, sparq_geo::GeoError>;

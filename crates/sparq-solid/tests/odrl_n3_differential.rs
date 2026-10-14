@@ -1,11 +1,11 @@
-//! [SONNET-4.6] sq-zgbso.2 — Rust-vs-N3 decision differential for the stateless ODRL core.
+//! sq-zgbso.2 — Rust-vs-N3 decision differential for the stateless ODRL core.
 //!
 //! Asserts that the five-stratum N3 rule set (`rules/odrl-{a0,a,b,c,d}.n3`) produces
 //! EXACTLY the same `auth:*` triple set as `materialize_policy` for every case in the
 //! corpus. Both sides must also equal an independently-stated expected set so that a
 //! both-wrong agreement cannot pass.
 //!
-//! Decision-EQUIVALENCE scope — NARROWED [OPUS-5] after the PR #3458 review found two
+//! Decision-EQUIVALENCE scope — NARROWED after the PR #3458 review found two
 //! fail-OPEN defects the pre-existing scope statement did not exclude:
 //! - Unconstrained permissions and prohibitions
 //! - `odrl:dateTime` lteq / gteq constraints (canonical UTC lexical forms only —
@@ -619,7 +619,7 @@ fn inj8_caller_minted_request_typed_subject_rejected() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// GENERATED differential — [OPUS-5], PR #3458 review.
+// GENERATED differential —, PR #3458 review.
 //
 // The hand-picked corpus above is exactly what let two fail-OPEN defects through:
 // every case in it happened to use single-operand constraint nodes and no

@@ -6,7 +6,7 @@
 //! `target/criterion/` for local comparison with its own baseline mechanism. Do not
 //! bake numbers into documentation or tests.
 //!
-//! # [SONNET-4.6] sq-my8wd.3 — epic sq-my8wd
+//! # sq-my8wd.3 — epic sq-my8wd
 //!
 //! Surfaces covered:
 //! - `select_sources` — HiBISCuS-style recall-safe source selection over a 3-source,
@@ -14,14 +14,14 @@
 //! - `plan_bgp` — bind-vs-hash join planning over the selected sources.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-// [OPUS-4.8] criterion 0.8 deprecated its own black_box in favour of std::hint::black_box.
+// criterion 0.8 deprecated its own black_box in favour of std::hint::black_box.
 use sparq_fedplan::{
     plan_bgp, select_sources, Bgp, PlanOptions, PredPartition, SourceDescriptor, SourceId, Term,
     TriplePattern, Var,
 };
 use std::hint::black_box;
 
-// [GPT-5.6] sq-ioeih: distinct Criterion paths let the two feature-state runs
+// sq-ioeih: distinct Criterion paths let the two feature-state runs
 // retain separate baselines while exercising the identical fixed corpus.
 #[cfg(feature = "foldhash-maps")]
 const HASHER: &str = "foldhash";
@@ -86,7 +86,7 @@ fn bench_select_sources(c: &mut Criterion) {
             &n_sources,
             |b, _| {
                 b.iter(|| {
-                    // [SONNET-4.6] black_box prevents LLVM from eliding the selection
+                    // black_box prevents LLVM from eliding the selection
                     // when the result would otherwise be dropped unobserved.
                     black_box(select_sources(black_box(&bgp), black_box(&sources)));
                 });

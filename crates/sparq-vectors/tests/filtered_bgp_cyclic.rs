@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-p5oy, epic sq-3183) End-to-end tests for **cyclic** join sub-BGPs in
+//! (sq-p5oy, epic sq-3183) End-to-end tests for **cyclic** join sub-BGPs in
 //! the transitive filtered-ANN BGP→IdMask derivation of the `vec:` magic predicate
 //! (follow-up to sq-3tjd/#287, which added the join-connected-component mask).
 //!

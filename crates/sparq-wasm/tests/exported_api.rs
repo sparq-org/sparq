@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-8r9a — native behavioural tests of the REAL exported `#[wasm_bindgen]`
+// sq-8r9a — native behavioural tests of the REAL exported `#[wasm_bindgen]`
 // `Store` API (and the `SolutionCursor` / `QueryChunks` / `QuadChunks` cursor types).
 //
 // WHY THIS FILE EXISTS (coverage floor-raise)
@@ -29,7 +29,7 @@ const DATA: &str = r#"@prefix ex: <http://ex/> .
     ex:bob ex:name "Bob"@en ; ex:age 25 ."#;
 
 /// Extracts the `"value"` strings of every `?<var>` binding from a SPARQL-JSON batch, in
-/// document order. [OPUS-4.8]
+/// document order.
 ///
 /// We anchor on the binding KEY (`"<var>":{ … "value":"<v>"`) rather than scanning every
 /// `"value":"` in the batch, so the extraction stays correct if a row gains a second
@@ -58,7 +58,7 @@ fn select_binding_values(batch: &str, var: &str) -> Vec<String> {
         .collect()
 }
 
-/// Normalises an N-Triples document to its SORTED set of non-empty lines. [OPUS-4.8]
+/// Normalises an N-Triples document to its SORTED set of non-empty lines.
 ///
 /// A CONSTRUCT/DESCRIBE graph has SET semantics: the document is the *set* of its triples,
 /// and the engine makes no ordering guarantee on triple emission (see
@@ -127,7 +127,7 @@ fn exported_load_compressed_matches_raw() {
     assert!(cmp.heap_bytes() <= raw.heap_bytes());
 }
 
-/// [OPUS-4.8] sq-ty78o (#1114): the exported `Store::new()` (`new Store()`) builds an empty,
+/// sq-ty78o (#1114): the exported `Store::new()` (`new Store()`) builds an empty,
 /// mutable store, and a `GRAPH`-targeted `updateInPlace` then a `GRAPH ?g` query round-trips
 /// — the named-graph gap closed by the constructor. Exercises the `new`/`update_in_place`
 /// success arms natively (the coverage floor for the exported method).
@@ -149,7 +149,7 @@ fn exported_new_store_named_graph_roundtrip() {
     );
 }
 
-/// [OPUS-4.8] sq-f66jz (#1115): the exported `Store::loadWithBase` resolves relative IRIs
+/// sq-f66jz (#1115): the exported `Store::loadWithBase` resolves relative IRIs
 /// against the base (the `Ok` arm runs natively).
 #[test]
 fn exported_load_with_base_resolves_relative() {
@@ -298,7 +298,7 @@ fn exported_query_cursor_empty() {
     );
 }
 
-/// [OPUS-4.8] sq-bif: cursor PARTITIONING with a `batch_size > 1` over MULTIPLE batches —
+/// sq-bif: cursor PARTITIONING with a `batch_size > 1` over MULTIPLE batches —
 /// the case the existing tests never reach (they use only batch_size 1, where every step
 /// advances by exactly one row, or an oversized single batch). A 5-row result with
 /// batch_size 2 must split into batches of `[2, 2, 1]` (the trailing PARTIAL batch via
@@ -345,7 +345,7 @@ fn exported_query_cursor_partial_trailing_batch() {
 
     // The rows, in order across the batches, are exactly 1..=5 with no gap/dup/reorder.
     // Extract the ?n binding values (key-anchored, so a future second projected var would
-    // not be conflated — see `select_binding_values`). [OPUS-4.8]
+    // not be conflated — see `select_binding_values`).
     let values: Vec<String> = [&b0, &b1, &b2]
         .iter()
         .flat_map(|b| select_binding_values(b, "n"))
@@ -357,7 +357,7 @@ fn exported_query_cursor_partial_trailing_batch() {
     );
 }
 
-/// [OPUS-4.8] sq-bif: cursor partitioning when `row_count` is an EXACT MULTIPLE of
+/// sq-bif: cursor partitioning when `row_count` is an EXACT MULTIPLE of
 /// `batch_size` (4 rows, batch_size 2 → two full batches, NO trailing empty batch). This is
 /// the boundary the exhaustion guard `pos == total && total != 0` is written for: after the
 /// second batch `pos` lands exactly on `total` from a step of 2, and the next call must
@@ -429,7 +429,7 @@ fn exported_query_quads_chunks_reassemble() {
     }
     assert_eq!(n, 2, "batch_size 1 over 2 triples => 2 batches");
     // SET-equal: both paths must yield the same triples (emission order is unspecified for
-    // CONSTRUCT, so compare the sorted line sets rather than byte-for-byte). [OPUS-4.8]
+    // CONSTRUCT, so compare the sorted line sets rather than byte-for-byte).
     assert_eq!(
         sorted_nt_lines(&reassembled),
         sorted_nt_lines(&whole),
@@ -437,7 +437,7 @@ fn exported_query_quads_chunks_reassemble() {
     );
 }
 
-/// [OPUS-4.8] sq-bif: DESCRIBE through the exported `Store::queryQuads`. The existing quad
+/// sq-bif: DESCRIBE through the exported `Store::queryQuads`. The existing quad
 /// tests only exercise CONSTRUCT; DESCRIBE is the OTHER graph-valued form routed through the
 /// same export, and it returns the Concise Bounded Description (the resource's OUTGOING
 /// triples only). This asserts the CBD reaches the N-Triples document across the binding and
@@ -460,14 +460,14 @@ fn exported_query_quads_describe_cbd() {
     // include it (that would be the bug where DESCRIBE leaked the whole neighbourhood). Pin
     // the SPECIFIC inbound triple's absence rather than any mention of ex:alice, so the test
     // would still pass if ex:alice legitimately appeared as the OBJECT of an outgoing triple
-    // (it does not here, but the invariant is "no inbound edge", not "no alice"). [OPUS-4.8]
+    // (it does not here, but the invariant is "no inbound edge", not "no alice").
     assert!(
         !nt.contains("<http://ex/alice> <http://ex/knows> <http://ex/bob>"),
         "CBD must not pull in the inbound knows triple: {nt}"
     );
 }
 
-/// [OPUS-4.8] sq-bif: `queryQuadsChunks` PARTITIONING at a NON-multiple boundary. The
+/// sq-bif: `queryQuadsChunks` PARTITIONING at a NON-multiple boundary. The
 /// existing test uses batch_size 1 over 2 triples (an even split); this constructs 5
 /// triples and batches by 2, so the partition is `[2, 2, 1]` — a trailing PARTIAL chunk
 /// (`triples.chunks(2)` over 5). It pins both the exact batch count (3) and that
@@ -499,7 +499,7 @@ fn exported_query_quads_chunks_partial_tail() {
         "5 triples, batch_size 2 => chunk sizes [2, 2, 1]"
     );
     // SET-equal: no triple dropped at the short tail (emission order is unspecified, so
-    // compare the sorted line sets rather than byte-for-byte). [OPUS-4.8]
+    // compare the sorted line sets rather than byte-for-byte).
     assert_eq!(
         sorted_nt_lines(&reassembled),
         sorted_nt_lines(&whole),
@@ -625,7 +625,7 @@ fn exported_explain_analyze() {
 
 // ---- explain-json: the exported structured-plan success arms ----------------
 //
-// [FABLE-5] sq-ixc3.19. Only the OK arm runs natively (the `Err` arm constructs
+// sq-ixc3.19. Only the OK arm runs natively (the `Err` arm constructs
 // `JsError`); the negative arms stay covered by the wasm32 `tests/web.rs`.
 #[cfg(feature = "explain-json")]
 mod explain_json {
@@ -724,7 +724,7 @@ mod shacl {
 
 // ---- forms: the exported `Store::deriveForm` success arm ---------------------
 //
-// [SONNET-4.6] sq-q4apb (#2644): only the OK arm runs natively (every error path
+// sq-q4apb (#2644): only the OK arm runs natively (every error path
 // constructs `JsError`); the malformed-input `Err` arms stay covered by the wasm32
 // `tests/web.rs::forms::derive_form_malformed_inputs_are_err_not_trap`. The assertion that
 // matters is PASS-THROUGH: the exported binding's string must be byte-identical to

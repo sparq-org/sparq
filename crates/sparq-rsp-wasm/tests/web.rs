@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-nzcb — headless wasm smoke test of the JS-facing sparq-rsp-wasm API.
+// sq-nzcb — headless wasm smoke test of the JS-facing sparq-rsp-wasm API.
 //
 // The crate's `#[cfg(test)] mod tests` in src/ runs on the NATIVE target only, so it
 // exercises the sparq-rsp + serialiser functions the wrappers delegate to — NOT the actual
@@ -12,7 +12,7 @@
 // executor (no browser, no DOM); Node is the default target, so no
 // `wasm_bindgen_test_configure!(run_in_browser)` directive is needed.
 //
-// [OPUS-4.8] sq-734a — the numeric boundary args (`range`/`step`/`maxDelay`/`ts`) are `f64`,
+// sq-734a — the numeric boundary args (`range`/`step`/`maxDelay`/`ts`) are `f64`,
 // i.e. plain JS `Number`s, NOT `u64` (which would be a JS `BigInt`). The Rust-side tests pass
 // `f64` literals; `js_number_args_do_not_throw_bigint_error` additionally drives the GENERATED
 // JS glue with a real JS `Number` — the path the deployed page hits — the regression guard for
@@ -105,7 +105,7 @@ fn zero_window_rejected() {
     assert!(Rsp::select(&avg_query(), 10.0, 0.0, 0.0, "rstream").is_err());
 }
 
-/// [OPUS-4.8] sq-734a — a fractional / negative / non-finite numeric arg is a CLEAN error
+/// sq-734a — a fractional / negative / non-finite numeric arg is a CLEAN error
 /// (a `JsError`), not a silent truncation. A logical timestamp must be a whole number;
 /// rounding one would corrupt window membership, so the boundary fails closed.
 #[wasm_bindgen_test]
@@ -133,14 +133,14 @@ fn late_push_is_counted() {
     let mut q = Rsp::select(&avg_query(), 10.0, 10.0, 0.0, "rstream").expect("register");
     q.push(SENSOR, READING, "1", 5.0).expect("push"); // [0,10)
     q.push(SENSOR, READING, "2", 25.0).expect("push"); // watermark 25 closes [0,10) and [10,20)
-    // [OPUS-4.8] sq-734a: lateDropped() now returns a JS Number (f64), so compare to f64.
+    // sq-734a: lateDropped() now returns a JS Number (f64), so compare to f64.
     assert_eq!(q.late_dropped(), 0.0, "no late drops yet");
     // ts=3 now lands behind the closed [0,10): too late.
     q.push(SENSOR, READING, "9", 3.0).expect("push");
     assert_eq!(q.late_dropped(), 1.0, "the ts=3 arrival is dropped as late");
 }
 
-// [OPUS-4.8] sq-734a — the wasm-bindgen NUMERIC-MARSHALLING reproduction for issue #832.
+// sq-734a — the wasm-bindgen NUMERIC-MARSHALLING reproduction for issue #832.
 //
 // The crate's own high-level `#[wasm_bindgen] Rsp` class is module-scoped in the generated JS
 // glue, so a `wasm_bindgen_test` cannot reach it from JS to call it through the glue (calling

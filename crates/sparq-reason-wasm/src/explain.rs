@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-6qw3: the opt-in `Reasoner::why(...)` derivation proof tree.
+//! sq-6qw3: the opt-in `Reasoner::why(...)` derivation proof tree.
 //!
 //! Behind the non-default `explain` feature (which turns on `sparq-reason`'s `explain`
 //! feature), so the standard reason bundle carries zero proof-tree code. Exposes
@@ -15,7 +15,7 @@ use sparq_core::dict::{Dict, Id, NO_ID};
 use sparq_core::Graph;
 use sparq_reason::n3::parser as n3_parser;
 use sparq_reason::{
-    ExplainOpts, MaterializedGraph, MaterializedN3Graph, MaterializedOwlGraph, ProofTree,
+    why_n3_document, ExplainOpts, MaterializedGraph, MaterializedOwlGraph, ProofTree,
 };
 use wasm_bindgen::prelude::*;
 
@@ -56,7 +56,7 @@ fn proof_to_json(proof: Option<ProofTree>) -> String {
     }
 }
 
-/// [FABLE-5] sq-ixc3.20 — the native body of [`Reasoner::why_n3`]. Native (`String` error) so
+/// sq-ixc3.20 — the native body of [`Reasoner::why_n3`]. Native (`String` error) so
 /// the crate's unit tests drive it end to end; the `#[wasm_bindgen]` wrapper below is a trivial
 /// error-mapping shim (the same split `n3_new_ntriples` / `n3_query_ntriples` use).
 ///
@@ -73,16 +73,15 @@ fn why_n3_impl(n3: &str, s: &str, p: &str, o: &str) -> Result<String, String> {
         // COULD be in the closure, so there is nothing to explain.
         return Ok("null".to_string());
     };
-    // `new` joins the document's facts to the base and fully materializes the closure; `why`
-    // then re-runs the batch engine with proof recording (cost paid only when asked — see
-    // `MaterializedN3Graph::why`'s own docs).
-    let g = MaterializedN3Graph::new(n3, &[])?;
-    Ok(proof_to_json(g.why_with(fact, ExplainOpts::default())))
+    // A standalone document is evaluated exactly as `reasonN3` evaluates it: a batch run with
+    // proof recording (cost paid only when asked), no `MaterializedN3Graph` and no caller
+    // namespace. Every blank here is the document's, named as `reasonN3` prints it.
+    Ok(proof_to_json(why_n3_document(n3, fact, ExplainOpts::default())?))
 }
 
 #[wasm_bindgen]
 impl Reasoner {
-    /// [OPUS-4.8] sq-6qw3: returns ONE derivation of the triple `(s, p, o)` from the asserted
+    /// sq-6qw3: returns ONE derivation of the triple `(s, p, o)` from the asserted
     /// base of `data` under `profile`, as a proof-tree JSON document — or the JSON literal
     /// `null` if the triple is not entailed (not in the closure). `s`/`p`/`o` are N-Triples
     /// term strings (e.g. `"<http://ex/Socrates>"`, `"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"`,
@@ -124,7 +123,7 @@ impl Reasoner {
                 let g = MaterializedOwlGraph::new(&mut dict, &base);
                 g.why_with(&dict, triple, opts)
             }
-            // [OPUS-4.8] sq-e5atd: D-entailment is a value-space materialiser (the rdfD1
+            // sq-e5atd: D-entailment is a value-space materialiser (the rdfD1
             // datatype-typing closure with typed literal equality), not a rule-based
             // forward-chainer that records a premises-before-conclusion derivation DAG, so
             // there is no `why` proof tree for it. `Profile::D` only exists when the bundle is
@@ -143,7 +142,7 @@ impl Reasoner {
         Ok(proof_to_json(proof))
     }
 
-    /// [FABLE-5] sq-ixc3.20: returns ONE derivation of the triple `(s, p, o)` under the N3
+    /// sq-ixc3.20: returns ONE derivation of the triple `(s, p, o)` under the N3
     /// RULES + facts document `n3` (the same combined `rules + base facts` document
     /// [`Reasoner::reason_n3`](crate::Reasoner::reason_n3) consumes), as a proof-tree JSON
     /// document — or the JSON literal `null` if the triple is not in the N3 closure.
@@ -247,7 +246,7 @@ mod tests {
         assert_eq!(Profile::parse("owl-rl"), Some(Profile::OwlRl));
     }
 
-    // [FABLE-5] sq-ixc3.20 — `whyN3` (the native `why_n3_impl` body the wasm shim wraps).
+    // sq-ixc3.20 — `whyN3` (the native `why_n3_impl` body the wasm shim wraps).
 
     /// A two-rule N3 document whose closure needs a MULTI-STEP derivation (the second rule is
     /// recursive: it consumes its own conclusions), mirroring the GUI's combined
@@ -339,4 +338,76 @@ mod tests {
         assert!(k1.contains("V\\\"x\\\"") && k2.contains("V\\\"__ua.http://ex/x\\\""), "{k1} / {k2}");
     }
 
+    /// PR #6779 review round 2, finding 3: `whyN3` explains every triple `reasonN3New`
+    /// derives, including one about a blank node of the document (a written `_:x` and a
+    /// `[]`), and its proof shows the blank as the document and `reasonN3` label it.
+    #[test]
+    fn why_n3_explains_derived_document_blanks() {
+        let doc = "_:x <http://ex/p> <http://ex/o> .\n\
+                   [] <http://ex/p> <http://ex/o2> .\n\
+                   { ?s <http://ex/p> ?o } => { ?s <http://ex/q> ?o } .";
+        let derived = crate::n3_new_ntriples(doc).expect("reason");
+        let lines: Vec<&str> = derived.lines().filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 2, "{derived}");
+        for line in lines {
+            let terms: Vec<&str> = line.trim_end_matches(" .").split(' ').collect();
+            let [s, p, o] = terms[..] else {
+                panic!("{line}")
+            };
+            assert!(s.starts_with("_:"), "{line}");
+            let json = why_n3_impl(doc, s, p, o).expect("explain");
+            assert_ne!(
+                json, "null",
+                "reasonN3 derived {line} but whyN3 cannot explain it"
+            );
+            assert!(
+                json.contains("n3-rule-0") && json.contains("\"asserted\""),
+                "{json}"
+            );
+            assert!(
+                json.contains(&format!("\"{s}\"")),
+                "the proof relabels {s}: {json}"
+            );
+            assert!(!json.contains("__d."), "{json}");
+        }
+        let asserted = why_n3_impl(doc, "_:x", "<http://ex/p>", "<http://ex/o>").unwrap();
+        assert!(
+            asserted.contains("\"asserted\"") && asserted.contains("\"_:x\""),
+            "{asserted}"
+        );
+    }
+
+    /// PR #6779 review rounds 5 and 6: `whyN3` evaluates a standalone document as
+    /// `reasonN3New` does, with no graph and no caller namespace, so it refuses no runtime
+    /// parse that `reasonN3New` accepts: a text spelling `_:__bs0_x` (the caller prefix an
+    /// internal graph would pick), alone and followed by a store-scoped `log:notIncludes`
+    /// rule. Both succeed, and every triple `reasonN3New` derives is explained.
+    #[test]
+    fn why_n3_explains_what_reason_n3_new_derives_from_a_bs_text() {
+        let parse = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     { \"_:__bs0_x <urn:p> <urn:o> .\" log:parsedAsN3 ?f } \
+                     => { <urn:s> <urn:parsed> true } .\n";
+        let negate = format!(
+            "{parse}{{ <urn:s> <urn:parsed> true . \
+             ?scope log:notIncludes {{ <urn:s> <urn:blocked> true }} }} \
+             => {{ <urn:s> <urn:clear> true }} ."
+        );
+        for (doc, n) in [(parse.to_string(), 1), (negate, 2)] {
+            let derived = crate::n3_new_ntriples(&doc).expect("reasonN3New succeeds");
+            let lines: Vec<&str> = derived.lines().filter(|l| !l.trim().is_empty()).collect();
+            assert_eq!(lines.len(), n, "{derived}");
+            for line in lines {
+                let terms: Vec<&str> = line.trim_end_matches(" .").split(' ').collect();
+                let [s, p, o] = terms[..] else {
+                    panic!("{derived}")
+                };
+                let json = why_n3_impl(&doc, s, p, o).expect("whyN3 succeeds");
+                assert_ne!(
+                    json, "null",
+                    "reasonN3New derived {line} but whyN3 cannot explain it"
+                );
+                assert!(json.contains("n3-rule-"), "{json}");
+            }
+        }
+    }
 }

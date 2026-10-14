@@ -1,4 +1,4 @@
-//! [GPT-6] ACP §6.5: an attribute-free matcher never matches any context.
+//! ACP §6.5: an attribute-free matcher never matches any context.
 
 mod reference;
 

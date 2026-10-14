@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-8o74m — pattern-scope leakage-channel FUZZ battery over randomized masks.
+//! sq-8o74m — pattern-scope leakage-channel FUZZ battery over randomized masks.
 //!
 //! Hardens the fixed differential battery in `pattern_scope.rs`: for N seeded
 //! pseudo-random (source-dataset, allow/deny scope map, query-battery) cases, the

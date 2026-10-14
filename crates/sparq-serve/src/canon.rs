@@ -1,7 +1,7 @@
 //! Cheap query canonicalization for the result-cache key
 //! (research/concurrent-serving.md §6.3).
 //!
-//! [OPUS-4.8] sq-jluc — written while Fable 5 unavailable; re-review when Fable
+//! sq-jluc — written while Fable 5 unavailable; re-review when Fable
 //! returns.
 //!
 //! §6.3 prescribes the canonicalization ladder: "whitespace/prefix normalization +
@@ -232,7 +232,7 @@ impl Renamer {
 mod tests {
     use super::*;
 
-    // [GPT-5.6] sq-bvdyd: exercise every lexical context that can affect whether
+    // sq-bvdyd: exercise every lexical context that can affect whether
     // a second canonicalization pass changes the cache key.
     const IDEMPOTENCE_QUERIES: [&str; 4] = [
         "  SELECT   ?x\n WHERE {\t?x ?p ?o } # trailing comment\n",

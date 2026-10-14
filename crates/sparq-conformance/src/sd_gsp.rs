@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-1uuxz (epic sq-my8wd) — the SPARQL 1.1 **Service-Description** (SD) +
+//! sq-1uuxz (epic sq-my8wd) — the SPARQL 1.1 **Service-Description** (SD) +
 //! **Graph-Store Protocol** (GSP) conformance lane.
 //!
 //! Where the sibling `http_protocol` lane (sq-jaj38) exercises the SPARQL 1.1 *Protocol*
@@ -862,7 +862,7 @@ mod tests {
         assert_eq!(r.failures().len(), 1);
     }
 
-    /// [OPUS-4.8] sq-1uuxz: a DIRECT in-lib invocation of the top-level entry point (the gating
+    /// sq-1uuxz: a DIRECT in-lib invocation of the top-level entry point (the gating
     /// runner in `tests/sd_gsp_suite.rs` also exercises it, but covering it here keeps the public
     /// fn directly tested for the coverage ratchet). Stands up the REAL loopback server with the
     /// `federation-descriptors` flag on and drives the whole suite: it must produce many PASS

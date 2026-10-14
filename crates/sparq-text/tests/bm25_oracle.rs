@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ripcg — DIFFERENTIAL BM25 ORACLE for [`TextIndex`]'s ranked
+//! sq-ripcg — DIFFERENTIAL BM25 ORACLE for [`TextIndex`]'s ranked
 //! search, wired into the central conformance scoreboard as a sparq-EXTENSION
 //! ratchet (NOT a W3C/standards conformance claim — there is no normative
 //! full-text-over-RDF or BM25 conformance suite to point at; this asserts
@@ -38,7 +38,7 @@
 //! fixed query battery makes; it may only RISE (more queries / corpora), and a
 //! drop means a genuine scoring regression.
 //!
-//! [SONNET-4.6] sq-z1xv8 — the floor is no longer MIRRORED anywhere. It is the one
+//! sq-z1xv8 — the floor is no longer MIRRORED anywhere. It is the one
 //! `sparq_conformance_floors::text::BM25_ORACLE_FLOOR` const, which the central
 //! `sparq_conformance::scoreboard::SUITES` row imports too, so the enforced and the
 //! reported floor cannot drift by construction (previously the conformance crate's
@@ -48,7 +48,7 @@
 
 use oxrdf::Term;
 use rand::rngs::StdRng;
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{RngExt, SeedableRng};
 use sparq_core::dict::Id;
 use sparq_core::Graph;
@@ -65,8 +65,8 @@ use std::collections::BTreeMap;
 /// drift. The pinned value is the ACTUAL
 /// measured count over the fixed-seed corpora + query battery below (printed as
 /// `text-search differential oracle assertions N (floor F)`), not a round
-/// number. [OPUS-4.8] sq-ripcg
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// number. sq-ripcg
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).
@@ -403,7 +403,7 @@ fn bm25_differential_oracle() {
 /// as a fully independent cross-check on `RefScorer` itself (so a bug shared
 /// between the index and the reference scorer cannot hide a regression). A
 /// shorter doc outranks a longer one at equal tf (length normalisation), and a
-/// higher-tf doc outranks both. [OPUS-4.8] sq-ripcg
+/// higher-tf doc outranks both. sq-ripcg
 #[test]
 fn bm25_hand_pinned_cross_check() {
     // Distinct literals so the dictionary keeps them separate.

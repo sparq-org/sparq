@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-11664 — Tripwire that the sparq-py wheel's DEFAULT feature set keeps
+// sq-11664 — Tripwire that the sparq-py wheel's DEFAULT feature set keeps
 // the three planner/optimizer features the CLI ships (`dp-planner`, `algebra-rewrite`,
 // `antijoin-static-decline`) lit — the shipped pip wheel must execute the same rewritten
 // plans the CLI and the canonical benchmarks measure.

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-qcnn) Correctness coverage for the SHACL-AF node-expression
+//! (sq-qcnn) Correctness coverage for the SHACL-AF node-expression
 //! **function operators** (`src/func.rs`) — fixture-independent unit tests that
 //! drive every built-in operator through the PUBLIC `eval_node_expression` seam
 //! and the `apply_rules` value-rule path, asserting hand-derived result node sets

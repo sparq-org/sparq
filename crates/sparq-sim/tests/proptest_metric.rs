@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-3f1u6: property witnesses for the structural-similarity metric axioms.
+// sq-3f1u6: property witnesses for the structural-similarity metric axioms.
 
 use std::collections::HashSet;
 

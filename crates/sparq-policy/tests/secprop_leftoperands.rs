@@ -6,13 +6,14 @@
 //! stateless evaluator — a `secx:` constraint still evaluates as an opaque
 //! custom-leftOperand block, fail-closed) plus the profile-recognition surface.
 //!
-//! [OPUS-4.8] sq-uor3g (epic sq-0dksu, Phase 4). 🤖 SPARQ agent —
+//! sq-uor3g (epic sq-0dksu, Phase 4). 🤖 SPARQ agent —
 //! security-properties ontology. Flag for re-review when Fable returns.
 #![cfg(feature = "secprop-leftoperands")]
 
 use sparq_policy::secprop::{
     discharge_requirements, is_secprop_left_operand, over_dimension, Deontic, DischargeExpr,
-    PROFILE_IRI, REQUIRES_ASSURANCE, REQUIRES_UNLINKABILITY_SCOPE, SECPROP_LEFT_OPERANDS,
+    PROFILE_IRI, REQUIRES_ADVERSARY_MODEL, REQUIRES_ASSURANCE, REQUIRES_CORRUPTION_THRESHOLD,
+    REQUIRES_UNLINKABILITY_SCOPE, SECPROP_LEFT_OPERANDS,
 };
 use sparq_policy::{
     evaluate, parse_policy_str, Action, Constraint, Operator, Policy, Request, Rule, Value, ODRL_NS,
@@ -33,6 +34,24 @@ fn profile_surface_is_first_class() {
     // Every leftOperand resolves to a distinct dimension.
     assert!(SECPROP_LEFT_OPERANDS.len() >= 7);
     assert!(PROFILE_IRI.starts_with("https://sparq.dev/ns/odrl-secprop-profile#"));
+}
+
+/// The two MPC trust-model leftOperands (#6186) are registered with the dimensions
+/// the shared admissibility reasoner's `secx:overDimension` facts name. Without this
+/// mapping a `requiresAdversaryModel` preference is an unrecognised custom operand
+/// and the semi-honest exclusion cannot be computed at all.
+#[test]
+fn mpc_trust_model_left_operands_are_registered() {
+    assert!(is_secprop_left_operand(REQUIRES_ADVERSARY_MODEL));
+    assert!(is_secprop_left_operand(REQUIRES_CORRUPTION_THRESHOLD));
+    assert_eq!(
+        over_dimension(REQUIRES_ADVERSARY_MODEL),
+        Some("https://w3id.org/zkp-sparql/sec-prop#AdversaryModel")
+    );
+    assert_eq!(
+        over_dimension(REQUIRES_CORRUPTION_THRESHOLD),
+        Some("https://w3id.org/zkp-sparql/sec-prop#CorruptionThreshold")
+    );
 }
 
 /// The published profile TTL parses with the real ODRL parser AND its `secx:requires…`

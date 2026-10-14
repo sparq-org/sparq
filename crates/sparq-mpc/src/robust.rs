@@ -1,6 +1,7 @@
-// [OPUS-4.8] sq-m34i (MPC WI-1): Reed-Solomon consistency-checked + robust
-// (Berlekamp-Welch) reconstruction over Fp. Closes malicious-security gap (D)
-// at the Shamir layer for the honest-majority abort/robust regime. Written while
+// sq-m34i (MPC WI-1): Reed-Solomon consistency-checked + robust
+// (Berlekamp-Welch) reconstruction over Fp. Addresses malicious-security gap (D)
+// for share OPENS at the Shamir layer (honest-majority abort/robust regime);
+// it does not make the protocols above it malicious-secure. Written while
 // Fable unavailable — re-review on return.
 //! Reed–Solomon error-detection / error-correction for Shamir reconstruction.
 //!
@@ -29,8 +30,8 @@
 //! ## Threat model (honest-majority, information-theoretic)
 //!
 //! This adds detect-and-abort (and, where the bound allows, robust correction)
-//! against ACTIVE tampering of share *values* — guarantee (D) at the Shamir
-//! layer. It needs no PKI, broadcast, or preprocessing. It does NOT defend:
+//! against ACTIVE tampering of share *values* at reconstruction — a step toward
+//! guarantee (D) at the Shamir layer, not malicious security. It needs no PKI, broadcast, or preprocessing. It does NOT defend:
 //!
 //! - **Exactly `t+1` shares (no redundancy).** Any `t+1` arbitrary points define
 //!   *some* degree-`t` polynomial, so a single forged share just selects a
@@ -386,7 +387,7 @@ fn berlekamp_welch(shares: &[Share], degree: usize, e: usize) -> Option<Vec<Fp>>
         }
         // RHS: the fixed monic top E_e = 1 contributes y·x^e to N(x_i)=y·E(x_i),
         // i.e. moves to the RHS as + y·x^e.
-        // [OPUS-4.8] sq-7ltf: `e` is the PUBLIC error-correction parameter and `x`
+        // sq-7ltf: `e` is the PUBLIC error-correction parameter and `x`
         // a PUBLIC evaluation point, so the variable-time exponentiation is sound
         // here (no secret in the exponent or base).
         row[cols] = y.mul(x.pow_vartime(e as u64));
@@ -579,7 +580,7 @@ mod tests {
 
     #[test]
     fn untampered_full_set_reconstructs() {
-        // [OPUS-4.8] Genuine differential vs the UNCHECKED Lagrange primitive on
+        // Genuine differential vs the UNCHECKED Lagrange primitive on
         // clean inputs: no regression. We must NOT compare against
         // `ShamirBackend::reconstruct`, which now routes through
         // `reconstruct_robust` itself (robust-vs-robust is vacuous). Compare the
@@ -633,7 +634,7 @@ mod tests {
 
     #[test]
     fn corrects_two_tampers_at_n9() {
-        // [OPUS-4.8] The backend fixes t = floor((n-1)/2), so for n=9, t=4 (NOT
+        // The backend fixes t = floor((n-1)/2), so for n=9, t=4 (NOT
         // t=2). With t=4 the BW correction budget is e_max = floor((n-t-1)/2) =
         // floor((9-4-1)/2) = 2: this test corrects exactly e_max = 2 errors and
         // then asserts that a 3rd error (over budget) aborts.
@@ -671,7 +672,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------
-    // [OPUS-4.8] sq-6u6b: cheater attribution.
+    // sq-6u6b: cheater attribution.
     // ---------------------------------------------------------------------
 
     #[test]
@@ -798,7 +799,7 @@ mod tests {
     }
 
     // =====================================================================
-    // [OPUS-4.8] sq-qcnn.26 — DIRECT unit tests on the private polynomial /
+    // sq-qcnn.26 — DIRECT unit tests on the private polynomial /
     // linear-algebra helpers of the robust (Berlekamp–Welch) reconstruction
     // path. Each asserts EXACT VALUES (not just "no panic") so the mutation
     // ratchet's semantic mutant classes — arithmetic swaps (`+`/`-`/`*`/`/`),
@@ -806,7 +807,7 @@ mod tests {
     // replacements — are NOTICED in the helper that actually computes the
     // reconstruction, not only end-to-end where a wrong intermediate can be
     // masked. Semi-honest scope only; NO protocol logic changed, NO security
-    // claim (sq-qhy4 gates that). `[OPUS-4.8]`
+    // claim (sq-qhy4 gates that).
     // =====================================================================
 
     #[test]

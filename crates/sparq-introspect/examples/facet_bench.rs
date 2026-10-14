@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-ywe8p — self-relative facet fast-path benchmark with a full-scan oracle.
+// sq-ywe8p — self-relative facet fast-path benchmark with a full-scan oracle.
 use oxrdf::Term;
 use sparq_core::{dict::Id, Graph};
 use sparq_introspect::{facets, Counted, FacetRequest, FacetResponse, PredicateValues};

@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-3dyje.7: MUTATION-KILL ASSERTIONS for sparq-fedplan.
+// sq-3dyje.7: MUTATION-KILL ASSERTIONS for sparq-fedplan.
 //
 // These tests target SPECIFIC surviving mutants from the features-ON
 // (`--features fedplan,adaptive-replan`) cargo-mutants run that revealed

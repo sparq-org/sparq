@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-qcnn) Fail-closed + edge-construct correctness coverage for the
+//! (sq-qcnn) Fail-closed + edge-construct correctness coverage for the
 //! SHACL Compact Syntax (SCS) PARSER (`src/scs.rs`).
 //!
 //! The W3C `shacl-compact-syntax` corpus that drives `scs.rs` is fetched into a

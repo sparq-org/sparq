@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.20: Direct regressions for stream batching and error/late-arrival edges.
+// sq-bif.20: Direct regressions for stream batching and error/late-arrival edges.
 
 use oxrdf::{NamedNode, Term};
 use sparq_rsp::{ContinuousQuery, TimestampedTriple, TripleStream, WindowSpec, WindowedStream};

@@ -4,7 +4,7 @@
 //! regression/stability oracle only; this benchmark makes no new reasoner-soundness claim.
 //! Criterion keeps measurements outside tracked files, under `target/criterion/`.
 
-// [GPT-5.6] sq-7ru8y: stability-oracle fixtures for self-relative depth scaling.
+// sq-7ru8y: stability-oracle fixtures for self-relative depth scaling.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use sparq_core::dict::Id;

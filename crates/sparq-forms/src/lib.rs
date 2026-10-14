@@ -1,4 +1,4 @@
-// [FABLE-5] sq-lsp7k.1.1 (forms F1): single-source the crate overview from README.md
+// sq-lsp7k.1.1 (forms F1): single-source the crate overview from README.md
 // so crates.io and the docs.rs front page render identical content; the README's
 // `## Usage` rust fence compiles as a doctest.
 #![doc = include_str!("../README.md")]
@@ -87,7 +87,7 @@ pub fn derive_form_with_model(
     )
 }
 
-/// [GPT-5.6] Derives a form and attaches live SHACL results for `focus` to
+/// Derives a form and attaches live SHACL results for `focus` to
 /// matching declared, editable fields without mutating `data`.
 ///
 /// Validation is additive and opt-in: [`derive_form`] and
@@ -149,7 +149,7 @@ pub fn derive_form_validated(
 /// SHACL 1.2 `sh:targetWhere` and SPARQL-valued targets still do NOT drive
 /// applicability: both need evaluation machinery (single-node conformance
 /// against an inline shape; running a node expression) that `sparq-shacl` keeps
-/// crate-private. [OPUS-4.8] sq-vfcxv
+/// crate-private. sq-vfcxv
 pub fn applicable_shapes(
     data: &Graph,
     shapes: &Graph,

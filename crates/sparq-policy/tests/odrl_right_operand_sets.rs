@@ -2,7 +2,7 @@
 //! ( <a> <b> )`) and multiple objects (`odrl:rightOperand <a>, <b>`) folded into
 //! the `|`-separated set encoding the set-relation operators
 //! (`isPartOf`/`isAnyOf`/`isNoneOf`) consume. End-to-end through the REAL
-//! `parse_policy_str` + `evaluate` path (not a mock). [FABLE-5] sq-ueydm.
+//! `parse_policy_str` + `evaluate` path (not a mock). sq-ueydm.
 //!
 //! Load-bearing invariants pinned here:
 //! * a single-valued right operand (including a ONE-element list) keeps the
@@ -254,7 +254,7 @@ fn empty_list_right_operand_never_matches_ordinary_values() {
 }
 
 // ===========================================================================
-// sq-srjuc — a MALFORMED collection rightOperand REFUSES the parse ([FABLE-5]).
+// sq-srjuc — a MALFORMED collection rightOperand REFUSES the parse.
 //
 // The fold used to walk the chain prefix-tolerantly, contributing the valid
 // PREFIX of a broken-tail/dangling/forked collection (and, for a cycle, the full

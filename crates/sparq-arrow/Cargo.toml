@@ -1,7 +1,7 @@
 # sparq-arrow (gh-910, beads sq-v78l4 + sq-lsp7k.16 + sq-lsp7k.21): opt-in Apache Arrow columnar
 # import/export for SPARQL SELECT results. Converts between a sparq-engine `QueryResult`
 # and an Arrow `RecordBatch` for dataframe / analytics interoperability.
-# [OPUS-4.8] [GPT-5.6]
+#
 #
 # OPT-IN / LEAN-CORE by construction: this is a SEPARATE leaf crate, so the `arrow-*`
 # dependency closure NEVER enters sparq-core / sparq-engine / the wasm bundle. Nothing
@@ -26,7 +26,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg so the `arrow`-gated
+# docs.rs: build with all features + the `docsrs` cfg so the `arrow`-gated
 # `to_record_batch` / `from_record_batch` / `term_schema` items render on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
@@ -41,12 +41,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 # off the default workspace build), and the Arrow dependency is opt-in on top of that.
 default = []
 arrow = ["dep:arrow-array", "dep:arrow-schema", "dep:arrow-buffer"]
-# [GPT-5.6] Parquet is a second opt-in layer over the Arrow term-struct projection.
+# Parquet is a second opt-in layer over the Arrow term-struct projection.
 # Enabling it necessarily enables `arrow`; without it, the Parquet dependency is absent.
 parquet = ["arrow", "dep:bytes", "dep:parquet"]
-# [GPT-5.6] Arrow IPC streams are another opt-in container over the term projection.
+# Arrow IPC streams are another opt-in container over the term projection.
 ipc = ["arrow", "dep:arrow-ipc"]
-# [FABLE-5] CSV is a third opt-in container over the SAME term projection (issue #910's
+# CSV is a third opt-in container over the SAME term projection (issue #910's
 # BI/pandas/DuckDB target): each variable's five-field term struct is flattened to five
 # `var.field` Utf8 columns. The RFC-4180 serializer/parser is hand-rolled over std —
 # the schema is fixed, so it adds ZERO dependencies (measured faster than the arrow-csv
@@ -59,7 +59,7 @@ csv = ["arrow"]
 # The SELECT result we project (`QueryResult { vars, rows }`). Always present — the
 # crate's whole job is to read it. default-features=false keeps the edge lean (we need
 # only the result type + its `oxrdf::Term` rows, no engine features).
-sparq-engine = { path = "../sparq-engine", version = "0.1.5", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.6", default-features = false }
 # The RDF term model (`Term`, `Literal`, `NamedNode`, …). workspace-pinned so the term
 # type is byte-identical to sparq-engine's. Always present (used to classify each cell).
 oxrdf.workspace = true
@@ -67,7 +67,7 @@ oxrdf.workspace = true
 # builders) and `arrow-schema` (Schema / Field / DataType) — NOT the `arrow` meta-crate,
 # which additionally pulls IPC / Flight / CSV / JSON / cast machinery we do not use. This
 # keeps the dependency (and cargo-vet exemption) closure as small as a RecordBatch export
-# can be. Only behind the `arrow` feature. [OPUS-4.8]
+# can be. Only behind the `arrow` feature.
 arrow-array = { version = "59", optional = true }
 arrow-schema = { version = "59", optional = true }
 # `NullBuffer` for the per-row struct validity (unbound cells). It is `arrow-array`'s
@@ -90,7 +90,7 @@ bytes = { version = "1", optional = true }
 # (default-features=false) edge.
 sparq-core = { path = "../sparq-core" }
 sparq-engine = { path = "../sparq-engine" }
-# [GPT-5.6] Property generators for schema/shape/null-mask invariants.
+# Property generators for schema/shape/null-mask invariants.
 proptest = "1"
 
 [[example]]

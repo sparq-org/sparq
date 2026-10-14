@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-1rg2q.6: graph-scope projection and write-target witnesses.
+// sq-1rg2q.6: graph-scope projection and write-target witnesses.
 
 #![cfg(feature = "proposed-graph-scope")]
 

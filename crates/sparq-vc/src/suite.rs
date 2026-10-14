@@ -29,7 +29,7 @@
 //!
 //! # Proof-configuration RDF mapping
 //!
-//! [OPUS-5.5] zkp-14.2: the typed [`ProofConfig`] maps to the same RDF the W3C
+//! zkp-14.2: the typed [`ProofConfig`] maps to the same RDF the W3C
 //! vc-di-eddsa test vectors canonicalize (<https://www.w3.org/TR/vc-di-eddsa/#test-vectors>,
 //! `eddsa-rdfc-2022` representation): `created` is
 //! `<http://purl.org/dc/terms/created>` typed `xsd:dateTime`, and `cryptosuite`
@@ -74,10 +74,10 @@ pub const CRYPTOSUITE: &str = "eddsa-rdfc-2022";
 const SEC: &str = "https://w3id.org/security#";
 const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-// [OPUS-5.5] The Data Integrity `@context` maps `created` to Dublin Core, not
+// The Data Integrity `@context` maps `created` to Dublin Core, not
 // `sec:created`. Changing this breaks every existing proof and the W3C vectors.
 const DCTERMS_CREATED: &str = "http://purl.org/dc/terms/created";
-// [OPUS-5.5] Datatype of the `cryptosuite` literal in the Data Integrity
+// Datatype of the `cryptosuite` literal in the Data Integrity
 // `@context`. Changing it breaks every existing proof and the W3C vectors.
 const CRYPTOSUITE_STRING: &str = "https://w3id.org/security#cryptosuiteString";
 
@@ -706,7 +706,7 @@ mod tests {
             .to_nquads()
     }
 
-    /// [OPUS-5.5] zkp-14.2: the proof-config RDF mapping reproduces the W3C
+    /// zkp-14.2: the proof-config RDF mapping reproduces the W3C
     /// vc-di-eddsa `eddsa-rdfc-2022` test vector byte-for-byte — canonical
     /// proof-config N-Quads (Example 12) and their published SHA-256 (Example 13).
     /// Source: <https://www.w3.org/TR/vc-di-eddsa/#test-vectors> (Recommendation,

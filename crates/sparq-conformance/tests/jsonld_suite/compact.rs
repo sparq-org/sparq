@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.27 — the W3C JSON-LD 1.1 `compact` lane runner, on the NATIVE
+//! sq-oy1f.27 — the W3C JSON-LD 1.1 `compact` lane runner, on the NATIVE
 //! DOCUMENT-LEVEL oracle: `sparq_jsonld::compact::compact()` (the spec Compaction
 //! Algorithm over the expanded document) deep-compared against the suite's NORMATIVE
 //! expected document with `json_ld_equal` — the same oracle shape as the `expand` and
@@ -14,7 +14,7 @@ use serde_json::Value;
 use sparq_jsonld::{FsLoader, JsonLdOptions, ProcessingMode};
 use std::path::Path;
 
-// [GPT-5] sq-ruktv — keep the order-sensitive measurement beside the gating
+// sq-ruktv — keep the order-sensitive measurement beside the gating
 // JSON-LD-semantic score. The strict score is diagnostic only: compacted
 // `@container: @list` arrays do not carry an explicit `@list` marker, so the
 // shared comparator cannot infer that their order is significant.
@@ -23,7 +23,7 @@ pub struct CompactScores {
     pub strict: Score,
 }
 
-/// [FABLE-5] sq-oy1f.27 — run the W3C JSON-LD `compact` category with the NATIVE
+/// sq-oy1f.27 — run the W3C JSON-LD `compact` category with the NATIVE
 /// DOCUMENT-LEVEL oracle.
 ///
 /// ## Pipeline (the native compact path)
@@ -38,8 +38,11 @@ pub struct CompactScores {
 ///    Algorithm. The `FsLoader` maps the suite URL prefix to the local fixture tree so
 ///    remote `@context`/`@import` references resolve offline (deny-by-default otherwise).
 /// 5. Deep-compare against the suite's EXPECTED document via `json_ld_equal` (object key
-///    order insignificant; array order significant only inside explicit `@list` values;
-///    numbers compared as in the expand lane).
+///    order insignificant; array order significant only inside explicit `@list` values
+///    and a `@json` payload;
+///    numbers compared as in the expand lane), AND compare the two documents'
+///    re-expansions the same way (`json_ld_output_equal`), so a `@json` payload
+///    hidden behind a coerced term or aliased keywords is still order-checked.
 ///
 /// ## Honest oracle caveat
 ///
@@ -51,7 +54,7 @@ pub struct CompactScores {
 /// the floor (see `floors::compact`); list-order fidelity is also covered by the crate-local
 /// `tests/compact.rs` unit tests, which assert exact shapes.
 ///
-/// ## NegativeEvaluationTests are RUN, not skipped ([OPUS-5] sq-gzsky)
+/// ## NegativeEvaluationTests are RUN, not skipped (sq-gzsky)
 ///
 /// The 17-case negative SKIP bucket is closed (bead sq-oy1f.31's compact half). A negative
 /// passes iff `compact()` — expansion + context processing + compaction — errors with
@@ -259,9 +262,10 @@ pub fn run_compact(root: &Path) -> CompactScores {
                 "compacted JSON differs under strict array ordering".to_string(),
             );
         }
-        if json_ld_equal(&got, &want) {
-            s.pass();
-        } else {
+        // Document-level equality AND re-expanded equality (#4264): a context can
+        // coerce a term to `@json` or alias `@value`/`@type`, hiding a `@json`
+        // payload from the document-level comparator's ordered-array rule.
+        if let Err(why) = json_ld_output_equal(&got, &want, &opts, &loader) {
             // Truncated got/want dumps keep a regression diagnosable from the
             // failure log without re-running locally.
             let mut g = got.to_string();
@@ -270,8 +274,13 @@ pub fn run_compact(root: &Path) -> CompactScores {
             w.truncate(240);
             s.fail(
                 &e.id,
-                format!("compacted JSON differs\n    got:  {}\n    want: {}", g, w),
+                format!(
+                    "compacted JSON differs ({})\n    got:  {}\n    want: {}",
+                    why, g, w
+                ),
             );
+        } else {
+            s.pass();
         }
     }
     CompactScores {
@@ -420,7 +429,7 @@ fn t0038_skip_is_narrowly_scoped() {
     );
 }
 
-/// [OPUS-5] sq-gzsky — scope pin for the compact negative lane, the sibling of the expand
+/// sq-gzsky — scope pin for the compact negative lane, the sibling of the expand
 /// lane's `expand_negatives_all_run_with_an_expected_code`. Every `NegativeEvaluationTest`
 /// in the pinned `compact` manifest must carry an `expectErrorCode` (without one the runner
 /// compares against `""`, which no spec code equals, so the case could only ever FAIL) and

@@ -3,7 +3,7 @@
 //! must equal `tests/fixtures/<name>.golden.json` byte-for-byte. Regenerate
 //! intentionally with `UPDATE_GOLDENS=1 cargo test -p sparq-forms --test golden`
 //! and REVIEW the diff — the goldens are the crate's behavioural contract.
-//! [FABLE-5] sq-lsp7k.1.1
+//! sq-lsp7k.1.1
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
@@ -59,7 +59,7 @@ fn golden_inverse_multi() {
     check("inverse_multi", "apollo", &FormOptions::default());
 }
 
-/// [OPUS-4.8] sq-vfcxv: predicate-target applicability — sh:targetSubjectsOf
+/// sq-vfcxv: predicate-target applicability — sh:targetSubjectsOf
 /// and sh:targetObjectsOf join the switcher, ranked below
 /// dash:applicableToClass (which therefore stays the selected shape), and a
 /// predicate target whose predicate the focus node does not carry stays out.

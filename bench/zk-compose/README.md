@@ -43,11 +43,39 @@ records identify GPT-6 and their exact measurement provenance separately.
 | `scripts/bb_gates_matrix.py`      | regenerate the per-config bb-gates matrix (joins the snapshot) |
 | `scripts/constraint_pack.py`      | regenerate + verify the constraint-count evaluation pack |
 | [verify_result_evidence.py](scripts/verify_result_evidence.py) | [GPT-6] default evidence consistency checks and independent fixed-foundation rebuild |
+| [remeasure_result_evidence.py](scripts/remeasure_result_evidence.py) | re-measure the result evidence members in two clean-archive runs and rewrite the four `result_*` evidence files after a `zk/compose` source change (usage in its docstring) |
 
 > The gate-count JSON is also the source the in-crate **regression gate**
 > (`crates/sparq-zk-compose/tests/gate_count.rs`, sq-c5f) baselines against —
 > re-run `scripts/gate_counts.sh` after an intentional circuit change and update
 > both that JSON and `crates/sparq-zk-compose/tests/gate_count_snapshot.json`.
+
+## Re-measure result evidence
+
+Keep the four destination evidence files and `gate_counts_latest.json` clean
+against `HEAD`, in both the working tree and the index. Follow the two clean-archive `measure` runs and the
+`apply` command in
+[`remeasure_result_evidence.py`](scripts/remeasure_result_evidence.py)'s docstring.
+Pass `--baseline-commit <pre-change-commit>` to `apply` to name the commit whose
+evidence is the pre-change baseline (it defaults to `HEAD`). `apply` reads those
+files from that commit with `git show`, never from the working tree. It refuses
+a baseline whose `prepared_by` differs from the destination file's, and a baseline
+that differs from the destination in any field `apply` does not re-measure or
+rewrite, since that field would otherwise be silently replaced.
+
+`apply` refuses staged or unstaged destination edits, checking each separately,
+and fails closed if Git cannot check against `HEAD`. On replacement failure, it
+attempts every restore independently and cleans up temporary output files. If a restore fails, it exits
+non-zero and lists the affected files with `git checkout -- <file>` recovery
+commands to run from the repository root.
+
+The tooling regression tests use temporary fixtures and require only Python's
+standard library and Git; they do not run measurements:
+
+```sh
+python3 -m unittest discover -s bench/zk-compose/scripts -p 'test_remeasure_result_evidence.py'
+python3 -m py_compile bench/zk-compose/scripts/remeasure_result_evidence.py
+```
 
 ## sq-1s2.1.2: SPARQL feature → ZK gate-cost catalog
 

@@ -171,7 +171,7 @@ fn fresh_inserts(dict: &mut Dict, n: usize, tag: &str) -> Vec<[Id; 3]> {
     out
 }
 
-// [OPUS-4.8] sq-x58ow (parent sq-6tykl.4): sample ONLY triples whose deletion stays on the
+// sq-x58ow (parent sq-6tykl.4): sample ONLY triples whose deletion stays on the
 // pure-ABox incremental path. `is_rebuild_trigger` MUST mirror
 // `MaterializedOwlGraph::triggers_rebuild` — not just the six TBox *predicates* but also
 // axiom-typing triples (`p == rdf:type` && an axiom-class object like
@@ -486,7 +486,7 @@ fn main() {
             .into_iter()
             .map(&mut iri)
             .collect();
-            // [OPUS-4.8] sq-x58ow: the rest of `triggers_rebuild`'s surface — axiom-typing
+            // sq-x58ow: the rest of `triggers_rebuild`'s surface — axiom-typing
             // (`p == rdf:type` && an axiom-class object) and occurrence-guarded ids.
             let ty = iri(RDF_TYPE.into());
             let axiom_objs: FxHashSet<Id> = [

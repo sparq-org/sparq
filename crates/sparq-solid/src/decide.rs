@@ -1,4 +1,4 @@
-//! [OPUS-4.8] issue #992 Phase-1 — the per-resource WAC **decision** layer
+//! issue #992 Phase-1 — the per-resource WAC **decision** layer
 //! (beads sq-snopa.1 / .2 / .3). Where the rest of this crate filters *graphs* (the
 //! authorization *oracle*: `accessible` / `query_as` / `update_as`), this module answers
 //! the one question an LDP resource server asks per request: **"may principal X do mode M
@@ -251,7 +251,7 @@ impl WacDecision {
     /// # Ok::<(), String>(())
     /// ```
     pub fn acl_link_header(&self) -> Option<String> {
-        // [OPUS-4.8] POSITIONAL format args (CodeQL rust/unused-variable false positive).
+        // POSITIONAL format args (CodeQL rust/unused-variable false positive).
         self.governing_acl
             .as_ref()
             .map(|acl| format!("<{}>; rel=\"acl\"", acl.as_str()))
@@ -261,7 +261,7 @@ impl WacDecision {
 /// A read-only structural index of a dataset's named graphs: which IRIs are control
 /// documents (`.acl`/`.acr`), and whether the auth view is loaded. Built ONCE per
 /// `decide_batch` / `resolve_acl` call so a batch of N decisions is N point lookups, not
-/// N full scans (FR-7's "one indexed call, not N round-trips"). [OPUS-4.8]
+/// N full scans (FR-7's "one indexed call, not N round-trips").
 pub(crate) struct AclIndex {
     /// Every control-document IRI present (both `.acl` and `.acr` — a pod is one system,
     /// but we don't assume which, and an own-ACL lookup is just a set membership test).
@@ -328,7 +328,7 @@ impl AclIndex {
 
 /// Compute the decision for one `(session, resource, mode)` against a prebuilt index +
 /// auth index. Shared by [`crate::PodStore::decide`] and `decide_batch` (the batch path
-/// builds the [`AclIndex`] once). [OPUS-4.8]
+/// builds the [`AclIndex`] once).
 pub(crate) fn decide_one(
     index: &AclIndex,
     auth: &AuthIndex,
@@ -376,7 +376,7 @@ pub(crate) fn decide_one(
 /// is the fail-closed direction.
 const DECODE_ROUNDS: usize = 8;
 
-/// [OPUS-5] sq-gg0qq.5 (issue #2571) — whether `name`, a single child-name path segment a
+/// sq-gg0qq.5 (issue #2571) — whether `name`, a single child-name path segment a
 /// create request would MINT inside a container, names an access-control document
 /// (`.acl` / `.acr`) and so must never be created through the child-minting path.
 ///
@@ -516,7 +516,7 @@ fn is_safe_child_segment(name: &str) -> bool {
 }
 
 /// The decision for "may `session` MINT a child named `child_name` inside `container`?"
-/// Shared by [`crate::PodStore::decide_create`]. [OPUS-5]
+/// Shared by [`crate::PodStore::decide_create`].
 pub(crate) fn decide_create_one(
     index: &AclIndex,
     auth: &AuthIndex,
@@ -557,7 +557,7 @@ pub(crate) fn decide_create_one(
 /// The point-query analogue of `PodStore::modes_held`, over the index directly (no
 /// per-session cache here — `decide` is a single index walk).
 ///
-/// [OPUS-4.8] sq-b7k7u (issue #1571): the accessibility check is restricted to
+/// sq-b7k7u (issue #1571): the accessibility check is restricted to
 /// `resource`'s OWN origin ([`AuthIndex::accessible_in_origin`]) instead of building the
 /// whole-store accessible set four times. Since `resource` has exactly that origin,
 /// membership is identical to the full [`AuthIndex::accessible`] check, but a per-request

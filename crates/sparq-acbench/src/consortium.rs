@@ -30,6 +30,8 @@
 //! (`oracle_odrl_with_embargo`) — it never calls sparq's N3 rule engine, `AclIndex`,
 //! or `sparq-policy` evaluator.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 
@@ -90,6 +92,8 @@ struct MembershipRoll {
 
 /// Output of the U4 research-data-consortium generator.
 pub struct ConsortiumDataset {
+    /// Group IRIs mapped to their resolved agent members, including nested membership.
+    pub group_memberships: BTreeMap<String, BTreeSet<String>>,
     /// N-Quads lines forming the data graph.
     pub data_nquads: Vec<String>,
     /// Compiled WAC policy graph.
@@ -171,6 +175,10 @@ pub fn generate(params: &GenParams) -> ConsortiumDataset {
         let idx = all_agents.len();
         all_agents.push(format!("{base}agents/extra{idx}"));
     }
+
+    let group_memberships = rolls.iter()
+        .map(|roll| (roll.group_uri.clone(), roll.members.iter().cloned().collect()))
+        .collect();
 
     // ── 3. Build dataset resources ────────────────────────────────────────────────────
     let mut datasets: Vec<DatasetResource> = Vec::new();
@@ -741,6 +749,7 @@ pub fn generate(params: &GenParams) -> ConsortiumDataset {
     }
 
     ConsortiumDataset {
+        group_memberships,
         data_nquads,
         wac_policy,
         acp_policy,

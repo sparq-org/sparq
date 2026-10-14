@@ -13,11 +13,11 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# [OPUS-4.8] sq-evb1: crate-local README so crates.io (package.readme) matches the docs.rs
+# sq-evb1: crate-local README so crates.io (package.readme) matches the docs.rs
 # front page (lib.rs include_str!("../README.md")) — same content on both registries.
 readme = "README.md"
 
-# [OPUS-4.8] sq-evb1: build docs.rs with all features so the engine-backed items render.
+# sq-evb1: build docs.rs with all features so the engine-backed items render.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -40,7 +40,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # the crate is itself the opt-in surface (depending on it is the opt-in).
 default = []
 
-# [OPUS-4.8] sq-xetf7 (Phase E2): RBox / property-chain + transitive-role saturation
+# sq-xetf7 (Phase E2): RBox / property-chain + transitive-role saturation
 # (CR10 role inclusion + CR11 role composition, the EL+ role automaton — the SNOMED-critical
 # right-identity/transitive role reasoning). OFF by default so the E1 classifier (and the lean
 # wasm port) carry zero role-automaton code: without `rbox` every `rdfs:subPropertyOf`,
@@ -49,7 +49,7 @@ default = []
 # rustc-hash. Spike: research/owl2-el-ql-reasoning-spike.md §5 (EL-track E2).
 rbox = []
 
-# [OPUS-4.8] sq-s2nob (Phase E3): transitive reduction to the DIRECT-subsumer Hasse diagram
+# sq-s2nob (Phase E3): transitive reduction to the DIRECT-subsumer Hasse diagram
 # (`DirectHierarchy` + `classify_hasse_graph`) — the COMPACT class-taxonomy emission (direct
 # `rdfs:subClassOf` edges + `owl:equivalentClass` cliques) instead of the O(N²) full closure,
 # plus equivalence-class collapse and a membership-indexed reduction (the "indexing / join
@@ -58,7 +58,7 @@ rbox = []
 # No new dependency — reuses rustc-hash. Spike: research/owl2-el-ql-reasoning-spike.md §5 (E3).
 hasse = []
 
-# [FABLE-5] sq-pbz04.2.2 (epic sq-pbz04.2): CONCRETE DOMAINS (CR7–CR9) — faceted
+# sq-pbz04.2.2 (epic sq-pbz04.2): CONCRETE DOMAINS (CR7–CR9) — faceted
 # datatype-restriction satisfiability (`owl:onDatatype`/`owl:withRestrictions`
 # min/max{In,Ex}clusive over the exact integer/decimal tier) + `DataHasValue`/singleton
 # `DataOneOf` point ranges, decided on the SHARED numeric value tower
@@ -70,7 +70,7 @@ hasse = []
 # honest deferral, never a guessed sat/unsat verdict (see src/cdomain.rs).
 cdomain = ["dep:sparq-substrate", "sparq-substrate/numeric"]
 
-# [OPUS-4.8] sq-pbz04.2.5 (epic sq-pbz04.2): ABox internalization + realisation + whole-ontology
+# sq-pbz04.2.5 (epic sq-pbz04.2): ABox internalization + realisation + whole-ontology
 # consistency. Encodes `ClassAssertion`/`ObjectPropertyAssertion` as safe-nominal axioms over the
 # landed CR6 machinery (`a rdf:type C` ⇒ `{a} ⊑ C`; `a p b` ⇒ `{a} ⊑ ∃p.{b}`), then reads off
 # instance typings (`a rdf:type C`), individual equality (`a owl:sameAs b`) and a NEW
@@ -82,7 +82,7 @@ cdomain = ["dep:sparq-substrate", "sparq-substrate/numeric"]
 # assertion shapes (data-property assertions, non-EL class expressions) stay counted skips
 # (fail-closed). No new dependency — reuses oxrdf + rustc-hash.
 #
-# [SONNET-4.6] sq-vkq9u: composed with `cdomain` this feature ALSO rescues a
+# sq-vkq9u: composed with `cdomain` this feature ALSO rescues a
 # `DataPropertyAssertion` whose literal lies in the exact numeric tier — `a q 5` becomes
 # `{a} ⊑ ∃q.{5}` over the very point range CR9 mints for `DataHasValue 5`, so CR8 threads an
 # asserted VALUE into the TBox's data-range obligations (tests/abox_cdomain.rs; the feature
@@ -90,7 +90,7 @@ cdomain = ["dep:sparq-substrate", "sparq-substrate/numeric"]
 # data-property assertion keeps the fail-closed counted skip described above.
 abox = []
 
-# [FABLE-5] sq-wy3i6 (Phase E4): PARALLEL saturation — `Classifier::classify_par` /
+# sq-wy3i6 (Phase E4): PARALLEL saturation — `Classifier::classify_par` /
 # `classify_graph_par`, a deterministic bulk-synchronous parallel fixpoint over the SAME
 # CR1–CR6 (+`rbox` CR10/CR11) completion rules: each round the membership frontier is
 # partitioned across a bounded `std::thread::scope` worker pool that derives rule firings
@@ -102,7 +102,7 @@ abox = []
 # cannot spawn — carries zero threading code. No new dependency (std scoped threads only).
 par = []
 
-# [SONNET-4.6] sq-clsv6 (Phase E5): INCREMENTAL classification under TBox edits —
+# sq-clsv6 (Phase E5): INCREMENTAL classification under TBox edits —
 # `IncrementalClassifier`, a stateful classifier that keeps its CR1–CR6 saturation alive across
 # edits and folds a MONOTONE extension (added class axioms + brand-new class-expression nodes) into
 # it instead of re-running the fixpoint. Deliberately scoped: a RETRACTION — and any RBox /
@@ -118,23 +118,23 @@ incremental = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false }
 oxrdf.workspace = true
 rustc-hash.workspace = true
-# [FABLE-5] sq-pbz04.2.2: the shared zero-overhead evaluation substrate — ONLY its
+# sq-pbz04.2.2: the shared zero-overhead evaluation substrate — ONLY its
 # `numeric` slice (the exact `Num`/`Dec` XSD value tower) and ONLY under `cdomain`
 # (`dep:` + optional), so the default build links nothing new. Like sparq-core it sits
 # below the engine, so no dependency cycle.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.5", default-features = false, optional = true }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.6", default-features = false, optional = true }
 
-# [OPUS-4.8] sq-s2nob: the Hasse scale benchmark uses the `hasse`-gated DirectHierarchy API, so it
+# sq-s2nob: the Hasse scale benchmark uses the `hasse`-gated DirectHierarchy API, so it
 # only builds with the feature on. `required-features` keeps a default `cargo build --all-targets`
 # (which passes no features) from trying to compile it and failing on the missing import.
 [[example]]
 name = "hasse_bench"
 required-features = ["hasse"]
 
-# [OPUS-4.8] sq-ez1rc (epic sq-pbz04): the end-to-end SNOMED/GO-style scaling benchmark composes
+# sq-ez1rc (epic sq-pbz04): the end-to-end SNOMED/GO-style scaling benchmark composes
 # the WHOLE pipeline — normalise + RBox (CR10/CR11) + Hasse transitive reduction — so it needs BOTH
 # `rbox` and `hasse`. `required-features` keeps the default `--all-targets` build (no features) from
 # compiling it and failing on the gated imports. It asserts a RELATIVE doubling-ratio bound (no hard-
@@ -144,7 +144,7 @@ required-features = ["hasse"]
 name = "snomed_go_scale_bench"
 required-features = ["rbox", "hasse"]
 
-# [SONNET-4.6] sq-q0o82 (E4 follow-up): the parallel-saturation phase-attribution bench — the
+# sq-q0o82 (E4 follow-up): the parallel-saturation phase-attribution bench — the
 # first in-repo consumer of `classify_graph_par`'s thread-count knob, and the MEASUREMENT the
 # parallel-apply refinement is gated on. `required-features = ["par"]` keeps the default
 # `--all-targets` build (which passes no features) from compiling it against the gated API.

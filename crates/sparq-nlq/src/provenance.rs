@@ -24,7 +24,7 @@
 //! edge produces a [`ProvenanceRecord`] for which [`ProvenanceRecord::has_provenance`] is
 //! `false` — the caller renders **"no source recorded"**, never a guessed citation. This
 //! is the fail-closed property the Phase-1 acceptance bar requires (over a no-provenance
-//! graph the output is "no source recorded", never a guess). [OPUS-4.8]
+//! graph the output is "no source recorded", never a guess).
 //!
 //! ## Generality
 //!
@@ -95,7 +95,7 @@ impl ProvenanceRecord {
 /// IRI-safety guard: an IRI is embeddable in a `<…>` SPARQL term only if it has no `>`,
 /// no whitespace, and no ASCII control characters. Bindings come from the dictionary so
 /// this should always hold; we still reject defensively rather than build a malformed
-/// (or injection-bearing) query. [OPUS-4.8]
+/// (or injection-bearing) query.
 fn iri_is_embeddable(iri: &str) -> bool {
     !iri.is_empty()
         && iri.chars().all(|c| {
@@ -148,7 +148,7 @@ fn term_text(t: &Term) -> String {
         Term::Literal(l) => l.value().to_string(),
         Term::BlankNode(b) => format!("_:{}", b.as_str()),
         // RDF-star quoted triple (the workspace enables oxrdf's `rdf-12`): render its
-        // canonical N-Triples form rather than panic. [OPUS-4.8]
+        // canonical N-Triples form rather than panic.
         Term::Triple(tr) => tr.to_string(),
     }
 }
@@ -275,7 +275,7 @@ mod tests {
 
     // A small PKG-shaped fixture: two Findings with full provenance + one bare resource
     // with none. Mirrors the real `pkg.ttl` predicate set so the join exercises the REAL
-    // path, not a mock. [OPUS-4.8]
+    // path, not a mock.
     const PKG: &str = r#"
 @prefix pkg:     <https://sparq.dev/ns/pkg#> .
 @prefix prov:    <http://www.w3.org/ns/prov#> .
@@ -371,7 +371,7 @@ ex:bare a pkg:Finding ;
     /// A subject with TWO `prov:wasDerivedFrom` sources resolves to TWO distinct
     /// [`SourceLink`]s — the multi-source fold (`records_from` dedup of the OPTIONAL
     /// cross-product into one link per distinct `(source, anchor)`). No existing fixture
-    /// has a subject with more than one source. [OPUS-4.8]
+    /// has a subject with more than one source.
     #[test]
     fn provenance_for_subject_with_two_sources() {
         let g = Graph::load_str(
@@ -400,7 +400,7 @@ ex:bare a pkg:Finding ;
     }
 
     /// `lookup_query` is deterministic and embeds the subject in EVERY axis clause — the
-    /// shape a caller inspecting "exactly what is executed" depends on. [OPUS-4.8]
+    /// shape a caller inspecting "exactly what is executed" depends on.
     #[test]
     fn lookup_query_embeds_subject_in_every_axis() {
         let q = lookup_query("http://ex/s").expect("embeddable");

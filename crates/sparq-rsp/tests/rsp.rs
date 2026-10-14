@@ -417,7 +417,7 @@ fn continuous_query_over_count_window() {
     assert_eq!(sums, vec![sum(1), sum(3), sum(6)]);
 }
 
-/// [GPT-5.6] sq-f0v71: count-window R2S diffs compare consecutive
+/// sq-f0v71: count-window R2S diffs compare consecutive
 /// *reported* windows when the slide skips arrivals. The transient window
 /// after `v3` would be `{v2, v3}`; incorrectly using it as the diff base would
 /// emit only `v4` for ISTREAM and `v2` for DSTREAM, which these assertions
@@ -605,13 +605,13 @@ fn delta_mode_compaction_and_multi_timestamp_eviction() {
         out
     };
     assert_eq!(run(EvalMode::Delta), run(EvalMode::Rebuild));
-    // [OPUS-4.8] (sq-j39) Snapshot shares Delta's live-graph maintenance (incl.
+    // (sq-j39) Snapshot shares Delta's live-graph maintenance (incl.
     // the same overlay-compaction trigger and multi-timestamp eviction), so it
     // too must track the rebuild baseline across many compactions.
     assert_eq!(run(EvalMode::Snapshot), run(EvalMode::Rebuild));
 }
 
-/// [OPUS-4.8] PersistentDict dictionary compaction (sq-lhg): a long synthetic
+/// PersistentDict dictionary compaction (sq-lhg): a long synthetic
 /// stream with HIGH VOCABULARY CHURN — every tick contributes a brand-new
 /// subject and object IRI — must NOT grow the lifetime dictionary without
 /// bound. The dictionary is reclaimed as terms age out of every live window, so

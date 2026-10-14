@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-rt6v — RDF *graph* serialisation (and RDF/XML parsing) for the graph-valued
+//! sq-rt6v — RDF *graph* serialisation (and RDF/XML parsing) for the graph-valued
 //! surfaces: CONSTRUCT / DESCRIBE results and the Graph Store HTTP Protocol read/write side.
 //!
 //! Where [`crate::results`] serialises *SPARQL solution sets* (the SELECT/ASK result
@@ -157,7 +157,7 @@ pub fn triples_to_rdfxml(triples: &[Triple]) -> Result<String, String> {
     buffer(triples.len() * 64, |w| write_rdfxml_to(triples, w))
 }
 
-/// [OPUS-4.8] sq-oy1f.1: Serialises an RDF graph (triple list) as **JSON-LD 1.1**
+/// sq-oy1f.1: Serialises an RDF graph (triple list) as **JSON-LD 1.1**
 /// (`application/ld+json`) in the engine's *flattened* document form: a
 /// `{"@graph": [ … node objects … ]}` envelope with subjects merged into one node object
 /// each and a stable node ordering. We pick the flattened form (over expanded or compacted)
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn parse_rdfxml_rejects_an_invalid_base_iri() {
-        // [OPUS-4.8] sq-4vao: the `base` (the GSP graph IRI) is fed to `with_base_iri`; a
+        // sq-4vao: the `base` (the GSP graph IRI) is fed to `with_base_iri`; a
         // syntactically invalid base must fail FAST with a clear message (the caller maps it
         // to a 400) rather than silently parsing against no base. A bare space is not a valid IRI.
         let err = parse_rdfxml(b"<?xml version=\"1.0\"?><rdf:RDF/>", Some("not a valid iri"))

@@ -11,7 +11,7 @@ use sparq_engine::QueryResult;
 use crate::import::variables_from_schema;
 use crate::{from_record_batch, to_record_batch, ArrowError, ArrowExportError};
 
-// [GPT-5.6] Keep Parquet failures inside the existing export error surface instead of
+// Keep Parquet failures inside the existing export error surface instead of
 // adding an enum variant that would break downstream exhaustive matches.
 fn export_error(error: ParquetError) -> ArrowExportError {
     ArrowExportError::Arrow(ArrowLibraryError::ParquetError(error.to_string()))
@@ -66,7 +66,7 @@ pub fn parquet_variables_from_bytes(bytes: &[u8]) -> Result<Vec<Variable>, Arrow
 /// # Errors
 ///
 /// Returns [`ArrowError`] if `bytes` do not contain readable Parquet metadata.
-// [GPT-5.6] Keep the metadata-only path separate from full row decoding.
+// Keep the metadata-only path separate from full row decoding.
 pub fn parquet_row_count_from_bytes(bytes: &[u8]) -> Result<usize, ArrowError> {
     let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(bytes))
         .map_err(import_error)?;

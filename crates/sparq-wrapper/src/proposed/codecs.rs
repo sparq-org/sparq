@@ -5,7 +5,7 @@
 //! a string-only mapping, these codecs validate the RDF datatype and retain the
 //! language tag where one is required.
 
-// [GPT-5.6] sq-1rg2q.4: exact i128 and language-tagged literal codecs.
+// sq-1rg2q.4: exact i128 and language-tagged literal codecs.
 
 use oxrdf::vocab::{rdf, xsd};
 use oxrdf::{Literal, NamedNode};

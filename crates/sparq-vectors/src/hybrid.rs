@@ -1,5 +1,5 @@
 //! **Hybrid retrieval + second-stage reranking** — the deterministic fusion core behind the
-//! `vec:hybrid` magic predicate ([`crate::rewrite`]). [SONNET-4.6] (sq-lhcot.4)
+//! `vec:hybrid` magic predicate ([`crate::rewrite`]). (sq-lhcot.4)
 //!
 //! Before this module the crate shipped hybrid retrieval only as *Rust* fusion helpers
 //! ([`crate::fuse`]): a caller could fuse ranked lists by RRF, but there was no in-query surface,
@@ -569,7 +569,7 @@ pub fn ablate(
 /// (The [`RerankPolicy`] fail-open/fail-closed switch applies to the *second* stage, whose
 /// failure mode is the one worth a policy: the first stage's candidates are the answer.)
 ///
-/// [OPUS-4.8] (review #4519) The ids an arm returns are **untrusted**. On the `vec:hybrid` query
+/// (review #4519) The ids an arm returns are **untrusted**. On the `vec:hybrid` query
 /// path an id outside the graph dictionary's domain is a hard, arm-named query error, and — with
 /// `filtered-ann` — the returned ranking is then restricted to the same BGP-derived candidate mask
 /// the built-in dense arm searched under, preserving the arm's relative order. So an arm need not
@@ -594,7 +594,7 @@ pub fn ablate(
 /// for), so an arm sizes its response buffer against a known finite cap.
 pub type ArmFn<'a> = Box<dyn Fn(&ArmQuery<'_>, usize) -> Result<Vec<(Id, f64)>, String> + 'a>;
 
-/// [SONNET-4.6] (review #4519, round 6) The largest number of results ONE
+/// (review #4519, round 6) The largest number of results ONE
 /// [`ArmFn`] request may ask for while paging an arm past the `filtered-ann`
 /// admissibility mask — **65536**.
 ///
@@ -749,7 +749,7 @@ impl<'a> HybridConfig<'a> {
             .collect()
     }
 
-    /// [OPUS-4.8] (review #4519) Runs ONE declared auxiliary arm — the `i`th, `i < arm_count()` —
+    /// (review #4519) Runs ONE declared auxiliary arm — the `i`th, `i < arm_count()` —
     /// asking it for `candidates` results.
     ///
     /// The per-arm seam exists so the `filtered-ann` query path can re-ask a single arm for a

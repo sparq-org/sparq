@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-lk3aw.3: Differential tests for `geof::distance_meters` with extended
+//! sq-lk3aw.3: Differential tests for `geof::distance_meters` with extended
 //! (non-point) geometries, verifying the vertex-HaversineClosestPoint approach against
 //! two complementary oracles:
 //!
@@ -22,19 +22,19 @@ use geo::{Distance, Geodesic, Haversine};
 use geo_types::{Coord, Geometry, LineString, Point};
 use sparq_geo::geof;
 
-/// Build a `Geometry::LineString` from `(longitude, latitude)` pairs. [SONNET-4.6]
+/// Build a `Geometry::LineString` from `(longitude, latitude)` pairs.
 fn linestring(coords: &[(f64, f64)]) -> Geometry<f64> {
     Geometry::LineString(LineString(
         coords.iter().map(|&(x, y)| Coord { x, y }).collect(),
     ))
 }
 
-/// Haversine point-to-point distance (metres) between two long/lat positions. [SONNET-4.6]
+/// Haversine point-to-point distance (metres) between two long/lat positions.
 fn haversine_m(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
     Haversine.distance(Point::new(lon1, lat1), Point::new(lon2, lat2))
 }
 
-/// Geodesic (WGS84 Vincenty/Karney) point-to-point distance (metres). [SONNET-4.6]
+/// Geodesic (WGS84 Vincenty/Karney) point-to-point distance (metres).
 fn geodesic_m(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
     Geodesic.distance(Point::new(lon1, lat1), Point::new(lon2, lat2))
 }
@@ -50,7 +50,7 @@ fn geodesic_m(lon1: f64, lat1: f64, lon2: f64, lat2: f64) -> f64 {
 /// (both at 30°N), giving cos(30°) ≈ 0.866 instead of cos(50°) ≈ 0.643 — an
 /// overestimate of ~35 %. The new vertex-HaversineClosestPoint approach correctly
 /// finds the northernmost vertex pair and returns a result within 0.5 % of the
-/// haversine oracle. [SONNET-4.6]
+/// haversine oracle.
 #[test]
 fn extended_distance_resolves_equirectangular_distortion() {
     // Line A: vertical at 0°E, 10°N to 50°N.
@@ -98,12 +98,12 @@ fn extended_distance_resolves_equirectangular_distortion() {
 /// For this specific fixture the nearest vertex pair is **west London → east NYC**:
 /// the west London endpoint (−0.50°) has a smaller longitude gap to east NYC (−73.75°)
 /// of 73.25°, versus east London (−0.30°) → east NYC at 73.45°. Great-circle distance
-/// grows with longitude gap at these latitudes, so the smaller-gap pair wins. [SONNET-4.6]
+/// grows with longitude gap at these latitudes, so the smaller-gap pair wins.
 ///
 /// Documented bound ≤ 1 %:
 /// - Haversine-sphere vs WGS84-ellipsoid: ≤ 0.3 %
 /// - Nearest vertex vs true-minimum interior point: ≤ segment-arc / baseline
-///   ≈ 15 km / 5 540 km ≈ 0.3 % [SONNET-4.6]
+///   ≈ 15 km / 5 540 km ≈ 0.3 %
 #[test]
 fn extended_distance_continent_spanning_geodesic_oracle() {
     // Short E-W linestring near London Heathrow (≈ 15 km, long/lat).
@@ -117,7 +117,7 @@ fn extended_distance_continent_spanning_geodesic_oracle() {
     // Robust oracle: geodesic (WGS84 Karney) minimum over all 4 vertex–vertex pairs.
     // Computing the minimum over all combinations avoids a fragile hard-coded pair
     // assumption — if the fixture geometry ever shifts so a different pair becomes
-    // nearest, the oracle adapts automatically. [SONNET-4.6]
+    // nearest, the oracle adapts automatically.
     let (lon_w, lat_lon) = (-0.50_f64, 51.48_f64);
     let (lon_e, _) = (-0.30_f64, 51.48_f64);
     let (nyc_w, lat_nyc) = (-74.00_f64, 40.64_f64);
@@ -132,7 +132,7 @@ fn extended_distance_continent_spanning_geodesic_oracle() {
 
     // Precondition: verify that west London → east NYC (pair index 1) is the nearest
     // vertex pair for this fixture. If this assertion fires, the fixture has changed
-    // and the pair index and comment in this function need updating. [SONNET-4.6]
+    // and the pair index and comment in this function need updating.
     assert!(
         pair_dists[1] <= pair_dists[0]
             && pair_dists[1] <= pair_dists[2]
@@ -167,7 +167,7 @@ fn extended_distance_continent_spanning_geodesic_oracle() {
 
 /// Verify that the point↔point path through `geof::distance_meters` is UNCHANGED:
 /// a `Geometry::Point` triggers `point_to_geometry_meters` which uses the exact
-/// Haversine path, not the extended-extended iteration. [SONNET-4.6]
+/// Haversine path, not the extended-extended iteration.
 #[test]
 fn point_to_point_haversine_path_unchanged() {
     // London ↔ Paris (well-known ~343.6 km pair).

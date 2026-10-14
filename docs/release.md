@@ -114,7 +114,9 @@ release-plz-generated PR: before the first dependency-first crates.io bootstrap,
 the unpublished inter-crate registry dependencies, including in its temporary package graph.
 While `release-plz.toml` has `git_only = true` and `publish = false`, the Release-PR job
 explicitly skips automatic version calculation. The separate tag job remains active and
-creates the new version's tag after the manual version PR merges.
+creates the new version's tag after the manual version PR merges. It tags the commit that
+last changed `version` in the root `Cargo.toml`, not whatever `main` head its run starts on,
+so a later push cannot move the tag off the version commit.
 After all 12 crates (and the fork) exist, flip `git_only = false` only in the same change that enables
 crates.io OIDC publishing. A generated release-plz PR can resume Cargo versioning then,
 but it is **not merge-ready** until the same PR also aligns every public npm manifest and
@@ -136,6 +138,15 @@ its merge is the release-triggering change, not evidence of successful publicati
 Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (Keep-a-Changelog format:
 Added / Changed / Fixed / Removed). Performance claims go in only with a pointer to the
 measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the bottom.
+
+### v0.1.6
+
+`v0.1.5` (e6b65b63) published its GitHub Release, container image and all three npm packages
+with provenance. Its `sparq-rdf` wheel builds failed (maturin rejects `--release` with
+`--profile`, fixed in #6817), so nothing reached PyPI, and it attached the repository's
+`assets/logo.svg` without provenance (fixed in #6812). A dispatch runs the workflow as tagged,
+so both fixes need a new tag: **v0.1.6**, following the same sequence below with 0.1.6 in place
+of 0.1.4. It is the first PyPI release, and the crates.io bootstrap targets it.
 
 ### v0.1.5 fix-forward
 

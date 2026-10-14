@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-yqi1 (#162): the `Store::validate(data, shapes)` SHACL binding.
+//! sq-yqi1 (#162): the `Store::validate(data, shapes)` SHACL binding.
 //!
 //! Exposes `sparq-shacl`'s existing public validation API
 //! ([`sparq_shacl::validate`] — SHACL Core + SHACL-SPARQL §5.2) to JS/WASM
@@ -14,7 +14,7 @@
 //!   and are re-parsed per call. The `rdf-validate-shacl` drop-in.
 //! - [`Store::validate_store`] (`validateStore`) — **store-backed**: validates
 //!   the triples ALREADY loaded in the receiver, so only the shapes document is
-//!   parsed per call ([SONNET-4.6] gh-2520).
+//!   parsed per call (gh-2520).
 //!
 //! This module compiles ONLY under the opt-in `shacl` feature, so the default
 //! browser bundle carries zero SHACL code.
@@ -44,93 +44,18 @@
 //! `message` is the plain text of the shape's first `sh:message` (or the
 //! generated default), suitable for surfacing directly in a UI.
 
-use oxrdf::Term;
 use sparq_core::Graph;
-use sparq_shacl::{ValidationReport, ValidationResult};
 use wasm_bindgen::prelude::*;
 
 use crate::Store;
 
-/// Appends `s` to `out` as a JSON string literal (quotes + minimal escaping).
-/// The bundle carries no serde, so — exactly like the SPARQL-JSON serialiser —
-/// strings are escaped by hand. Escapes the two mandatory characters (`"` and
-/// `\`) plus the C0 control characters JSON forbids unescaped.
-fn push_json_string(out: &mut String, s: &str) {
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-}
 
-/// Appends `"key":<json-string>` (or `"key":null` when `val` is `None`).
-fn push_field(out: &mut String, key: &str, val: Option<&str>) {
-    out.push('"');
-    out.push_str(key);
-    out.push_str("\":");
-    match val {
-        Some(v) => push_json_string(out, v),
-        None => out.push_str("null"),
-    }
-}
 
-/// The plain text of a result's first `sh:message`, or its generated default —
-/// the human-readable string a UI surfaces (mirrors `to_text`'s message choice).
-fn result_message(r: &ValidationResult) -> String {
-    match r.messages.first() {
-        Some(Term::Literal(l)) => l.value().to_string(),
-        _ => r.default_message.clone(),
-    }
-}
 
-/// Serialises a [`ValidationReport`] to the JS-facing JSON described in the
-/// module docs. Kept here (not in `sparq-shacl`) so the report struct stays
-/// serde-free and the wasm bundle keeps its hand-rolled-JSON convention.
-fn report_to_json(report: &ValidationReport) -> String {
-    let mut out = String::from("{\"conforms\":");
-    out.push_str(if report.conforms { "true" } else { "false" });
-    out.push_str(",\"results\":[");
-    for (i, r) in report.results.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push('{');
-        push_field(&mut out, "focusNode", Some(&r.focus_node.to_string()));
-        out.push(',');
-        let path = r.path.as_ref().map(|p| p.to_turtle());
-        push_field(&mut out, "path", path.as_deref());
-        out.push(',');
-        let value = r.value.as_ref().map(|v| v.to_string());
-        push_field(&mut out, "value", value.as_deref());
-        out.push(',');
-        push_field(&mut out, "sourceShape", Some(&r.source_shape.to_string()));
-        out.push(',');
-        push_field(
-            &mut out,
-            "sourceConstraintComponent",
-            Some(&r.source_component),
-        );
-        out.push(',');
-        push_field(&mut out, "severity", Some(&r.severity));
-        out.push(',');
-        push_field(&mut out, "message", Some(&result_message(r)));
-        out.push('}');
-    }
-    out.push_str("]}");
-    out
-}
 
 #[wasm_bindgen]
 impl Store {
-    /// [OPUS-4.8] sq-yqi1 (#162): validates an RDF **data graph** against a SHACL
+    /// sq-yqi1 (#162): validates an RDF **data graph** against a SHACL
     /// **shapes graph**, returning a SHACL validation report as a JSON string.
     ///
     /// Both arguments are RDF documents in the same syntaxes [`Store::load`]
@@ -162,10 +87,10 @@ impl Store {
         let data_graph = Graph::load_str(data, format).map_err(|e| JsError::new(&e))?;
         let shapes_graph = Graph::load_str(shapes, format).map_err(|e| JsError::new(&e))?;
         let report = sparq_shacl::validate(&data_graph, &shapes_graph);
-        Ok(report_to_json(&report))
+        Ok(report.to_js_json())
     }
 
-    /// [SONNET-4.6] gh-2520: validates the triples **already loaded in this
+    /// gh-2520: validates the triples **already loaded in this
     /// store** against a SHACL shapes document, returning the same JSON report
     /// [`validate`](Self::validate) does.
     ///
@@ -194,7 +119,7 @@ impl Store {
     pub fn validate_store(&self, shapes: &str, format: &str) -> Result<String, JsError> {
         let shapes_graph = Graph::load_str(shapes, format).map_err(|e| JsError::new(&e))?;
         let report = sparq_shacl::validate(&self.graph, &shapes_graph);
-        Ok(report_to_json(&report))
+        Ok(report.to_js_json())
     }
 }
 
@@ -229,7 +154,7 @@ mod tests {
         let data = Graph::load_str(data, "turtle").unwrap();
         let shapes = Graph::load_str(SHAPES, "turtle").unwrap();
         let report = sparq_shacl::validate(&data, &shapes);
-        report_to_json(&report)
+        report.to_js_json()
     }
 
     /// Conforming data: the report says `conforms: true` with an empty results array.
@@ -313,7 +238,7 @@ mod tests {
         )
         .unwrap();
         let report = sparq_shacl::validate(&data, &shapes);
-        let json = report_to_json(&report);
+        let json = report.to_js_json();
         assert!(json.contains("\"conforms\":false"), "{json}");
         // minCount on a property shape: path IS present (the ex:p path), value is null.
         assert!(json.contains(r#""value":null"#), "value null: {json}");
@@ -321,7 +246,7 @@ mod tests {
         assert!(!json.contains(r#""message":null"#), "{json}");
     }
 
-    /// [SONNET-4.6] gh-2520: `validateStore` validates the store's OWN triples —
+    /// gh-2520: `validateStore` validates the store's OWN triples —
     /// the load-bearing difference from the stateless `validate`, whose data
     /// argument ignores the receiver. The `Ok` arm never touches `JsError::new`,
     /// so the binding itself runs natively here (the `Err` arm — a malformed
@@ -528,18 +453,5 @@ mod tests {
             violating.validate(conforming, SHAPES, "turtle").unwrap(),
             r#"{"conforms":true,"results":[]}"#
         );
-    }
-
-    /// The hand-rolled JSON escaper handles quotes, backslashes and control chars
-    /// in a message so the document stays valid JSON.
-    #[test]
-    fn json_string_escaping() {
-        let mut s = String::new();
-        push_json_string(&mut s, "a\"b\\c\nd\te");
-        assert_eq!(s, r#""a\"b\\c\nd\te""#, "{s}");
-        // A C0 control char is \u-escaped (raw control chars are invalid in JSON).
-        let mut ctrl = String::new();
-        push_json_string(&mut ctrl, "\u{0001}");
-        assert_eq!(ctrl, "\"\\u0001\"", "{ctrl}");
     }
 }

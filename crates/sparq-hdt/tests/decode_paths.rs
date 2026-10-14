@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-cafc — behavioural coverage for the direct decoder's least-covered
+//! sq-cafc — behavioural coverage for the direct decoder's least-covered
 //! PRODUCTION paths (not vacuous line-touchers):
 //!
 //!  * the triples-section CONTROL-INFO validation branches (`decode.rs`): a non-`Triples`
@@ -193,7 +193,7 @@ fn missing_order_property_is_rejected() {
     );
 }
 
-/// [OPUS-4.8] sq-cafc: the SINGLE-THREADED dictionary-decode fast path. `decode_dict`
+/// sq-cafc: the SINGLE-THREADED dictionary-decode fast path. `decode_dict`
 /// takes a straight-line (no `rayon::join`) arm when `rayon::current_num_threads() <= 1`;
 /// the default test pool is multi-threaded, so that arm was never measured. Decoding the
 /// SAME archive inside a 1-thread rayon pool (via `ThreadPool::install`, which makes

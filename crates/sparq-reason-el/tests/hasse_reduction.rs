@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-s2nob: differential-correctness fixtures for the EL+⊥ transitive reduction
+// sq-s2nob: differential-correctness fixtures for the EL+⊥ transitive reduction
 // (Phase E3: direct-subsumer Hasse diagram + equivalence-class collapse).
 //
 // `#![cfg(feature = "hasse")]` — these run ONLY with the `hasse` feature on. A feature-matrix.yml
@@ -347,7 +347,7 @@ fn empty_graph_is_safe() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// [OPUS-4.8] sq-bif: Hasse public-accessor edge-case coverage. The fixtures above assert the
+// sq-bif: Hasse public-accessor edge-case coverage. The fixtures above assert the
 // reduction over REPRESENTATIVE rows + the count metrics; the additions below pin the documented
 // fallbacks of the three lookup accessors on inputs the existing suite never passes them: a class
 // equivalent to nothing, an unknown dict id, and a NON-representative clique member (whose row and

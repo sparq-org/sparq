@@ -1,6 +1,6 @@
 //! The engine-under-test abstraction, the in-process sparq driver, and the
 //! deliberately-injected wrong-result mutant used by the oracle self-tests.
-//! [FABLE-5] sq-gum8.6
+//! sq-gum8.6
 //!
 //! Everything the oracles need from an engine is one operation: evaluate a SPARQL
 //! query and return parsed results ([`SparqlEngine::select`]). Results come back in

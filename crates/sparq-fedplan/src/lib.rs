@@ -1,5 +1,5 @@
 // ─── Crate-level documentation ──────────────────────────────────────────────────────
-// [OPUS-4.8] sq-gxx7 (sibling of sq-tiq4 / PR #470): the narrative below intra-doc-links
+// sq-gxx7 (sibling of sq-tiq4 / PR #470): the narrative below intra-doc-links
 // items that are EVERY one `#[cfg(feature = "fedplan")]`-gated — the re-exports
 // (`SourceDescriptor`/`select_sources`/`plan_bgp`/`JoinTree`/`StreamJoin`/…) and the private
 // `selection`/`plan`/`stream` modules. In the DEFAULT (fedplan OFF) build none of them are in
@@ -96,7 +96,7 @@ an empty crate.
 )]
 // Default (fedplan OFF) build: a concise, link-free crate doc. None of the per-phase modules /
 // re-exported items linked above exist in this build, so the doc is plain text + code spans
-// (matching `README.md`). [OPUS-4.8] sq-gxx7.
+// (matching `README.md`). sq-gxx7.
 #![cfg_attr(
     not(feature = "fedplan"),
     doc = r#"sparq-fedplan: **cost-based federated source selection + bind-vs-hash join
@@ -117,13 +117,13 @@ adaptive re-planning (`AdaptiveExecutor`) is behind the further `adaptive-replan
 [OPUS-4.8] sq-a35t / sq-vf7q / sq-7s4z / sq-gxx7 — flagged for Fable re-review."#
 )]
 #![forbid(unsafe_code)]
-// [OPUS-4.8] sq-a35t: crate has zero `unsafe`.
-// [OPUS-4.8] sq-gxx7: lock the crate-doc fix in. `rustdoc::broken_intra_doc_links` is a
+// sq-a35t: crate has zero `unsafe`.
+// sq-gxx7: lock the crate-doc fix in. `rustdoc::broken_intra_doc_links` is a
 // rustdoc-only lint — it fires under `cargo doc`, NOT under `cargo build`/`clippy`/`test` — so
 // denying it keeps the existing build/clippy/test gates untouched while making a future broken
 // crate-doc link a hard `cargo doc` error in EITHER feature state.
 #![deny(rustdoc::broken_intra_doc_links)]
-// [OPUS-4.8] sq-qik4: also lock in the *private*-link invariant. This is a SEPARATE rustdoc lint
+// sq-qik4: also lock in the *private*-link invariant. This is a SEPARATE rustdoc lint
 // from `broken_intra_doc_links` (#474) — it fires when a PUBLIC item's doc links to a private
 // item. `from_void_nt`'s doc links to `SourceDescriptorBuilder::authorities_complete`; once the
 // builder is re-exported (above), that target is public, so this deny is clean. Denying it makes a
@@ -131,7 +131,7 @@ adaptive re-planning (`AdaptiveExecutor`) is behind the further `adaptive-replan
 #![deny(rustdoc::private_intra_doc_links)]
 #![cfg_attr(not(feature = "fedplan"), allow(dead_code, unused_imports))]
 
-// [OPUS-4.8] sq-7s4z: live adaptive mid-execution re-planning. Gated behind the
+// sq-7s4z: live adaptive mid-execution re-planning. Gated behind the
 // `adaptive-replan` feature (which implies `fedplan`); compiled out entirely otherwise.
 #[cfg(feature = "adaptive-replan")]
 mod adaptive;
@@ -143,11 +143,11 @@ mod pattern;
 mod plan;
 #[cfg(feature = "fedplan")]
 mod selection;
-// [OPUS-4.8] sq-vf7q: the execution-side non-blocking streaming join + spill operator.
+// sq-vf7q: the execution-side non-blocking streaming join + spill operator.
 #[cfg(feature = "fedplan")]
 mod stream;
 
-// [OPUS-4.8] sq-qik4: re-export `SourceDescriptorBuilder` too. It is the return type of the
+// sq-qik4: re-export `SourceDescriptorBuilder` too. It is the return type of the
 // PUBLIC `SourceDescriptor::builder` and the link target of `from_void_nt`'s doc, so leaving it
 // un-exported (a) leaked a public method returning an unnameable type and (b) tripped the residual
 // `rustdoc::private_intra_doc_links` warning (the link resolved to a `pub` item reachable only
@@ -164,13 +164,13 @@ pub use pattern::{Bgp, Term, TriplePattern, Var};
 pub use plan::{plan_bgp, JoinAlgo, JoinNode, JoinTree, PlanOptions};
 #[cfg(feature = "fedplan")]
 pub use selection::{select_sources, PatternSources, SourceCandidate};
-// [OPUS-4.8] sq-vf7q.
+// sq-vf7q.
 #[cfg(feature = "fedplan")]
 pub use stream::{
     blocking_hash_join, run_streaming, SpillStore, StreamJoin, StreamJoinOptions, Tuple,
 };
-// [OPUS-4.8] sq-7s4z: live adaptive mid-execution re-planning surface.
-// [FABLE-5] sq-s5kd: + LatencyAggregation (per-source vs slowest-arm latency in cost).
+// sq-7s4z: live adaptive mid-execution re-planning surface.
+// sq-s5kd: + LatencyAggregation (per-source vs slowest-arm latency in cost).
 #[cfg(feature = "adaptive-replan")]
 pub use adaptive::{
     exec_oracle, AdaptiveExecutor, LatencyAggregation, ReplanOutcome, ReplanPolicy, RuntimeStats,

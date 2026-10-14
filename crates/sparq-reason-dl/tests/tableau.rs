@@ -1,4 +1,4 @@
-// [FABLE-5] sq-pbz04.4.3 (epic sq-pbz04.4) — integration tests for the L3 ALCH tableau
+// sq-pbz04.4.3 (epic sq-pbz04.4) — integration tests for the L3 ALCH tableau
 // (design record research/owl2-direct-semantics-scoping.md §3).
 //
 // 🤖 SPARQ agent. Four acceptance families (the bead's acceptance criteria):
@@ -159,7 +159,7 @@ fn cyclic_tbox_with_universal_contradiction_is_unsatisfiable() {
 }
 
 // -------------------------------------------------------------------------------------------
-// (e) Opt-in transitive roles (`dl_transitive`, [GPT-5.6] sq-zfwzq) — the ∀₊-rule
+// (e) Opt-in transitive roles (`dl_transitive`, sq-zfwzq) — the ∀₊-rule
 // -------------------------------------------------------------------------------------------
 //
 // ACCEPTANCE (bead sq-zfwzq): hand-built ALCH+transitive fixtures with hand-derived

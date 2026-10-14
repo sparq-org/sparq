@@ -21,7 +21,7 @@
 //! asserted confidence the fixture encodes* — it validates the floor logic + the monotone
 //! band, not that the hand-authored `pkg:confidence` numbers are themselves calibrated. A
 //! reliability-diagram measurement on calibrated confidences is explicitly out of scope and
-//! deferred (the design's §0 honesty rule). [OPUS-4.8]
+//! deferred (the design's §0 honesty rule).
 #![cfg(feature = "citations")]
 
 use sparq_core::Graph;

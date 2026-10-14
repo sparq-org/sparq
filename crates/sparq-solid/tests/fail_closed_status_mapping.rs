@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-6tgxp — the FR-6 fail-closed load/error contract as a **table oracle**
+//! sq-6tgxp — the FR-6 fail-closed load/error contract as a **table oracle**
 //! over [`AclStatus`] + [`AclStatus::is_retryable`], locking the 403-vs-503 split a Solid
 //! resource server (epic sq-gg0qq) must honour when mapping a [`WacDecision`] to an HTTP
 //! status:

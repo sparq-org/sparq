@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3jtd.8 — a library-level **WAC conformance harness**.
+//! sq-3jtd.8 — a library-level **WAC conformance harness**.
 //!
 //! # What this is (and the decision behind it)
 //!
@@ -372,7 +372,7 @@ impl WacScenario {
     }
 
     /// The scenario's accumulated N-Quads corpus (its `.acl` graphs + document
-    /// placeholders). [OPUS-4.8] sq-t58w.7 — exposed read-only so a SECOND consumer (the
+    /// placeholders). sq-t58w.7 — exposed read-only so a SECOND consumer (the
     /// differential oracle, `tests/differential_oracle.rs`) can feed the IDENTICAL RDF to
     /// an **independent** procedural WAC evaluator without re-emitting it. This is the raw
     /// input the engine's [`WacScenario::run`] loads via `Graph::load_dataset`; a
@@ -382,7 +382,7 @@ impl WacScenario {
     }
 
     /// The scenario's expected `(agent, client, mode, resource) → decision` table.
-    /// [OPUS-4.8] sq-t58w.7 — exposed read-only so the differential oracle can use the hand
+    /// sq-t58w.7 — exposed read-only so the differential oracle can use the hand
     /// table as a THIRD decider alongside the engine and the reference evaluator.
     pub fn expects(&self) -> &[Expect] {
         &self.expects
@@ -405,12 +405,12 @@ impl WacScenario {
         let index = AuthIndex::from_graph(&graph);
         ScenarioReport::build(&self.name, &self.expects, |e| {
             // WAC has no issuer dimension; the session's issuer stays None (an absent
-            // `acl:issuer` notion — see authindex::Session). [OPUS-4.8] sq-3jtd.8
+            // `acl:issuer` notion — see authindex::Session). sq-3jtd.8
             let session = Session {
                 agent: e.req_agent(),
                 client: e.req_client(),
                 issuer: None,
-                // [OPUS-4.8] sq-0q7n: WAC has no time-window grant; the clock is unused.
+                // sq-0q7n: WAC has no time-window grant; the clock is unused.
                 now: None,
             };
             index
@@ -440,7 +440,7 @@ impl WacScenario {
                 agent: e.req_agent(),
                 client: e.req_client(),
                 issuer: None,
-                // [OPUS-4.8] sq-0q7n: WAC has no time-window grant; the clock is unused.
+                // sq-0q7n: WAC has no time-window grant; the clock is unused.
                 now: None,
             };
             store

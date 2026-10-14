@@ -36,7 +36,7 @@
 //! it pins against. Run:
 //! `cargo test -p sparq-trust --features framework-vocab --test trust_expression_fixtures`.
 //!
-//! [SONNET-4.6] sq-6syab.3 (epic sq-6syab; issue #1592). 🤖 SPARQ agent —
+//! sq-6syab.3 (epic sq-6syab; issue #1592). 🤖 SPARQ agent —
 //! trust-expression conformance suite data.
 #![cfg(feature = "framework-vocab")]
 

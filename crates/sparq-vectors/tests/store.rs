@@ -257,7 +257,7 @@ fn open_from_bytes_validates_like_open() {
     assert!(VectorStore::open_from_bytes(bytes).is_err());
 }
 
-// [OPUS-4.8] Regression for review 1874: the owned-bytes path must read vectors correctly even
+// Regression for review 1874: the owned-bytes path must read vectors correctly even
 // when the source `Vec<u8>` is NOT 4-byte aligned — the store now copies into an f32-aligned
 // backing, so `slot_vector`'s &[u8]→&[f32] cast can never see an unaligned pointer (which is UB).
 // Under `cargo +nightly miri test` this also flags any residual misaligned-reference creation.

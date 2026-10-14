@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-iywur) Opt-in dynamic-programming join-order enumerator.
+//! (sq-iywur) Opt-in dynamic-programming join-order enumerator.
 //!
 //! The default planner is the greedy GOO heuristic in `crate::exec` (`goo_seed` /
 //! `goo_pick`): it builds a left-deep order one pattern at a time, always extending
@@ -40,7 +40,7 @@
 //! pattern with no variables) — those have no single connected plan, and the greedy
 //! path already handles cross products.
 //!
-//! ## Default-on when compiled; opt-out available [SONNET-4.6] sq-7d3dj.30.5
+//! ## Default-on when compiled; opt-out available sq-7d3dj.30.5
 //!
 //! The whole module compiles only under the non-default `dp-planner` cargo feature,
 //! keeping `sparq-core` / `sparq-engine` lean when the feature is off (zero DP code
@@ -88,7 +88,7 @@ pub(crate) struct DpConfig {
     pub(crate) max_subgraphs: usize,
 }
 
-/// Three-way thread-local install state for the DPccp planner. [SONNET-4.6] sq-7d3dj.30.5
+/// Three-way thread-local install state for the DPccp planner. sq-7d3dj.30.5
 ///
 /// * `Default` — no explicit override; [`active()`] returns the compiled-in default
 ///   (`DEFAULT_MAX_SUBGRAPHS`). This is the initial state on every thread.
@@ -330,7 +330,7 @@ impl QueryGraph {
         // cardinality to a large FINITE sentinel so it ranks as the WORST plan. A bare
         // `max(0.0)` would silently fold NaN → 0.0 (`f64::max` returns the non-NaN
         // operand), making the DP PREFER the pathological join instead of avoiding it.
-        // [OPUS-4.8] sq-iywur
+        // sq-iywur
         if c.is_finite() {
             c.max(0.0)
         } else {
@@ -495,7 +495,7 @@ struct Entry {
 /// * there are fewer than **3** patterns or more than `MAX_PATTERNS` — for n=1 there is
 ///   nothing to order; for n=2 greedy GOO is already `Cout`-optimal (there is exactly one
 ///   connected join, and greedy seeds from the more selective pattern) and carries less
-///   overhead than the full DPccp enumeration path. [SONNET-4.6] sq-7d3dj.30.5
+///   overhead than the full DPccp enumeration path. sq-7d3dj.30.5
 /// * the BGP join graph is disconnected (no single connected plan; greedy does the
 ///   cross products);
 /// * the connected-subgraph count exceeds `max_subgraphs` (DP-table budget guard); or
@@ -676,7 +676,7 @@ mod tests {
     }
 
     /// For n=2 connected BGPs, DPccp adds overhead without benefit — greedy GOO is
-    /// already optimal (one join order). `plan()` must return `None`. [SONNET-4.6] sq-7d3dj.30.5
+    /// already optimal (one join order). `plan()` must return `None`. sq-7d3dj.30.5
     #[test]
     fn two_pattern_bgp_falls_back_to_greedy() {
         let g = qg(&[10.0, 20.0], &[(0b11, 4.0)]);
@@ -775,7 +775,7 @@ mod tests {
         assert!(checked > 100, "expected many connected samples, got {}", checked);
     }
 
-    // ---- default-on and opt-out tests [SONNET-4.6] sq-7d3dj.30.5 ----------------
+    // ---- default-on and opt-out tests sq-7d3dj.30.5 ----------------
 
     /// `active()` returns `None` inside `without_dp_planner` — direct unit test for
     /// the `Disabled` install state and the `without_dp_planner` public function.

@@ -83,7 +83,7 @@ proptest! {
         ..Config::default()
     })]
 
-    // [GPT-5.6] sq-agrtc: this witnesses both the native-loader equivalence law and
+    // sq-agrtc: this witnesses both the native-loader equivalence law and
     // invariance of concurrent section decode/fixed-order merge under pool width.
     #[test]
     fn concurrent_decode_is_equivalent_and_thread_deterministic(

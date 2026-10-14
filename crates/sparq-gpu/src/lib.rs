@@ -30,7 +30,7 @@
 //! - WGSL has **no f64**: the f64 filter compares IEEE-754 *bit patterns* mapped
 //!   to a monotonic u64 key (sign-flip trick) — exact, no precision loss, but a
 //!   real portability cost worth knowing about (see README §limits).
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use bytemuck::{Pod, Zeroable};
 
@@ -191,7 +191,7 @@ mod tests {
         check_table(&[]);
     }
 
-    // [GPT-5.6] sq-pz5rf: Exercise the mixer directly, including values around
+    // sq-pz5rf: Exercise the mixer directly, including values around
     // the hash-table sentinel and a bounded sample of the full u32 domain.
     #[test]
     fn hash32_is_deterministic_and_total_for_sampled_inputs() {
@@ -513,7 +513,7 @@ impl Gpu {
 
     async fn new_async() -> Option<Gpu> {
         let instance = wgpu::Instance::default();
-        // [OPUS-4.8] wgpu 22 -> 29 migration (sq-5z08): `request_adapter` now
+        // wgpu 22 -> 29 migration (sq-5z08): `request_adapter` now
         // returns `Result` (was `Option` in 22); `.ok()?` keeps the
         // "no adapter ⇒ None" contract callers rely on.
         let adapter = instance

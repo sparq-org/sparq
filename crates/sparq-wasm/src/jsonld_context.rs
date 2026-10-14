@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-yz27r (#3251): the opt-in `Store.loadJsonLdWithContexts(text, contexts)`
+//! sq-yz27r (#3251): the opt-in `Store.loadJsonLdWithContexts(text, contexts)`
 //! binding — JSON-LD ingest for a document that references its `@context` **by URL**.
 //!
 //! ## The gap this closes
@@ -125,7 +125,7 @@ pub(crate) fn parse_jsonld_with_contexts(
 
 #[wasm_bindgen]
 impl Store {
-    /// [SONNET-4.6] sq-yz27r (#3251): parses a JSON-LD document whose `@context` is given
+    /// sq-yz27r (#3251): parses a JSON-LD document whose `@context` is given
     /// **by URL**, resolving those URLs from a caller-supplied `contexts` map.
     ///
     /// `contexts` is an ordered array of `[url, documentText]` string pairs — the context

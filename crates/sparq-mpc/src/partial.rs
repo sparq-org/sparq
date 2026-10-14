@@ -1,4 +1,4 @@
-// [OPUS-4.8] Shared value types crossing the MPC module boundaries (M0).
+// Shared value types crossing the MPC module boundaries (M0).
 //! Shared, crypto-free value types used across the MPC module boundaries.
 //!
 //! Architecture refs: §4.1 (parties — holders are identified), §4.3 step 3
@@ -90,7 +90,8 @@ pub enum MpcError {
     /// the deferral auditable at the call site.
     NotYetImplemented { what: String, gated_on: String },
     /// **Active tampering detected** during a consistency-checked / robust
-    /// reconstruction (guarantee (D), malicious-honest-majority abort — sq-m34i).
+    /// reconstruction (honest-majority tamper-evident detect-and-abort toward
+    /// guarantee (D) — NOT malicious security; sq-m34i).
     /// Returned when redundant Shamir shares (`n > t+1`) do NOT all lie on one
     /// degree-`t` polynomial and the inconsistency exceeds the correctable error
     /// budget `e = ⌊(n−t−1)/2⌋`. This is **not** a precondition bug
@@ -118,14 +119,27 @@ pub enum MpcError {
     /// dishonest-majority-malicious request over the SPARQL pipeline returns this,
     /// never a downgraded answer. `requirement` is the human-readable requirement
     /// that could not be met; `considered` is how many backends were inspected and
-    /// rejected. `[OPUS-4.8]`
+    /// rejected.
     NoBackendSatisfies {
         requirement: String,
         considered: usize,
     },
+    /// Security-qualified backends all failed the declared preprocessing budget.
+    ///
+    /// Distinct from [`MpcError::NoBackendSatisfies`]: at least one backend met
+    /// the security floor, but every such candidate exceeded a set ceiling or
+    /// had an unknown/overflowing estimate for it.
+    PreprocessingBudgetRefused {
+        /// The security floor that candidates met.
+        requirement: String,
+        /// Workload and inclusive ceilings that could not be met.
+        budget: crate::backend::PreprocessingBudget,
+        /// Each rejected security-qualified backend's name and cost estimates.
+        rejected: Vec<String>,
+    },
     /// **The batched IT-MAC check FAILED** (`σ ≠ 0`) just before a value was about
-    /// to be opened — the catch-everything step of honest-majority
-    /// malicious-with-abort security (design `research/mpc-malicious-security-design.md`
+    /// to be opened — the integrity step of the honest-majority
+    /// IT-MAC tier (tamper-evident with abort, NOT AXIS-1 `Malicious` today) (design `research/mpc-malicious-security-design.md`
     /// §2.5, sq-km34.4 / sq-ka8m). Every authenticated value carries an IT-MAC
     /// `m_x = α·x` under a session-global, secret-shared `[α]` no party knows; the
     /// batched check opens a leakage-free `σ = Σ χ_j·[m_{y_j}] − (Σ χ_j·y_j)·[α]`,
@@ -138,7 +152,6 @@ pub enum MpcError {
     /// over-determination check, which needs `n > 2t+1` redundancy): this check
     /// works at the MINIMAL `n = 2t+1` because soundness comes from the *secret*
     /// `α`, not from codeword redundancy. `detail` describes the batch that failed.
-    /// `[OPUS-4.8]`
     MacCheckFailed { detail: String },
 }
 
@@ -178,6 +191,18 @@ impl std::fmt::Display for MpcError {
                     f,
                     "no registered MPC backend satisfies the security requirement \
                      [{requirement}] (refused fail-closed after considering {considered} backend(s))"
+                )
+            }
+            MpcError::PreprocessingBudgetRefused {
+                requirement,
+                budget,
+                rejected,
+            } => {
+                write!(
+                    f,
+                    "no security-qualified MPC backend fits preprocessing budget {budget:?} \
+                     for [{requirement}] (refused fail-closed: {})",
+                    rejected.join("; ")
                 )
             }
             MpcError::MacCheckFailed { detail } => {

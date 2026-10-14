@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-tonhr.2) The W3C **rdf-n-triples**, **rdf-n-quads** and **rdf-trig**
+//! (sq-tonhr.2) The W3C **rdf-n-triples**, **rdf-n-quads** and **rdf-trig**
 //! syntax suites (`rdf/rdf11/rdf-{n-triples,n-quads,trig}/manifest.ttl` in w3c/rdf-tests),
 //! run THROUGH THE REAL SPARQ PARSE PATHS — the same entry points `sparq-cli` /
 //! `sparq-server` ingest through:

@@ -8,7 +8,7 @@
 //!
 //! Compiled only under `--features trust-graph`.
 //!
-//! [OPUS-4.8] sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
 #![cfg(feature = "trust-graph")]
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
@@ -164,7 +164,7 @@ fn age_25_grants_real_podstore_read_end_to_end() {
          real PodStore (admission + N3 merge + materialise)"
     );
     // And a query as Jesse now sees the resource content.
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
+    // sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
     let q = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
     let jesse = Session {

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-xzb9p — the **external-engine differential arm** (test-only):
+//! sq-xzb9p — the **external-engine differential arm** (test-only):
 //! translate a [`Program`] into Soufflé Datalog, run the real
 //! [Soufflé](https://souffle-lang.github.io/) engine over the same facts, and compare
 //! its closure with ours.

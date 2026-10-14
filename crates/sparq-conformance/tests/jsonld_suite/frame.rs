@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.29 — the W3C JSON-LD 1.1 `frame` lane runner, moved to the
+//! sq-oy1f.29 — the W3C JSON-LD 1.1 `frame` lane runner, moved to the
 //! NATIVE DOCUMENT-LEVEL oracle (`sparq_jsonld::frame::frame()` + `json_ld_equal`),
 //! matching the `expand` / `flatten` / `compact` lanes. The former RDF-answer-
 //! equivalence oracle over the RDF-first engine framer is retired here: the native
@@ -12,7 +12,7 @@ use sparq_jsonld::frame::{frame as jsonld_frame, FrameOptions};
 use sparq_jsonld::{JsonLdOptions, NoopLoader, ProcessingMode};
 use std::path::Path;
 
-/// [FABLE-5] sq-oy1f.29 — run the SEPARATE W3C `w3c/json-ld-framing` suite against
+/// sq-oy1f.29 — run the SEPARATE W3C `w3c/json-ld-framing` suite against
 /// the NATIVE document-level framer.
 ///
 /// ## Pipeline (the native framing path)
@@ -29,8 +29,9 @@ use std::path::Path;
 ///    errors with exactly the manifest's `expectErrorCode` (`invalid frame`,
 ///    `invalid @embed value`).
 /// 5. A positive case compares the framed output to the suite's NORMATIVE expected
-///    document with `json_ld_equal` (object key order insignificant; array order
-///    significant only inside `@list`).
+///    document with `json_ld_output_equal`: `json_ld_equal` (object key order
+///    insignificant; array order significant only inside `@list` and a `@json`
+///    payload) on the documents AND on their re-expansions.
 ///
 /// ## Honest SKIP buckets (recorded, not passed, not failed) — see the `frame` floor
 ///
@@ -148,10 +149,12 @@ pub fn run_frame(root: &Path) -> Score {
                 continue;
             }
         };
-        if json_ld_equal(&got, &want) {
-            s.pass();
-        } else {
-            s.fail(&e.id, format!("framed JSON mismatch for {}", e.id));
+        // Document-level equality AND re-expanded equality (#4264): a frame's
+        // context can coerce a term to `@json` or alias `@value`/`@type`, hiding a
+        // `@json` payload from the document-level comparator's ordered-array rule.
+        match json_ld_output_equal(&got, &want, &opts, &NoopLoader) {
+            Ok(()) => s.pass(),
+            Err(why) => s.fail(&e.id, format!("framed JSON mismatch for {} ({why})", e.id)),
         }
     }
     s

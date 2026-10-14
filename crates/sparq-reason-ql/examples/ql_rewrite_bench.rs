@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t5bne: QL-rewrite micro-benchmark — a self-asserting, deterministic workload
+//! sq-t5bne: QL-rewrite micro-benchmark — a self-asserting, deterministic workload
 //! for the OWL 2 QL (DL-Lite_R) PerfectRef query rewriter. Run:
 //!
 //!     cargo run -p sparq-reason-ql --example ql_rewrite_bench --release --features experimental [DEPTH]
@@ -35,7 +35,7 @@ use sparq_reason_ql::{rewrite, rewrite_production};
 use std::str::FromStr;
 use std::time::Instant;
 
-// [OPUS-4.8] sq-pbz04.3.5: the SPARQL/Turtle prefixes the corpus-profile section uses (the
+// sq-pbz04.3.5: the SPARQL/Turtle prefixes the corpus-profile section uses (the
 // realistic QL corpus is written with prefixed names for readability). Kept separate from the
 // chain benchmark, which builds bare N-triples.
 const SPARQL_PREFIXES: &str = "PREFIX : <http://ex/> \
@@ -155,7 +155,7 @@ fn run_production(depth: usize) {
 }
 
 // ===========================================================================================
-// [OPUS-4.8] sq-pbz04.3.5 — the combined-approach / H-complete-ABox EVALUATE-FIRST measurement.
+// sq-pbz04.3.5 — the combined-approach / H-complete-ABox EVALUATE-FIRST measurement.
 //
 // The combined approach (Kontchakov, Lutz, Toman, Wolter, Zakharyaschev — "The Combined Approach
 // to Query Answering in DL-Lite") trades a large query REWRITING for a hierarchy-completed
@@ -207,7 +207,7 @@ fn min_ucq(ttl: &str, body: &str) -> usize {
 /// generator with its applicability condition, a two-distinguished-variable product, and the
 /// conjunction that minimises) PLUS the answered W3C `pr:QL` extensional-CQ shapes (a single/double
 /// class atom over a shallow RDFS hierarchy, a literal-object role atom). Each `expected` is the
-/// hand-verified closed form. [OPUS-4.8] sq-pbz04.3.5
+/// hand-verified closed form. sq-pbz04.3.5
 fn realistic_corpus() -> Vec<(&'static str, &'static str, &'static str, usize)> {
     vec![
         // --- graduated DL-Lite_R oracle shapes (mirror of QL_DLLITE_ORACLE C1..C11) ---

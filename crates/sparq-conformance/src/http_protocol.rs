@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-jaj38 (epic sq-my8wd) — the W3C SPARQL 1.1 **Protocol** conformance lane.
+//! sq-jaj38 (epic sq-my8wd) — the W3C SPARQL 1.1 **Protocol** conformance lane.
 //!
 //! Where the sibling `service_eval` lane (sq-ddpgx) graduates the federated `SERVICE`
 //! EVALUATION tests by driving the engine's `SERVICE` transport over the wire, THIS lane
@@ -31,7 +31,7 @@
 //!
 //! This is a **W3C SPARQL Protocol** conformance lane (family `W3C SPARQL`), distinct from the
 //! experimental `sparq extension` ratchets. Each assertion that PASSES reflects a behaviour the
-//! server genuinely implements end-to-end over real HTTP. [OPUS-4.8] sq-406acc: the server now
+//! server genuinely implements end-to-end over real HTTP. sq-406acc: the server now
 //! returns **406 Not Acceptable** for a present-but-unsatisfiable `Accept` (a SELECT/ASK request
 //! whose `Accept` names no supported result format and no wildcard), matching Oxigraph
 //! (w3c/sparql-protocol#40) — previously the documented sparq-vs-Oxigraph fallback divergence,
@@ -576,7 +576,7 @@ pub fn run_protocol_suite() -> SuiteReport {
     );
 
     // --- 406 on a present-but-unsatisfiable Accept (SELECT) — now a genuine PASS ---
-    // [OPUS-4.8] sq-406acc: sparq now returns 406 Not Acceptable when an `Accept` header is
+    // sq-406acc: sparq now returns 406 Not Acceptable when an `Accept` header is
     // present and names no supported SELECT/ASK result format (and no wildcard), matching
     // Oxigraph (w3c/sparql-protocol#40). This was the documented sparq-vs-Oxigraph divergence;
     // closing it raises HTTP_PROTOCOL_FLOOR 20→21 honestly (the server genuinely emits 406).
@@ -598,7 +598,7 @@ pub fn run_protocol_suite() -> SuiteReport {
     }
 
     // --- The converse: an absent / `*/*` Accept still defaults to SRJ (NOT a 406) ---
-    // [OPUS-4.8] sq-406acc: the strictness above must NOT regress the W3C-permitted default
+    // sq-406acc: the strictness above must NOT regress the W3C-permitted default
     // representation when `Accept` is absent or a wildcard. This is the load-bearing
     // answer-safety check for the change; recorded as a DIVERGENCE so the floor stays at the
     // honest single +1 (the 406 pass) while still exercising the converse on every run.
@@ -825,20 +825,9 @@ fn status_ok(got: u16, want: u16) -> bool {
     }
 }
 
-/// Percent-encode a string for inclusion in a URL query value (the subset this lane needs:
-/// it escapes everything that is not an unreserved character, so SPARQL queries embed safely).
-pub fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for &b in s.as_bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
+/// Percent-encode a string for inclusion in a URL query value: everything that is not an
+/// RFC 3986 unreserved character is escaped, so SPARQL queries embed safely.
+pub use sparq_core::percent::encode as url_encode;
 
 #[cfg(test)]
 mod tests {

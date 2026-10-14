@@ -1,5 +1,5 @@
 //! GeoSPARQL geometry-METADATA properties (GeoSPARQL 1.0 §8.4 / 1.1 §8.5 — the
-//! `geo:Geometry` data properties). [OPUS-4.8] sq-mzmh — closes OGC R9.
+//! `geo:Geometry` data properties). sq-mzmh — closes OGC R9.
 //!
 //! The GeoSPARQL ontology attaches a handful of *metadata* properties to every
 //! `geo:Geometry` node, describing the geometry itself rather than its topology
@@ -42,7 +42,7 @@ use geo_types::{Coord, Geometry, LineString};
 
 /// The materialised values of the GeoSPARQL geometry-metadata properties for one
 /// geometry (`geo:dimension`/`coordinateDimension`/`spatialDimension`/`isEmpty`/
-/// `isSimple`/`hasSerialization`). [OPUS-4.8] sq-mzmh
+/// `isSimple`/`hasSerialization`). sq-mzmh
 #[derive(Debug, Clone, PartialEq)]
 pub struct GeometryMetadata {
     /// `geo:dimension` — the topological dimension (0 = points, 1 = curves,
@@ -68,7 +68,7 @@ pub struct GeometryMetadata {
 impl GeoGeometry {
     /// Materialises this geometry's GeoSPARQL metadata-property values
     /// (`geo:dimension`/`coordinateDimension`/`spatialDimension`/`isEmpty`/
-    /// `isSimple`/`hasSerialization`). [OPUS-4.8] sq-mzmh — OGC R9.
+    /// `isSimple`/`hasSerialization`). sq-mzmh — OGC R9.
     pub fn metadata(&self) -> GeometryMetadata {
         let empty = self.geometry.is_empty();
         GeometryMetadata {
@@ -84,7 +84,7 @@ impl GeoGeometry {
 
 /// The topological dimension of a geometry per OGC SFA: 0 for points, 1 for
 /// curves, 2 for surfaces, and the MAXIMUM over a collection's members. `None`
-/// for the empty geometry (it has no topological dimension). [OPUS-4.8]
+/// for the empty geometry (it has no topological dimension).
 pub fn topological_dimension(g: &Geometry<f64>) -> Option<u8> {
     match g {
         Geometry::Point(_) => Some(0),
@@ -102,7 +102,7 @@ pub fn topological_dimension(g: &Geometry<f64>) -> Option<u8> {
 /// `geo:coordinateDimension` as a standalone pure fn: measurements per
 /// coordinate — always 2 in this 2-D Simple-Features profile, `None` for the
 /// empty geometry (same rule as [`GeoGeometry::metadata`]'s field; the
-/// `geof_accessors` differential tests pin the correspondence). [FABLE-5]
+/// `geof_accessors` differential tests pin the correspondence).
 /// sq-lsp7k
 #[cfg(feature = "geof_accessors")]
 pub fn coordinate_dimension(g: &Geometry<f64>) -> Option<u8> {
@@ -112,7 +112,7 @@ pub fn coordinate_dimension(g: &Geometry<f64>) -> Option<u8> {
 /// `geo:spatialDimension` as a standalone pure fn: SPATIAL measurements per
 /// coordinate (excludes the M measure) — always 2 here, `None` for the empty
 /// geometry (same rule as [`GeoGeometry::metadata`]'s field; the
-/// `geof_accessors` differential tests pin the correspondence). [FABLE-5]
+/// `geof_accessors` differential tests pin the correspondence).
 /// sq-lsp7k
 #[cfg(feature = "geof_accessors")]
 pub fn spatial_dimension(g: &Geometry<f64>) -> Option<u8> {
@@ -121,7 +121,7 @@ pub fn spatial_dimension(g: &Geometry<f64>) -> Option<u8> {
 
 /// The OGC Simple Features geometry-class IRI (`sf:Point`, `sf:LineString`, …)
 /// of a parsed geometry — the value the opt-in `geof:geometryType` accessor
-/// returns. [FABLE-5] sq-lsp7k
+/// returns. sq-lsp7k
 ///
 /// `None` — mapped by the registry to an honest `GeoError::Unsupported`
 /// expression error, never a fabricated IRI — for:
@@ -158,7 +158,7 @@ pub fn sf_geometry_type(g: &Geometry<f64>) -> Option<&'static str> {
 }
 
 /// `geo:isSimple` (OGC SFA "Simple"): whether the geometry has no anomalous
-/// geometric points such as self-intersection or self-tangency. [OPUS-4.8]
+/// geometric points such as self-intersection or self-tangency.
 ///
 /// Per the Simple-Features definitions:
 ///
@@ -268,7 +268,7 @@ fn linestring_is_simple(ls: &LineString<f64>) -> bool {
 /// `geo:gmlLiteral` lexical form in, the property value out — the shape a SPARQL
 /// engine builtin or a triple-materialising loader consumes. Each parses the
 /// geometry via [`crate::parse_geometry_literal`] and reads off
-/// [`GeoGeometry::metadata`]. [OPUS-4.8] sq-mzmh
+/// [`GeoGeometry::metadata`]. sq-mzmh
 pub mod lex {
     use super::GeometryMetadata;
     use crate::{parse_geometry_literal, GeoError};
@@ -431,7 +431,7 @@ mod tests {
 
     #[test]
     fn lex_metadata_aggregate_returns_all_values() {
-        // [OPUS-4.8] sq-9g58 coverage: the aggregate `lex::metadata` helper (the
+        // sq-9g58 coverage: the aggregate `lex::metadata` helper (the
         // single-call form a materialising loader uses) — distinct from the
         // per-property `lex::dimension` etc. that the test above drives.
         use crate::vocab::WKT_LITERAL;
@@ -446,12 +446,12 @@ mod tests {
 
     #[test]
     fn degenerate_linestring_is_simple() {
-        // [OPUS-4.8] sq-9g58 coverage: linestring_is_simple's `< 2 points`
+        // sq-9g58 coverage: linestring_is_simple's `< 2 points`
         // early-return arm. An EMPTY linestring has no vertices and is simple.
         assert!(meta("LINESTRING EMPTY").is_simple);
     }
 
-    // ---- the standalone `geof_accessors` pure fns (sq-lsp7k) [FABLE-5] ----
+    // ---- the standalone `geof_accessors` pure fns (sq-lsp7k) ----
 
     #[cfg(feature = "geof_accessors")]
     #[test]
@@ -525,7 +525,7 @@ mod tests {
 
     #[test]
     fn collinear_self_overlapping_linestring_is_not_simple() {
-        // [OPUS-4.8] sq-9g58 coverage: linestring_is_simple's COLLINEAR
+        // sq-9g58 coverage: linestring_is_simple's COLLINEAR
         // intersection arm — a curve whose segments overlap along a shared line
         // (it doubles back over itself) is NOT simple.
         // (0 0)->(3 0)->(1 0): the second segment lies ON the first.

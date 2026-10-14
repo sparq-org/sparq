@@ -3,7 +3,7 @@
 //! sparq's own SPARQL engine over the ingested graph; the engine bounds the result set,
 //! so within the store the answer cannot be fabricated.
 //!
-//! [OPUS-4.8] sq-2m6zm.3 (epic sq-2m6zm). 🤖 SPARQ agent — query-the-PKG skill PoC.
+//! sq-2m6zm.3 (epic sq-2m6zm). 🤖 SPARQ agent — query-the-PKG skill PoC.
 //!
 //! Run: `cargo test -p sparq-kb --features query --test query_canned -- --nocapture`
 //! (and, to exercise the optional closure path:

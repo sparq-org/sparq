@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-bvmd, epic sq-3183) End-to-end tests for the engine-side
+//! (sq-bvmd, epic sq-3183) End-to-end tests for the engine-side
 //! **filtered-ANN BGP→IdMask wiring** of the `vec:` magic predicate (follow-up to
 //! sq-1wc1/#242). When a `vec:` neighbour variable is also constrained by ordinary
 //! patterns in the same BGP, those patterns carve out a candidate id-set (the
@@ -240,7 +240,7 @@ fn empty_constraint_yields_no_rows() {
     );
 }
 
-/// [OPUS-4.8] (sq-36ol) ADVERSARIAL end-to-end cache-invalidation through the PUBLIC
+/// (sq-36ol) ADVERSARIAL end-to-end cache-invalidation through the PUBLIC
 /// `query_vec` seam: the derived-mask cache must never serve a stale mask after the graph
 /// changes. We run the same constrained `vec:` query against graph g1 (Cars {a,b,c}), then
 /// against a MUTATED graph g2 that demotes `c` to a Boat. With a sound cache the second query

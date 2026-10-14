@@ -15,7 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
 # front page and every feature-gated item (`engine`, `cjk`, …) render on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
@@ -39,36 +39,36 @@ rustdoc-args = ["--cfg", "docsrs"]
 # engine's `regex` + `digest` builtins (so a `text:` rewrite over a query that ALSO uses
 # REGEX/hash works) and `parallel` via the default below; the wasm bundle
 # (`sparq-text-wasm`, sq-jbe6) takes `features = ["engine"]` ONLY, keeping the browser
-# bundle lean (no rayon/regex/digest). [OPUS-4.8] sq-jbe6
+# bundle lean (no rayon/regex/digest). sq-jbe6
 # `parallel` (default on, mirroring sparq-engine): rayon-sharded dictionary scan in
 # `TextIndex::build`; the index built is identical to the serial one. Also forwards the
 # engine's own `parallel` (its parallel execution), so the native `engine`+`parallel`
-# build is byte-for-byte the engine feature set it had before. [OPUS-4.8] sq-jbe6
+# build is byte-for-byte the engine feature set it had before. sq-jbe6
 # `engine-builtins` (default on): turns the engine's `regex` (SPARQL REGEX/REPLACE) +
 # `digest` (hash builtins) back on, so the native `text:` rewrite path supports the full
-# SPARQL builtin set exactly as before this split. OFF in the wasm bundle. [OPUS-4.8] sq-jbe6
+# SPARQL builtin set exactly as before this split. OFF in the wasm bundle. sq-jbe6
 default = ["engine", "parallel", "engine-builtins"]
 engine = ["dep:sparq-engine", "dep:spargebra"]
 engine-builtins = ["engine", "sparq-engine/regex", "sparq-engine/digest"]
 parallel = ["dep:rayon", "sparq-core/parallel", "sparq-engine?/parallel"]
-# [GPT-5.6] sq-lsp7k.14: bounded typo-tolerant lookup. OFF by default so the
+# sq-lsp7k.14: bounded typo-tolerant lookup. OFF by default so the
 # ordinary index, native dependency graph, and lean wasm bundle pay nothing.
 fuzzy = []
-# [GPT-5.6] sq-lsp7k.19: literal snippet extraction and match highlighting.
+# sq-lsp7k.19: literal snippet extraction and match highlighting.
 # OFF by default so ordinary index/search builds carry no highlighting code.
 highlight = []
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false }
 # Behind the `engine` feature (the dependency direction is sparq-text -> sparq-engine,
 # exactly like sparq-geo; the engine itself stays text-search-free, and so does the
 # wasm bundle). `default-features = false` so the engine's rayon/regex/digest are NOT
 # force-on'd through unification — the native build opts them back in via the
 # `parallel` + `engine-builtins` features above, the wasm bundle leaves them off.
-# [OPUS-4.8] sq-jbe6
-sparq-engine = { path = "../sparq-engine", version = "0.1.5", optional = true, default-features = false }
+# sq-jbe6
+sparq-engine = { path = "../sparq-engine", version = "0.1.6", optional = true, default-features = false }
 spargebra = { workspace = true, optional = true }
 oxrdf.workspace = true
 rustc-hash.workspace = true
@@ -78,20 +78,20 @@ rayon = { workspace = true, optional = true }
 unicode-segmentation = "1"
 
 [dev-dependencies]
-# [SONNET-4.6] sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
+# sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
 # `publish = false`): the conformance ratchet floor this crate's test runner enforces is
 # the SAME `const` sparq-conformance's central scoreboard reports, so the two cannot
 # drift, and the dep edge puts this crate in the floors crate's reverse-dependency
 # closure (which is what makes CI test-selection sound for the floor — it replaces the
 # guard test's old runtime read of this file's source).
 sparq-conformance-floors = { path = "../sparq-conformance-floors" }
-# [GPT-5.6] sq-wxxkk: generated incremental-completion delta histories.
+# sq-wxxkk: generated incremental-completion delta histories.
 proptest = "1"
 # Deterministic random literals/deltas for the differential test + the benchmark example.
-# [OPUS-4.8] sq-8xug: rand-ecosystem 0.10. `random_range`/`random` moved from the
+# sq-8xug: rand-ecosystem 0.10. `random_range`/`random` moved from the
 # `Rng` trait to `RngExt` in 0.10, so the test/example imports use the prelude.
 rand = "0.10"
-# [OPUS-4.8] (sq-ghjc) Test-only: PARSE the dependency-free `bench_text --json` emit
+# (sq-ghjc) Test-only: PARSE the dependency-free `bench_text --json` emit
 # back to assert it is valid JSON with the documented shape. The emit itself stays
 # serde-free (hand-built `format!`); serde_json is a dev-dependency so it never enters
 # the library, its dependents, or the wasm bundle (`sparq-text-wasm`).

@@ -176,7 +176,7 @@
 //!
 //! ## Prior art: porting this to the LOCAL evaluator — attempted, unmerged (read before re-deriving)
 //!
-//! [OPUS-5] The recurring request to reuse this trigger + hysteresis in the **local**
+//! The recurring request to reuse this trigger + hysteresis in the **local**
 //! (`sparq-engine`) join loop — gh-903 / sq-gafdh / #2932 — **has already been implemented
 //! once, in full, and was held back rather than merged.** It is recorded here because the
 //! federated re-planner is where a reader looking to port it starts, and the prior art was
@@ -209,14 +209,14 @@
 //! triggered strategy switch, sq-6i40, is judged the higher-ceiling path), and on the
 //! maintainer questions still outstanding. Read it before re-implementing anything.
 //!
-//! [OPUS-4.8] sq-7s4z (epic sq-3183) — flagged for Fable re-review.
+//! sq-7s4z (epic sq-3183) — flagged for Fable re-review.
 
 use crate::pattern::Bgp;
 use crate::plan::{JoinTree, PlanOptions};
 use crate::selection::PatternSources;
 use std::collections::HashMap;
 
-/// [FABLE-5] sq-s5kd. How a multi-source pattern's per-source latency observations are
+/// sq-s5kd. How a multi-source pattern's per-source latency observations are
 /// aggregated into the single cost factor its joins are scaled by.
 ///
 /// * [`Self::SlowestArm`] (default, sq-b51o behaviour) — the pattern is charged at its
@@ -263,27 +263,27 @@ pub struct ReplanPolicy {
     /// Hard cap on how many re-plans a single execution may perform (belt-and-braces
     /// anti-thrash + bounded planning overhead). Default `8`.
     pub max_replans: usize,
-    /// [OPUS-4.8] sq-b51o. Weight `w ≥ 0` of observed per-source latency in the cost model
+    /// sq-b51o. Weight `w ≥ 0` of observed per-source latency in the cost model
     /// (a HEURISTIC constant, not a derived optimum). A candidate join whose slowest retained
     /// source is observed at relative slowness `s = latency / latency_baseline` has its cost
     /// scaled by `clamp(1 + w·(s − 1), latency_floor, latency_cap)`. `w = 0` disables latency
     /// weighting entirely (pure cardinality planning); the default `0.5` lets a 2×-slow source
     /// cost 1.5× — a deliberately *gentle* bias, because latency measurements are noisy.
     pub latency_weight: f64,
-    /// [OPUS-4.8] sq-b51o. Baseline latency (same abstract units as
+    /// sq-b51o. Baseline latency (same abstract units as
     /// [`RuntimeStats::record_source_latency`]) a source is judged *relative to*: a source
     /// observed at this latency is "typical" (relative slowness `s = 1` ⇒ cost factor `1.0`).
     /// A hand-set reference point, not measured. Default `100.0`.
     pub latency_baseline: f64,
-    /// [OPUS-4.8] sq-b51o. Lower clamp on the latency cost factor — a source observed *faster*
+    /// sq-b51o. Lower clamp on the latency cost factor — a source observed *faster*
     /// than baseline can make its joins cheaper, but never below this floor (a fast source is
     /// still a remote sub-query). Default `0.5`.
     pub latency_floor: f64,
-    /// [OPUS-4.8] sq-b51o. Upper clamp on the latency cost factor — stops a single outlier
+    /// sq-b51o. Upper clamp on the latency cost factor — stops a single outlier
     /// latency spike from dominating the join order (anti-thrash for the latency term, mirroring
     /// the cardinality `divergence_factor` discipline). Default `4.0`.
     pub latency_cap: f64,
-    /// [FABLE-5] sq-s5kd. How a multi-source pattern's per-source latencies fold into its
+    /// sq-s5kd. How a multi-source pattern's per-source latencies fold into its
     /// single cost factor: [`LatencyAggregation::SlowestArm`] (default — bottleneck model,
     /// the sq-b51o behaviour, bit-identical for existing callers) or the opt-in
     /// [`LatencyAggregation::CardinalityWeighted`] (expected-work model). Single-source
@@ -307,7 +307,7 @@ impl Default for ReplanPolicy {
 }
 
 impl ReplanPolicy {
-    /// [OPUS-4.8] sq-b51o. The latency cost-multiplier for a single observed source latency,
+    /// sq-b51o. The latency cost-multiplier for a single observed source latency,
     /// or `None` when latency weighting is off (`latency_weight == 0`). A source at the
     /// baseline (or with no observation — handled by the caller passing `None`) yields `1.0`,
     /// so the model is inert until evidence diverges from baseline. HEURISTIC — see the
@@ -334,7 +334,7 @@ pub struct RuntimeStats {
     /// union over its sources). Present only for patterns that have been (at least
     /// partially) evaluated.
     observed_leaf_card: HashMap<usize, f64>,
-    /// Per-source **EWMA-smoothed** latency, in abstract time units (e.g. ms). [OPUS-4.8]
+    /// Per-source **EWMA-smoothed** latency, in abstract time units (e.g. ms).
     /// sq-b51o (+ follow-up): each [`Self::record_source_latency`] folds the new observation
     /// into a per-source exponentially-weighted moving average rather than overwriting — this
     /// is the value fed into the cost model + the re-plan trigger, so a single transient spike
@@ -342,15 +342,15 @@ pub struct RuntimeStats {
     /// more, biasing the re-plan toward faster sources / deferring the slow one (see
     /// [`ReplanPolicy::latency_weight`]). Affects cost/ordering ONLY, never the result multiset.
     observed_latency: HashMap<usize, f64>,
-    /// [OPUS-4.8] sq-b51o follow-up. **Global** (fallback) EWMA smoothing factor α ∈ (0, 1]
+    /// sq-b51o follow-up. **Global** (fallback) EWMA smoothing factor α ∈ (0, 1]
     /// applied per source in [`Self::record_source_latency`]: `ewma_new = α·observed +
     /// (1−α)·ewma_prev`. A **hand-picked HEURISTIC**, default [`Self::DEFAULT_LATENCY_ALPHA`]
     /// (`0.3`) — see the module docs. Lower = calmer/laggier, higher = twitchier/faster-tracking;
     /// not derived from a workload. Clamped to `(0, 1]` on construction. A per-source override in
     /// [`Self::source_alpha`] takes precedence over this global value when present
-    /// ([OPUS-4.8] sq-3xkz).
+    /// (sq-3xkz).
     latency_alpha: f64,
-    /// [OPUS-4.8] sq-3xkz. **Per-source** EWMA α override map. When a source has an entry here it
+    /// sq-3xkz. **Per-source** EWMA α override map. When a source has an entry here it
     /// is used in preference to the global [`Self::latency_alpha`], so each source can be smoothed
     /// at its own rate (a steady source can keep a low/calm α; a bursty one a higher/twitchier
     /// α). Empty by default — and an empty map means EVERY source falls back to the global α, so
@@ -359,7 +359,7 @@ pub struct RuntimeStats {
     /// HEURISTIC: the MECHANISM to set α per source, not a tuned α — tuning needs a real
     /// federated workload (deferred, sq-3xkz).
     source_alpha: HashMap<usize, f64>,
-    /// [OPUS-4.8] sq-3xkz. Optional **time-aware decay** half-life, in the same abstract time
+    /// sq-3xkz. Optional **time-aware decay** half-life, in the same abstract time
     /// units the elapsed gap is passed in. `None` (default) ⇒ **no** time decay: a sample folds in
     /// at the plain per-source α regardless of the wall-clock gap since the previous sample, so
     /// the default path reproduces the prior equal-weighting EWMA exactly (back-compat). `Some(h)`
@@ -369,13 +369,13 @@ pub struct RuntimeStats {
     /// dominate rather than being averaged equally with a now-stale history. Injectable/elapsed-in
     /// so it stays deterministic — the clock is never read directly here.
     decay_half_life: Option<f64>,
-    /// [OPUS-4.8] sq-3xkz. Per-source **logical age**: the value of [`Self::clock`] at the moment
+    /// sq-3xkz. Per-source **logical age**: the value of [`Self::clock`] at the moment
     /// that source was last updated. Used purely for [`Self::evict_stale`] / [`Self::source_age`];
     /// it never affects the EWMA value. Sources recorded via the plain (no-elapsed)
     /// [`Self::record_source_latency`] are stamped at the current [`Self::clock`] (age 0 at record
     /// time).
     last_seen: HashMap<usize, f64>,
-    /// [OPUS-4.8] sq-3xkz. Monotone **logical clock** (abstract units), advanced ONLY by the
+    /// sq-3xkz. Monotone **logical clock** (abstract units), advanced ONLY by the
     /// `elapsed` arg of [`Self::record_source_latency_after`] / [`Self::advance_clock`]. Starts at
     /// `0.0`. Deterministic by construction — there is no hidden wall-clock read; the caller owns
     /// the time source and passes elapsed gaps in, so tests are reproducible.
@@ -397,7 +397,7 @@ impl Default for RuntimeStats {
 }
 
 impl RuntimeStats {
-    /// [OPUS-4.8] sq-b51o follow-up. Default per-source latency EWMA smoothing factor α — a
+    /// sq-b51o follow-up. Default per-source latency EWMA smoothing factor α — a
     /// hand-picked heuristic (latest sample weighted 30%, history 70%): enough history to damp
     /// a single transient spike below the re-plan trigger, enough recency to converge on a
     /// sustained shift within a few samples. NOT a derived optimum.
@@ -409,7 +409,7 @@ impl RuntimeStats {
         RuntimeStats::default()
     }
 
-    /// [OPUS-4.8] sq-b51o follow-up. A fresh, empty statistics store with an explicit latency
+    /// sq-b51o follow-up. A fresh, empty statistics store with an explicit latency
     /// EWMA smoothing factor `alpha` (clamped to `(0, 1]`). `alpha = 1.0` recovers the old
     /// "single last observation" behaviour (no smoothing); the default
     /// ([`Self::DEFAULT_LATENCY_ALPHA`]) is `0.3`.
@@ -427,7 +427,7 @@ impl RuntimeStats {
         self.latency_alpha
     }
 
-    /// [OPUS-4.8] sq-3xkz. Set a **per-source** EWMA α override for `source` (clamped to
+    /// sq-3xkz. Set a **per-source** EWMA α override for `source` (clamped to
     /// `(0, 1]`), taking precedence over the global [`Self::latency_alpha`] for that source's
     /// subsequent [`Self::record_source_latency`] / [`Self::record_source_latency_after`] folds.
     /// This is the MECHANISM for adaptive per-source smoothing — a steady source can keep a calm
@@ -439,14 +439,14 @@ impl RuntimeStats {
         self.source_alpha.insert(source, Self::clamp_alpha(alpha));
     }
 
-    /// [OPUS-4.8] sq-3xkz. Builder form of [`Self::set_source_alpha`]: returns `self` with the
+    /// sq-3xkz. Builder form of [`Self::set_source_alpha`]: returns `self` with the
     /// per-source α override applied, for chaining at construction.
     pub fn with_source_alpha(mut self, source: usize, alpha: f64) -> RuntimeStats {
         self.set_source_alpha(source, alpha);
         self
     }
 
-    /// [OPUS-4.8] sq-3xkz. The **effective** EWMA α for `source`: its per-source override
+    /// sq-3xkz. The **effective** EWMA α for `source`: its per-source override
     /// ([`Self::set_source_alpha`]) if present, else the global [`Self::latency_alpha`]. With an
     /// empty override map this is always the global α, so the default path is unchanged.
     pub fn effective_alpha(&self, source: usize) -> f64 {
@@ -466,7 +466,7 @@ impl RuntimeStats {
         alpha.clamp(f64::MIN_POSITIVE, 1.0)
     }
 
-    /// [OPUS-4.8] sq-3xkz. Enable **time-aware decay** with a `half_life` (abstract time units,
+    /// sq-3xkz. Enable **time-aware decay** with a `half_life` (abstract time units,
     /// the same scale the elapsed gap is later passed in). A non-finite or non-positive value
     /// **disables** decay (sets it back to `None`), the back-compat default. See
     /// [`Self::decay_half_life`] for the semantics; the actual decay applies only on samples fed
@@ -479,24 +479,24 @@ impl RuntimeStats {
         };
     }
 
-    /// [OPUS-4.8] sq-3xkz. Builder form of [`Self::set_decay_half_life`].
+    /// sq-3xkz. Builder form of [`Self::set_decay_half_life`].
     pub fn with_decay_half_life(mut self, half_life: f64) -> RuntimeStats {
         self.set_decay_half_life(half_life);
         self
     }
 
-    /// [OPUS-4.8] sq-3xkz. The configured time-aware-decay half-life, or `None` when decay is off.
+    /// sq-3xkz. The configured time-aware-decay half-life, or `None` when decay is off.
     pub fn decay_half_life(&self) -> Option<f64> {
         self.decay_half_life
     }
 
-    /// [OPUS-4.8] sq-3xkz. The current logical clock (abstract units), advanced only by the
+    /// sq-3xkz. The current logical clock (abstract units), advanced only by the
     /// `elapsed` arg of [`Self::record_source_latency_after`] / [`Self::advance_clock`].
     pub fn clock(&self) -> f64 {
         self.clock
     }
 
-    /// [OPUS-4.8] sq-3xkz. Advance the logical clock by `elapsed` (abstract units; a negative or
+    /// sq-3xkz. Advance the logical clock by `elapsed` (abstract units; a negative or
     /// non-finite value is treated as `0`). Lets a caller age the store between queries without
     /// recording a sample (e.g. before a bulk [`Self::evict_stale`]). Deterministic — elapsed is
     /// supplied by the caller, never read from a wall clock.
@@ -504,7 +504,7 @@ impl RuntimeStats {
         self.clock += elapsed.max(0.0);
     }
 
-    /// [OPUS-4.8] sq-3xkz. The **logical age** of `source` — `clock − last_seen[source]`, i.e. how
+    /// sq-3xkz. The **logical age** of `source` — `clock − last_seen[source]`, i.e. how
     /// much logical time has elapsed since this source was last recorded — or `None` if the source
     /// has no observation. Always `≥ 0` (the clock is monotone). Drives [`Self::evict_stale`].
     pub fn source_age(&self, source: usize) -> Option<f64> {
@@ -526,17 +526,17 @@ impl RuntimeStats {
     /// (`ewma = observed`); subsequent samples decay the history. The smoothed value — not the
     /// raw sample — is what [`Self::observed_latency_of`] returns and the cost model/trigger
     /// read, so a single transient spike is damped (anti-thrash) while a sustained shift
-    /// converges. [OPUS-4.8] sq-b51o follow-up. Affects cost/ordering ONLY, never results.
+    /// converges. sq-b51o follow-up. Affects cost/ordering ONLY, never results.
     ///
     /// This is the **time-unaware** fold: it folds at the plain per-source α regardless of any
     /// wall-clock gap (back-compat). For time-aware decay pass the elapsed gap to
-    /// [`Self::record_source_latency_after`] ([OPUS-4.8] sq-3xkz). The source is stamped at the
+    /// [`Self::record_source_latency_after`] (sq-3xkz). The source is stamped at the
     /// current logical [`Self::clock`] (age 0 at record time).
     pub fn record_source_latency(&mut self, source: usize, latency: f64) {
         self.fold_latency(source, latency, self.effective_alpha(source));
     }
 
-    /// [OPUS-4.8] sq-3xkz. Record a latency sample for `source` `elapsed` abstract time units
+    /// sq-3xkz. Record a latency sample for `source` `elapsed` abstract time units
     /// after the previous one, applying **time-aware decay**: the longer the gap, the more the
     /// stale history is decayed and the more the new sample is trusted.
     ///
@@ -570,7 +570,7 @@ impl RuntimeStats {
         self.fold_latency(source, latency, alpha);
     }
 
-    /// [OPUS-4.8] sq-3xkz. The shared EWMA fold: seed on the first sample for `source`, otherwise
+    /// sq-3xkz. The shared EWMA fold: seed on the first sample for `source`, otherwise
     /// blend at `alpha`. Always stamps the source's `last_seen` at the current logical clock so
     /// [`Self::source_age`] / [`Self::evict_stale`] track recency. `alpha` is assumed already
     /// clamped into `(0, 1]` by the caller.
@@ -589,7 +589,7 @@ impl RuntimeStats {
         self.last_seen.insert(source, self.clock);
     }
 
-    /// [OPUS-4.8] sq-3xkz. **Staleness eviction.** Drop every source whose [`Self::source_age`]
+    /// sq-3xkz. **Staleness eviction.** Drop every source whose [`Self::source_age`]
     /// (`clock − last_seen`) is **strictly greater** than `max_age` (abstract time units) — entries
     /// older than the threshold are removed from both the EWMA map and the age map, so a long-lived
     /// `RuntimeStats` reused across queries does not let a stale latency keep biasing the planner.
@@ -621,7 +621,7 @@ impl RuntimeStats {
     }
 
     /// The **EWMA-smoothed** observed latency for `source`, if any sample has been recorded.
-    /// This is the smoothed running average, not the last raw sample ([OPUS-4.8] sq-b51o
+    /// This is the smoothed running average, not the last raw sample (sq-b51o
     /// follow-up) — it is what the latency cost factor and the re-plan trigger consume.
     pub fn observed_latency_of(&self, source: usize) -> Option<f64> {
         self.observed_latency.get(&source).copied()
@@ -665,7 +665,7 @@ fn corrected_selection(base: &[PatternSources], stats: &RuntimeStats) -> Vec<Pat
         .collect()
 }
 
-/// [OPUS-4.8] sq-b51o. The **slowest** observed latency over the sources retained for
+/// sq-b51o. The **slowest** observed latency over the sources retained for
 /// `pattern` (a union is bottlenecked by its slowest arm), or `None` when no source of the
 /// pattern has a latency observation yet.
 fn pattern_slowest_latency(
@@ -680,8 +680,8 @@ fn pattern_slowest_latency(
         .fold(None::<f64>, |acc, l| Some(acc.map_or(l, |a| a.max(l))))
 }
 
-/// [OPUS-4.8] sq-b51o. The latency cost-multiplier for joining `pattern`, aggregated over
-/// its retained sources per [`ReplanPolicy::latency_aggregation`] ([FABLE-5] sq-s5kd):
+/// sq-b51o. The latency cost-multiplier for joining `pattern`, aggregated over
+/// its retained sources per [`ReplanPolicy::latency_aggregation`] (sq-s5kd):
 ///
 /// * [`LatencyAggregation::SlowestArm`] — the slowest source's observed latency run through
 ///   [`ReplanPolicy::latency_factor`] (bottleneck model, the default).
@@ -710,7 +710,7 @@ fn pattern_latency_factor(
     }
 }
 
-/// [FABLE-5] sq-s5kd. The cardinality-weighted mean of the per-source latency factors over
+/// sq-s5kd. The cardinality-weighted mean of the per-source latency factors over
 /// `pattern`'s retained sources: `Σ card_c · factor_c / Σ card_c`, where `factor_c` is the
 /// source's EWMA latency through [`ReplanPolicy::latency_factor`] (or `1.0` when the source
 /// has no observation — inert, exactly as in slowest-arm mode). Each `factor_c` is already
@@ -751,7 +751,7 @@ fn pattern_weighted_latency_factor(
     }
 }
 
-/// [OPUS-4.8] sq-b51o. The pattern's slowest source's *relative slowness* `s = latency /
+/// sq-b51o. The pattern's slowest source's *relative slowness* `s = latency /
 /// baseline` (un-clamped, un-weighted) under `policy`'s [`ReplanPolicy::latency_baseline`] —
 /// what the trigger compares to `divergence_factor`. `None` when the pattern has no latency
 /// observation.
@@ -858,7 +858,7 @@ impl<'a> AdaptiveExecutor<'a> {
     /// Considers a re-plan at the current stage boundary given the latest `stats`.
     ///
     /// Fires the trigger when a not-yet-executed pattern's observed leaf cardinality
-    /// diverges from its estimate past the policy factor, **or** ([OPUS-4.8] sq-b51o) a
+    /// diverges from its estimate past the policy factor, **or** (sq-b51o) a
     /// not-yet-executed pattern's slowest source is observed to be `divergence_factor×`
     /// slower than the latency baseline; if so, re-plans the **suffix** with the corrected
     /// statistics (cardinality *and* latency-weighted cost) and adopts the new order only
@@ -886,7 +886,7 @@ impl<'a> AdaptiveExecutor<'a> {
                     (Some(&e), Some(o)) => diverges(e, o, &self.policy),
                     _ => false,
                 });
-        // [OPUS-4.8] sq-b51o (+ EWMA follow-up): a not-yet-executed pattern bound to an
+        // sq-b51o (+ EWMA follow-up): a not-yet-executed pattern bound to an
         // observably slow source — whose slowest source's EWMA-SMOOTHED latency is past
         // divergence_factor× baseline — is also enough to *consider* a re-plan: a latency-bound
         // query reacts even when cardinalities are spot-on. Reading the EWMA (not the raw last
@@ -951,7 +951,7 @@ impl<'a> AdaptiveExecutor<'a> {
 
     /// Estimated remaining cost of executing `suffix` (in this order) on top of the current
     /// prefix, under the corrected statistics — the comparable used for hysteresis. Costs are
-    /// **latency-weighted** ([OPUS-4.8] sq-b51o): a join against a slow source costs more, so a
+    /// **latency-weighted** (sq-b51o): a join against a slow source costs more, so a
     /// suffix that defers the slow source compares favourably. Output cardinality is unaffected.
     fn suffix_cost(
         &self,
@@ -977,7 +977,7 @@ impl<'a> AdaptiveExecutor<'a> {
 /// next, tie-break on index) but over a fixed prefix — so the only thing that can change is
 /// the order of the not-yet-executed patterns. Pure, deterministic.
 ///
-/// [OPUS-4.8] sq-b51o: the per-candidate selection key is the **latency-weighted** output
+/// sq-b51o: the per-candidate selection key is the **latency-weighted** output
 /// score `out · latency_factor(cand)` rather than raw output cardinality — a candidate bound
 /// to an observably slow source is deferred. The factor is `1.0` whenever the candidate has no
 /// latency observation (or latency weighting is off), so a measurement-free re-plan is
@@ -1043,7 +1043,7 @@ fn plan_suffix_greedy(
                 opts,
                 connected,
             );
-            // [OPUS-4.8] sq-b51o: rank on the latency-weighted score, but advance `cur_card`
+            // sq-b51o: rank on the latency-weighted score, but advance `cur_card`
             // with the TRUE `out` — latency never changes the cardinality the planner feeds
             // forward (results/soundness are untouched), only which arm we pick next.
             let score = out * pattern_latency_factor(cand, selection, stats, policy);
@@ -1069,7 +1069,7 @@ fn plan_suffix_greedy(
 }
 
 /// Estimated total remaining cost of joining `suffix` (in the given order) onto `prefix`.
-/// [OPUS-4.8] sq-b51o: each per-join cost is scaled by the candidate's latency factor (a slow
+/// sq-b51o: each per-join cost is scaled by the candidate's latency factor (a slow
 /// source's joins cost more); the output cardinality fed forward is the TRUE estimate, so
 /// latency biases the cost comparable only, never the result.
 #[allow(clippy::too_many_arguments)]
@@ -1112,7 +1112,7 @@ fn suffix_cost_greedy(
             opts,
             connected,
         );
-        // [OPUS-4.8] sq-b51o: latency-weight the cost of this join; cardinality fed forward
+        // sq-b51o: latency-weight the cost of this join; cardinality fed forward
         // (`out`) stays the true estimate, so the comparable is latency-aware but the plan
         // remains a pure reorder (result-equivalent).
         total += cost * pattern_latency_factor(cand, selection, stats, policy);
@@ -1603,7 +1603,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-b51o — per-source latency folded into the adaptive cost model.
+    // sq-b51o — per-source latency folded into the adaptive cost model.
     // ============================================================================
 
     // A 3-arm star on ?s where each arm's predicate is served by a DIFFERENT source, so a
@@ -1840,7 +1840,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [FABLE-5] sq-s5kd — per-source (cardinality-weighted) latency aggregation.
+    // sq-s5kd — per-source (cardinality-weighted) latency aggregation.
     // ============================================================================
 
     // One pattern (index 0) retained on two sources with the given per-source cards.
@@ -2084,7 +2084,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-b51o follow-up — per-source latency EWMA smoothing.
+    // sq-b51o follow-up — per-source latency EWMA smoothing.
     // ============================================================================
 
     // ---- EWMA mechanics + the default α are pinned. First sample seeds the average; each
@@ -2280,7 +2280,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-3xkz — EWMA refinements: per-source adaptive α, time-aware decay,
+    // sq-3xkz — EWMA refinements: per-source adaptive α, time-aware decay,
     // staleness eviction. All deterministic (elapsed gaps passed in, no wall clock).
     // ============================================================================
 
@@ -2441,7 +2441,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-bif.3 — correctness suite: previously-uncovered adaptive branches
+    // sq-bif.3 — correctness suite: previously-uncovered adaptive branches
     // (the <2-remaining + advance-to-empty edge cases, the `corrected_selection`
     // even-spread + empty-candidate branches, `diverges` directionality, the input clamps
     // on `record_*`, `clamp_alpha` NaN, `pattern_slowest_latency` max-over-sources, and the

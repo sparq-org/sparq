@@ -9,7 +9,7 @@
 //! cross-engine differential already runs in sparq-bench; the zk feature only
 //! needs to prove it does not perturb results).
 //!
-//! [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+//! written while Fable 5 unavailable — re-review when Fable returns.
 
 #![cfg(feature = "zk")]
 

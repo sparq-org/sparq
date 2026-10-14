@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-55c1 — DIFFERENTIAL SHACL fuzzing against reference engines.
+//! sq-55c1 — DIFFERENTIAL SHACL fuzzing against reference engines.
 //!
 //! Generates random but VALID SHACL shapes graphs + data graphs, validates each
 //! through `sparq-shacl` AND through one-or-more reference SHACL engines, and
@@ -84,7 +84,7 @@ use sparq_shacl::validate;
 mod gen;
 use gen::{Rng, Scenario};
 
-/// [GPT-5.6] (sq-qvqk7) The explicit element type must keep string-literal picks
+/// (sq-qvqk7) The explicit element type must keep string-literal picks
 /// sized on rustc 1.88 while preserving the selected value.
 #[test]
 fn rng_string_pick_has_sized_elements() {
@@ -388,7 +388,7 @@ fn ref_keys(report: &RefReport) -> std::collections::BTreeSet<Key> {
         .violations
         .iter()
         .map(|v| Key {
-            // [OPUS-4.8] A genuinely-absent `focus` in the reference JSON is a
+            // A genuinely-absent `focus` in the reference JSON is a
             // distinct fact from a blank-node focus: collapsing both to "_:bnode"
             // would let a report-shape bug (adapter dropping the focus field)
             // silently compare equal to sparq emitting a blank-node focus, masking
@@ -589,7 +589,7 @@ fn differential_shacl_fuzz() {
         all_mismatches.append(&mut mismatches);
         all_skip_examples.append(&mut skip_examples);
 
-        // [OPUS-4.8] Guard against a VACUOUS pass for THIS engine. We only resolve
+        // Guard against a VACUOUS pass for THIS engine. We only resolve
         // an engine when its toolchain is present, so it is expected to actually
         // compare. If it compared zero cases (resolved yet errored on every seed —
         // wrong venv / missing jar / adapter regression) that is a broken setup,
@@ -624,7 +624,7 @@ fn differential_shacl_fuzz() {
 
 /// Decide whether a *resolved-adapter* run produced a meaningful comparison.
 ///
-/// [OPUS-4.8] `agree` is the number of cases that ran the full sparq-vs-reference
+/// `agree` is the number of cases that ran the full sparq-vs-reference
 /// comparison and matched; by the time the driver calls this, any mismatch has
 /// already panicked, so `agree == compared` (the count of cases that actually
 /// compared). If every case was instead `Skipped` — the adapter resolved yet
@@ -722,7 +722,7 @@ fn key_normalisation_is_consistent() {
             default_message: String::new(),
             details: vec![],
         }],
-        // [OPUS-4.8] (sq-lz99x) report now carries skipped-constraint diagnostics;
+        // (sq-lz99x) report now carries skipped-constraint diagnostics;
         // none here (this fixture is a hand-built result, not a real validation).
         diagnostics: vec![],
     };
@@ -742,7 +742,7 @@ fn key_normalisation_is_consistent() {
     );
 }
 
-/// [OPUS-4.8] Fast guard for the line-354 fix: a resolved adapter that errored on
+/// Fast guard for the line-354 fix: a resolved adapter that errored on
 /// every seed (all `Skipped`, zero compared) must be a FAILURE, not a pass; a run
 /// that compared at least one case is OK. Runs in the per-PR fast lane (no
 /// reference engine needed), so the floor logic can't silently regress.
@@ -759,7 +759,7 @@ fn all_skipped_run_is_a_failure_not_a_vacuous_pass() {
     assert!(assess_run(200, 0).is_ok());
 }
 
-/// [OPUS-4.8] Fast guard for the line-199 fix: a reference violation with a
+/// Fast guard for the line-199 fix: a reference violation with a
 /// genuinely-absent `focus` must NOT normalise to the same key as a blank-node
 /// focus, so a dropped-focus report-shape bug can't silently compare equal.
 #[test]
@@ -790,7 +790,7 @@ fn missing_focus_is_distinct_from_blank_node_focus() {
     );
 }
 
-/// [OPUS-4.8] (sq-evws) Jena classpath gating: an explicit `SHACL_DIFF_JENA_CP`
+/// (sq-evws) Jena classpath gating: an explicit `SHACL_DIFF_JENA_CP`
 /// wins; else `${JENA_HOME}/lib/*`; else `None` (Jena SKIPPED, pySHACL-only lane
 /// unaffected). A blank value is treated as unset so an empty env var can't yield
 /// a degenerate empty classpath. Pure (env passed in) so it runs in the fast lane
@@ -823,7 +823,7 @@ fn jena_classpath_gating() {
     );
 }
 
-/// [OPUS-4.8] (sq-vsqr) The Jena adapter must mirror the pySHACL adapter's sq-0hj7
+/// (sq-vsqr) The Jena adapter must mirror the pySHACL adapter's sq-0hj7
 /// `sh:detail` exclusion: a nested sub-result that is the object of an `sh:detail`
 /// must NOT appear as a top-level violation (it lives in `ValidationResult::details`
 /// in sparq, and `sh:detail` is non-normative per SHACL §3.6.2 — diffing it would
@@ -857,7 +857,7 @@ fn jena_adapter_excludes_nested_sh_detail() {
     );
 }
 
-/// [OPUS-4.8] (sq-vz2v) Node node_modules gating, pure (no filesystem / process
+/// (sq-vz2v) Node node_modules gating, pure (no filesystem / process
 /// env touched, so it is parallel-safe): an explicit `SHACL_DIFF_NODE_MODULES`
 /// wins; else the adapter-local `node_modules` IF it exists; else `NODE_PATH`;
 /// else `None` (Node engine SKIPPED — the pySHACL/Jena lanes unaffected). Blank
@@ -907,7 +907,7 @@ fn node_modules_gating() {
     );
 }
 
-/// [OPUS-4.8] (sq-vz2v) The Node adapter must mirror the pySHACL/Jena adapters'
+/// (sq-vz2v) The Node adapter must mirror the pySHACL/Jena adapters'
 /// `sh:detail` exclusion: a nested sub-result that is the object of an `sh:detail`
 /// must NOT appear as a top-level violation (it lives in `ValidationResult::details`
 /// in sparq, and `sh:detail` is non-normative per SHACL §3.6.2 — diffing it would
@@ -943,7 +943,7 @@ fn node_adapter_excludes_nested_sh_detail() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-0hj7) Guards for the extended generator: logical components,
+// (sq-0hj7) Guards for the extended generator: logical components,
 // sh:node nested-shape refs, and complex SHAPE paths. These run in the per-PR
 // fast lane (no reference engine) so the extension can't silently degenerate.
 // ---------------------------------------------------------------------------

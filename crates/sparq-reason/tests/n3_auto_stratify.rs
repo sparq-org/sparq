@@ -498,7 +498,7 @@ fn deep_document() -> String {
 /// the resolver cannot supply: both cut the run, so the negation is refused.
 #[test]
 fn log_semantics_cuts_refuse_negation() {
-    with_big_stack(log_semantics_cuts_refuse_negation_body);
+    on_small_stack(log_semantics_cuts_refuse_negation_body);
 }
 
 fn log_semantics_cuts_refuse_negation_body() {
@@ -616,12 +616,11 @@ fn truncation_sources() -> Vec<(&'static str, String, String)> {
 /// Every negation and aggregation builtin, through every entry point, over an input
 /// whose evaluation was cut short by every kind of cut: each is refused (an error,
 /// never an answer that read the cut as absence).
-/// Run `f` on a thread with a large stack: the parser recurses once per nesting level,
-/// and a document past its nesting limit needs more stack than a test thread has in a
-/// debug build.
-fn with_big_stack(f: impl FnOnce() + Send + 'static) {
+/// Run `f` on a 2 MiB thread, the smallest stack the parser supports: a document past
+/// its nesting limit is a cut there, not a stack overflow (#6732).
+fn on_small_stack(f: impl FnOnce() + Send + 'static) {
     std::thread::Builder::new()
-        .stack_size(256 << 20)
+        .stack_size(2 << 20)
         .spawn(f)
         .expect("spawn")
         .join()
@@ -630,7 +629,7 @@ fn with_big_stack(f: impl FnOnce() + Send + 'static) {
 
 #[test]
 fn every_negation_and_aggregation_refuses_a_truncated_input_at_every_entry_point() {
-    with_big_stack(every_negation_and_aggregation_refuses_a_truncated_input);
+    on_small_stack(every_negation_and_aggregation_refuses_a_truncated_input);
 }
 
 fn every_negation_and_aggregation_refuses_a_truncated_input() {
@@ -851,7 +850,7 @@ fn derivable_prohibitions_are_seen_at_every_entry_point() {
         if let Ok(rs) = sparq_reason::n3::compiled::compile(&src) {
             let mut d = Dict::new();
             let facts = sparq_reason::n3::compiled::intern_facts(&mut d, &src).expect(name);
-            let out = sparq_reason::n3::compiled::eval(&mut d, &facts, &rs);
+            let out = sparq_reason::n3::compiled::eval(&mut d, &facts, &rs).expect(name);
             assert!(
                 !out.iter().any(|t| permit_iri(&d, t[1])),
                 "{name}: compiled"

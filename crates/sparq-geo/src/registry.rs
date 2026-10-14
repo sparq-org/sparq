@@ -40,7 +40,7 @@
 //! * every [`crate::GeoError`] (WKT parse failure, CRS mismatch, unknown unit, …)
 //!   is the same expression error.
 //!
-//! # Parsed-geometry caching (sq-lkrgi) [FABLE-5]
+//! # Parsed-geometry caching (sq-lkrgi)
 //!
 //! The registry evaluates through the TYPED [`crate::geof`] API over a small
 //! per-thread cache of parsed geometries keyed by (datatype, full lexical form)
@@ -53,7 +53,7 @@
 //! the differential unit tests below pin that. Parse FAILURES are not cached —
 //! an erroneous literal re-errors per row, exactly as before.
 //!
-//! # Prepared-relate caching (sq-hq8t5) [FABLE-5]
+//! # Prepared-relate caching (sq-hq8t5)
 //!
 //! The DE-9IM relation families (`geof:sf*` / `geof:eh*` / `geof:rcc8*` /
 //! `geof:relate`) additionally cache a PREPARED form of each REUSED operand —
@@ -80,7 +80,7 @@ use sparq_engine::FunctionRegistry;
 use std::rc::Rc;
 
 /// An OWNING prepared form of a parsed geometry for repeated DE-9IM relates
-/// (sq-hq8t5). [FABLE-5]
+/// (sq-hq8t5).
 ///
 /// `geo`'s `Relate` rebuilds a noded topology graph (edge R*-tree +
 /// self-intersection nodes) for BOTH operands on EVERY call; against a large
@@ -109,14 +109,14 @@ impl PreparedGeoGeometry {
 }
 
 /// One relate operand: the parsed geometry plus, when it came from a WARM
-/// cache entry, its prepared form (sq-hq8t5). [FABLE-5]
+/// cache entry, its prepared form (sq-hq8t5).
 struct RelateArg {
     geom: Rc<GeoGeometry>,
     prepared: Option<Rc<PreparedGeoGeometry>>,
 }
 
 /// The DE-9IM intersection matrix of `a` vs `b`, reusing a prepared side
-/// when available (sq-hq8t5). [FABLE-5]
+/// when available (sq-hq8t5).
 ///
 /// # Why the prepared path is result-identical (the load-bearing property)
 ///
@@ -143,7 +143,7 @@ fn de9im_matrix(a: &RelateArg, b: &RelateArg) -> Result<IntersectionMatrix, Stri
 /// How a relation family decides `true`/`false` from the DE-9IM matrix.
 /// Splitting the relation table on this (instead of the whole-relation
 /// `fn(&GeoGeometry, &GeoGeometry)` mirrors it used before sq-hq8t5) lets
-/// every family share [`de9im_matrix`]'s prepared-side reuse. [FABLE-5]
+/// every family share [`de9im_matrix`]'s prepared-side reuse.
 #[derive(Clone, Copy)]
 enum MatrixPred {
     /// A simple-features predicate method of [`IntersectionMatrix`].
@@ -171,7 +171,7 @@ fn arity(name: &str, args: &[Term], n: usize) -> Result<(), String> {
     }
 }
 
-/// Bounded per-thread cache of parsed geometry literals (sq-lkrgi). [FABLE-5]
+/// Bounded per-thread cache of parsed geometry literals (sq-lkrgi).
 ///
 /// # Why serving a cached parse is SOUND (the load-bearing property)
 ///
@@ -263,7 +263,6 @@ mod geom_cache {
     /// lookup. A hit is the proof of reuse that pays for preparation; a miss
     /// (e.g. every distinct per-row geometry of a scan) never builds one, so
     /// the streaming side of a filter costs exactly what it did before.
-    /// [FABLE-5]
     pub(super) fn parse_prepared(
         kind: LexKind,
         lex: &str,
@@ -357,7 +356,7 @@ mod geom_cache {
 /// (so a constant geometry repeated across rows is parsed once per thread,
 /// not once per row — sq-lkrgi). Both GeoSPARQL serializations are accepted
 /// (§8.5): a `geo:wktLiteral` or a `geo:gmlLiteral`, each keyed under its own
-/// parser. Any other term is a per-row expression error. [FABLE-5]
+/// parser. Any other term is a per-row expression error.
 fn geom_arg(name: &str, args: &[Term], i: usize) -> Result<Rc<GeoGeometry>, String> {
     match &args[i] {
         Term::Literal(l) if l.datatype().as_str() == WKT_LITERAL => {
@@ -376,7 +375,7 @@ fn geom_arg(name: &str, args: &[Term], i: usize) -> Result<Rc<GeoGeometry>, Stri
 /// [`geom_arg`] for a DE-9IM RELATE operand (sq-hq8t5): same accepted terms
 /// and error wording, but resolved through `geom_cache::parse_prepared` so a
 /// REUSED operand (a constant geometry filtered against every row) also
-/// carries its cached prepared form for [`de9im_matrix`]. [FABLE-5]
+/// carries its cached prepared form for [`de9im_matrix`].
 fn relate_arg(name: &str, args: &[Term], i: usize) -> Result<RelateArg, String> {
     let parsed = match &args[i] {
         Term::Literal(l) if l.datatype().as_str() == WKT_LITERAL => {
@@ -466,7 +465,7 @@ type GeomSetOp = fn(&GeoGeometry, &GeoGeometry) -> Result<GeoGeometry, GeoError>
 ///   the OGC `sf:` geometry-class IRI as `xsd:anyURI` — delegating to the
 ///   `metadata` module's pure fns; undefined cases (the empty geometry's
 ///   dimensions / sf: class, a `GEOMETRYCOLLECTION`'s sf: class) are honest
-///   expression errors, never fabricated values. [FABLE-5]
+///   expression errors, never fabricated values.
 ///
 /// Build it once and reuse it: the registry is cheaply cloneable and `Send + Sync`,
 /// so one instance can serve every query on every thread for the process lifetime.
@@ -475,13 +474,13 @@ type GeomSetOp = fn(&GeoGeometry, &GeoGeometry) -> Result<GeoGeometry, GeoError>
 /// by the literal's exact lexical form (sq-lkrgi), so a constant geometry in a
 /// `FILTER` — even a ~100 KB polygon — is parsed once per thread rather than
 /// once per row. Results are identical to fresh parses (the parse is a pure
-/// function of the lexical form); parse failures are never cached. [FABLE-5]
+/// function of the lexical form); parse failures are never cached.
 ///
 /// The DE-9IM relation families additionally reuse a cached PREPARED form
 /// (indexed topology graph) of any reused operand (sq-hq8t5), so relating
 /// per-row geometries against a constant does not rebuild the constant's
 /// relate structures per row. Results are byte-identical to the unprepared
-/// functions (see the module docs). [FABLE-5]
+/// functions (see the module docs).
 pub fn geof_registry() -> FunctionRegistry {
     let mut reg = FunctionRegistry::new();
 
@@ -513,7 +512,7 @@ pub fn geof_registry() -> FunctionRegistry {
         });
     }
 
-    // Unary geometry predicates: geometry -> xsd:boolean. [GPT-5.6] sq-lc2io
+    // Unary geometry predicates: geometry -> xsd:boolean. sq-lc2io
     let predicates: [(&'static str, BooleanUnary); 1] = [("isEmpty", geof::is_empty)];
     for (name, f) in predicates {
         reg.register(format!("{GEOF_NS}{name}"), move |args: &[Term]| {
@@ -528,7 +527,7 @@ pub fn geof_registry() -> FunctionRegistry {
     // `de9im_matrix` (sq-hq8t5); each predicate is the SAME decision the
     // matching `geof` function makes (its `IntersectionMatrix` method for
     // simple features, its `geof` pattern const for Egenhofer/RCC8 — the
-    // differential tests below pin the correspondence per name). [FABLE-5]
+    // differential tests below pin the correspondence per name).
     let relations: [(&'static str, MatrixPred); 24] = [
         // Simple features (GeoSPARQL Req 22-24).
         ("sfEquals", MatrixPred::Sf(IntersectionMatrix::is_equal_topo)),
@@ -603,7 +602,7 @@ pub fn geof_registry() -> FunctionRegistry {
         });
     }
 
-    // geof:simplify(?g, ?tolerance) -> geo:wktLiteral. [GPT-5.6] sq-lsp7k.23
+    // geof:simplify(?g, ?tolerance) -> geo:wktLiteral. sq-lsp7k.23
     reg.register(format!("{GEOF_NS}simplify"), |args: &[Term]| {
         arity("simplify", args, 2)?;
         let g = geom_arg("simplify", args, 0)?;
@@ -653,7 +652,7 @@ pub fn geof_registry() -> FunctionRegistry {
 
     // GeoSPARQL 1.1 non-topological ACCESSOR functions, behind the opt-in
     // `geof_accessors` feature (OFF by default): the default registry
-    // byte-set is unchanged. [FABLE-5] sq-lsp7k
+    // byte-set is unchanged. sq-lsp7k
     #[cfg(feature = "geof_accessors")]
     register_accessors(&mut reg);
 
@@ -670,7 +669,7 @@ pub fn geof_registry() -> FunctionRegistry {
 /// layer leaves UNDEFINED — the empty geometry's dimensions, the sf: class
 /// of an empty or `GEOMETRYCOLLECTION` operand — is an honest
 /// [`GeoError::Unsupported`]-mapped expression error, never a fabricated
-/// integer/boolean/IRI. [FABLE-5] sq-lsp7k
+/// integer/boolean/IRI. sq-lsp7k
 #[cfg(feature = "geof_accessors")]
 fn register_accessors(reg: &mut FunctionRegistry) {
     use crate::metadata;
@@ -740,7 +739,7 @@ mod tests {
         // 45 in the DEFAULT feature state; +5 accessors under the opt-in
         // `geof_accessors` feature (sq-lsp7k). The runtime `cfg!` keeps this
         // exact-count pin sound in EITHER feature state (a feature-unified
-        // workspace build included). [FABLE-5]
+        // workspace build included).
         let expected = if cfg!(feature = "geof_accessors") { 50 } else { 45 };
         assert_eq!(reg.len(), expected);
         // The accessors are registered IFF the feature is on — the default
@@ -918,7 +917,7 @@ mod tests {
             outside.value()
         );
         // 1-D set subtraction is now supported (sq-fxv3): line − line removes
-        // the collinear-overlapping span, leaving LINESTRING(0 0, 1 0). [OPUS-4.8]
+        // the collinear-overlapping span, leaving LINESTRING(0 0, 1 0).
         let diff = reg.get(&format!("{GEOF_NS}difference")).unwrap();
         let Term::Literal(d) =
             diff(&[wkt("LINESTRING(0 0, 2 0)"), wkt("LINESTRING(1 0, 3 0)")]).unwrap()
@@ -988,7 +987,7 @@ mod tests {
         assert!(distance(&[wkt("POINT(0 0)"), wkt("POINT(1 1)"), bogus]).is_err());
     }
 
-    // ---- the parsed-geometry cache (sq-lkrgi) [FABLE-5] -----------------------------
+    // ---- the parsed-geometry cache (sq-lkrgi) -----------------------------
     //
     // Each test runs on its own thread (the default test harness), so the
     // thread-local cache and attempt counter are naturally isolated; `reset()`
@@ -1129,7 +1128,7 @@ mod tests {
         assert_eq!(geom_cache::len(), 0);
     }
 
-    // ---- the prepared-relate cache (sq-hq8t5) [FABLE-5] -----------------------------
+    // ---- the prepared-relate cache (sq-hq8t5) -----------------------------
 
     /// Parses a WKT lexical form directly (no cache — the differential
     /// baseline the prepared path must match).
@@ -1346,7 +1345,7 @@ mod tests {
         assert_eq!(geom_cache::prepare_count(), 2);
     }
 
-    // ---- GeoSPARQL 1.1 accessors (`geof_accessors`, sq-lsp7k) [FABLE-5] ----
+    // ---- GeoSPARQL 1.1 accessors (`geof_accessors`, sq-lsp7k) ----
     //
     // The load-bearing invariant: each registered geof:<name> returns EXACTLY
     // what the corresponding crate::metadata pure fn computes for the same

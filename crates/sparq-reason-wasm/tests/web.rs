@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-6qw3 — headless wasm smoke test of the JS-facing sparq-reason-wasm API.
+// sq-6qw3 — headless wasm smoke test of the JS-facing sparq-reason-wasm API.
 //
 // The crate's `#[cfg(test)] mod tests` in src/ runs on the NATIVE target only, so it
 // exercises the engine + reasoner functions the wrappers delegate to — NOT the actual
@@ -97,7 +97,7 @@ fn unknown_profile_errors() {
     assert!(Reasoner::materialize(SOCRATES_TTL, "turtle", "nope").is_err());
 }
 
-// [FABLE-5] sq-ohnj1 — the eye-js README socrates example (data + query), driving the compat
+// sq-ohnj1 — the eye-js README socrates example (data + query), driving the compat
 // bindings in a real wasm runtime.
 const SOC_DATA: &str = r#"@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>.
 @prefix : <http://example.org/socrates#>.
@@ -127,7 +127,7 @@ fn reason_n3_query_selects_over_closure() {
     assert!(nt.contains(SOC_HUMAN_NT), "asserted Human selected: {nt}");
 }
 
-/// [OPUS-5] sq-xqchl.1 (GH #3144) — a builtin in the query premise is EVALUATED in wasm too
+/// sq-xqchl.1 (GH #3144) — a builtin in the query premise is EVALUATED in wasm too
 /// (it used to fail closed), and it FILTERS: `:b` is 12, so only `:a` answers.
 #[wasm_bindgen_test]
 fn reason_n3_query_evaluates_a_premise_builtin() {
@@ -176,7 +176,7 @@ fn why_proof_tree() {
     assert_eq!(absent, "null", "absent triple => null");
 }
 
-/// [FABLE-5] sq-ixc3.20 — `whyN3` (only compiled with the `explain` feature) returns a proof
+/// sq-ixc3.20 — `whyN3` (only compiled with the `explain` feature) returns a proof
 /// tree for an N3-rule-derived triple (naming the fired rule), and `null` for a triple that is
 /// not in the closure.
 #[cfg(feature = "explain")]

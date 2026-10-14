@@ -43,10 +43,10 @@ use crate::authz::wac::{Decision, ReadDecision, WacAuthorizer};
 use crate::authz::wac_allow::wac_allow_header;
 use crate::authz::{mode_for_operation, AccessMode};
 use crate::error::ServerError;
-use crate::ldp::conditional::{self, evaluate as eval_preconditions};
+use crate::ldp::conditional;
 use crate::ldp::content::{
-    classify, negotiate_accept_with_profile, parse_to_triples, serialize_triples,
-    serialize_triples_negotiated, validate_rdf, RdfFormat,
+    classify, label_blank_nodes_by_position, negotiate_accept_with_profile, parse_to_triples,
+    serialize_triples, serialize_triples_negotiated, validate_rdf, RdfFormat,
 };
 use crate::ldp::patch::{
     apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update, PatchKind,
@@ -641,8 +641,18 @@ impl<S: Store> LdpState<S> {
         // target's real ETag), so it still requires the read-mode. (This closed the V4-over-broad
         // finding: bare `*` was previously 403'd for a Write-without-Read holder, breaking the standard
         // Inrupt `PUT … If-None-Match: *` create pattern for no non-disclosure gain.)
+        // An `If-Unmodified-Since` the write will actually evaluate (no `If-Match`, a valid date, a
+        // plain-resource target) probes the target's modification time, which is just as much
+        // read-side state, so it is gated the same way. A container target is exempt because the
+        // write ignores the header there (`write_precondition_time`), so its outcome reveals nothing.
         let has_etag_conditional = Self::conditional_carries_etag(headers, header::IF_MATCH)
-            || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH);
+            || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH)
+            || (!target_iri.ends_with('/')
+                && conditional::unmodified_since_applies(
+                    header_str(headers, header::IF_MATCH),
+                    crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
+                )
+                .is_some());
         // The mode that governs reading THIS target's representation: Control for an `.acl`, else Read.
         let read_mode = if crate::authz::is_acl_resource(target_iri) {
             AccessMode::Control
@@ -893,15 +903,15 @@ async fn serve_read_once<S: Store>(
     //   none selectable there is no 304). An Accept merely naming no producible type instead falls
     //   back to text/turtle, the Solid default (see `content::negotiate_accept_with_profile`).
     let (rendered, etag): (Option<(Bytes, String)>, String) = if target.is_container {
-        let (body, content_type) = render_container(
+        let (body, content_type, etag) = render_container(
             state,
             &target.iri,
             &resource.body,
             &resource.meta.content_type,
+            &resource.meta.etag,
             accept,
         )
         .await?;
-        let etag = representation_etag(&body);
         (Some((body, content_type)), etag)
     } else {
         let etag = negotiated_validator(&resource.meta.etag, &resource.meta.content_type, accept)?;
@@ -1014,12 +1024,12 @@ async fn serve_read_once<S: Store>(
     // path is unusable in normal cache flows. Set on the SHARED headers (so the 304 carries it too,
     // §15.4.5) and only for a plain resource with a known time; a container's stale record time is
     // deliberately not advertised (matching the 304 exclusion above). GET and HEAD emit it identically.
-    if let Some(imf) = effective_last_modified.and_then(crate::store::timestamp::to_imf_fixdate) {
+    if let Some(imf) = effective_last_modified.and_then(crate::http_date::format) {
         set_str(&mut out, header::LAST_MODIFIED, &imf);
     }
     if conditional::evaluate_read(
         header_str(req_headers, header::IF_NONE_MATCH),
-        header_str(req_headers, header::IF_MODIFIED_SINCE),
+        crate::http_date::single_line(req_headers, header::IF_MODIFIED_SINCE),
         &etag,
         effective_last_modified,
     ) == conditional::ReadPrecondition::NotModified
@@ -1179,12 +1189,21 @@ pub async fn put_handler<S: Store>(
     // `negotiate_body`). The stored media type is the (sanitised) declared one.
     let stored_type = validate_writable(&content_type, &body, &target.iri)?;
 
-    // Conditional write: evaluate preconditions against the CURRENT representation's ETag.
-    let current_etag = current.as_ref().map(|m| m.etag.as_str());
-    conditional::require(eval_preconditions(
+    // Conditional write: evaluate preconditions against the CURRENT state's tag and modification
+    // time.
+    let current_etag = write_validator(
+        &state,
+        &target,
+        &headers,
+        current.as_ref().map(|m| m.etag.as_str()),
+    )
+    .await?;
+    conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
-        current_etag,
+        crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
+        current_etag.as_deref(),
+        write_precondition_time(&target, current.as_ref().and_then(|m| m.last_modified)),
     ))?;
 
     let parent = parent_container(&target);
@@ -1256,7 +1275,7 @@ pub async fn put_handler<S: Store>(
     // `invalidate_acl_if_acl`).
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target.iri))
+    Ok(write_response(existed, &meta, &target))
 }
 
 /// `POST /{path}` — create a child resource inside a container.
@@ -1413,7 +1432,13 @@ pub async fn post_handler<S: Store>(
         .await;
 
     let mut out = HeaderMap::new();
-    set_str(&mut out, header::ETAG, &meta.etag);
+    // A new container is empty, so its validator is the empty-listing state tag.
+    let etag = if child_iri.ends_with('/') {
+        container_state_etag(&meta.etag, &[])
+    } else {
+        meta.etag.clone()
+    };
+    set_str(&mut out, header::ETAG, &etag);
     set_str(&mut out, header::LOCATION, &child_iri);
     Ok((StatusCode::CREATED, out).into_response())
 }
@@ -1497,11 +1522,16 @@ pub async fn delete_handler<S: Store>(
         }
     };
 
-    // Conditional delete: honour If-Match / If-None-Match against the current ETag.
-    conditional::require(eval_preconditions(
+    // Conditional delete: honour If-Match / If-Unmodified-Since / If-None-Match against the current
+    // state's tag and modification time.
+    let current_etag =
+        write_validator(&state, &target, &headers, Some(current.etag.as_str())).await?;
+    conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
-        Some(current.etag.as_str()),
+        crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
+        current_etag.as_deref(),
+        write_precondition_time(&target, current.last_modified),
     ))?;
 
     // An AUXILIARY `.acl` resource is NOT a contained child (it is created via `store.write`, never via
@@ -1672,12 +1702,20 @@ pub async fn patch_handler<S: Store>(
         Err(e) => return Err(e),
     };
 
-    // Apply preconditions against the current ETag.
-    let current_etag = current.as_ref().map(|r| r.meta.etag.clone());
-    conditional::require(eval_preconditions(
+    // Apply preconditions against the current state's tag and modification time.
+    let current_etag = write_validator(
+        &state,
+        &target,
+        &headers,
+        current.as_ref().map(|r| r.meta.etag.as_str()),
+    )
+    .await?;
+    conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
+        crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
+        write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
     // Determine the existing triples + the stored format (default Turtle for a new resource).
@@ -1788,7 +1826,7 @@ pub async fn patch_handler<S: Store>(
     // read resolves against the patched ACL immediately.
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target.iri))
+    Ok(write_response(existed, &meta, &target))
 }
 
 /// `OPTIONS /{path}` — advertise the methods + write media types for a target (RFC 9110 §9.3.7 +
@@ -1897,8 +1935,9 @@ async fn render_container<S: Store>(
     container_iri: &str,
     stored_body: &Bytes,
     stored_content_type: &str,
+    stored_etag: &str,
     accept: Option<&str>,
-) -> Result<(Bytes, String), ServerError> {
+) -> Result<(Bytes, String, String), ServerError> {
     // The container's stored bytes default to a Turtle representation; if the stored type is RDF, use
     // it as the conneg default (most faithful) and parse the stored body for its own triples.
     let stored_format = classify(Some(stored_content_type)).ok();
@@ -1919,10 +1958,12 @@ async fn render_container<S: Store>(
     // The stored set is carried through VERBATIM (no intra-set de-dup) — exactly as before — so a
     // container body that literally repeats a triple keeps both occurrences (the serialised bytes,
     // and hence the representation ETag, stay identical to the prior linear-scan render).
-    let stored_triples: Vec<Triple> = match stored_format {
+    let mut stored_triples: Vec<Triple> = match stored_format {
         Some(fmt) => parse_to_triples(fmt, stored_body, container_iri).unwrap_or_default(),
         None => Vec::new(),
     };
+    // Fix blank-node labels by position, so one container state always renders to the same bytes.
+    label_blank_nodes_by_position(&mut stored_triples);
 
     // Build the output Vec DIRECTLY — no whole-graph `HashSet<Triple>` clone-dedup. The previous code
     // seeded a `HashSet` from `stored_triples.iter().cloned()` and clone-inserted every generated
@@ -1938,8 +1979,12 @@ async fn render_container<S: Store>(
     // preserve that — and only that — with a membership check against ONLY the stored set, which is
     // empty for the overwhelmingly common empty/typing-free container body, so the hot path does zero
     // membership work. Insertion order + which triples appear are unchanged, so the serialiser emits
-    // the same bytes and `representation_etag` is preserved byte-for-byte.
-    let children = state.store.list_children(container_iri).await?;
+    // the same bytes are preserved byte-for-byte.
+    let children = sorted_children(state, container_iri).await?;
+    let etag = conditional::variant_etag(
+        &container_state_etag(stored_etag, &children),
+        negotiated.variant_suffix(),
+    );
     let stored_len = stored_triples.len();
 
     // Suppress ONLY a GENERATED triple that duplicates a STORED one. There are exactly `3 + N`
@@ -1953,7 +1998,7 @@ async fn render_container<S: Store>(
     //     of `stored_triples` ONCE (no clones — references into the still-owned Vec) and probe it O(1),
     //     capping the worst case at O(stored_len + (3 + N)) as the old whole-graph HashSet did.
     // All three branches suppress EXACTLY the same triples (a generated triple present in the stored
-    // set), so the output bytes + `representation_etag` are identical regardless of which path runs.
+    // set), so the output bytes are identical regardless of which path runs.
     //
     // The generated triples are collected into their own Vec FIRST (so the membership probe can borrow
     // the still-owned `stored_triples`); the final `triples` is then `stored ++ generated`, preserving
@@ -2016,29 +2061,85 @@ async fn render_container<S: Store>(
     triples.extend(generated);
 
     // Serialise into the negotiated format AND JSON-LD document form; the `Content-Type` echoes
-    // any honoured profile. The representation ETag the caller derives from these bytes is
-    // profile-variant-specific exactly when the bytes differ (compacted output differs; expanded
-    // output is byte-identical to the default serialisation).
+    // any honoured profile. The validator's variant suffix is profile-specific exactly when the
+    // bytes differ (compacted output differs; expanded output is byte-identical to the default
+    // serialisation).
     let bytes = serialize_triples_negotiated(negotiated, &triples)?;
-    Ok((Bytes::from(bytes), negotiated.content_type()))
+    Ok((Bytes::from(bytes), negotiated.content_type(), etag))
 }
 
-/// A STRONG ETag computed from a rendered representation's BYTES — `"<len>-<hash>"`.
+/// A container's STATE tag: a strong validator for everything its representations are rendered
+/// from, namely its stored record (by that record's own tag) and its membership.
 ///
-/// Used for a container response, whose body is generated from live membership (not stored bytes), so
-/// the validator must track the actual representation: it changes whenever the serialised body changes
-/// (a child added/removed, or the negotiated format differs). The same body computed for GET and HEAD
-/// yields the same validator, so the two methods agree. This is a non-cryptographic content hash
-/// (FNV-1a over the bytes), sufficient for a cache validator — collisions across distinct
-/// representations are vanishingly unlikely and the length prefix further disambiguates.
-fn representation_etag(body: &[u8]) -> String {
-    // FNV-1a 64-bit over the serialised representation.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in body {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+/// Every representation of a container is generated, so none of them carries the stored tag. A
+/// read serves `"<state>+<variant>"` ([`conditional::variant_etag`] with the negotiated format), and
+/// a write's `If-Match` / `If-None-Match` compares against this state tag ([`write_validator`]), so
+/// a client can round-trip `GET` (any `Accept`) → conditional `PUT`/`PATCH`/`DELETE` with the tag it
+/// received, while any change to the record or the membership makes that tag stale for both reads
+/// and writes.
+///
+/// `children` must be in [`sorted_children`] order, the same order the listing is rendered in, so
+/// one state always renders to the same bytes. SHA-256 over the length-framed stored tag and child
+/// IRIs, truncated to 128 bits and prefixed with the child count. Never contains `+`, so the variant
+/// suffix stays unambiguous.
+fn container_state_etag(stored_etag: &str, children: &[crate::store::ValidatedChildIri]) -> String {
+    use sha2::{Digest as _, Sha256};
+    use std::fmt::Write as _;
+    debug_assert!(children.is_sorted_by(|a, b| a.as_str() < b.as_str()));
+    let mut digest = Sha256::new();
+    let mut frame = |bytes: &[u8]| {
+        digest.update((bytes.len() as u64).to_be_bytes());
+        digest.update(bytes);
+    };
+    frame(stored_etag.as_bytes());
+    for child in children {
+        frame(child.as_str().as_bytes());
     }
-    format!("\"{}-{:x}\"", body.len(), hash)
+    let hash = digest.finalize();
+    // `"<count>-<32 hex>"`, written into one allocation.
+    let mut tag = String::with_capacity(64);
+    let _ = write!(tag, "\"{}-", children.len());
+    for byte in &hash[..16] {
+        let _ = write!(tag, "{byte:02x}");
+    }
+    tag.push('"');
+    tag
+}
+
+/// A container's children in IRI order. Stores list children in whatever order they keep them
+/// (the in-memory store, insertion order), so a child deleted and re-created would otherwise move in
+/// the rendered listing while the state, and so the strong validator, stayed the same.
+async fn sorted_children<S: Store>(
+    state: &Arc<LdpState<S>>,
+    container_iri: &str,
+) -> Result<Vec<crate::store::ValidatedChildIri>, ServerError> {
+    let mut children = state.store.list_children(container_iri).await?;
+    children.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
+    Ok(children)
+}
+
+/// The tag a write's `If-Match` / `If-None-Match` is evaluated against: the stored tag for a plain
+/// resource (whose read validators are that tag or a `+<variant>` of it), and the
+/// [`container_state_etag`] for a container (whose read validators are variants of THAT). The
+/// container's listing is read only when a precondition names a concrete tag; `*` needs existence
+/// alone, and an unconditional write needs nothing.
+async fn write_validator<S: Store>(
+    state: &Arc<LdpState<S>>,
+    target: &crate::ldp::target::LdpTarget,
+    headers: &HeaderMap,
+    stored: Option<&str>,
+) -> Result<Option<String>, ServerError> {
+    let Some(stored) = stored else {
+        return Ok(None);
+    };
+    let names_a_tag = [header::IF_MATCH, header::IF_NONE_MATCH]
+        .into_iter()
+        .any(|h| header_str(headers, h).is_some_and(|v| !conditional::is_wildcard(v)));
+    if !target.is_container || !names_a_tag {
+        return Ok(Some(stored.to_string()));
+    }
+    let children = sorted_children(state, &target.iri).await?;
+    Ok(Some(container_state_etag(stored, &children)))
 }
 
 /// Ensure every ANCESTOR container of `iri` exists, creating any that are missing and wiring each into
@@ -2137,16 +2238,33 @@ async fn reject_slash_semantics_conflict<S: Store>(
 }
 
 /// The shared 201/204 + ETag (+ Location on create) response for PUT / PATCH writes.
-fn write_response(existed: bool, meta: &ResourceMeta, iri: &str) -> Response {
+///
+/// A container's validators are [`container_state_etag`]s, so a newly created (hence empty)
+/// container gets the empty-listing state tag. A replaced container gets no `ETag`: its current tag
+/// depends on a listing the writer may not be allowed to read, and its stored tag is not a
+/// validator for any of its representations.
+fn write_response(
+    existed: bool,
+    meta: &ResourceMeta,
+    target: &crate::ldp::target::LdpTarget,
+) -> Response {
     let status = if existed {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::CREATED
     };
     let mut out = HeaderMap::new();
-    set_str(&mut out, header::ETAG, &meta.etag);
+    if !target.is_container {
+        set_str(&mut out, header::ETAG, &meta.etag);
+    } else if !existed {
+        set_str(
+            &mut out,
+            header::ETAG,
+            &container_state_etag(&meta.etag, &[]),
+        );
+    }
     if !existed {
-        set_str(&mut out, header::LOCATION, iri);
+        set_str(&mut out, header::LOCATION, &target.iri);
     }
     (status, out).into_response()
 }
@@ -2177,8 +2295,10 @@ fn negotiate_body(
     if negotiated.serves_stored_verbatim(stored_format) {
         return Ok((stored_body.clone(), stored_content_type.to_string()));
     }
-    // Re-serialise into the chosen format + document form.
-    let triples = parse_to_triples(stored_format, stored_body, base_iri)?;
+    // Re-serialise into the chosen format + document form, with blank-node labels fixed by
+    // position so the same stored bytes always re-serialise to the same bytes.
+    let mut triples = parse_to_triples(stored_format, stored_body, base_iri)?;
+    label_blank_nodes_by_position(&mut triples);
     let bytes = serialize_triples_negotiated(negotiated, &triples)?;
     Ok((Bytes::from(bytes), negotiated.content_type()))
 }
@@ -2407,6 +2527,19 @@ fn is_storage_root(iri: &str, base_url: &str) -> bool {
 }
 
 /// Read a header value as `&str`, or `None` if absent / not valid UTF-8.
+/// The modification time a write's `If-Unmodified-Since` compares against: a plain resource's
+/// recorded time, but NEVER a container's. A container's listing changes with its membership without
+/// touching the container record's own time (the same reason the read path neither advertises nor
+/// compares it), so that time is stale and could let a write through after the container changed.
+/// `None` makes the evaluator ignore the header, as RFC 9110 §13.1.4 permits when there is no
+/// reliable modification date.
+fn write_precondition_time(
+    target: &crate::ldp::target::LdpTarget,
+    recorded: Option<std::time::SystemTime>,
+) -> Option<std::time::SystemTime> {
+    if target.is_container { None } else { recorded }
+}
+
 fn header_str(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
@@ -3681,11 +3814,12 @@ mod tests {
         }
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
 
-        let (body, ct) = render_container(
+        let (body, ct, _etag) = render_container(
             &state,
             container,
             &AxBytes::new(),
             "text/turtle",
+            "\"0-0\"",
             Some("text/turtle"),
         )
         .await
@@ -3729,11 +3863,12 @@ mod tests {
             .expect("mint container with stored body");
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
 
-        let (body, _ct) = render_container(
+        let (body, _ct, _etag) = render_container(
             &state,
             container,
             &stored_body,
             "text/turtle",
+            "\"0-0\"",
             Some("text/turtle"),
         )
         .await
@@ -3785,11 +3920,12 @@ mod tests {
         }
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
 
-        let (body_out, _ct) = render_container(
+        let (body_out, _ct, _etag) = render_container(
             &state,
             container,
             &stored_body,
             "text/turtle",
+            "\"0-0\"",
             Some("text/turtle"),
         )
         .await
@@ -5102,6 +5238,336 @@ mod tests {
         assert_eq!(etag_of(&not_mod), etag, "container 304 ETag == 200 ETag");
     }
 
+    /// A conditional write by the owner: `verb` on `path` with one precondition header naming `tag`.
+    async fn owner_conditional_write(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        precondition: HeaderName,
+        tag: &str,
+    ) -> Response {
+        let uri: axum::http::Uri = path.parse().unwrap();
+        let (s, t) = (State(state.clone()), Extension(owner_token()));
+        let mut headers = match verb {
+            "PATCH" => n3_patch_headers(),
+            _ => turtle_write_headers(),
+        };
+        headers.insert(precondition, HeaderValue::from_str(tag).unwrap());
+        let patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+                     _:p solid:inserts { <#it> <http://p> \"v\" . }.\n";
+        match verb {
+            "PUT" => put_handler(s, t, uri, headers, AxBytes::new()).await,
+            "PATCH" => patch_handler(s, t, uri, headers, AxBytes::from(patch)).await,
+            _ => delete_handler(s, t, uri, headers).await,
+        }
+        .unwrap_or_else(|e| e.into_response())
+    }
+
+    #[tokio::test]
+    async fn container_read_validators_round_trip_into_write_preconditions() {
+        // A container's representations are generated from its stored record and its membership,
+        // so its read tags are variants of one state tag over both. A conditional write compares
+        // that state: a tag read in any format is current for PUT, PATCH and DELETE until the
+        // container or its membership changes, and stale for reads and writes alike after that.
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        let seed = |path: &'static str| {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::new(),
+            )
+        };
+        seed("/alice/c/a").await.expect("seed child");
+        let read_tag = |media: &'static str| {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let state = state.clone();
+            async move { etag_of(&get_with(&state, owner_token(), "/alice/c/", accept).await) }
+        };
+
+        // Every format's tag is current for every verb: If-None-Match fails without writing.
+        let ttl = read_tag("text/turtle").await;
+        let jsonld = read_tag("application/ld+json").await;
+        assert_ne!(
+            ttl, jsonld,
+            "each representation keeps its own read validator"
+        );
+        for tag in [&ttl, &jsonld] {
+            for verb in ["PUT", "PATCH", "DELETE"] {
+                let resp =
+                    owner_conditional_write(&state, verb, "/alice/c/", header::IF_NONE_MATCH, tag)
+                        .await;
+                assert_eq!(
+                    resp.status(),
+                    StatusCode::PRECONDITION_FAILED,
+                    "{verb} {tag}"
+                );
+            }
+        }
+        // …and If-Match with any of them proceeds. A replaced container's response carries no
+        // ETag, since its stored tag validates none of its representations.
+        let resp =
+            owner_conditional_write(&state, "PATCH", "/alice/c/", header::IF_MATCH, &jsonld).await;
+        assert!(resp.status().is_success(), "{}", resp.status());
+        assert!(resp.headers().get(header::ETAG).is_none());
+        let after_patch = read_tag("text/turtle").await;
+        assert_ne!(
+            after_patch, ttl,
+            "the container's own record is part of its state"
+        );
+        let resp =
+            owner_conditional_write(&state, "PUT", "/alice/c/", header::IF_MATCH, &after_patch)
+                .await;
+        assert!(resp.status().is_success(), "{}", resp.status());
+
+        // A membership change makes the held tag stale: DELETE fails its precondition (412, before
+        // the non-empty 409), and a conditional read gets a fresh 200.
+        let held = read_tag("text/turtle").await;
+        seed("/alice/c/b").await.expect("add child");
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            let resp =
+                owner_conditional_write(&state, verb, "/alice/c/", header::IF_MATCH, &held).await;
+            assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED, "{verb}");
+        }
+        let mut cond = HeaderMap::new();
+        cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&held).unwrap());
+        cond.insert(header::ACCEPT, HeaderValue::from_static("text/turtle"));
+        assert_eq!(
+            get_with(&state, owner_token(), "/alice/c/", cond)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    async fn a_container_validator_tracks_membership_and_its_bytes() {
+        // Replacing one child with another keeps the child count but changes the membership, so the
+        // held tag is stale. Deleting and re-creating a child restores the same membership, so the
+        // tag AND the bytes it labels are the same again, though the store now lists the children
+        // in a different order.
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        let put = |path: &'static str| {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::new(),
+            )
+        };
+        let delete = |path: &'static str| {
+            delete_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                HeaderMap::new(),
+            )
+        };
+        let listing = || {
+            let mut accept = HeaderMap::new();
+            accept.insert(
+                header::ACCEPT,
+                HeaderValue::from_static("application/n-triples"),
+            );
+            let state = state.clone();
+            async move {
+                let resp = get_with(&state, owner_token(), "/alice/c/", accept).await;
+                let tag = etag_of(&resp);
+                (tag, body_bytes(resp).await)
+            }
+        };
+        put("/alice/c/a").await.expect("child a");
+        put("/alice/c/b").await.expect("child b");
+        let (before, before_bytes) = listing().await;
+
+        delete("/alice/c/a").await.expect("delete a");
+        put("/alice/c/a").await.expect("re-create a");
+        let (again, again_bytes) = listing().await;
+        assert_eq!(again, before, "the same membership is the same state");
+        assert_eq!(
+            again_bytes, before_bytes,
+            "one strong tag labels one byte sequence"
+        );
+
+        delete("/alice/c/b").await.expect("delete b");
+        put("/alice/c/z").await.expect("child z");
+        let (replaced, _) = listing().await;
+        assert_ne!(replaced, before, "same child count, different membership");
+        let resp =
+            owner_conditional_write(&state, "PATCH", "/alice/c/", header::IF_MATCH, &before).await;
+        assert_eq!(resp.status(), StatusCode::PRECONDITION_FAILED);
+    }
+
+    #[tokio::test]
+    async fn re_serialised_reads_with_anonymous_blank_nodes_are_byte_stable() {
+        // A parser invents fresh labels for `[ … ]` and collections on every parse. A container (always
+        // rendered) and a plain resource read in another format must still serve the same bytes for
+        // the same state, in every format, because each carries a strong validator.
+        const BODY: &str =
+            "<> <http://p> [ <http://q> \"x\" ] ; <http://r> ( 1 [ <http://s> 2 ] ) .";
+        const COMPACTED_JSONLD: &str =
+            "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#compacted\"";
+        const EXPANDED_JSONLD: &str =
+            "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        for path in ["/alice/c/", "/alice/doc"] {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::from(BODY),
+            )
+            .await
+            .expect("store a document with anonymous blank nodes");
+        }
+        for (path, media) in [
+            ("/alice/c/", "text/turtle"),
+            ("/alice/c/", "application/ld+json"),
+            ("/alice/c/", COMPACTED_JSONLD),
+            ("/alice/c/", EXPANDED_JSONLD),
+            ("/alice/c/", "application/n-triples"),
+            ("/alice/c/", "application/n-quads"),
+            ("/alice/doc", "application/ld+json"),
+            ("/alice/doc", COMPACTED_JSONLD),
+            ("/alice/doc", "application/n-triples"),
+            ("/alice/doc", "application/n-quads"),
+        ] {
+            let mut reads = Vec::new();
+            for _ in 0..2 {
+                let mut accept = HeaderMap::new();
+                accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+                let resp = get_with(&state, owner_token(), path, accept).await;
+                assert_eq!(resp.status(), StatusCode::OK, "{path} {media}");
+                let tag = etag_of(&resp);
+                reads.push((tag, body_bytes(resp).await));
+            }
+            assert!(
+                String::from_utf8_lossy(&reads[0].1).contains("_:") || media.contains("json"),
+                "{path} {media}: the body carries blank nodes"
+            );
+            assert_eq!(reads[0], reads[1], "{path} {media}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_new_containers_write_etag_is_a_current_validator() {
+        // A container created by POST or PUT is empty, and the ETag its creation returns is current
+        // for a conditional write: an If-Match DELETE with it removes the container.
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/seed".parse().unwrap(),
+            turtle_write_headers(),
+            AxBytes::new(),
+        )
+        .await
+        .expect("seed /alice/");
+        let mut headers = post_turtle_headers_with_slug("box");
+        headers.insert(
+            header::LINK,
+            HeaderValue::from_static(LINK_TYPE_LDP_BASIC_CONTAINER),
+        );
+        let created = post_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/".parse().unwrap(),
+            headers,
+            AxBytes::new(),
+        )
+        .await
+        .expect("POST a container");
+        assert_eq!(created.status(), StatusCode::CREATED);
+        let posted = created
+            .headers()
+            .get(header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        let posted_path = posted
+            .strip_prefix("https://pod.example")
+            .unwrap()
+            .to_string();
+        let posted_tag = etag_of(&created);
+
+        let put = put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/made/".parse().unwrap(),
+            turtle_write_headers(),
+            AxBytes::new(),
+        )
+        .await
+        .expect("PUT a container");
+        assert_eq!(put.status(), StatusCode::CREATED);
+        let put_tag = etag_of(&put);
+
+        for (path, tag) in [
+            (posted_path.as_str(), posted_tag),
+            ("/alice/made/", put_tag),
+        ] {
+            let resp =
+                owner_conditional_write(&state, "DELETE", path, header::IF_MATCH, &tag).await;
+            assert!(resp.status().is_success(), "{path}: {}", resp.status());
+        }
+    }
+
+    #[tokio::test]
+    async fn container_validators_are_distinct_across_formats_with_identical_bytes() {
+        // #4879 review: N-Triples and default-graph N-Quads render identical bytes, and a one-triple
+        // Turtle listing can too, so the container validator must carry the format: each format's
+        // tag 304s only a request for that same format, on GET and HEAD alike.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let formats = [
+            "text/turtle",
+            "application/n-triples",
+            "application/n-quads",
+        ];
+        let mut tags = Vec::new();
+        for media in formats {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            tags.push(etag_of(&resp));
+        }
+        for (i, held) in tags.iter().enumerate() {
+            for (j, media) in formats.iter().enumerate() {
+                for verb in ["GET", "HEAD"] {
+                    let mut cond = HeaderMap::new();
+                    cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                    cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(held).unwrap());
+                    let uri: axum::http::Uri = "/alice/".parse().unwrap();
+                    let (s, t) = (State(state.clone()), Extension(owner_token()));
+                    let resp = match verb {
+                        "GET" => get_handler(s, t, uri, cond).await,
+                        _ => head_handler(s, t, uri, cond).await,
+                    }
+                    .unwrap();
+                    let expected = if i == j {
+                        StatusCode::NOT_MODIFIED
+                    } else {
+                        StatusCode::OK
+                    };
+                    assert_eq!(
+                        resp.status(),
+                        expected,
+                        "{verb} {media} holding the {} tag",
+                        formats[i]
+                    );
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn unauthorized_caller_gets_denial_not_304_no_existence_leak() {
         // A stranger with NO read access must get the auth failure (403 authenticated), NOT a 304 —
@@ -5133,6 +5599,57 @@ mod tests {
 
     const COND_DOC: &str =
         "<https://pod.example/alice/doc#me> <http://xmlns.com/foaf/0.1/name> \"X\" .";
+
+    #[tokio::test]
+    async fn relabelling_the_same_bytes_changes_the_etag() {
+        // The Content-Type is part of the representation: re-storing identical bytes under another
+        // media type must mint a new validator, so the old tag no longer passes If-Match and a
+        // conditional GET holding it is not a 304.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let turtle_tag =
+            etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let mut plain = HeaderMap::new();
+        plain.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+        put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/doc".parse().unwrap(),
+            plain.clone(),
+            AxBytes::from(COND_DOC),
+        )
+        .await
+        .expect("relabel as text/plain");
+        let plain_read = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+        assert_eq!(
+            plain_read.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/plain"
+        );
+        let plain_tag = etag_of(&plain_read);
+        assert_ne!(plain_tag, turtle_tag);
+
+        let mut cond = HeaderMap::new();
+        cond.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&turtle_tag).unwrap(),
+        );
+        let resp = get_with(&state, owner_token(), "/alice/doc", cond).await;
+        assert_eq!(resp.status(), StatusCode::OK, "the Turtle tag must not 304");
+
+        plain.insert(
+            header::IF_MATCH,
+            HeaderValue::from_str(&turtle_tag).unwrap(),
+        );
+        let stale = put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/doc".parse().unwrap(),
+            plain,
+            AxBytes::from(COND_DOC),
+        )
+        .await
+        .unwrap_or_else(IntoResponse::into_response);
+        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+    }
 
     #[tokio::test]
     async fn get_stored_tag_with_accept_jsonld_is_200_not_304() {
@@ -5267,6 +5784,42 @@ mod tests {
     }
 
     #[test]
+    fn container_state_tags_frame_each_field() {
+        // Moving bytes across the boundary between the stored tag and a child, or between two
+        // children, is a different state.
+        let child = |iri: &str| crate::store::ValidatedChildIri::parse(iri).unwrap();
+        let tag = |stored: &str, children: &[&str]| {
+            let children: Vec<_> = children.iter().map(|c| child(c)).collect();
+            container_state_etag(stored, &children)
+        };
+        // Both lists concatenate to `a:xa:yb:z`.
+        assert_ne!(
+            tag("\"1-a\"", &["a:x", "a:yb:z"]),
+            tag("\"1-a\"", &["a:xa:y", "b:z"])
+        );
+        // Equal-size memberships whose additive FNV-1a sums collide: a digest over the framed list
+        // tells them apart.
+        assert_ne!(
+            tag(
+                "\"1-a\"",
+                &[
+                    "https://pod.example/alice/c/a0",
+                    "https://pod.example/alice/c/c1"
+                ]
+            ),
+            tag(
+                "\"1-a\"",
+                &[
+                    "https://pod.example/alice/c/a1",
+                    "https://pod.example/alice/c/c0"
+                ]
+            )
+        );
+        assert_eq!(tag("\"1-a\"", &[]), tag("\"1-a\"", &[]));
+        assert!(tag("\"1-a\"", &["http://x/a"]).starts_with("\"1-"));
+    }
+
+    #[test]
     fn negotiated_validator_binary_keeps_the_stored_tag() {
         // (d) A non-RDF (binary) resource is served verbatim whatever the Accept — ONE
         // representation, so its validator stays the stored tag (current behaviour preserved).
@@ -5288,6 +5841,69 @@ mod tests {
         assert_eq!(
             negotiated_validator(stored, "text/turtle", Some("application/ld+json")).unwrap(),
             "\"5-abc123+jsonld\""
+        );
+    }
+
+    #[tokio::test]
+    async fn get_ntriples_and_nquads_are_served_with_their_own_validators() {
+        // #4879: an explicit N-Triples or N-Quads Accept is served in that format (no longer the
+        // Turtle fallback), with a validator distinct from every other representation that 304s
+        // only for its own type.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let turtle_tag =
+            etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let expected = format!("{COND_DOC}\n");
+        let mut tags = vec![turtle_tag];
+        for media in ["application/n-triples", "application/n-quads"] {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/doc", accept.clone()).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), media);
+            let tag = etag_of(&resp);
+            assert!(
+                !tags.contains(&tag),
+                "{media} reuses another representation's tag"
+            );
+            // A single default-graph triple: the N-Quads line carries no graph label, so both
+            // bodies are the one canonical line.
+            assert_eq!(body_bytes(resp).await, expected.as_bytes(), "{media}");
+
+            let mut cond = accept;
+            cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&tag).unwrap());
+            let not_mod = get_with(&state, owner_token(), "/alice/doc", cond).await;
+            assert_eq!(not_mod.status(), StatusCode::NOT_MODIFIED, "{media}");
+            for other in &tags {
+                let mut cond = HeaderMap::new();
+                cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(other).unwrap());
+                let resp = get_with(&state, owner_token(), "/alice/doc", cond).await;
+                assert_eq!(resp.status(), StatusCode::OK, "{media} 304'd for {other}");
+            }
+            tags.push(tag);
+        }
+    }
+
+    #[tokio::test]
+    async fn get_container_as_ntriples_lists_its_children() {
+        // #4879: the container listing path negotiates the same formats as a plain resource.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let mut accept = HeaderMap::new();
+        accept.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/n-triples"),
+        );
+        let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/n-triples"
+        );
+        let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+        assert!(
+            body.lines().any(|l| l
+                == "<https://pod.example/alice/> <http://www.w3.org/ns/ldp#contains> <https://pod.example/alice/doc> ."),
+            "{body}"
         );
     }
 
@@ -5627,6 +6243,245 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn v4_write_without_read_if_unmodified_since_is_denied() {
+        // An evaluated If-Unmodified-Since probes the target's modification time, so Bob (Write, no
+        // Read) gets the same denial a concrete If-Match gets, whether or not the date would pass.
+        for date in [
+            "Thu, 01 Jan 1970 00:00:00 GMT",
+            "Fri, 31 Dec 9999 23:59:59 GMT",
+        ] {
+            let state = store_bob_write_without_read().await;
+            let mut headers = turtle_headers();
+            headers.insert(header::IF_UNMODIFIED_SINCE, HeaderValue::from_static(date));
+            let got = observe(
+                put_handler(
+                    State(state),
+                    Extension(bob()),
+                    "/alice/c/wonly".parse().unwrap(),
+                    headers,
+                    request_body_bytes(),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(got.status, 403, "{date}: {got:?}");
+        }
+    }
+
+    /// One conditional write to the owner's `/alice/doc` carrying `If-Unmodified-Since: date`.
+    async fn write_if_unmodified_since(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        date: &str,
+    ) -> StatusCode {
+        let headers = |mut h: HeaderMap| {
+            h.insert(
+                header::IF_UNMODIFIED_SINCE,
+                HeaderValue::from_str(date).unwrap(),
+            );
+            h
+        };
+        let (s, t) = (State(state.clone()), Extension(owner_token()));
+        let uri: axum::http::Uri = "/alice/doc".parse().unwrap();
+        let result = match verb {
+            "PUT" => put_handler(s, t, uri, headers(turtle_write_headers()), body_doc()).await,
+            "PATCH" => {
+                let patch = insert_only_patch("https://pod.example/alice/doc#me");
+                patch_handler(s, t, uri, headers(n3_patch_headers()), patch).await
+            }
+            "DELETE" => delete_handler(s, t, uri, headers(HeaderMap::new())).await,
+            _ => unreachable!(),
+        };
+        result.unwrap_or_else(IntoResponse::into_response).status()
+    }
+
+    fn body_doc() -> AxBytes {
+        AxBytes::from(COND_DOC)
+    }
+
+    #[tokio::test]
+    async fn if_unmodified_since_guards_put_patch_and_delete() {
+        // RFC 9110 §13.1.4: a write proceeds only if the target has not changed after the date. The
+        // resource's own Last-Modified passes; a date before it, in any of the three HTTP-date forms
+        // or as a leap second, fails with 412 and changes nothing; an invalid date is ignored.
+        const STALE: [&str; 4] = [
+            "Thu, 01 Jan 1970 00:00:00 GMT",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+            "Thu, 31 Dec 1998 23:59:60 GMT",
+        ];
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            for stale_date in STALE {
+                let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+                let etag =
+                    etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+                let stale = write_if_unmodified_since(&state, verb, stale_date).await;
+                assert_eq!(
+                    stale,
+                    StatusCode::PRECONDITION_FAILED,
+                    "{verb} {stale_date}"
+                );
+                let after = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+                assert_eq!(
+                    etag_of(&after),
+                    etag,
+                    "{verb}: a 412 must not change the resource"
+                );
+            }
+
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let read = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+            let last_modified = read
+                .headers()
+                .get(header::LAST_MODIFIED)
+                .expect("a plain resource carries Last-Modified")
+                .to_str()
+                .unwrap()
+                .to_string();
+            let current = write_if_unmodified_since(&state, verb, &last_modified).await;
+            assert!(current.is_success(), "{verb} at Last-Modified: {current}");
+
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let invalid = write_if_unmodified_since(&state, verb, "last week").await;
+            assert!(invalid.is_success(), "{verb}: an invalid date is ignored");
+        }
+    }
+
+    /// A date header sent on more than one field line is not one HTTP-date, so it is ignored
+    /// (RFC 9110 §13.1.4) rather than read from its first line: two stale lines do not refuse the write.
+    #[tokio::test]
+    async fn a_repeated_if_unmodified_since_is_ignored() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let mut headers = turtle_write_headers();
+        for _ in 0..2 {
+            headers.append(
+                header::IF_UNMODIFIED_SINCE,
+                HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
+            );
+        }
+        let uri: axum::http::Uri = "/alice/doc".parse().unwrap();
+        let got = put_handler(
+            State(state),
+            Extension(owner_token()),
+            uri,
+            headers,
+            body_doc(),
+        )
+        .await
+        .unwrap_or_else(IntoResponse::into_response)
+        .status();
+        assert!(got.is_success(), "{got}");
+    }
+
+    /// The read path accepts the two obsolete HTTP-date forms as well as IMF-fixdate (RFC 9110
+    /// §5.6.7): a later date in any form is a 304, an earlier one a 200.
+    #[tokio::test]
+    async fn if_modified_since_accepts_every_http_date_form() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let cases = [
+            ("Saturday, 06-Nov-60 08:49:37 GMT", StatusCode::NOT_MODIFIED),
+            ("Sat Nov  6 08:49:37 2100", StatusCode::NOT_MODIFIED),
+            ("Sunday, 06-Nov-94 08:49:37 GMT", StatusCode::OK),
+            ("Sun Nov  6 08:49:37 1994", StatusCode::OK),
+        ];
+        for (date, want) in cases {
+            let mut cond = HeaderMap::new();
+            cond.insert(header::IF_MODIFIED_SINCE, HeaderValue::from_static(date));
+            let got = get_with(&state, owner_token(), "/alice/doc", cond).await;
+            assert_eq!(got.status(), want, "{date}");
+        }
+    }
+
+    #[tokio::test]
+    async fn if_match_takes_precedence_over_if_unmodified_since_on_writes() {
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let etag =
+                etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+            let mut headers = match verb {
+                "PUT" => turtle_write_headers(),
+                "PATCH" => n3_patch_headers(),
+                _ => HeaderMap::new(),
+            };
+            headers.insert(header::IF_MATCH, HeaderValue::from_str(&etag).unwrap());
+            headers.insert(
+                header::IF_UNMODIFIED_SINCE,
+                HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
+            );
+            let (s, t) = (State(state.clone()), Extension(owner_token()));
+            let uri: axum::http::Uri = "/alice/doc".parse().unwrap();
+            let result = match verb {
+                "PUT" => put_handler(s, t, uri, headers, body_doc()).await,
+                "PATCH" => {
+                    let patch = insert_only_patch("https://pod.example/alice/doc#me");
+                    patch_handler(s, t, uri, headers, patch).await
+                }
+                _ => delete_handler(s, t, uri, headers).await,
+            };
+            let status = result.unwrap_or_else(IntoResponse::into_response).status();
+            assert!(status.is_success(), "{verb}: {status}");
+        }
+    }
+
+    #[tokio::test]
+    async fn if_unmodified_since_is_ignored_for_a_container() {
+        // A container's record time does not move when its membership does, so it is no basis for
+        // the comparison: even a date long before it lets the write through.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let mut headers = turtle_write_headers();
+        headers.insert(
+            header::IF_UNMODIFIED_SINCE,
+            HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
+        );
+        let status = put_handler(
+            State(state),
+            Extension(owner_token()),
+            "/alice/".parse().unwrap(),
+            headers,
+            AxBytes::new(),
+        )
+        .await
+        .unwrap_or_else(IntoResponse::into_response)
+        .status();
+        assert!(status.is_success(), "{status}");
+    }
+
+    #[tokio::test]
+    async fn if_unmodified_since_on_a_container_needs_no_read() {
+        // The write ignores If-Unmodified-Since for a container, so the V4 Read gate must not apply
+        // either: Bob (Write on `/alice/c/`, no Read) gets exactly the outcome he gets without it.
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            let mut statuses = Vec::new();
+            for date in [None, Some("Thu, 01 Jan 1970 00:00:00 GMT")] {
+                let state = store_bob_write_without_read().await;
+                let mut headers = match verb {
+                    "PUT" => turtle_headers(),
+                    "PATCH" => n3_patch_headers(),
+                    _ => HeaderMap::new(),
+                };
+                if let Some(date) = date {
+                    headers.insert(header::IF_UNMODIFIED_SINCE, HeaderValue::from_static(date));
+                }
+                let (s, t) = (State(state), Extension(bob()));
+                let uri: axum::http::Uri = "/alice/c/".parse().unwrap();
+                let result = match verb {
+                    "PUT" => put_handler(s, t, uri, headers, AxBytes::new()).await,
+                    "PATCH" => {
+                        let patch = insert_only_patch("https://pod.example/alice/c/#me");
+                        patch_handler(s, t, uri, headers, patch).await
+                    }
+                    _ => delete_handler(s, t, uri, headers).await,
+                };
+                statuses.push(result.unwrap_or_else(IntoResponse::into_response).status());
+            }
+            assert_eq!(statuses[0], statuses[1], "{verb}");
+            if verb != "DELETE" {
+                assert!(statuses[0].is_success(), "{verb}: {}", statuses[0]);
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn v4_write_without_read_unconditional_put_still_succeeds() {
         // The control: WITHOUT a conditional header, Bob's Write IS sufficient — an unconditional PUT to
         // `wonly` succeeds (204). V4 only gates the CONDITIONAL channel; it must not block a plain write.
@@ -5763,6 +6618,219 @@ mod tests {
             alice_get.etag.is_some(),
             "the authorized reader DOES receive the container ETag"
         );
+    }
+
+    /// Every header value and the body of one response, as text, so a test can check that a value
+    /// appears NOWHERE in it, not just in the `ETag` header.
+    async fn response_text(result: Result<Response, ServerError>) -> (u16, String) {
+        let resp = result.unwrap_or_else(IntoResponse::into_response);
+        let status = resp.status().as_u16();
+        let mut text: String = resp
+            .headers()
+            .iter()
+            .map(|(name, value)| format!("{name}: {}\n", String::from_utf8_lossy(value.as_bytes())))
+            .collect();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        text.push_str(&String::from_utf8_lossy(&body));
+        (status, text)
+    }
+
+    /// The container's current membership ETag, as its reader Alice sees it, without the quotes.
+    async fn container_etag(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+    ) -> String {
+        let alice = VerifiedToken {
+            web_id: Some(ALICE.into()),
+            ..VerifiedToken::default()
+        };
+        let got = run_verb(state, "GET", "/alice/c/", alice).await;
+        assert_eq!(got.status, 200, "Alice reads her container: {got:?}");
+        let etag = got.etag.expect("a reader receives the container ETag");
+        etag.trim_start_matches("W/").trim_matches('"').to_string()
+    }
+
+    /// A writer who can change the container's members but can never read the container: Append and
+    /// Write on `/alice/c/` itself, and Write (only) inherited by its members. Added to the dropbox
+    /// fixture so the successful PUT, PATCH, POST and DELETE paths run for a non-reader.
+    const V5_WRITER: &str = "https://pod.example/writer/profile/card#me";
+
+    async fn dropbox_with_writer(
+    ) -> Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>> {
+        let state = dropbox_with_secret().await;
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#alice> a acl:Authorization;
+         acl:agent <{ALICE}>;
+         acl:accessTo <https://pod.example/alice/c/>;
+         acl:default <https://pod.example/alice/c/>;
+         acl:mode acl:Read, acl:Write, acl:Control.
+<#bob> a acl:Authorization;
+       acl:agent <{BOB}>;
+       acl:accessTo <https://pod.example/alice/c/>;
+       acl:mode acl:Append.
+<#writer> a acl:Authorization;
+          acl:agent <{V5_WRITER}>;
+          acl:accessTo <https://pod.example/alice/c/>;
+          acl:mode acl:Append, acl:Write.
+<#writer-members> a acl:Authorization;
+                  acl:agent <{V5_WRITER}>;
+                  acl:default <https://pod.example/alice/c/>;
+                  acl:mode acl:Write."#
+        );
+        state
+            .store
+            .write(
+                "https://pod.example/alice/c/.acl",
+                AxBytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed container acl with the writer");
+        state
+    }
+
+    /// One request of the V5 matrix, with `{etag}` in a conditional header replaced by `etag`.
+    async fn v5_request(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        conditional: Option<(&'static str, &str)>,
+        etag: &str,
+        token: VerifiedToken,
+    ) -> (u16, String) {
+        let mut headers = match verb {
+            "PUT" | "POST" => turtle_headers(),
+            "PATCH" => n3_patch_headers(),
+            _ => HeaderMap::new(),
+        };
+        if let Some((name, template)) = conditional {
+            let value = HeaderValue::from_str(&template.replace("{etag}", etag)).unwrap();
+            headers.insert(HeaderName::from_static(name), value);
+        }
+        let uri: axum::http::Uri = path.parse().unwrap();
+        let (s, t) = (State(state.clone()), Extension(token));
+        let result = match verb {
+            "GET" => get_handler(s, t, uri, headers).await,
+            "HEAD" => head_handler(s, t, uri, headers).await,
+            "OPTIONS" => options_handler(s, t, uri).await,
+            "PUT" => put_handler(s, t, uri, headers, request_body_bytes()).await,
+            "POST" => post_handler(s, t, uri, headers, request_body_bytes()).await,
+            "PATCH" => {
+                let patch = insert_only_patch("https://pod.example/alice/c/x#me");
+                patch_handler(s, t, uri, headers, patch).await
+            }
+            "DELETE" => delete_handler(s, t, uri, headers).await,
+            _ => unreachable!(),
+        };
+        response_text(result).await
+    }
+
+    /// V5 as an invariant rather than one path: whatever a non-reader sends, to the container, its
+    /// members, its `.acl` or paths that do not exist, and with or without conditional headers naming
+    /// the ETag, no response carries the container's membership ETag anywhere (header or body),
+    /// neither the value before the request nor the one after it. And the STATUS never depends on
+    /// whether a validator matches it: each conditional request is replayed, on a fresh copy of the
+    /// pod, with a validator of the same shape that cannot match, and must get the same status. The
+    /// non-readers include a writer, so the successful write paths run too (checked by positive
+    /// controls). A new response path that emits the tag, or answers differently when it is guessed,
+    /// fails here.
+    #[tokio::test]
+    async fn v5_no_response_path_shows_a_non_reader_the_container_etag() {
+        const WRONG: &str = "0-00000000";
+        let writer = || VerifiedToken {
+            web_id: Some(V5_WRITER.into()),
+            ..VerifiedToken::default()
+        };
+        let conditionals: [Option<(&'static str, &str)>; 11] = [
+            None,
+            Some(("if-match", "\"{etag}\"")),
+            Some(("if-match", "W/\"{etag}\"")),
+            Some(("if-match", "\"x\", \"{etag}\"")),
+            Some(("if-match", "*")),
+            Some(("if-none-match", "\"{etag}\"")),
+            Some(("if-none-match", "W/\"{etag}\"")),
+            Some(("if-none-match", "\"x\", \"{etag}\"")),
+            Some(("if-none-match", "*")),
+            Some(("if-modified-since", "Thu, 01 Jan 1970 00:00:00 GMT")),
+            Some(("if-unmodified-since", "Thu, 01 Jan 1970 00:00:00 GMT")),
+        ];
+        let paths = [
+            "/alice/c/",
+            EXISTING,
+            MISSING,
+            "/alice/c/.acl",
+            "/alice/c/ghost.acl",
+            "/alice/nope/",
+            "/",
+        ];
+        let mut writer_statuses = std::collections::BTreeMap::new();
+        for path in paths {
+            for verb in ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] {
+                for conditional in conditionals {
+                    for (label, token) in
+                        [("anonymous", anon()), ("bob", bob()), ("writer", writer())]
+                    {
+                        let state = dropbox_with_writer().await;
+                        let before = container_etag(&state).await;
+                        let (status, text) =
+                            v5_request(&state, verb, path, conditional, &before, token.clone())
+                                .await;
+                        let after = container_etag(&state).await;
+                        for etag in [&before, &after] {
+                            assert!(
+                                !text.contains(etag.as_str()),
+                                "{verb} {path} as {label} ({conditional:?}) answered {status} \
+                                 with the container ETag {etag}:\n{text}"
+                            );
+                        }
+                        if conditional.is_some_and(|(_, template)| template.contains("{etag}")) {
+                            let fresh = dropbox_with_writer().await;
+                            let fresh_before = container_etag(&fresh).await;
+                            let (wrong_status, wrong_text) =
+                                v5_request(&fresh, verb, path, conditional, WRONG, token).await;
+                            let fresh_after = container_etag(&fresh).await;
+                            for etag in [&fresh_before, &fresh_after] {
+                                assert!(
+                                    !wrong_text.contains(etag.as_str()),
+                                    "{verb} {path} as {label} ({conditional:?}, non-matching) \
+                                     answered {wrong_status} with the container ETag {etag}:\n\
+                                     {wrong_text}"
+                                );
+                            }
+                            assert_eq!(
+                                status, wrong_status,
+                                "{verb} {path} as {label} ({conditional:?}): the status shows \
+                                 whether the validator is the container ETag"
+                            );
+                        }
+                        if label == "writer" && conditional.is_none() {
+                            writer_statuses.insert((verb, path), status);
+                        }
+                    }
+                }
+            }
+        }
+        // Positive controls: the writer's unconditional writes really succeed, so the matrix above
+        // covered the successful PUT (replace and create), PATCH, POST and DELETE responses, while
+        // the container itself stays unreadable to them.
+        for (verb, path, expected) in [
+            ("PUT", EXISTING, 2),
+            ("PUT", MISSING, 2),
+            ("PATCH", EXISTING, 2),
+            ("POST", "/alice/c/", 2),
+            ("DELETE", EXISTING, 2),
+            ("GET", "/alice/c/", 4),
+            ("HEAD", "/alice/c/", 4),
+        ] {
+            let status = writer_statuses[&(verb, path)];
+            assert_eq!(
+                status / 100,
+                expected,
+                "writer {verb} {path} answered {status}"
+            );
+        }
     }
 
     // =====================================================================================

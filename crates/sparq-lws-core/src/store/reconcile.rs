@@ -121,7 +121,7 @@
 //! future admin endpoint / CLI / a one-shot boot sweep. The native server also wires the existing
 //! [`spawn_periodic`] runner behind `SOLID_SERVER_RECONCILE_INTERVAL_SECS`: UNSET (the default) spawns
 //! no task; a positive integer starts exactly one task after router assembly, using
-//! [`ReconcileOptions::default`] and therefore the unchanged one-hour grace window. [GPT-5.6]
+//! [`ReconcileOptions::default`] and therefore the unchanged one-hour grace window.
 //!
 //! This is intended for a single-instance deployment that wants a self-driving sweep. In a
 //! horizontally-scaled deployment GC should instead be one scheduled job (a leader-elected task / a

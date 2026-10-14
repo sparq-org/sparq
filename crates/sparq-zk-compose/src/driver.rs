@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! nargo + bb subprocess driver (v1: subprocess proving is acceptable per the
 //! plan). One [`CircuitProver`] points at the `zk/compose/` workspace and a
 //! scratch dir; it compiles a member, generates a witness from a Prover.toml,
@@ -16,7 +16,7 @@ use crate::manifest::CircuitId;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-// [GPT-6] Owned, opt-in measurements never enter a presentation or global state.
+// Owned, opt-in measurements never enter a presentation or global state.
 mod metrics;
 pub use metrics::{
     AcirCacheObservation, DriverStage, DriverStageEvent, DriverStageMetrics, DriverStageOutcome,
@@ -59,7 +59,7 @@ impl From<std::io::Error> for DriverError {
     }
 }
 
-// [GPT-6] Tags are filename labels, never paths or subprocess options. Preserve
+// Tags are filename labels, never paths or subprocess options. Preserve
 // the legacy empty tag and common ASCII punctuation inside a single component.
 pub(crate) fn validate_witness_tag(tag: &str) -> Result<(), DriverError> {
     if tag == "."
@@ -77,7 +77,7 @@ pub(crate) fn validate_witness_tag(tag: &str) -> Result<(), DriverError> {
     Ok(())
 }
 
-// [GPT-6] nargo treats a dot in --prover-name as an extension and replaces it.
+// nargo treats a dot in --prover-name as an extension and replaces it.
 // Percent is outside the admitted alphabet, so this encoding is injective while
 // preserving existing labels without dots. Only this internal filename changes.
 fn witness_file_label(tag: &str) -> String {
@@ -92,7 +92,7 @@ pub struct ProofArtifacts {
     pub vk: Vec<u8>,
 }
 
-// [GPT-6] Atomic directory allocation prevents shared-root calls from mixing
+// Atomic directory allocation prevents shared-root calls from mixing
 // verification tuples. The counter is only a name hint: create_dir arbitrates.
 static SCRATCH_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 struct ScratchDir(PathBuf);
@@ -126,7 +126,7 @@ impl Drop for ScratchDir {
     }
 }
 
-// [GPT-6] nargo beta.21 has no target-directory override. Every driver compile
+// nargo beta.21 has no target-directory override. Every driver compile
 // and execute holds this advisory per-workspace OS lock, including implicit
 // compilation during execute. Opening a fresh fd per acquisition coordinates
 // independent driver instances, threads, and processes on a local filesystem.
@@ -165,7 +165,7 @@ impl NargoCacheLock {
     }
 }
 
-// [GPT-6] The witness is born under 0700, before nargo creates it. Neither this
+// The witness is born under 0700, before nargo creates it. Neither this
 // owner nor its credential-input path is serializable or printable with Debug.
 #[cfg(feature = "successful-results")]
 pub(crate) struct PrivateWitness {
@@ -267,7 +267,7 @@ impl CircuitProver {
         self.compile_package(&id.package())
     }
 
-    // [GPT-6] Crate-private package dispatch also serves the isolated result contract.
+    // Crate-private package dispatch also serves the isolated result contract.
     pub(crate) fn compile_package(&self, pkg: &str) -> Result<PathBuf, DriverError> {
         self.with_compiled_bytes(pkg, |bytes, _lock| self.snapshot_acir(pkg, bytes))
     }
@@ -364,7 +364,7 @@ impl CircuitProver {
     /// where the internal label encodes each dot as `%2E` for Nargo compatibility.
     /// Tags allow ASCII alphanumerics, underscores, hyphens and dots; `.`/`..`
     /// and path separators reject before I/O. Empty retains the legacy shared name.
-    // [OPUS-4.8] tag-isolated witness path so the toolchain tests are safe under
+    // tag-isolated witness path so the toolchain tests are safe under
     // default (parallel) `cargo test` — no shared Prover.toml/witness race
     // (roborev codex job 2180).
     pub fn gen_witness_tagged(
@@ -376,7 +376,7 @@ impl CircuitProver {
         self.gen_package_witness(&id.package(), prover_toml, tag)
     }
 
-    // [GPT-6] Callers supply a fixed, internally selected member name.
+    // Callers supply a fixed, internally selected member name.
     pub(crate) fn gen_package_witness(
         &self,
         pkg: &str,
@@ -408,13 +408,13 @@ impl CircuitProver {
             .compose_dir
             .join(pkg)
             .join(format!("{prover_name}.toml"));
-        // [GPT-6] Input files contain credential secrets: restrict before writing.
+        // Input files contain credential secrets: restrict before writing.
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            // [GPT-6] A caller-selected label must not follow an existing input symlink.
+            // A caller-selected label must not follow an existing input symlink.
             options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
         }
         let mut input = options.open(&toml_path)?;
@@ -458,7 +458,7 @@ impl CircuitProver {
         Ok(witness_path)
     }
 
-    // [GPT-6] A caller tag is descriptive; the actual input/witness names are
+    // A caller tag is descriptive; the actual input/witness names are
     // allocated internally so even identical caller tags cannot collide.
     #[cfg(feature = "successful-results")]
     pub(crate) fn private_package_witness(
@@ -530,7 +530,7 @@ impl CircuitProver {
     /// `Prover.toml` / `target/<pkg>_w.gz` (the bb artifacts already land in the
     /// caller's isolated `out_dir`). Use a per-test-unique `tag`.
     /// The same filename-label rules as [`Self::gen_witness_tagged`] apply.
-    // [OPUS-4.8] tag-isolated prove path (roborev codex job 2180).
+    // tag-isolated prove path (roborev codex job 2180).
     pub fn prove_in(
         &self,
         id: &CircuitId,
@@ -541,7 +541,7 @@ impl CircuitProver {
         self.prove_package(&id.package(), prover_toml, out_dir, tag)
     }
 
-    // [GPT-6] Shares the explicit noir-recursive (ZK) backend with legacy members.
+    // Shares the explicit noir-recursive (ZK) backend with legacy members.
     pub(crate) fn prove_package(
         &self,
         pkg: &str,
@@ -598,12 +598,12 @@ impl CircuitProver {
     /// `bb write_vk`. Measured deterministic and fast (~40-60ms once the ACIR is
     /// cached, ~350ms cold); a freshly-recompiled ACIR yields a byte-identical
     /// vk to `bb prove --write_vk`, so this is the authentic member vk.
-    // [OPUS-4.8] new verifier-side canonical-vk path (audit #2).
+    // new verifier-side canonical-vk path (audit #2).
     pub fn canonical_vk(&self, id: &CircuitId, work_dir: &Path) -> Result<Vec<u8>, DriverError> {
         self.canonical_package_vk(&id.package(), work_dir)
     }
 
-    // [GPT-6] Rebuilds a member key locally; never consumes an untrusted bundled VK.
+    // Rebuilds a member key locally; never consumes an untrusted bundled VK.
     pub(crate) fn canonical_package_vk(
         &self,
         pkg: &str,
@@ -632,7 +632,7 @@ impl CircuitProver {
     /// [`Self::canonical_vk`]) and the reconstructed-and-byte-checked public
     /// inputs, NEVER the prover's `art.vk` / `art.public_inputs`. Returns
     /// Ok(true) on a valid proof, Ok(false) if bb rejects, Err on spawn/io.
-    // [OPUS-4.8] verify against caller-pinned vk + public inputs (audit #1/#2).
+    // verify against caller-pinned vk + public inputs (audit #1/#2).
     pub fn verify_with(
         &self,
         proof: &[u8],
@@ -703,7 +703,7 @@ fn run(tool: &str, cmd: &mut Command) -> Result<(), DriverError> {
     Ok(())
 }
 
-// [OPUS-4.8] sq-bif.6: GLUE unit tests for the nargo/bb subprocess wrapper's
+// sq-bif.6: GLUE unit tests for the nargo/bb subprocess wrapper's
 // ERROR-classification + tag-based path isolation. These are toolchain-FREE: they
 // drive the error arms with a guaranteed-absent binary (the `Spawn` arm) and a
 // real-but-failing binary (the `Tool` arm), and check the tag-isolation file-naming
@@ -1077,7 +1077,7 @@ mod driver_glue_tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
-    // [GPT-6] Reject caller-controlled path fragments before input publication,
+    // Reject caller-controlled path fragments before input publication,
     // scratch allocation or compilation, including an existing traversal path.
     #[test]
     fn unsafe_witness_tags_reject_before_any_artifact_write() {

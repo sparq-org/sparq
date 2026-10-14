@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-pzet (car-hire family completion, sq-8dx2): round-trip + family-
+// sq-pzet (car-hire family completion, sq-8dx2): round-trip + family-
 // completeness tests for the REMAINING circuit-family members wired in this bead —
 // the scan (k,n,r)-lattice members that had no compiled package, and the N=64
 // hidden-join buckets so a join composes with an n=64 scan.

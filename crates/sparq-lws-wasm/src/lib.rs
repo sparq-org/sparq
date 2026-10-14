@@ -1,6 +1,6 @@
-// [GPT-5.6] sq-6xasp.3: wasm host adapter over the real LWS router.
-// [SONNET-4.6] sq-250si: wasm panic hook + host trap-recovery boundary.
-// [SONNET-4.6] sq-wubkf: bounded linear-memory accounting behind the `memory` module. The crate
+// sq-6xasp.3: wasm host adapter over the real LWS router.
+// sq-250si: wasm panic hook + host trap-recovery boundary.
+// sq-wubkf: bounded linear-memory accounting behind the `memory` module. The crate
 // root is `deny(unsafe_code)` rather than `forbid` for exactly one reason — a `#[global_allocator]`
 // requires `unsafe impl GlobalAlloc`, which has no safe substitute. `memory` carries the only
 // `#[allow(unsafe_code)]` in the crate; every other module still fails to compile on `unsafe`.
@@ -49,7 +49,7 @@
 #[allow(unsafe_code)]
 pub mod memory;
 
-// [GPT-5.6] sq-6xasp.7: the opt-in persistence seam. Nothing here is reachable from
+// sq-6xasp.7: the opt-in persistence seam. Nothing here is reachable from
 // `SolidServer::new`, which stays purely in-memory; only `SolidServer::withSnapshot` journals.
 pub mod persist;
 
@@ -83,14 +83,14 @@ mod wasm {
     /// Installs a panic hook that writes the panic message to `console.error` before the
     /// `unreachable` trap propagates to the host as a `WebAssembly.RuntimeError`. The hook
     /// is idempotent — safe to call from any context, and a no-op if already installed.
-    // [SONNET-4.6] sq-250si: set_once is idempotent; safe for concurrent (future) init paths.
+    // sq-250si: set_once is idempotent; safe for concurrent (future) init paths.
     #[wasm_bindgen(start)]
     pub fn lws_init() {
         console_error_panic_hook::set_once();
     }
 
     /// Bytes currently held by live allocations inside the module's linear memory.
-    // [SONNET-4.6] sq-wubkf: `f64` rather than `u64` so the host reads a plain JS number; byte
+    // sq-wubkf: `f64` rather than `u64` so the host reads a plain JS number; byte
     // totals stay far inside the 2^53 exactly-representable range.
     #[wasm_bindgen(js_name = lwsMemoryLiveBytes)]
     pub fn lws_memory_live_bytes() -> f64 {
@@ -193,7 +193,7 @@ mod wasm {
         /// The owner ACL is provisioned only when the restored pod does not already carry one, so a
         /// restart never overwrites an ACL the owner edited. Rejects a snapshot it cannot decode or
         /// replay rather than silently booting a pod with part of its data.
-        // [GPT-5.6] sq-6xasp.7: `Vec<u8>` copies the host's `Uint8Array` in; the encoded journal is
+        // sq-6xasp.7: `Vec<u8>` copies the host's `Uint8Array` in; the encoded journal is
         // bounded by the store's own 64 MiB blob quota.
         #[wasm_bindgen(js_name = withSnapshot)]
         pub fn with_snapshot(

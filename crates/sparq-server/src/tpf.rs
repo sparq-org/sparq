@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-bzh1 (epic sq-3183): OPT-IN Triple Pattern Fragments (TPF) / Linked Data
+//! sq-bzh1 (epic sq-3183): OPT-IN Triple Pattern Fragments (TPF) / Linked Data
 //! Fragments server endpoint.
 //!
 //! A [Triple Pattern Fragments](https://www.hydra-cg.com/spec/latest/triple-pattern-fragments/)
@@ -87,7 +87,7 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 /// `xsd:integer` — the datatype of the count / page-size literals.
 const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
 
-/// [OPUS-4.8] sq-dxhb: the brTPF `values` control property — the Hydra `hydra:property` the
+/// sq-dxhb: the brTPF `values` control property — the Hydra `hydra:property` the
 /// `{values}` template variable maps to. brTPF (Hartig & Buil-Aranda, ODBASE 2016) has no term
 /// in a standardised vocabulary for "the attached solution-mapping set", so we mint one under a
 /// sparq namespace; a client reads it from the `hydra:mapping` to learn the dataset accepts a
@@ -268,10 +268,10 @@ pub fn evaluate(graph: &Graph, pattern: &TriplePattern, page: usize, page_size: 
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-dxhb: bindings-restricted Triple Pattern Fragments (brTPF).
+// sq-dxhb: bindings-restricted Triple Pattern Fragments (brTPF).
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-dxhb: one brTPF solution mapping — a PARTIAL binding of the triple-pattern
+/// sq-dxhb: one brTPF solution mapping — a PARTIAL binding of the triple-pattern
 /// positions. Each of `subject` / `predicate` / `object` is `Some(term)` when this mapping
 /// constrains that position, or `None` (the mapping says nothing about it). A mapping that
 /// binds a position the PATTERN already bound is allowed (it is simply redundant — the merge
@@ -295,7 +295,7 @@ impl Binding {
     }
 }
 
-/// [OPUS-4.8] sq-r74h: the DoS caps on a brTPF binding set, enforced by [`parse_bindings_capped`]
+/// sq-r74h: the DoS caps on a brTPF binding set, enforced by [`parse_bindings_capped`]
 /// BEFORE the (potentially large) payload is fully parsed and BEFORE any index work. `0` on either
 /// field disables that cap (the historical uncapped behaviour). These bound the binding set
 /// *independently of* the server's `--max-body-bytes` body limit, for two reasons the body limit
@@ -329,7 +329,7 @@ impl BindingLimits {
     };
 }
 
-/// [OPUS-4.8] sq-r74h: a brTPF binding-set parse outcome that DISTINGUISHES a malformed payload
+/// sq-r74h: a brTPF binding-set parse outcome that DISTINGUISHES a malformed payload
 /// (the client sent garbage → `400`) from a payload that exceeds a DoS cap (the client sent a
 /// well-formed but too-large set → `413`, the same refusal class as `--max-body-bytes`). The HTTP
 /// layer maps the two variants to those two distinct statuses.
@@ -362,7 +362,7 @@ impl From<ParseError> for BindingError {
     }
 }
 
-/// [OPUS-4.8] sq-dxhb: parses a brTPF `values` payload into the set of solution mappings.
+/// sq-dxhb: parses a brTPF `values` payload into the set of solution mappings.
 ///
 /// The wire format is one mapping per line; within a line, whitespace-separated
 /// `position=term` pairs, where `position` is `subject` / `predicate` / `object` (or the short
@@ -397,7 +397,7 @@ pub fn parse_bindings(payload: &str) -> Result<Vec<Binding>, ParseError> {
     }
 }
 
-/// [OPUS-4.8] sq-r74h: [`parse_bindings`] with the DoS caps in [`BindingLimits`] enforced.
+/// sq-r74h: [`parse_bindings`] with the DoS caps in [`BindingLimits`] enforced.
 ///
 /// Enforces, in this order:
 ///   1. **The payload-byte cap** (`limits.max_payload_bytes`) — checked FIRST, on the raw byte
@@ -466,7 +466,7 @@ pub fn parse_bindings_capped(
     Ok(out)
 }
 
-/// [OPUS-4.8] sq-dxhb: evaluates `pattern` against `graph` RESTRICTED to the brTPF binding set
+/// sq-dxhb: evaluates `pattern` against `graph` RESTRICTED to the brTPF binding set
 /// `bindings`, returning the [`Fragment`] for (zero-based) `page`.
 ///
 /// The bindings-restricted fragment is the set of triples matching `pattern` that are
@@ -555,7 +555,7 @@ pub fn evaluate_brtpf(
     }
 }
 
-/// [OPUS-4.8] sq-dxhb: merges a pattern position (the term the PATTERN bound, if any) with a
+/// sq-dxhb: merges a pattern position (the term the PATTERN bound, if any) with a
 /// brTPF mapping's term for the same position. Returns `Some(merged)` — `Some(Some(term))` when
 /// a term is fixed, `Some(None)` when the merged position is still a variable — or `None` on a
 /// CLASH (both bound, to different terms ⇒ the mapping is incompatible with the pattern).
@@ -570,7 +570,7 @@ fn merge_term(pat: Option<&Term>, bind: Option<&Term>) -> Option<Option<Term>> {
     }
 }
 
-/// [OPUS-4.8] sq-dxhb: [`merge_term`] for the predicate position (a [`NamedNode`]).
+/// sq-dxhb: [`merge_term`] for the predicate position (a [`NamedNode`]).
 #[cfg(feature = "brtpf")]
 fn merge_predicate(pat: Option<&NamedNode>, bind: Option<&NamedNode>) -> Option<Option<NamedNode>> {
     match (pat, bind) {

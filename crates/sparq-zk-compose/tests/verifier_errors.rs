@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-hbg7 (CI coverage ratchet): coverage for the PROVER-FREE surface
+// sq-hbg7 (CI coverage ratchet): coverage for the PROVER-FREE surface
 // of `verifier.rs` — the `CheckError` Display impl (every reject reason a relying
 // party surfaces) and the external trust-anchor constructors (`KeySet`,
 // `HolderRegistry`, `EntailmentPolicy`, `RevocationPolicy`). These run with no
@@ -19,7 +19,7 @@
 // fail-closed defaults (empty == trusts nothing) are asserted, not just executed.
 
 use sparq_zk::verify::VerifyError;
-// [OPUS-5] sq-rsd3v.7: the two UNBUILT completeness halves, as the refusal message
+// sq-rsd3v.7: the two UNBUILT completeness halves, as the refusal message
 // and this test's needles must agree on them.
 use sparq_zk_compose::derivation::COMPLETENESS_UNDER_ENTAILMENT_UNBUILT;
 use sparq_zk_compose::manifest::{CircuitId, EntailmentRegime, StatusListSnapshot};
@@ -72,12 +72,12 @@ fn check_error_display_covers_structural_reject_reasons() {
         &CheckError::PublicInputMismatch { proof: 9 },
         &["9", "public inputs"],
     );
-    // [OPUS-4.8] sq-vxq8: distinct-graph strict-ordering reject (duplicate-inclusion).
+    // sq-vxq8: distinct-graph strict-ordering reject (duplicate-inclusion).
     assert_display_carries(
         &CheckError::ScanCommitmentsNotStrictlyIncreasing { proof: 0, at: 1 },
         &["strictly increasing", "S2.5"],
     );
-    // [OPUS-4.8] Copilot PR #95: Display must be panic-free for EVERY constructible
+    // Copilot PR #95: Display must be panic-free for EVERY constructible
     // value, including the `at == 0` boundary (the prior `at - 1` would underflow:
     // debug panic / release wrap). `saturating_sub(1)` keeps it total. The current
     // constructor never emits `at == 0`, but Display correctness is independent of
@@ -86,7 +86,7 @@ fn check_error_display_covers_structural_reject_reasons() {
         &CheckError::ScanCommitmentsNotStrictlyIncreasing { proof: 0, at: 0 },
         &["strictly increasing", "S2.5"],
     );
-    // [OPUS-4.8] sq-sfsi: hidden cross-credential JOIN bind_joins reject reasons.
+    // sq-sfsi: hidden cross-credential JOIN bind_joins reject reasons.
     assert_display_carries(&CheckError::JoinDanglingEdge { edge: 2 }, &["join edge", "2"]);
     assert_display_carries(&CheckError::JoinEdgeKindMismatch { edge: 3 }, &["join edge", "3"]);
     assert_display_carries(
@@ -97,7 +97,7 @@ fn check_error_display_covers_structural_reject_reasons() {
         &CheckError::JoinSlotMismatch { edge: 5 },
         &["join edge", "5", "slot"],
     );
-    // [OPUS-4.8] sq-r2s8: N-way join chain commitment-equality reject reason.
+    // sq-r2s8: N-way join chain commitment-equality reject reason.
     assert_display_carries(
         &CheckError::JoinCommitmentChainMismatch { edge: 6 },
         &["join edge", "6", "N-way"],
@@ -124,7 +124,7 @@ fn check_error_display_covers_query_correctness_reasons() {
         &CheckError::AttributionMalformed { proof: 0, expected: 2, got: 1 },
         &["2", "1"],
     );
-    // [OPUS-5] sq-q9r5e follow-up: the explicit pattern→scan mapping's rejections.
+    // sq-q9r5e follow-up: the explicit pattern→scan mapping's rejections.
     assert_display_carries(
         &CheckError::PatternScanArityMismatch { patterns: 2, declared: 1 },
         &["pattern_scans", "2", "1"],
@@ -141,7 +141,7 @@ fn check_error_display_covers_query_correctness_reasons() {
         &CheckError::PatternScanUndeclared { proof: 3 },
         &["pattern_scans", "3"],
     );
-    // [OPUS-5] #5240: within-pattern repeated-variable slot equality.
+    // #5240: within-pattern repeated-variable slot equality.
     assert_display_carries(
         &CheckError::RepeatedSlotMismatch {
             pattern: 0,
@@ -263,7 +263,7 @@ fn check_error_display_covers_hidden_issuer_reasons() {
     assert_display_carries(&CheckError::HiddenIssuerMalformedProof, &["malformed"]);
 }
 
-// [OPUS-4.8] sq-c2ql (HolderPoP T6 / B2): the in-circuit holder-PoK binding-edge
+// sq-c2ql (HolderPoP T6 / B2): the in-circuit holder-PoK binding-edge
 // reasons each render their commitment + a stable sq-c2ql phrase, so a verifier
 // rejection names the binding-edge cause precisely.
 #[test]
@@ -317,7 +317,7 @@ fn check_error_display_covers_holder_pop_and_entailment_reasons() {
         &CheckError::UngroundedDerivationAntecedent { step: 1, antecedent: 0 },
         &["1", "0"],
     );
-    // [OPUS-5] sq-rsd3v.7: the completeness-under-entailment refusal must name the
+    // sq-rsd3v.7: the completeness-under-entailment refusal must name the
     // regime AND BOTH unbuilt halves (the closure-sweep and the saturation proof) —
     // a relying party that asked for completeness has to be able to read WHY it
     // cannot have it, and that the accept it did not get would only ever have been
@@ -405,7 +405,7 @@ fn entailment_policy_default_is_simple_only_and_owl_subsumes_rdfs() {
     assert_eq!(EntailmentRegime::Simple, EntailmentRegime::Simple);
 }
 
-/// [OPUS-5] sq-rsd3v.7: the completeness-under-entailment dial is a DISTINCT
+/// sq-rsd3v.7: the completeness-under-entailment dial is a DISTINCT
 /// dimension of the policy, not a re-spelling of regime acceptance — demanding
 /// completeness must not be satisfiable by opting into a regime. Asserted on the
 /// builder identities (the refusal behaviour itself is asserted end-to-end in

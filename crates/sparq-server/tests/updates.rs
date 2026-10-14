@@ -17,7 +17,7 @@
 //! 1M-triple graph under the ring (per-batch O(graph) fork — the recorded A2 trade):
 //!   cargo test -p sparq-server --release --test updates -- --ignored --nocapture
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -377,7 +377,7 @@ async fn bench_update_latency_1m() {
 // Per-named-graph cache invalidation scope (sq-uqh, Wave B)
 // ---------------------------------------------------------------------------
 //
-// [OPUS-4.8] These exercise the END-TO-END epoch behaviour the cache hook depends on:
+// These exercise the END-TO-END epoch behaviour the cache hook depends on:
 // `apply_update` extracts the per-named-graph visibility scope of the parsed update and
 // publishes a generation that bumps ONLY those pods' epochs. A cached read records the
 // epochs of the pods it touched and stays valid while they are unchanged — so the

@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-clsv6 (Phase E5, `incremental`): incremental classification under TBox edits.
+// sq-clsv6 (Phase E5, `incremental`): incremental classification under TBox edits.
 //
 // Spike: research/owl2-el-ql-reasoning-spike.md §5 (EL-track E5). The E1–E4 entries
 // (`Classifier::classify` / `classify_graph` / their `par` twins) are STATELESS: every call
@@ -114,7 +114,7 @@ pub struct IncrementalReport {
     pub report: Report,
 }
 
-/// [SONNET-4.6] sq-clsv6 (Phase E5, `incremental`): an OWL 2 EL classifier that keeps its
+/// sq-clsv6 (Phase E5, `incremental`): an OWL 2 EL classifier that keeps its
 /// saturation alive across TBox edits — the stateful sibling of the stateless
 /// [`Classifier`](crate::Classifier).
 ///

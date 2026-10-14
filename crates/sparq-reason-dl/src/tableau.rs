@@ -1,6 +1,6 @@
 //! L3 (part 2) — the terminating ALCH tableau: consistency + class satisfiability.
 //!
-//! 🤖 SPARQ agent [FABLE-5]. Bead sq-pbz04.4.3 (epic sq-pbz04.4, design record
+//! 🤖 SPARQ agent. Bead sq-pbz04.4.3 (epic sq-pbz04.4, design record
 //! `research/owl2-direct-semantics-scoping.md` §3). A completion-forest tableau with GCI
 //! internalisation, the `⊓`/`⊔`/`∃`/`∀`/GCI completion rules matched modulo the role
 //! hierarchy, ancestor **subset blocking**, and chronological backtracking over
@@ -199,9 +199,9 @@
 //! this module to silently mis-handle. (Transitive roles, by contrast, are the
 //! first-in-line extension: absent inverses they need a `∀₊`-propagation rule but no
 //! blocking change — Horrocks & Sattler 1999; implemented behind the OPT-IN
-//! `dl_transitive` feature and argued in full in §5a below, [GPT-5.6] sq-zfwzq.)
+//! `dl_transitive` feature and argued in full in §5a below, sq-zfwzq.)
 //!
-//! # 5a. Transitive roles — the opt-in `dl_transitive` extension ([GPT-5.6] sq-zfwzq)
+//! # 5a. Transitive roles — the opt-in `dl_transitive` extension (sq-zfwzq)
 //!
 //! Under the OPT-IN `dl_transitive` cargo feature (OFF by default; with it off this module
 //! compiles to exactly the ALCH tableau above) the fragment grows by TRANSITIVE role
@@ -526,7 +526,7 @@ struct System {
     /// Strict super-roles per role (transitive closure of `rdfs:subPropertyOf`);
     /// reflexivity is handled in [`System::is_subrole`].
     super_roles: FxHashMap<Id, FxHashSet<Id>>,
-    /// Roles asserted transitive (`Trans(T)`; module docs §5a). [GPT-5.6] sq-zfwzq.
+    /// Roles asserted transitive (`Trans(T)`; module docs §5a). sq-zfwzq.
     #[cfg(feature = "dl_transitive")]
     transitive_roles: FxHashSet<Id>,
     /// ∀₊-propagation table (module docs §5a): the interned id of each `∀R.C` ↦ the
@@ -673,7 +673,7 @@ fn preprocess(onto: &Ontology, extra: Option<&ClassExpression>) -> (System, Fore
         if let Axiom::SubObjectPropertyOf { sub, sup } = axiom {
             direct.entry(sub.named()).or_default().insert(sup.named());
         }
-        // [GPT-5.6] sq-zfwzq (opt-in `dl_transitive`): record `Trans(T)` declarations for
+        // sq-zfwzq (opt-in `dl_transitive`): record `Trans(T)` declarations for
         // the ∀₊-rule (module docs §5a).
         #[cfg(feature = "dl_transitive")]
         if let Axiom::TransitiveObjectProperty { property } = axiom {
@@ -788,7 +788,7 @@ fn preprocess(onto: &Ontology, extra: Option<&ClassExpression>) -> (System, Fore
         });
     }
 
-    // [GPT-5.6] sq-zfwzq (opt-in `dl_transitive`): pre-intern the ∀₊-closure `sub⁺(O)` and
+    // sq-zfwzq (opt-in `dl_transitive`): pre-intern the ∀₊-closure `sub⁺(O)` and
     // build the ∀₊-propagation table (module docs §5a). For every `∀R.C` in the closure and
     // every transitive `T ⊑* R`, the ∀₊-rule may add `∀T.C`, so that concept must be part of
     // the interned universe BEFORE expansion (termination step 1 stays structural: the rules
@@ -943,7 +943,7 @@ fn saturate(f: &mut Forest, sys: &System, s: &mut Search) -> Result<Step, Exhaus
                             }
                             changed = true;
                         }
-                        // [GPT-5.6] sq-zfwzq ∀₊-rule (module docs §5a, opt-in
+                        // sq-zfwzq ∀₊-rule (module docs §5a, opt-in
                         // `dl_transitive`): for `∀R.C ∈ L(src)` and a transitive `T` with
                         // `S ⊑* T ⊑* R` (the `T ⊑* R` half is pre-baked into the table
                         // entry), add `∀T.C` to `L(tgt)` — the Horrocks–Sattler propagation

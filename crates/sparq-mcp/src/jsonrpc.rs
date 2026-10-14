@@ -1,22 +1,22 @@
 //! Minimal JSON-RPC 2.0 framing for the MCP wire protocol.
 //!
-//! [OPUS-4.8] (sq-0z43i, gh #909) MCP messages are JSON-RPC 2.0 objects. We model
+//! (sq-0z43i, gh #909) MCP messages are JSON-RPC 2.0 objects. We model
 //! only the subset MCP uses — a request/notification (`method` + optional `params` +
 //! optional `id`) and a response (`result` XOR `error`) — over `serde_json::Value`,
 //! so no heavy dependency or codegen is needed. The transport (stdio, in `transport`)
 //! is line-delimited: one JSON value per line — an object, or, since the MCP 2025-03-26
-//! revision requires receiving them, a top-level batch array. [OPUS-5] gh #2497
+//! revision requires receiving them, a top-level batch array. gh #2497
 //!
 //! Why hand-rolled rather than the official `rmcp` SDK: assessed 2026-07-28 in
 //! `research/mcp-rmcp-sdk-adoption-assessment.md` (sq-95zda, gh #3219). Verdict was to
 //! keep this module — `rmcp` would replace it and `transport` (146 lines together) at the
 //! cost of an unconditional async runtime, and neither the vendoring-policy nor the
 //! cargo-vet precondition held at the time. That record also lists the triggers that
-//! should reopen the question; an HTTP/SSE transport is the strongest one. [SONNET-4.6]
+//! should reopen the question; an HTTP/SSE transport is the strongest one.
 //! That trigger fired and was re-assessed 2026-07-29 in
 //! `research/mcp-streamable-http-transport-design.md` (sq-2c0f0, gh #3221): the verdict
 //! held — a Streamable HTTP transport on the axum stack already in the workspace lock adds
-//! no new crate to audit, where `rmcp` would. [OPUS-5]
+//! no new crate to audit, where `rmcp` would.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -114,5 +114,5 @@ pub const INTERNAL_ERROR: i64 = -32603;
 /// MCP's implementation-defined error code for "the requested resource does not exist",
 /// returned by `resources/read` and `resources/subscribe`. The pod server reuses it for
 /// the existence-non-disclosure case too, so an unreadable resource is reported exactly
-/// like a nonexistent one. [SONNET-4.6] sq-cmjmr
+/// like a nonexistent one. sq-cmjmr
 pub const RESOURCE_NOT_FOUND: i64 = -32002;

@@ -1,5 +1,5 @@
 //! Oracle verdict types — **wrong-result strictly distinguished from engine-error**.
-//! [FABLE-5] sq-gum8.6
+//! sq-gum8.6
 //!
 //! Every oracle in this crate returns a [`Verdict`] with exactly three top-level states:
 //!
@@ -29,15 +29,15 @@ pub enum OracleKind {
     /// Cross-engine differential oracle (see [`crate::differential`]).
     Differential,
     /// Ternary logic partitioning under **set** semantics — the `DISTINCT` variant, whose
-    /// partitions recombine by set union (see [`crate::distinct`]). [OPUS-5] sq-gum8.12
+    /// partitions recombine by set union (see [`crate::distinct`]). sq-gum8.12
     TlpDistinct,
     /// Ternary logic partitioning recombined through an **aggregate** — `COUNT`/`SUM`
     /// over the three branches, with SPARQL's aggregate error semantics (see
-    /// [`crate::aggregate`]). [OPUS-5] sq-gum8.12
+    /// [`crate::aggregate`]). sq-gum8.12
     TlpAggregate,
     /// Cross-engine differential oracle in **`ORDER BY` mode** — compared up to
     /// permutation within each sort-key equivalence class (see
-    /// [`crate::differential::check_differential_ordered`]). [OPUS-5] sq-gum8.12
+    /// [`crate::differential::check_differential_ordered`]). sq-gum8.12
     DifferentialOrdered,
 }
 

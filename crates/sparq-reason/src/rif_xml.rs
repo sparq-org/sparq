@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-pbz04.5.3 — OPT-IN RIF/XML importer: parse the W3C RIF-Core
+// sq-pbz04.5.3 — OPT-IN RIF/XML importer: parse the W3C RIF-Core
 // XML presentation syntax into `rif::Document` with Or-split / Exists-flatten
 // desugaring and a fail-closed taxonomy. Requires the `rif-core` feature (wired by
 // the `rif-xml` feature below). When off, zero rif_xml code is compiled.
@@ -14,27 +14,27 @@
 // wrapper is still single-cardinality (duplicate <object> → MalformedXml). The
 // old unique_child("slot", …) check that made duplicate <slot> an error is
 // removed; the per-slot named-arg check replaces the former single-slot guard.
-// [SONNET-4.6] sq-jsgyn
+// sq-jsgyn
 //
 // Opus adversarial-verify fixes applied (sq-pbz04.5.3 post-verify):
 // Fix-1: unconditional alpha-renaming of Exists-declared vars prevents variable
 //        capture in both shadow (Forall ?x … Exists ?x) and sibling (Exists ?y …
-//        Exists ?y) patterns. [SONNET-4.6]
+//        Exists ?y) patterns.
 // Fix-2: fail-closed on non-<formula> children in And/Or/head-And + duplicate
-//        single-cardinality wrappers (<if>, <then>) now abort the import. [SONNET-4.6]
+//        single-cardinality wrappers (<if>, <then>) now abort the import.
 // Fix-3: per-type whitespace handling — xsd:string lexical values preserve exact
 //        whitespace; IRI/numeric/boolean types trim (XSD whitespace-collapse facet).
-//        Removes the global trim_text(true) that was corrupting string literals. [SONNET-4.6]
+//        Removes the global trim_text(true) that was corrupting string literals.
 // Fix-4: func:count → Builtin::ListLength added to iri_to_builtin (was wrongly
-//        rejected as UnknownExternal). [SONNET-4.6]
-// Fix-5: honesty claims in module docs updated to match final behaviour. [SONNET-4.6]
+//        rejected as UnknownExternal).
+// Fix-5: honesty claims in module docs updated to match final behaviour.
 // Fix-6: <declare> with != 1 <Var> child now returns MalformedXml in BOTH the
 //        Exists arm (parse_condition) and the Forall arm (parse_sentence). The old
 //        filter_map(.first()) silently dropped all but the first Var, leaving the
 //        others unrenamed and causing variable capture (demonstrated: Exists
 //        <declare>?a ?b</declare> conflated universal ?b with existential ?b).
 //        Fail-closed beats guessing; multi-Var-per-declare is not schema-valid
-//        RIF-XML. [SONNET-4.6]
+//        RIF-XML.
 // sq-anuo9: residual silent-drop class (adversarial re-verify of #1461). Single-cardinality
 //        wrappers read via `.children.first()` dropped surplus siblings on non-schema-valid
 //        input — <if> dropping its 2nd conjunct WEAKENS the body -> OVER-derivation (the
@@ -43,7 +43,7 @@
 //        also TOLERATED a stray non-<Var> sibling. Fix: the `only_child` helper enforces
 //        exactly-one-child fail-closed (MalformedXml) on every such wrapper, and <declare>
 //        now requires exactly one child that is a <Var>. Conformant RIF-XML is unaffected by
-//        design. [SONNET-4.6]
+//        design.
 // Beads for deferred low-priority items: see bead notes inline.
 
 //! # `rif_xml` — W3C RIF-Core XML importer
@@ -80,7 +80,7 @@
 //! # }
 //! ```
 //!
-//! ## Positional predicate atoms — `Atom(op args…)` [SONNET-4.6] sq-n7y15
+//! ## Positional predicate atoms — `Atom(op args…)` sq-n7y15
 //!
 //! RIF-Core's XML presentation syntax uses `<Atom>` for **positional (ordered-argument)
 //! predicate calls** — the dominant form in real W3C RIF Core test files. This importer
@@ -199,7 +199,7 @@ pub enum ImportError {
         /// The location IRI of the import.
         location: String,
     },
-    /// [SONNET-4.6] sq-wbql1 — the imports-closure consistency check detected a
+    /// sq-wbql1 — the imports-closure consistency check detected a
     /// GENUINE incompatibility in an `<Import>` directive: the imported document's
     /// `profile` designates a non-Core dialect, or the combined imports-closure fails
     /// RIF-Core validation. This is a NON-VACUOUS rejection: it demonstrates detecting
@@ -345,7 +345,7 @@ impl XmlNode {
     /// they keep the module's fail-closed "nothing is silently skipped or dropped" contract
     /// airtight. `Ok(None)` is returned when the wrapper is ABSENT so each caller keeps its own
     /// "missing" diagnostic. Conformant RIF-XML has at most one of each wrapper, so this rejects
-    /// only malformed input. `ctx` names the parent for the diagnostic. [OPUS-4.8] sq-4l1fj
+    /// only malformed input. `ctx` names the parent for the diagnostic. sq-4l1fj
     fn unique_child(&self, tag: &str, ctx: &str) -> Result<Option<&XmlNode>, ImportError> {
         // Iterate `self.children` directly (not via `children_named`, whose returned
         // iterator borrows `tag`) so the returned `&XmlNode` binds to `&self`.
@@ -372,7 +372,7 @@ impl XmlNode {
     /// here keeps the module's fail-closed "nothing is silently skipped or dropped"
     /// contract honest. Conformant RIF-XML always has exactly one child in these
     /// wrappers, so this rejects only malformed input. `ctx` names the wrapper for the
-    /// diagnostic. [SONNET-4.6] sq-anuo9
+    /// diagnostic. sq-anuo9
     fn only_child(&self, ctx: &str) -> Result<&XmlNode, ImportError> {
         match self.children.as_slice() {
             [one] => Ok(one),
@@ -525,7 +525,7 @@ fn parse_xml_tree(xml_bytes: &[u8]) -> Result<XmlNode, ImportError> {
             // Event::GeneralRef in quick-xml 0.40+.  Resolve the five predefined XML
             // entities and numeric character references (decimal + hex); unknown general
             // entities are fail-closed (MalformedXml) — we never silently drop bytes.
-            // [SONNET-4.6]
+            //
             Event::GeneralRef(r) => {
                 let name =
                     r.decode().map_err(|e| ImportError::MalformedXml(format!("{}", e)))?;
@@ -559,7 +559,7 @@ fn local_name_str(bytes: &[u8]) -> String {
 /// - Hexadecimal numeric character references: `#x26` / `#X26` → `&`.
 ///
 /// Unknown general entities (e.g. `foo` for `&foo;`) → `MalformedXml` (fail-closed;
-/// we never silently drop a character). [SONNET-4.6]
+/// we never silently drop a character).
 fn resolve_xml_entity(name: &str) -> Result<String, ImportError> {
     if let Some(rep) = quick_xml::escape::resolve_predefined_entity(name) {
         return Ok(rep.to_string());
@@ -607,7 +607,7 @@ fn read_attrs(e: &quick_xml::events::BytesStart<'_>) -> Result<Vec<(String, Stri
         // produces `"http://ex/?a=1&b=2"` rather than the literal `"&amp;"` text.
         // quick_xml::escape::unescape resolves the five predefined XML entities +
         // numeric character references, and returns Err for unknown entities.
-        // [SONNET-4.6]
+        //
         let raw = std::str::from_utf8(&a.value)
             .map_err(|err| ImportError::MalformedXml(format!("{}", err)))?;
         let val = quick_xml::escape::unescape(raw)
@@ -688,7 +688,7 @@ fn iri_to_builtin(iri: &str) -> Result<Builtin, ImportError> {
     if iri == concat_strs(FUNC, "concatenate") {
         return Ok(Builtin::ListConcatenate);
     }
-    // [SONNET-4.6] Fix-4: func:count (list-member count) → Builtin::ListLength.
+    // Fix-4: func:count (list-member count) → Builtin::ListLength.
     // The downstream lowering (list:length) IS implemented; the importer was wrongly
     // rejecting this IRI as UnknownExternal (Opus adversarial-verify finding).
     if iri == concat_strs(FUNC, "count") {
@@ -799,7 +799,7 @@ const RIF_IRI_TYPE: &str = "http://www.w3.org/2007/rif#iri";
 /// equal across documents, which would cause a `NegativeEntailmentTest` to
 /// incorrectly report the non-conclusion as "entailed" (the `Local_Constant` W3C
 /// test demonstrates this exactly). We therefore reject `rif:local` constants
-/// fail-closed rather than silently mis-importing them. [SONNET-4.6] sq-n7y15
+/// fail-closed rather than silently mis-importing them. sq-n7y15
 const RIF_LOCAL_TYPE: &str = "http://www.w3.org/2007/rif#local";
 
 /// Parse a `<Const>` or `<Var>` node into a `Term`.
@@ -822,7 +822,7 @@ fn parse_term(node: &XmlNode) -> Result<Term, ImportError> {
                 // would make them structurally equal across documents — a soundness hazard
                 // (a NegativeEntailmentTest with a rif:local non-conclusion would
                 // incorrectly report the non-conclusion as entailed). Reject fail-closed.
-                // [SONNET-4.6] sq-n7y15
+                // sq-n7y15
                 return Err(ImportError::UnrecognizedElement {
                     tag: "Const(rif:local) — local constants are document-scoped; \
                           cross-document identity cannot be faithfully represented \
@@ -1157,7 +1157,7 @@ fn parse_positive_atoms(node: &XmlNode) -> Result<Vec<Atom>, ImportError> {
         "Member" => Ok(vec![parse_member(node)?]),
         "Subclass" => Ok(vec![parse_subclass(node)?]),
         "Equal" => Ok(vec![parse_equal(node)?]),
-        // [SONNET-4.6] sq-n7y15 — positional predicate Atom: Atom(op args...) import.
+        // sq-n7y15 — positional predicate Atom: Atom(op args...) import.
         "Atom" => Ok(vec![parse_positional_atom(node)?]),
         other => {
             check_non_core(other)?;
@@ -1198,7 +1198,7 @@ fn parse_positive_atoms(node: &XmlNode) -> Result<Vec<Atom>, ImportError> {
 ///
 /// Any positional atom that cannot be soundly mapped to an existing variant is rejected
 /// with a clear `ImportError` — never silently imported with altered semantics.
-/// [SONNET-4.6] sq-n7y15
+/// sq-n7y15
 fn parse_positional_atom(node: &XmlNode) -> Result<Atom, ImportError> {
     // <op> is a single-cardinality wrapper: fail-closed on duplicates (sq-4l1fj).
     let op_node = node.unique_child("op", "positional Atom")?.ok_or_else(|| {
@@ -1251,12 +1251,12 @@ fn parse_positional_atom(node: &XmlNode) -> Result<Atom, ImportError> {
     // Map arity → semantically equivalent existing Atom variant.
     // Fail-closed on unsupported arities — never silently mis-import.
     match args.as_slice() {
-        // Arity 1: unary predicate C(arg1) ≡ arg1 # C (membership). [SONNET-4.6] sq-n7y15
+        // Arity 1: unary predicate C(arg1) ≡ arg1 # C (membership). sq-n7y15
         [arg1] => Ok(Atom::Member {
             obj: arg1.clone(),
             class: Term::Iri(pred_iri),
         }),
-        // Arity 2: binary predicate P(arg1, arg2) ≡ arg1[P -> arg2] (frame). [SONNET-4.6] sq-n7y15
+        // Arity 2: binary predicate P(arg1, arg2) ≡ arg1[P -> arg2] (frame). sq-n7y15
         [arg1, arg2] => Ok(Atom::Frame {
             obj: arg1.clone(),
             pred: Term::Iri(pred_iri),
@@ -1299,7 +1299,7 @@ fn parse_positional_atom(node: &XmlNode) -> Result<Atom, ImportError> {
 ///   document with only `<object>` and no `<slot>` is malformed — unlike the prior
 ///   single-slot-only importer, the `<slot>` multiplicity guard is now `>= 1`.
 ///
-/// [SONNET-4.6] sq-jsgyn
+/// sq-jsgyn
 fn parse_frame_atoms(node: &XmlNode) -> Result<Vec<Atom>, ImportError> {
     // <object> is single-cardinality (sq-4l1fj): duplicate <object> → MalformedXml.
     let obj_node = node.unique_child("object", "Frame")?.ok_or_else(|| ImportError::MalformedXml(
@@ -1386,7 +1386,7 @@ fn parse_equal(node: &XmlNode) -> Result<Atom, ImportError> {
 /// Parse the single term child of a single-cardinality wrapper element (e.g.
 /// `<object>TERM</object>`, `<instance>`, `<class>`, `<sub>`, `<sup>`, `<left>`,
 /// `<right>`). Surplus term siblings are rejected (fail-closed, sq-anuo9) rather
-/// than silently dropped by the old `.children.first()`. [SONNET-4.6]
+/// than silently dropped by the old `.children.first()`.
 fn parse_first_term(wrapper: &XmlNode) -> Result<Term, ImportError> {
     let child = wrapper.only_child(&format!("term wrapper <{}>", wrapper.tag))?;
     parse_term(child)
@@ -1481,7 +1481,7 @@ fn parse_condition(node: &XmlNode) -> Result<BodyCond, ImportError> {
             // </Exists>
             // Collect declared variable names (used by alpha_rename_cond in parse_implies).
             //
-            // [SONNET-4.6] Fix-6 + sq-anuo9: fail-closed on <declare> with != 1 child, or a
+            // Fix-6 + sq-anuo9: fail-closed on <declare> with != 1 child, or a
             // single non-<Var> child. The old filter_map(.first()) silently dropped all but
             // the first <Var> (demonstrated capture: Exists <declare>?a ?b</declare> conflated
             // universal ?b with existential ?b); the earlier Fix-6 filter-to-<Var> still
@@ -1520,7 +1520,7 @@ fn parse_condition(node: &XmlNode) -> Result<BodyCond, ImportError> {
                 // N-slot frame → And(obj[p1->v1], obj[p2->v2], …).
                 // Under RIF-Core §2.3 a multi-slot frame is the conjunction of per-slot
                 // frames; this is the semantically equivalent Horn-body lowering.
-                // [SONNET-4.6] sq-jsgyn
+                // sq-jsgyn
                 Ok(BodyCond::And(atoms.into_iter().map(BodyCond::Atom).collect()))
             }
         }
@@ -1528,7 +1528,7 @@ fn parse_condition(node: &XmlNode) -> Result<BodyCond, ImportError> {
         "Subclass" => Ok(BodyCond::Atom(parse_subclass(node)?)),
         "Equal" => Ok(BodyCond::Atom(parse_equal(node)?)),
         "External" => Ok(BodyCond::Atom(parse_external(node)?)),
-        // [SONNET-4.6] sq-n7y15 — positional Atom in body conditions.
+        // sq-n7y15 — positional Atom in body conditions.
         "Atom" => Ok(BodyCond::Atom(parse_positional_atom(node)?)),
         other => {
             check_non_core(other)?;
@@ -1599,7 +1599,7 @@ fn parse_sentence(node: &XmlNode) -> Result<Vec<Rule>, ImportError> {
             // These seed the alpha-rename universe so generated fresh names cannot
             // collide with universally-declared vars.
             //
-            // [SONNET-4.6] Fix-6 + sq-anuo9: identical guard to the Exists arm — reject a
+            // Fix-6 + sq-anuo9: identical guard to the Exists arm — reject a
             // <declare> whose sole child is not a <Var>, or that has != 1 child, instead of
             // silently dropping extras or tolerating a stray non-<Var> sibling.
             let mut forall_vars_vec: Vec<String> = Vec::new();
@@ -1638,7 +1638,7 @@ fn parse_sentence(node: &XmlNode) -> Result<Vec<Rule>, ImportError> {
             }
         }
         // Bare fact (no Forall wrapper) — no existentials are possible.
-        // [SONNET-4.6] sq-n7y15 — "Atom" added: bare positional predicate fact.
+        // sq-n7y15 — "Atom" added: bare positional predicate fact.
         // Multi-slot Frame: one Rule::fact per slot. [sq-jsgyn]
         "Frame" | "Member" | "Subclass" | "Equal" | "Atom" => {
             let atoms = parse_positive_atoms(node)?;
@@ -1675,7 +1675,7 @@ fn parse_implies(node: &XmlNode, forall_vars: &BTreeSet<String>) -> Result<Vec<R
     // Parse the body condition. Single-cardinality: the <if> holds exactly one condition.
     // A surplus condition sibling used to be silently dropped by `.children.first()` — for
     // `<if>` that drops a CONJUNCT, weakening the guard → OVER-derivation (unsound). This is
-    // the soundness-relevant site; reject surplus fail-closed (sq-anuo9). [SONNET-4.6]
+    // the soundness-relevant site; reject surplus fail-closed (sq-anuo9).
     let body_child = if_node.only_child("<if>")?;
     let body_cond = parse_condition(body_child)?;
 
@@ -1689,7 +1689,7 @@ fn parse_implies(node: &XmlNode, forall_vars: &BTreeSet<String>) -> Result<Vec<R
 
     // Parse the head. Single-cardinality: the <then> holds exactly one head element (a
     // positive atom or a conjunctive <And>). A surplus head sibling used to be silently
-    // dropped → under-derivation; reject it fail-closed (sq-anuo9). [SONNET-4.6]
+    // dropped → under-derivation; reject it fail-closed (sq-anuo9).
     let then_child = then_node.only_child("<then>")?;
     let head = parse_head(then_child)?;
 
@@ -1707,7 +1707,7 @@ fn parse_implies(node: &XmlNode, forall_vars: &BTreeSet<String>) -> Result<Vec<R
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Imports-closure consistency check  [SONNET-4.6] sq-wbql1
+// Imports-closure consistency check  sq-wbql1
 // ---------------------------------------------------------------------------
 
 /// The W3C RIF-Core profile IRI. An `<Import>` whose `profile` attribute names a
@@ -1951,7 +1951,7 @@ pub fn import(xml_bytes: &[u8]) -> Result<Document, ImportError> {
     Ok(doc)
 }
 
-/// [SONNET-4.6] sq-wbql1 — Parse a RIF-Core XML document and compute the
+/// sq-wbql1 — Parse a RIF-Core XML document and compute the
 /// **imports-closure consistency check** using a caller-supplied resolver.
 ///
 /// Unlike [`import`], this function does NOT blanket-refuse `<Import>` directives.
@@ -3245,7 +3245,7 @@ mod tests {
     // turning the `expect_err`/`unwrap_err` RED. Conformant RIF-XML (exactly one child
     // per wrapper) is unaffected: the paired control in the `<if>` test imports fine, and
     // the full existing suite (MINIMAL_RULE_XML, OR_SPLIT_XML, EXISTS_FLATTEN_XML, …)
-    // stays green. [SONNET-4.6]
+    // stays green.
 
     /// Assert `xml` is rejected with `MalformedXml` whose message mentions `needle`.
     fn assert_surplus_rejected(xml: &[u8], needle: &str) {
@@ -3600,7 +3600,7 @@ mod tests {
     /// returns `Ok` — it silently accepts the document and drops the second Var,
     /// leaving ?b unrenamed. With the guard this test returns `Err(MalformedXml)`
     /// and the assertion passes; removing the guard causes the `expect_err` to panic
-    /// (import returns `Ok`), making the test RED. [SONNET-4.6]
+    /// (import returns `Ok`), making the test RED.
     #[test]
     fn test_reject_multi_var_declare_exists() {
         let err = import(MULTI_VAR_DECLARE_EXISTS_XML)
@@ -3706,7 +3706,7 @@ mod tests {
     //  C. Unknown general entities (&undefined;) must be fail-closed (MalformedXml),
     //     not silently dropped.
     //
-    // [SONNET-4.6]
+    //
 
     /// Entity references in text content must be decoded correctly.
     ///
@@ -3718,7 +3718,7 @@ mod tests {
     /// the text node accumulates only the adjacent text (`a`, `b `, `c`, ` `, `d`),
     /// producing `"ab c d"` instead of `"a&b <c> &d"`.  The `assert_eq!` below then
     /// fails, turning this test RED.  Restore the `Event::GeneralRef` arm to make it
-    /// GREEN again. [SONNET-4.6]
+    /// GREEN again.
     #[test]
     fn test_entity_text_roundtrip() {
         // RIF Document with a bare Frame fact whose val Const is an xsd:string
@@ -3760,7 +3760,6 @@ mod tests {
     /// Mutation check annotation: if `read_attrs` is reverted to use
     /// `str::from_utf8(&a.value).to_string()` (without `quick_xml::escape::unescape`),
     /// the datatype will contain the literal `"&amp;"` and the `assert_eq!` will fail.
-    /// [SONNET-4.6]
     #[test]
     fn test_entity_attr_roundtrip() {
         // Bare Frame fact with a typed literal whose datatype IRI contains &amp; in the
@@ -3794,7 +3793,7 @@ mod tests {
     }
 
     /// An unknown general entity reference (&undefined;) must produce MalformedXml,
-    /// never silently drop the reference text. [SONNET-4.6]
+    /// never silently drop the reference text.
     #[test]
     fn test_reject_unknown_entity() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -3857,7 +3856,7 @@ mod tests {
     // (`Ok(self.children.iter().find(|c| c.tag == tag))`) makes every `import` below return `Ok`
     // (silently taking the first wrapper), flipping the `unwrap_err`/`expect_err` RED. Conformant
     // RIF-XML has at most one of each wrapper, so every valid-document test stays green (the
-    // paired controls below import cleanly). [OPUS-4.8]
+    // paired controls below import cleanly).
 
     /// Assert `xml` is rejected with a `MalformedXml` DUPLICATE-wrapper diagnostic naming `tag`.
     /// Asserts the word "duplicate" so the test pins the `unique_child` path specifically (the
@@ -3944,7 +3943,7 @@ mod tests {
     /// `parse_positive_atoms` back to `parse_positive_atom` (single-atom) breaks
     /// compilation OR causes the test to fail if a single-atom shim is inserted
     /// (it returns one rule with only the first slot → `doc.rules.len() == 1` →
-    /// assertion `2` fails → RED). [SONNET-4.6] sq-jsgyn
+    /// assertion `2` fails → RED). sq-jsgyn
     #[test]
     fn test_multislot_bare_fact_desugars_to_per_slot_facts() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -3993,7 +3992,7 @@ mod tests {
     /// Mutation-check: reverting the `"Frame"` arm in `parse_condition` from
     /// `parse_frame_atoms` + `BodyCond::And` back to `parse_frame` (single atom)
     /// causes the rule body to contain only 1 atom → `rule.body.len() == 1` →
-    /// assertion `2` fails → RED. [SONNET-4.6] sq-jsgyn
+    /// assertion `2` fails → RED. sq-jsgyn
     #[test]
     fn test_multislot_body_desugars_to_conjunction() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4050,7 +4049,7 @@ mod tests {
     ///
     /// Mutation-check: reverting `parse_head` from `extend(parse_positive_atoms(…))`
     /// back to `push(parse_positive_atom(…))` causes the head to contain only 1 atom
-    /// → `rule.head.len() == 1` → assertion `2` fails → RED. [SONNET-4.6] sq-jsgyn
+    /// → `rule.head.len() == 1` → assertion `2` fails → RED. sq-jsgyn
     #[test]
     fn test_multislot_head_desugars_to_multiple_head_atoms() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4101,7 +4100,7 @@ mod tests {
     ///
     /// The desugaring is not limited to exactly 2 slots; a 3-slot frame in a rule
     /// body must produce 3 body atoms. This test prevents a "only handle 2 slots"
-    /// regression. [SONNET-4.6] sq-jsgyn
+    /// regression. sq-jsgyn
     #[test]
     fn test_multislot_three_slots_in_body() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4143,7 +4142,7 @@ mod tests {
     ///
     /// Mutation-check: removing the `slots.is_empty()` guard from `parse_frame_atoms`
     /// causes this to return `Ok(vec![])` → a rule with an empty head atom list →
-    /// the `expect_err` panics → RED. [SONNET-4.6] sq-jsgyn
+    /// the `expect_err` panics → RED. sq-jsgyn
     #[test]
     fn test_multislot_frame_zero_slots_rejected() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4173,7 +4172,7 @@ mod tests {
     /// Mutation-check: removing the `slot.child("Name").is_some()` guard in
     /// `parse_frame_atoms` would allow the named-arg slot to pass through as
     /// a malformed term, corrupting the import silently → `expect_err` panics →
-    /// RED. [SONNET-4.6] sq-jsgyn
+    /// RED. sq-jsgyn
     #[test]
     fn test_multislot_named_arg_slot_rejected() {
         // A 2-slot Frame where the second slot is a named-argument uniterm.
@@ -4219,7 +4218,7 @@ mod tests {
     /// the `pred` distinctness assertion would fail → RED.
     ///
     /// This directly tests the per-slot `atoms.push(…)` loop in `parse_frame_atoms`
-    /// is called for EVERY slot, not just one. [SONNET-4.6] sq-jsgyn
+    /// is called for EVERY slot, not just one. sq-jsgyn
     #[test]
     fn test_multislot_split_mutation_per_slot_distinctness() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4621,7 +4620,7 @@ mod tests {
         assert_eq!(rule.head.len(), 1);
     }
 
-    /// Positional Atom in the HEAD of a rule imports as Frame. [SONNET-4.6] sq-n7y15
+    /// Positional Atom in the HEAD of a rule imports as Frame. sq-n7y15
     #[test]
     fn test_positional_atom_in_rule_head() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4664,7 +4663,7 @@ mod tests {
         );
     }
 
-    /// Arity-0 positional Atom is rejected fail-closed. [SONNET-4.6] sq-n7y15
+    /// Arity-0 positional Atom is rejected fail-closed. sq-n7y15
     #[test]
     fn test_positional_atom_arity_0_rejected() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4683,7 +4682,7 @@ mod tests {
         );
     }
 
-    /// Arity-3+ positional Atom is rejected fail-closed. [SONNET-4.6] sq-n7y15
+    /// Arity-3+ positional Atom is rejected fail-closed. sq-n7y15
     #[test]
     fn test_positional_atom_arity_3_rejected() {
         let xml = br#"<Document xmlns="http://www.w3.org/2007/rif#">
@@ -4706,7 +4705,7 @@ mod tests {
         );
     }
 
-    /// Non-IRI operator in a positional Atom is rejected fail-closed. [SONNET-4.6] sq-n7y15
+    /// Non-IRI operator in a positional Atom is rejected fail-closed. sq-n7y15
     #[test]
     fn test_positional_atom_non_iri_op_rejected() {
         // Literal-typed Const (xsd:string) is not a valid predicate IRI.
@@ -4730,7 +4729,7 @@ mod tests {
 
     /// Mutation check: swapping arg order (arg1 ↔ arg2) in a binary positional Atom
     /// must change the parsed Frame (obj ≠ val). This proves that arg ORDER is preserved
-    /// and the mapping is not accidentally order-insensitive. [SONNET-4.6] sq-n7y15
+    /// and the mapping is not accidentally order-insensitive. sq-n7y15
     #[test]
     fn test_positional_atom_arg_order_mutation() {
         // Normal order: Atom(P, a, b) → Frame{obj=a, pred=P, val=b}
@@ -4793,7 +4792,7 @@ mod tests {
 
     /// Positional Atom with variables round-trips through the rule engine (fact + rule).
     /// Proves the REAL path works end-to-end: binary Atom fact asserted, binary Atom rule
-    /// body matches it, Frame head derived. [SONNET-4.6] sq-n7y15
+    /// body matches it, Frame head derived. sq-n7y15
     #[test]
     fn test_positional_atom_end_to_end_rule_engine() {
         use sparq_core::dict::Dict;
@@ -4839,7 +4838,7 @@ mod tests {
         // The triple (http://ex/a, http://ex/relatedTo, http://ex/b) must be in the closure.
         // Use intern_iri — the IRIs are now in the dict after the closure run, so intern
         // returns the existing Id (no new allocation needed). A closure triple [s,p,o]
-        // with all three Ids present proves the derivation fired. [SONNET-4.6] sq-n7y15
+        // with all three Ids present proves the derivation fired. sq-n7y15
         let s_id = dict.intern_iri("http://ex/a");
         let p_id = dict.intern_iri("http://ex/relatedTo");
         let o_id = dict.intern_iri("http://ex/b");
@@ -4889,7 +4888,7 @@ mod tests {
         }
     }
 
-    // ---- [SONNET-4.6] sq-wbql1: imports-closure consistency check tests ----
+    // ---- sq-wbql1: imports-closure consistency check tests ----
 
     const EMPTY_GROUP_DOC: &[u8] = br#"<Document xmlns="http://www.w3.org/2007/rif#">
   <payload><Group></Group></payload>

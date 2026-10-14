@@ -1,10 +1,10 @@
-// [GPT-6] Synthetic, NONcanonical stage-13 experiment; not external security assurance.
+// Synthetic, NONcanonical stage-13 experiment; not external security assurance.
 //! Run with a strict experiment JSON and a new output directory. No real wallet input.
 #[path = "../src/toolchain.rs"]
 mod toolchain;
 #[path = "result_experiment/workloads.rs"]
 mod workloads;
-// [OPUS-5.5] beadzkp-15.1.1: separately versioned schema-3 v1/v4 ablation mode.
+// beadzkp-15.1.1: separately versioned schema-3 v1/v4 ablation mode.
 #[path = "result_experiment/public_pattern.rs"]
 mod public_pattern;
 
@@ -230,7 +230,7 @@ fn command(tool: &str, args: &[&str], cwd: &Path) -> Fallible<String> {
         .trim()
         .to_owned())
 }
-// [OPUS-5.5] Checks raw, untrimmed stdout: generic trimming would rescue leading blanks.
+// Checks raw, untrimmed stdout: generic trimming would rescue leading blanks.
 fn pinned_version(tool: &str, out: Output) -> Fallible<String> {
     let stdout = successful_stdout(tool, out)?;
     let version = String::from_utf8(stdout).map_err(|e| {
@@ -315,7 +315,7 @@ fn rejection(
         Ok(_) => Err("tampered presentation was accepted".into()),
     }
 }
-// [OPUS-5.5] beadzkp-15.1.1: one measured relation, so every adapter mode shares
+// beadzkp-15.1.1: one measured relation, so every adapter mode shares
 // the same prove/verify/replay/tamper/artifact pipeline instead of copying it.
 /// One proof relation under measurement, with its exact request and wire version.
 struct Relation<'a> {
@@ -529,7 +529,7 @@ fn run_relation(
     Ok(p)
 }
 
-// [GPT-6] Preserve measurements on failures too. Driver events are nested inside
+// Preserve measurements on failures too. Driver events are nested inside
 // an inclusive API span, so adding the two levels would double count work.
 fn driver_stage<T>(
     record: &mut Value,
@@ -582,7 +582,7 @@ struct SchemaProbe {
     schema_version: u32,
 }
 
-// [OPUS-5.5] beadzkp-15.1.1: both schemas still parse the original bytes strictly,
+// beadzkp-15.1.1: both schemas still parse the original bytes strictly,
 // so duplicate or unknown keys cannot survive an intermediate `Value` round trip.
 fn parse_manifest(bytes: &[u8]) -> Fallible<Manifest> {
     let probe: SchemaProbe = serde_json::from_slice(bytes)?;
@@ -869,7 +869,7 @@ mod tests {
         );
     }
 
-    // [OPUS-5.5] Synthetic `Output`s exercise the adapter boundary without spawning tools.
+    // Synthetic `Output`s exercise the adapter boundary without spawning tools.
     #[cfg(unix)]
     #[test]
     fn tool_versions_are_checked_on_raw_successful_stdout() {

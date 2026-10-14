@@ -14,7 +14,7 @@ keywords.workspace = true
 categories.workspace = true
 description = "ZK derived-credential commitment pipeline + zk-trace seam for sparq (RDFC10 canonicalization, Poseidon2-BN254 per-graph commitments, <urn:sparq:zk> registry plumbing)"
 readme = "README.md"
-# [GPT-5.6] Published only as the externally unaudited, default-off dependency used by
+# Published only as the externally unaudited, default-off dependency used by
 # sparq-server and sparq-trust; this does not change the crate's security posture.
 
 # NOTHING in the workspace depends on this crate: default builds, the wasm
@@ -23,7 +23,7 @@ readme = "README.md"
 
 [features]
 default = []
-# [OPUS-4.8] sq-zzxt: the `value-only` commitment method — a single value-first
+# sq-zzxt: the `value-only` commitment method — a single value-first
 # leaf with the lexical-identity hash DROPPED (term identity lost entirely). It is
 # a BENCHMARK / RESEARCH comparison dial only and NEVER a production default
 # (`research/zk-configurable-commitment-design.md` §2.2, §10 default (2)). OFF by
@@ -32,7 +32,7 @@ default = []
 # name is the warning. LEAN: adds NO dependency. (`string-canonical` and
 # `dual-leaf` are always available; only the research dial is gated.)
 commitment-value-only = []
-# [OPUS-4.8] sq-xojl: the DUAL-LEAF value-lane HOST ENCODING (`dual_leaf` module)
+# sq-xojl: the DUAL-LEAF value-lane HOST ENCODING (`dual_leaf` module)
 # — VALUE_HOOK + lexical-identity hash in one leaf, the host mirror of the
 # `filter_value_dl_int` Noir circuit member. OFF by default: the default
 # string-canonical pipeline (`encode.rs`/`commit.rs`) is byte-unchanged and the
@@ -42,7 +42,7 @@ commitment-value-only = []
 # documented INV-VL downgrade (#769 accepted, CR-G8 / sq-qhy4); NOT externally
 # audited. LEAN: adds NO dependency (reuses the existing blake3 / poseidon2).
 dual-leaf = []
-# [OPUS-4.8] sq-bevd3 (Phase 3, epic sq-0dksu): the PER-METHOD security-properties
+# sq-bevd3 (Phase 3, epic sq-0dksu): the PER-METHOD security-properties
 # annotation graph (`secprop` module) — the machine-readable form of the
 # zk-configurable-commitment-security.md §4 posture table, keyed on the `zk:scheme` /
 # `zk:cryptosuite` IRIs this crate's registry records, plus the over-claim GUARDS
@@ -51,7 +51,7 @@ dual-leaf = []
 # byte-unchanged and the `secprop` module is compiled out. Pulls in the `oxttl`
 # Turtle parser to load the static graph.
 #
-# [OPUS-5] sq-3705: the `secx:` IRIs the graph references now come from the
+# sq-3705: the `secx:` IRIs the graph references now come from the
 # ZERO-dependency `sparq-secprop-vocab` leaf, which owns the constants, the canonical
 # `secprop-ext.ttl` and the single drift test. They used to be redeclared LOCALLY and
 # pinned by an `include_str!("../../sparq-trust/…")` — sparq-trust depends on sparq-zk,
@@ -63,7 +63,7 @@ dual-leaf = []
 # RECORDS claims + their epistemic basis; asserts NO soundness/privacy property (estate
 # NOT externally audited, sq-qhy4).
 secprop-annotations = ["dep:oxttl", "dep:sparq-secprop-vocab"]
-# [OPUS-4.8] sq-9c5e: the OFF-circuit W3C Verifiable-Credential ingest BRIDGE
+# sq-9c5e: the OFF-circuit W3C Verifiable-Credential ingest BRIDGE
 # (`vc_bridge` module) — verify a source VC's W3C Data-Integrity proof
 # (`eddsa-rdfc-2022` / `ecdsa-rdfc-2019`) at the HOST (off-circuit, fail-closed),
 # then re-commit under sparq's commitment pipeline and record the
@@ -77,7 +77,7 @@ secprop-annotations = ["dep:oxttl", "dep:sparq-secprop-vocab"]
 # audited (sq-qhy4); the bridge verifies the DI hashing off-circuit and asserts no
 # in-circuit / soundness property. design `research/zk-configurable-commitment-design.md` §5.
 #
-# [OPUS-5] sq-txg1y (issue #3234, follow-up to sq-9c5e) EXTENDS this feature twice,
+# sq-txg1y (issue #3234, follow-up to sq-9c5e) EXTENDS this feature twice,
 # and both additions are why the dependency list grew:
 #   * `ecdsa-rdfc-2019` with a **P-384** key (the W3C SHA-384 profile,
 #     vc-di-ecdsa §A.3) now verifies instead of failing closed as
@@ -93,7 +93,7 @@ secprop-annotations = ["dep:oxttl", "dep:sparq-secprop-vocab"]
 # touches the JSON-LD path. `oxjsonld` is driven with a caller-supplied context
 # allowlist and NO network (see `vc_bridge_json`'s module docs).
 #
-# [OPUS-5] sq-u5y1f (issue #3235) adds the SELECTIVE-DISCLOSURE ingest SEAM
+# sq-u5y1f (issue #3235) adds the SELECTIVE-DISCLOSURE ingest SEAM
 # (`vc_bridge_sd`) under this same gate, and adds NO dependency: a real BBS /
 # `ecdsa-sd-2023` verifier is not in-repo, so `bbs-2023` / `ecdsa-sd-2023` are
 # DELEGATED to a host-supplied `SelectiveDisclosureVerifier` trait impl (the BBS/SD
@@ -116,19 +116,19 @@ vc-bridge = [
 # sparq term model / store / engine. The engine dep turns on its non-default
 # `zk` feature (the zk-trace executor seam); that feature only exists inside
 # sparq-zk's own dependency graph.
-sparq-core = { path = "../sparq-core", version = "0.1.5" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.5", features = ["zk"] }
+sparq-core = { path = "../sparq-core", version = "0.1.6" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.6", features = ["zk"] }
 oxrdf = { workspace = true }
 spargebra = { workspace = true }
 
 # RDFC-1.0 (W3C RDF Dataset Canonicalization) — single-sourced in the opt-in
 # `sparq-canon` crate (the public canonicalization surface; sq-0qip). It owns
 # the oxrdf 0.3 <-> 0.2 bridge and the rdf-canon dependency, so `sparq-zk`'s
-# `canon` module is now just a re-export. [OPUS-4.8]
-sparq-canon = { path = "../sparq-canon", version = "0.1.5" }
+# `canon` module is now just a re-export.
+sparq-canon = { path = "../sparq-canon", version = "0.1.6" }
 
 # BN254 scalar field (the Noir `Field`) for Poseidon2.
-# [OPUS-4.8] The whole arkworks stack (ark-bn254/ark-ff/ark-ec/ark-serialize/ark-ed-on-bn254/
+# The whole arkworks stack (ark-bn254/ark-ff/ark-ec/ark-serialize/ark-ed-on-bn254/
 # ark-std) is bumped 0.5 -> 0.6 TOGETHER: the traits are version-coupled, so a partial bump
 # (Dependabot PRs #21 ark-std / #22 ark-ed-on-bn254 in isolation) mixes 0.5/0.6 trait
 # coherence and fails to compile. The combined bump compiles clean and all sparq-zk tests
@@ -139,13 +139,13 @@ ark-ff = { version = "0.6", default-features = false }
 # Off-circuit string hash h_s (plan §2.2: Enc_t(term) = h_2(type_code, h_s(value))).
 blake3 = "1"
 
-# [OPUS-4.8] sq-bevd3 — OPTIONAL, `secprop-annotations` feature only. The oxigraph
+# sq-bevd3 — OPTIONAL, `secprop-annotations` feature only. The oxigraph
 # Turtle parser used to load the static per-method annotation graph
 # (`ontologies/secprop-methods.ttl`). Same `oxttl` the rest of the workspace uses
 # (sparq-core / sparq-trust). The default build pulls neither it nor the module.
 oxttl = { workspace = true, optional = true }
 
-# [OPUS-5] sq-3705 — OPTIONAL, `secprop-annotations` feature only. The shared
+# sq-3705 — OPTIONAL, `secprop-annotations` feature only. The shared
 # `sec-prop:`/`secx:` IRI constants + the canonical `secprop-ext.ttl` they are pinned
 # to. A ZERO-dependency LEAF crate deliberately placed BELOW sparq-trust (the vocabulary's
 # declared owner, which depends on THIS crate), so importing the constants is finally
@@ -153,9 +153,9 @@ oxttl = { workspace = true, optional = true }
 # `include_str!("../../sparq-trust/…")` drift test that broke `cargo package` here. It has
 # no dependencies of its own, so the opt-in build grows by a `const &str` table only and
 # the default build pulls nothing.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.5", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.6", optional = true }
 
-# [OPUS-4.8] sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
+# sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
 # CR-G5): secret-memory hygiene + constant-time-equality PRIMITIVES for the
 # secret-bearing types in this crate. This is timing/memory HYGIENE only — it
 # changes NO crypto algorithm, protocol behaviour, wire format, or verifier
@@ -170,7 +170,7 @@ subtle = "2"
 # OS CSPRNG for the trusted-ingest per-graph salt mint (audit #9 / sq-610): each
 # named graph draws fresh OS-random entropy so its bnode salt is globally unique
 # by construction.
-# [OPUS-4.8] sq-610 / sq-8xug: bumped to the 0.4 line as part of the rand-ecosystem
+# sq-610 / sq-8xug: bumped to the 0.4 line as part of the rand-ecosystem
 # upgrade. getrandom 0.3+ replaced the top-level `getrandom()` fn with `fill()`.
 getrandom = "0.4"
 ark-ed-on-bn254 = { version = "0.6", default-features = false }
@@ -178,7 +178,7 @@ ark-ec = { version = "0.6", default-features = false }
 ark-serialize = { version = "0.6", default-features = false }
 ark-std = { version = "0.6", default-features = false, features = ["std"] }
 
-# [OPUS-4.8] sq-9c5e: OFF-circuit W3C VC ingest-bridge crypto. ALL OPTIONAL +
+# sq-9c5e: OFF-circuit W3C VC ingest-bridge crypto. ALL OPTIONAL +
 # gated behind the OFF-by-default `vc-bridge` feature, so the default build pulls
 # NONE of them (the lean-default constraint). RustCrypto Ed25519 (eddsa-rdfc-2022)
 # + P-256 ECDSA (ecdsa-rdfc-2019) verify the source VC's Data-Integrity proof at
@@ -186,14 +186,14 @@ ark-std = { version = "0.6", default-features = false, features = ["std"] }
 # (SHA-256 for the Ed25519 / P-256 profiles, SHA-384 for the P-384 profile).
 ed25519-dalek = { version = "2", default-features = false, optional = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
-# [OPUS-5] sq-txg1y: the `ecdsa-rdfc-2019` P-384 / SHA-384 profile (vc-di-ecdsa
+# sq-txg1y: the `ecdsa-rdfc-2019` P-384 / SHA-384 profile (vc-di-ecdsa
 # §A.3). Deliberately the 0.13 line — the same RustCrypto `elliptic-curve` /
 # `ecdsa` generation `p256` above is on, so the two curves share one copy of the
 # shared traits instead of unifying to two `elliptic-curve` majors.
 p384 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
 sha2 = { version = "0.10", default-features = false, optional = true }
 
-# [OPUS-5] sq-txg1y: the ADDITIVE JSON-LD VC envelope entry point
+# sq-txg1y: the ADDITIVE JSON-LD VC envelope entry point
 # (`vc_bridge_json`). Same OFF-by-default `vc-bridge` gate as the crypto above.
 #   * serde_json — split a DI-secured VC into (unsecured document, proof config)
 #     and read `proof.cryptosuite` / `proof.verificationMethod` / `proof.proofValue`.

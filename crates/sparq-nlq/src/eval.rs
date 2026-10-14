@@ -1,7 +1,7 @@
 //! Exec-accuracy harness for the NL→SPARQL loop — the design doc's `sparq-nlq`
 //! accuracy gate (`research/genai-design.md` §4): exec-accuracy on a QALD-style set,
 //! **oracle-linking vs end-to-end reported separately** AND **≥ the same LLM without
-//! grounding** ("the grounding must pay for itself"). [OPUS-4.8] sq-05rv
+//! grounding** ("the grounding must pay for itself"). sq-05rv
 //!
 //! ## What "exec-accuracy" means here
 //!
@@ -525,7 +525,7 @@ mod tests {
     /// perfect/partial/disjoint and empty-vs-empty tests never reach. An empty PREDICTED
     /// against a non-empty gold is a total miss (recall 0); a non-empty predicted against
     /// an empty gold is a total false-positive (precision 0). Both score F1 0 and are NOT
-    /// exact. This is the `p == 0` / `g == 0` ratio guard in `F1::score`. [OPUS-4.8]
+    /// exact. This is the `p == 0` / `g == 0` ratio guard in `F1::score`.
     #[test]
     fn f1_one_side_empty_scores_zero_and_is_not_exact() {
         let g = tiny_graph();
@@ -556,7 +556,7 @@ mod tests {
 
     /// Answer-set comparison is a MULTISET — duplicate rows are preserved, so a query that
     /// returns a row twice does NOT collapse it. Guards the `intersection_count` greedy
-    /// merge over duplicates and the `from_result` dup-keeping. [OPUS-4.8]
+    /// merge over duplicates and the `from_result` dup-keeping.
     #[test]
     fn answer_set_is_a_multiset_over_duplicate_rows() {
         let g = tiny_graph();

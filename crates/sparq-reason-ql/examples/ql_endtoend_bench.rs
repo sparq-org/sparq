@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-mg1wx: hermetic OWL 2 QL rewrite-then-execute benchmark.
+//! sq-mg1wx: hermetic OWL 2 QL rewrite-then-execute benchmark.
 //!
 //! The fixture shapes mirror the shallow hierarchy, inverse-role, and conjunctive-query forms
 //! found in NPD/Requiem-style OBDA suites. Every answer count is asserted before its timing row is

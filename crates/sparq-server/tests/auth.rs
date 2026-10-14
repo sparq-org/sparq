@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-zcby (PSS gh-46) — HTTP integration tests for the Bearer-token gate on the
+//! sq-zcby (PSS gh-46) — HTTP integration tests for the Bearer-token gate on the
 //! write surface, plus the optional read gate.
 //!
 //! Each test spins the real axum server on an ephemeral port and drives it over HTTP with
@@ -15,7 +15,7 @@
 //!
 //! Mirrors QLever's `-a <token>` write gate.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -344,7 +344,7 @@ async fn reads_gated_when_read_gate_on() {
     assert_eq!(count_rows_authed(&cl, &base, TOKEN).await, 1);
 }
 
-/// [OPUS-4.8] sq-b3df9 (w3c/sparql-protocol#40): the HTTP `QUERY` method enforces the SAME
+/// sq-b3df9 (w3c/sparql-protocol#40): the HTTP `QUERY` method enforces the SAME
 /// `--auth-token-read` gate as GET/POST — it is a read on the dataset and must NOT bypass the
 /// hot auth path. No header => 401 + `WWW-Authenticate: Bearer`; correct token => 200.
 #[tokio::test]
@@ -389,7 +389,7 @@ async fn query_method_gated_when_read_gate_on() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-9jrx: /metrics is a READ (it leaks the live triple count and the
+// sq-9jrx: /metrics is a READ (it leaks the live triple count and the
 // active-subscription count), so it is gated by --auth-token-read like any other
 // GET. /health stays ungated for liveness probes.
 // ---------------------------------------------------------------------------
@@ -552,7 +552,7 @@ async fn update_via_form_path_is_gated() {
     );
 }
 
-/// [OPUS-4.8] sq-zcby (Copilot PR#71 SECURITY regression test): the auth-bypass fix.
+/// sq-zcby (Copilot PR#71 SECURITY regression test): the auth-bypass fix.
 ///
 /// An `update=` form field IS an update operation BY DEFINITION (SPARQL 1.1 Protocol §2.2),
 /// so it MUST be gated as a write UNCONDITIONALLY — even when its value is a well-formed

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-qcnn) SHACL-SPARQL (`src/sparql.rs`) edge-case correctness
+//! (sq-qcnn) SHACL-SPARQL (`src/sparql.rs`) edge-case correctness
 //! coverage — the genuinely-dark branches of the `sh:sparql` constraint path and
 //! the SHACL §6 SPARQL-based constraint-COMPONENT validator path that the
 //! fixture-gated W3C `sparql/` suites leave uncovered on a fresh checkout.

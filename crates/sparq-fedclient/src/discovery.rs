@@ -42,7 +42,7 @@
 //! missing. It reuses the same [`Fetcher`](crate::discovery::Fetcher) policy seam, caches every
 //! outcome, and fails open on
 //! timeout/error/budget exhaustion. Only a well-formed ASK `false` prunes; successful row counts
-//! replace fallback estimates and otherwise affect ranking/join order only. [GPT-5.6] sq-fx5id.
+//! replace fallback estimates and otherwise affect ranking/join order only. sq-fx5id.
 //!
 //! ## SSRF caution on every fetch
 //!
@@ -52,21 +52,22 @@
 //! uses**: it resolves the host itself and refuses to dial loopback / RFC1918 / link-local
 //! (incl. the `169.254.169.254` cloud-metadata IP) / unique-local / CGNAT addresses, vetting
 //! the *resolved* IP just before connect so a DNS-rebind cannot smuggle an internal address
-//! through. The IP classifier (`is_forbidden_ip`) mirrors
-//! `sparq_engine::service::is_forbidden_ip` (which is `pub(crate)` there, so it is
-//! re-derived here rather than imported); an embedder may relax the policy per-host with
+//! through. The IP classifier (`is_forbidden_ip`) is the engine's own
+//! (`sparq_engine::is_forbidden_ip`); an embedder may relax the policy per-host with
 //! `HttpFetcher::allow_private_host`.
 //!
 //! The network is behind the [`Fetcher`](crate::discovery::Fetcher) trait seam, so the parser
 //! + orchestration are tested with an in-memory [`MapFetcher`](crate::discovery::MapFetcher)
 //! and pay **zero** network in CI.
 //
-// [OPUS-4.8] sq-nfxl (epic sq-dnko): Phase-1 discovery client + Service-Description parser.
+// sq-nfxl (epic sq-dnko): Phase-1 discovery client + Service-Description parser.
 // Net-new: the SD->Capability parser + the SSRF-guarded fetch seam + the ASK fallback.
 // Reused: SourceDescriptor::from_void_nt for the VoID+scs statistics half. Flagged for
 // Fable re-review when available.
 
 use crate::source::pct_encode;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ureq_egress::{Client, GuardedHttp};
 use sparq_fedplan::{SourceDescriptor, SourceId};
 
 // ─── Vocabulary IRIs (must match sparq-server/src/descriptors.rs exactly) ────────────
@@ -82,14 +83,14 @@ const SD_SPARQL11_QUERY: &str = "http://www.w3.org/ns/sparql-service-description
 /// when built with the `service` feature). We surface it as [`Capability::federated_query`].
 const SD_BASIC_FEDERATED_QUERY: &str =
     "http://www.w3.org/ns/sparql-service-description#BasicFederatedQuery";
-/// [OPUS-4.8] sq-yyy3: the sparq PROV-O **data-lineage** extension feature IRI a `sparq-server`
+/// sq-yyy3: the sparq PROV-O **data-lineage** extension feature IRI a `sparq-server`
 /// advertises via `sd:feature` when it serves W3C PROV-O lineage for the data it derives. We
 /// surface it as [`Capability::provenance_lineage`] so a federation client can prefer (or record)
 /// a source that can answer "where did this come from?". An SD that omits it yields the
 /// recall-safe `false` default; it is never inferred from anything but this exact IRI.
 const PROV_LINEAGE_FEATURE_IRI: &str = "http://sparq.dev/ns/prov#lineage";
 
-/// [OPUS-4.8] sq-ym6kf: the `sd:supportedVersion` predicate — the SPARQL 1.2 Service Description
+/// sq-ym6kf: the `sd:supportedVersion` predicate — the SPARQL 1.2 Service Description
 /// (ED) move that splits the version-agnostic LANGUAGE (`sd:SPARQLQuery`/`sd:SPARQLUpdate`) from
 /// the language VERSION. A `sparq-server` (sq-2msb / gh-917) advertises the SPARQL language
 /// versions it conformance-verifies via `sd:supportedVersion <sparql:version-*>`. The CLIENT
@@ -97,7 +98,7 @@ const PROV_LINEAGE_FEATURE_IRI: &str = "http://sparq.dev/ns/prov#lineage";
 const SD_SUPPORTED_VERSION: &str =
     "http://www.w3.org/ns/sparql-service-description#supportedVersion";
 
-/// [OPUS-4.8] sq-ym6kf: the `sparql:` namespace (`http://www.w3.org/ns/sparql#`) the
+/// sq-ym6kf: the `sparql:` namespace (`http://www.w3.org/ns/sparql#`) the
 /// `sparql:version-*` version IRIs live in. MUST match `sparq-server/src/descriptors.rs`
 /// (the writer this parser consumes).
 const SPARQL_NS: &str = "http://www.w3.org/ns/sparql#";
@@ -135,7 +136,7 @@ pub enum SparqlVersion {
     Sparql11,
 }
 
-/// [OPUS-4.8] sq-ym6kf: one SPARQL language VERSION a source advertises via the SPARQL 1.2
+/// sq-ym6kf: one SPARQL language VERSION a source advertises via the SPARQL 1.2
 /// Service Description (ED) `sd:supportedVersion <sparql:version-*>` predicate — the
 /// version-agnostic-language / explicit-version split sq-2msb's server side emits.
 ///
@@ -254,7 +255,7 @@ pub struct Capability {
     pub interface: Interface,
     /// The SPARQL query language advertised (`sd:supportedLanguage`), if any.
     pub sparql_version: Option<SparqlVersion>,
-    /// [OPUS-4.8] sq-ym6kf: the SPARQL language VERSIONS the source advertises via the SPARQL 1.2
+    /// sq-ym6kf: the SPARQL language VERSIONS the source advertises via the SPARQL 1.2
     /// SD `sd:supportedVersion <sparql:version-*>` predicate (sorted + de-duplicated). This is the
     /// CLIENT consumer of the server-side advertisement sq-2msb added: a 1.2-aware federation
     /// client reads it to detect full-1.2 (triple-term / `dir`-lang) support **without probing**.
@@ -278,7 +279,7 @@ pub struct Capability {
     pub update: bool,
     /// Whether the source advertises `sd:BasicFederatedQuery` (a SERVICE-capable endpoint).
     pub federated_query: bool,
-    /// [OPUS-4.8] sq-yyy3: whether the source advertises the sparq PROV-O data-lineage feature
+    /// sq-yyy3: whether the source advertises the sparq PROV-O data-lineage feature
     /// (`sd:feature <http://sparq.dev/ns/prov#lineage>`) — it can serve W3C PROV-O lineage for the
     /// data it derives. Purely informational for the planner (it constrains no pushdown), so it is
     /// the recall-safe `false` default unless the SD names the exact lineage feature IRI.
@@ -300,7 +301,7 @@ impl Capability {
         Capability {
             interface: Interface::Endpoint,
             sparql_version: Some(SparqlVersion::Sparql11),
-            // [OPUS-4.8] sq-ym6kf: an ASK-only endpoint published no SD, so it advertises NO
+            // sq-ym6kf: an ASK-only endpoint published no SD, so it advertises NO
             // `sd:supportedVersion` — its version posture is UNKNOWN (empty), never an over-claim.
             sparql_versions: Vec::new(),
             pushable_filters: FilterClass::Full,
@@ -310,7 +311,7 @@ impl Capability {
             order_limit: false,
             update: false,
             federated_query: false,
-            // [OPUS-4.8] sq-yyy3: an ASK-only endpoint published no SD, so it makes no lineage
+            // sq-yyy3: an ASK-only endpoint published no SD, so it makes no lineage
             // claim — recall-safe `false`.
             provenance_lineage: false,
             result_formats: vec![MediaType(
@@ -326,7 +327,7 @@ impl Capability {
             .any(MediaType::is_sparql_results_json)
     }
 
-    /// [OPUS-4.8] sq-ym6kf: whether the source **advertises** the FULL SPARQL 1.2 / RDF 1.2
+    /// sq-ym6kf: whether the source **advertises** the FULL SPARQL 1.2 / RDF 1.2
     /// language version (`sd:supportedVersion <sparql:version-1.2>`) — i.e. triple terms and
     /// `dir`-tagged literals — so a 1.2-aware federation client can push those constructs to it
     /// without first probing.
@@ -342,7 +343,7 @@ impl Capability {
             .contains(&SparqlLanguageVersion::Full12)
     }
 
-    /// [OPUS-4.8] sq-ym6kf: whether the source advertised **any** `sd:supportedVersion` at all.
+    /// sq-ym6kf: whether the source advertised **any** `sd:supportedVersion` at all.
     /// `false` means its language-version posture is **UNKNOWN** (the source predates the SPARQL
     /// 1.2 SD term, or simply omitted it) — never read `false` as "no version supported".
     pub fn advertises_sparql_versions(&self) -> bool {
@@ -448,7 +449,7 @@ pub fn parse_service_description(nt: &str) -> Result<Option<Capability>, String>
     result_formats.sort();
     result_formats.dedup();
 
-    // --- [OPUS-4.8] sq-ym6kf: sd:supportedVersion → the SPARQL language VERSIONS the source
+    // --- sq-ym6kf: sd:supportedVersion → the SPARQL language VERSIONS the source
     // advertises (the SPARQL 1.2 SD predicate sq-2msb's server side emits). Only `sparql:version-*`
     // named-node objects are recognised; a non-`sparql:` IRI / literal / blank node is ignored, and
     // ABSENCE leaves the Vec empty (version posture UNKNOWN, never read as "no version supported").
@@ -473,7 +474,7 @@ pub fn parse_service_description(nt: &str) -> Result<Option<Capability>, String>
             .unwrap_or(false)
     };
     let federated_query = has_feature(SD_BASIC_FEDERATED_QUERY);
-    // [OPUS-4.8] sq-yyy3: the sparq PROV-O data-lineage extension feature.
+    // sq-yyy3: the sparq PROV-O data-lineage extension feature.
     let provenance_lineage = has_feature(PROV_LINEAGE_FEATURE_IRI);
 
     // A SPARQL endpoint evaluates a full FILTER grammar and a VALUES bind-join block; a
@@ -527,7 +528,7 @@ pub trait Fetcher {
 ///
 /// `max_probes` counts actual HTTP requests, including failed ASK/SELECT requests; cache hits
 /// are free. `cardinality_cap` bounds the number of solution rows requested from an endpoint.
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PatternProbeConfig {
@@ -551,7 +552,7 @@ impl Default for PatternProbeConfig {
 }
 
 /// Recall-safe result of probing one `(endpoint, triple-pattern)` pair.
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PatternProbeOutcome {
@@ -569,7 +570,7 @@ pub enum PatternProbeOutcome {
 }
 
 /// Deterministic counters for one [`PatternProbeSession`].
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PatternProbeStats {
@@ -585,7 +586,7 @@ pub struct PatternProbeStats {
 ///
 /// Construct one session per federated query and pass it to
 /// `crate::planner::select_sources_with_pattern_probes`. Failures are cached as `Unknown`, so a
-/// repeated pattern (or a bind-join with many bindings) never reissues the probe. [GPT-5.6]
+/// repeated pattern (or a bind-join with many bindings) never reissues the probe.
 /// sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 pub struct PatternProbeSession<'a> {
@@ -632,7 +633,10 @@ impl<'a> PatternProbeSession<'a> {
         endpoint: &str,
         pattern: &sparq_fedplan::TriplePattern,
     ) -> PatternProbeOutcome {
-        let clause = crate::planner::render_pattern_clause(pattern);
+        // A pattern that cannot be written as SPARQL is never probed; the source is kept.
+        let Ok(clause) = crate::planner::render_pattern_clause(pattern) else {
+            return PatternProbeOutcome::Unknown;
+        };
         let key = format!("{}\0{}", endpoint, clause);
         if let Some(outcome) = self.cache.get(&key).copied() {
             self.stats.cache_hits += 1;
@@ -692,10 +696,24 @@ impl<'a> PatternProbeSession<'a> {
     }
 }
 
-#[cfg(feature = "pattern_probe")]
+/// The GET form of `query` against `endpoint`. The endpoint's own query parameters are kept,
+/// except any existing `query` (the SPARQL Protocol takes exactly one); empty parameters are
+/// dropped, and a fragment is removed because it is never sent to the server.
 fn probe_url(endpoint: &str, query: &str) -> String {
-    let separator = if endpoint.contains('?') { '&' } else { '?' };
-    format!("{endpoint}{separator}query={}", pct_encode(query))
+    let base = endpoint.split_once('#').map_or(endpoint, |(base, _)| base);
+    let (path, params) = base.split_once('?').unwrap_or((base, ""));
+    let mut url = format!("{path}?");
+    for param in params.split('&') {
+        // Match the name as a server decodes it (`%71uery` is `query`); keep the text verbatim.
+        let name = param.split_once('=').map_or(param, |(name, _)| name);
+        if !param.is_empty() && sparq_core::percent::decode(name, false) != "query" {
+            url.push_str(param);
+            url.push('&');
+        }
+    }
+    url.push_str("query=");
+    url.push_str(&pct_encode(query));
+    url
 }
 
 /// An in-memory fetcher mapping exact URLs → response bodies. Any URL not in the map yields a
@@ -727,49 +745,19 @@ impl Fetcher for MapFetcher {
 }
 
 /// Classifies a resolved [`IpAddr`](std::net::IpAddr) as a forbidden (private / internal /
-/// non-global) destination for a discovery fetch — the SSRF default-deny set.
-///
-/// This **mirrors `sparq_engine::service::is_forbidden_ip`** (which is `pub(crate)` in the
-/// engine, hence re-derived here rather than imported). Forbidden ranges: loopback
-/// (`127/8`, `::1`); RFC1918 private (`10/8`, `172.16/12`, `192.168/16`); link-local
-/// (`169.254/16`, incl. the `169.254.169.254` cloud-metadata IP, and IPv6 `fe80::/10`);
-/// unique-local IPv6 (`fc00::/7`); unspecified (`0.0.0.0`, `::`); broadcast; CGNAT
-/// (`100.64/10`). IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is unwrapped and re-classified as the
-/// embedded IPv4, so a private v4 cannot ride in through a v6 host literal.
+/// non-global) destination for a discovery fetch: the engine's SERVICE classification (see
+/// [`crate::source::is_forbidden_ip`]).
 #[cfg(not(target_arch = "wasm32"))]
-pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
-    use std::net::IpAddr;
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || matches!(v4.octets(), [100, b, ..] if (64..=127).contains(&b))
-            // 100.64/10 CGNAT
-        }
-        IpAddr::V6(v6) => {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                return is_forbidden_ip(IpAddr::V4(v4));
-            }
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-                || (v6.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
-        }
-    }
-}
+pub use sparq_engine::is_forbidden_ip;
 
 /// The production network fetcher: a blocking ureq GET behind the **same default-deny SSRF
 /// egress filter the engine's SERVICE transport uses**. Native-only — neither ureq nor its
 /// TLS stack ever enters the wasm bundle.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct HttpFetcher {
-    timeout: std::time::Duration,
-    /// Hosts (bare authority, lower-cased) exempt from the SSRF filter — for a trusted
-    /// internal federation endpoint that resolves privately.
-    allow_private: std::sync::Arc<std::collections::HashSet<String>>,
+    /// The timeout and the hosts (bare authority, lower-cased) exempt from the SSRF filter —
+    /// for a trusted internal federation endpoint that resolves privately.
+    http: GuardedHttp,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -785,14 +773,13 @@ impl HttpFetcher {
     /// discovery) and the strict default-deny SSRF policy (no private host allowed).
     pub fn new() -> HttpFetcher {
         HttpFetcher {
-            timeout: std::time::Duration::from_secs(15),
-            allow_private: std::sync::Arc::new(std::collections::HashSet::new()),
+            http: GuardedHttp::new(Client::Discovery, std::collections::HashSet::new()),
         }
     }
 
     /// Sets the per-request timeout.
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> HttpFetcher {
-        self.timeout = timeout;
+        self.http.timeout = timeout;
         self
     }
 
@@ -800,90 +787,19 @@ impl HttpFetcher {
     /// filter — its resolved addresses are dialled even when private. Use ONLY for a
     /// deliberately-trusted internal endpoint.
     pub fn allow_private_host(mut self, host: impl Into<String>) -> HttpFetcher {
-        std::sync::Arc::make_mut(&mut self.allow_private).insert(host.into().to_ascii_lowercase());
+        std::sync::Arc::make_mut(&mut self.http.allow_private)
+            .insert(host.into().to_ascii_lowercase());
         self
-    }
-}
-
-/// ureq resolver enforcing the SSRF egress policy on the *resolved* addresses
-/// (DNS-rebinding-safe): it resolves the host, drops every [`is_forbidden_ip`] address
-/// (unless the bare host is on the allowlist), and returns only survivors — so ureq dials
-/// only vetted IPs. Mirrors the engine's `EgressFilterResolver`.
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug)]
-struct EgressFilterResolver {
-    allow_private: std::sync::Arc<std::collections::HashSet<String>>,
-}
-
-// [OPUS-4.8] sq-g2xs: ureq-3's `Resolver` takes a parsed `&http::Uri` (+ config + timeout) and
-// returns an `ArrayVec<SocketAddr, 16>` rather than ureq-2's `&str` netloc → `Vec`. The SSRF
-// policy is byte-for-byte the ureq-2 one; the shared `crate::ureq_egress` helpers carry the
-// ureq-3 boilerplate so the three sparq-fedclient transports share one implementation. (The engine
-// SERVICE resolver applies equivalent, unit-tested logic via its own inline copy — `sparq-engine`
-// cannot depend on `sparq-fedclient` — so it does not share this module.)
-#[cfg(not(target_arch = "wasm32"))]
-impl ureq::unversioned::resolver::Resolver for EgressFilterResolver {
-    fn resolve(
-        &self,
-        uri: &ureq::http::Uri,
-        _config: &ureq::config::Config,
-        _timeout: ureq::unversioned::transport::NextTimeout,
-    ) -> Result<ureq::unversioned::resolver::ResolvedSocketAddrs, ureq::Error> {
-        let (host_port, host, port) = crate::ureq_egress::uri_host_port(uri).ok_or_else(|| {
-            crate::ureq_egress::egress_refused(format!(
-                "discovery egress refused: request URI {uri} has no host authority to vet"
-            ))
-        })?;
-        // Port-scoped allowlist: a `host:port` entry re-opens a private host only on its exact
-        // dialled port (shared host:port rule with the engine SERVICE guard; sq-vbnyc).
-        let allowed = crate::ureq_egress::allowlist_permits(&self.allow_private, &host, port);
-        crate::ureq_egress::filter_resolved(&host_port, allowed, is_forbidden_ip, || {
-            format!(
-                "discovery egress refused: {host_port} resolves only to private/internal \
-                 addresses (default-deny SSRF policy; allow it with \
-                 HttpFetcher::allow_private_host)"
-            )
-        })
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str, accept: &str) -> Result<String, String> {
-        // [OPUS-4.8] sq-g2xs: ureq-3 `Agent::with_parts` + the default-deny SSRF resolver — ureq
-        // dials only the addresses the resolver returns (the vetted IP is the dialled IP).
-        let config = ureq::Agent::config_builder()
-            .timeout_global(Some(self.timeout))
-            .user_agent(concat!("sparq-fedclient/", env!("CARGO_PKG_VERSION")))
-            .build();
-        let agent = ureq::Agent::with_parts(
-            config,
-            ureq::unversioned::transport::DefaultConnector::new(),
-            EgressFilterResolver {
-                allow_private: std::sync::Arc::clone(&self.allow_private),
-            },
-        );
-        match agent.get(url).header("Accept", accept).call() {
-            // ureq-3 caps `read_to_string` at 10 MiB by default; raise it to match the other
-            // transports (a finite cap still bounds memory).
-            Ok(mut r) => r
-                .body_mut()
-                .with_config()
-                .limit(DISCOVERY_MAX_BODY_BYTES)
-                .read_to_string()
-                .map_err(|e| format!("discovery: reading response from {url}: {e}")),
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("discovery: {url} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("discovery: request to {url} failed: {e}")),
-        }
+        let response = self.http.agent().get(url).header("Accept", accept).call();
+        self.http.read_body(response, url, false)
     }
 }
-
-/// Max bytes read from a discovery (VoID/SD) response body. ureq-3's default `read_to_string`
-/// cap is 10 MiB; raised to a generous-but-finite bound (memory stays bounded). [OPUS-4.8] sq-g2xs.
-#[cfg(not(target_arch = "wasm32"))]
-const DISCOVERY_MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
 // ─── Orchestration: discover() ────────────────────────────────────────────────────────
 
@@ -1001,7 +917,7 @@ pub fn discover(endpoint: &str, fetcher: &dyn Fetcher) -> Result<Discovery, Stri
 /// [`Fetcher`] can express. Returns the boolean answer, or an error if the endpoint is
 /// unreachable or returns a non-ASK body.
 fn ask_probe(endpoint: &str, fetcher: &dyn Fetcher) -> Result<bool, String> {
-    let url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
+    let url = probe_url(endpoint, ASK_PROBE);
     let body = fetcher
         .get(&url, "application/sparql-results+json")
         .map_err(|e| format!("discovery: ASK probe to {endpoint} failed: {e}"))?;
@@ -1049,6 +965,8 @@ fn parse_ask_boolean(body: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::ureq_egress::EgressFilterResolver;
 
     /// A served-shape Service Description (the exact N-Triples
     /// `sparq-server/src/descriptors.rs::sd_ntriples` writes for a read-only, federation-
@@ -1103,7 +1021,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         assert!(cap.result_formats.windows(2).all(|w| w[0] < w[1]), "sorted");
         // SPARQL 1.1 ⇒ aggregates / paths / order-limit pushable.
         assert!(cap.aggregates && cap.property_paths && cap.order_limit);
-        // [OPUS-4.8] sq-yyy3: this SD does NOT advertise the PROV-O lineage feature, so the flag
+        // sq-yyy3: this SD does NOT advertise the PROV-O lineage feature, so the flag
         // is the recall-safe `false` (it is set ONLY by the exact lineage feature IRI).
         assert!(
             !cap.provenance_lineage,
@@ -1111,7 +1029,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         );
     }
 
-    // ---- [OPUS-4.8] sq-ym6kf: sd:supportedVersion (the SPARQL 1.2 SD version advertisement) ----
+    // ---- sq-ym6kf: sd:supportedVersion (the SPARQL 1.2 SD version advertisement) ----
 
     /// A served-shape SD fragment carrying the EXACT `sd:supportedVersion <sparql:version-*>`
     /// triples `sparq-server/src/descriptors.rs` emits for a build that conformance-verifies
@@ -1177,7 +1095,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
 
     #[test]
     fn parse_sd_extracts_supported_versions() {
-        // [OPUS-4.8] sq-ym6kf: the CLIENT consumes the server-side `sd:supportedVersion`
+        // sq-ym6kf: the CLIENT consumes the server-side `sd:supportedVersion`
         // advertisement (sq-2msb): the version set is parsed, sorted, and a 1.2-aware client can
         // detect FULL 1.2 (triple-term / dir-lang) support without probing.
         let cap = parse_service_description(SERVED_SD_WITH_VERSIONS_NT)
@@ -1267,7 +1185,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
 
     #[test]
     fn ask_fallback_has_unknown_version_set() {
-        // [OPUS-4.8] sq-ym6kf: an ASK-only endpoint published no SD, so it advertises no version —
+        // sq-ym6kf: an ASK-only endpoint published no SD, so it advertises no version —
         // the fallback capability's set is empty (UNKNOWN), never an over-claim of 1.2 support.
         let cap = Capability::ask_fallback();
         assert!(cap.sparql_versions.is_empty());
@@ -1277,7 +1195,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
 
     #[test]
     fn parse_sd_with_provenance_feature_sets_flag() {
-        // [OPUS-4.8] sq-yyy3: a node advertising the sparq PROV-O data-lineage feature
+        // sq-yyy3: a node advertising the sparq PROV-O data-lineage feature
         // (`sd:feature <http://sparq.dev/ns/prov#lineage>`, exactly what
         // `descriptors::sd_ntriples` emits when `Capabilities::provenance`) is surfaced as
         // `Capability::provenance_lineage`. Adding it leaves BasicFederatedQuery untouched.
@@ -1404,6 +1322,42 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         assert_eq!(d.provenance, Provenance::AskProbe);
     }
 
+    #[test]
+    fn probe_url_keeps_one_query_parameter_in_the_query_string() {
+        // (endpoint suffix after `http://e/s`, the probe URL before its `query=` parameter)
+        for (suffix, kept) in [
+            ("", "?"),
+            ("?g=x", "?g=x&"),
+            ("?g=x#top", "?g=x&"),
+            ("#top", "?"),
+            ("?query=old&g=x", "?g=x&"),
+            ("?query&g=x", "?g=x&"),
+            ("?queryx=1", "?queryx=1&"),
+            ("?", "?"),
+            ("?g=x&", "?g=x&"),
+            ("?%71uery=ASK%7B%7D&g=x", "?g=x&"),
+            ("?%71uery", "?"),
+            ("?Query=1&qu+ery=2", "?Query=1&qu+ery=2&"),
+        ] {
+            let expected = format!("http://e/s{kept}query={}", pct_encode(ASK_PROBE));
+            assert_eq!(
+                probe_url(&format!("http://e/s{suffix}"), ASK_PROBE),
+                expected,
+                "{suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn ask_probe_appends_to_an_existing_query_string() {
+        // An endpoint URL that already carries a query string gets `&query=`, not a second `?`.
+        let endpoint = "http://keyed/sparql?default-graph-uri=urn%3Ag";
+        let ask_url = format!("{endpoint}&query={}", pct_encode(ASK_PROBE));
+        let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": true }"#);
+        let d = discover(endpoint, &fetcher).expect("the probe reaches the keyed endpoint");
+        assert_eq!(d.provenance, Provenance::AskProbe);
+    }
+
     // ---- ASK boolean parsing -------------------------------------------------------
 
     #[test]
@@ -1501,12 +1455,13 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
     // that ureq actually calls applies it correctly — including the host-authority parse
     // (`rsplit(':')`), the IPv6 bracket strip, and the `allow_private_host` allowlist bypass.
     // All cases use IP-LITERAL netlocs so `to_socket_addrs` is hermetic (no DNS lookup, no
-    // network), so the tests are deterministic. [OPUS-4.8] sq-73om (follow-up to sq-nfxl).
+    // network), so the tests are deterministic. sq-73om (follow-up to sq-nfxl).
 
     #[cfg(not(target_arch = "wasm32"))]
     fn resolver_denying() -> EgressFilterResolver {
         EgressFilterResolver {
             allow_private: std::sync::Arc::new(std::collections::HashSet::new()),
+            client: Client::Discovery,
         }
     }
 
@@ -1516,10 +1471,11 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         set.insert(host.to_ascii_lowercase());
         EgressFilterResolver {
             allow_private: std::sync::Arc::new(set),
+            client: Client::Discovery,
         }
     }
 
-    /// [OPUS-4.8] sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building the
+    /// sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building the
     /// `http://<netloc>/` URI the resolver parses, with a default `Config` + no-deadline timeout.
     #[cfg(not(target_arch = "wasm32"))]
     fn resolve_netloc(

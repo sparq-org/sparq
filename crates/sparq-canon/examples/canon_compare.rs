@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-p3ssl) Native in-process rdf-canon column for the RDFC-1.0
+//! (sq-p3ssl) Native in-process rdf-canon column for the RDFC-1.0
 //! canonicalization panel (`bench/canon/`, sq-hmd7l.16).
 //!
 //! `bench/canon/run.sh` drives the rdf-canon Rust crate through a gather-time

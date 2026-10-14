@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-p4zci, design record `research/stratified-datalog-rules.md` §6 item 6) The
+//! (sq-p4zci, design record `research/stratified-datalog-rules.md` §6 item 6) The
 //! stratified-Datalog CLI surface end-to-end: `--reason datalog:<rules.dlog>` on `query` and
 //! `reason <f> <fmt> datalog:<rules.dlog> [out.nt]`.
 //!

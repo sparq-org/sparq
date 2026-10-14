@@ -1,4 +1,4 @@
-//! [GPT-5.6] (sq-zvavi) Value-level differential tests for remote result codecs.
+//! (sq-zvavi) Value-level differential tests for remote result codecs.
 #![cfg(feature = "service")]
 
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Variable};
@@ -7,12 +7,37 @@ use serde_json::{json, Map, Value};
 
 // Compile the crate-private codec module into this integration-test crate. This keeps the
 // production surface private while giving the test access to its collected seams.
-// [GPT-5.6] (sq-zvavi)
+// (sq-zvavi)
 #[path = "../src/service.rs"]
 #[allow(dead_code)]
 mod service;
 
-use service::{parse_srj, parse_srx, ServiceRelation};
+use service::{parse_srj_into, parse_srx_into};
+
+/// A fully-collected remote SELECT result (`None` = unbound).
+#[derive(Debug, PartialEq)]
+struct ServiceRelation {
+    vars: Vec<Variable>,
+    rows: Vec<Vec<Option<Term>>>,
+}
+
+fn parse_srj(text: &str) -> Result<ServiceRelation, String> {
+    let mut rows = Vec::new();
+    let vars = parse_srj_into(text, &mut |row| {
+        rows.push(row);
+        Ok(())
+    })?;
+    Ok(ServiceRelation { vars, rows })
+}
+
+fn parse_srx(text: &str) -> Result<ServiceRelation, String> {
+    let mut rows = Vec::new();
+    let vars = parse_srx_into(text, &mut |row| {
+        rows.push(row);
+        Ok(())
+    })?;
+    Ok(ServiceRelation { vars, rows })
+}
 
 fn variable_strategy() -> impl Strategy<Value = Vec<Variable>> {
     (1_usize..=4).prop_map(|len| {

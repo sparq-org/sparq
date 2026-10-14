@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-1rg2q: deterministic public-API correctness smoke.
+// sq-1rg2q: deterministic public-API correctness smoke.
 
 use oxrdf::NamedNode;
 use sparq_core::Graph;

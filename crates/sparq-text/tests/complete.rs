@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-lsp7k.9.1: non-vacuous completion API coverage.
+// sq-lsp7k.9.1: non-vacuous completion API coverage.
 use rustc_hash::FxHashMap;
 use sparq_core::Graph;
 use sparq_text::{Candidate, CandidateKind, CompletionIndex};

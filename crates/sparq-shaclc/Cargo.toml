@@ -26,7 +26,7 @@ readme = "README.md"
 # grammar/shaclc12ext.shuttle (vendored; provenance pinned in src/provenance.rs) and
 # checked in — no build-time codegen, no Node in the build graph. Regenerate with
 # scripts/regen-shuttle-parsers.sh; the tests/provenance_drift.rs test fails if the
-# vendored grammar drifts from the recorded pin. [FABLE-5]
+# vendored grammar drifts from the recorded pin.
 
 [package.metadata.docs.rs]
 all-features = true

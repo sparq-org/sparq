@@ -3,7 +3,7 @@
 //! protocol (`site/papers/sparq-engine-systems.typ` §8, evidence key
 //! `substrate.overhead_<kernel>`).
 //!
-//! # [FABLE-5] sq-atjue — the title-level zero-overhead claim's producing harness
+//! # sq-atjue — the title-level zero-overhead claim's producing harness
 //!
 //! The paper's central claim is that "carrying many standards costs no *measured*
 //! marginal overhead over the engine's own hand-tuned evaluation". The word
@@ -305,20 +305,10 @@ INVALID for that kernel.\n",
 // is small and fixed).
 // ---------------------------------------------------------------------------
 
-/// Emit a JSON string literal, escaping the characters that can appear in the
-/// fixed workload/host notes (`"` and `\`). The notes never contain control
-/// characters, so a full escaper is unnecessary.
+/// Emit a JSON string literal.
 fn json_str(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            _ => out.push(c),
-        }
-    }
-    out.push('"');
+    let mut out = String::new();
+    sparq_core::json::push_string(&mut out, s);
     out
 }
 
@@ -505,7 +495,7 @@ fn bench_hash_probe(reps: u32) -> Kernel {
         substrate_ns,
         handrolled_ns,
         agree,
-        // [OPUS-4.8] sq-4r8uy: the descriptor's per-row single-column key projection —
+        // sq-4r8uy: the descriptor's per-row single-column key projection —
         // previously `key_cols.iter().map(...).collect()` over a heap `Vec<(usize,usize)>`,
         // the whole measured delta in the #1810 canonical run — is now FAST-PATHED. For the
         // dominant `key_cols.len() == 1` case `JoinKeys::right_key` special-cases to a direct
@@ -638,7 +628,7 @@ fn inline_num_binop(x: Num, y: Num, op: ArithOp) -> Option<Num> {
     fn f64_of(n: Num) -> f64 {
         n.f64()
     }
-    // [OPUS-5] issue #3796: the float tier promotes through the SHARED `Num::f32` helper —
+    // issue #3796: the float tier promotes through the SHARED `Num::f32` helper —
     // one correctly-rounded conversion — exactly as `Num::binop` does. The pre-fix body
     // here was a verbatim copy of `numeric.rs`'s `f64() as f32` double rounding, so the
     // defect lived in TWO places; both now route through the one helper and cannot drift.
@@ -994,7 +984,7 @@ mod tests {
     /// fixing `numeric.rs` alone left the defect alive here, and the timing harness's
     /// `agree` flag could not see it because it feeds small integers. The fixtures below
     /// are the exact-rational-verified midpoint witnesses; the assertion is on
-    /// `f32::to_bits()` because the two candidates are ADJACENT floats. [OPUS-5]
+    /// `f32::to_bits()` because the two candidates are ADJACENT floats.
     #[test]
     fn inline_num_binop_float_promotion_matches_substrate_bit_exactly() {
         // `H +/- 1` around an f32 midpoint that is exactly representable in f64.

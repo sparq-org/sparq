@@ -1,4 +1,4 @@
-# [FABLE-5] sq-i6du2.1 — AC-query benchmark scaffold.
+# sq-i6du2.1 — AC-query benchmark scaffold.
 #
 # DEV-ONLY crate: `publish = false`. Nothing in the shipping graph depends on it —
 # `sparq-core`, `sparq-engine`, and every crate in the `sparq-*` runtime tree are

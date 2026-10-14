@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-5xgxe, gh #3218) The `sparq-mcp` binary's argument parsing and
+//! (sq-5xgxe, gh #3218) The `sparq-mcp` binary's argument parsing and
 //! dataset loading — the library half of the shipped server binary, so the startup
 //! contract (which flag turns writes on, which file is loaded as what format) is
 //! unit-testable without spawning a process.

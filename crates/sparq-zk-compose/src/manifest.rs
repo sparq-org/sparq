@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! The proof manifest: the public, serializable description of a query-result
 //! proof (plan v3 §S2.5 / §S4.E module (iii)).
 //!
@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 use sparq_zk::field::{field_from_hex_str, field_to_hex, Fr};
-// [OPUS-4.8] sq-h8rg (HolderPoP T2): the holder-key digest from the T1 message
+// sq-h8rg (HolderPoP T2): the holder-key digest from the T1 message
 // family (`commitment_message_with_holder`) is computed via `holder_key_digest`;
 // the attested-holder-binding schema below wires it through the manifest.
 use sparq_zk::sig::{holder_key_digest, public_key_from_hex, HolderKeyError, PublicKey};
@@ -110,7 +110,7 @@ pub enum BindingMode {
     /// binding (the issuer signing the holder key into the credential) is deferred;
     /// see the verifier docs. Until then the relying party's holder registry is the
     /// who-may-present anchor.
-    // [OPUS-4.8] sq-cwq: holder PoP — implemented (challenge-bound Schnorr),
+    // sq-cwq: holder PoP — implemented (challenge-bound Schnorr),
     // fail-closed; issuer→holder credential binding documented-deferred.
     HolderPop {
         challenge: FieldHex,
@@ -145,7 +145,7 @@ impl BindingMode {
     /// The disclosed holder verification key of a [`BindingMode::HolderPop`]
     /// binding, parsed (compressed Baby-JubJub point). `None` for a
     /// [`BindingMode::Challenge`] binding or a malformed `holder` hex.
-    // [OPUS-4.8] sq-h8rg (HolderPoP T2): expose the presented holder key.
+    // sq-h8rg (HolderPoP T2): expose the presented holder key.
     pub fn holder_key(&self) -> Option<PublicKey> {
         match self {
             BindingMode::HolderPop { holder, .. } => public_key_from_hex(holder),
@@ -162,7 +162,7 @@ impl BindingMode {
     /// (fail-closed — [`HolderKeyError::IdentityKey`]).
     ///
     /// This is wiring only; the actual fail-closed equality gate lives in T3.
-    // [OPUS-4.8] sq-h8rg (HolderPoP T2): digest of the presented holder key.
+    // sq-h8rg (HolderPoP T2): digest of the presented holder key.
     pub fn holder_key_digest(&self) -> Option<Fr> {
         self.holder_key()
             .as_ref()
@@ -184,7 +184,7 @@ impl BindingMode {
 /// signature IN-CIRCUIT with an undisclosed signing key + a set-membership
 /// gadget over K, revealing only "signed by SOME key in K". See
 /// `sparq_zk::sig` module docs.
-// [OPUS-4.8] audit #3.
+// audit #3.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitmentAttestation {
     /// `C(G)` — must match a scan sub-proof's `commitments[g]` (and is itself
@@ -209,7 +209,7 @@ pub struct CommitmentAttestation {
     /// (the Q6 cross-graph bnode-correlation channel). Absent => salt-unbound
     /// legacy attestation (audit #3 only); the salt-separation guarantee then
     /// rests on the honest-ingest convention, which the verifier cannot enforce.
-    // [OPUS-4.8] audit #9: issuer-attested per-graph salt.
+    // audit #9: issuer-attested per-graph salt.
     #[serde(default)]
     pub salt: Option<FieldHex>,
     /// The credential's STATUS-LIST REFERENCE as the issuer signed it (audit
@@ -225,7 +225,7 @@ pub struct CommitmentAttestation {
     /// precedent; an omitted status ref is rejected, never silently un-checked).
     /// Absent => status-unbound (audit #3/#9 only) attestation, NOT accepted on
     /// the scan-verify path.
-    // [OPUS-4.8] audit #12: issuer-attested status-list reference.
+    // audit #12: issuer-attested status-list reference.
     #[serde(default)]
     pub status: Option<AttestedStatusRef>,
     /// The ISSUER-ATTESTED holder binding (sq-h8rg, HolderPoP T2): when present,
@@ -251,7 +251,7 @@ pub struct CommitmentAttestation {
     /// and refusing to honour a holder-pop claim over a bearer attestation
     /// (`HolderBindingMissing`/`HolderKeyMismatch`) — are sq-z8s7 (T3). Until then
     /// the presence of this field changes no verifier decision.
-    // [OPUS-4.8] sq-h8rg (HolderPoP T2): issuer-attested holder binding (schema +
+    // sq-h8rg (HolderPoP T2): issuer-attested holder binding (schema +
     // digest wiring; verifier enforcement deferred to T3/sq-z8s7).
     #[serde(default)]
     pub holder: Option<AttestedHolderBinding>,
@@ -265,8 +265,8 @@ pub struct CommitmentAttestation {
 /// in the attestation (not just `RevocationStatus`) so the issuer-signed values
 /// and the disclosed reference are cross-checked for equality — a prover that
 /// disclosed a different index/version than the issuer signed is rejected.
-// [OPUS-4.8] audit #12.
-// [OPUS-4.8] sq-ayv: `index` is now OPTIONAL — a committed-index attestation
+// audit #12.
+// sq-ayv: `index` is now OPTIONAL — a committed-index attestation
 // (the index-hiding path) signs an `index_commitment` instead of the clear index,
 // so the clear index is absent from the signed object.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -285,10 +285,10 @@ pub struct AttestedStatusRef {
     /// clear-index and committed-index paths this is MANDATORY — a `None` version
     /// there is rejected fail-closed ([`crate::verifier::CheckError::RevocationReferenceModeInvalid`]),
     /// never silently defaulted to 0.
-    // [OPUS-5] sq-kndw: version withholdable on the fully-hidden path.
+    // sq-kndw: version withholdable on the fully-hidden path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u64>,
-    /// [OPUS-4.8] sq-ayv: the hiding COMMITMENT to the index the issuer signed (in
+    /// sq-ayv: the hiding COMMITMENT to the index the issuer signed (in
     /// place of the clear `index`), hex. When `Some`, the issuer signed
     /// `status_ref_commit_digest(H(list), index_commitment, version)` and the clear
     /// index is withheld; the hidden-index revocation proof cross-binds this
@@ -296,7 +296,7 @@ pub struct AttestedStatusRef {
     /// (audit #12) path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_commitment: Option<FieldHex>,
-    /// [OPUS-5] sq-kndw: the hiding COMMITMENT to the `(list IRI, version)` PAIR the
+    /// sq-kndw: the hiding COMMITMENT to the `(list IRI, version)` PAIR the
     /// issuer signed, hex — [`sparq_zk::sig::status_ref_commitment`]`(H(list),
     /// version, ref_blinding)`. When `Some`, the issuer signed the FULLY-COMMITTED
     /// digest [`sparq_zk::sig::status_ref_fully_committed_digest`]`(ref_commitment,
@@ -337,7 +337,7 @@ impl AttestedStatusRef {
         }
     }
 
-    /// [OPUS-5] sq-kndw: the FULLY-HIDDEN attested reference. The issuer signs
+    /// sq-kndw: the FULLY-HIDDEN attested reference. The issuer signs
     /// [`sparq_zk::sig::status_ref_fully_committed_digest`]`(ref_commitment,
     /// index_commitment)` — no clear list id, no clear version. Build the inputs
     /// with [`sparq_zk::sig::status_ref_commitment`]`(H(list), version,
@@ -389,7 +389,7 @@ impl AttestedStatusRef {
 /// This struct is the SCHEMA only. The fail-closed cross-checks (disclosed key
 /// vs digest; issuer signature over `commitment_message_with_holder`) are T3.
 /// See `research/zk-holder-pop-design.md` §3.2 / §6 step 2 (this) and step 3 (T3).
-// [OPUS-4.8] sq-h8rg (HolderPoP T2): attested-holder-binding schema + digest wiring.
+// sq-h8rg (HolderPoP T2): attested-holder-binding schema + digest wiring.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestedHolderBinding {
     /// The issuer-attested holder-key DIGEST,
@@ -420,7 +420,7 @@ impl AttestedHolderBinding {
     /// Returns [`HolderKeyError::IdentityKey`] for the identity key (fail-closed —
     /// it has no usable digest and is never a valid holder key), exactly as
     /// [`sparq_zk::sig::holder_key_digest`].
-    // [OPUS-4.8] sq-h8rg (HolderPoP T2): digest wiring from the holder key.
+    // sq-h8rg (HolderPoP T2): digest wiring from the holder key.
     pub fn from_holder_key(hpk: &PublicKey, disclose_key: bool) -> Result<Self, HolderKeyError> {
         let digest = holder_key_digest(hpk)?;
         Ok(AttestedHolderBinding {
@@ -432,7 +432,7 @@ impl AttestedHolderBinding {
     /// The issuer-attested holder-key digest as a field element. `None` if the
     /// stored hex is malformed (fail-closed — the verifier in T3 treats an
     /// unparseable digest as no valid binding).
-    // [OPUS-4.8] sq-h8rg (HolderPoP T2).
+    // sq-h8rg (HolderPoP T2).
     pub fn digest(&self) -> Option<Fr> {
         self.holder_pk_digest.to_field()
     }
@@ -440,7 +440,7 @@ impl AttestedHolderBinding {
     /// The disclosed clear holder key (clear-key tier), parsed. `None` when the
     /// binding is hidden-tier (no clear key) OR the hex is malformed. The T3
     /// verifier cross-checks `holder_key_digest(this) == digest()`.
-    // [OPUS-4.8] sq-h8rg (HolderPoP T2).
+    // sq-h8rg (HolderPoP T2).
     pub fn holder_key(&self) -> Option<PublicKey> {
         self.holder_public_key
             .as_deref()
@@ -503,7 +503,7 @@ pub struct RevocationStatus {
     /// absent from both the signed object and the manifest. MANDATORY on the clear
     /// and committed-index paths — a `None` IRI there is a malformed mode and is
     /// rejected fail-closed.
-    // [OPUS-5] sq-kndw: list IRI withholdable (fully-hidden path).
+    // sq-kndw: list IRI withholdable (fully-hidden path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_list: Option<String>,
     /// The CLEAR index into the list (the audit-#12 clear-index path). `None` when
@@ -519,7 +519,7 @@ pub struct RevocationStatus {
     /// this: revocation is checked via the hidden-index proof against the
     /// authoritative root, and the issuer binds only a hiding commitment to the
     /// index — so neither the index NOR the liveness bit is disclosed.
-    // [OPUS-4.8] sq-ayv: clear index withholdable (committed-index path).
+    // sq-ayv: clear index withholdable (committed-index path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<u64>,
     /// The status-list version the credential asserts against (a monotone
@@ -530,17 +530,17 @@ pub struct RevocationStatus {
     /// mandatory and a version-0 reference still must match the issuer-signed
     /// digest and a fresh snapshot, so the default does not bypass the gate.
     ///
-    /// [OPUS-5] sq-kndw: now `Option<u64>` — `None` on the FULLY-HIDDEN path,
+    /// sq-kndw: now `Option<u64>` — `None` on the FULLY-HIDDEN path,
     /// where the version is committed inside `ref_commitment` and proven
     /// `>= min_version` IN-CIRCUIT instead of being disclosed. On the clear and
     /// committed-index paths a `None` version is a malformed mode and is rejected
     /// fail-closed (it is NOT defaulted to 0 — that would let a manifest silently
     /// drop the freshness anchor).
-    // [OPUS-4.8] audit #12: issuer-bound, freshness-checked version.
-    // [OPUS-5] sq-kndw: version withholdable (fully-hidden path).
+    // audit #12: issuer-bound, freshness-checked version.
+    // sq-kndw: version withholdable (fully-hidden path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u64>,
-    /// [OPUS-4.8] sq-ayv: the hiding COMMITMENT to the index (in place of the clear
+    /// sq-ayv: the hiding COMMITMENT to the index (in place of the clear
     /// `index`), hex. When `Some`, the issuer signed
     /// `status_ref_commit_digest(H(list), index_commitment, version)` and the
     /// verifier (a) recomputes that digest from THIS field to check the signature,
@@ -550,7 +550,7 @@ pub struct RevocationStatus {
     /// then checked there, never skipped — fail-closed).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_commitment: Option<FieldHex>,
-    /// [OPUS-5] sq-kndw: the hiding COMMITMENT to the `(list IRI, version)` pair,
+    /// sq-kndw: the hiding COMMITMENT to the `(list IRI, version)` pair,
     /// hex — [`sparq_zk::sig::status_ref_commitment`]`(H(list), version,
     /// ref_blinding)`. When `Some` (the FULLY-HIDDEN mode) the verifier
     /// (a) recomputes the issuer-signed digest
@@ -598,7 +598,7 @@ impl RevocationStatus {
         }
     }
 
-    /// [OPUS-5] sq-kndw: the FULLY-HIDDEN disclosed reference — no list IRI, no
+    /// sq-kndw: the FULLY-HIDDEN disclosed reference — no list IRI, no
     /// index, no version; only the two hiding commitments the issuer signed. Pairs
     /// with [`AttestedStatusRef::fully_hidden`], and REQUIRES a
     /// [`ProofManifest::fully_hidden_revocation`] proof (liveness is decided there,
@@ -643,8 +643,8 @@ impl RevocationStatus {
 ///
 /// `bits` is the raw status bitstring, LSB-first within each byte (bit `i` is
 /// `bits[i / 8] >> (i % 8) & 1`) — the StatusList2021 convention.
-// [OPUS-4.8] audit #12: status-list snapshot (authoritative copy lives in the policy).
-// [OPUS-4.8] audit #12 re-audit: prover's manifest copy is NOT the bit-decision source.
+// audit #12: status-list snapshot (authoritative copy lives in the policy).
+// audit #12 re-audit: prover's manifest copy is NOT the bit-decision source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusListSnapshot {
     /// IRI of the status list this snapshot is for (must equal the credential's
@@ -661,7 +661,7 @@ impl StatusListSnapshot {
     /// The status bit at `index` (LSB-first within each byte). An out-of-range
     /// index reads as SET (revoked) — fail-closed: a credential whose index
     /// falls outside the disclosed snapshot is treated as not-proven-live.
-    // [OPUS-4.8] audit #12: out-of-range reads as revoked (fail closed).
+    // audit #12: out-of-range reads as revoked (fail closed).
     pub fn bit(&self, index: u64) -> bool {
         let byte = (index / 8) as usize;
         let off = (index % 8) as u32;
@@ -686,7 +686,7 @@ pub enum CircuitId {
     /// `filter_int_d{d}` — hidden xsd:integer FILTER with `d` decimal digits.
     FilterInt { d: u32 },
     /// `filter_f64_d{d}` — MANIFEST-COMPOSABLE hidden xsd:double FILTER with `d`
-    /// decimal digits, over the INTEGER-VALUED double fragment ([OPUS-4.8] sq-q7e
+    /// decimal digits, over the INTEGER-VALUED double fragment (sq-q7e
     /// / sq-tat). The hidden operand is bound to the committed literal via the
     /// canonical `"<digits>"^^<…#double>` token (blake3, the same mechanism as
     /// `filter_int`), and the IEEE bits are DERIVED in-circuit from the bound
@@ -696,11 +696,11 @@ pub enum CircuitId {
     /// integer-valued doubles (`"42"^^xsd:double`); fractional/scientific forms
     /// are deferred (the in-circuit decimal→IEEE parser is unbudgeted). See
     /// `sparq_zk_compose_core::filter_float::filter_f64_composable_check`.
-    // [OPUS-4.8] sq-q7e + sq-tat: FilterF64 is now manifest-composable (carries d).
+    // sq-q7e + sq-tat: FilterF64 is now manifest-composable (carries d).
     FilterF64 { d: u32 },
     /// `filter_signed_int_d{md}` — MANIFEST-COMPOSABLE hidden SIGNED xsd:integer
     /// FILTER with `md` MAGNITUDE digits (the optional leading `-` is bound into the
-    /// canonical token, not counted in `md`) ([OPUS-4.8] sq-7lrq, the sq-1q9h
+    /// canonical token, not counted in `md`) (sq-7lrq, the sq-1q9h
     /// member). Extends [`Self::FilterInt`] (canonical NON-negative only) to negative
     /// coordinates / amounts: the hidden operand is bound to the committed literal
     /// via the canonical `"[-]?<digits>"^^<…#integer>` token (blake3, the same
@@ -711,11 +711,11 @@ pub enum CircuitId {
     /// `MD`), so a `md`-magnitude-digit operand is provable ONLY by the `MD == md`
     /// member — the same EXACT-match discipline (sq-wto) the filter_int / filter_f64
     /// families use.
-    // [OPUS-4.8] sq-7lrq: signed xsd:integer FILTER is now manifest-composable.
+    // sq-7lrq: signed xsd:integer FILTER is now manifest-composable.
     FilterSignedInt { md: u32 },
     /// `filter_decimal_i{id}_f{fd}` — MANIFEST-COMPOSABLE hidden xsd:decimal FILTER
     /// with `id` integer-part digits and `fd` fraction digits (e.g. `"123.45"` =>
-    /// `id=3`, `fd=2`) ([OPUS-4.8] sq-7lrq, the sq-1q9h member). The hidden operand
+    /// `id=3`, `fd=2`) (sq-7lrq, the sq-1q9h member). The hidden operand
     /// is bound to the committed literal via the canonical
     /// `"[-]?<int>.<frac>"^^<…#decimal>` token (blake3, the same mechanism as
     /// `filter_int`), and the comparison is fixed-point at `fd` places against a
@@ -729,10 +729,10 @@ pub enum CircuitId {
     /// decimal→IEEE RNE parser over an arbitrary lexical form) remains DEFERRED — see
     /// `filter_float.nr` and the README "sparq-zk API gaps"; this member is the
     /// fixed-point decimal fragment, not that parser.
-    // [OPUS-4.8] sq-7lrq: xsd:decimal FILTER is now manifest-composable.
+    // sq-7lrq: xsd:decimal FILTER is now manifest-composable.
     FilterDecimal { id: u32, fd: u32 },
     /// `filter_value_dl_int` — DUAL-LEAF value-lane FILTER over a committed
-    /// NON-NEGATIVE `xsd:integer` ([OPUS-4.8] sq-xojl). Unlike the blake3-bound
+    /// NON-NEGATIVE `xsd:integer` (sq-xojl). Unlike the blake3-bound
     /// `FilterInt` family (which re-hashes the canonical token in-circuit), this
     /// member binds the operand to the DUAL-LEAF commitment via two Poseidon2
     /// permutations over the witnessed `VALUE_HOOK` and carries
@@ -751,12 +751,12 @@ pub enum CircuitId {
     /// agreement on the value-FILTER lane is TRUSTED-ISSUER-HONESTY, not
     /// machine-enforced (#769 accepted at research grade; gap CR-G8 / sq-qhy4).
     /// The whole ZK estate is NOT externally audited; no soundness / privacy claim.
-    // [OPUS-4.8] sq-xojl: dual-leaf value-lane FILTER member. Opt-in (`dual-leaf`
+    // sq-xojl: dual-leaf value-lane FILTER member. Opt-in (`dual-leaf`
     // feature), research-grade, NOT externally audited.
     #[cfg(feature = "dual-leaf")]
     FilterValueDl,
     /// `filter_value_dl_f64` — DUAL-LEAF value-lane FILTER over a committed
-    /// `xsd:double` ([OPUS-4.8] sq-2ezsx, the double sibling of [`Self::FilterValueDl`]).
+    /// `xsd:double` (sq-2ezsx, the double sibling of [`Self::FilterValueDl`]).
     /// Like the integer member it binds the operand via two Poseidon2 permutations
     /// over the witnessed `VALUE_HOOK` (here the IEEE-754 bit pattern) with NO
     /// in-circuit blake3, but — because `xsd:double` is MANY-TO-ONE on the term
@@ -770,12 +770,12 @@ pub enum CircuitId {
     /// DOCUMENTED RISK: carries the INV-VL downgrade (value↔lexical agreement is
     /// trusted-issuer-honesty, not machine-enforced; #769 accepted, CR-G8 / sq-qhy4).
     /// NOT externally audited; no soundness / privacy claim.
-    // [OPUS-4.8] sq-2ezsx: dual-leaf value-lane double FILTER member. Opt-in
+    // sq-2ezsx: dual-leaf value-lane double FILTER member. Opt-in
     // (`dual-leaf`), research-grade, NOT externally audited.
     #[cfg(feature = "dual-leaf")]
     FilterValueDlF64,
     /// `filter_value_dl_decimal` — DUAL-LEAF value-lane FILTER over a committed
-    /// `xsd:decimal` at a fixed canonical scale ([OPUS-4.8] sq-2ezsx, the decimal
+    /// `xsd:decimal` at a fixed canonical scale (sq-2ezsx, the decimal
     /// sibling of [`Self::FilterValueDl`]). Binds the operand via two Poseidon2
     /// permutations over the witnessed `VALUE_HOOK` (here the SIGNED scaled
     /// magnitude) with NO in-circuit blake3. Because `xsd:decimal` is MANY-TO-ONE on
@@ -790,12 +790,12 @@ pub enum CircuitId {
     ///
     /// DOCUMENTED RISK: carries the INV-VL downgrade (CR-G8 / sq-qhy4). NOT
     /// externally audited; no soundness / privacy claim.
-    // [OPUS-4.8] sq-2ezsx: dual-leaf value-lane decimal FILTER member. Opt-in
+    // sq-2ezsx: dual-leaf value-lane decimal FILTER member. Opt-in
     // (`dual-leaf`), research-grade, NOT externally audited.
     #[cfg(feature = "dual-leaf")]
     FilterValueDlDecimal,
     /// `filter_value_dl_datetime` — DUAL-LEAF value-lane FILTER over a committed
-    /// `xsd:dateTime` OR `xsd:date` ([OPUS-5] sq-wz99x, the dateTime/date sibling
+    /// `xsd:dateTime` OR `xsd:date` (sq-wz99x, the dateTime/date sibling
     /// of [`Self::FilterValueDl`]; `research/zk-field-native-encoding.md` §13.5).
     /// Structurally [`Self::FilterValueDlDecimal`] with a different value handle:
     /// the `VALUE_HOOK` is the SIGNED SCALED EPOCH (milliseconds from
@@ -823,7 +823,7 @@ pub enum CircuitId {
     /// DOCUMENTED RISK: carries the INV-VL downgrade, and the whole §13 rule set is
     /// itself an OPEN external-audit obligation (CR-G8 / sq-qhy4). NOT externally
     /// audited; no soundness / privacy claim.
-    // [OPUS-5] sq-wz99x: dual-leaf value-lane dateTime/date FILTER member. Opt-in
+    // sq-wz99x: dual-leaf value-lane dateTime/date FILTER member. Opt-in
     // (`dual-leaf`), research-grade, NOT externally audited.
     #[cfg(feature = "dual-leaf")]
     FilterValueDlDateTime,
@@ -834,7 +834,7 @@ pub enum CircuitId {
     /// the proof proves "the bit at my hidden index is unset" without disclosing
     /// the index (the clear-index linkability channel the verifier-side
     /// [`RevocationStatus`] check leaked). Supports lists up to `2^depth` indices.
-    // [OPUS-4.8] sq-3e5 + sq-h2v: hidden-index revocation circuit member.
+    // sq-3e5 + sq-h2v: hidden-index revocation circuit member.
     RevokeUnset { depth: u32 },
     /// `revoke_hidden_ref_d{depth}_a{set_depth}` — the FULLY-HIDDEN revocation
     /// member (sq-kndw, the deferred remainder of sq-6qe;
@@ -860,7 +860,7 @@ pub enum CircuitId {
     ///
     /// Opt-in and research-grade: NOT externally audited (sq-qhy4); no soundness /
     /// ZK-privacy property is asserted as achieved.
-    // [OPUS-5] sq-kndw: fully-hidden revocation circuit member.
+    // sq-kndw: fully-hidden revocation circuit member.
     RevokeHiddenRef { depth: u32, set_depth: u32 },
     /// `hidden_issuer_d{depth}` — in-circuit Schnorr-over-Baby-JubJub signature
     /// verification + hidden-key set membership over a depth-`depth` Poseidon2
@@ -871,7 +871,7 @@ pub enum CircuitId {
     /// "this commitment was signed by SOME key in K" without disclosing WHICH
     /// issuer. The privacy upgrade over the clear-key
     /// `crate::verifier::bind_issuer_attestations` check.
-    // [OPUS-4.8] sq-z9l: hidden-issuer-attestation circuit member.
+    // sq-z9l: hidden-issuer-attestation circuit member.
     HiddenIssuer { depth: u32 },
     /// `holder_pok` — in-circuit holder Proof-of-Possession (sq-xqfg, HolderPoP
     /// T5, the B2 hidden-key tier). The proof's PUBLIC inputs are `challenge` +
@@ -886,7 +886,7 @@ pub enum CircuitId {
     /// depth-free member (no Merkle parameterisation — the clear-digest tier).
     /// The verifier gate that binds `holder_pk_digest` to the issuer attestation
     /// is `bind_holder_pok` (T6/sq-i1dt), SEPARATE from this member registration.
-    // [OPUS-4.8] sq-xqfg (HolderPoP T5): in-circuit holder-PoK circuit member.
+    // sq-xqfg (HolderPoP T5): in-circuit holder-PoK circuit member.
     HolderPok,
     /// `holder_set_d{depth}` — in-circuit hidden-holder SET membership (sq-3c00,
     /// the HolderPoP hidden-holder-SET anonymity tier). The proof's PUBLIC inputs
@@ -907,7 +907,7 @@ pub enum CircuitId {
     ///
     /// NOT-yet-sound (sq-qhy4 / sq-9hrn; remediation epic sq-1s2); opt-in. No
     /// soundness / ZK-privacy property is asserted as achieved.
-    // [OPUS-4.8] sq-3c00 (HolderPoP hidden-holder-SET tier): circuit member. Opt-in,
+    // sq-3c00 (HolderPoP hidden-holder-SET tier): circuit member. Opt-in,
     // NOT-yet-sound.
     HolderSet { depth: u32 },
     /// `join_eq_na{n_a}_nb{n_b}` — hidden cross-credential JOIN
@@ -924,7 +924,7 @@ pub enum CircuitId {
     /// This is SCHEMA ONLY (sq-fi03, step 3). The verifier gate `bind_joins`
     /// (public-input reconstruction + canonical-vk + the `UnboundJoin` query
     /// binding) is step 4 (sq-sfsi) and is NOT wired here.
-    // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN member.
+    // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN member.
     JoinEq { n_a: u32, n_b: u32 },
     /// `path_reach_d{d}_k{k}_n{n}` — BOUNDED-DEPTH property-path reachability
     /// member (sq-3kd2g.6, the compose-side of the sq-3kd2g.2 circuit family).
@@ -959,7 +959,7 @@ pub enum CircuitId {
     /// dispatch routing; it does NOT make the composition verifier sound. The
     /// verifier is internally re-audited but NOT externally audited (sq-qhy4
     /// pending); no soundness / ZK-privacy property is asserted as achieved.
-    // [OPUS-4.8] sq-3kd2g.6: bounded-depth path-reachability member. Opt-in
+    // sq-3kd2g.6: bounded-depth path-reachability member. Opt-in
     // (`extended-fragment` feature), research-grade, NOT externally audited.
     #[cfg(feature = "extended-fragment")]
     PathReach { d: u32, k: u32, n: u32 },
@@ -972,42 +972,42 @@ impl CircuitId {
             CircuitId::Scan { k, n, r } => format!("scan_k{k}_n{n}_r{r}"),
             CircuitId::FilterInt { d } => format!("filter_int_d{d}"),
             CircuitId::FilterF64 { d } => format!("filter_f64_d{d}"),
-            // [OPUS-4.8] sq-7lrq: the `md` magnitude-digit count names the compiled
+            // sq-7lrq: the `md` magnitude-digit count names the compiled
             // signed-int member, e.g. `filter_signed_int_d2`.
             CircuitId::FilterSignedInt { md } => format!("filter_signed_int_d{md}"),
-            // [OPUS-4.8] sq-7lrq: the `(id, fd)` integer/fraction digit counts name
+            // sq-7lrq: the `(id, fd)` integer/fraction digit counts name
             // the compiled decimal member, e.g. `filter_decimal_i3_f2`.
             CircuitId::FilterDecimal { id, fd } => format!("filter_decimal_i{id}_f{fd}"),
-            // [OPUS-4.8] sq-xojl: digit-count-free dual-leaf value member (one
+            // sq-xojl: digit-count-free dual-leaf value member (one
             // package per datatype class; the integer class).
             #[cfg(feature = "dual-leaf")]
             CircuitId::FilterValueDl => "filter_value_dl_int".to_string(),
-            // [OPUS-4.8] sq-2ezsx: the double + decimal datatype-class siblings.
+            // sq-2ezsx: the double + decimal datatype-class siblings.
             #[cfg(feature = "dual-leaf")]
             CircuitId::FilterValueDlF64 => "filter_value_dl_f64".to_string(),
             #[cfg(feature = "dual-leaf")]
             CircuitId::FilterValueDlDecimal => "filter_value_dl_decimal".to_string(),
-            // [OPUS-5] sq-wz99x: the dateTime/date datatype-class sibling. ONE
+            // sq-wz99x: the dateTime/date datatype-class sibling. ONE
             // package for BOTH lanes — the lane lives in the public
             // `datatype_const`, not the member name.
             #[cfg(feature = "dual-leaf")]
             CircuitId::FilterValueDlDateTime => "filter_value_dl_datetime".to_string(),
             CircuitId::RevokeUnset { depth } => format!("revoke_unset_d{depth}"),
-            // [OPUS-5] sq-kndw: the (status-list depth, accepted-set depth) pair
+            // sq-kndw: the (status-list depth, accepted-set depth) pair
             // names the compiled fully-hidden member, e.g. revoke_hidden_ref_d10_a4.
             CircuitId::RevokeHiddenRef { depth, set_depth } => {
                 format!("revoke_hidden_ref_d{depth}_a{set_depth}")
             }
             CircuitId::HiddenIssuer { depth } => format!("hidden_issuer_d{depth}"),
-            // [OPUS-4.8] sq-xqfg (HolderPoP T5): depth-free single member.
+            // sq-xqfg (HolderPoP T5): depth-free single member.
             CircuitId::HolderPok => "holder_pok".to_string(),
-            // [OPUS-4.8] sq-3c00 (HolderPoP hidden-holder-SET tier): the `depth`
+            // sq-3c00 (HolderPoP hidden-holder-SET tier): the `depth`
             // names the compiled set-membership member, e.g. `holder_set_d4`.
             CircuitId::HolderSet { depth } => format!("holder_set_d{depth}"),
-            // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): the `n_a`/`n_b` graph-size
+            // sq-bwwl / sq-fi03 (step 3): the `n_a`/`n_b` graph-size
             // buckets name the compiled join member, e.g. `join_eq_na16_nb16`.
             CircuitId::JoinEq { n_a, n_b } => format!("join_eq_na{n_a}_nb{n_b}"),
-            // [OPUS-4.8] sq-3kd2g.6: the `(d, k, n)` buckets name the compiled
+            // sq-3kd2g.6: the `(d, k, n)` buckets name the compiled
             // bounded-depth path member, e.g. `path_reach_d4_k2_n16`.
             #[cfg(feature = "extended-fragment")]
             CircuitId::PathReach { d, k, n } => format!("path_reach_d{d}_k{k}_n{n}"),
@@ -1044,7 +1044,7 @@ pub enum ProofInputs {
         /// so it is PROOF-BOUND, not a prover-controlled claim. The verifier
         /// cross-checks it against `manifest.attributions` for the pattern this
         /// scan answers (closes the `[[0],[0]]` collapse-two-graphs forge).
-        // [OPUS-4.8] audit #8: in-circuit per-graph source attribution.
+        // audit #8: in-circuit per-graph source attribution.
         #[serde(default)]
         attribution: Vec<bool>,
     },
@@ -1061,7 +1061,7 @@ pub enum ProofInputs {
         expected: bool,
     },
     /// filter_f64_d{d}: MANIFEST-COMPOSABLE hidden-operand numeric FILTER over an
-    /// xsd:double (integer-valued fragment) ([OPUS-4.8] sq-q7e / sq-tat). Public
+    /// xsd:double (integer-valued fragment) (sq-q7e / sq-tat). Public
     /// inputs mirror the member `main`: challenge (prepended), operand_enc, op,
     /// b_bits, expected. The hidden operand is bound to the committed literal by
     /// `operand_enc` (the scan-proof anchor, same as `filter_int`), and `b_bits`
@@ -1079,7 +1079,7 @@ pub enum ProofInputs {
         expected: bool,
     },
     /// filter_signed_int_d{md}: MANIFEST-COMPOSABLE hidden-operand numeric FILTER
-    /// over a SIGNED xsd:integer ([OPUS-4.8] sq-7lrq). Public inputs mirror the
+    /// over a SIGNED xsd:integer (sq-7lrq). Public inputs mirror the
     /// member `main` (`zk/compose/filter_signed_int_d{md}/src/main.nr`), in
     /// declaration order AFTER the prepended `challenge`: operand_enc, op, bound_neg,
     /// bound, expected. The hidden operand is bound to the committed literal by
@@ -1103,7 +1103,7 @@ pub enum ProofInputs {
         expected: bool,
     },
     /// filter_decimal_i{id}_f{fd}: MANIFEST-COMPOSABLE hidden-operand numeric FILTER
-    /// over an xsd:decimal ([OPUS-4.8] sq-7lrq). Public inputs mirror the member
+    /// over an xsd:decimal (sq-7lrq). Public inputs mirror the member
     /// `main` (`zk/compose/filter_decimal_i{id}_f{fd}/src/main.nr`), in declaration
     /// order AFTER the prepended `challenge`: operand_enc, op, bound_neg,
     /// bound_scaled, expected. The hidden operand is bound to the committed literal
@@ -1129,7 +1129,7 @@ pub enum ProofInputs {
         expected: bool,
     },
     /// filter_value_dl_int: DUAL-LEAF value-lane FILTER over a committed
-    /// NON-NEGATIVE xsd:integer ([OPUS-4.8] sq-xojl). These fields are EXACTLY the
+    /// NON-NEGATIVE xsd:integer (sq-xojl). These fields are EXACTLY the
     /// `pub` parameters of the `filter_value_dl_int` member `main`
     /// (`zk/compose/filter_value_dl_int/src/main.nr`), in declaration order AFTER
     /// the prepended `challenge`:
@@ -1159,8 +1159,8 @@ pub enum ProofInputs {
     /// DOCUMENTED RISK: this carries the INV-VL downgrade (value↔lexical agreement
     /// is trusted-issuer-honesty, not machine-enforced; #769 accepted, CR-G8 /
     /// sq-qhy4). NOT externally audited; no soundness / privacy claim.
-    // [OPUS-4.8] sq-xojl: dual-leaf value-lane FILTER inputs. Opt-in, NOT-yet-sound.
-    // [OPUS-5] sq-5xdlk: + the xsd:boolean lane, by datatype_const alone.
+    // sq-xojl: dual-leaf value-lane FILTER inputs. Opt-in, NOT-yet-sound.
+    // sq-5xdlk: + the xsd:boolean lane, by datatype_const alone.
     #[cfg(feature = "dual-leaf")]
     #[serde(rename = "filter_value_dl")]
     FilterValueDl {
@@ -1181,7 +1181,7 @@ pub enum ProofInputs {
         expected: bool,
     },
     /// filter_value_dl_f64: DUAL-LEAF value-lane FILTER over a committed
-    /// `xsd:double` ([OPUS-4.8] sq-2ezsx). These fields are EXACTLY the `pub`
+    /// `xsd:double` (sq-2ezsx). These fields are EXACTLY the `pub`
     /// parameters of the `filter_value_dl_f64` member `main`
     /// (`zk/compose/filter_value_dl_f64/src/main.nr`), in declaration order AFTER
     /// the prepended `challenge`:
@@ -1196,7 +1196,7 @@ pub enum ProofInputs {
     /// FILTER's constant double as an IEEE-754 bit pattern (PUBLIC), and
     /// `datatype_const = blake3(xsd:double IRI)` is PUBLIC. DOCUMENTED RISK: INV-VL
     /// downgrade (CR-G8 / sq-qhy4); NOT externally audited; no soundness claim.
-    // [OPUS-4.8] sq-2ezsx: dual-leaf double value-lane FILTER inputs. Opt-in.
+    // sq-2ezsx: dual-leaf double value-lane FILTER inputs. Opt-in.
     #[cfg(feature = "dual-leaf")]
     #[serde(rename = "filter_value_dl_f64")]
     FilterValueDlF64 {
@@ -1212,7 +1212,7 @@ pub enum ProofInputs {
         expected: bool,
     },
     /// filter_value_dl_decimal: DUAL-LEAF value-lane FILTER over a committed
-    /// `xsd:decimal` at a fixed canonical scale ([OPUS-4.8] sq-2ezsx). These fields
+    /// `xsd:decimal` at a fixed canonical scale (sq-2ezsx). These fields
     /// are EXACTLY the `pub` parameters of the `filter_value_dl_decimal` member
     /// `main` (`zk/compose/filter_value_dl_decimal/src/main.nr`), in declaration
     /// order AFTER the prepended `challenge`:
@@ -1228,7 +1228,7 @@ pub enum ProofInputs {
     /// `datatype_const = blake3(xsd:decimal IRI ‖ "@scale=fd")` is PUBLIC — it folds
     /// BOTH the datatype AND the canonical scale (the B4 scale bind). DOCUMENTED
     /// RISK: INV-VL downgrade (CR-G8 / sq-qhy4); NOT externally audited.
-    // [OPUS-4.8] sq-2ezsx: dual-leaf decimal value-lane FILTER inputs. Opt-in.
+    // sq-2ezsx: dual-leaf decimal value-lane FILTER inputs. Opt-in.
     #[cfg(feature = "dual-leaf")]
     #[serde(rename = "filter_value_dl_decimal")]
     FilterValueDlDecimal {
@@ -1247,7 +1247,7 @@ pub enum ProofInputs {
         expected: bool,
     },
     /// filter_value_dl_datetime: DUAL-LEAF value-lane FILTER over a committed
-    /// `xsd:dateTime` OR `xsd:date` ([OPUS-5] sq-wz99x). These fields are EXACTLY
+    /// `xsd:dateTime` OR `xsd:date` (sq-wz99x). These fields are EXACTLY
     /// the `pub` parameters of the `filter_value_dl_datetime` member `main`
     /// (`zk/compose/filter_value_dl_datetime/src/main.nr`), in declaration order
     /// AFTER the prepended `challenge`:
@@ -1266,7 +1266,7 @@ pub enum ProofInputs {
     /// by that constant alone. DOCUMENTED RISK: INV-VL downgrade, and the §13 rule
     /// set is an OPEN external-audit obligation (CR-G8 / sq-qhy4); NOT externally
     /// audited.
-    // [OPUS-5] sq-wz99x: dual-leaf dateTime/date value-lane FILTER inputs. Opt-in.
+    // sq-wz99x: dual-leaf dateTime/date value-lane FILTER inputs. Opt-in.
     #[cfg(feature = "dual-leaf")]
     #[serde(rename = "filter_value_dl_datetime")]
     FilterValueDlDateTime {
@@ -1308,7 +1308,7 @@ pub enum ProofInputs {
     /// query-bound join slots are public. The slots are public BY DESIGN (§4.4):
     /// the query already reveals which column a shared variable occupies, so
     /// disclosing the slot is not new leakage — only the join term stays hidden.
-    // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN inputs.
+    // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN inputs.
     #[serde(rename = "join_eq")]
     JoinEq {
         id: CircuitId,
@@ -1351,7 +1351,7 @@ pub enum ProofInputs {
     /// EXISTENCE-ONLY: a passing proof witnesses one bounded chain; it says
     /// NOTHING about longer paths or reachable-set completeness. NOT externally
     /// audited (sq-qhy4); no soundness / privacy claim.
-    // [OPUS-4.8] sq-3kd2g.6: bounded-depth path-reachability inputs. Opt-in
+    // sq-3kd2g.6: bounded-depth path-reachability inputs. Opt-in
     // (`extended-fragment`), research-grade, NOT-yet-sound.
     #[cfg(feature = "extended-fragment")]
     #[serde(rename = "path_reach")]
@@ -1390,23 +1390,23 @@ impl ProofInputs {
             ProofInputs::Scan { id, .. } => id,
             ProofInputs::FilterInt { id, .. } => id,
             ProofInputs::FilterF64 { id, .. } => id,
-            // [OPUS-4.8] sq-7lrq: signed xsd:integer / xsd:decimal composable FILTERs.
+            // sq-7lrq: signed xsd:integer / xsd:decimal composable FILTERs.
             ProofInputs::FilterSignedInt { id, .. } => id,
             ProofInputs::FilterDecimal { id, .. } => id,
-            // [OPUS-4.8] sq-xojl: dual-leaf value-lane FILTER.
+            // sq-xojl: dual-leaf value-lane FILTER.
             #[cfg(feature = "dual-leaf")]
             ProofInputs::FilterValueDl { id, .. } => id,
-            // [OPUS-4.8] sq-2ezsx: dual-leaf double + decimal value-lane FILTERs.
+            // sq-2ezsx: dual-leaf double + decimal value-lane FILTERs.
             #[cfg(feature = "dual-leaf")]
             ProofInputs::FilterValueDlF64 { id, .. } => id,
             #[cfg(feature = "dual-leaf")]
             ProofInputs::FilterValueDlDecimal { id, .. } => id,
-            // [OPUS-5] sq-wz99x: dual-leaf dateTime/date value-lane FILTER.
+            // sq-wz99x: dual-leaf dateTime/date value-lane FILTER.
             #[cfg(feature = "dual-leaf")]
             ProofInputs::FilterValueDlDateTime { id, .. } => id,
-            // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN.
+            // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN.
             ProofInputs::JoinEq { id, .. } => id,
-            // [OPUS-4.8] sq-3kd2g.6: bounded-depth path reachability.
+            // sq-3kd2g.6: bounded-depth path reachability.
             #[cfg(feature = "extended-fragment")]
             ProofInputs::PathReach { id, .. } => id,
         }
@@ -1414,9 +1414,9 @@ impl ProofInputs {
 }
 
 /// The PUBLIC `datatype_const` of the DUAL-LEAF `xsd:boolean` value lane
-/// (sq-5xdlk) — `blake3_field(xsd:boolean IRI)`, exactly the constant
-/// `sparq_zk::dual_leaf_boolean::encode_boolean` (the host half, sq-hh7a4) folds
-/// into the committed leaf's `value_component`.
+/// (sq-5xdlk) — BLAKE3 key derivation over the `xsd:boolean` IRI, exactly the
+/// constant `sparq_zk::dual_leaf_boolean::encode_boolean` (the host half,
+/// sq-hh7a4) folds into the committed leaf's `value_component`.
 ///
 /// # The boolean lane adds NO new Noir member
 ///
@@ -1431,11 +1431,16 @@ impl ProofInputs {
 /// # Lane separation is the public `datatype_const`, and only that
 ///
 /// `datatype_const` is folded into `value_component = h3(VALUE_HOOK,
-/// DATATYPE_CONST, LANG_NONE)`, and `blake3(xsd:boolean) != blake3(xsd:integer)`.
-/// So the honest witness for a committed `"1"^^xsd:integer` leaf recomputes a
+/// DATATYPE_CONST, LANG_NONE)`, and this constant differs from
+/// `blake3(xsd:integer)`. So the honest witness for a committed `"1"^^xsd:integer` leaf recomputes a
 /// DIFFERENT leaf under this constant and fails the member's
 /// `assert_eq(leaf, operand_enc)` binding — and symmetrically for a boolean leaf
-/// under the integer constant. That is a BINDING argument resting on Poseidon2
+/// under the integer constant. The member range-checks the hook to `u64`, not to
+/// `{0, 1}`, so the constant also differs from the `blake3(datatype IRI)` any
+/// string-lane leaf folds with `VALUE_NONE`: it is derived in BLAKE3's
+/// key-derivation mode, a domain separate from the plain fold for every byte
+/// string, so neither an `xsd:boolean` nor an opaque-datatype leaf can be opened
+/// as a boolean value. That is a BINDING argument resting on Poseidon2
 /// preimage resistance (a prover free to search preimages is out of scope of this
 /// statement), NOT an audited soundness claim.
 ///
@@ -1443,12 +1448,10 @@ impl ProofInputs {
 /// — value↔lexical agreement is TRUSTED-ISSUER-HONESTY, not machine-enforced
 /// (#769 accepted; gap CR-G8 / sq-qhy4). The ZK estate is internally re-audited
 /// but NOT externally audited; nothing here is a soundness or privacy guarantee.
-// [OPUS-5] sq-5xdlk: boolean value-lane wiring. Opt-in (`dual-leaf`), NOT-yet-sound.
+// sq-5xdlk: boolean value-lane wiring. Opt-in (`dual-leaf`), NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn boolean_datatype_const() -> FieldHex {
-    FieldHex(field_to_hex(&sparq_zk::dual_leaf::datatype_const(
-        sparq_zk::dual_leaf_boolean::XSD_BOOLEAN,
-    )))
+    FieldHex(field_to_hex(&sparq_zk::dual_leaf_boolean::boolean_datatype_const()))
 }
 
 /// The PUBLIC `datatype_const` of the DUAL-LEAF `xsd:dateTime` value lane
@@ -1465,7 +1468,7 @@ pub fn boolean_datatype_const() -> FieldHex {
 /// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
 /// CR-G8 / sq-qhy4), and the §13 rule set is itself an OPEN external-audit
 /// obligation. NOT externally audited; no soundness / privacy claim.
-// [OPUS-5] sq-wz99x: dateTime lane constant. Opt-in (`dual-leaf`), NOT-yet-sound.
+// sq-wz99x: dateTime lane constant. Opt-in (`dual-leaf`), NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn datetime_datatype_const() -> FieldHex {
     FieldHex(field_to_hex(
@@ -1500,7 +1503,7 @@ pub fn datetime_datatype_const() -> FieldHex {
 ///
 /// DOCUMENTED RISK: as [`datetime_datatype_const`] (CR-G8 / sq-qhy4). NOT
 /// externally audited; no soundness / privacy claim.
-// [OPUS-5] sq-wz99x: date lane constant. Opt-in (`dual-leaf`), NOT-yet-sound.
+// sq-wz99x: date lane constant. Opt-in (`dual-leaf`), NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn date_datatype_const() -> FieldHex {
     FieldHex(field_to_hex(
@@ -1527,7 +1530,7 @@ pub struct SubProof {
 /// scanned column). Verifier checks this as a field equality over the
 /// already-verified public inputs.
 ///
-/// # Canonical ordering ([OPUS-4.8] sq-y2wy)
+/// # Canonical ordering (sq-y2wy)
 /// `binding_edges` is canonicalised by [`ProofManifest::canonicalize`] (applied
 /// before hashing/serialisation) to ascending `(from_proof, from_row, from_slot,
 /// to_proof)` — the field-declaration tuple, which is a TOTAL order over edges.
@@ -1565,7 +1568,7 @@ pub struct BindingEdge {
 /// the query-derived slots for the shared variable (the §4.4 slot binding). Those
 /// slots live on the `join_eq` proof's public inputs, NOT on this edge.
 ///
-/// # Canonical ordering ([OPUS-4.8] sq-y2wy — was deferred at sq-fi03)
+/// # Canonical ordering (sq-y2wy — was deferred at sq-fi03)
 /// `join_edges` is canonicalised by [`ProofManifest::canonicalize`] (applied
 /// before hashing/serialisation) to ascending `(scan_a, graph_a, scan_b, graph_b,
 /// join_proof)` — the field-declaration tuple, a TOTAL order over edges (it
@@ -1580,7 +1583,7 @@ pub struct BindingEdge {
 /// is value-symmetric, so the proven equality holds regardless of edge order.
 ///
 /// The `bind_joins` gate that consumes this is step 4 (sq-sfsi).
-// [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN edge.
+// sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN edge.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct JoinEdge {
     /// Index into [`ProofManifest::sub_proofs`] of the scan sub-proof for graph A.
@@ -1610,7 +1613,7 @@ pub struct JoinEdge {
 /// cell — it never trusts a prover-supplied encoding. So this carries the
 /// PREIMAGE the relying party reads, and the gate proves that preimage is the one
 /// the proof attests.
-// [OPUS-4.8] sq-1zf94: disclosed-solution term. Opt-in (`extended-fragment`),
+// sq-1zf94: disclosed-solution term. Opt-in (`extended-fragment`),
 // research-grade, NOT-yet-sound (sq-qhy4).
 #[cfg(any(feature = "extended-fragment", feature = "successful-results"))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1671,7 +1674,7 @@ impl DisclosedTerm {
 /// `var` (a query variable name, no leading `?`) is bound to the disclosed
 /// [`DisclosedTerm`]. The verifier binds this to the proof-bound term encodings
 /// (see [`crate::verifier::bind_fragment_solution`]).
-// [OPUS-4.8] sq-1zf94: disclosed-solution binding. Opt-in (`extended-fragment`).
+// sq-1zf94: disclosed-solution binding. Opt-in (`extended-fragment`).
 #[cfg(feature = "extended-fragment")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SolutionBinding {
@@ -1732,7 +1735,7 @@ pub struct SolutionBinding {
 ///
 /// [`solution`]: BranchWitness::solution
 /// [`scan_rows`]: BranchWitness::scan_rows
-// [OPUS-4.8] sq-3kd2g.6: per-solution UNION branch attribution + obligation
+// sq-3kd2g.6: per-solution UNION branch attribution + obligation
 // binding schema. Opt-in (`extended-fragment`), NOT-yet-sound.
 #[cfg(feature = "extended-fragment")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1771,7 +1774,7 @@ pub struct BranchWitness {
     /// rows is refused fail-closed.
     ///
     /// [`scan_proofs`]: BranchWitness::scan_proofs
-    // [OPUS-4.8] sq-qyfth: per-solution BGP scan-slot row selection.
+    // sq-qyfth: per-solution BGP scan-slot row selection.
     #[serde(default)]
     pub scan_rows: Vec<usize>,
     /// The DISCLOSED solution bindings (sq-1zf94): the variable→term assignment
@@ -1784,7 +1787,7 @@ pub struct BranchWitness {
     /// endpoint variable MUST appear here; an EXISTENTIAL (non-projected) endpoint
     /// stays hidden and is not term-bound. Empty => no disclosed-term binding
     /// (only the query-CONSTANT path predicate/endpoints are bound).
-    // [OPUS-4.8] sq-1zf94: disclosed-solution term binding.
+    // sq-1zf94: disclosed-solution term binding.
     #[serde(default)]
     pub solution: Vec<SolutionBinding>,
 }
@@ -1846,21 +1849,21 @@ pub struct ProofManifest {
     /// requires this declared `key_set` to be a SUBSET of the external `K` (a
     /// prover may narrow but never widen the trust set). An empty external `K`
     /// trusts no issuer — any scan carrying commitments is then rejected.
-    // [OPUS-4.8] audit #3 / codex #1: prover-declared, NOT the trust anchor.
+    // audit #3 / codex #1: prover-declared, NOT the trust anchor.
     #[serde(default)]
     pub key_set: Vec<String>,
     /// Issuer attestations over the per-graph commitments (audit #3): one per
     /// distinct `commitments[g]` value that any scan sub-proof carries. The
     /// verifier requires every scan commitment to have a matching attestation
     /// whose signature is valid and whose key is in `key_set`.
-    // [OPUS-4.8] audit #3.
+    // audit #3.
     #[serde(default)]
     pub commitment_attestations: Vec<CommitmentAttestation>,
     /// Per-pattern graph attribution sets (which committed graph indices each
     /// BGP pattern may draw from) — fed to `verify::recheck` for the Q6
     /// cross-graph bnode-join guard.
     pub attributions: Vec<Vec<usize>>,
-    /// [OPUS-5] sq-q9r5e follow-up: the EXPLICIT per-pattern answering-scan
+    /// sq-q9r5e follow-up: the EXPLICIT per-pattern answering-scan
     /// declaration — `pattern_scans[pi]` is the set of `sub_proofs` indices of
     /// the SCAN sub-proofs that answer query BGP pattern `pi`. Indexed per query
     /// pattern in query order, exactly like [`Self::attributions`].
@@ -1912,7 +1915,7 @@ pub struct ProofManifest {
     /// Checked by the FLAT stage-1 gates only. The `extended-fragment` regime
     /// defers all query-text term binding (see `verify_fragment_manifest`), so a
     /// declaration is neither validated nor used there.
-    // [OPUS-5] sq-q9r5e follow-up: explicit pattern→scan mapping. Research-grade,
+    // sq-q9r5e follow-up: explicit pattern→scan mapping. Research-grade,
     // NOT externally audited (sq-qhy4).
     #[serde(default)]
     pub pattern_scans: Vec<Vec<usize>>,
@@ -1930,7 +1933,7 @@ pub struct ProofManifest {
     /// regime with NO grounded steps is rejected (fail-closed). See the
     /// `derivation` module for the honest scope (disclosed-base re-check; the
     /// in-circuit closure proof is deferred).
-    // [OPUS-4.8] sq-314: derivation steps for entailment-regime enforcement.
+    // sq-314: derivation steps for entailment-regime enforcement.
     #[serde(default)]
     pub derivation_steps: Vec<crate::derivation::DerivationStep>,
     pub binding: BindingMode,
@@ -2001,7 +2004,7 @@ pub struct ProofManifest {
     /// (issuer-bound) `revocation` reference must show `bit[index] == 0` and a
     /// version within the verifier's freshness window. A missing matching
     /// snapshot REJECTS.
-    // [OPUS-4.8] audit #12.
+    // audit #12.
     #[serde(default)]
     pub status_snapshots: Vec<StatusListSnapshot>,
     /// The composed sub-proofs (per-property circuit instances).
@@ -2015,7 +2018,7 @@ pub struct ProofManifest {
     /// manifest with no hidden joins (defaults so legacy manifests parse). The
     /// `bind_joins` verifier gate that enforces these is step 4 (sq-sfsi); this
     /// field is the schema it consumes.
-    // [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN edges.
+    // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN edges.
     #[serde(default)]
     pub join_edges: Vec<JoinEdge>,
     /// OPTIONAL hidden-index revocation proof (sq-3e5 / sq-h2v): a zero-knowledge
@@ -2034,10 +2037,10 @@ pub struct ProofManifest {
     /// per presentation, bound to the one issuer-signed reference. The
     /// multi-credential consequence and the obligations any `Vec` migration owes
     /// are pre-registered on [`Self::revocation`] (sq-cuvmj).
-    // [OPUS-4.8] sq-3e5 + sq-h2v: hidden-index revocation proof (privacy upgrade).
+    // sq-3e5 + sq-h2v: hidden-index revocation proof (privacy upgrade).
     #[serde(default)]
     pub hidden_revocation: Option<HiddenIndexRevocation>,
-    /// [OPUS-5] sq-kndw: the FULLY-HIDDEN revocation proof — the privacy upgrade
+    /// sq-kndw: the FULLY-HIDDEN revocation proof — the privacy upgrade
     /// over [`Self::hidden_revocation`], hiding the status-list IRI and version on
     /// top of the index and the liveness bit. Present exactly when
     /// `revocation` is in the FULLY-HIDDEN mode (`status_list`/`index`/`version`
@@ -2060,7 +2063,7 @@ pub struct ProofManifest {
     ///
     /// SCALAR for the same reason [`Self::revocation`] is; the `Vec`-migration
     /// obligations are pre-registered on that field (sq-cuvmj).
-    // [OPUS-5] sq-kndw: fully-hidden revocation proof. Opt-in, research-grade.
+    // sq-kndw: fully-hidden revocation proof. Opt-in, research-grade.
     #[serde(default)]
     pub fully_hidden_revocation: Option<FullyHiddenRevocation>,
     /// OPTIONAL hidden-issuer attestation proofs (sq-z9l): zero-knowledge proofs
@@ -2074,7 +2077,7 @@ pub struct ProofManifest {
     /// `bb verify` — so WHICH authority vouched for the holder is never disclosed.
     /// The clear-key path remains the interim/always-on check; this is the additive
     /// privacy layer. See `crate::verifier::bind_hidden_issuer_attestations`.
-    // [OPUS-4.8] sq-z9l: hidden-issuer attestation proofs (privacy upgrade).
+    // sq-z9l: hidden-issuer attestation proofs (privacy upgrade).
     #[serde(default)]
     pub hidden_issuer_attestations: Vec<HiddenIssuerAttestation>,
     /// OPTIONAL in-circuit holder Proof-of-Possession proofs (sq-c2ql, HolderPoP
@@ -2096,7 +2099,7 @@ pub struct ProofManifest {
     /// NOT-yet-sound (sq-qhy4 / sq-9hrn; remediation epic sq-1s2): this wires the
     /// binding edge, it does NOT make the verifier sound. No soundness/ZK-privacy
     /// claim. See [`HolderPokProof`].
-    // [OPUS-4.8] sq-c2ql (HolderPoP T6 / B2): in-circuit holder PoK proofs. Opt-in,
+    // sq-c2ql (HolderPoP T6 / B2): in-circuit holder PoK proofs. Opt-in,
     // NOT-yet-sound.
     #[serde(default)]
     pub holder_pok_proofs: Vec<HolderPokProof>,
@@ -2118,7 +2121,7 @@ pub struct ProofManifest {
     /// NOT-yet-sound (sq-qhy4 / sq-9hrn; remediation epic sq-1s2): this wires the
     /// membership gate, it does NOT make the verifier sound. No soundness /
     /// ZK-privacy property is asserted as achieved. See [`HolderSetProof`].
-    // [OPUS-4.8] sq-3c00 (HolderPoP hidden-holder-SET tier): in-circuit
+    // sq-3c00 (HolderPoP hidden-holder-SET tier): in-circuit
     // set-membership proofs. Opt-in, NOT-yet-sound.
     #[serde(default)]
     pub holder_set_proofs: Vec<HolderSetProof>,
@@ -2140,7 +2143,7 @@ pub struct ProofManifest {
 /// `depth` selects the circuit member (`revoke_unset_d{depth}`) and MUST equal the
 /// depth the relying party uses to derive its authoritative root, so the trees (and
 /// roots) are over the same leaf layout.
-// [OPUS-4.8] sq-3e5 + sq-h2v.
+// sq-3e5 + sq-h2v.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HiddenIndexRevocation {
     /// The Merkle-tree depth (`revoke_unset_d{depth}` member; supports `2^depth`
@@ -2149,7 +2152,7 @@ pub struct HiddenIndexRevocation {
     /// The status-list Merkle root the proof was produced against (the proof's
     /// PUBLIC input). Checked byte-equal to the relying party's authoritative root.
     pub root: FieldHex,
-    /// [OPUS-4.8] sq-ayv: the hiding index COMMITMENT the proof was produced against
+    /// sq-ayv: the hiding index COMMITMENT the proof was produced against
     /// (the proof's SECOND public input, after `root`), hex. The circuit recomputes
     /// it in-circuit from the same private `index` it proves bit-unset for; the
     /// verifier byte-matches it against the ISSUER-SIGNED commitment in
@@ -2164,7 +2167,7 @@ pub struct HiddenIndexRevocation {
     pub proof_hex: String,
 }
 
-/// [OPUS-5] sq-kndw: a FULLY-HIDDEN revocation proof — the bb proof produced by
+/// sq-kndw: a FULLY-HIDDEN revocation proof — the bb proof produced by
 /// the `revoke_hidden_ref_d{depth}_a{set_depth}` circuit
 /// ([`CircuitId::RevokeHiddenRef`]), together with the public inputs it commits.
 /// The privacy upgrade over [`HiddenIndexRevocation`]: the status-list IRI and the
@@ -2203,7 +2206,7 @@ pub struct HiddenIndexRevocation {
 ///
 /// NOT externally audited (sq-qhy4). Research-grade; no soundness / ZK-privacy
 /// property is asserted as achieved.
-// [OPUS-5] sq-kndw: fully-hidden revocation proof (deferred remainder of sq-6qe).
+// sq-kndw: fully-hidden revocation proof (deferred remainder of sq-6qe).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FullyHiddenRevocation {
     /// The status-list Merkle depth (the `d{depth}` half of the member name).
@@ -2257,7 +2260,7 @@ pub struct FullyHiddenRevocation {
 ///
 /// `depth` selects the circuit member (`hidden_issuer_d{depth}`) and MUST equal
 /// the depth the relying party derives its root with.
-// [OPUS-4.8] sq-z9l: hidden-issuer attestation (privacy upgrade).
+// sq-z9l: hidden-issuer attestation (privacy upgrade).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HiddenIssuerAttestation {
     /// The commitment this attestation covers — must match a scan sub-proof's
@@ -2301,8 +2304,8 @@ pub struct HiddenIssuerAttestation {
     /// including the separate (non-linkability) guess-confirmation residual and the
     /// trip-wire that fires if `C(G)` ever stops being disclosed:
     /// `research/zk-hidden-path-salt-disclosure.md`.
-    // [OPUS-4.8] sq-xxg: salt for hidden-only `m` reconstruction.
-    // [OPUS-5] sq-93h: assessed NO-BUILD — dominated by the clear `commitment`.
+    // sq-xxg: salt for hidden-only `m` reconstruction.
+    // sq-93h: assessed NO-BUILD — dominated by the clear `commitment`.
     #[serde(default)]
     pub salt: Option<FieldHex>,
     /// The bb proof blob (hex), same `len|proof|len|pi|vk` layout as a
@@ -2352,7 +2355,7 @@ pub struct HiddenIssuerAttestation {
 /// this member inherits that — a passing proof is NOT a guarantee under an
 /// adversarial prover, and there is NO external accredited-cryptographer sign-off
 /// (sq-qhy4 pending). Research-grade, opt-in. No soundness/ZK-privacy claim is made.
-// [OPUS-4.8] sq-c2ql (HolderPoP T6 / B2): in-circuit holder PoK + issuer-attested
+// sq-c2ql (HolderPoP T6 / B2): in-circuit holder PoK + issuer-attested
 // credential binding edge. NOT-yet-sound (sq-qhy4); opt-in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HolderPokProof {
@@ -2402,7 +2405,7 @@ pub struct HolderPokProof {
 /// adversarial prover, and there is NO external accredited-cryptographer sign-off
 /// (sq-qhy4 pending). Research-grade, opt-in. No soundness / ZK-privacy property is
 /// asserted as achieved.
-// [OPUS-4.8] sq-3c00 (HolderPoP hidden-holder-SET tier): in-circuit set-membership
+// sq-3c00 (HolderPoP hidden-holder-SET tier): in-circuit set-membership
 // proof. Opt-in, NOT-yet-sound (sq-qhy4).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HolderSetProof {
@@ -2454,7 +2457,7 @@ impl ProofManifest {
         }
     }
 
-    /// Canonicalise the edge vectors to a deterministic order ([OPUS-4.8]
+    /// Canonicalise the edge vectors to a deterministic order (
     /// sq-y2wy). Sorts `binding_edges` ascending by `(from_proof, from_row,
     /// from_slot, to_proof)` and `join_edges` ascending by `(scan_a, graph_a,
     /// scan_b, graph_b, join_proof)` — each the struct's field-declaration tuple
@@ -2476,9 +2479,9 @@ impl ProofManifest {
     /// is always canonical regardless of construction order. Call this directly
     /// when a canonical in-memory manifest is needed (e.g. before equality checks
     /// on the struct itself).
-    // [OPUS-4.8] sq-y2wy: canonical edge ordering for binding_edges + join_edges.
+    // sq-y2wy: canonical edge ordering for binding_edges + join_edges.
     pub fn canonicalize(&mut self) {
-        // [OPUS-4.8] sq-y2wy: edges are distinct under derived total `Ord`
+        // sq-y2wy: edges are distinct under derived total `Ord`
         // (no equal elements), so an unstable sort is deterministic here and
         // avoids the auxiliary allocation a stable sort may perform.
         self.binding_edges.sort_unstable();
@@ -2490,7 +2493,7 @@ impl ProofManifest {
     /// deterministic in edge order WITHOUT mutating `self`: two manifests that
     /// differ only in edge order produce byte-identical JSON (and thus the same
     /// hash over those bytes).
-    // [OPUS-4.8] sq-y2wy: canonicalise edge order before serialisation.
+    // sq-y2wy: canonicalise edge order before serialisation.
     pub fn to_json(&self) -> String {
         let mut canonical = self.clone();
         canonical.canonicalize();
@@ -2521,7 +2524,7 @@ impl ProofManifest {
 /// `verify_manifest` crypto flow for an end-to-end path/`UNION`/`VALUES` accept
 /// (which additionally needs the disclosed-solution term binding) is a documented
 /// follow-up bead. NOT externally audited (sq-qhy4); no soundness/privacy claim.
-// [OPUS-4.8] sq-3kd2g.6: extended-fragment presentation wrapper. Opt-in
+// sq-3kd2g.6: extended-fragment presentation wrapper. Opt-in
 // (`extended-fragment`), research-grade, NOT-yet-sound (sq-qhy4).
 #[cfg(feature = "extended-fragment")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2572,7 +2575,7 @@ impl FragmentManifest {
     }
 }
 
-// [OPUS-4.8] sq-h8rg (HolderPoP T2): AttestedHolderBinding schema + digest-wiring tests.
+// sq-h8rg (HolderPoP T2): AttestedHolderBinding schema + digest-wiring tests.
 #[cfg(test)]
 mod holder_binding_tests {
     use super::*;
@@ -2768,7 +2771,7 @@ mod holder_binding_tests {
         // `holder: None` serializes (no skip on the field) but a JSON missing it
         // must still parse via #[serde(default)].
         //
-        // [OPUS-4.8] Drop the `holder` key STRUCTURALLY (parse → remove key on the
+        // Drop the `holder` key STRUCTURALLY (parse → remove key on the
         // attestation object → re-serialize) rather than via brittle raw-string
         // `.replace()`, so this back-compat test survives field-order, whitespace,
         // and future-field changes to the serialized form.
@@ -2820,7 +2823,7 @@ mod holder_binding_tests {
     }
 }
 
-/// [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): schema tests for the hidden
+/// sq-bwwl / sq-fi03 (step 3): schema tests for the hidden
 /// cross-credential JOIN manifest types — `CircuitId::JoinEq`,
 /// `ProofInputs::JoinEq`, and `JoinEdge`. SCHEMA ONLY: the `bind_joins` verifier
 /// gate (commitment binding + `UnboundJoin` query binding) is step 4 (sq-sfsi).
@@ -2963,7 +2966,7 @@ mod join_schema_tests {
     }
 }
 
-/// [OPUS-4.8] sq-y2wy: canonical edge-ordering tests for `binding_edges` +
+/// sq-y2wy: canonical edge-ordering tests for `binding_edges` +
 /// `join_edges`. PR #178 (sq-fi03) documented (then corrected to "deferred")
 /// edge canonicalisation; this module pins the now-real implementation —
 /// `ProofManifest::canonicalize` / `to_json` sort both edge vectors to a total,
@@ -3138,7 +3141,7 @@ mod canonical_edge_tests {
     }
 }
 
-// [OPUS-4.8] sq-3kd2g.6: schema tests for the bounded-depth path member id,
+// sq-3kd2g.6: schema tests for the bounded-depth path member id,
 // the PathReach public inputs, and the extended-fragment FragmentManifest wrapper.
 #[cfg(all(test, feature = "extended-fragment"))]
 mod path_schema_tests {
@@ -3203,7 +3206,7 @@ mod path_schema_tests {
 
     #[test]
     fn branch_witness_scan_rows_is_serde_default_back_compatible() {
-        // [OPUS-4.8] sq-qyfth: a pre-scan_rows manifest (no `scan_rows` key) still
+        // sq-qyfth: a pre-scan_rows manifest (no `scan_rows` key) still
         // deserializes, defaulting the row-selection to empty — additive back-compat.
         let json = r#"{"branch":0,"scan_proofs":[0],"path_proofs":[],"values_rows":[]}"#;
         let back: BranchWitness = serde_json::from_str(json).expect("deserializes");

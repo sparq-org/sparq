@@ -5,7 +5,7 @@
 //! a reader still pins a generation on entry (snapshot consistency, §6.4); the
 //! scheduler only decides *when and on which worker* the pinned read runs.
 //!
-//! [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+//! written while Fable 5 unavailable — re-review when Fable returns.
 //!
 //! ## Design (Umbra-style, litreview-C Topic A)
 //!
@@ -430,7 +430,7 @@ impl<T: Send + 'static> Scheduler<T> {
 
     /// Total jobs completed (ran to a result or were shed) since construction.
     pub fn completed(&self) -> u64 {
-        // [OPUS-4.8] Acquire (paired with the worker's Release increment in
+        // Acquire (paired with the worker's Release increment in
         // `worker_loop`) so a caller observing all its tickets' `wait()` returned
         // is guaranteed to see every corresponding increment — the invariant the
         // `heavy_concurrency_is_bounded` quiet-box race violated under Relaxed.
@@ -506,7 +506,7 @@ fn worker_loop<T: Send + 'static>(
         // A panic-safe guard: if `work` panics, deliver `Panicked` and release
         // the heavy slot, so the pool never deadlocks on a leaked cap count.
         let outcome = run_job_catching(job.work);
-        // [OPUS-4.8] Signal-before-count race fix. The completion counter MUST be
+        // Signal-before-count race fix. The completion counter MUST be
         // incremented BEFORE `deliver()` signals the ticket waiter, and with
         // Release ordering, so the increment is published *before* the wake. Order
         // matters: `deliver()` takes the slot mutex, stores `Done`, and notifies

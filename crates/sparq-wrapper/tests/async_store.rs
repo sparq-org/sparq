@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-1rg2q.8: streaming, cancellation, and round-trip witnesses for the
+// sq-1rg2q.8: streaming, cancellation, and round-trip witnesses for the
 // asynchronous store wrapper. The fake backend is deliberately delayed and instrumented so
 // the assertions observe WHEN the producer ran, not just what it produced.
 

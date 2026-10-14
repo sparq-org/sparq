@@ -99,10 +99,11 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   ephemeral-*static* ECDH: **not forward-secret** — compromise of the recipient's
   long-term private key exposes previously recorded wraps.
 - **`capability`** — `PublicGrant` (deterministic encode/decode, `cap_id`,
-  admin `sign`/`verify`, and a **branch set**: `ScopedBranch` +
+  admin `sign`/`verify`, exercise-time `check_epoch`, and a **branch set**: `ScopedBranch` +
   `branch_scope`/`set_branch_scope`/`covers_branch`), `Capability`
   (`new_read`/`new_write`/`new_admin`, `validate`,
-  `encode_secret`/`decode_secret`), `wrap_capability`/`unwrap_capability` (the
+  `encode_secret` → `Zeroizing<Vec<u8>>`/`decode_secret`),
+  `wrap_capability`/`unwrap_capability` (the
   typed §4.2 secret-transfer path: encode-secret + recipient-wrap under the fixed
   `CAPABILITY_WRAP_AAD`, plaintext never handed to the caller), and `delegate`
   (narrow-only).
@@ -116,7 +117,13 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   the encrypted parent; `open_object` / `SealedObject::open` verify the whole tree
   and reassemble. `ObjectLayout` shapes it (`chunk_size`/`arity`), `ObjectLimits`
   bounds an untrusted block set, and `SealedObject::merkle_root`/`commit_id` is
-  the root block's digest.
+  the root block's digest. For reproducible wire vectors,
+  `seal_object_deterministic(k_read, ctx, object, plaintext, layout, block_material)`
+  accepts a callback `FnMut(u64) -> (BlockId, [u8; 24])`: it receives each chunk
+  index once (leaves first, internal nodes bottom-up, root index 0 last) and
+  supplies its explicit id and nonce. The result is still root-first. Supply
+  distinct block ids and never reuse a nonce under the same derived block key
+  for different plaintexts; use the randomized APIs for production.
 - **`epoch`** — `EpochTransition` (`sign`/`verify`, monotonic-epoch check,
   `HistoryPolicy::{ForwardOnly, HistoryRekeyed}`) — the revocation mechanism.
 
@@ -124,7 +131,11 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
 
 - **Secrets never go on the wire in the clear.** `K_read` and private keys live in
   the secret-bearing `Capability::encode_secret` output (a bearer secret) — wrap it
-  with `wrap` before it leaves protected local storage. Prefer
+  with `wrap` before it leaves protected local storage. That output is a
+  `zeroize::Zeroizing<Vec<u8>>` written into one pre-reserved buffer (no secret
+  CBOR fragments, no reallocation), so it erases itself on drop — keep it in that
+  wrapper; copying it into a plain `Vec` (`.to_vec()`, `(*buf).clone()`) leaves an
+  un-erased copy. Prefer
   `wrap_capability`/`unwrap_capability`: same two steps, but the AAD is the fixed
   `CAPABILITY_WRAP_AAD` (so a capability wrapping cannot be confused with a DEK or
   bare-`K_read` wrapping made under a caller-chosen label), the capability is
@@ -153,6 +164,12 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   The epoch bound is the child's own signed `PublicGrant::max_epoch` ceiling — the
   child keeps the parent's exact `epoch`, so a narrowed grant never claims an epoch
   that disagrees with the topics it carries.
+- **`max_epoch` is enforced only where you call `check_epoch`.** `verify` checks
+  the admin signature, not the epoch: a signed grant past its `max_epoch` still
+  verifies. This crate never sees a "current epoch", so whoever admits a grant
+  (the broker/sync tier) must also call `PublicGrant::check_epoch(current)`,
+  which accepts the inclusive range `epoch ..= max_epoch` (unbounded above when
+  `max_epoch` is `None`) and otherwise fails with `Error::EpochOutOfRange`.
 - **A branch set is authorization, not key distribution.** A grant is scoped to one
   or more branches (`Delegation::branches` selects a subset out of the parent's set;
   `None` inherits it), and each branch in scope carries its own epoch-specific topic,
@@ -165,7 +182,18 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   a single-branch grant omits the field and encodes exactly as it always did.
 - **Determinism is load-bearing.** `cap_id` and `CommitId` are hashes of canonical
   bytes; the golden vectors in `tests/vectors.rs` pin the exact wire format. A
-  change to those bytes is a wire-format break, not a refactor.
+  change to those bytes is a wire-format break, not a refactor. Set-valued fields
+  are canonical on the wire and rejected otherwise: a `Commit`'s `parents` encode
+  strictly ascending with duplicates removed (an in-memory list in any order is
+  canonicalized by `encode`/`signing_bytes`), and `Commit::decode` fails with
+  `Error::NonCanonical` on a reordered or duplicated parent list — so permuting
+  or duplicating parents (other fields unchanged) gives identical `encode` and
+  `signing_bytes` output. This is not a unique encoding: the decoder ignores
+  unknown map keys, so other plaintexts can decode to the same signed commit.
+  Nor is `CommitId` unique: sealing is randomized, so sealing the same commit
+  bytes twice gives two envelopes and two `CommitId`s that both decrypt and
+  verify. Commits written by
+  older code with unsorted or duplicate parents no longer decode.
 
 ## Learn more
 

@@ -15,46 +15,46 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] sq-r06h. OPT-IN policy layer (the sparq-reason / sparq-solid isolation
+# sq-r06h. OPT-IN policy layer (the sparq-reason / sparq-solid isolation
 # pattern): a SEPARATE crate so the core engine carries zero ODRL/usage-control code,
 # deps, or runtime cost — it is a dependency of NOTHING in the workspace. It builds ON
 # the existing N3/EYE reasoner + the sparq-solid WAC/ACP allow/deny enforcement model.
 # Design: research/feature-research-odrl-policy.md (epic sq-3183, candidate #1).
 #
 # The single-node ODRL base case is complete; the headline federated-disclosure /
-# ODRL→MPC composition (research doc §2) remains deferred. [GPT-5.6] This crate is
+# ODRL→MPC composition (research doc §2) remains deferred. This crate is
 # published because sparq-server and sparq-solid expose it behind default-off features.
 
-# [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg.
+# docs.rs: build with all features + the `docsrs` cfg.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io.
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false }
-sparq-engine = { path = "../sparq-engine", version = "0.1.5", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.6", default-features = false }
 oxrdf.workspace = true
 # OPTIONAL — `secprop-leftoperands` feature only (sq-3705). The shared `secx:` IRI
 # constants, single-sourced in a ZERO-dependency leaf so this crate's `DIM_*` are the
 # SAME strings `sparq-trust` and `sparq-zk` use without any of them depending on each
 # other. It has no dependencies of its own, so the lean graph above is unchanged.
-sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.5", optional = true }
+sparq-secprop-vocab = { path = "../sparq-secprop-vocab", version = "0.1.6", optional = true }
 
 [features]
-# [OPUS-4.8] sq-zi5w: STATEFUL `odrl:count` constraint enforcement — a usage-counter
+# sq-zi5w: STATEFUL `odrl:count` constraint enforcement — a usage-counter
 # store + an atomic exercise path that increments per use and denies once the limit is
 # reached. OFF by default (lean core): the default evaluator treats `odrl:count` as the
 # stateless numeric constraint it always was (the caller supplies the count in the
 # request context). Turning this on adds the `count` module (an injectable
 # `UsageCounterStore` trait + an in-memory `Mutex`-backed default impl), the `count_file`
-# module ([OPUS-4.8] sq-5z1q: a cross-process file+lockfile store), and the `count_backend`
-# module ([OPUS-4.8] sq-u3yo: the `AtomicCounterBackend` Redis/SQL seam + `BackendCounterStore`
+# module (sq-5z1q: a cross-process file+lockfile store), and the `count_backend`
+# module (sq-u3yo: the `AtomicCounterBackend` Redis/SQL seam + `BackendCounterStore`
 # adapter). ALL std-only — no new deps (the operator brings their own Redis/SQL client); it
 # does NOT change the stateless `evaluate` path.
 count-enforcement = []
 
-# [OPUS-4.8] sq-uor3g (epic sq-0dksu, Phase 4): the sparq security-property ODRL
+# sq-uor3g (epic sq-0dksu, Phase 4): the sparq security-property ODRL
 # PROFILE — the custom `secx:requires…` leftOperands made FIRST-CLASS (their IRIs as
 # Rust constants + the leftOperand→dimension map + a recogniser + the published
 # `odrl:Profile` IRI). OFF by default (lean core): the default evaluator already
@@ -67,7 +67,7 @@ count-enforcement = []
 # property of any method (sparq's ZK estate is research-grade + externally UNAUDITED,
 # sq-qhy4 — the admissibility reduction itself is Phases 2/5, not this profile).
 #
-# [OPUS-5] sq-3705: the dimension IRIs this profile ranges over are no longer a fourth
+# sq-3705: the dimension IRIs this profile ranges over are no longer a fourth
 # hand-kept copy — `DIM_*` are `pub use` aliases of `sparq-secprop-vocab`, the
 # ZERO-dependency leaf that owns the `secx:` constants, the canonical `secprop-ext.ttl`
 # and the single drift test. This crate could never take the `sparq-trust` edge (it
@@ -77,12 +77,12 @@ count-enforcement = []
 # the copies + the file reads are gone.
 secprop-leftoperands = ["dep:sparq-secprop-vocab"]
 
-# [GPT-5.6] sq-mu4au: deterministic, read-only aggregation of already-computed
+# sq-mu4au: deterministic, read-only aggregation of already-computed
 # authorization decisions. OFF by default and std-only; does not alter evaluation.
 decision-report = []
 
 [dev-dependencies]
-# [SONNET-4.6] sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
+# sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
 # `publish = false`): the conformance ratchet floor this crate's test runner enforces is
 # the SAME `const` sparq-conformance's central scoreboard reports, so the two cannot
 # drift, and the dep edge puts this crate in the floors crate's reverse-dependency

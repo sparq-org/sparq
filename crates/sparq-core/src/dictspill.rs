@@ -85,7 +85,7 @@ impl SpillConfig {
         Self::from_lookup(|name| std::env::var(name).ok())
     }
 
-    /// [OPUS-4.8] sq-x4jy: the PURE gate/override logic of [`Self::from_env`], with the
+    /// sq-x4jy: the PURE gate/override logic of [`Self::from_env`], with the
     /// environment read through an injectable `lookup` closure instead of the
     /// process-global `std::env`. Production calls it with `std::env::var`; the tests call
     /// it with an in-memory map so they NEVER mutate the process-global environment.
@@ -212,7 +212,7 @@ fn serialize_termparts(tp: &TermParts, out: &mut Vec<u8>) {
             out.extend_from_slice(b.as_bytes());
         }
         TermParts::Triple(_) => {
-            // [OPUS-4.8] (sq-jvbr) Triple terms are NOT routed/spilled as leaf records — their
+            // (sq-jvbr) Triple terms are NOT routed/spilled as leaf records — their
             // content is their components' ids (resolvable only after the leaf dedup), so they
             // take the dedicated in-RAM triple-term arena (`SpillInterner::triples`) and are
             // finalised in `finalize_triple_terms`. This leaf serializer must never see one.
@@ -660,7 +660,7 @@ pub(crate) struct SpillInterner {
     staged_path: PathBuf,
     staged_count: u64,
     cache_budget_per_shard: usize,
-    /// [OPUS-4.8] (sq-jvbr) RDF 1.2 triple-term occurrences, in first-occurrence (batch,
+    /// (sq-jvbr) RDF 1.2 triple-term occurrences, in first-occurrence (batch,
     /// partial, arena) order. Each entry is the triple's three components encoded in the
     /// SAME staged-id namespace as a triple (inline / leaf `(shard+1)<<32|seq` / nested
     /// triple-term `TRIPLE_TT_BASE|tt_index`). Triple terms are rare reification metadata,
@@ -675,7 +675,7 @@ pub(crate) struct SpillInterner {
 /// (sq-jvbr). `STAGED_DICT_BASE` is `2^32` so a leaf `seq` (a `u32`) occupies the low 32 bits.
 const STAGED_DICT_BASE: u64 = 1 << 32;
 
-/// [OPUS-4.8] (sq-jvbr) Triple-term staged-reference tag, well above any leaf shard band
+/// (sq-jvbr) Triple-term staged-reference tag, well above any leaf shard band
 /// (`(shard+1) * 2^32`): `default_shards()` is tiny, so this `2^48` base never collides with
 /// a leaf reference. The low bits hold the `tt_index` into `SpillInterner::triples`.
 const TRIPLE_TT_BASE: u64 = 1 << 48;
@@ -727,7 +727,7 @@ impl SpillInterner {
                 let mut scratch: Vec<u8> = Vec::new();
                 for i in 1..=pd.len() as Id {
                     let tp = pd.term_parts(i);
-                    // [OPUS-4.8] (sq-jvbr) Triple terms are NOT hash-routed — they take the
+                    // (sq-jvbr) Triple terms are NOT hash-routed — they take the
                     // serial triple-term arena pass below (same split as the sharded path's
                     // `intern_partials`: leaf pass parallel, triple-term pass serial).
                     if matches!(tp, TermParts::Triple(_)) {
@@ -750,10 +750,10 @@ impl SpillInterner {
         struct SlotPtr(*mut u64, usize);
         // SAFETY: `SlotPtr` (a `*mut u64`) only ever touches its own hash-routed slot —
         // disjoint writes, no reads until the parallel scope ends (same argument as
-        // `ShardedDict::intern_partials`). [OPUS-4.8 sq-8wbn]
+        // `ShardedDict::intern_partials`). [sq-8wbn]
         unsafe impl Send for SlotPtr {}
         // SAFETY: shared read of a `Copy` raw-pointer handle; the writes it performs are
-        // disjoint by hash routing (see the `Send` argument). [OPUS-4.8 sq-8wbn]
+        // disjoint by hash routing (see the `Send` argument). [sq-8wbn]
         unsafe impl Sync for SlotPtr {}
         let scatter: Vec<SlotPtr> = remaps.iter_mut().map(|v| SlotPtr(v.as_mut_ptr(), v.len())).collect();
 
@@ -776,7 +776,7 @@ impl SpillInterner {
             })
             .map_err(|e| e.to_string())?;
 
-        // [OPUS-4.8] (sq-jvbr) Serial second pass — fill every partial's triple-term remap
+        // (sq-jvbr) Serial second pass — fill every partial's triple-term remap
         // slots from the in-RAM arena. Runs AFTER the leaf scatter, so each component's staged
         // id is already in `remaps` (children precede their triple in a partial's arena —
         // `nt::parse_chunk` interns s/p/o before the triple). One arena entry per OCCURRENCE,
@@ -851,7 +851,7 @@ pub(crate) struct RemapPlan {
     staged_path: PathBuf,
     staged_count: u64,
     shards: Vec<ShardRemap>,
-    /// [OPUS-4.8] (sq-jvbr) Final dict id per RDF 1.2 triple-term OCCURRENCE (`tt_finals[tt_index]`),
+    /// (sq-jvbr) Final dict id per RDF 1.2 triple-term OCCURRENCE (`tt_finals[tt_index]`),
     /// used by [`remap_staged`] to resolve a `TRIPLE_TT_BASE | tt_index` staged reference.
     /// Empty on the common triple-term-free path.
     tt_finals: Vec<u32>,
@@ -905,7 +905,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
         s.cache = ByteCache::default();
         shard_files.push((s.rec_path, s.seq, s.epochs));
     }
-    // [OPUS-4.8] (sq-jvbr) Move the in-RAM triple-term arena out before dropping the interner;
+    // (sq-jvbr) Move the in-RAM triple-term arena out before dropping the interner;
     // it is finalised AFTER the leaf consolidation (their final ids follow every leaf's).
     let staged_triples = std::mem::take(&mut st.triples);
     drop(st);
@@ -1020,7 +1020,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
                     (dict::StoredRef::Iri { prefix: prefixes.intern(prefix), suffix }, f64::NAN, None)
                 }
                 TermParts::Lit { value, datatype, lang } => {
-                    // [FABLE-5] (sq-9781x / sq-74oy4 / sq-6b1lj) SAME DATATYPE-AWARE acceptance
+                    // (sq-9781x / sq-74oy4 / sq-6b1lj) SAME DATATYPE-AWARE acceptance
                     // (`cached_numeric_f64`) as the in-RAM `numerics_of` — the spilled cache must
                     // be byte-identical to the in-RAM one, and both equal `Num::of_literal`'s
                     // acceptance set (so a per-datatype-ill-formed lexical folds to the NaN
@@ -1054,7 +1054,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
 
     // Phase 4 — per shard: (seq -> min_seq) ⋈ (min_seq -> final id) -> dense
     // `seq -> final id` remap file (sorted by seq; every seq present exactly once).
-    // [OPUS-4.8] (sq-jvbr) MOVED ahead of the meta/hash finalisation (it used to run last)
+    // (sq-jvbr) MOVED ahead of the meta/hash finalisation (it used to run last)
     // so the per-shard `seq -> final id` remaps exist BEFORE triple terms are finalised — a
     // triple term's leaf components are staged `(shard, seq)` ids that resolve to final ids
     // through these same remap files.
@@ -1126,7 +1126,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
         shards_out.push(ShardRemap { remap_path, epochs });
     }
 
-    // [OPUS-4.8] (sq-jvbr) Phase 4b — FINALISE RDF 1.2 triple terms. They are content-
+    // (sq-jvbr) Phase 4b — FINALISE RDF 1.2 triple terms. They are content-
     // addressed by their components' FINAL dense ids and assigned ids AFTER every leaf
     // (`total + rank`), exactly as the sharded path's dedicated triple shard sorts LAST. The
     // arena holds one entry per occurrence in first-occurrence order, so deduping by resolved
@@ -1167,7 +1167,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     }
 
     // dict-meta.bin (version header + prefixes + datatypes + term count) — identical bytes to
-    // `save_mmap`. [OPUS-4.8] (review 1409) The version header records the id-space partition.
+    // `save_mmap`. (review 1409) The version header records the id-space partition.
     {
         let mut meta = BufWriter::new(std::fs::File::create(dir.join("dict-meta.bin")).map_err(io_err)?);
         meta.write_all(&dict::DICT_META_MAGIC.to_le_bytes()).map_err(io_err)?;
@@ -1203,7 +1203,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     Ok(RemapPlan { staged_path, staged_count, shards: shards_out, tt_finals: tt_finals.per_occurrence })
 }
 
-/// [OPUS-4.8] (sq-jvbr) Result of [`finalize_triple_terms`]: the per-OCCURRENCE final dict id
+/// (sq-jvbr) Result of [`finalize_triple_terms`]: the per-OCCURRENCE final dict id
 /// (`per_occurrence[tt_index]`, used by [`remap_staged`] to resolve a `TRIPLE_TT_BASE` staged
 /// reference) and the count of DISTINCT triple terms appended to the dictionary.
 struct TripleTermFinals {
@@ -1211,7 +1211,7 @@ struct TripleTermFinals {
     distinct: usize,
 }
 
-/// [OPUS-4.8] (sq-jvbr) Resolve, dedup, and stream every RDF 1.2 triple-term occurrence into
+/// (sq-jvbr) Resolve, dedup, and stream every RDF 1.2 triple-term occurrence into
 /// the dictionary, appending its records AFTER every leaf (final id = `leaf_total + rank`,
 /// matching the sharded triple shard's LAST-shard position). `staged_triples` holds the
 /// staged-id components in first-occurrence order; a leaf component `(shard, seq)` resolves to
@@ -1371,7 +1371,7 @@ pub(crate) fn remap_staged(
                 out[k] = if v < STAGED_DICT_BASE {
                     v as Id // inline-integer id, passed through at ingest
                 } else if v >= TRIPLE_TT_BASE {
-                    // [OPUS-4.8] (sq-jvbr) RDF 1.2 triple-term reference — its final dict id was
+                    // (sq-jvbr) RDF 1.2 triple-term reference — its final dict id was
                     // assigned (after every leaf) in `finalize_triple_terms`.
                     let tt = (v - TRIPLE_TT_BASE) as usize;
                     *plan.tt_finals.get(tt).ok_or_else(|| {
@@ -1469,7 +1469,7 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
-    // [OPUS-4.8] ---- focused coverage for the previously-untested defensive / config
+    // ---- focused coverage for the previously-untested defensive / config
     // surface of the spilled dictionary (sq-corecov). These are cheap unit tests; the
     // full end-to-end pipeline (intern_batch/consolidate/remap_staged/ShardWindow byte-
     // identity vs the sharded path) lives in lib.rs::tests::dict_spill_build_byte_*.
@@ -1491,7 +1491,7 @@ mod tests {
 
     #[test]
     fn spill_config_from_env_gate_and_overrides() {
-        // [OPUS-4.8] sq-x4jy: HERMETIC. Exercise the gate/override logic through
+        // sq-x4jy: HERMETIC. Exercise the gate/override logic through
         // `from_lookup` with an in-memory map instead of mutating the process-global
         // environment. The previous form set/removed real env vars (`std::env::set_var`),
         // which races every concurrent `std::env::var` reader in the parallel-threaded test

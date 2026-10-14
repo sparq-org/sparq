@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-hmd7l.15 — shared JSON-LD comparison helpers for the W3C
+//! sq-hmd7l.15 — shared JSON-LD comparison helpers for the W3C
 //! conformance lane (`tests/jsonld_suite/`) and the comparative-benchmark
 //! harness (`bench/jsonld/`, the `bench_jsonld` example).
 //!
@@ -19,18 +19,21 @@ use serde_json::Value;
 
 // ── JSON-LD document-level equality comparator ──────────────────────────────
 //
-// [SONNET-4.6] sq-kk1mq — the comparator for the native expand() oracle.
+// sq-kk1mq — the comparator for the native expand() oracle.
 //
 // Semantics (PINNED IN CODE per sq-kk1mq):
 //   • Object key order: insignificant.  Two objects are equal iff they have the
 //     same keys with deeply-equal values.
-//   • Array element order: SIGNIFICANT only when the array is the **direct value
-//     of a `"@list"` key**; insignificant everywhere else (multiset / set
-//     semantics).  In expanded JSON-LD `@list` is the only structured-sequence
-//     construct; all other arrays are bags.
+//   • Array element order: SIGNIFICANT when the array is the **direct value of a
+//     `"@list"` key** (its elements revert to the default below), and
+//     RECURSIVELY inside the `@value` payload of a `@json` literal
+//     (`{"@value": …, "@type": "@json"}`), which is opaque JSON where `[1,2]` and
+//     `[2,1]` are different documents (#4264).  Insignificant everywhere else
+//     (multiset / set semantics): in expanded JSON-LD `@list` is the only
+//     structured-sequence construct; all other arrays are bags.
 //   • Numbers: integral (i64/u64-representable) compared exactly so integers
 //     ≥ 2^53 remain distinct; non-integral (either side is a JSON float) fall
-//     back to f64, so `1` ≡ `1.0`.  [SONNET-4.6] sq-kk1mq numeric-guard.
+//     back to f64, so `1` ≡ `1.0`.  sq-kk1mq numeric-guard.
 //   • Strings, booleans, null: exact equality.
 //
 // Why document-level rather than RDF-level?  The expansion algorithm operates
@@ -43,22 +46,37 @@ use serde_json::Value;
 // with the reference output.  See `floors::expand` for the honest ordered
 // vs unordered pass-count breakdown on the W3C suite.
 
+/// How the array immediately under comparison must be compared: the JSON-LD
+/// data model gives arrays three different meanings depending on where they sit.
+/// Same three-way mode as `sparq-jsonld/tests/common/mod.rs` (#4226 / #4264),
+/// restated over `serde_json::Value`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Arrays {
+    /// The default: a property's value array is an unordered SET of values.
+    Unordered,
+    /// The array under a `@list` key: its order is significant, but its elements
+    /// are ordinary JSON-LD values again (so nested arrays revert to `Unordered`).
+    ListOrdered,
+    /// Inside a `@json` literal's `@value` payload: plain JSON, so array order is
+    /// significant RECURSIVELY (object member order stays insignificant).
+    JsonExact,
+}
+
 /// Returns `true` iff `a` and `b` are equal under the JSON-LD comparison rules
 /// described in the module-level comment.
 ///
-/// [SONNET-4.6] sq-kk1mq
+/// sq-kk1mq
 pub fn json_ld_equal(a: &Value, b: &Value) -> bool {
-    json_ld_equal_inner(a, b, false)
+    json_ld_equal_inner(a, b, Arrays::Unordered)
 }
 
-/// Recursive inner: `in_list` means the IMMEDIATE parent is a `"@list"` key, so
-/// this value (an array) must be compared in ORDER.
-fn json_ld_equal_inner(a: &Value, b: &Value, in_list: bool) -> bool {
+/// Recursive inner: `arrays` says how an array at THIS position compares.
+fn json_ld_equal_inner(a: &Value, b: &Value, arrays: Arrays) -> bool {
     match (a, b) {
         (Value::Null, Value::Null) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Number(x), Value::Number(y)) => {
-            // JSON-LD numeric equality [SONNET-4.6] sq-kk1mq numeric-guard:
+            // JSON-LD numeric equality sq-kk1mq numeric-guard:
             // • Both i64-representable: compare exactly so integers ≥ 2^53 are
             //   not wrongly collapsed by f64 rounding
             //   (e.g. 9007199254740992 ≢ 9007199254740993 must remain distinct).
@@ -81,27 +99,43 @@ fn json_ld_equal_inner(a: &Value, b: &Value, in_list: bool) -> bool {
             if xs.len() != ys.len() {
                 return false;
             }
-            if in_list {
-                // @list: element order is SIGNIFICANT.
-                xs.iter()
-                    .zip(ys.iter())
-                    .all(|(x, y)| json_ld_equal_inner(x, y, false))
-            } else {
+            match arrays {
                 // Set semantics: order INSIGNIFICANT (multiset match).
-                json_ld_array_equal_unordered(xs, ys)
+                Arrays::Unordered => json_ld_array_equal_unordered(xs, ys),
+                // @list: element order is SIGNIFICANT; the elements are JSON-LD
+                // values again, so their own arrays revert to set semantics.
+                Arrays::ListOrdered => xs
+                    .iter()
+                    .zip(ys.iter())
+                    .all(|(x, y)| json_ld_equal_inner(x, y, Arrays::Unordered)),
+                // Inside a @json payload the exactness propagates all the way down.
+                Arrays::JsonExact => xs
+                    .iter()
+                    .zip(ys.iter())
+                    .all(|(x, y)| json_ld_equal_inner(x, y, Arrays::JsonExact)),
             }
         }
         (Value::Object(xa), Value::Object(ya)) => {
             if xa.len() != ya.len() {
                 return false;
             }
+            let json_literal = arrays != Arrays::JsonExact && is_json_literal(xa);
             for (k, va) in xa {
                 let Some(vb) = ya.get(k) else {
                     return false;
                 };
-                // The array VALUE of a "@list" key is ORDER-SIGNIFICANT.
-                let child_in_list = k == "@list";
-                if !json_ld_equal_inner(va, vb, child_in_list) {
+                let child = if arrays == Arrays::JsonExact {
+                    // An opaque payload: `@list` / `@type` are ordinary member names.
+                    Arrays::JsonExact
+                } else if json_literal && k == "@value" {
+                    Arrays::JsonExact
+                } else if k == "@list" {
+                    // The array VALUE of a "@list" key is ORDER-SIGNIFICANT.
+                    Arrays::ListOrdered
+                } else {
+                    Arrays::Unordered
+                };
+                if !json_ld_equal_inner(va, vb, child) {
                     return false;
                 }
             }
@@ -111,14 +145,25 @@ fn json_ld_equal_inner(a: &Value, b: &Value, in_list: bool) -> bool {
     }
 }
 
-/// Multiset-equality for arrays that are NOT inside a `@list` value: every element
-/// of `xs` must match exactly one unused element of `ys`, regardless of position.
+/// Is this object an expanded `@json` value object (`{"@value":…,"@type":"@json"}`)?
+/// Expansion emits the `@type` as a bare string; a single-element array is
+/// accepted too so the check does not depend on that normalisation.
+fn is_json_literal(members: &serde_json::Map<String, Value>) -> bool {
+    match members.get("@type") {
+        Some(Value::String(s)) => s == "@json",
+        Some(Value::Array(a)) => matches!(a.as_slice(), [Value::String(s)] if s == "@json"),
+        _ => false,
+    }
+}
+
+/// Multiset-equality for arrays under set semantics: every element of `xs` must
+/// match exactly one unused element of `ys`, regardless of position.
 /// O(n²) but conformance-suite arrays are small (typically ≤ 10 elements).
 fn json_ld_array_equal_unordered(xs: &[Value], ys: &[Value]) -> bool {
     let mut used = vec![false; ys.len()];
     'outer: for x in xs {
         for (j, y) in ys.iter().enumerate() {
-            if !used[j] && json_ld_equal_inner(x, y, false) {
+            if !used[j] && json_ld_equal_inner(x, y, Arrays::Unordered) {
                 used[j] = true;
                 continue 'outer;
             }
@@ -126,6 +171,58 @@ fn json_ld_array_equal_unordered(xs: &[Value], ys: &[Value]) -> bool {
         return false;
     }
     true
+}
+
+/// The compact / frame lanes' oracle: `got` passes iff it equals `want` under
+/// [`json_ld_equal`] AND the two documents' re-expansions also agree under
+/// [`json_ld_equal`].
+///
+/// Why both (#4264 follow-up): in a compacted or framed document a `@json` literal
+/// need not have the `{"@value":…,"@type":"@json"}` shape the document-level
+/// comparator recognises. A context can coerce a term to `@json`
+/// (`"payload": [1,2]`) or alias the keywords (`{"v": [1,2], "t": "@json"}`), and
+/// those payload arrays would compare as unordered sets. Expansion puts every
+/// `@json` literal in canonical form, so the re-expanded comparison applies the
+/// `JsonExact` rule to them. The document-level comparison is kept because it is
+/// the stricter check on everything else (term choice, compaction shape).
+///
+/// Each document is expanded with its own embedded `@context`, under `opts` with
+/// `expand_context` cleared (that option only applies to the lane's INPUT) and
+/// `frame_expansion` off. If either expansion fails the comparison fails: a
+/// shared failure gives no evidence that the payloads agree, so accepting it
+/// would let a reordered `@json` payload through.
+///
+/// # Errors
+/// `Err(reason)` describing the first comparison that failed.
+pub fn json_ld_output_equal(
+    got: &Value,
+    want: &Value,
+    opts: &sparq_jsonld::JsonLdOptions,
+    loader: &dyn sparq_jsonld::DocumentLoader,
+) -> Result<(), String> {
+    if !json_ld_equal(got, want) {
+        return Err("document-level JSON differs".to_string());
+    }
+    let mut eopts = opts.clone();
+    eopts.expand_context = None;
+    eopts.frame_expansion = false;
+    let reexpand = |v: &Value| -> Result<Value, String> {
+        let j = sparq_jsonld::Json::parse(&v.to_string())
+            .map_err(|e| format!("re-parse as Json: {e}"))?;
+        match sparq_jsonld::expand(&j, &eopts, loader) {
+            Ok(x) => sparq_json_to_serde(&x),
+            Err(e) => Err(format!("expand error {}", e.code().as_str())),
+        }
+    };
+    match (reexpand(got), reexpand(want)) {
+        (Ok(g), Ok(w)) if json_ld_equal(&g, &w) => Ok(()),
+        (Ok(_), Ok(_)) => Err("re-expanded documents differ".to_string()),
+        (g, w) => Err(format!(
+            "re-expansion disagrees: got {:?}, want {:?}",
+            g.err(),
+            w.err()
+        )),
+    }
 }
 
 /// Convert a `sparq_jsonld::Json` value to a `serde_json::Value` by
@@ -166,7 +263,7 @@ pub fn jsonld_to_canonical_dataset(doc: &str, base: &str) -> Result<Dataset, Str
     Ok(ds)
 }
 
-/// [OPUS-4.8] sq-3uos5 (moved from `tests/jsonld_suite/common.rs`, sq-hmd7l.15) —
+/// sq-3uos5 (moved from `tests/jsonld_suite/common.rs`, sq-hmd7l.15) —
 /// read a context document and extract the caller `@context` value as the
 /// engine writer's `JsonLdValue`. The wrapping file holds `{"@context": …}`;
 /// sparq's `graph_to_jsonld_compact` expects the INNER value (the
@@ -208,7 +305,7 @@ pub fn dataset_to_nquads(ds: &Dataset) -> String {
     let mut out = String::new();
     for q in ds.iter() {
         let owned: Quad = q.into_owned();
-        // [OPUS-4.8] positional format arg (avoids the CodeQL rust/unused-variable
+        // positional format arg (avoids the CodeQL rust/unused-variable
         // false positive on inline-captured identifiers).
         out.push_str(&format!("{} .\n", owned));
     }
@@ -221,6 +318,134 @@ mod tests {
     use serde_json::json;
 
     // ── json_ld_equal unit tests (sq-kk1mq; moved with the fn, sq-hmd7l.15) ──
+
+    /// (#4264) A `@json` literal's `@value` payload is opaque JSON, where array
+    /// order IS significant — recursively — while object member order is not.
+    /// With set semantics the W3C lanes were blind to a payload-reordering bug.
+    #[test]
+    fn json_payload_array_order_is_significant() {
+        let literal = |payload: Value| {
+            json!({"@id": "http://example.com/a",
+                   "http://example.com/payload": [{"@value": payload, "@type": "@json"}]})
+        };
+        assert!(
+            !json_ld_equal(&literal(json!([1, 2])), &literal(json!([2, 1]))),
+            "@json payload array order must be significant"
+        );
+        assert!(
+            !json_ld_equal(
+                &literal(json!({"k": [1, 2]})),
+                &literal(json!({"k": [2, 1]}))
+            ),
+            "@json payload array order must be significant at any depth"
+        );
+        // Keyword-looking member names inside the payload are plain JSON: a nested
+        // `{"@value":…,"@type":"@json"}` or `@list` there does not reset the mode.
+        assert!(!json_ld_equal(
+            &literal(json!({"@value": [1, 2], "@type": "x"})),
+            &literal(json!({"@value": [2, 1], "@type": "x"}))
+        ));
+        // Equal payloads stay equal; member order inside the payload is insignificant.
+        assert!(json_ld_equal(
+            &literal(json!([1, 2])),
+            &literal(json!([1, 2]))
+        ));
+        assert!(json_ld_equal(
+            &literal(json!({"a": 1, "b": [1, 2]})),
+            &literal(json!({"b": [1, 2], "a": 1}))
+        ));
+        // A single-element `@type` array is recognised too.
+        let arr_typed = |payload: Value| json!([{"@value": payload, "@type": ["@json"]}]);
+        assert!(!json_ld_equal(
+            &arr_typed(json!([1, 2])),
+            &arr_typed(json!([2, 1]))
+        ));
+        // The carve-out must not leak: an ordinary property value array is still
+        // an unordered set, and a non-`@json` `@value` is compared as before.
+        assert!(json_ld_equal(
+            &json!({"http://example.com/p": [{"@value": "x"}, {"@value": "y"}]}),
+            &json!({"http://example.com/p": [{"@value": "y"}, {"@value": "x"}]})
+        ));
+    }
+
+    /// (#4264 follow-up) In a COMPACTED / FRAMED document a `@json` literal need
+    /// not look like `{"@value":…,"@type":"@json"}`: the context can coerce a
+    /// term to `@json`, or alias `@value` / `@type`. The document-level
+    /// comparator cannot see those payloads, so the output oracle also compares
+    /// the re-expansions, where every `@json` literal is in canonical form.
+    #[test]
+    fn output_oracle_sees_coerced_and_aliased_json_payloads() {
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let loader = sparq_jsonld::NoopLoader;
+        let coerced = |payload: Value| {
+            json!({"@context": {"payload": {"@id": "https://example.org/p", "@type": "@json"}},
+                   "payload": payload})
+        };
+        // Document-level equality alone is blind to the reordering…
+        assert!(json_ld_equal(
+            &coerced(json!([1, 2])),
+            &coerced(json!([2, 1]))
+        ));
+        // …the output oracle is not.
+        assert!(json_ld_output_equal(
+            &coerced(json!([1, 2])),
+            &coerced(json!([2, 1])),
+            &opts,
+            &loader
+        )
+        .is_err());
+        // A context both sides fail to load must not wave the reordering through.
+        let remote = |payload: Value| {
+            json!({"@context": ["https://example.org/context",
+                                {"p": {"@id": "https://example.org/p", "@type": "@json"}}],
+                   "p": payload})
+        };
+        assert!(json_ld_output_equal(
+            &remote(json!([1, 2])),
+            &remote(json!([2, 1])),
+            &opts,
+            &loader
+        )
+        .is_err());
+        assert!(json_ld_output_equal(
+            &coerced(json!({"k": [1, 2]})),
+            &coerced(json!({"k": [2, 1]})),
+            &opts,
+            &loader
+        )
+        .is_err());
+
+        let aliased = |payload: Value| {
+            json!({"@context": {"v": "@value", "t": "@type"},
+                   "@id": "https://example.org/a",
+                   "https://example.org/p": {"v": payload, "t": "@json"}})
+        };
+        assert!(json_ld_equal(
+            &aliased(json!([1, 2])),
+            &aliased(json!([2, 1]))
+        ));
+        assert!(json_ld_output_equal(
+            &aliased(json!([1, 2])),
+            &aliased(json!([2, 1])),
+            &opts,
+            &loader
+        )
+        .is_err());
+
+        // Equal documents still pass, and ordinary (set-valued) arrays stay unordered.
+        assert!(json_ld_output_equal(
+            &coerced(json!([1, 2])),
+            &coerced(json!([1, 2])),
+            &opts,
+            &loader
+        )
+        .is_ok());
+        let plain = |a: &str, b: &str| {
+            json!({"@context": {"p": "https://example.org/p"},
+                   "@id": "https://example.org/a", "p": [a, b]})
+        };
+        assert!(json_ld_output_equal(&plain("x", "y"), &plain("y", "x"), &opts, &loader).is_ok());
+    }
 
     /// Arrays outside @list are unordered (set semantics).
     #[test]
@@ -312,7 +537,7 @@ mod tests {
     /// Large integers ≥ 2^53 that are distinct as i64 must not be collapsed by f64
     /// rounding.  Under the old f64-only path 9007199254740992 and 9007199254740993
     /// round to the same f64 and would be wrongly equal.  The numeric-guard fix
-    /// [SONNET-4.6] sq-kk1mq compares integral values exactly via i64/u64.
+    /// sq-kk1mq compares integral values exactly via i64/u64.
     #[test]
     fn large_integer_numeric_guard() {
         // 2^53 and 2^53+1 are distinct i64 values but collapse to the same f64.

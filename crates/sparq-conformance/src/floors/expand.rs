@@ -1,14 +1,14 @@
-//! [FABLE-5] sq-oy1f.40 — the W3C JSON-LD 1.1 `expand` lane ratchet floor
+//! sq-oy1f.40 — the W3C JSON-LD 1.1 `expand` lane ratchet floor
 //! (relocated from `tests/jsonld_suite.rs` to this lib-side single source).
 
-/// [SONNET-4.6] sq-kk1mq (oracle-correction re-baseline; supersedes the old
+/// sq-kk1mq (oracle-correction re-baseline; supersedes the old
 /// sq-oy1f RDF-equivalence oracle) — `expand` pass floor over the
 /// `expand` category of `w3c/json-ld-api`, now measured with the NATIVE
 /// DOCUMENT-LEVEL oracle: `sparq_jsonld::expand(input, opts, &NoopLoader)`
 /// produces a `Json` value; that value is deep-compared against the suite's
 /// expected expanded document using the runner's `json_ld_equal` comparator
 /// (object key order insignificant; array order SIGNIFICANT only inside `@list`
-/// values, insignificant elsewhere; numeric equality as f64).
+/// values and (recursively) a `@json` literal payload, insignificant elsewhere; numeric equality as f64).
 ///
 /// ## Oracle-correction rationale
 ///
@@ -73,7 +73,7 @@
 ///     (the new oracle forwards processingMode and doesn't require a non-empty RDF
 ///     projection); the 109 that remain are the NegativeEvaluationTests (deferred)
 ///
-/// ## [FABLE-5] sq-oy1f.37 — expand() correctness raise 240 → 259
+/// ## sq-oy1f.37 — expand() correctness raise 240 → 259
 ///
 /// Three spec-faithful expander fixes (`crates/sparq-jsonld/src/expand.rs`) flip 19
 /// previously-failing positive cases to pass (measured 259 pass / 17 fail / 109 skip):
@@ -97,7 +97,7 @@
 /// (`@id: null` retention t0122, relative-IRI-with-colon t0109, rdf-star reverse
 /// `@index` t0131, `invalid IRI mapping` / `invalid scoped context` shapes).
 ///
-/// ## [SONNET-4.6] sq-oy1f.45 — expand() correctness raise 259 → 276
+/// ## sq-oy1f.45 — expand() correctness raise 259 → 276
 ///
 /// Six additional spec-faithful fixes flip 17 previously-failing positive cases to pass
 /// (measured 276 pass / 0 fail / 109 skip):
@@ -125,7 +125,7 @@
 ///   mode and skipped when the expanded value is itself a keyword (e.g. `@type`),
 ///   matching the spec's 1.1-only semantics. Fixes t0026 and t0071.
 ///
-/// ## [OPUS-5] sq-gzsky — the NEGATIVE lane lands; 276 → 381 (skips 109 → 0)
+/// ## sq-gzsky — the NEGATIVE lane lands; 276 → 381 (skips 109 → 0)
 ///
 /// The 109-case skip bucket above WAS the entire expand gap
 /// (`research/gap-jsonld-conformance-2026-07.md` §6, lever sq-oy1f.31). It is now closed:

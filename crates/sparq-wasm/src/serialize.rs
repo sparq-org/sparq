@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-fe1s / sq-ixc3.5: the `Store::serialize(format, …)` RDF-writer binding.
+//! sq-fe1s / sq-ixc3.5: the `Store::serialize(format, …)` RDF-writer binding.
 //!
 //! Exposes `sparq-engine`'s pretty Turtle / TriG writers
 //! ([`sparq_engine::serialize`] — `graph_to_turtle_pretty_with` /
@@ -74,7 +74,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::Store;
 
-/// [OPUS-4.8] sq-l5kr: turns the optional JS `prefixes` argument into the engine
+/// sq-l5kr: turns the optional JS `prefixes` argument into the engine
 /// [`Prefixes`] map the writers consume.
 ///
 /// * `None` (the JS caller passed `undefined` / `null` / omitted the argument) reproduces
@@ -150,7 +150,7 @@ impl SerFormat {
 
 #[wasm_bindgen]
 impl Store {
-    /// [OPUS-4.8] sq-fe1s / sq-ixc3.5: serialises the store's contents to a **Turtle**,
+    /// sq-fe1s / sq-ixc3.5: serialises the store's contents to a **Turtle**,
     /// **TriG**, or **JSON-LD** document string.
     ///
     /// `format` (case-insensitive) is one of:
@@ -208,7 +208,7 @@ impl Store {
                 format
             ))
         })?;
-        // [OPUS-4.8] sq-l5kr: the caller's prefix policy (or the engine default when absent).
+        // sq-l5kr: the caller's prefix policy (or the engine default when absent).
         let prefixes = resolve_prefixes(prefixes)?;
         // JSON-LD selects its form via the `format` string (not `abbreviate`); the
         // `indent`/`pretty` args carry through identically to the Turtle/TriG path.
@@ -240,7 +240,7 @@ impl Store {
                 // empty prefix map is passed to suppress CURIE compaction in that case.
                 SerFormat::Turtle if abbreviate => graph_to_turtle_with(&self.graph, &prefixes),
                 SerFormat::Turtle => graph_to_turtle_with(&self.graph, &Prefixes::new()),
-                // [OPUS-4.8] sq-l5kr: the compact TriG path now honours the caller's prefix
+                // sq-l5kr: the compact TriG path now honours the caller's prefix
                 // map via `graph_to_trig_with` (previously it always used default_prefixes()).
                 // `abbreviate=false` suppresses compaction with an empty map, matching Turtle.
                 SerFormat::Trig if abbreviate => graph_to_trig_with(&self.graph, &prefixes),
@@ -251,7 +251,7 @@ impl Store {
         Ok(out)
     }
 
-    /// [OPUS-4.8] sq-oy1f.5: serialises the store as a **full W3C JSON-LD 1.1 Compaction**
+    /// sq-oy1f.5: serialises the store as a **full W3C JSON-LD 1.1 Compaction**
     /// document against a caller-supplied `@context`.
     ///
     /// Where [`serialize`](Self::serialize)`("jsonld-compacted", …)` only abbreviates IRIs
@@ -423,7 +423,7 @@ mod tests {
         assert_eq!(got, want, "wasm compact Turtle must equal the engine output");
     }
 
-    // ---- [OPUS-4.8] sq-l5kr: the optional caller-supplied prefix map ----
+    // ---- sq-l5kr: the optional caller-supplied prefix map ----
     //
     // The `prefixes` arg is a `js_sys::Array`, which can only be CONSTRUCTED in a real
     // wasm runtime (`js_sys::Array::new()` traps off-wasm). So the native tests here pin
@@ -499,7 +499,7 @@ mod tests {
         assert_eq!(reparsed.len(), store.size(), "serialise->parse round-trip");
     }
 
-    // ---- [OPUS-4.8] sq-ixc3.5: JSON-LD serialise-out parity with the engine writer ----
+    // ---- sq-ixc3.5: JSON-LD serialise-out parity with the engine writer ----
 
     use sparq_engine::serialize::{graph_to_jsonld_pretty_with, graph_to_jsonld_with, JsonLdForm};
 
@@ -593,7 +593,7 @@ mod tests {
         }
     }
 
-    // ---- [OPUS-4.8] sq-oy1f.5: full W3C JSON-LD 1.1 Compaction (caller `@context`) ----
+    // ---- sq-oy1f.5: full W3C JSON-LD 1.1 Compaction (caller `@context`) ----
     //
     // `serializeCompact(context, pretty, indent)` exposes the engine's
     // `graph_to_jsonld_compact` — the REAL Compaction Algorithm against a supplied `@context`,

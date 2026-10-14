@@ -599,7 +599,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // [OPUS-4.8] sq-qcnn.33 — coverage-raise tests: targeted paths not yet
+    // sq-qcnn.33 — coverage-raise tests: targeted paths not yet
     // exercised by the framing suite above.
     // -----------------------------------------------------------------------
 

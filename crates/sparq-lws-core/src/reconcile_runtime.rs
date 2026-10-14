@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-5ruwm: boot-only periodic reconciler wiring shared by every native backend.
+// sq-5ruwm: boot-only periodic reconciler wiring shared by every native backend.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -81,6 +81,10 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
 
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         self.0.remove_child(container, child).await
+    }
+
+    async fn fence(&self, fence: &sparq_lws_core::store::Fence) -> Result<(), SparqError> {
+        self.0.fence(fence).await
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {

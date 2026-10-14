@@ -1,4 +1,4 @@
-//! [GPT-6] An expired SELECT must not queue behind unrelated Rayon work.
+//! An expired SELECT must not queue behind unrelated Rayon work.
 #![cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 
 use sparq_core::Graph;

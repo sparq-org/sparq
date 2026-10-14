@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3jtd.4 — `ldp:contains` / containment-view OWNERSHIP decision guard.
+//! sq-3jtd.4 — `ldp:contains` / containment-view OWNERSHIP decision guard.
 //!
 //! DECISION (research/solid-access-control-design.md §2.1 / §7.7,
 //! research/sparq-solid-scope.md area 2): a container's `ldp:contains` listing is

@@ -1,5 +1,5 @@
 //! sparq-shacl-wasm: the sparq **SHACL** validator compiled to WebAssembly — the
-//! tier-b "W-shacl" bundle ([OPUS-4.8] sq-lfmf).
+//! tier-b "W-shacl" bundle (sq-lfmf).
 //!
 //! This is a SEPARATE, lazy-loaded bundle from the lean `sparq-wasm` triplestore bundle.
 //! It exposes SHACL Core + SHACL-SPARQL (`sh:sparql`, W3C SHACL §5.2) validation of a data
@@ -36,14 +36,13 @@
 //! OFF by default so the showcase artifact (and its deterministic bundle-bytes record)
 //! is unchanged; see the `stateful` module and `research/shacl-wasm-stateful-2026-07.md`
 //! (the sq-01xlp measurement + decision).
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-lfmf: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-lfmf: crate has zero `unsafe`
 
-use oxrdf::Term;
 use sparq_core::Graph;
-use sparq_shacl::{ValidationReport, ValidationResult};
+use sparq_shacl::ValidationReport;
 use wasm_bindgen::prelude::*;
 
-// [FABLE-5] sq-01xlp: the opt-in pre-parsed/stateful validation handle. Behind the
+// sq-01xlp: the opt-in pre-parsed/stateful validation handle. Behind the
 // non-default `stateful` feature so the default showcase bundle carries zero extra
 // surface; CI builds + tests the bundle in both feature states.
 #[cfg(feature = "stateful")]
@@ -83,7 +82,7 @@ impl Validator {
     /// `sh:conforms`); filter `results` by `severity` for a violations-only gate, or call
     /// [`conforms`](Self::conforms) directly. Errors only if a document fails to parse.
     pub fn validate(data: &str, shapes: &str, format: &str) -> Result<String, JsError> {
-        Ok(report_to_json(&run(data, shapes, format)?))
+        Ok(run(data, shapes, format)?.to_js_json())
     }
 
     /// Like [`validate`](Self::validate) but returns the report as **report-RDF Turtle**
@@ -123,82 +122,9 @@ impl Validator {
     }
 }
 
-/// The plain text of a result's first `sh:message`, or its generated default — the
-/// human-readable string a UI surfaces (mirrors `to_text`'s message choice).
-fn result_message(r: &ValidationResult) -> String {
-    match r.messages.first() {
-        Some(Term::Literal(l)) => l.value().to_string(),
-        _ => r.default_message.clone(),
-    }
-}
 
-/// Serialises a [`ValidationReport`] to the JS-facing JSON described on [`Validator::validate`].
-/// The bundle carries no serde, so — exactly like the lean bundle's SHACL-JSON serialiser —
-/// the document is assembled by hand and strings are escaped by [`push_json_string`].
-pub(crate) fn report_to_json(report: &ValidationReport) -> String {
-    let mut out = String::from("{\"conforms\":");
-    out.push_str(if report.conforms { "true" } else { "false" });
-    out.push_str(",\"results\":[");
-    for (i, r) in report.results.iter().enumerate() {
-        if i > 0 {
-            out.push(',');
-        }
-        out.push('{');
-        push_field(&mut out, "focusNode", Some(&r.focus_node.to_string()));
-        out.push(',');
-        let path = r.path.as_ref().map(|p| p.to_turtle());
-        push_field(&mut out, "path", path.as_deref());
-        out.push(',');
-        let value = r.value.as_ref().map(|v| v.to_string());
-        push_field(&mut out, "value", value.as_deref());
-        out.push(',');
-        push_field(&mut out, "sourceShape", Some(&r.source_shape.to_string()));
-        out.push(',');
-        push_field(
-            &mut out,
-            "sourceConstraintComponent",
-            Some(&r.source_component),
-        );
-        out.push(',');
-        push_field(&mut out, "severity", Some(&r.severity));
-        out.push(',');
-        push_field(&mut out, "message", Some(&result_message(r)));
-        out.push('}');
-    }
-    out.push_str("]}");
-    out
-}
 
-/// Appends `"key":<json-string>` (or `"key":null` when `val` is `None`).
-fn push_field(out: &mut String, key: &str, val: Option<&str>) {
-    out.push('"');
-    out.push_str(key);
-    out.push_str("\":");
-    match val {
-        Some(v) => push_json_string(out, v),
-        None => out.push_str("null"),
-    }
-}
 
-/// Appends `s` to `out` as a JSON string literal (quotes + minimal escaping). The bundle
-/// carries no serde, so — exactly like the lean bundle's SPARQL/SHACL-JSON serialiser —
-/// strings are escaped by hand. Escapes the two mandatory characters (`"` and `\`) plus the
-/// C0 control characters JSON forbids unescaped.
-pub(crate) fn push_json_string(out: &mut String, s: &str) {
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-}
 
 #[cfg(test)]
 mod tests {
@@ -252,14 +178,14 @@ mod tests {
             "expected DatatypeConstraintComponent, got {}",
             r.source_component
         );
-        assert_eq!(result_message(r), "age must be an integer");
+        assert_eq!(r.message_text(), "age must be an integer");
     }
 
     /// The JSON serialiser emits the documented report shape, with the offending value and
     /// message present and `conforms:false`.
     #[test]
     fn json_report_shape() {
-        let json = report_to_json(&report());
+        let json = report().to_js_json();
         assert!(
             json.starts_with("{\"conforms\":false,\"results\":["),
             "{json}"
@@ -293,7 +219,7 @@ mod tests {
         let report = sparq_shacl::validate(&data, &shapes);
         assert!(report.conforms);
         assert_eq!(
-            report_to_json(&report),
+            report.to_js_json(),
             "{\"conforms\":true,\"results\":[]}"
         );
     }
@@ -314,16 +240,5 @@ mod tests {
         let text = report().to_text();
         assert!(text.starts_with("Does not conform"), "{text}");
         assert!(text.contains("http://example.org/alice"), "{text}");
-    }
-
-    /// The hand-rolled JSON escaper handles quotes, backslashes and control chars.
-    #[test]
-    fn json_string_escaping() {
-        let mut s = String::new();
-        push_json_string(&mut s, "a\"b\\c\nd\te");
-        assert_eq!(s, r#""a\"b\\c\nd\te""#, "{s}");
-        let mut ctrl = String::new();
-        push_json_string(&mut ctrl, "\u{0001}");
-        assert_eq!(ctrl, "\"\\u0001\"", "{ctrl}");
     }
 }

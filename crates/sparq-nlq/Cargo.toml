@@ -24,7 +24,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
 # front page and the `live`-gated `AnthropicLlm` items render on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
@@ -34,7 +34,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # `live` enables AnthropicLlm (network access to the Anthropic Messages API).
 # OFF by default: CI and the eval harness run entirely on recorded fixtures.
 live = ["dep:reqwest"]
-# [OPUS-4.8] sq-2m6zm.6 (PKG NL-tool PRODUCT flavor): `nlq-endpoint` enables
+# sq-2m6zm.6 (PKG NL-tool PRODUCT flavor): `nlq-endpoint` enables
 # `EndpointLlm`, a CONFIGURABLE, provider-agnostic OpenAI-compatible chat-completions
 # client (user-supplied base-url + model + key, from args or env — NOTHING is baked in).
 # This is the productization of the measured agent-flavor win (sq-zbyo7) for external
@@ -42,28 +42,28 @@ live = ["dep:reqwest"]
 # (already optional, shared with `live`). Unlike `live`, the loopback-stub tests
 # exercise the real request/parse path OFFLINE — so this lane is in the feature matrix.
 nlq-endpoint = ["dep:reqwest"]
-# [OPUS-4.8] sq-2489d.1 (GenAI-KB Phase 1): `citations` enables the cross-cutting
+# sq-2489d.1 (GenAI-KB Phase 1): `citations` enables the cross-cutting
 # provenance-join primitive (`provenance`) and the PKG-native citation renderer
 # (`cite`) + the `Answer::citations` accessor. OFF by default: keeps the lean NL→SPARQL
 # loop free of provenance machinery; the renderer is purely additive and read-only over
 # `sparq-core`. Citations are emitted from in-graph `prov:wasDerivedFrom`/`dcterms:source`
 # provenance ONLY — never guessed; absent provenance yields "no source recorded".
 citations = []
-# [GPT-5.6] sq-9zs3g: generated-query policy inspection is opt-in so the
+# sq-9zs3g: generated-query policy inspection is opt-in so the
 # default NLQ surface remains unchanged.
 query-policy = []
 
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.5" }
-sparq-engine = { path = "../sparq-engine", version = "0.1.5" }
-sparq-introspect = { path = "../sparq-introspect", version = "0.1.5" }
+sparq-core = { path = "../sparq-core", version = "0.1.6" }
+sparq-engine = { path = "../sparq-engine", version = "0.1.6" }
+sparq-introspect = { path = "../sparq-introspect", version = "0.1.6" }
 # Structural entity/relation linking (T7, GenAI phase 3 — research/genai-nl-to-sparql.md
 # §2.6/§8.3): maps question mentions to concrete IRIs in the store's dictionary, then
 # expands each linked entity with its structurally-similar siblings via the store's
 # permutation indexes. Read-only over the public sparq-core API; no model, no network.
-sparq-sim = { path = "../sparq-sim", version = "0.1.5" }
+sparq-sim = { path = "../sparq-sim", version = "0.1.6" }
 # Term types for two surfaces: the entity/relation linking surface (entities/relations
 # are oxrdf NamedNodes/Terms, sq-uw40) and the N2 dictionary-grounded constraint
 # (`constrain.rs`, sq-9yjp — build oxrdf NamedNode/Term to probe the live dictionary via
@@ -81,5 +81,5 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 
 [dev-dependencies]
-# [GPT-5.6] sq-lxw27: metric-law coverage for deterministic dictionary ranking.
+# sq-lxw27: metric-law coverage for deterministic dictionary ranking.
 proptest = "1"

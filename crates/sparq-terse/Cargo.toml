@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-leg8n (epic sq-2m6zm, design research/llm-ergonomic-sparql-surface.md
+# sq-leg8n (epic sq-2m6zm, design research/llm-ergonomic-sparql-surface.md
 # §3/§6, PR #1074). An opt-in, LLM-ergonomic, VERIFIABLE SPARQL surface: a PRE-PARSE
 # textual transpiler that always emits CANONICAL, conformant SPARQL — it never touches
 # the vendored spargebra GRAMMAR. The single public contract is `terse_to_sparql`, which
@@ -25,10 +25,10 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 # Research prototype (epic sq-2m6zm dogfooding); broad adoption is gated on the
-# design's §5 token/quality A/B verdict. [GPT-5.6] Published because sparq-cli and
+# design's §5 token/quality A/B verdict. Published because sparq-cli and
 # sparq-server expose it behind default-off features; maturity remains explicit.
 
-# [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg so the `vectors`-gated
+# docs.rs: build with all features + the `docsrs` cfg so the `vectors`-gated
 # items render on the docs.rs front page.
 [package.metadata.docs.rs]
 all-features = true
@@ -58,22 +58,22 @@ vectors = ["dep:sparq-core", "dep:sparq-nlq", "dep:sparq-vectors", "dep:oxrdf"]
 spargebra.workspace = true
 # The engine graph the lexical/vector resolution reads (only behind `vectors`).
 # default-features=false keeps it lean.
-sparq-core = { path = "../sparq-core", version = "0.1.5", default-features = false, optional = true }
+sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = false, optional = true }
 # The deterministic, no-model, no-network LEXICAL entity linker reused for V() (design
 # §6.4 "lexical-first"). Only behind `vectors`.
-sparq-nlq = { path = "../sparq-nlq", version = "0.1.5", optional = true }
+sparq-nlq = { path = "../sparq-nlq", version = "0.1.6", optional = true }
 # The staleness-guarded nearest-term search (the §6.5 mandatory staleness guard) for the
 # V() vector fallback. Only behind `vectors`.
-sparq-vectors = { path = "../sparq-vectors", version = "0.1.5", optional = true }
+sparq-vectors = { path = "../sparq-vectors", version = "0.1.6", optional = true }
 # Term types for the resolution surface (Resolution.iri is an oxrdf NamedNode). Only
 # behind `vectors`; workspace-pinned so the term type is byte-identical to sparq-core's.
 oxrdf = { workspace = true, optional = true }
 
 [dev-dependencies]
-# [GPT-5.6] sq-v7li4 — deterministic metamorphic coverage for the lean keyword layer.
+# sq-v7li4 — deterministic metamorphic coverage for the lean keyword layer.
 proptest = "1"
 
-# [OPUS-4.8] sq-bzign — the deterministic transpile-and-echo tool the Phase-5 A/B harness
+# sq-bzign — the deterministic transpile-and-echo tool the Phase-5 A/B harness
 # (`bench/terse/`) calls. It needs `terse_to_sparql_with` + the `Graph`, so it is gated on
 # `vectors` and only built with `--features vectors` (never in the lean default gate).
 [[example]]

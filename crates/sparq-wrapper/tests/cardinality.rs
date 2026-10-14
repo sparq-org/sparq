@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-1rg2q.3: direct coverage for every proposed cardinality function.
+// sq-1rg2q.3: direct coverage for every proposed cardinality function.
 
 #![cfg(feature = "proposed-cardinality")]
 

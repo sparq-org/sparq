@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-1rg2q.11: public-surface witnesses for the cycle-safe JSON
+// sq-1rg2q.11: public-surface witnesses for the cycle-safe JSON
 // projection. The in-module unit tests pin each knob; this file pins the two
 // properties the proposal actually promises across the crate boundary — the
 // projection is deterministic and total on a cyclic graph, and it never drops a

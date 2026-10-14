@@ -11,7 +11,8 @@ use super::*;
 /// Delete the stored record `iri` of a service container (a grant, a request, a subscription).
 /// The index commit is the deletion point: when the store reports a failure but the record no
 /// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
-/// record is gone.
+/// record is gone. One that still exists after a failure is not shown to stay unless the failure
+/// is settled (see [`still_listed`]): the error is returned as it is, so the caller can tell.
 pub(crate) async fn delete_record<S: Store>(
     store: &S,
     iri: &str,
@@ -28,6 +29,11 @@ pub(crate) async fn delete_record<S: Store>(
 
 /// Whether the record `iri` is stored as a start would load it: listed in `container` and there
 /// to read. An error when that cannot be told.
+///
+/// What it reads is final only for a write that is settled. One that failed
+/// [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that timed out) can still
+/// commit afterwards, until its fence ([`Store::fence`]) has succeeded: before that, a create
+/// not listed may still be stored, and a delete still listed may still remove it.
 pub(crate) async fn still_listed<S: Store>(
     store: &S,
     iri: &str,
@@ -79,11 +85,19 @@ pub(crate) async fn within_wait<T>(
 /// - The record's own lock is held from before it is created until it is registered, so a
 ///   revocation of it waits for that. A name already stored is refused.
 /// - A write that succeeds registers the record, and announces it (`Create`, its `author` one
-///   of who may hear of it, [`announce_record`]) as it does. One that fails is checked against the listing
-///   ([`still_listed`]): stored after all, it is registered; not stored, `register` (and the
-///   quota place it holds) is dropped and the create fails; not known, the create answers that,
-///   and a task holding the record's lock and the quota place settles it from the listing once
-///   the store answers, registering it under the container's lock, shared. A start loads whatever the listing holds.
+///   of who may hear of it, [`announce_record`]) as it does. One that fails is checked against
+///   the listing ([`still_listed`]): stored after all, it is registered; not stored, and the
+///   write settled, `register` (and the quota place it holds) is dropped and the create fails.
+///   Otherwise, the create answers that whether it was stored is not known, and a task holding
+///   the record's lock and the quota place settles it once the store answers, registering it
+///   under the container's lock, shared, if it is stored. A write that failed
+///   [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that timed out, whose
+///   worker may still be running) is fenced first ([`Store::fence`]), so a listing that does not
+///   show it is final: its quota place is released only once it can no longer commit. A start
+///   loads whatever the listing holds.
+/// - The change holds a place among those being made or settled ([`Settlements`]) from the
+///   request until it is settled: `503` when there is none. The task that settles one is the
+///   state's, and ends when the state is dropped.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
@@ -97,20 +111,23 @@ pub(crate) async fn create_record<S, F>(
 ) -> Result<(), Response>
 where
     S: Store + 'static,
-    F: FnOnce() + Send + 'static,
+    F: FnOnce(&LwsState<S>) + Send + 'static,
 {
     // Announced as it is put in force, wherever that happens (in the request's task, or in the
     // task that settles a write whose outcome was not known), so no record in force goes
     // unannounced, and none is announced that is not.
     let register = {
-        let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
-        move || {
-            register();
-            announce_record(&state, "Create", &iri, &container, author);
+        let (container, iri) = (container.to_string(), iri.to_string());
+        move |state: &LwsState<S>| {
+            register(state);
+            announce_record(state, "Create", &iri, &container, author);
         }
     };
     use crate::error::ServerError;
     let failed = |e: ServerError| problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+    let Some(place) = state.settlements.reserve() else {
+        return Err(settlements_full());
+    };
     let shared = match held {
         Some(_) => None,
         None => Some(within_wait(state.locks.read(container)).await?),
@@ -138,30 +155,47 @@ where
             .create_in_container(&container, &iri, body, LWS_JSON)
             .await;
         let Err(e) = written else {
-            register();
+            register(&state);
             return Ok(());
+        };
+        // A record listed is stored for good (its lock keeps a revocation of it out). One not
+        // listed is not stored only once the write is settled: a write that failed unsettled
+        // (an HTTP update that timed out, whose worker may still be running) can still commit
+        // after the listing was read, until its fence succeeds.
+        let unsettled = match &e {
+            ServerError::Unsettled { fence, .. } => Some(fence.clone()),
+            _ => None,
         };
         match still_listed(&state.store, &iri, &container).await {
             Ok(true) => {
-                register();
+                register(&state);
                 Ok(())
             }
-            Ok(false) => Err(e),
-            Err(_) => {
-                // Settled holding the record's own lock (a revocation of it waits); the
-                // container's is taken only to register it.
-                let state = state.clone();
-                tokio::spawn(async move {
-                    let _own = own;
-                    if until_done(|| still_listed(&state.store, &iri, &container)).await {
-                        // Registered under the container's lock, shared (taken after the
-                        // record's, as a revocation takes them), so no conditional create sees
-                        // the listing change between its check and its own registration. This
-                        // task holds no admission, so it may wait for it.
-                        let _listing =
-                            until_done(|| async { state.locks.read(&container).await.ok_or(()) })
-                                .await;
-                        register();
+            Ok(false) if unsettled.is_none() => Err(e),
+            Ok(false) | Err(_) => {
+                // Settled by a task the state owns, holding the record's own lock (a
+                // revocation of it waits), the quota place (`register` holds it) and this
+                // change's place among those being settled; the container's lock is taken
+                // only to register it. An unsettled write is fenced first, so the listing it
+                // then reads is final.
+                let (weak, store, locks) =
+                    (state.downgrade(), state.store.clone(), state.locks.clone());
+                state.settlements.spawn(async move {
+                    let _held = (own, place);
+                    if let Some(fence) = unsettled {
+                        until_done(|| store.fence(&fence)).await;
+                    }
+                    if !until_done(|| still_listed(&store, &iri, &container)).await {
+                        return;
+                    }
+                    // Registered under the container's lock, shared (taken after the record's,
+                    // as a revocation takes them), so no conditional create sees the listing
+                    // change between its check and its own registration. This task holds no
+                    // admission, so it may wait for it.
+                    let _listing =
+                        until_done(|| async { locks.read(&container).await.ok_or(()) }).await;
+                    if let Some(state) = weak.upgrade() {
+                        register(&state);
                     }
                 });
                 Err(ServerError::Storage(
@@ -226,6 +260,15 @@ pub(crate) enum Removed {
 ///   force: [`Removed::Absent`]); the record is deleted ([`delete_record`]), and a failure is
 ///   checked against the listing ([`still_listed`]); `settle` is told whether it is confirmed
 ///   gone, and removes it from memory or puts it back, giving the author to announce it to.
+/// - A delete that failed [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that
+///   timed out) can still remove the record after the listing showed it. Still listed (or the
+///   listing unreadable), it is settled in the background: the record stays out of force, and
+///   its own lock held, until the delete is fenced ([`Store::fence`]) and the listing read
+///   again; `settle` is then told the outcome under the container's lock, shared, and a record
+///   gone is announced. The answer is `500`, saying this is not known yet.
+/// - As for a create, the removal holds a place among those being made or settled
+///   ([`Settlements`]) until it is settled (`503` when there is none), and the task that settles
+///   it is the state's.
 /// - Only a record confirmed gone is announced (`Delete`, [`announce_record`]), once its locks
 ///   are released. Otherwise the answer is `500`, saying whether it is still stored or that this
 ///   is not known (it is left as it was, and the request may be retried).
@@ -243,8 +286,11 @@ where
     S: Store + 'static,
     H: Send + 'static,
     A: FnOnce() -> Option<H> + Send + 'static,
-    Z: FnOnce(bool, H) -> Option<String> + Send + 'static,
+    Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
+    let Some(place) = state.settlements.reserve() else {
+        return Err(settlements_full());
+    };
     let own = within_wait(state.locks.lock(iri)).await?;
     let listing = within_wait(state.locks.read(container)).await?;
     let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
@@ -255,13 +301,52 @@ where
         };
         let gone = match delete_record(&state.store, &iri, &container).await {
             Ok(()) => Some(true),
+            // A record not listed is gone for good (a delete only removes, and the record's
+            // lock keeps a create of it out). One still listed may yet go: the delete failed
+            // unsettled and can still commit, until its fence succeeds.
+            Err(crate::error::ServerError::Unsettled { fence, .. }) => {
+                match still_listed(&state.store, &iri, &container).await {
+                    Ok(false) => Some(true),
+                    Ok(true) | Err(_) => {
+                        // Settled by a task the state owns, holding the record's own lock and
+                        // this change's place among those being settled, with the record out
+                        // of force until then; the container's lock is taken again only to
+                        // settle it.
+                        drop(listing);
+                        let (weak, store, locks) =
+                            (state.downgrade(), state.store.clone(), state.locks.clone());
+                        let (iri, container) = (iri.clone(), container.clone());
+                        state.settlements.spawn(async move {
+                            let _place = place;
+                            until_done(|| store.fence(&fence)).await;
+                            let listed =
+                                until_done(|| still_listed(&store, &iri, &container)).await;
+                            let listing =
+                                until_done(|| async { locks.read(&container).await.ok_or(()) })
+                                    .await;
+                            let Some(state) = weak.upgrade() else {
+                                return;
+                            };
+                            let author = settle(&state, !listed, held);
+                            drop((own, listing));
+                            if !listed {
+                                announce_record(&state, "Delete", &iri, &container, author);
+                            }
+                        });
+                        return Err(format!(
+                            "whether the {what} was removed is not known yet; it is out of \
+                             force until that is settled, and the request may be retried"
+                        ));
+                    }
+                }
+            }
             Err(_) => still_listed(&state.store, &iri, &container)
                 .await
                 .ok()
                 .map(|listed| !listed),
         };
-        let author = settle(gone == Some(true), held);
-        drop((own, listing));
+        let author = settle(&state, gone == Some(true), held);
+        drop((own, listing, place));
         match gone {
             Some(true) => {
                 announce_record(&state, "Delete", &iri, &container, author);
@@ -284,6 +369,68 @@ where
             Some(&e.to_string()),
         )),
     }
+}
+
+/// How many record changes (creates and removals of grants, requests and subscriptions) may be
+/// in progress or waiting to be settled at once. Past it, a new one is refused with `503`: a
+/// store that keeps failing cannot pile up settlement tasks, and the records and locks they hold.
+pub(crate) const MAX_SETTLING: usize = 256;
+
+/// The record changes in progress or being settled, owned by the state: each change holds a
+/// place ([`Settlements::reserve`]) from its request until it is settled, and the tasks that
+/// settle a change whose outcome was not known ([`Settlements::spawn`]) are the state's. Such a
+/// task never holds the state across an await: it waits on the store and the locks through their
+/// own handles ([`tracked::Tracked`] and [`resources::IriLocks`] are shared), and upgrades its
+/// weak handle to the state only for the synchronous step that puts the outcome in memory. So
+/// dropping every other handle drops the state even while a store call of a settlement is
+/// stalled, and with it these tasks (a [`tokio::task::JoinSet`] aborts its tasks when dropped),
+/// releasing the locks and quota places they hold. A change whose settlement is cut short that
+/// way is left as the store has it, which the next start loads.
+pub(crate) struct Settlements {
+    places: Arc<tokio::sync::Semaphore>,
+    tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
+}
+
+impl Default for Settlements {
+    fn default() -> Self {
+        Self::with_capacity(MAX_SETTLING)
+    }
+}
+
+impl Settlements {
+    /// At most `places` changes at once.
+    pub(crate) fn with_capacity(places: usize) -> Self {
+        Self {
+            places: Arc::new(tokio::sync::Semaphore::new(places)),
+            tasks: Default::default(),
+        }
+    }
+
+    /// A place for one record change, held until it is settled: `None` when there is none
+    /// (answered with [`settlements_full`]).
+    pub(crate) fn reserve(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.places.clone().try_acquire_owned().ok()
+    }
+
+    /// Run `settle` as a task the state owns.
+    pub(crate) fn spawn(&self, settle: impl std::future::Future<Output = ()> + Send + 'static) {
+        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        while tasks.try_join_next().is_some() {}
+        tasks.spawn(settle);
+    }
+
+    /// How many settlement tasks have not finished.
+    #[cfg(test)]
+    pub(crate) fn pending(&self) -> usize {
+        let mut tasks = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        while tasks.try_join_next().is_some() {}
+        tasks.len()
+    }
+}
+
+/// The answer to a record change when [`Settlements`] has no place for it.
+fn settlements_full() -> Response {
+    resources::retry_later("too many changes to records are still being settled")
 }
 
 /// Announce that the service record `iri` in `container` (an access grant or request, a

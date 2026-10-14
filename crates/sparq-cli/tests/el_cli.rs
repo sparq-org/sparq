@@ -1,4 +1,4 @@
-//! [OPUS-5] (sq-2ch27, Phase E6 of research/owl2-el-ql-reasoning-spike.md §5) The OWL 2 EL
+//! (sq-2ch27, Phase E6 of research/owl2-el-ql-reasoning-spike.md §5) The OWL 2 EL
 //! classifier CLI surface end-to-end: `classify <data-file> <format> [out.nt]` and
 //! `--reason el` / `reason <f> <fmt> el`.
 //!

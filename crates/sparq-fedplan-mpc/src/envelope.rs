@@ -13,7 +13,8 @@
 //!    structure, the disclose/hide partition, the disclosed operands, and which sources
 //!    participate — **honestly over-counting rather than under-counting** what is revealed.
 //! 2. **Runs the dual ratification** ([`ratify_envelope`]): each **holder** fail-closed-rejects a
-//!    plan that would disclose one of *its own* private predicates (constraint C-B), AND the
+//!    envelope that *declares* a disclosure of one of *its own* private predicates (constraint
+//!    C-B; it checks the declared operand labels only, not the executed operators), AND the
 //!    **verifier** ratifies the envelope against an acceptance policy (an over-leaking envelope —
 //!    one whose disclosed-operand count exceeds the verifier's declared budget — is rejected).
 //!    Only a plan that survives **both** ratifications is cleared for execution.
@@ -42,22 +43,26 @@
 //! envelope is a *declaration* of what the plan reveals, and the ratification is a *policy check*
 //! over that declaration — neither is a cryptographic enforcement. The fail-closed holder check is
 //! the design record's constraint C-B (§2.2): the disclosure decision belongs to the data owners
-//! and the verifier, not the planner, so a lying planner that proposes an over-disclosing route is
-//! **rejected here, not honoured**. But this is a *plan-time policy gate*, not a runtime guarantee
+//! and the verifier, not the planner, so an envelope that *declares* a disclosure of a holder's
+//! private predicate is **rejected here, not honoured**. The check attests only the declared
+//! operand list: the caller must build the envelope from the actual operators with
+//! [`assemble_leakage_envelope`], keep it in step with what executes, and rebuild and re-ratify
+//! after any change. A planner that also writes the envelope can mislabel a disclosure, and
+//! nothing here detects that. This is a *plan-time policy gate*, not a runtime guarantee
 //! that a malicious holder/verifier honours it; it makes **NO** soundness/privacy/security claim.
 //! The MPC estate (`sparq-mpc`) is research-grade, **honest-majority semi-honest only**, and is
 //! **NOT** externally audited — the accredited-cryptographer sign-off (sq-qhy4) and the coZK
 //! re-audit (sq-9hrn) are pending. This pass does not change that posture by one inch. See the
 //! crate `README.md` and `research/mpc-untrusted-planner-routing-design.md` §2.1 / §2.2 / §4.4 / §6.
 //!
-//! [OPUS-4.8] sq-pwr.2.
+//! sq-pwr.2.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use sparq_fedplan::SourceId;
 use sparq_mpc::pipeline::Routing;
 
-use crate::routing::{Operand, QueryOperator};
+use crate::routing::{validate_operands, Operand, QueryOperator, ANONYMOUS_GLOBAL_IRI};
 use crate::seam::{
     LeakageEnvelope, OperatorDisclosure, PrivateRouting, RatificationOutcome, SeamError, SeamPhase,
 };
@@ -78,18 +83,21 @@ use crate::SourcePrivacyDescriptor;
 ///
 /// # Errors
 ///
-/// Returns [`SeamError::DescriptorMismatch`] (phase [`SeamPhase::LeakageEnvelope`]) if `routing`
+/// Returns [`SeamError::DescriptorMismatch`] (phase [`SeamPhase::LeakageEnvelope`]) if an
+/// operand's predicate id is empty or the reserved [`ANONYMOUS_GLOBAL_IRI`] label, or if `routing`
 /// and `operators` disagree in length or in an operator's label — an envelope cannot honestly
 /// enumerate what is disclosed if the routing it accounts for does not match the operators it
 /// claims to describe (fail-closed: refuse rather than emit a misleading envelope).
 ///
 /// This function performs **no** MPC and makes **no** soundness/privacy claim — it produces a
-/// *declaration*. See the module docs and the crate `README.md`. [OPUS-4.8] sq-pwr.2.
+/// *declaration*. See the module docs and the crate `README.md`. sq-pwr.2.
 pub fn assemble_leakage_envelope(
     routing: &PrivateRouting,
     operators: &[QueryOperator],
     selected: &SelectedPrivateSources,
 ) -> Result<LeakageEnvelope, SeamError> {
+    validate_operands(operators, SeamPhase::LeakageEnvelope)?;
+
     // The envelope can only honestly account for the routing if it was computed over THESE
     // operators: same count, and the labels line up (the routing carries the operator label
     // verbatim). A mismatch is fail-closed — refuse rather than emit a leakage statement that
@@ -155,7 +163,9 @@ fn operand_disclosure_label(operand: &Operand) -> String {
         // A global-IRI operand reveals which predicate it binds (e.g. the membership key on the
         // flat IRI). The empty-predicate case (an IRI binding no specific predicate) records the
         // honest fact that *a* global IRI is disclosed, labelled as such.
-        Operand::GlobalIri { predicate } if predicate.is_empty() => "<global-iri>".to_string(),
+        Operand::GlobalIri { predicate } if predicate.is_empty() => {
+            ANONYMOUS_GLOBAL_IRI.to_string()
+        }
         Operand::GlobalIri { predicate } => predicate.clone(),
         Operand::Predicate(p) => p.clone(),
     }
@@ -166,24 +176,39 @@ fn operand_disclosure_label(operand: &Operand) -> String {
 ///
 /// A plan is cleared for execution **only** if it survives *both* ratifications:
 ///
+/// 0. **Policy coverage.** `holders` must hold exactly one descriptor for each source in
+///    `envelope.participating_sources` and none for any other source. A missing participant
+///    policy (including an empty `holders` for a nonempty participation set) and a descriptor
+///    for a non-participating source are both rejected as
+///    [`RatificationOutcome::ParticipationMismatch`], so a holder can neither be skipped nor be
+///    substituted by an unrelated one. An envelope with no participating source that discloses
+///    any operand is rejected the same way: with no holder, nobody consented to the disclosure.
 /// 1. **Holder fail-closed re-check (constraint C-B).** Each `holder` descriptor independently
 ///    re-derives whether the envelope discloses one of *its own* private predicates. If the plan
 ///    routes an operator `Disclosed` whose operands include a predicate the holder has **not**
 ///    marked [`Disclosability::Public`](crate::Disclosability::Public), the holder **rejects**
-///    (fail-closed) — the over-disclosing plan is *not honoured*. This is the load-bearing C-B
-///    discharge: the disclosure decision belongs to the data owners, not the planner, so a lying
-///    planner that over-discloses is caught here.
+///    (fail-closed) — the over-disclosing plan is *not honoured*. This checks the declaration
+///    only: it does not by itself enforce C-B against a planner that mislabels the envelope.
 /// 2. **Verifier acceptance policy.** The verifier rejects an **over-leaking** envelope — one
 ///    whose total count of distinct disclosed operands exceeds `verifier_budget`. `None` means
 ///    "no budget cap" (accept any envelope the holders cleared). This is the verifier-side
 ///    "the leak is bounded and declared" check.
 ///
+/// **No exemptions.** Every disclosed operand goes through the holder re-check, including the
+/// [`ANONYMOUS_GLOBAL_IRI`] label recorded for a disclosed global IRI that binds no predicate: a
+/// holder consents to that disclosure only by marking the label public.
+///
+/// **Trust boundary.** Ratification attests only the declared operand list; it does not
+/// re-derive labels from the typed operators. Build `envelope` with
+/// [`assemble_leakage_envelope`] from the operators that will run, keep that correspondence
+/// through execution, and rebuild and re-ratify after any change.
+///
 /// Returns a [`RatificationOutcome`] enumerating, honestly, *which* ratification(s) failed and
-/// *why* — an over-disclosing plan is reported with the offending source + predicate (holder
+/// *why* — a declared over-disclosure is reported with the offending source + predicate (holder
 /// rejection) or the budget overrun (verifier rejection), never silently dropped.
 ///
 /// This is a **plan-time policy gate, not a cryptographic enforcement.** It runs **no** MPC and
-/// makes **no** soundness/privacy claim — see the module docs. [OPUS-4.8] sq-pwr.2.
+/// makes **no** soundness/privacy claim — see the module docs. sq-pwr.2.
 pub fn ratify_envelope(
     envelope: &LeakageEnvelope,
     holders: &[SourcePrivacyDescriptor],
@@ -207,6 +232,36 @@ pub fn ratify_envelope(
         };
     }
 
+    // 0. Policy coverage: the holder set must be exactly the participation set. A participant
+    // without a policy is never skipped, and a policy for a non-participant is refused rather than
+    // silently ignored or allowed to stand in for a missing one.
+    let participants: BTreeSet<&str> = envelope
+        .participating_sources
+        .iter()
+        .map(String::as_str)
+        .collect();
+    if let Some(missing) = participants
+        .iter()
+        .find(|id| !by_id.keys().any(|h| h.0 == **id))
+    {
+        return RatificationOutcome::ParticipationMismatch {
+            source_id: (*missing).to_string(),
+            detail: "no SourcePrivacyDescriptor for this participating holder (a missing policy fails closed)",
+        };
+    }
+    if let Some(extra) = by_id.keys().find(|h| !participants.contains(h.0.as_str())) {
+        return RatificationOutcome::ParticipationMismatch {
+            source_id: extra.0.clone(),
+            detail: "SourcePrivacyDescriptor for a source outside the envelope's participation set",
+        };
+    }
+    if participants.is_empty() && !envelope.distinct_disclosed_operands().is_empty() {
+        return RatificationOutcome::ParticipationMismatch {
+            source_id: String::new(),
+            detail: "plan discloses an operand but declares no participating holder to consent",
+        };
+    }
+
     // 1. Holder fail-closed re-check (constraint C-B). The most-private holder wins: if ANY holder
     // would have one of its private predicates disclosed by the plan, the whole plan is rejected.
     // Deterministic order: scan the disclosed operands per operator, then the holders by id.
@@ -215,11 +270,6 @@ pub fn ratify_envelope(
             continue;
         }
         for predicate in &op.disclosed_operands {
-            // A global-IRI placeholder operand binds no predicate a holder can object to; skip it
-            // (it is disclosed by convention, not over a holder's private term).
-            if predicate == "<global-iri>" {
-                continue;
-            }
             for (id, holder) in &by_id {
                 if !holder.may_disclose(predicate) {
                     return RatificationOutcome::HolderRejected {
@@ -428,13 +478,12 @@ mod tests {
         assert!(outcome.is_ratified());
     }
 
-    /// NEGATIVE (holder): a plan that discloses a predicate a holder marked PRIVATE is rejected by
-    /// that holder, fail-closed — the over-disclosing plan is NOT honoured (constraint C-B).
+    /// NEGATIVE (holder): an envelope that declares a disclosure of a predicate a holder marked
+    /// PRIVATE is rejected by that holder, fail-closed (constraint C-B, over the declaration).
     #[test]
     fn holder_rejects_a_plan_disclosing_a_private_term() {
-        // Build an envelope that (dishonestly) discloses the SALARY predicate — exactly what a
-        // lying planner that over-discloses would propose. The holder marks salary PRIVATE, so its
-        // fail-closed re-check must reject it.
+        // Build an envelope that explicitly declares a disclosure of the SALARY predicate. The
+        // holder marks salary PRIVATE, so its fail-closed re-check must reject it.
         let leaking_env = LeakageEnvelope {
             operators: vec![OperatorDisclosure {
                 operator: "salary-threshold-DISCLOSED (over-disclosing)".to_string(),
@@ -647,7 +696,7 @@ mod tests {
 
     // A single-operator plan that discloses one global IRI binding NO specific predicate, plus the
     // routing that matches it (so `assemble_leakage_envelope` accepts the pair). Returns
-    // (routing, ops). [OPUS-4.8] sq-bif.
+    // (routing, ops). sq-bif.
     fn disclosed_empty_global_iri_plan() -> (PrivateRouting, Vec<QueryOperator>) {
         let ops = vec![QueryOperator::new(
             "membership-join (anonymous global IRI)",
@@ -671,7 +720,7 @@ mod tests {
 
     /// An empty-predicate global-IRI operand, when disclosed, is recorded HONESTLY in the envelope
     /// as the `<global-iri>` placeholder (not silently dropped, not a panic) — the disclosure of
-    /// *a* global IRI is enumerated even though it binds no named predicate. [OPUS-4.8] sq-bif.
+    /// *a* global IRI is enumerated even though it binds no named predicate. sq-bif.
     #[test]
     fn empty_global_iri_operand_is_recorded_as_the_placeholder() {
         let (routing, ops) = disclosed_empty_global_iri_plan();
@@ -687,38 +736,74 @@ mod tests {
         );
     }
 
-    /// The load-bearing C-B soundness boundary for the placeholder: a `<global-iri>` disclosure is
-    /// disclosed BY CONVENTION (it binds no holder's named predicate), so a holder's fail-closed
-    /// re-check must NOT spuriously reject it — even a deny-all holder ratifies. A regression that
-    /// dropped the `<global-iri>` skip would falsely reject every plan that discloses an anonymous
-    /// global IRI. [OPUS-4.8] sq-bif.
+    /// The placeholder gets no holder-check exemption: a deny-all holder rejects a disclosed
+    /// anonymous global IRI, and a holder that explicitly marks the label public consents. A
+    /// relabelled envelope therefore cannot use the label to skip a holder's veto.
     #[test]
-    fn placeholder_global_iri_is_not_held_against_a_deny_all_holder() {
+    fn placeholder_global_iri_needs_explicit_holder_consent() {
         let (routing, ops) = disclosed_empty_global_iri_plan();
-        let env =
+        let mut env =
             assemble_leakage_envelope(&routing, &ops, &SelectedPrivateSources::default()).unwrap();
-        // A maximally-private holder discloses NOTHING — yet it must still ratify the placeholder,
-        // because the placeholder is not over any named predicate it could object to.
+        env.participating_sources = vec!["http://a/".to_string()];
         let deny_all = SourcePrivacyDescriptor::deny_all(SourceId::new("http://a/"));
+        match ratify_envelope(&env, &[deny_all], None) {
+            RatificationOutcome::HolderRejected { predicate, .. } => {
+                assert_eq!(predicate, ANONYMOUS_GLOBAL_IRI)
+            }
+            other => panic!("expected a holder rejection, got {other:?}"),
+        }
+        let consenting = SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(ANONYMOUS_GLOBAL_IRI)
+            .build();
         assert_eq!(
-            ratify_envelope(&env, &[deny_all], None),
-            RatificationOutcome::Ratified,
-            "an anonymous global IRI is disclosed by convention; no holder can veto it"
+            ratify_envelope(&env, &[consenting], None),
+            RatificationOutcome::Ratified
         );
     }
 
-    /// The placeholder is skipped by the HOLDER check but still COUNTS against the VERIFIER budget:
-    /// it is a real disclosure (the verifier bounds total operand disclosure), so a budget of 0
-    /// rejects it on the verifier side even though every holder accepted. This pins the precise
-    /// asymmetry — holder-exempt, verifier-counted. [OPUS-4.8] sq-bif.
+    /// A private predicate relabelled as the placeholder in a hand-edited envelope is still vetoed
+    /// by a holder that has not consented to the label.
     #[test]
-    fn placeholder_global_iri_counts_against_the_verifier_budget() {
+    fn relabelled_private_predicate_is_still_vetoed() {
+        let env = LeakageEnvelope {
+            operators: vec![OperatorDisclosure {
+                operator: "salary-threshold".to_string(),
+                class: OperatorClass::Comparison,
+                disclosed: true,
+                disclosed_operands: vec![ANONYMOUS_GLOBAL_IRI.to_string()],
+            }],
+            participating_sources: vec!["http://a/".to_string()],
+        };
+        assert!(matches!(
+            ratify_envelope(&env, &[flatmate_privacy("http://a/")], Some(1)),
+            RatificationOutcome::HolderRejected { .. }
+        ));
+    }
+
+    /// A disclosed placeholder with no participant is a disclosure nobody consented to: rejected.
+    #[test]
+    fn placeholder_disclosure_without_any_participant_is_rejected() {
         let (routing, ops) = disclosed_empty_global_iri_plan();
         let env =
             assemble_leakage_envelope(&routing, &ops, &SelectedPrivateSources::default()).unwrap();
-        let holders = [SourcePrivacyDescriptor::deny_all(SourceId::new(
-            "http://a/",
-        ))];
+        assert!(env.participating_sources.is_empty());
+        assert!(matches!(
+            ratify_envelope(&env, &[], Some(1)),
+            RatificationOutcome::ParticipationMismatch { .. }
+        ));
+    }
+
+    /// The placeholder counts against the VERIFIER budget like any disclosed operand: a budget of
+    /// 0 rejects it even though the (consenting) holder accepted. sq-bif.
+    #[test]
+    fn placeholder_global_iri_counts_against_the_verifier_budget() {
+        let (routing, ops) = disclosed_empty_global_iri_plan();
+        let mut env =
+            assemble_leakage_envelope(&routing, &ops, &SelectedPrivateSources::default()).unwrap();
+        env.participating_sources = vec!["http://a/".to_string()];
+        let holders = [SourcePrivacyDescriptor::builder(SourceId::new("http://a/"))
+            .public_predicate(ANONYMOUS_GLOBAL_IRI)
+            .build()];
         // Budget 0: one distinct disclosed operand (`<global-iri>`) exceeds it ⇒ verifier rejects.
         match ratify_envelope(&env, &holders, Some(0)) {
             RatificationOutcome::VerifierRejected {
@@ -743,7 +828,7 @@ mod tests {
     /// declared non-participation) no longer gates a predicate's disclosability, so a predicate the
     /// *remaining* sources all mark public becomes Disclosed — and the assembled envelope honestly
     /// records that disclosure. This is the cross-phase interaction (selection → routing →
-    /// envelope) over the REAL path. [OPUS-4.8] sq-bif.
+    /// envelope) over the REAL path. sq-bif.
     #[test]
     fn pruned_private_holder_does_not_gate_disclosure_downstream() {
         // Source A marks memberOf public and participates; source B marks it PRIVATE but declares
@@ -786,6 +871,173 @@ mod tests {
             ratify_envelope(&env, &[a_pub], Some(4)),
             RatificationOutcome::Ratified
         );
+    }
+
+    // ── Policy coverage: missing / extra holder policies fail closed ──────────────────────
+
+    fn membership_disclosed_envelope(participants: &[&str]) -> LeakageEnvelope {
+        LeakageEnvelope {
+            operators: vec![OperatorDisclosure {
+                operator: "membership-join".to_string(),
+                class: OperatorClass::EqualityJoin,
+                disclosed: true,
+                disclosed_operands: vec![MEMBER_OF.to_string()],
+            }],
+            participating_sources: participants.iter().map(|p| p.to_string()).collect(),
+        }
+    }
+
+    fn public_member_of(id: &str) -> SourcePrivacyDescriptor {
+        SourcePrivacyDescriptor::builder(SourceId::new(id))
+            .public_predicate(MEMBER_OF)
+            .build()
+    }
+
+    /// An empty holder list for a nonempty participation set is rejected, naming the participant
+    /// with no policy. Before the coverage check the holder loop had no iterations and ratified.
+    #[test]
+    fn empty_holders_for_a_nonempty_participation_set_are_rejected() {
+        let env = membership_disclosed_envelope(&["http://a/"]);
+        for budget in [None, Some(8)] {
+            assert_eq!(
+                ratify_envelope(&env, &[], budget),
+                RatificationOutcome::ParticipationMismatch {
+                    source_id: "http://a/".to_string(),
+                    detail: "no SourcePrivacyDescriptor for this participating holder (a missing policy fails closed)",
+                }
+            );
+        }
+    }
+
+    /// Partial omission: the supplied holder permits the disclosure, but a second participant has
+    /// no policy. The plan is rejected and the unlisted participant named.
+    #[test]
+    fn partially_missing_holder_policies_are_rejected() {
+        let env = membership_disclosed_envelope(&["http://a/", "http://b/"]);
+        match ratify_envelope(&env, &[public_member_of("http://a/")], None) {
+            RatificationOutcome::ParticipationMismatch { source_id, .. } => {
+                assert_eq!(source_id, "http://b/")
+            }
+            other => panic!("expected a participation mismatch, got {other:?}"),
+        }
+    }
+
+    /// A policy for a source outside the participation set is rejected rather than ignored, so it
+    /// cannot stand in for a missing participant's policy.
+    #[test]
+    fn holder_policy_for_a_non_participant_is_rejected() {
+        let env = membership_disclosed_envelope(&["http://a/"]);
+        let holders = [public_member_of("http://a/"), public_member_of("http://c/")];
+        match ratify_envelope(&env, &holders, None) {
+            RatificationOutcome::ParticipationMismatch { source_id, .. } => {
+                assert_eq!(source_id, "http://c/")
+            }
+            other => panic!("expected a participation mismatch, got {other:?}"),
+        }
+        // Substitution: the non-participant's policy in place of the participant's.
+        match ratify_envelope(&env, &[public_member_of("http://c/")], None) {
+            RatificationOutcome::ParticipationMismatch { source_id, .. } => {
+                assert_eq!(source_id, "http://a/")
+            }
+            other => panic!("expected a participation mismatch, got {other:?}"),
+        }
+    }
+
+    /// An envelope that discloses a predicate while declaring no participant has no holder to
+    /// consent, so it is rejected; an all-hidden envelope with no participant still ratifies.
+    #[test]
+    fn disclosure_without_any_participant_is_rejected() {
+        let env = membership_disclosed_envelope(&[]);
+        assert!(matches!(
+            ratify_envelope(&env, &[], None),
+            RatificationOutcome::ParticipationMismatch { .. }
+        ));
+        let hidden = LeakageEnvelope {
+            operators: vec![OperatorDisclosure {
+                operator: "sum".to_string(),
+                class: OperatorClass::LinearAggregate,
+                disclosed: false,
+                disclosed_operands: vec![],
+            }],
+            participating_sources: vec![],
+        };
+        assert_eq!(
+            ratify_envelope(&hidden, &[], Some(0)),
+            RatificationOutcome::Ratified
+        );
+    }
+
+    /// Every participant's policy present and each marks the disclosed predicate public: the
+    /// explicitly permitted case ratifies.
+    #[test]
+    fn complete_explicitly_permitting_policies_ratify() {
+        let env = membership_disclosed_envelope(&["http://a/", "http://b/"]);
+        let holders = [public_member_of("http://b/"), public_member_of("http://a/")];
+        assert_eq!(
+            ratify_envelope(&env, &holders, Some(1)),
+            RatificationOutcome::Ratified
+        );
+    }
+
+    /// The end-to-end omission path: a valid selection names source A, but routing and
+    /// ratification are handed no policy for it. Routing refuses, and ratifying the envelope the
+    /// selection would produce with no holder policy is rejected too.
+    #[test]
+    fn omitted_policy_is_refused_end_to_end() {
+        let privacy = vec![flatmate_privacy("http://a/")];
+        let bgp = Bgp::new(vec![TriplePattern::new(
+            Term::Var(Var::new("h")),
+            Term::Iri(MEMBER_OF.to_string()),
+            Term::Iri(FLAT_IRI.to_string()),
+        )]);
+        let selected = select_private_sources(&bgp, &[source("http://a/")], &privacy).unwrap();
+        let ops = vec![QueryOperator::new(
+            "membership-join",
+            OperatorClass::EqualityJoin,
+            vec![Operand::GlobalIri {
+                predicate: MEMBER_OF.to_string(),
+            }],
+        )];
+        assert!(route_operators(&selected, &[], &ops, RoutingPolicy::Strict).is_err());
+
+        // With the policy supplied, routing proceeds; the envelope still names A as participant.
+        let routing = route_operators(&selected, &privacy, &ops, RoutingPolicy::Strict).unwrap();
+        let env = assemble_leakage_envelope(&routing, &ops, &selected).unwrap();
+        assert_eq!(env.participating_sources, vec!["http://a/"]);
+        assert!(matches!(
+            ratify_envelope(&env, &[], None),
+            RatificationOutcome::ParticipationMismatch { .. }
+        ));
+        assert_eq!(
+            ratify_envelope(&env, &privacy, None),
+            RatificationOutcome::Ratified
+        );
+    }
+
+    /// Assembly refuses an operand that would be recorded under the reserved placeholder label,
+    /// so a predicate disclosure cannot be recorded as an anonymous global IRI.
+    #[test]
+    fn assembly_refuses_the_reserved_placeholder_as_a_predicate() {
+        let ops = vec![QueryOperator::new(
+            "disguised",
+            OperatorClass::EqualityJoin,
+            vec![Operand::Predicate(ANONYMOUS_GLOBAL_IRI.to_string())],
+        )];
+        let routing = PrivateRouting {
+            routing: vec![sparq_mpc::pipeline::OperatorRouting {
+                operator: "disguised".to_string(),
+                routing: Routing::Disclosed,
+            }],
+        };
+        let err = assemble_leakage_envelope(&routing, &ops, &SelectedPrivateSources::default())
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            SeamError::DescriptorMismatch {
+                phase: SeamPhase::LeakageEnvelope,
+                ..
+            }
+        ));
     }
 
     /// Determinism: same plan ⇒ identical envelope + identical outcome, twice.

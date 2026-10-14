@@ -7,7 +7,7 @@ use crate::path::Path;
 use oxrdf::Term;
 use std::fmt::Write as _;
 
-/// [OPUS-4.8] (sq-sx15d) The DEFAULT `sh:conformanceDisallows` severity set
+/// (sq-sx15d) The DEFAULT `sh:conformanceDisallows` severity set
 /// (SHACL 1.2 Core §3.9): a data graph fails to conform when ANY validation
 /// result carries one of these severities. Results at `sh:Debug` / `sh:Trace`
 /// (below `sh:Info` in the `sh:Trace < sh:Debug < sh:Info < sh:Warning <
@@ -18,7 +18,7 @@ pub const DEFAULT_CONFORMANCE_DISALLOWS: &[&str] = &[
     "http://www.w3.org/ns/shacl#Info",
 ];
 
-/// [OPUS-4.8] (sq-sx15d) `true` iff none of `results` carries a severity in the
+/// (sq-sx15d) `true` iff none of `results` carries a severity in the
 /// `disallowed` set — the SHACL 1.2 conformance test (default or custom set).
 fn conforms_over(results: &[ValidationResult], disallowed: &[&str]) -> bool {
     !results
@@ -38,7 +38,7 @@ pub struct ValidationResult {
     pub value: Option<Term>,
     /// The shape the failing constraint is declared on.
     pub source_shape: Term,
-    /// [OPUS-4.8] (sq-mue75) The constraint node a SPARQL-based result came from
+    /// (sq-mue75) The constraint node a SPARQL-based result came from
     /// (`sh:sourceConstraint`): the `sh:SPARQLConstraint` node (the object of
     /// `sh:sparql`). SHACL §5.2.2 stamps this on `sh:sparql` results so a report
     /// can point at the exact constraint, distinct from `sh:sourceShape` (the
@@ -54,7 +54,7 @@ pub struct ValidationResult {
     pub messages: Vec<Term>,
     /// A generated message used when the shape declares none.
     pub default_message: String,
-    /// [OPUS-4.8] (sq-f8gu) Nested `sh:detail` sub-results explaining WHY this
+    /// (sq-f8gu) Nested `sh:detail` sub-results explaining WHY this
     /// result fired — currently the per-member (`sh:memberShape`) / per-duplicate
     /// (`sh:uniqueMembers`) results produced by validating each offending list
     /// member against the member shape. Empty for every other component. The
@@ -64,13 +64,13 @@ pub struct ValidationResult {
     pub details: Vec<ValidationResult>,
 }
 
-/// [OPUS-4.8] (sq-lz99x) A non-fatal author-time diagnostic: a constraint the
+/// (sq-lz99x) A non-fatal author-time diagnostic: a constraint the
 /// validator could not evaluate and therefore SKIPPED (the crate's lenient
 /// ill-formed-shape policy), surfaced so the skip is not silent. Two producers:
 /// an uncompilable `sh:pattern` regex — the Rust `regex` crate has no
 /// lookahead/lookbehind (neither does XML Schema regex, which the W3C SHACL
 /// spec ties `sh:pattern` to), so a `(?!...)` pattern fails to compile — and
-/// [FABLE-5] (sq-c1v3e) each parse-time **ill-formed shapes-graph construct**
+/// (sq-c1v3e) each parse-time **ill-formed shapes-graph construct**
 /// ([`crate::IllFormedConstruct`]), which the lenient `validate` skips and the
 /// strict channel rejects. A diagnostic never affects `conforms`: a skipped
 /// constraint reports no violations.
@@ -93,7 +93,7 @@ pub struct ValidationReport {
     /// True iff there are no validation results.
     pub conforms: bool,
     pub results: Vec<ValidationResult>,
-    /// [OPUS-4.8] (sq-lz99x) Non-fatal author-time diagnostics for constraints
+    /// (sq-lz99x) Non-fatal author-time diagnostics for constraints
     /// that could not be evaluated and were therefore SKIPPED (e.g. an
     /// uncompilable `sh:pattern` regex). These never affect `conforms` — a
     /// skipped constraint contributes no results — but surface the skip so it is
@@ -102,7 +102,7 @@ pub struct ValidationReport {
 }
 
 impl ValidationReport {
-    // [OPUS-4.8] (sq-lz99x) Test-only convenience: the report tests below build
+    // (sq-lz99x) Test-only convenience: the report tests below build
     // reports from hand-rolled results (no diagnostics). Production code calls
     // `with_diagnostics_and_disallows`, so gate this to `test` to avoid a
     // dead-code warning in the plain lib build.
@@ -111,7 +111,7 @@ impl ValidationReport {
         Self::with_diagnostics_and_disallows(results, Vec::new(), None)
     }
 
-    /// [OPUS-4.8] (sq-lz99x / sq-5q76d) Build a report carrying validation results
+    /// (sq-lz99x / sq-5q76d) Build a report carrying validation results
     /// and skipped-constraint diagnostics (e.g. an uncompilable `sh:pattern`),
     /// computing `conforms` against an EXPLICIT `sh:conformanceDisallows` set (the
     /// shapes-graph-declared override, SHACL 1.2 Core §3.9) — falling back to the
@@ -139,7 +139,7 @@ impl ValidationReport {
         }
     }
 
-    /// [OPUS-4.8] (sq-sx15d) Recompute conformance against a CUSTOM disallowed
+    /// (sq-sx15d) Recompute conformance against a CUSTOM disallowed
     /// severity set (the SHACL 1.2 `sh:conformanceDisallows` of a results graph,
     /// SHACL Core §3.9): `true` iff no result carries a severity in `disallowed`.
     /// `disallowed` holds full severity IRIs (e.g.
@@ -194,7 +194,7 @@ impl ValidationReport {
     /// This emits the same validation-report graph as [`to_turtle`](Self::to_turtle),
     /// including nested `sh:detail` results.
     pub fn to_ntriples(&self) -> String {
-        // [GPT-5.6] (sq-qcuhh) Keep the Turtle renderer as the single report-graph
+        // (sq-qcuhh) Keep the Turtle renderer as the single report-graph
         // construction path, then use oxttl for complete N-Triples term escaping.
         let turtle = self.to_turtle();
         let triples = oxttl::TurtleParser::new().for_slice(turtle.as_bytes());
@@ -232,12 +232,8 @@ impl ValidationReport {
             if let Some(v) = &r.value {
                 let _ = write!(out, " | value {v}");
             }
-            let msg = match r.messages.first() {
-                Some(Term::Literal(l)) => l.value().to_string(),
-                _ => r.default_message.clone(),
-            };
-            let _ = writeln!(out, "\n    {comp}: {msg}");
-            // [OPUS-4.8] (sq-f8gu) Render nested sh:detail sub-results, indented.
+            let _ = writeln!(out, "\n    {comp}: {}", r.message_text());
+            // (sq-f8gu) Render nested sh:detail sub-results, indented.
             for d in &r.details {
                 let dcomp = d
                     .source_component
@@ -251,7 +247,7 @@ impl ValidationReport {
                 let _ = writeln!(out);
             }
         }
-        // [OPUS-4.8] (sq-lz99x) Surface skipped-constraint diagnostics so the
+        // (sq-lz99x) Surface skipped-constraint diagnostics so the
         // lenient skip is not silent. They never affect `conforms`.
         for d in &self.diagnostics {
             let comp = d
@@ -316,14 +312,10 @@ impl ValidationReport {
                     "      \"severity\": \"{}\",",
                     escape_json(&result.severity)
                 );
-                let message = match result.messages.first() {
-                    Some(Term::Literal(literal)) => literal.value(),
-                    _ => &result.default_message,
-                };
                 let _ = write!(
                     out,
                     "      \"resultMessage\": \"{}\"\n    }}",
-                    escape_json(message)
+                    escape_json(result.message_text())
                 );
             }
             out.push_str("\n  ]");
@@ -360,24 +352,65 @@ impl ValidationReport {
     }
 }
 
+impl ValidationReport {
+    /// The compact JSON the JavaScript bindings (`sparq-wasm`'s `Store.validate` and
+    /// `sparq-shacl-wasm`) return:
+    ///
+    /// ```json
+    /// {"conforms":false,"results":[{"focusNode":"<http://ex/bob>",
+    ///   "path":"<http://ex/age>","value":"\"-1\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+    ///   "sourceShape":"_:b0","sourceConstraintComponent":"http://www.w3.org/ns/shacl#…",
+    ///   "severity":"http://www.w3.org/ns/shacl#Violation","message":"Value is not >= 0"}]}
+    /// ```
+    ///
+    /// `focusNode`, `value` and `sourceShape` are N-Triples term strings, `path` is a
+    /// SHACL Turtle path expression, and `message` is [`ValidationResult::message_text`].
+    /// `path` and `value` are `null` when absent. Diagnostics are not included.
+    pub fn to_js_json(&self) -> String {
+        use sparq_core::json::push_string;
+        fn field(out: &mut String, key: &str, val: Option<&str>) {
+            out.push('"');
+            out.push_str(key);
+            out.push_str("\":");
+            match val {
+                Some(v) => push_string(out, v),
+                None => out.push_str("null"),
+            }
+        }
+        let mut out = String::from("{\"conforms\":");
+        out.push_str(if self.conforms { "true" } else { "false" });
+        out.push_str(",\"results\":[");
+        for (i, r) in self.results.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push('{');
+            field(&mut out, "focusNode", Some(&r.focus_node.to_string()));
+            out.push(',');
+            let path = r.path.as_ref().map(|p| p.to_turtle());
+            field(&mut out, "path", path.as_deref());
+            out.push(',');
+            let value = r.value.as_ref().map(|v| v.to_string());
+            field(&mut out, "value", value.as_deref());
+            out.push(',');
+            field(&mut out, "sourceShape", Some(&r.source_shape.to_string()));
+            out.push(',');
+            field(&mut out, "sourceConstraintComponent", Some(&r.source_component));
+            out.push(',');
+            field(&mut out, "severity", Some(&r.severity));
+            out.push(',');
+            field(&mut out, "message", Some(r.message_text()));
+            out.push('}');
+        }
+        out.push_str("]}");
+        out
+    }
+}
+
 /// Returns a JSON-safe string body without surrounding quotes.
 fn escape_json(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '"' => escaped.push_str("\\\""),
-            '\\' => escaped.push_str("\\\\"),
-            '\u{08}' => escaped.push_str("\\b"),
-            '\u{0C}' => escaped.push_str("\\f"),
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            control if control.is_control() => {
-                let _ = write!(escaped, "\\u{:04X}", control as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
+    sparq_core::json::escape_into(&mut escaped, value);
     escaped
 }
 
@@ -391,7 +424,7 @@ fn term_to_json_string(term: &Term) -> String {
     }
 }
 
-/// [OPUS-4.8] (sq-f8gu) Writes one `sh:ValidationResult` as an anonymous
+/// (sq-f8gu) Writes one `sh:ValidationResult` as an anonymous
 /// blank-node block, recursively nesting `sh:detail` sub-results. Emitted as a
 /// continuation of an already-written predicate (`sh:result ` / `sh:detail `),
 /// and closed with `]` (no trailing `.` — the caller owns statement framing).
@@ -408,7 +441,7 @@ fn write_result_node(out: &mut String, r: &ValidationResult) {
     // A blank-node source shape has no graph-independent identity; emit its
     // label so the report stays self-consistent and parseable.
     let _ = writeln!(out, "    sh:sourceShape {} ;", r.source_shape);
-    // [OPUS-4.8] (sq-mue75) `sh:sourceConstraint` — the originating
+    // (sq-mue75) `sh:sourceConstraint` — the originating
     // `sh:SPARQLConstraint` node, present only on `sh:sparql` results.
     if let Some(c) = &r.source_constraint {
         let _ = writeln!(out, "    sh:sourceConstraint {c} ;");
@@ -430,6 +463,15 @@ fn write_result_node(out: &mut String, r: &ValidationResult) {
 }
 
 impl ValidationResult {
+    /// The plain text a UI shows for this result: the lexical form of the first
+    /// `sh:message` literal, or the generated default.
+    pub fn message_text(&self) -> &str {
+        match self.messages.first() {
+            Some(Term::Literal(l)) => l.value(),
+            _ => &self.default_message,
+        }
+    }
+
     /// The result messages: the source shape's sh:message literals, or the
     /// generated default when the shape declares none.
     pub fn effective_messages(&self) -> Vec<Term> {
@@ -443,7 +485,7 @@ impl ValidationResult {
     }
 }
 
-// [OPUS-4.8] Report-serialisation coverage (sq-qap0). report.rs (~64% covered)
+// Report-serialisation coverage (sq-qap0). report.rs (~64% covered)
 // has branches the validate()-level tests don't reliably hit in isolation: the
 // path/value-present vs -absent arms of to_turtle / to_text, the
 // conforming-vs-not text rendering, the default-vs-declared message path, and
@@ -494,6 +536,49 @@ mod tests {
             .for_slice(ttl.as_bytes())
             .collect::<Result<Vec<_>, _>>()
             .unwrap_or_else(|e| panic!("report Turtle does not parse: {e}\n{ttl}"))
+    }
+
+    #[test]
+    fn js_json_shape_nulls_escaping_and_message_choice() {
+        assert_eq!(
+            ValidationReport::new(vec![]).to_js_json(),
+            r#"{"conforms":true,"results":[]}"#
+        );
+        let declared = result(
+            iri(&format!("{EX}bob")),
+            Some(Path::Predicate(format!("{EX}age"))),
+            Some(lit("say \"hi\"\n")),
+            "MinInclusiveConstraintComponent",
+            "Violation",
+            vec![lit("tab\there"), lit("second")],
+        );
+        let bare = result(
+            iri(&format!("{EX}eve")),
+            None,
+            None,
+            "NodeConstraintComponent",
+            "Warning",
+            vec![],
+        );
+        let json = ValidationReport::new(vec![declared, bare]).to_js_json();
+        assert_eq!(
+            json,
+            format!(
+                concat!(
+                    r#"{{"conforms":false,"results":["#,
+                    r#"{{"focusNode":"<{ex}bob>","path":"<{ex}age>","value":"\"say \\\"hi\\\"\\n\"","#,
+                    r#""sourceShape":"<{ex}Shape>","#,
+                    r#""sourceConstraintComponent":"{sh}MinInclusiveConstraintComponent","#,
+                    r#""severity":"{sh}Violation","message":"tab\there"}},"#,
+                    r#"{{"focusNode":"<{ex}eve>","path":null,"value":null,"#,
+                    r#""sourceShape":"<{ex}Shape>","#,
+                    r#""sourceConstraintComponent":"{sh}NodeConstraintComponent","#,
+                    r#""severity":"{sh}Warning","message":"generated default"}}]}}"#
+                ),
+                ex = EX,
+                sh = SH
+            )
+        );
     }
 
     #[test]
@@ -587,6 +672,7 @@ mod tests {
         );
         assert!(!json.contains("quoted \"line\"\nnext"));
         assert_eq!(escape_json("\\\t\u{1}"), "\\\\\\t\\u0001");
+        assert_eq!(escape_json("\u{8}\u{c}\u{7f}"), "\\u0008\\u000c\u{7f}");
         assert_eq!(
             term_to_json_string(&Term::NamedNode(NamedNode::new_unchecked(
                 "http://example.org/node"
@@ -747,7 +833,7 @@ mod tests {
         assert_eq!(n_results, 2, "{ttl}");
     }
 
-    // [GPT-5.6] (sq-qcuhh) Value-pinned direct coverage for the public N-Triples
+    // (sq-qcuhh) Value-pinned direct coverage for the public N-Triples
     // serializer: two violations must remain two report links and conformity must
     // be the boolean false in the emitted report graph.
     #[test]
@@ -884,7 +970,7 @@ mod tests {
         assert_eq!(m, vec![lit("m1"), lit("m2")]);
     }
 
-    // [OPUS-4.8] (sq-f8gu) A result carrying sh:detail sub-results nests each as a
+    // (sq-f8gu) A result carrying sh:detail sub-results nests each as a
     // sh:ValidationResult blank node under sh:detail; both Turtle and text render
     // them, and the Turtle round-trips.
     #[test]
@@ -966,7 +1052,7 @@ mod tests {
                 vec![],
             ),
         ]);
-        // [OPUS-4.8] (sq-sx15d) sh:conforms uses the DEFAULT disallowed set
+        // (sq-sx15d) sh:conforms uses the DEFAULT disallowed set
         // {Violation, Warning, Info}: a Warning/Info report does NOT conform.
         // The violations-only toggle is strictly weaker and passes here (no
         // sh:Violation).
@@ -991,7 +1077,7 @@ mod tests {
         assert!(!r.conforms_violations_only());
     }
 
-    // [OPUS-4.8] (sq-sx15d) SHACL-1.2 conformance threshold: results below
+    // (sq-sx15d) SHACL-1.2 conformance threshold: results below
     // sh:Info (sh:Debug / sh:Trace) are reported but DO NOT break the default
     // `conforms`; a custom disallowed set is applied via
     // `conforms_with_disallowed`.

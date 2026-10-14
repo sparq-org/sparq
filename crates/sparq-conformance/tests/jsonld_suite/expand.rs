@@ -1,18 +1,18 @@
-//! [FABLE-5] sq-oy1f.40 — the W3C JSON-LD 1.1 `expand` lane runner (split out of the
+//! sq-oy1f.40 — the W3C JSON-LD 1.1 `expand` lane runner (split out of the
 //! former monolithic `tests/jsonld_suite.rs`; behaviour byte-identical). The `expand`
 //! category uses the NATIVE DOCUMENT-LEVEL oracle (`sparq_jsonld::expand()` +
 //! `json_ld_equal`), NOT the RDF-writer path.
 
 use super::common::*;
 use serde_json::Value;
-// [SONNET-4.6] sq-kk1mq — native expand() for the document-level expand oracle.
-// [SONNET-4.6] sq-oy1f.45 — FsLoader maps the W3C suite URL prefix to local fixtures so
+// sq-kk1mq — native expand() for the document-level expand oracle.
+// sq-oy1f.45 — FsLoader maps the W3C suite URL prefix to local fixtures so
 // `@context`/`@import` relative-URL references (e.g. t0126, tc034, tso08) are resolved
 // from the local checkout rather than hitting the network.
 use sparq_jsonld::{expand as jsonld_expand, FsLoader, JsonLdOptions, ProcessingMode};
 use std::path::Path;
 
-/// [SONNET-4.6] sq-kk1mq — run the W3C JSON-LD `expand` category with the
+/// sq-kk1mq — run the W3C JSON-LD `expand` category with the
 /// NATIVE DOCUMENT-LEVEL oracle: call `sparq_jsonld::expand()` directly on the
 /// input document and deep-compare the result to the suite's expected expanded
 /// document via `json_ld_equal`.
@@ -32,10 +32,10 @@ use std::path::Path;
 ///    by writing and re-parsing (no structural loss — both ASTs are JSON).
 /// 5. Parse the suite's expected document as a `serde_json::Value`.
 /// 6. Compare with `json_ld_equal` (object key order insignificant; array
-///    order significant only inside `@list`; integers compared exactly,
+///    order significant only inside `@list` and a `@json` payload; integers compared exactly,
 ///    non-integral numbers compared as f64 so `1` ≡ `1.0`).
 ///
-/// ## NegativeEvaluationTests are RUN, not skipped ([OPUS-5] sq-gzsky)
+/// ## NegativeEvaluationTests are RUN, not skipped (sq-gzsky)
 ///
 /// The 109-case negative SKIP bucket this lane used to carry WAS the entire expand gap
 /// (`research/gap-jsonld-conformance-2026-07.md` §6). It is closed: a negative case passes
@@ -58,7 +58,7 @@ pub fn run_expand_native(root: &Path) -> Score {
             return s;
         }
     };
-    // [SONNET-4.6] sq-oy1f.45 — FsLoader maps the suite's base URL prefix to the local
+    // sq-oy1f.45 — FsLoader maps the suite's base URL prefix to the local
     // fixture directory so `@context` / `@import` IRI references in test inputs are
     // resolved against the checked-out files instead of hitting the network.  The mapping
     // mirrors the `SUITE_BASE` constant (`https://w3c.github.io/json-ld-api/tests/`).
@@ -218,7 +218,7 @@ pub fn run_expand_native(root: &Path) -> Score {
     s
 }
 
-/// [OPUS-5] sq-gzsky — scope pin for the negative lane, the analogue of the compact lane's
+/// sq-gzsky — scope pin for the negative lane, the analogue of the compact lane's
 /// `t0038_skip_is_narrowly_scoped`. Asserts that every `NegativeEvaluationTest` in the
 /// pinned `expand` manifest (a) carries an `expectErrorCode` — without one the runner would
 /// compare against `""`, which no spec code equals, so the case could only ever FAIL — and

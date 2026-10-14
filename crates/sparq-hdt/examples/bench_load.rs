@@ -11,7 +11,7 @@
 //! cargo run --release -p sparq-hdt --example bench_load -- --json /tmp/hdt.json
 //! ```
 //!
-//! [OPUS-4.8] (sq-cxji) `--json <path>` writes the SAME measurements STDOUT prints —
+//! (sq-cxji) `--json <path>` writes the SAME measurements STDOUT prints —
 //! the deterministic file sizes + triple count, plus the advisory best-of-RUNS load
 //! times — as a stable, DEPENDENCY-FREE JSON document, mirroring the `format!`-JSON
 //! convention of `crates/sparq-mpc/examples/mpc_net_bench.rs::cell_json` and
@@ -28,7 +28,7 @@ const N_TRIPLES: usize = 1_000_000;
 const RUNS: usize = 3;
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json <path> machine-readable results emit
+// (sq-cxji) --json <path> machine-readable results emit
 // ---------------------------------------------------------------------------
 
 /// Extracts `--json <path>` (and its value) from argv, returning argv WITHOUT the
@@ -151,7 +151,7 @@ fn main() {
     );
     println!("speedup: {:.2}x", best_gz / best_hdt);
 
-    // [OPUS-4.8] (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
+    // (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
     // given. STDOUT above is the unchanged human table.
     if let Some(path) = json_path {
         let doc = results_json(nt_bytes, gz_bytes, hdt_bytes, n, best_hdt, best_gz);
@@ -215,7 +215,7 @@ fn generate(nt_path: &Path, gz_path: &Path, hdt_path: &Path) {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json emit tests
+// (sq-cxji) --json emit tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {

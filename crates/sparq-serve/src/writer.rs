@@ -88,7 +88,7 @@
 //!
 //! ## Commit hook (per-publish observation seam)
 //!
-//! [FABLE-5] (sq-bdaw5) [`Writer::spawn_with_commit_hook`] installs a hook that runs on
+//! (sq-bdaw5) [`Writer::spawn_with_commit_hook`] installs a hook that runs on
 //! the writer thread once per **commit-publish** with the `(predecessor, published)`
 //! generation pair — the seam a durable change-data-capture recorder
 //! (`ChangeLog::into_commit_hook`, feature `change-stream`) plugs into. Because the
@@ -164,7 +164,7 @@ pub struct WriterConfig {
     /// Whether a window commits as one generation or as one generation per
     /// commuting run (module docs).
     pub granularity: CommitGranularity,
-    /// [OPUS-4.8] (sq-p7kk5) ADAPTIVE group-commit. When `false` (the default,
+    /// (sq-p7kk5) ADAPTIVE group-commit. When `false` (the default,
     /// unchanged behaviour) the writer always waits the full [`window`](Self::window)
     /// after the first update, absorbing any concurrent traffic that arrives within
     /// it into one generation. That fixed wait is pure latency for a **serial /
@@ -236,7 +236,7 @@ pub trait ApplyUpdates: Send + 'static {
 
     /// Finalizes the working copy into a publishable snapshot.
     ///
-    /// [OPUS-4.8] (sq-vpx4) Fallible so an applier with a DURABLE side (e.g. the
+    /// (sq-vpx4) Fallible so an applier with a DURABLE side (e.g. the
     /// server's `--persist` mirror) can refuse a batch whose durable commit failed
     /// WITHOUT tearing down the writer thread. `Err(msg)` means "this batch did not
     /// durably commit": the writer publishes NOTHING for it and fails every pending
@@ -259,7 +259,7 @@ pub trait ApplyUpdates: Send + 'static {
         Footprint::Barrier
     }
 
-    /// [OPUS-4.8] (sq-x32t) Runs an out-of-band MAINTENANCE operation on the writer
+    /// (sq-x32t) Runs an out-of-band MAINTENANCE operation on the writer
     /// thread — the only thread that mutates the applier's durable side. The default
     /// is a no-op (an in-memory applier has nothing to maintain).
     ///
@@ -278,7 +278,7 @@ pub trait ApplyUpdates: Send + 'static {
         Ok(())
     }
 
-    /// [OPUS-4.8] (sq-ft7u) RESTORE the applier's durable side from a freshly-built, already-
+    /// (sq-ft7u) RESTORE the applier's durable side from a freshly-built, already-
     /// validated `fresh` snapshot, and return the new published snapshot the ring should serve.
     /// Runs on the WRITER THREAD (the only thread that touches the durable store), sequenced
     /// through the same queue as updates — so the durable swap never races a commit and the
@@ -308,7 +308,7 @@ pub enum WriteError {
     /// The writer has shut down (or its thread panicked); the update was not
     /// applied.
     Shutdown,
-    /// [OPUS-4.8] (sq-vpx4) The update applied cleanly in memory but its batch
+    /// (sq-vpx4) The update applied cleanly in memory but its batch
     /// could NOT be made durable ([`ApplyUpdates::seal`] returned `Err`, e.g. a
     /// transient `ENOSPC`/I/O error on the `--persist` mirror). Nothing was
     /// published and nothing was acked — the write is REFUSED, not silently lost,
@@ -342,7 +342,7 @@ struct Msg<U> {
     ack: Option<SyncSender<Result<u64, WriteError>>>,
 }
 
-/// [OPUS-4.8] (sq-x32t) What the writer thread receives on its queue: either an UPDATE
+/// (sq-x32t) What the writer thread receives on its queue: either an UPDATE
 /// submission (the steady-state path) or a MAINTENANCE request (an admin op such as WAL
 /// compaction). Maintenance is sequenced through the SAME single queue as updates, so it
 /// runs strictly between batches on the one thread that owns the durable store — no lock,
@@ -354,7 +354,7 @@ enum Cmd<U, S> {
     /// channel so the caller can block for completion. Publishes NO generation (maintenance
     /// preserves the live snapshot exactly).
     Maintain(SyncSender<Result<(), String>>),
-    /// [OPUS-4.8] (sq-ft7u) RESTORE the durable store from the freshly-built, already-validated
+    /// (sq-ft7u) RESTORE the durable store from the freshly-built, already-validated
     /// snapshot `fresh` on the writer thread, then PUBLISH the restored snapshot as a new
     /// generation so the ring serves it. Sequenced through the same queue as updates, so the
     /// durable swap runs strictly between batches — never concurrently with a commit. The ack
@@ -374,7 +374,7 @@ enum Cmd<U, S> {
 /// commits any in-flight batch (graceful drain — pending sync submitters still
 /// get their generation number), and joins the thread.
 ///
-/// [OPUS-4.8] (sq-ft7u) The second type parameter `S` is the applier's SNAPSHOT type (e.g. the
+/// (sq-ft7u) The second type parameter `S` is the applier's SNAPSHOT type (e.g. the
 /// server's `Graph`): it is the payload of the out-of-band [`restore`](Self::restore) op, which
 /// installs a freshly-built snapshot as the new served lineage (the durable-restore primitive).
 /// It is inferred from the applier at [`spawn`](Self::spawn), so existing call sites that name
@@ -406,7 +406,7 @@ impl<U: Send + 'static, S: Send + Sync + 'static> Writer<U, S> {
         )
     }
 
-    /// [FABLE-5] (sq-bdaw5) [`spawn`](Self::spawn) with a **commit hook**: `hook` runs ON
+    /// (sq-bdaw5) [`spawn`](Self::spawn) with a **commit hook**: `hook` runs ON
     /// THE WRITER THREAD immediately after every commit-publish, receiving the
     /// `(predecessor, published)` generation pair of that commit. Because the writer
     /// thread is the ring's ONLY publisher, consecutive pairs CHAIN (each call's
@@ -504,7 +504,7 @@ impl<U: Send + 'static, S: Send + Sync + 'static> Writer<U, S> {
         ack_rx.recv().map_err(|_| WriteError::Shutdown)?
     }
 
-    /// [OPUS-4.8] (sq-x32t) Runs an out-of-band MAINTENANCE op ([`ApplyUpdates::maintain`])
+    /// (sq-x32t) Runs an out-of-band MAINTENANCE op ([`ApplyUpdates::maintain`])
     /// on the writer thread and **blocks until it completes**, returning its result. The
     /// request is sequenced through the same queue as updates, so it runs strictly between
     /// batches — never concurrently with a commit, and never reordered across an in-flight
@@ -524,7 +524,7 @@ impl<U: Send + 'static, S: Send + Sync + 'static> Writer<U, S> {
         done_rx.recv().map_err(|_| WriteError::Shutdown)
     }
 
-    /// [OPUS-4.8] (sq-ft7u) RESTORE the durable store from the freshly-built, already-validated
+    /// (sq-ft7u) RESTORE the durable store from the freshly-built, already-validated
     /// snapshot `fresh` ON THE WRITER THREAD, then PUBLISH the restored snapshot as a new
     /// generation, and **block until it completes** — returning the published generation number
     /// (or the restore error). Routed through the SAME queue as updates, so the durable swap
@@ -586,7 +586,7 @@ impl<U: Send + 'static, S: Send + Sync + 'static> Drop for Writer<U, S> {
     }
 }
 
-/// [OPUS-4.8] (sq-ft7u) A restore request held until the in-flight batch commits: the
+/// (sq-ft7u) A restore request held until the in-flight batch commits: the
 /// freshly-built snapshot to install + the ack channel for the published generation number.
 type PendingRestore<A> = (
     <A as ApplyUpdates>::Snapshot,
@@ -594,7 +594,7 @@ type PendingRestore<A> = (
 );
 
 /// The writer thread: collect a batch per group-commit window, commit, repeat.
-/// [FABLE-5] (sq-bdaw5) `hook`, when present, fires once per commit-publish
+/// (sq-bdaw5) `hook`, when present, fires once per commit-publish
 /// (never for a restore publish — see `Writer::spawn_with_commit_hook`).
 fn run<A: ApplyUpdates, H>(
     ring: Arc<GenerationRing<A::Snapshot>>,
@@ -616,12 +616,12 @@ fn run<A: ApplyUpdates, H>(
         };
         let first = match first {
             Cmd::Update(m) => m,
-            // [OPUS-4.8] (sq-x32t) Maintenance arrived with no pending batch: run it now.
+            // (sq-x32t) Maintenance arrived with no pending batch: run it now.
             Cmd::Maintain(done) => {
                 let _ = done.send(applier.maintain());
                 continue;
             }
-            // [OPUS-4.8] (sq-ft7u) Restore arrived with no pending batch: run it now.
+            // (sq-ft7u) Restore arrived with no pending batch: run it now.
             Cmd::Restore { fresh, ack } => {
                 run_restore(&ring, &mut applier, *fresh, ack);
                 continue;
@@ -630,18 +630,18 @@ fn run<A: ApplyUpdates, H>(
         let deadline = Instant::now() + config.window;
         let mut batch = vec![first];
         let mut disconnected = false;
-        // [OPUS-4.8] (sq-x32t) A maintenance request that arrives mid-window CLOSES the window
+        // (sq-x32t) A maintenance request that arrives mid-window CLOSES the window
         // (we commit the batch collected so far) and is then run AFTER the commit, preserving
         // strict FIFO: every update queued before the maintenance request is committed first,
         // so a compaction observes exactly the writes that preceded it. The request is held
         // here and serviced once the batch is committed below.
         let mut pending_maintain: Option<SyncSender<Result<(), String>>> = None;
-        // [OPUS-4.8] (sq-ft7u) Likewise a RESTORE request that arrives mid-window closes the
+        // (sq-ft7u) Likewise a RESTORE request that arrives mid-window closes the
         // window: the in-flight batch is committed FIRST (strict FIFO), then the durable store is
         // replaced — so a restore never races, or is reordered against, a concurrent update.
         let mut pending_restore: Option<PendingRestore<A>> = None;
         while batch.len() < max_batch {
-            // [OPUS-4.8] (sq-p7kk5) In ADAPTIVE mode we never wait the window: after the
+            // (sq-p7kk5) In ADAPTIVE mode we never wait the window: after the
             // first update we drain only what is ALREADY queued (`try_recv`) and commit the
             // moment the backlog empties. A serial client (blocked on its own ack) has an
             // empty queue here, so it commits in engine-time instead of paying ~window per
@@ -687,14 +687,14 @@ fn run<A: ApplyUpdates, H>(
                 }
             }
         }
-        // [OPUS-4.8] (sq-x32t) Run the maintenance op AFTER the preceding batch is committed +
+        // (sq-x32t) Run the maintenance op AFTER the preceding batch is committed +
         // published (so a compaction folds in every write that arrived before it), then ack the
         // caller. A maintenance failure leaves the writer thread alive (it is reported via the
         // returned `Result`, not by tearing down the writer).
         if let Some(done) = pending_maintain {
             let _ = done.send(applier.maintain());
         }
-        // [OPUS-4.8] (sq-ft7u) Run the restore AFTER the preceding batch is committed + published
+        // (sq-ft7u) Run the restore AFTER the preceding batch is committed + published
         // (strict FIFO — the restore observes every write that arrived before it, then replaces
         // the store), then ack the caller. A restore failure leaves the writer alive (it is
         // reported via the returned `Result`, not by tearing down the writer).
@@ -707,14 +707,14 @@ fn run<A: ApplyUpdates, H>(
     }
 }
 
-/// [OPUS-4.8] (sq-ft7u) Run a durable RESTORE on the writer thread and PUBLISH the restored
+/// (sq-ft7u) Run a durable RESTORE on the writer thread and PUBLISH the restored
 /// snapshot as a new generation so the ring serves it. The applier's
 /// [`restore_durable`](ApplyUpdates::restore_durable) performs the crash-safe on-disk swap and
 /// returns the snapshot to publish; on its `Err` nothing is published and the OLD store is intact
 /// (the swap is fail-closed). The publish uses an empty epoch-touched set: a full-store restore
 /// invalidates everything, and the generation bump alone re-evaluates active subscriptions.
 ///
-/// [FABLE-5] (sq-bdaw5) A restore publish deliberately does NOT fire the commit hook: the
+/// (sq-bdaw5) A restore publish deliberately does NOT fire the commit hook: the
 /// restored snapshot does not share the predecessor's writer lineage, so a lineage-diffing
 /// consumer (the change stream) must never be handed the pair (`Writer::spawn_with_commit_hook`).
 fn run_restore<A: ApplyUpdates>(
@@ -779,7 +779,7 @@ fn split_commute_groups<A: ApplyUpdates>(
 /// Applies one batch to a fresh working copy and publishes ONE generation
 /// (module docs: FIFO order, failed updates skipped + re-fork recovery, epochs =
 /// union of successful updates' pods, no publish if nothing succeeded).
-/// [FABLE-5] (sq-bdaw5) On publish, `hook` fires with `(base, published)` BEFORE
+/// (sq-bdaw5) On publish, `hook` fires with `(base, published)` BEFORE
 /// the batch's acks are sent — so a hook-side durable effect (a change-stream
 /// record) is complete by the time any submitter's `submit` returns.
 fn commit<A: ApplyUpdates, H>(
@@ -825,7 +825,7 @@ fn commit<A: ApplyUpdates, H>(
         return;
     }
 
-    // [OPUS-4.8] (sq-vpx4) Seal is the durable-commit point for an applier with a
+    // (sq-vpx4) Seal is the durable-commit point for an applier with a
     // `--persist` mirror. On `Err` the batch did NOT durably commit: publish NOTHING
     // (so no reader ever sees it) and ack NOTHING with success. We then `return` — the
     // writer thread survives the failure, so reads keep flowing from the last published
@@ -848,7 +848,7 @@ fn commit<A: ApplyUpdates, H>(
         .iter()
         .flat_map(|&i| batch[i].touched.iter().cloned());
     let published = ring.publish(snapshot, touched);
-    // [FABLE-5] (sq-bdaw5) Fire the commit hook (once per published generation, on this
+    // (sq-bdaw5) Fire the commit hook (once per published generation, on this
     // — the only publishing — thread) BEFORE acking, so a hook-side durable record is
     // complete when submitters unblock. `base` is the generation this commit forked
     // from; since only this thread publishes, `(base, published)` pairs chain gapless
@@ -905,7 +905,7 @@ fn fail_all<U>(batch: Vec<Msg<U>>, reason: &str) {
     }
 }
 
-/// [OPUS-4.8] (sq-vpx4) Resolves a batch when [`ApplyUpdates::seal`] could not make it
+/// (sq-vpx4) Resolves a batch when [`ApplyUpdates::seal`] could not make it
 /// durable. Failure semantics are per-submitter, preserving the rejected-vs-pending
 /// distinction:
 ///   * a submitter rejected during `apply` (`errs[i] == Some(reason)`) keeps that

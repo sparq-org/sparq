@@ -23,9 +23,9 @@ use serde_json::{json, Value};
 
 use super::access::Action;
 use super::{
-    add_page_links, is_uri, jose, json_response, method_not_allowed, problem, requested_page, set,
-    Agent, LwsRequest, LwsState, ResourceMeta, LD_JSON, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
-    TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
+    add_page_links, is_uri, jose, json_response, method_not_allowed, problem, relation_key,
+    requested_page, set, Agent, LwsRequest, LwsState, ResourceMeta, LD_JSON, LWS_CONTEXT, LWS_JSON,
+    LWS_NS, META_SUFFIX, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::store::Store;
 
@@ -42,6 +42,12 @@ pub const MAX_FILTER_IRIS: usize = 256;
 /// Largest filter, in bytes. Every page link of a result set carries the filter, base64url-encoded
 /// (a third larger), so a filter is held to a size whose links fit well inside a request head.
 pub const MAX_FILTER_BYTES: usize = 8 * 1024;
+
+/// Most of a QUERY body collected: past this it is refused as it is read (`413`). A well-formed
+/// filter past [`MAX_FILTER_BYTES`] but within this is refused as too complex to page (`422`,
+/// section 7.2), so whether a search is answered or refused as too complex does not turn on how long the
+/// storage's origin is: the same filter is longer by every IRI's share of a longer origin.
+pub const MAX_FILTER_READ: usize = 4 * MAX_FILTER_BYTES;
 
 /// Relations the search never indexes: structural or protocol ones (section 7.1).
 const STRUCTURAL_RELATIONS: &[&str] = &[
@@ -144,15 +150,6 @@ fn groups(value: &Value, room: usize) -> Result<Groups, FilterError> {
         }
     }
     Ok(out)
-}
-
-/// A relation as it is compared: lower-cased when it is a registered (non-URI) relation.
-fn relation_key(rel: &str) -> String {
-    if rel.contains(':') {
-        rel.to_string()
-    } else {
-        rel.to_ascii_lowercase()
-    }
 }
 
 /// Resolve `target` against `base`, leaving it as it is when it cannot be resolved.
@@ -463,6 +460,14 @@ async fn handle_within<S: Store + 'static>(
                 Some(b) => filter_bytes = Bytes::from(b),
                 None => return problem(StatusCode::NOT_FOUND, None),
             }
+            // The rounding above lets a byte or two more through: a page link carrying a filter
+            // past its size is longer than any this server makes, whatever the filter holds.
+            if filter_bytes.len() > MAX_FILTER_BYTES {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+                );
+            }
         } else {
             match req.content_type() {
                 None => {
@@ -476,12 +481,6 @@ async fn handle_within<S: Store + 'static>(
                 }
                 Some(_) => filter_bytes = req.body.clone(),
             }
-        }
-        if filter_bytes.len() > MAX_FILTER_BYTES {
-            return problem(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
-            );
         }
         filter = match parse_filter(&filter_bytes) {
             Ok(f) => f,
@@ -500,6 +499,15 @@ async fn handle_within<S: Store + 'static>(
                 )
             }
         };
+        if filter_bytes.len() > MAX_FILTER_BYTES {
+            // A well-formed filter too long to carry on its page links is a search too complex
+            // to answer (section 7.2), as one with too many groups is. (A page link carrying one
+            // was refused above.)
+            return problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+            );
+        }
     }
     // lws+json or ld+json, negotiated by quality and specificity (lws+json on a tie, or without
     // Accept); a range with q=0 refuses its type. The response varies on Accept (section 7.2).
@@ -722,6 +730,86 @@ mod tests {
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
+    /// Issue #6881: a QUERY filter past its size was refused as too large (`413`), so a search naming
+    /// many types was answered on a short origin and refused on a long one, its IRIs being
+    /// longer there. Past its size, within what is read, it is too complex to page (`422`).
+    #[tokio::test]
+    async fn a_filter_too_long_to_page_is_too_complex() {
+        use super::super::test_store;
+        let (state, _) = test_store::state(1).await;
+        let search = |filter: String| {
+            let state = state.clone();
+            async move {
+                handle(
+                    &state,
+                    &test_store::request(
+                        Method::from_bytes(b"QUERY").unwrap(),
+                        TYPE_SEARCH_PATH,
+                        &[("content-type", LWS_QUERY)],
+                        &filter,
+                    ),
+                    &Agent::anonymous(),
+                )
+                .await
+                .status()
+            }
+        };
+        let types = |n: usize, origin: &str| {
+            let iris: Vec<String> = (0..n)
+                .map(|i| format!("\"{origin}/vocab#Type{i}\""))
+                .collect();
+            format!("{{\"type\": [{}]}}", iris.join(","))
+        };
+        let long = format!("https://{}.example", "o".repeat(60));
+        let filter = types(99, &long);
+        assert!(filter.len() > MAX_FILTER_BYTES && filter.len() <= MAX_FILTER_READ);
+        assert_eq!(search(filter).await, StatusCode::UNPROCESSABLE_ENTITY);
+        let short = types(99, "https://e.example");
+        assert!(short.len() <= MAX_FILTER_BYTES);
+        // The same search gets the same answer on either origin.
+        assert_eq!(search(short).await, StatusCode::UNPROCESSABLE_ENTITY);
+        // At the limit, and one byte past it.
+        let padded = |len: usize| {
+            let head = "{\"type\": [\"https://e.example/T\"], \"@padding\": \"";
+            format!("{head}{}\"}}", "x".repeat(len - head.len() - 2))
+        };
+        assert_eq!(padded(MAX_FILTER_BYTES).len(), MAX_FILTER_BYTES);
+        assert_eq!(search(padded(MAX_FILTER_BYTES)).await, StatusCode::OK);
+        assert_eq!(
+            search(padded(MAX_FILTER_BYTES + 1)).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // A long filter that is not one is malformed, whatever its length.
+        let mut broken = padded(MAX_FILTER_BYTES + 2);
+        broken.pop();
+        assert_eq!(broken.len(), MAX_FILTER_BYTES + 1);
+        assert_eq!(search(broken).await, StatusCode::BAD_REQUEST);
+        // A page link carrying a filter one byte past its size is refused as too large, whatever
+        // the filter holds: its encoding is within the rounded bound checked before decoding.
+        let link = |filter: String| {
+            let state = state.clone();
+            async move {
+                let q = jose::b64url(filter.as_bytes());
+                assert!(q.len() <= MAX_FILTER_BYTES.div_ceil(3) * 4);
+                let path = format!("{TYPE_SEARCH_PATH}?q={q}&page=1");
+                handle(
+                    &state,
+                    &test_store::request(Method::GET, &path, &[], ""),
+                    &Agent::anonymous(),
+                )
+                .await
+                .status()
+            }
+        };
+        assert_eq!(
+            link(padded(MAX_FILTER_BYTES + 1)).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
+        let mut broken = padded(MAX_FILTER_BYTES + 2);
+        broken.pop();
+        assert_eq!(link(broken).await, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
     #[tokio::test]
     async fn the_type_index_is_paged() {
         use super::super::test_store;
@@ -801,7 +889,7 @@ mod tests {
         );
         // The write's rollback keeps failing, and is set aside with the lock.
         *store.fail_delete_of.lock().unwrap() = Some(b.clone());
-        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+        let left = super::super::Unsettled::new(vec![super::super::Undo::Restore {
             key: b.clone(),
             prior: None,
         }]);
@@ -835,7 +923,7 @@ mod tests {
         assert_eq!(search_all(&state).await.status(), StatusCode::OK);
         // A stuck change to z sets aside z and the container listing it, not the root.
         *store.fail_delete_of.lock().unwrap() = Some(z.clone());
-        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+        let left = super::super::Unsettled::new(vec![super::super::Undo::Restore {
             key: z.clone(),
             prior: None,
         }]);
@@ -875,7 +963,7 @@ mod tests {
         // Meanwhile a stuck change to a sets aside a and the root, both already behind the
         // walk (or a ahead of it); b is let go untouched.
         *store.fail_delete_of.lock().unwrap() = Some(a.clone());
-        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+        let left = super::super::Unsettled::new(vec![super::super::Undo::Restore {
             key: a.clone(),
             prior: None,
         }]);
@@ -1399,6 +1487,15 @@ mod tests {
         assert_eq!(
             x.into_iter().collect::<Vec<_>>(),
             vec!["https://a/one", "https://s/two"]
+        );
+        // An extension relation is compared case-insensitively, however it was stored: a
+        // spelling kept before relations were compared so is found by any other.
+        meta.links
+            .insert("https://X/Rel".into(), vec!["https://a/three".into()]);
+        let x = relation_targets(uri, &meta, "HTTPS://x/REL");
+        assert_eq!(
+            x.into_iter().collect::<Vec<_>>(),
+            vec!["https://a/one", "https://a/three", "https://s/two"]
         );
         meta.links.insert("up".into(), vec!["https://s/".into()]);
         assert!(relation_targets(uri, &meta, "up").is_empty());

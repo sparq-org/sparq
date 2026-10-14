@@ -1,67 +1,35 @@
 // [GPT-6] Canonical full-u64 private literal binding; research-stage, not externally audited.
-//! Retains the existing string commitment and hides the exact decimal length.
-//! Each fixed-length BLAKE3 candidate is constrained. The public circuit capacity
+//! Retains the existing string commitment and hides the exact decimal length:
+//! one variable-length BLAKE3 opening covers every digit count, so the circuit
 //! does not select or reveal the witness's actual digit count.
 
-use crate::filter_int::filter_int_check;
-
-fn check_digits<let D: u32>(operand: Field, op: u32, bound: u64, digits: [u8; 20]) {
-    let mut selected = [0; D];
-    for i in 0..D { selected[i] = digits[20 - D + i]; }
-    filter_int_check::<D>(operand, op, bound, true, selected);
-}
+use crate::blake3_literal::integer_literal_hs;
+use crate::filter_int::{filter_int_check, OP_EQ, OP_GE, OP_GT, OP_LE, OP_LT, OP_NE};
+use crate::hashes::{h2, TYPE_CODE_LITERAL};
 
 /// Opens the exact canonical xsd:integer token for a private u64 value.
 /// Full-width arithmetic and lexical binding are enforced together; no host-only
 /// conversion or newly attested commitment substitutes for the signed RDF term.
 pub fn full_u64_check(operand: Field, op: u32, bound: u64, value: u64) {
-    let mut digits: [u8; 20] = [48; 20];
-    let mut remaining = value;
-    for i in 0..20 {
-        digits[19 - i] = 48 + (remaining % 10) as u8;
-        remaining = remaining / 10;
-    }
-    if value < 10 {
-        check_digits::<1>(operand, op, bound, digits);
-    } else if value < 100 {
-        check_digits::<2>(operand, op, bound, digits);
-    } else if value < 1000 {
-        check_digits::<3>(operand, op, bound, digits);
-    } else if value < 10000 {
-        check_digits::<4>(operand, op, bound, digits);
-    } else if value < 100000 {
-        check_digits::<5>(operand, op, bound, digits);
-    } else if value < 1000000 {
-        check_digits::<6>(operand, op, bound, digits);
-    } else if value < 10000000 {
-        check_digits::<7>(operand, op, bound, digits);
-    } else if value < 100000000 {
-        check_digits::<8>(operand, op, bound, digits);
-    } else if value < 1000000000 {
-        check_digits::<9>(operand, op, bound, digits);
-    } else if value < 10000000000 {
-        check_digits::<10>(operand, op, bound, digits);
-    } else if value < 100000000000 {
-        check_digits::<11>(operand, op, bound, digits);
-    } else if value < 1000000000000 {
-        check_digits::<12>(operand, op, bound, digits);
-    } else if value < 10000000000000 {
-        check_digits::<13>(operand, op, bound, digits);
-    } else if value < 100000000000000 {
-        check_digits::<14>(operand, op, bound, digits);
-    } else if value < 1000000000000000 {
-        check_digits::<15>(operand, op, bound, digits);
-    } else if value < 10000000000000000 {
-        check_digits::<16>(operand, op, bound, digits);
-    } else if value < 100000000000000000 {
-        check_digits::<17>(operand, op, bound, digits);
-    } else if value < 1000000000000000000 {
-        check_digits::<18>(operand, op, bound, digits);
-    } else if value < 10000000000000000000 {
-        check_digits::<19>(operand, op, bound, digits);
+    assert(op <= OP_NE, "unknown comparison operator");
+    let hs = integer_literal_hs(value, false);
+    assert_eq(h2(TYPE_CODE_LITERAL, hs), operand, "operand encoding mismatch");
+    let lt = value < bound;
+    let eq = value == bound;
+    let result = if op == OP_LT {
+        lt
+    } else if op == OP_LE {
+        lt | eq
+    } else if op == OP_GT {
+        !lt & !eq
+    } else if op == OP_GE {
+        !lt
+    } else if op == OP_EQ {
+        eq
     } else {
-        check_digits::<20>(operand, op, bound, digits);
-    }
+        !eq
+    };
+    assert(result, "filter verdict mismatch");
 }
 
 // Independent token construction for test expectations; production derives digits from u64.

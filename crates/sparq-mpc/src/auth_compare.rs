@@ -1,8 +1,8 @@
-// [OPUS-4.8] sq-ka8m (sq-mnv5 residual; design Hole 4): MALICIOUS-SECURE secure
+// sq-ka8m (sq-mnv5 residual; design Hole 4): TAMPER-EVIDENT secure
 // greater-than over the decompose+compare chain. Every multiplication carries an
 // IT-MAC (sq-km34.3, `MacSession::auth_mul`) and the boolean verdict is MAC-checked
 // (sq-km34.4, `MacSession::mac_check`) BEFORE it is opened.
-//! Honest-majority **malicious-with-abort** secure greater-than — the IT-MAC
+//! Honest-majority **tamper-evident-with-abort** secure greater-than — the IT-MAC
 //! upgrade of the semi-honest [`crate::compare`] comparison chain (Hole 4).
 //!
 //! ## What this closes (design `research/mpc-malicious-security-design.md` Hole 4)
@@ -36,23 +36,33 @@
 //! Then, **before the verdict is opened**, run ONE batched random-challenge MAC-check
 //! ([`crate::shamir::MacSession::mac_check`], §2.5) over the verdict (and any other
 //! value the verdict's integrity depends on): open a leakage-free
-//! `σ = Σ χ_j·[m_{y_j}] − (Σ χ_j·y_j)·[α]` and **abort iff `σ ≠ 0`**. A tamper in ANY
-//! gate of the chain changes some value `y_j` away from the value whose MAC was
-//! authenticated; the deviating party cannot fix the MAC consistently without knowing
-//! the secret `α`, so the check fires with probability `≈ 1 − 2^{−61}` over `F_p`.
+//! `σ = Σ χ_j·[m_{y_j}] − (Σ χ_j·y_j)·[α]` and **abort iff `σ ≠ 0`**. A tamper that
+//! leaves some checked value `y_j` inconsistent with its MAC cannot be fixed up without
+//! knowing the secret `α`, so the check fires with probability `≈ 1 − 2^{−61}` over
+//! `F_p`. This does NOT cover every gate: `auth_mul` adopts a value tamper on its
+//! SECOND operand (see the security tier below).
 //! Crucially this works at the minimal `n = 2t+1` — soundness comes from the secret
 //! `α`, not from RS over-determination (design §2.5, the reason RS could not close
 //! Hole 1 / Hole 4 but the MAC can).
 //!
 //! ## Security tier (stated precisely, no over-claim)
 //!
-//! **Honest-majority, malicious-with-abort, unanimous abort** (design §3). On the
-//! three-axis registry: AXIS-1 `Malicious` (the upgrade — [`crate::compare`] is
-//! `SemiHonest`), AXIS-2 `Abort(Unanimous)` (detect-and-abort, NOT identifiable
-//! abort, NOT GOD), AXIS-3 `HonestMajority` (unchanged; degrades / refuses if
+//! **Honest-majority, tamper-evident-with-abort on the opened values; the abort is local detection, not an agreed unanimous or identifiable abort.**
+//! This is NOT AXIS-1 `Malicious` today, whatever design §3 targets:
+//! [`crate::shamir::MacSession::auth_mul`] carries the output MAC as
+//! `[α·z] = reduce([α·x]·[y])`, so it ADOPTS a value tamper on its second operand
+//! (witness `mac_check_adopts_a_second_operand_tamper_but_catches_a_first_operand_one`
+//! in [`crate::auth_disclose`]). Every gate of this chain is an `auth_mul`, so an
+//! actively deviating party has a route to a wrong verdict without an abort. Closing it
+//! needs multiplication-gate verification binding BOTH operands in `MacSession`. On the
+//! three-axis registry, `ShamirBackend` still reports `OperatorClass::Comparison` as
+//! [`crate::backend::SecurityDescriptor::semi_honest_only`]: AXIS-1 `SemiHonest`,
+//! AXIS-2 `Abort(Selective)` (a failed MAC-check is detected locally, but nothing
+//! establishes that every honest party agrees to abort, so this is NOT unanimous or
+//! identifiable abort, NOT GOD), AXIS-3 `HonestMajority` (degrades / refuses if
 //! `n ≤ 2t`). It does NOT enter the dishonest-majority SPDZ regime (route (b) /
 //! sq-j5ok). The exact integer operands are NEVER opened — only the 1-bit verdict,
-//! and only after the MAC-check passes. `[OPUS-4.8]`
+//! and only after the MAC-check passes.
 
 use crate::authenticated::{auth_add, auth_add_constant, auth_scale, auth_sub, AuthenticatedShare};
 use crate::compare::COMPARE_BITS;
@@ -61,11 +71,11 @@ use crate::partial::MpcError;
 use crate::shamir::{MacSession, ShamirBackend};
 
 /// `n >= 2t+1` is required so each multiplication's degree reduction exists. Mirror
-/// [`crate::compare`]'s fail-closed check, with the malicious-mode message.
+/// [`crate::compare`]'s fail-closed check, with the tamper-evident-mode message.
 fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
     if n < 2 * t + 1 {
         return Err(MpcError::Protocol(format!(
-            "malicious-secure comparison needs n >= 2t+1 (each authenticated multiplication's \
+            "tamper-evident comparison needs n >= 2t+1 (each authenticated multiplication's \
              degree reduction does, and the MAC-check is honest-majority); got n = {n}, t = {t}"
         )));
     }
@@ -77,7 +87,7 @@ fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
 fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
     if v.value() >= (1u64 << COMPARE_BITS) {
         return Err(MpcError::Protocol(format!(
-            "malicious-secure comparison operand `{label}` = {} is out of range (must be < 2^{} = \
+            "tamper-evident comparison operand `{label}` = {} is out of range (must be < 2^{} = \
              {}); the bit-decomposition would wrap and the verdict would be wrong",
             v.value(),
             COMPARE_BITS,
@@ -165,7 +175,8 @@ fn auth_greater_than_bits(
     Ok(gt)
 }
 
-/// **Malicious-secure secure greater-than over two SECRET operands**, opening only
+/// **Tamper-evident secure greater-than over two SECRET operands** (not yet
+/// malicious-secure; see the module security tier), opening only
 /// the verdict bit — and **only after a batched IT-MAC check passes**.
 ///
 /// Returns the boolean `a > b` (1 if `a > b`, else 0). The operands `a`, `b` are
@@ -181,12 +192,14 @@ fn auth_greater_than_bits(
 /// 2. Run the authenticated MSB-first comparator (`auth_greater_than_bits`) — every
 ///    gate a [`MacSession::auth_mul`].
 /// 3. **MAC-check the verdict** ([`MacSession::mac_check`]) BEFORE opening it — a
-///    tamper in any gate of step 2 (a forged share, a wrong `degree_reduce`
-///    re-sharing) makes `σ ≠ 0` and this ABORTS with [`MpcError::MacCheckFailed`].
+///    tamper that leaves the verdict inconsistent with its MAC makes `σ ≠ 0` and
+///    this ABORTS with [`MpcError::MacCheckFailed`]. A value tamper on the second
+///    operand of a step-2 `auth_mul` is adopted, not caught (module security tier).
 /// 4. Open the (now MAC-verified) verdict.
 ///
 /// Both operands must be `< 2^`[`COMPARE_BITS`] (fail-closed). `n >= 2t+1`
-/// (fail-closed). Honest-majority, **malicious-with-abort** (design §3). `[OPUS-4.8]`
+/// (fail-closed). Honest-majority, **tamper-evident-with-abort** (design §3 targets
+/// malicious-with-abort; see the module security tier).
 pub fn malicious_greater_than(backend: &ShamirBackend, a: Fp, b: Fp) -> Result<bool, MpcError> {
     check_party_count(backend.parties(), backend.threshold())?;
     check_in_range("a", a)?;
@@ -210,13 +223,14 @@ pub fn malicious_greater_than(backend: &ShamirBackend, a: Fp, b: Fp) -> Result<b
     verdict_bit(opened[0])
 }
 
-/// **Malicious-secure secure greater-than against a PUBLIC threshold** — the £100k
+/// **Tamper-evident secure greater-than against a PUBLIC threshold** (not yet
+/// malicious-secure; see the module security tier) — the £100k
 /// flatmate path. Returns `secret > threshold`, MAC-checked before open.
 ///
 /// The threshold is public, so its bits are public CONSTANTS and the per-bit products
 /// against it collapse to FREE local affine maps on the authenticated secret bits — no
 /// authenticated multiplication is spent on the threshold side, only on the `eq`/`gt`
-/// chain. Same security tier and pipeline as [`malicious_greater_than`]. `[OPUS-4.8]`
+/// chain. Same security tier and pipeline as [`malicious_greater_than`].
 pub fn malicious_threshold(
     backend: &ShamirBackend,
     secret: Fp,
@@ -275,8 +289,7 @@ fn auth_greater_than_public_bits(
 /// a degree-`t` sharing of a 0/1; this reconstructs it (robust where redundancy
 /// exists, like every other open) and returns the boolean. A non-boolean
 /// reconstruction is refused rather than coerced. This is the ONLY value the
-/// malicious-secure comparison path opens; the operands are never reconstructed.
-/// `[OPUS-4.8]`
+/// tamper-evident comparison path opens; the operands are never reconstructed.
 pub fn open_auth_verdict(
     backend: &ShamirBackend,
     verdict: &AuthenticatedShare,
@@ -288,7 +301,7 @@ pub fn open_auth_verdict(
 /// is not `0` or `1` rather than silently rounding it. Split out of
 /// [`open_auth_verdict`] so the MAC-checked paths can reuse it on the value handed back
 /// by [`MacSession::mac_check_and_open`] — they must not re-open the sharing, or the
-/// bit they act on would be bound to the checked bit only by convention. `[OPUS-4.8]`
+/// bit they act on would be bound to the checked bit only by convention.
 fn verdict_bit(bit: Fp) -> Result<bool, MpcError> {
     if bit == Fp::zero() {
         Ok(false)
@@ -296,7 +309,7 @@ fn verdict_bit(bit: Fp) -> Result<bool, MpcError> {
         Ok(true)
     } else {
         Err(MpcError::Protocol(format!(
-            "malicious-secure comparison verdict reconstructed to a non-boolean field element {} \
+            "tamper-evident comparison verdict reconstructed to a non-boolean field element {} \
              (expected 0 or 1) — refusing to coerce",
             bit.value()
         )))
@@ -346,7 +359,7 @@ mod tests {
                 assert_eq!(
                     got,
                     a > b,
-                    "n={n}: malicious-secure verdict for ({a} > {b}) must match plaintext"
+                    "n={n}: tamper-evident verdict for ({a} > {b}) must match plaintext"
                 );
             }
         }
@@ -372,7 +385,7 @@ mod tests {
                 assert_eq!(
                     got,
                     s > thr,
-                    "n={n}: malicious-secure threshold verdict ({s} > {thr}) must match plaintext"
+                    "n={n}: tamper-evident threshold verdict ({s} > {thr}) must match plaintext"
                 );
             }
         }
@@ -527,7 +540,7 @@ mod tests {
         ));
     }
 
-    /// [OPUS-4.8] sq-81gd — **THE regression test that distinguishes the SOUND
+    /// sq-81gd — **THE regression test that distinguishes the SOUND
     /// MAC-carry from the UNSOUND one by tampering INSIDE the value `degree_reduce`.**
     ///
     /// The other tamper tests in this module (and `auth_mul_chain_is_correct_and_
@@ -664,7 +677,7 @@ mod tests {
         }
     }
 
-    /// [SONNET-4.6] **The COORDINATED Hole-2 deviation — a deviating party re-shares
+    /// **The COORDINATED Hole-2 deviation — a deviating party re-shares
     /// wrongly in BOTH degree-reduces of the same `auth_mul`, and is still caught.**
     ///
     /// [`mac_carry_soundness_distinguished_by_in_reduce_tamper`] deviates only in the

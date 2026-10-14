@@ -1,8 +1,8 @@
-// [OPUS-4.8] sq-jxl0: single-source the crate overview from README.md so crates.io
+// sq-jxl0: single-source the crate overview from README.md so crates.io
 // (package.readme) and the docs.rs front page render identical content. The README's
 // quickstart fence is a compiled doctest (hidden `#`-scaffolding for the pushed triple).
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 #[cfg(feature = "window-aggregate")]
 mod aggregate;
@@ -22,7 +22,7 @@ pub use query::{
     AskResult, ContinuousAsk, ContinuousConstruct, ContinuousQuery, GraphResult, R2S, WindowResult,
 };
 pub use rspql::{RspqlQuery, WindowDecl};
-// [SONNET-4.6] sq-xqu: re-exported so embedders can build per-registered-query
+// sq-xqu: re-exported so embedders can build per-registered-query
 // window-evaluation budgets without a direct sparq-engine dependency.
 pub use sparq_engine::QueryBudget;
 pub use stream::{Timestamped, TimestampedTriple, TripleStream};
