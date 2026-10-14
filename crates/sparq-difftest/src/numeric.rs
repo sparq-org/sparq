@@ -1,4 +1,4 @@
-//! Exact numeric value equality, independent of sparq's numeric tower. [OPUS-4.8] sq-qcnn.4
+//! Exact numeric value equality, independent of sparq's numeric tower. sq-qcnn.4
 //!
 //! Integers are compared as arbitrary-precision [`num_bigint::BigInt`] (so distinct integers
 //! **beyond `i128`** — where sparq's own exact tier and any `f64` collapse them — stay distinct);
@@ -116,7 +116,7 @@ pub fn numeric_equal(a: &NumericValue, b: &NumericValue) -> bool {
         (_, Double(y)) => to_f64(a).is_some_and(|x| x == *y),
         (Integer(x), Integer(y)) => x == y,
         (Decimal(x), Decimal(y)) => x.cmp(y) == Ordering::Equal,
-        // [OPUS-4.8] num-bigint 0.5: bigdecimal 0.4 no longer implements From<BigInt 0.5>
+        // num-bigint 0.5: bigdecimal 0.4 no longer implements From<BigInt 0.5>
         // (two separate semver-major instances). Convert via the decimal string form, which is
         // lossless for integers and always parses successfully.
         (Integer(x), Decimal(y)) => BigDecimal::from_str(&x.to_string())

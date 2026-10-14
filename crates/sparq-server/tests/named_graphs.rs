@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-fh4z / gh-47) HTTP integration tests for the SERVER's named-graph
+//! (sq-fh4z / gh-47) HTTP integration tests for the SERVER's named-graph
 //! query + update surface — the exact PSS (Solid pod-server) set that was previously
 //! UNCOVERED at the server level.
 //!
@@ -45,7 +45,7 @@
 //! would compare (term kind / lexical value / datatype IRI), here pinned to the spec's
 //! canonical projection.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the

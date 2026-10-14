@@ -1,6 +1,6 @@
 //! Taxonomy block + disjointness repulsion/mask (structure-aware vectorisation **P3**).
 //!
-//! [OPUS-4.8] sq-0wo9e.4 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.4 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §2 rows "subClassOf hierarchy" + "owl:disjointWith / sh:not", §3.3 "the taxonomy block", §6.A
 //! formal-properties table, §9 limitations 4). This is the **third** additive slice of the
 //! structure-aware-vectorisation epic, after P0 ([`crate::structure`]: closure-before-vectorise +
@@ -633,7 +633,7 @@ impl DisjointnessOracle {
     }
 
     /// Absorb externally-**proven** disjoint class pairs into the oracle — the seam the
-    /// [`crate::ufo_priors`] UFO/gUFO reader feeds ([FABLE-5] kern/ufo-priors, epic sq-0wo9e:
+    /// [`crate::ufo_priors`] UFO/gUFO reader feeds (kern/ufo-priors, epic sq-0wo9e:
     /// the design's "optional/last" gUFO prior, §2 + §9.5).
     ///
     /// SOUNDNESS CONTRACT: every pair passed here must be *proven* disjoint by the caller (e.g.
@@ -973,7 +973,7 @@ ex:Animal owl:disjointWith ex:Plant .
 
     #[test]
     fn absorbed_proven_pairs_join_the_mask_and_self_pairs_are_ignored() {
-        // [FABLE-5] kern/ufo-priors: the seam the UFO/gUFO reader feeds. Absorbed pairs behave
+        // kern/ufo-priors: the seam the UFO/gUFO reader feeds. Absorbed pairs behave
         // exactly like mined ones (symmetric, mask-effective); a self-pair is silently ignored.
         let c = closed();
         let mut oracle = DisjointnessOracle::mine(&c.graph);

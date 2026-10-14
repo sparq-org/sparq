@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-pbz04.3.6 (epic sq-pbz04 / sq-6tykl):
+// sq-pbz04.3.6 (epic sq-pbz04 / sq-6tykl):
 // Integration tests for body-blank-node → fresh-existential-variable lifting.
 //
 // SOUNDNESS INVARIANT (the load-bearing test): a blank node in a SPARQL query body is a
@@ -62,7 +62,7 @@ mod gated {
     // -------------------------------------------------------------------------
     // Minimal FAITHFUL UCQ evaluator for the differential ORACLE.
     //
-    // [OPUS-4.8] sq-pbz04.3.6 — the differential-oracle tests below used to compare
+    // sq-pbz04.3.6 — the differential-oracle tests below used to compare
     // only `report.disjuncts` (a count); a count is a weak witness (two structurally
     // different UCQs can share a disjunct count). This evaluator runs the FULL
     // rewritten UCQ (`Rewritten::query`, a spargebra `Query`) over a concrete ABox and
@@ -258,7 +258,7 @@ mod gated {
     #[test]
     fn gate_rejects_blank_node_as_rdf_type_object() {
         // `?x rdf:type _:c` — a blank node as the class name in a type atom is not a named
-        // DL-Lite class; the emitter rejects it fail-closed (sq-pbz04.3.6). [SONNET-4.6]
+        // DL-Lite class; the emitter rejects it fail-closed (sq-pbz04.3.6).
         //
         // NOTE: spargebra parses `?x rdf:type _:c` as a BGP triple pattern with a blank node in
         // the object position (not a class atom in the gate's sense). The gate admits it, but
@@ -297,7 +297,7 @@ mod gated {
     #[test]
     fn single_blank_node_in_role_maps_to_existential() {
         // `SELECT ?x { ?x :p _:b }` — `_:b` is a non-distinguished existential in object
-        // position. With no TBox, identity UCQ (1 disjunct). [SONNET-4.6] sq-pbz04.3.6
+        // position. With no TBox, identity UCQ (1 disjunct). sq-pbz04.3.6
         let query = q(&format!("{PRE} SELECT ?x WHERE {{ ?x :p _:b }}"));
         let r = rewrite(&query, &[]).unwrap();
         assert_eq!(
@@ -316,7 +316,7 @@ mod gated {
     /// The blank node is semantically a non-projected, non-shared variable. We prove
     /// answer-equivalence by evaluating BOTH rewritten UCQs over a concrete ABox and
     /// comparing the full projected `?x` answer set (not merely the disjunct count), and
-    /// cross-check both against a hand-derived oracle. [OPUS-4.8] sq-pbz04.3.6
+    /// cross-check both against a hand-derived oracle. sq-pbz04.3.6
     #[test]
     fn blank_node_rewrite_equivalent_to_nondistinguished_var() {
         let t = tbox(&[&format!(
@@ -362,7 +362,7 @@ mod gated {
     /// data-03-style ABox where only a `:Student` (no explicit `:Person`) exists, so the
     /// answer is `true` ONLY IF the Student ⊑ Person disjunct actually fired (a disjunct
     /// COUNT could not distinguish a right-vs-wrong rewrite here). We also check a negative
-    /// ABox (`false`). [OPUS-4.8] sq-pbz04.3.6
+    /// ABox (`false`). sq-pbz04.3.6
     #[test]
     fn sparqldl05_ask_blank_class_atom() {
         // TBox: :Student rdfs:subClassOf :Person .
@@ -433,7 +433,7 @@ mod gated {
     ///
     /// TBox: :Employee rdfs:subClassOf :Intermediate  (role-sub approximation — avoids blank
     /// node in the N-Triples TBox fixture). We use a role-inclusion TBox that produces an
-    /// extra disjunct only when the object is unbound (non-shared). [SONNET-4.6] sq-pbz04.3.6
+    /// extra disjunct only when the object is unbound (non-shared). sq-pbz04.3.6
     #[test]
     fn sparqldl08_shared_blank_node_blocks_existential_gen() {
         // TBox: :manages rdfs:subPropertyOf :p .

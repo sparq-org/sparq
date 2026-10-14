@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-it50: a minimal ChaCha20 CSPRNG that sparq fully OWNS, so its
+// sq-it50: a minimal ChaCha20 CSPRNG that sparq fully OWNS, so its
 // key schedule can be scrubbed on drop.
 //! Owned ChaCha20 keystream generator with a scrubbable key schedule.
 //!
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(g.state[12], 2, "block counter must have advanced by two");
     }
 
-    /// [OPUS-4.8] sq-it50 — the core of this bead: the key schedule (and the
+    /// sq-it50 — the core of this bead: the key schedule (and the
     /// counter + cached keystream) is scrubbed. `zeroize()` is exactly what the
     /// derived `Drop`/`ZeroizeOnDrop` runs, so asserting it wipes the state on a
     /// live value proves drop scrubs the key — WITHOUT the UB of reading dropped

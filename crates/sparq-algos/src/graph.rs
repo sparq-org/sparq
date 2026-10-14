@@ -77,7 +77,7 @@ impl NodeGraph {
     /// 2-core vs an 8-core host. Order-sensitive heuristics such as
     /// [`label_propagation`](crate::label_propagation) would otherwise return a
     /// host-dependent partition for the same graph; canonicalising the node order here pins a
-    /// single answer. [OPUS-4.8] sq-lqty.
+    /// single answer. sq-lqty.
     pub fn build_with(graph: &Graph, filter: NodeFilter) -> NodeGraph {
         // Map sparq-core dict id -> provisional (first-seen) node index. The final indices
         // are re-derived below in canonical term order, so this first pass only needs to

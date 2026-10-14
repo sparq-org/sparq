@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-7d3dj.30.14) Differential + mutation tests for the membership-cluster
+//! (sq-7d3dj.30.14) Differential + mutation tests for the membership-cluster
 //! pre-materialisation planner path (`cluster-materialize` feature, SP2Bench q07).
 //!
 //! The optimisation is a pure JOIN-ORDER choice: when a BGP has the q07 shape (one

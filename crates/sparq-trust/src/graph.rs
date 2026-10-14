@@ -97,7 +97,7 @@
 //! a *broadening* or *forged-edge* escalation given honest anchor keys; it does not close
 //! the upstream key-trust gap.
 //!
-//! [OPUS-4.8] sq-pfae.15 (epic sq-pfae, issue #940; design record
+//! sq-pfae.15 (epic sq-pfae, issue #940; design record
 //! `research/trust-expression-spec.md` §3.4). Written while Fable unavailable — flag for
 //! re-review when Fable returns. 🤖 SPARQ agent — certification-edge trust-graph closure.
 

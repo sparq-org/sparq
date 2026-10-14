@@ -1,4 +1,4 @@
-# [SONNET-4.6] sq-z1xv8 — the SHARED ratchet-floor crate.
+# sq-z1xv8 — the SHARED ratchet-floor crate.
 #
 # DEV-ONLY constant crate: `publish = false`, ZERO dependencies. It exists so a
 # conformance ratchet floor that is enforced in one crate's test runner and

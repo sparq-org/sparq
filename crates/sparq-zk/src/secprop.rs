@@ -55,9 +55,9 @@
 //! `sparq-secprop-vocab`, a leaf below `sparq-trust`, `sparq-policy` and `sparq-zk`
 //! alike, so importing them creates no cycle.
 //!
-//! [OPUS-4.8] sq-bevd3 (Phase 3; epic sq-0dksu; design record
+//! sq-bevd3 (Phase 3; epic sq-0dksu; design record
 //! `research/security-properties-ontology-design.md` §5a); de-duplicated onto
-//! `sparq-secprop-vocab` by [OPUS-5] sq-3705. 🤖 SPARQ agent —
+//! `sparq-secprop-vocab` by sq-3705. 🤖 SPARQ agent —
 //! security-properties ontology. Flag for re-review when Fable returns.
 
 use oxrdf::{NamedOrBlankNode, Term};

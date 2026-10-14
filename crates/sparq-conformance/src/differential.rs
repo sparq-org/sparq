@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-tonhr.2) The REUSABLE parser DIFFERENTIAL harness for the rdf-shuttle
+//! (sq-tonhr.2) The REUSABLE parser DIFFERENTIAL harness for the rdf-shuttle
 //! generated-parser program (epic sq-tonhr): drive a CANDIDATE parser and an INCUMBENT
 //! parser over the same inputs and require an IDENTICAL verdict on every one —
 //! accept/reject agreement, and on accept an identical quad SET (blank-node-bijection
@@ -23,7 +23,7 @@
 use crate::quadset::{compare_quad_sets, SetCompare};
 use std::path::Path;
 
-/// [FABLE-5] Why a differential comparison could not reach a verdict.
+/// Why a differential comparison could not reach a verdict.
 ///
 /// A comparison normally resolves to agreement or a concrete divergence. This
 /// error is returned only when the blank-node isomorphism check exhausts its

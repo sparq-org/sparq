@@ -1,6 +1,6 @@
 //! `pkg-query` — one command to **introspect → ground → ask** over the ingested PKG.
 //!
-//! [OPUS-4.8] sq-2m6zm.3 (epic sq-2m6zm); design record
+//! sq-2m6zm.3 (epic sq-2m6zm); design record
 //! `research/dogfooding-sparq-knowledge-graph.md` §6 (PR #1063). 🤖 SPARQ agent —
 //! dogfooding sparq as a project knowledge graph. Written while Fable unavailable; flag
 //! for re-review when Fable returns.

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-6te5 — END-TO-END gather verification of sparq-vectors' ANN against an
+//! sq-6te5 — END-TO-END gather verification of sparq-vectors' ANN against an
 //! ESTABLISHED reference library (hnswlib / FAISS).
 //!
 //! WHAT THIS PROVES (the load-bearing invariant) ------------------------------

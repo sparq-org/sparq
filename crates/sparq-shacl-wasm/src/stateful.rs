@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-01xlp: the opt-in **pre-parsed / stateful** validation handle.
+//! sq-01xlp: the opt-in **pre-parsed / stateful** validation handle.
 //!
 //! The default surface (`Validator`) is deliberately stateless one-shot: every call
 //! re-parses both documents, which is the right shape for the showcase page's

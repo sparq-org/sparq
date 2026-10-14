@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-lhcot.4 — the `vec:hybrid` magic predicate end to end: hybrid retrieval
+//! sq-lhcot.4 — the `vec:hybrid` magic predicate end to end: hybrid retrieval
 //! (dense + caller-supplied arms, fused by deterministic weighted RRF) and out-of-process
 //! reranking, expressed INSIDE plain SPARQL and evaluated through the ordinary engine.
 //!
@@ -43,7 +43,7 @@ const TTL: &str = r#"
 <http://ex/d> <http://ex/p> "d" .
 "#;
 
-/// [OPUS-4.8] (review #4519) The same four entities, but only `c` carries the constraining
+/// (review #4519) The same four entities, but only `c` carries the constraining
 /// `<http://ex/ok>` triple — so a surrounding BGP pattern on that predicate genuinely NARROWS the
 /// candidate set, unlike [`TTL`] where every entity satisfies `<http://ex/p>`. Only the
 /// `filtered-ann` tests below use it (without that feature there is no BGP-derived mask at all).
@@ -425,7 +425,7 @@ fn the_budget_and_algebra_entry_points_agree_with_the_query_one() {
     assert_eq!(rows(&out), want);
 }
 
-/// The hit table JOINS — nothing more. [OPUS-4.8] (review #4519) Every entity in [`TTL`] carries
+/// The hit table JOINS — nothing more. (review #4519) Every entity in [`TTL`] carries
 /// `<http://ex/p>`, so this constraint admits the whole store by construction and this test says
 /// nothing about FILTERED hybrid retrieval; that is what the two candidate-mask tests below pin,
 /// on [`TTL_FILTERED`].
@@ -459,7 +459,7 @@ fn a_hybrid_pattern_joins_the_surrounding_bgp() {
     assert!(r.rows.iter().all(|row| row[1].is_some()));
 }
 
-/// [OPUS-4.8] (review #4519) An auxiliary arm's ranking must be restricted to the SAME
+/// (review #4519) An auxiliary arm's ranking must be restricted to the SAME
 /// BGP-derived candidate mask the built-in dense arm searches under.
 ///
 /// The witness is the shape that loses an answer outright: the arm ranks all three
@@ -507,7 +507,7 @@ fn an_auxiliary_arm_honours_the_bgp_derived_candidate_mask() {
     assert_eq!(rows[0].3, "text=1");
 }
 
-/// [OPUS-4.8] (review #4519) The same mask also fixes the RRF ranks of the hits that DO qualify:
+/// (review #4519) The same mask also fixes the RRF ranks of the hits that DO qualify:
 /// unrestricted, the three non-matching entities push `c` down to the arm's rank 4, which changes
 /// its fused score and its reported `?prov`. Restricted, `c` is the arm's rank 1.
 #[cfg(feature = "filtered-ann")]
@@ -543,7 +543,7 @@ fn the_candidate_mask_corrects_the_arm_ranks_of_qualifying_hits() {
     );
 }
 
-/// [OPUS-4.8] (review #4519, round 2) A graph deep enough to push the one admissible entity BELOW
+/// (review #4519, round 2) A graph deep enough to push the one admissible entity BELOW
 /// the first page an arm is asked for: eight non-matching `n0…n7`, then `m` — the only entity
 /// carrying the constraining `<http://ex/ok>` triple.
 #[cfg(feature = "filtered-ann")]
@@ -571,7 +571,7 @@ fn deep_fixture(tag: &str) -> (Graph, VectorStore, std::path::PathBuf) {
     (g, store, path)
 }
 
-/// [OPUS-4.8] (review #4519, round 2) An arm's restricted ranking must be its ranking over the
+/// (review #4519, round 2) An arm's restricted ranking must be its ranking over the
 /// ADMISSIBLE domain — not over whichever page it happened to return.
 ///
 /// This is the boundary the two tests above do not reach: they fit every arm hit inside the
@@ -613,7 +613,7 @@ fn an_admissible_arm_hit_below_the_first_page_is_still_found() {
     assert_eq!(rows[0].3, "text=1");
 }
 
-/// [OPUS-4.8] (review #4519, round 5) An admissible id is not always a STORED-TERM id: a `?node`
+/// (review #4519, round 5) An admissible id is not always a STORED-TERM id: a `?node`
 /// constrained in an OBJECT position to a small canonical `xsd:integer` is bound to an INLINE
 /// literal id, far outside `1..=dict.len()` — and `check_arm_ids` admits exactly that. So the
 /// paging backstop may not be `dict.len()`: an arm is free to rank `dict.len()` inadmissible ids
@@ -692,7 +692,7 @@ fn an_admissible_inline_integer_id_beyond_the_dictionary_length_is_still_found()
     );
 }
 
-/// [SONNET-4.6] (review #4519, round 6) The paging loop's escalation is bounded by a documented
+/// (review #4519, round 6) The paging loop's escalation is bounded by a documented
 /// finite cap, and hitting it is a hard arm-named error rather than a deeper request.
 ///
 /// The correctness bound on a prefix-consistent arm's ranking is the whole valid id domain —
@@ -752,7 +752,7 @@ fn a_non_exhausting_arm_is_paged_no_deeper_than_the_documented_cap() {
     );
 }
 
-/// [OPUS-4.8] (review #4519) An arm is a caller closure, so its ids are untrusted input. An id
+/// (review #4519) An arm is a caller closure, so its ids are untrusted input. An id
 /// outside the graph dictionary's domain — `0` (never a valid 1-based id) or one past the end —
 /// must be a HARD query error naming the arm, not a hit that resolves to the dictionary's
 /// out-of-range placeholder term and is then silently dropped from the inlined `VALUES` table.

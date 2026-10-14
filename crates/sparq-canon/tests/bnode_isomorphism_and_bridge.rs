@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-bif.9: focused isolated cases for `sparq-canon`'s PUBLIC API.
+//! sq-bif.9: focused isolated cases for `sparq-canon`'s PUBLIC API.
 //!
 //! The manifest-driven `tests/rdf_canon_suite.rs` already drives the FULL 86-entry W3C
 //! RDFC-1.0 suite (eval + issued-id map + negative poison-graph), so this crate's test

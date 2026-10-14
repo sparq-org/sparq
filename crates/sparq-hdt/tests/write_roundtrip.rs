@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-2te — round-trip validation for the HDT WRITE path (`save`).
+//! sq-2te — round-trip validation for the HDT WRITE path (`save`).
 //!
 //! `save` is opt-in (the `write` cargo feature), so the whole file is gated: with
 //! the feature OFF this is an empty test binary. The contract under test: a sparq
@@ -48,7 +48,7 @@ const ZOO: &str = concat!(
     "_:b1 <http://xmlns.com/foaf/0.1/name> \"anon\" .\n",
 );
 
-/// [OPUS-4.8] sq-117n: a UNIQUE, auto-cleaned scratch directory, one per call.
+/// sq-117n: a UNIQUE, auto-cleaned scratch directory, one per call.
 ///
 /// These tests `save` archives to disk and read them back. Previously every test
 /// shared one fixed `CARGO_TARGET_TMPDIR/sparq-hdt-write` directory (distinguished
@@ -187,7 +187,7 @@ fn save_empty_graph() {
     assert!(reloaded.is_empty());
 }
 
-/// [SONNET-4.6] sq-qalqs: literals with escaped quotes / backslashes round-trip
+/// sq-qalqs: literals with escaped quotes / backslashes round-trip
 /// EXACTLY through sparq's OWN writer. `save` (encode.rs) stores the lexical form
 /// RAW in the dictionary as the HDT spec prescribes — unlike the upstream crate's
 /// `Hdt::read_nt` fixture-builder, which stores the N-Triples-ESCAPED rendering and
@@ -217,7 +217,7 @@ fn save_round_trips_escaped_literals_exactly() {
     assert_eq!(triple_set(&upstream), triple_set(&original));
 }
 
-/// [OPUS-4.8] sq-bif: `save` MUST fail closed on a graph carrying an RDF 1.2 triple
+/// sq-bif: `save` MUST fail closed on a graph carrying an RDF 1.2 triple
 /// term (`<<( s p o )>>`). Standard HDT's dictionary has no quoted-triple representation,
 /// so `hdt_term_string` returns `Error::Term` rather than silently emitting a malformed /
 /// lossy archive — a documented contract (`save`'s rustdoc + `encode::hdt_term_string`)
@@ -257,7 +257,7 @@ fn save_rejects_rdf12_triple_term_graph() {
     );
 }
 
-/// [OPUS-4.8] sq-bif: the OUTPUT-container selection (`out_container`) keys off the path's
+/// sq-bif: the OUTPUT-container selection (`out_container`) keys off the path's
 /// final extension, lower-cased — so the same archive is produced for `.gz`/`.GZ`/`.Gz`,
 /// and `.zst` AND its `.zstd` alias both select zstd. Only lowercase `.gz`/`.zst`/`.bz2`
 /// were exercised; this pins the case-insensitivity and the `.zstd` alias by asserting the
@@ -323,7 +323,7 @@ fn save_is_idempotent_on_content() {
     assert_eq!(triple_set(&g2), triple_set(&original));
 }
 
-/// [OPUS-4.8] sq-ashy: the DIRECT encoder writes NO temporary N-Triples scratch
+/// sq-ashy: the DIRECT encoder writes NO temporary N-Triples scratch
 /// file at all (the old path round-tripped through one; this one encodes the HDT
 /// sections straight from sparq's in-memory dict + triples). Many saves must leave
 /// ZERO `sparq-hdt-save-*.nt` files behind — there is no temp-file step to leak.
@@ -358,7 +358,7 @@ fn count_scratch_nt() -> usize {
         .unwrap_or(0)
 }
 
-/// [OPUS-4.8] sq-ashy: the direct encoder's bytes equal what the upstream `hdt`
+/// sq-ashy: the direct encoder's bytes equal what the upstream `hdt`
 /// crate's own builder + writer (`Hdt::read_nt` over the equivalent N-Triples, then
 /// `Hdt::write`) produces — proving the direct PFC + BitmapTriples encode is the
 /// SAME standard archive, not merely something our own reader happens to accept.

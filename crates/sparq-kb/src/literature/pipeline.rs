@@ -3,7 +3,7 @@
 //! and ZERO live-model calls. (§4.7, the projector that extends `ingest_pkg.py` — realised
 //! in Rust behind the `literature` feature.)
 //!
-//! [OPUS-4.8] sq-2489d.5. The pipeline is the Phase-5 deliverable: it produces (a) a
+//! sq-2489d.5. The pipeline is the Phase-5 deliverable: it produces (a) a
 //! Turtle document of the *grounded, machine-tier* `pkg:Source` + `pkg:Finding` triples
 //! with full PROV-O lineage, and (b) a [`Sidecar`] reporting the citation-grounding rate +
 //! the quarantine list. The caller runs the SHACL gate (`pkg.shapes.ttl` +
@@ -211,7 +211,7 @@ pub struct PipelineOutput {
     /// The timestamp (UTC ISO 8601 xsd:dateTime) stamped on all emitted Findings and
     /// their extraction Activities via `prov:generatedAtTime`. In CI, this is injectable
     /// from the test fixtures; in live use, it defaults to the wall-clock instant.
-    /// (sq-tzars.2 [HAIKU-4.5])
+    /// (sq-tzars.2)
     pub generated_at_time: String,
 }
 
@@ -253,7 +253,7 @@ pub struct TieredOutput {
 /// sq-tzars.2 version omitted that shift and produced year `-4656` dates for the
 /// current epoch — a bug CI never saw because every test injects a fixed timestamp;
 /// caught + fixed by the sq-tzars.9 pilot, which keys its daily API-request ledger off
-/// this clock. Direct unit tests below pin known dates incl. leap days. [FABLE-5]
+/// this clock. Direct unit tests below pin known dates incl. leap days.
 pub(crate) fn civil_from_epoch_days(days: u64) -> (i64, i64, i64) {
     let a = days as i64 + 2_440_588 + 32044;
     let b = (4 * a + 3) / 146097;
@@ -270,8 +270,8 @@ pub(crate) fn civil_from_epoch_days(days: u64) -> (i64, i64, i64) {
 /// Generate the current UTC time as an ISO 8601 xsd:dateTime string (e.g.,
 /// `2026-07-05T14:30:00Z`). Used as the default `prov:generatedAtTime` when the caller
 /// does not inject a fixed timestamp (as CI tests do for determinism).
-/// (sq-tzars.2 [HAIKU-4.5]; shared with the pilot module for its `created_at` /
-/// daily-ledger date — [FABLE-5] sq-tzars.9)
+/// (sq-tzars.2; shared with the pilot module for its `created_at` /
+/// daily-ledger date — sq-tzars.9)
 pub(crate) fn current_generated_at_time() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -309,7 +309,7 @@ pub(crate) fn current_generated_at_time() -> String {
 /// * `extractor` - A trait object implementing [`Extractor`]
 /// * `generated_at_time` - Optional override for the `prov:generatedAtTime` timestamp.
 ///   If `None`, uses the current UTC time. CI tests pass a fixed instant for determinism.
-///   (sq-tzars.2 [HAIKU-4.5])
+///   (sq-tzars.2)
 pub fn run_with_time<E: Extractor>(
     connector_json: &str,
     extractor: &E,
@@ -333,7 +333,7 @@ pub fn run_with_time<E: Extractor>(
 
 /// Run the full pipeline with the default (current) timestamp.
 /// Convenience wrapper around [`run_with_time`] for callers that do not need to inject
-/// a fixed instant. (sq-tzars.2 [HAIKU-4.5])
+/// a fixed instant. (sq-tzars.2)
 pub fn run<E: Extractor>(connector_json: &str, extractor: &E) -> Result<PipelineOutput, String> {
     run_with_time(connector_json, extractor, None)
 }
@@ -518,7 +518,7 @@ fn write_source_node(t: &mut String, stub: &SourceStub, explored: bool) -> Resul
 /// the machine-tier caps (confidence ≤ ceiling, assurance forced to `secx:Conjectured`).
 /// `finding_n` is the stable GLOBAL finding number, so a finding's IRI is identical whether
 /// it lands in the combined output or a per-tier artifact. The single source of truth for
-/// the Finding block. (Timestamps: sq-tzars.2 [HAIKU-4.5].)
+/// the Finding block. (Timestamps: sq-tzars.2.)
 fn write_finding_node(
     t: &mut String,
     stub: &SourceStub,
@@ -561,7 +561,7 @@ fn write_finding_node(
 /// Emit the single COMBINED Turtle document: prefixes + the machine agent + every Source
 /// (with its grounded Findings). Deterministic input-order; byte-stable. Backward-compatible
 /// with the pre-tiering [`PipelineOutput::turtle`]. `grounded_by_doi` holds indices into
-/// `candidates`. (Timestamps: sq-tzars.2 [HAIKU-4.5].)
+/// `candidates`. (Timestamps: sq-tzars.2.)
 fn emit_turtle(
     stubs: &[SourceStub],
     candidates: &[CandidateFinding],
@@ -790,7 +790,7 @@ mod tests {
 
     #[test]
     fn civil_from_epoch_days_matches_known_dates() {
-        // Pins the JDN-offset fix ([FABLE-5] sq-tzars.9): the unshifted original mapped
+        // Pins the JDN-offset fix (sq-tzars.9): the unshifted original mapped
         // the current epoch to year -4656. Expected values are independent calendar
         // facts (days since 1970-01-01), including leap days + a century leap year.
         assert_eq!(civil_from_epoch_days(0), (1970, 1, 1));
@@ -861,7 +861,7 @@ mod tests {
         assert!(out.turtle.contains("prov:wasAttributedTo"));
         assert!(out.turtle.contains("prov:wasGeneratedBy"));
         assert!(out.turtle.contains("a pkg:MachineAgent"));
-        // [HAIKU-4.5] sq-tzars.2: prov:generatedAtTime stamped on Findings + Activities.
+        // sq-tzars.2: prov:generatedAtTime stamped on Findings + Activities.
         assert!(
             out.turtle.contains("prov:generatedAtTime"),
             "emitted Findings must carry prov:generatedAtTime for SHACL conformance"
@@ -883,7 +883,7 @@ mod tests {
 
     #[test]
     fn run_with_time_accepts_injected_timestamp_for_deterministic_tests() {
-        // [HAIKU-4.5] sq-tzars.2: direct unit test for the new public `run_with_time`
+        // sq-tzars.2: direct unit test for the new public `run_with_time`
         // function. Verify that an injected timestamp is used instead of the wall-clock
         // instant, enabling deterministic test fixtures.
         let extractor = RecordedExtractor::from_fixture().unwrap();

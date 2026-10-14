@@ -1,4 +1,4 @@
-//! `geo:gmlLiteral` lexical forms <-> CRS-tagged geometries. [OPUS-4.8] sq-zy0
+//! `geo:gmlLiteral` lexical forms <-> CRS-tagged geometries. sq-zy0
 //!
 //! GeoSPARQL (1.0 §8.5.2 / 1.1 §8.8) defines a second geometry serialization
 //! datatype, `geo:gmlLiteral`, whose lexical form is a **GML geometry element**
@@ -41,7 +41,7 @@
 //! `srsName` is read from the OUTERMOST geometry element (GML allows it on inner
 //! elements; the SF profile keeps it on the root, which is what we honour).
 //!
-//! ## Beyond GML-SF — real GML that is NOT in the gmlLiteral profile [OPUS-4.8] sq-47vu
+//! ## Beyond GML-SF — real GML that is NOT in the gmlLiteral profile sq-47vu
 //!
 //! The GeoSPARQL `geo:gmlLiteral` profile is GML Simple-Features, but data in the
 //! wild carries a few non-SF forms. These parse ADDITIVELY on the SAME path (they
@@ -78,7 +78,7 @@ use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use std::fmt::Write;
 
-// [OPUS-4.8] quick-xml 0.40 removed `BytesText::unescape()` and deprecated
+// quick-xml 0.40 removed `BytesText::unescape()` and deprecated
 // `Attribute::unescape_value()`. Both used to decode + resolve the XML
 // predefined entities without attribute-value whitespace folding. We replicate
 // that exact behaviour with `quick_xml::escape::unescape`
@@ -104,7 +104,7 @@ fn unescape_attr_value(raw: &[u8]) -> Result<String, GeoError> {
 /// returned as an empty `GEOMETRYCOLLECTION` in CRS84 exactly as the WKT path
 /// represents emptiness. A well-formed GML aggregate element that carries NO
 /// members (e.g. `<gml:MultiPoint/>`, `<gml:MultiGeometry/>`) is likewise the
-/// empty geometry rather than a parse error. [OPUS-4.8] sq-mzmh
+/// empty geometry rather than a parse error. sq-mzmh
 pub fn parse_gml_literal(lex: &str) -> Result<GeoGeometry, GeoError> {
     // R16: an empty/whitespace-only lexical form is the empty geometry.
     if lex.trim().is_empty() {
@@ -124,7 +124,7 @@ pub fn parse_gml_literal(lex: &str) -> Result<GeoGeometry, GeoError> {
 // ---- GeoGeometry -> GML 3 Simple Features ---------------------------------
 
 /// Serialises a CRS-tagged geometry to the GML 3 Simple Features profile.
-/// [GPT-5.6] sq-i3wb5
+/// sq-i3wb5
 pub(crate) fn serialize_gml_literal(value: &GeoGeometry) -> String {
     // Internal geographic coordinates are always longitude/latitude. GML uses
     // the declared CRS axis order, so reverse the parser's EPSG:4326 swap.
@@ -259,7 +259,7 @@ struct Node {
     crs: Crs,
     /// Coordinate dimension from the nearest `srsDimension` (`2` if none seen),
     /// inherited downward like `crs`. `3` means XYZ — Z is dropped on parse
-    /// (the geometry model is 2-D). [OPUS-4.8] sq-47vu
+    /// (the geometry model is 2-D). sq-47vu
     dim: usize,
     /// Concatenated character data directly inside this element.
     text: String,
@@ -308,7 +308,7 @@ fn crs_from_srs_name(srs: &str) -> Crs {
 /// Scans a start/empty element's attributes for `srsName` (-> [`Crs`]) and
 /// `srsDimension` (-> coordinate dimension), updating the inherited values in
 /// place so they propagate to descendants. Both attributes are matched on their
-/// LOCAL name, exactly as element names are. [OPUS-4.8] sq-47vu
+/// LOCAL name, exactly as element names are. sq-47vu
 fn scan_element_attrs(
     e: &quick_xml::events::BytesStart<'_>,
     inherited_crs: &mut Crs,
@@ -365,7 +365,7 @@ fn parse_root(lex: &str) -> Result<Node, GeoError> {
             }
             Ok(Event::Text(t)) => {
                 if let Some(top) = stack.last_mut() {
-                    // [OPUS-4.8] 0.40: decode (no EOL normalization, matching the old
+                    // 0.40: decode (no EOL normalization, matching the old
                     // `unescape`) then resolve predefined entities.
                     let decoded = t
                         .decode()
@@ -425,11 +425,11 @@ fn build_geometry(node: &Node) -> Result<Geometry<f64>, GeoError> {
             Ok(Geometry::MultiPolygon(build_multisurface(node)?))
         }
         // A heterogeneous aggregate: the GML 3 `gml:MultiGeometry` and the GML 2
-        // `gml:GeometryCollection`. An empty one is the empty geometry (R16). [OPUS-4.8]
+        // `gml:GeometryCollection`. An empty one is the empty geometry (R16).
         "multigeometry" | "geometrycollection" => {
             Ok(Geometry::GeometryCollection(build_geometrycollection(node)?))
         }
-        // [OPUS-4.8] sq-47vu: real-GML-but-not-SF forms, parsed additively (see
+        // sq-47vu: real-GML-but-not-SF forms, parsed additively (see
         // the module header). gml:Envelope -> a bbox Polygon; gml:Curve /
         // gml:Surface with arc segments -> arc densification.
         "envelope" => Ok(Geometry::Polygon(build_envelope(node)?)),
@@ -453,7 +453,7 @@ fn build_geometry(node: &Node) -> Result<Geometry<f64>, GeoError> {
 /// (`2` when none was declared, preserving the historical 2-D behaviour). For
 /// `dim == 3` the third ordinate (Z) is parsed then **dropped**: the crate's
 /// geometry model is 2-D, so 3-D coordinates are projected onto the XY plane
-/// (documented in the module header). [OPUS-4.8] sq-47vu
+/// (documented in the module header). sq-47vu
 fn parse_coords(text: &str, dim: usize) -> Result<Vec<Coord<f64>>, GeoError> {
     let nums: Vec<f64> = text
         .split([' ', '\t', '\n', '\r', ','])
@@ -578,7 +578,7 @@ fn build_multipoint(node: &Node) -> Result<MultiPoint<f64>, GeoError> {
             points.push(build_point(p)?);
         }
     }
-    // An empty gml:MultiPoint is the empty geometry (R16), not an error. [OPUS-4.8]
+    // An empty gml:MultiPoint is the empty geometry (R16), not an error.
     Ok(MultiPoint::new(points))
 }
 
@@ -602,7 +602,7 @@ fn build_multicurve(node: &Node) -> Result<MultiLineString<f64>, GeoError> {
             lines.push(build_linestring(ls)?);
         }
     }
-    // An empty gml:MultiCurve is the empty geometry (R16), not an error. [OPUS-4.8]
+    // An empty gml:MultiCurve is the empty geometry (R16), not an error.
     Ok(MultiLineString::new(lines))
 }
 
@@ -626,13 +626,13 @@ fn build_multisurface(node: &Node) -> Result<MultiPolygon<f64>, GeoError> {
             polys.push(build_polygon(poly)?);
         }
     }
-    // An empty gml:MultiSurface is the empty geometry (R16), not an error. [OPUS-4.8]
+    // An empty gml:MultiSurface is the empty geometry (R16), not an error.
     Ok(MultiPolygon::new(polys))
 }
 
 /// A `gml:MultiGeometry` / `gml:GeometryCollection`: every `gml:geometryMember`
 /// (or `gml:geometryMembers`) recursively built. An empty one is the empty
-/// geometry (R16). [OPUS-4.8] sq-mzmh
+/// geometry (R16). sq-mzmh
 fn build_geometrycollection(node: &Node) -> Result<GeometryCollection<f64>, GeoError> {
     let mut geoms = Vec::new();
     for member in node.children_named("geometrymember") {
@@ -648,7 +648,7 @@ fn build_geometrycollection(node: &Node) -> Result<GeometryCollection<f64>, GeoE
     Ok(GeometryCollection(geoms))
 }
 
-// ---- Beyond GML-SF: Envelope, arc-segment Curve/Surface (sq-47vu) [OPUS-4.8] -
+// ---- Beyond GML-SF: Envelope, arc-segment Curve/Surface (sq-47vu) -
 
 /// The fixed angular resolution at which circular arcs are densified to a
 /// polyline: at most this many DEGREES of arc per chord. A smaller value means a

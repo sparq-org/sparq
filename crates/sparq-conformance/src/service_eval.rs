@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ddpgx (epic sq-my8wd) — the W3C SPARQL 1.1 `sparql11/service`
+//! sq-ddpgx (epic sq-my8wd) — the W3C SPARQL 1.1 `sparql11/service`
 //! EVALUATION conformance lane, driven through the merged in-process loopback
 //! harness from sq-ushvx ([`crate::service_loopback::LoopbackEndpoint`], #1291).
 //!
@@ -200,7 +200,7 @@ fn stand_up(doc: &Path) -> Result<LoopbackEndpoint, String> {
     Ok(LoopbackEndpoint::serve(graph))
 }
 
-/// [SONNET-4.6] sq-my8wd.1 — Like [`stand_up`] but configures the loopback server
+/// sq-my8wd.1 — Like [`stand_up`] but configures the loopback server
 /// with a custom service egress allowlist so it can federate onward to other loopback
 /// endpoints. Used for service3-style tests where a top-level loopback endpoint hosts
 /// a body that contains nested non-SILENT `SERVICE` calls to a second loopback endpoint.
@@ -298,7 +298,7 @@ fn walk(p: &GraphPattern, f: &mut impl FnMut(&GraphPattern)) {
     }
 }
 
-/// [SONNET-4.6] sq-my8wd.1 — Walks the query pattern and returns a map from each
+/// sq-my8wd.1 — Walks the query pattern and returns a map from each
 /// outer non-SILENT named `SERVICE` endpoint IRI to the list of non-SILENT named
 /// `SERVICE` endpoint IRIs nested within its body. Used in [`run_test`] to determine
 /// endpoint startup order and to configure each outer endpoint's egress allowlist so it
@@ -419,7 +419,7 @@ fn run_test(test: &ServiceTest) -> Outcome {
         Err(e) => return Outcome::Fail(format!("query parse error: {e}")),
     };
 
-    // [SONNET-4.6] sq-my8wd.1 — Analyse nested SERVICE topology so inner endpoints
+    // sq-my8wd.1 — Analyse nested SERVICE topology so inner endpoints
     // (those nested in another SERVICE's body) are started BEFORE the outer endpoints
     // that need to reach them, and the outer endpoints are configured with an egress
     // allowlist that permits onward federation to the already-bound inner endpoints.

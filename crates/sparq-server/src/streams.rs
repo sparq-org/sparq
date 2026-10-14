@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-2999l (gh-906): OPT-IN HTTP change-data-capture (CDC) poll endpoint in the
+//! sq-2999l (gh-906): OPT-IN HTTP change-data-capture (CDC) poll endpoint in the
 //! Amazon-Neptune-Streams [`GetRecords`](https://docs.aws.amazon.com/neptune/latest/userguide/streams-using.html)
 //! shape, over the MERGED durable change-stream (sq-b4fns / #1223, in `sparq-serve`).
 //!
@@ -27,7 +27,7 @@
 //!   * `AFTER_SEQUENCE_NUMBER` (`after=N`) — from record `N+1` (resume after the last one seen).
 //!   * `LATEST` — only records committed strictly after this call (start at `next_seq`): a tail.
 //!
-//! [OPUS-5] (sq-iz7ag) "Oldest retained" is literal: retention (`ChangeLog::apply_retention`,
+//! (sq-iz7ag) "Oldest retained" is literal: retention (`ChangeLog::apply_retention`,
 //! sq-n9s4d) drops whole old segments, moving the **trim horizon**
 //! ([`ChangeLog::first_seq`](sparq_serve::ChangeLog::first_seq)) forward off seq 0. So
 //! `TRIM_HORIZON` resolves to the horizon, NOT to 0 — a poll below the horizon fails closed in the
@@ -61,7 +61,7 @@
 //!   "hasMoreRecords": false }
 //! ```
 //!
-//! [FABLE-5] (gh-2436) An operator **re-base gap record** (`ChangeRecord::rebase`, appended
+//! (gh-2436) An operator **re-base gap record** (`ChangeRecord::rebase`, appended
 //! by `POST /admin/change-stream/rebase` to resync a broken stream) renders as ONE marker
 //! entry with `"op": "REBASE"` and no `data`: the span before its `generation` was NOT
 //! captured, so a consumer needing a complete view re-bootstraps (e.g. from a backup at or
@@ -113,7 +113,7 @@ impl std::fmt::Display for ParamError {
     }
 }
 
-/// [OPUS-5] (sq-iz7ag) A resolved start offset that retention has already trimmed away — the
+/// (sq-iz7ag) A resolved start offset that retention has already trimmed away — the
 /// fail-closed rejection [`IteratorType::from_seq`] returns for an `AT_SEQUENCE_NUMBER` /
 /// `AFTER_SEQUENCE_NUMBER` anchor below the log's trim horizon.
 ///
@@ -135,7 +135,7 @@ pub struct TrimmedOffset {
 
 impl std::fmt::Display for TrimmedOffset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // [OPUS-4.8] positional format args (CodeQL rust/unused-variable false-positive).
+        // positional format args (CodeQL rust/unused-variable false-positive).
         write!(
             f,
             "start offset {} precedes the change-stream trim horizon {} — retention dropped those \
@@ -164,7 +164,7 @@ impl IteratorType {
         let parse_seq = |raw: Option<&str>, which: &str| -> Result<u64, ParamError> {
             match raw.map(str::trim) {
                 Some(s) if !s.is_empty() => s.parse::<u64>().map_err(|_| {
-                    // [OPUS-4.8] positional format arg (CodeQL rust/unused-variable false-positive).
+                    // positional format arg (CodeQL rust/unused-variable false-positive).
                     ParamError(format!(
                         "`{}` must be a non-negative integer sequence number",
                         which
@@ -208,7 +208,7 @@ impl IteratorType {
     /// `trim_horizon` — the oldest seq still retained
     /// ([`ChangeLog::first_seq`](sparq_serve::ChangeLog::first_seq); `0` for a never-trimmed log).
     ///
-    /// [OPUS-5] (sq-iz7ag) `TRIM_HORIZON` resolves to `trim_horizon`, not to seq 0: the older
+    /// (sq-iz7ag) `TRIM_HORIZON` resolves to `trim_horizon`, not to seq 0: the older
     /// records are gone, and polling the durable log below its horizon fails closed (a `500`) — so
     /// pinning the whole-stream replay at 0 makes it impossible to replay a trimmed log at all.
     /// A sequence-anchored type whose resolved start is below the horizon is a [`TrimmedOffset`]
@@ -283,7 +283,7 @@ pub fn page(records: &[ChangeRecord], from_seq: u64, limit: usize) -> Page<'_> {
 pub fn to_json(page: &Page<'_>) -> String {
     let mut records = Vec::new();
     for rec in page.records {
-        // [FABLE-5] (gh-2436) An operator re-base GAP record (`ChangeRecord::rebase`, no
+        // (gh-2436) An operator re-base GAP record (`ChangeRecord::rebase`, no
         // changes — `ChangeLog::rebase_to` / `POST /admin/change-stream/rebase`) must be
         // VISIBLE to a consumer: flattening it to zero entries would silently skip the one
         // record that says "the span before this generation was NOT captured — re-bootstrap
@@ -408,7 +408,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-5] (sq-iz7ag) THE retention regression guard: on a trimmed log `TRIM_HORIZON` must
+    /// (sq-iz7ag) THE retention regression guard: on a trimmed log `TRIM_HORIZON` must
     /// resolve to the horizon, not to seq 0. Pinning it at 0 sends the poll below the log's
     /// earliest retained record, which the durable log rejects fail-closed — i.e. a `500` on the
     /// one iterator type that means "replay everything retained". Change the `TrimHorizon` arm
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(IteratorType::Latest.from_seq(9, 4), Ok(9));
     }
 
-    /// [OPUS-5] (sq-iz7ag) An `at` / `after` anchor resolving BELOW the horizon is rejected with
+    /// (sq-iz7ag) An `at` / `after` anchor resolving BELOW the horizon is rejected with
     /// the offsets the HTTP layer turns into a `410` — never silently bumped up to the horizon
     /// (that would skip dropped records the consumer still believes are coming).
     #[test]
@@ -541,7 +541,7 @@ mod tests {
         assert!(r0["commitTimestampNanos"].is_string());
     }
 
-    /// [FABLE-5] (gh-2436) A re-base gap record (no changes) must NOT flatten to nothing —
+    /// (gh-2436) A re-base gap record (no changes) must NOT flatten to nothing —
     /// it renders as one explicit `"op": "REBASE"` marker entry, so a consumer replaying
     /// past it KNOWS the stream is not a complete diff history there. A regression back to
     /// pure per-change flattening turns this red (the gap would silently disappear).

@@ -1,5 +1,5 @@
 //! Prefix completion for RDF IRIs, local names, and common label predicates.
-//! [GPT-5.6] sq-lsp7k.9.1 + incremental maintenance sq-lsp7k.9.2.
+//! sq-lsp7k.9.1 + incremental maintenance sq-lsp7k.9.2.
 //!
 //! The index deliberately performs prefix matching only. Fuzzy matching is out of
 //! scope: callers that need it should layer a separate matcher over the returned

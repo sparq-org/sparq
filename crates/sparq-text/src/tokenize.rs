@@ -17,7 +17,7 @@
 //!   in it, and a multi-char CJK term behaves like the AND of its characters
 //!   (use `phrase` for adjacency, which then requires the characters
 //!   consecutive). Kana/Hangul runs that UAX #29 treats as a single word stay
-//!   one token. (Empirically pinned in `tests/analyzer_edges.rs`.) [OPUS-4.8]
+//!   one token. (Empirically pinned in `tests/analyzer_edges.rs`.)
 //! - **CJK n-gram analyzer (opt-in, [`Analyzer::CjkNgram`])**: for languages
 //!   without inter-word spacing, per-ideograph tokens make a multi-char term the
 //!   AND of its (very common) characters — low precision (`東京` matches any doc
@@ -31,7 +31,7 @@
 //!   every non-CJK input. This is the standard CGImm/n-gram alternative to a
 //!   heavyweight dictionary segmenter (e.g. lindera), with zero extra
 //!   dependencies and full determinism. It is OPT-IN and the index must be
-//!   queried with the same analyzer it was built with. [OPUS-4.8] sq-m3ln
+//!   queried with the same analyzer it was built with. sq-m3ln
 //!
 //! Query strings go through [`tokenize_query`], which additionally recognises
 //! a trailing `*` on a token as a PREFIX (autocomplete) marker: `auto*`
@@ -47,7 +47,7 @@ use unicode_segmentation::UnicodeSegmentation;
 /// Lowercases a segmented word, borrowing the overwhelmingly common already-
 /// lowercase ASCII case. Non-ASCII input deliberately takes the existing full
 /// Unicode lowercase path, even when it happens to be lowercase already, so
-/// folding remains exactly equivalent to [`str::to_lowercase`]. [GPT-5.6]
+/// folding remains exactly equivalent to [`str::to_lowercase`].
 #[inline]
 fn lowercase_word(word: &str) -> Cow<'_, str> {
     if word.bytes().all(|byte| byte.is_ascii() && !byte.is_ascii_uppercase()) {
@@ -61,7 +61,7 @@ fn lowercase_word(word: &str) -> Cow<'_, str> {
 /// built and queried with. The default is language-neutral UAX #29 word
 /// segmentation; [`Analyzer::CjkNgram`] is the opt-in CJK character-bigram
 /// variant (see the module docs). An index records its analyzer so build and
-/// query always agree. [OPUS-4.8] sq-m3ln
+/// query always agree. sq-m3ln
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Analyzer {
     /// UAX #29 Unicode word segmentation + Unicode lowercasing (the historical
@@ -71,14 +71,14 @@ pub enum Analyzer {
     /// Like [`Analyzer::Unicode`] for non-CJK text, but emits the overlapping
     /// character bigrams of each maximal CJK ideograph run (`東京都` →
     /// `東京`,`京都`); a one-character run stays a single-char unigram.
-    /// [OPUS-4.8] sq-m3ln
+    /// sq-m3ln
     CjkNgram,
 }
 
 /// Whether `c` is a CJK ideograph the n-gram analyzer bigrams. Covers the Han
 /// (Unified + Extensions + Compatibility) blocks; kana and Hangul are
 /// intentionally EXCLUDED — UAX #29 already groups their runs into words, so the
-/// per-ideograph problem (and thus the n-gram fix) is specific to Han. [OPUS-4.8]
+/// per-ideograph problem (and thus the n-gram fix) is specific to Han.
 fn is_cjk_ideograph(c: char) -> bool {
     matches!(c as u32,
         0x3400..=0x4DBF      // CJK Unified Ideographs Extension A
@@ -101,7 +101,7 @@ pub fn tokenize(text: &str) -> Vec<String> {
 /// Tokenizes document text with `analyzer`. [`Analyzer::Unicode`] is exactly
 /// [`tokenize`]; [`Analyzer::CjkNgram`] additionally rewrites each maximal run
 /// of CJK ideograph tokens into its overlapping lowercase character bigrams
-/// (see the module docs). [OPUS-4.8] sq-m3ln
+/// (see the module docs). sq-m3ln
 pub fn tokenize_with(text: &str, analyzer: Analyzer) -> Vec<String> {
     let words = text.unicode_words().map(lowercase_word).map(Cow::into_owned);
     match analyzer {
@@ -114,7 +114,7 @@ pub fn tokenize_with(text: &str, analyzer: Analyzer) -> Vec<String> {
 /// analyzer accumulates into runs. UAX #29 already isolates each Han ideograph
 /// as its own word (the very behaviour this analyzer compensates for), so a
 /// run of ideographs arrives as a sequence of single-char words; we stitch
-/// CONSECUTIVE such words back together and bigram them. [OPUS-4.8] sq-m3ln
+/// CONSECUTIVE such words back together and bigram them. sq-m3ln
 fn is_cjk_word(word: &str) -> bool {
     let mut chars = word.chars();
     matches!((chars.next(), chars.next()), (Some(c), None) if is_cjk_ideograph(c))
@@ -124,7 +124,7 @@ fn is_cjk_word(word: &str) -> bool {
 /// words: a maximal run of CONSECUTIVE single-ideograph words (`東`,`京`,`都`)
 /// becomes its overlapping bigrams (`東京`,`京都`); a one-character run stays a
 /// single unigram; every non-CJK word passes through unchanged. Non-CJK input
-/// therefore yields exactly the default analyzer's tokens. [OPUS-4.8] sq-m3ln
+/// therefore yields exactly the default analyzer's tokens. sq-m3ln
 fn cjk_ngram_stream(words: impl Iterator<Item = String>) -> Vec<String> {
     let mut out = Vec::new();
     // Buffer the current maximal run of single-ideograph words.
@@ -173,7 +173,7 @@ pub fn tokenize_query(query: &str) -> Vec<QueryToken> {
 /// of CJK ideographs is expanded into its character bigrams — each a plain
 /// (non-prefix) token, so an index built with the n-gram analyzer is searched on
 /// the same bigram vocabulary it stored. A `*` immediately after a CJK run is
-/// segmentation punctuation (bigrams are never prefix tokens). [OPUS-4.8] sq-m3ln
+/// segmentation punctuation (bigrams are never prefix tokens). sq-m3ln
 pub fn tokenize_query_with(query: &str, analyzer: Analyzer) -> Vec<QueryToken> {
     if analyzer == Analyzer::Unicode {
         return query
@@ -310,7 +310,7 @@ mod tests {
         );
     }
 
-    // ---- CJK n-gram analyzer ([OPUS-4.8] sq-m3ln) ----------------------------
+    // ---- CJK n-gram analyzer (sq-m3ln) ----------------------------
 
     #[test]
     fn ngram_agrees_with_default_on_non_cjk() {

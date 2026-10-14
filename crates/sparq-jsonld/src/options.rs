@@ -1,8 +1,8 @@
 //! [`JsonLdOptions`] — the JSON-LD 1.1 processing options, modelled once and honoured
 //! everywhere in the pipeline (design record §2 goal 5, §3.1 `options.rs`).
 //!
-//! [OPUS-4.8] (sq-oy1f.23) Introduced as the option **shape** and its spec defaults; each
-//! field's doc names the spec option it mirrors. [OPUS-5] (`sq-ghdfw`) The algorithms that
+//! (sq-oy1f.23) Introduced as the option **shape** and its spec defaults; each
+//! field's doc names the spec option it mirrors. (`sq-ghdfw`) The algorithms that
 //! read these fields have since landed (`sq-oy1f.24`+ — context processing, expansion,
 //! flattening, compaction, framing, from-RDF).
 

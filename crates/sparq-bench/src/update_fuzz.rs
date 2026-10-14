@@ -1,4 +1,4 @@
-//! SPARQL **UPDATE** differential fuzzer vs Oxigraph (beads sq-3dyje.4, sq-hodke). [FABLE-5]
+//! SPARQL **UPDATE** differential fuzzer vs Oxigraph (beads sq-3dyje.4, sq-hodke).
 //!
 //! The query-side differential fuzzer (`fuzz.rs`) has zero UPDATE coverage, and
 //! `sparq-engine/src/update.rs` is otherwise guarded by a single mechanism family
@@ -128,7 +128,7 @@
 //! `tests::non_canonical_integer_lexicals_are_distinct_terms`, which is the correct
 //! oracle given Oxigraph cannot serve as a reference for it.
 //!
-//! [GPT-6 ASTRA] #5183 also exposed a solution-multiplicity cascade: coexisting `8`
+//! #5183 also exposed a solution-multiplicity cascade: coexisting `8`
 //! and `"008"^^xsd:integer` produce two template blank nodes in sparq, but one in the
 //! lossy reference. The comparator correctly rejects this. The reference corpus now
 //! uses disjoint canonical/noncanonical integer value pools, with one spelling per
@@ -161,7 +161,7 @@ use std::path::{Path, PathBuf};
 /// The `xsd:integer` IRI in the N-Triples spelling the generator emits.
 const XSD_INTEGER: &str = "<http://www.w3.org/2001/XMLSchema#integer>";
 
-// [GPT-6 ASTRA] Keep the small canonical pool for exact DELETE/WHERE hits. The
+// Keep the small canonical pool for exact DELETE/WHERE hits. The
 // noncanonical pool starts above it; LOAD must use this same canonical bound.
 const CANONICAL_INTEGER_VALUES: u64 = 20;
 
@@ -825,7 +825,7 @@ fn oxigraph_normalized_term(t: &Term) -> Term {
     }
 }
 
-// [GPT-6 ASTRA] Quad uniqueness alone cannot detect colliding terms at different
+// Quad uniqueness alone cannot detect colliding terms at different
 // predicates/graphs. Check every integer leaf, including nested triple objects.
 fn record_lexical_terms(
     term: &Term,
@@ -939,7 +939,7 @@ enum Verdict {
     Differs(String),
 }
 
-// [GPT-6 Astra] Borrow raw lines so duplicate detection also works on unsorted
+// Borrow raw lines so duplicate detection also works on unsorted
 // diagnostic inputs. O(N log N) comparisons and O(N) borrowed references.
 fn repeated_raw_line(lines: &[String]) -> Option<(&str, usize)> {
     let mut seen = BTreeSet::new();
@@ -950,7 +950,7 @@ fn repeated_raw_line(lines: &[String]) -> Option<(&str, usize)> {
 
 /// Compares two snapshots under the canonical form the module docs describe.
 ///
-/// [GPT-6 Astra] Inputs are complete-quad snapshots or the full-quad rows from
+/// Inputs are complete-quad snapshots or the full-quad rows from
 /// `PROBES`. Repeated raw quads are invalid emissions, even on both sides; this
 /// is not a uniqueness policy for arbitrary SPARQL projection/join/UNION bags.
 /// In particular, a duplicate-bearing snapshot does not compare equal to itself.
@@ -1050,7 +1050,7 @@ fn compare(
 // by joining its cells is then a well-formed N-Quads line, so probe results go through
 // exactly the same canonical comparison as the dataset snapshots — which is what makes
 // them comparable at all once blank nodes are in play.
-// [GPT-6 Astra] Each probe projects every component of one triple/quad, including
+// Each probe projects every component of one triple/quad, including
 // the named graph. Adding projection loss, joins or UNION requires reassessing
 // this private comparator's unique-emission contract; ordinary result bags need
 // not be unique. The scope and projection tests below pin these two probes.
@@ -1504,7 +1504,7 @@ mod tests {
         UpdateDivergenceAllowlist::load()
     }
 
-    // [GPT-6 Astra] Equal raw totals must not hide canon's duplicate collapse.
+    // Equal raw totals must not hide canon's duplicate collapse.
     #[test]
     fn raw_duplicate_redistribution_is_rejected() {
         let p = format!("_:x <http://ex/p> \"020\"^^{XSD_INTEGER} .");
@@ -2136,11 +2136,11 @@ mod tests {
         );
     }
 
-    // [GPT-6 ASTRA] These checks use actual generated operations and public updates;
+    // These checks use actual generated operations and public updates;
     // a persistent map also catches collisions across different graphs or steps.
     #[test]
     fn generated_integer_domain_is_injective_including_load() {
-        // [GPT-6 ASTRA] Independent test boundaries: do not derive the expected
+        // Independent test boundaries: do not derive the expected
         // domain from the production constant or rely on a sampled collision.
         fn assert_integer_pool(term: &Term) {
             match term {
@@ -2387,7 +2387,7 @@ mod tests {
         assert!(negative.contains("step=1") && negative.contains("http://ex/injected"));
     }
 
-    // [GPT-6 ASTRA] Literal historical input, not regenerated after narrowing the
+    // Literal historical input, not regenerated after narrowing the
     // reference corpus. The reference cannot represent this lexical/cardinality case.
     #[test]
     fn historical_4141222487_preserves_lexicals_and_fresh_nodes() {

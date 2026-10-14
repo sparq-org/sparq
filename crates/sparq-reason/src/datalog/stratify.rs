@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-6tykl.3 — the **stratification checker**: assigns every rule a
+//! sq-6tykl.3 — the **stratification checker**: assigns every rule a
 //! stratum such that each `NOT`-negated or `AGGREGATE`-read predicate is fully
 //! derived in a strictly lower stratum, or rejects the program (a cycle through
 //! negation/aggregation has no stratified model).
@@ -22,7 +22,7 @@
 //! `[?y, a, ex:Leaf]` head. An `rdf:type` atom with a VARIABLE class is conservative:
 //! reading one depends on EVERY class; deriving one feeds every class reader.
 //!
-//! **[GPT-5.6] Variable-predicate soundness invariant (sq-a7bmo).** A variable
+//! **Variable-predicate soundness invariant (sq-a7bmo).** A variable
 //! predicate maps to `Top`, coupled to every concrete predicate, class, and
 //! `TypeAny` node. A `Top` read therefore cannot run below a relation it may inspect;
 //! if `Top` occurs in a head, every relation is also constrained not to run below
@@ -208,7 +208,7 @@ pub fn stratify(dict: &Dict, program: &Program) -> Result<Stratification, String
             }
         }
     }
-    // [GPT-5.6] Predicate-level analogue of TypeAny. Top reads the union of every
+    // Predicate-level analogue of TypeAny. Top reads the union of every
     // relation; a Top head may derive into any relation, so couple it back when
     // such a head exists. Include class-granular and TypeAny nodes: rdf:type is an
     // RDF predicate too, and omitting those nodes would make negative class cycles
@@ -242,7 +242,7 @@ pub fn stratify(dict: &Dict, program: &Program) -> Result<Stratification, String
     })
 }
 
-/// [SONNET-4.6] Run the dialect-neutral stratum-raising fixpoint.
+/// Run the dialect-neutral stratum-raising fixpoint.
 ///
 /// Edges are `(body_node, head_node)`; negative edges impose the strict
 /// `head > body` constraint used for negation and aggregation.

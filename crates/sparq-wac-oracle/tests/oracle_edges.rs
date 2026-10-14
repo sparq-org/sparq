@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.38 — integration-level edge contracts for the dev-only oracle.
+// sq-bif.38 — integration-level edge contracts for the dev-only oracle.
 
 use sparq_wac_oracle::escalation_corpus::{canonicalize_child, is_acl_shaped, naive_acl_guard};
 use sparq_wac_oracle::{build_store, fixtures, run_vectors};

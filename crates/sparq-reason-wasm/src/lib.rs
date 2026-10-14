@@ -1,5 +1,5 @@
 //! sparq-reason-wasm: the sparq forward-chaining **reasoner** compiled to WebAssembly —
-//! the tier-b "W-reason" bundle ([OPUS-4.8] sq-6qw3).
+//! the tier-b "W-reason" bundle (sq-6qw3).
 //!
 //! This is a SEPARATE, lazy-loaded bundle from the lean `sparq-wasm` triplestore bundle.
 //! It exposes RDFS / OWL 2 RL forward-chaining closure (and N3 rule reasoning) over an RDF
@@ -20,7 +20,7 @@
 //! // Only the NEWLY-entailed triples (the "what reasoning added" delta) as N-Triples:
 //! const added = Reasoner.entailed(turtleText, "turtle", "rdfs");
 //! ```
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-6qw3: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-6qw3: crate has zero `unsafe`
 
 use sparq_core::Graph;
 use sparq_reason::{materialize, Profile};
@@ -56,7 +56,7 @@ fn graph_to_ntriples(graph: &Graph) -> Result<String, JsError> {
     sparq_engine::construct_ntriples(graph, ECHO_CONSTRUCT).map_err(|e| JsError::new(&e))
 }
 
-/// [FABLE-5] sq-ohnj1 — the eye-js `--pass-only-new` (DERIVATIONS) delta for an N3 document:
+/// sq-ohnj1 — the eye-js `--pass-only-new` (DERIVATIONS) delta for an N3 document:
 /// the NEWLY-DERIVED ground triples only (closure minus the asserted base). This is exactly the
 /// set of `reason_n3_proof` step conclusions: the semi-naive chainer records a derivation step
 /// ONLY for a fact it produces that was not already present, so an asserted-and-re-derivable
@@ -73,7 +73,7 @@ fn n3_new_ntriples(n3: &str) -> Result<String, String> {
     sparq_engine::construct_ntriples(&graph, ECHO_CONSTRUCT)
 }
 
-/// [FABLE-5] sq-ohnj1, [OPUS-5] sq-xqchl.1 — the eye-js `--query` filter: materialise the
+/// sq-ohnj1, sq-xqchl.1 — the eye-js `--query` filter: materialise the
 /// deductive closure of `data`, then return every instantiated conclusion of the N3 query
 /// rule(s) over that closure as N-Triples.
 ///
@@ -177,7 +177,7 @@ impl Reasoner {
         graph_to_ntriples(&graph)
     }
 
-    /// [FABLE-5] sq-ohnj1 — the eye-js `--pass-only-new` **derivations** delta: the
+    /// sq-ohnj1 — the eye-js `--pass-only-new` **derivations** delta: the
     /// NEWLY-DERIVED ground triples only (closure minus the asserted base), as N-Triples. This
     /// backs `n3reasoner`'s DEFAULT `output` mode (`undefined` / `'derivations'`) in the
     /// `@sparq-org/eyereasoner-compat` package. A thin shim over `n3_new_ntriples`.
@@ -186,7 +186,7 @@ impl Reasoner {
         n3_new_ntriples(n3).map_err(|e| JsError::new(&e))
     }
 
-    /// [FABLE-5] sq-ohnj1, [OPUS-5] sq-xqchl.1 — the eye-js `--query` filter: materialise the
+    /// sq-ohnj1, sq-xqchl.1 — the eye-js `--query` filter: materialise the
     /// closure of `data`, then return every instantiated conclusion of the N3 query rule(s) over
     /// that closure as N-Triples. Backs `n3reasoner(data, query)` in the
     /// `@sparq-org/eyereasoner-compat` package. The query premise is evaluated by the reasoner's
@@ -318,7 +318,7 @@ mod tests {
         assert_eq!(base_n, 2, "expected two distinct asserted base triples");
     }
 
-    // [FABLE-5] sq-ohnj1 — the eye-js README socrates example, VERBATIM (data + query).
+    // sq-ohnj1 — the eye-js README socrates example, VERBATIM (data + query).
     const SOCRATES_N3_DATA: &str = r#"@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>.
 @prefix : <http://example.org/socrates#>.
 
@@ -360,7 +360,7 @@ mod tests {
         assert!(!nt.contains("subClassOf"), "non-matching axiom excluded: {nt}");
     }
 
-    /// [OPUS-5] sq-xqchl.1 (GH #3144) — a builtin in the query premise is EVALUATED (it used to
+    /// sq-xqchl.1 (GH #3144) — a builtin in the query premise is EVALUATED (it used to
     /// fail closed, because the SPARQL-BGP compat path could not evaluate one). The builtin must
     /// FILTER: matching `math:greaterThan` as data would answer for `:b` as well.
     #[test]

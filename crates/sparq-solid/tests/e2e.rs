@@ -3,7 +3,7 @@
 //! with the v1 FROM-NAMED rewrite path kept as a differential oracle: both paths
 //! must return byte-identical JSON for every fixture session.
 //!
-//! [OPUS-4.8] sq-gq28y (issue #1546): the DEFAULT read path is now spec-conformant
+//! sq-gq28y (issue #1546): the DEFAULT read path is now spec-conformant
 //! (empty standing default graph). Tests that probe pod content with a BARE default-graph
 //! pattern and assert the old UNION-ALWAYS counts are gated
 //! `#[cfg(feature = "legacy-union-default-graph")]` (the opt-in escape hatch that restores
@@ -35,7 +35,7 @@ fn store() -> PodStore {
 ///   anon   = pub1 144
 const TITLES: &str = "SELECT ?title WHERE { ?s <https://ex.dev/ns#title> ?title }";
 
-/// [OPUS-4.8] sq-gq28y (issue #1546): the SPEC default. A bare default-graph pattern is
+/// sq-gq28y (issue #1546): the SPEC default. A bare default-graph pattern is
 /// evaluated against the standing EMPTY default graph, so it matches nothing for every
 /// session (the union counts are reachable only via the opt-in — see
 /// `tests/union_default_graph.rs`). This is the mirror of the legacy-gated union test below.
@@ -51,7 +51,7 @@ fn bare_default_graph_pattern_is_empty_by_default() {
     assert_eq!(anon.rows.len(), 0, "empty standing default graph");
 }
 
-// [OPUS-4.8] sq-gq28y: bare-pattern union-always counts — only under the legacy escape hatch.
+// sq-gq28y: bare-pattern union-always counts — only under the legacy escape hatch.
 #[cfg(feature = "legacy-union-default-graph")]
 #[test]
 fn same_query_different_agents_different_results() {
@@ -67,7 +67,7 @@ fn same_query_different_agents_different_results() {
     assert_eq!(v1.rows.len(), 599);
 }
 
-// [OPUS-4.8] sq-gq28y: exercises bare-pattern cross-document joins (union-always) — only
+// sq-gq28y: exercises bare-pattern cross-document joins (union-always) — only
 // under the legacy escape hatch; the spec-default GRAPH/join coverage is in
 // tests/union_default_graph.rs.
 #[cfg(feature = "legacy-union-default-graph")]
@@ -118,7 +118,7 @@ fn explicit_named_graph_query_cannot_escape() {
 /// identically regardless of their relative order — a full sort makes the whole
 /// serialization canonical).
 ///
-/// [OPUS-4.8] sq-gq28y: EXPLICIT-`GRAPH` queries agree on both paths regardless of the
+/// sq-gq28y: EXPLICIT-`GRAPH` queries agree on both paths regardless of the
 /// default-graph flip (the flip changes only what a *bare* default-graph pattern sees), so
 /// this differential oracle runs on the default build over the explicit-GRAPH subset. The
 /// bare-pattern queries (which diverge: empty on the view vs union on the v1 `rewrite_for`
@@ -137,7 +137,7 @@ fn view_path_and_rewrite_path_agree_on_explicit_graph_queries() {
     assert_paths_agree(&queries);
 }
 
-/// [OPUS-4.8] sq-gq28y: the FULL oracle including bare default-graph patterns is only
+/// sq-gq28y: the FULL oracle including bare default-graph patterns is only
 /// coherent under the legacy escape hatch, where the view path also does union-always (so it
 /// matches the v1 `rewrite_for` path). Under the spec default the two intentionally diverge
 /// for bare patterns (empty vs union) — see `tests/union_default_graph.rs`.

@@ -1,4 +1,4 @@
-//! Deterministic metamorphic tests for the evaluator's deny invariants. [GPT-5.6]
+//! Deterministic metamorphic tests for the evaluator's deny invariants.
 
 use sparq_policy::{evaluate, parse_policy_str, Request};
 

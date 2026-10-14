@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-vw3ax.13 — capture harness for the site's federation capability row.
+//! sq-vw3ax.13 — capture harness for the site's federation capability row.
 //!
 //! Prints the EXACT, deterministic output of the real sparq-fedplan pipeline
 //! (`select_sources` + `plan_bgp`) over a small, fully-declared 3-source / 3-pattern

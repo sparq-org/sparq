@@ -6,7 +6,7 @@
 //! wrapper slice of the still-unlanded rdfjs/wrapper graph-scope proposal in
 //! draft PR #95.
 
-// [GPT-5.6] sq-1rg2q.6: explicit read projection with a single write target.
+// sq-1rg2q.6: explicit read projection with a single write target.
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;

@@ -1,4 +1,4 @@
-//! [GPT-6] Host-plan regressions; these tests do not run or verify ZK proofs.
+//! Host-plan regressions; these tests do not run or verify ZK proofs.
 
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Triple};
 use sparq_zk::commit::{commit_triples, GraphCommitment};

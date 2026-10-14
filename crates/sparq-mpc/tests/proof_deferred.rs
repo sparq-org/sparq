@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-bif.15 — glue test pinning the collaborative-proof / attestation
+// sq-bif.15 — glue test pinning the collaborative-proof / attestation
 // crypto boundary's HONEST DEFERRAL at the public-API level. TEST-COVERAGE bead:
 // no production logic changed. The crate exposes the `CollaborativeProof` and
 // `Attestation` trait surfaces (`crate::proof`) but ships NO implementor — every

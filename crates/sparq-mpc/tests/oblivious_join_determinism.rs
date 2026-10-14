@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-bif.15 — glue-level DETERMINISM + CARDINALITY tests for the
+// sq-bif.15 — glue-level DETERMINISM + CARDINALITY tests for the
 // oblivious set-returning hidden-join output path (`crate::oblivious_join`).
 // TEST-COVERAGE bead: no production logic changed. These exercise the REAL
 // public path (`oblivious_set_output` / `oblivious_join_output` /

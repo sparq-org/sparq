@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-fggn) The human-readable / identifier contracts that callers
+//! (sq-fggn) The human-readable / identifier contracts that callers
 //! (sparq-server's HTTP layer, logs, metrics) depend on but that the behavioural
 //! writer/ring tests never invoke: `WriteError`'s `Display`/`Error`, and `PodId`'s
 //! `as_str` round-trip plus its `Display`.

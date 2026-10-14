@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-7d3dj.30.5) DPccp default-on acceptance tests.
+//! (sq-7d3dj.30.5) DPccp default-on acceptance tests.
 //!
 //! Verifies that when the `dp-planner` feature is compiled:
 //!

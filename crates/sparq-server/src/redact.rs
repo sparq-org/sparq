@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-toze.34, epic sq-toze) **Request-log redaction** — keep SPARQL query / update
+//! (sq-toze.34, epic sq-toze) **Request-log redaction** — keep SPARQL query / update
 //! text and other request-body content OUT of the `--verbose` request log.
 //!
 //! ## The exposure
@@ -79,7 +79,7 @@ mod span {
     use super::redact_target;
     use tower_http::trace::MakeSpan;
 
-    /// [OPUS-4.8] sq-toze.34: a [`MakeSpan`] for the `--verbose` request log that records a
+    /// sq-toze.34: a [`MakeSpan`] for the `--verbose` request log that records a
     /// **redacted** request target — the path verbatim, the query string replaced by the
     /// length+fingerprint placeholder ([`redact_target`]). Used in place of tower-http's
     /// `DefaultMakeSpan` (which records the raw URI) when [`ServerConfig::redact_logs`] is on.

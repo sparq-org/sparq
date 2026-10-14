@@ -1,5 +1,5 @@
 //! Phrase queries (the opt-in positional index): adjacency + order, plus the
-//! proximity/slop generalisation `phrase_near`. [OPUS-4.8]
+//! proximity/slop generalisation `phrase_near`.
 //!
 //! `phrase("foo bar")` matches a document only where `foo` is immediately
 //! followed by `bar` (consecutive positions, in order). These tests pin: a
@@ -150,7 +150,7 @@ fn phrase_without_positions_panics() {
 
 /// The parallel build (>= MIN_PARALLEL_TERMS docs) merges per-shard position
 /// maps in `append_shard`; this exercises that path and pins it equal to the
-/// serial build. [OPUS-4.8]
+/// serial build.
 #[cfg(feature = "parallel")]
 #[test]
 fn parallel_positional_build_merges_shards() {
@@ -207,7 +207,7 @@ fn positions_via_apply_delta() {
     assert_eq!(idx, TextIndex::build_with_positions(&graph));
 }
 
-// ---- Proximity / slop (`phrase_near`) -------------------------------------- [OPUS-4.8]
+// ---- Proximity / slop (`phrase_near`) --------------------------------------
 //
 // `phrase_near("foo bar", slop)` is the relevance-ranked, bounded-gap variant of
 // `phrase`: tokens still IN ORDER, but spread over at most `slop` extra span,

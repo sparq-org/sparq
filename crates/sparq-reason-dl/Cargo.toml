@@ -9,15 +9,15 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# [FABLE-5] sq-pbz04.4.1: crate-local README rendered as the lib front page
+# sq-pbz04.4.1: crate-local README rendered as the lib front page
 # (lib.rs include_str!("../README.md")).
 readme = "README.md"
-# [FABLE-5] sq-pbz04.4.1: publish=false while the workstream is layered in (design record
+# sq-pbz04.4.1: publish=false while the workstream is layered in (design record
 # research/owl2-direct-semantics-scoping.md §6). It graduates to publishable once the
 # conformance arm (L5) pins a floor.
 publish = false
 
-# [FABLE-5] sq-pbz04.4.1: NEW opt-in Direct-Semantics crate (epic sq-pbz04.4, design record
+# sq-pbz04.4.1: NEW opt-in Direct-Semantics crate (epic sq-pbz04.4, design record
 # research/owl2-direct-semantics-scoping.md). A SEPARATE crate — same isolation rationale as
 # sparq-reason-el / sparq-reason-ql: sparq-core and sparq-engine (and the lean wasm build)
 # carry ZERO Direct-Semantics code, deps, or cost by default; DL is engaged only by depending
@@ -32,7 +32,7 @@ publish = false
 # the sole bead in its wave, so its Cargo.toml edits do not collide with the L2/L3 beads.
 default = []
 
-# [FABLE-5] sq-pbz04.4.4: the L4 fragment-dispatch Direct-Semantics checker (`check` module,
+# sq-pbz04.4.4: the L4 fragment-dispatch Direct-Semantics checker (`check` module,
 # design record §4/§6) — OFF by default so the L1–L3 layers stay dependency-light. Pulls the
 # EXISTING profile reasoners as optional deps: sparq-reason (OWL 2 RL materialization + clash
 # scan) and sparq-reason-el (EL consequence-based classification). sparq-reason-el is used
@@ -41,7 +41,7 @@ default = []
 # workspace feature unification).
 dispatch = ["dep:sparq-reason", "dep:sparq-reason-el"]
 
-# [FABLE-5] sq-fj8lj: graduate the QL dispatch branch — OFF by default, implies `dispatch`.
+# sq-fj8lj: graduate the QL dispatch branch — OFF by default, implies `dispatch`.
 # Pulls sparq-reason-ql with its `ql-consistency` feature (sq-p6yb7: DL-Lite_R consistency by
 # violation-query composition) so dispatch branch 3 can return DEFINITIVE verdicts instead of
 # the always-`Unknown(QlConsistencyPending)` arm. The verdict's soundness rests ENTIRELY on
@@ -52,7 +52,7 @@ dispatch = ["dep:sparq-reason", "dep:sparq-reason-el"]
 # soundness"). Without this feature the QL arm abstains exactly as before.
 dispatch_ql = ["dispatch", "dep:sparq-reason-ql", "sparq-reason-ql/ql-consistency"]
 
-# [GPT-5.6] sq-zfwzq: OPT-IN transitive roles (the "S" extension) -- OFF by default. Extends
+# sq-zfwzq: OPT-IN transitive roles (the "S" extension) -- OFF by default. Extends
 # the fragment to ALCH + transitive roles (still NO inverses / cardinality / nominals, which
 # stay fail-closed per the design-record §5 deferral ledger): L1 recognises
 # `owl:TransitiveProperty` (instead of refusing it) and the L3 tableau adds the ∀₊-propagation
@@ -68,20 +68,20 @@ sparq-core = { path = "../sparq-core", version = "0.1.6", default-features = fal
 # (the same use as sparq-reason-el). rustc-hash: the structural index maps/sets.
 oxrdf.workspace = true
 rustc-hash.workspace = true
-# [FABLE-5] sq-pbz04.4.4: optional profile-reasoner deps, pulled ONLY by the `dispatch`
+# sq-pbz04.4.4: optional profile-reasoner deps, pulled ONLY by the `dispatch`
 # feature (L4). `version` alongside `path`: cargo uses the path locally, the version on
 # crates.io.
 sparq-reason = { path = "../sparq-reason", version = "0.1.6", optional = true }
 sparq-reason-el = { path = "../sparq-reason-el", version = "0.1.6", optional = true }
-# [FABLE-5] sq-fj8lj: optional DL-Lite_R consistency checker, pulled ONLY by `dispatch_ql`.
+# sq-fj8lj: optional DL-Lite_R consistency checker, pulled ONLY by `dispatch_ql`.
 sparq-reason-ql = { path = "../sparq-reason-ql", version = "0.1.6", optional = true }
 
-# [GPT-5.6] sq-7ru8y: Criterion is dev-only and drives the self-relative tableau
+# sq-7ru8y: Criterion is dev-only and drives the self-relative tableau
 # microbenchmark; it does not enter the shipped opt-in reasoner crate.
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 
-# [GPT-5.6] sq-7ru8y: pinned synthetic concept expressions exercise NNF conversion and
+# sq-7ru8y: pinned synthetic concept expressions exercise NNF conversion and
 # tableau sat/subsumption checks at increasing nesting depths.
 [[bench]]
 name = "tableau_micro"

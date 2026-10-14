@@ -61,7 +61,7 @@
 //! adaptivity) — is out of scope for this slice. This is the non-blocking operator + the
 //! bounded spill only. See the roadmap bead filed from sq-vf7q under epic sq-3183.
 //!
-//! [OPUS-4.8] sq-vf7q.
+//! sq-vf7q.
 
 use crate::pattern::Var;
 use std::collections::HashMap;
@@ -726,7 +726,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-bif — correctness suite: the public `Tuple` value type's documented
+    // sq-bif — correctness suite: the public `Tuple` value type's documented
     // invariants (canonical variable-sorted bindings, duplicate-variable-keeps-first,
     // `get` lookup incl. the missing-var `None`), the `encode`/`decode` spill round-trip
     // (incl. the previously-uncovered empty-tuple line), and the load-bearing arrival-order

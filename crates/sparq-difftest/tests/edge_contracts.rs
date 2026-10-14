@@ -1,4 +1,4 @@
-//! [GPT-5.6] Integration pins for the differential comparator's boundary contracts (sq-bif.25).
+//! Integration pins for the differential comparator's boundary contracts (sq-bif.25).
 
 use sparq_difftest::{
     canonical_double_string, multiset_equal, numeric_equal, parse_results_json, NumericValue,

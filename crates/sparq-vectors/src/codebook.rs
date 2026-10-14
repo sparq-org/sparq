@@ -1,6 +1,6 @@
 //! Categorical **codebook** encoder for enumeration members (structure-aware vectorisation **P2**).
 //!
-//! [OPUS-4.8] sq-0wo9e.3 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.3 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §2 row "`owl:oneOf` / `sh:in` enum → a CATEGORICAL CODEBOOK" + §6.A "enum / boolean exactness").
 //! The encoder for [`crate::encode::Encoder::Enum`]. It is **opt-in** (the `structure` cargo
 //! feature, off by default — pure, no new dependency) and changes **nothing** in the default

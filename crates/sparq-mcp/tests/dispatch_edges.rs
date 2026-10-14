@@ -1,4 +1,4 @@
-//! [GPT-5.6] (sq-bif.35) JSON-RPC dispatch edge contracts for the always-compiled
+//! (sq-bif.35) JSON-RPC dispatch edge contracts for the always-compiled
 //! MCP server core.
 
 use serde_json::Value;
@@ -68,7 +68,7 @@ fn malformed_json_error_has_null_id() {
     );
 }
 
-// [OPUS-5] gh #2497: JSON-RPC 2.0 §6 batch receipt — the one thing the MCP 2025-03-26
+// gh #2497: JSON-RPC 2.0 §6 batch receipt — the one thing the MCP 2025-03-26
 // revision requires that the others do not, and therefore the precondition for
 // 2025-03-26 appearing in SUPPORTED_PROTOCOL_VERSIONS.
 

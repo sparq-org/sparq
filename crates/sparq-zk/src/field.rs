@@ -44,7 +44,7 @@ pub fn field_from_hex_str(s: &str) -> Option<Fr> {
 /// 32-byte BE field element, no length prefix; determined empirically against
 /// bb 5.0.0-nightly, see the `sparq-zk-compose` verifier reconstruction). The
 /// hex of this word is `field_to_hex` minus the `0x`.
-// [OPUS-4.8] added for the verifier's public-input reconstruction (audit #1).
+// added for the verifier's public-input reconstruction (audit #1).
 pub fn field_to_be_bytes_32(f: &Fr) -> [u8; 32] {
     let be = f.into_bigint().to_bytes_be();
     // ark `to_bytes_be` for a 254-bit field returns up to 32 bytes; left-pad to
@@ -67,7 +67,7 @@ pub fn field_from_hash_bytes(bytes: &[u8; 32]) -> Fr {
 }
 
 fn decode_hex(hex: &str) -> Vec<u8> {
-    // [OPUS-4.8] sq-hbg7: stable-1.96 clippy `manual_is_multiple_of`.
+    // sq-hbg7: stable-1.96 clippy `manual_is_multiple_of`.
     assert!(hex.len().is_multiple_of(2), "hex string must have even length");
     (0..hex.len())
         .step_by(2)

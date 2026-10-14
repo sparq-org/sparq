@@ -53,7 +53,7 @@ impl TripleStream {
         self
     }
 
-    /// [GPT-5.6] Appends already-wrapped elements in iterator order.
+    /// Appends already-wrapped elements in iterator order.
     pub fn push_batch<I: IntoIterator<Item = TimestampedTriple>>(&mut self, items: I) -> &mut Self {
         for item in items {
             self.push_item(item);

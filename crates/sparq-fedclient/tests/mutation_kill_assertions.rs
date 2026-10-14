@@ -39,7 +39,7 @@
 //!
 //! Gated on `fedclient`; the default build compiles this file to nothing.
 //!
-//! [FABLE-5] sq-3dyje.6 — SPARQ agent.
+//! sq-3dyje.6 — SPARQ agent.
 
 #![cfg(feature = "fedclient")]
 

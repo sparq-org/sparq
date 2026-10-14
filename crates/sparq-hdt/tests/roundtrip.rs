@@ -12,7 +12,7 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// [OPUS-4.8] sq-117n: a UNIQUE, auto-cleaned scratch directory, one per call.
+/// sq-117n: a UNIQUE, auto-cleaned scratch directory, one per call.
 ///
 /// The tests here materialize `.hdt` archives by writing an N-Triples file to disk
 /// (`src.nt` / `zoo.nt` / …) and reading it back with `hdt::Hdt::read_nt`. Previously
@@ -160,7 +160,7 @@ fn gzipped_hdt_loads_transparently() {
     assert_eq!(sparq_hdt::load(&path).unwrap().store.len(), 328);
 }
 
-// [OPUS-4.8] H5: zstd / bzip2 compressed-HDT container compressors, mirroring
+// H5: zstd / bzip2 compressed-HDT container compressors, mirroring
 // `gzipped_snikmeta`. Both decode in the STREAMING path (`with_hdt_stream`),
 // selected by magic bytes (zstd `28 b5 2f fd`, bzip2 "BZh"), never file name.
 
@@ -245,7 +245,7 @@ fn header_exposes_dataset_metadata() {
 }
 
 // ============================================================================
-// [OPUS-4.8] Differential correctness: the direct sparq-side decoder (H1–H4,
+// Differential correctness: the direct sparq-side decoder (H1–H4,
 // the default `load_reader` path) must produce EXACTLY the same triple set AND
 // the same number of distinct dictionary terms as the upstream-backed path
 // (`Hdt::read` + per-id `id_to_string` translation), on the same bytes. This is
@@ -376,7 +376,7 @@ fn direct_decoder_gzip_matches_plain() {
     assert_eq!(from_gz.store.len(), from_plain.store.len());
 }
 
-/// [OPUS-4.8] H5 differential gate: the SAME bytes compressed as gzip, zstd and
+/// H5 differential gate: the SAME bytes compressed as gzip, zstd and
 /// bzip2 must all decode (streaming) to the IDENTICAL triple set as the plain
 /// `.hdt`. Run on the multi-block generated archive so the codec path is fed a
 /// realistic-shaped, multi-section dictionary (not just the 10 KB snikmeta).
@@ -457,7 +457,7 @@ fn direct_decoder_matches_upstream_tiny() {
 }
 
 // ============================================================================
-// [OPUS-4.8] sq-fj7a — (1) HDT-load == N-Triples-load differential and
+// sq-fj7a — (1) HDT-load == N-Triples-load differential and
 // (3) a truncated/corrupt-archive REJECTION ORACLE for the id-translation layer.
 //
 // Audit context: the .hdt -> sparq `Dict` id-translation (decode.rs / lib.rs) is
@@ -474,7 +474,7 @@ fn direct_decoder_matches_upstream_tiny() {
 /// fixture-write path: N-Triples -> FourSectDict PFC + BitmapTriples via the `hdt`
 /// crate's `read_nt` + `write`) and returns the archive bytes.
 ///
-/// [OPUS-4.8] sq-117n: each call gets its OWN unique, auto-cleaned scratch dir
+/// sq-117n: each call gets its OWN unique, auto-cleaned scratch dir
 /// (`scratch_dir()`), so concurrent callers can never race on the same `src.nt`.
 /// The `TempDir` lives only for this call: `read_nt` reads the whole file and the
 /// archive is returned in memory, so the directory is safely removed on return.
@@ -618,7 +618,7 @@ fn pfc_dictionary_edges_translate_identically() {
     assert_direct_matches_upstream(&hdt_bytes, 5);
 }
 
-/// [SONNET-4.6] sq-qalqs — escaped-literal round-trip oracle: pins WHICH side mangles
+/// sq-qalqs — escaped-literal round-trip oracle: pins WHICH side mangles
 /// a literal containing escaped quotes / backslashes on the `Hdt::read_nt` -> `write`
 /// -> `sparq_hdt::load` fixture path, and encodes the UPSTREAM limitation exactly.
 ///

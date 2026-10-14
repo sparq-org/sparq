@@ -1,4 +1,4 @@
-//! Property coverage for the accepted WKT literal domain. [GPT-5.6]
+//! Property coverage for the accepted WKT literal domain.
 
 use geo_types::{Coord, Geometry, LineString, Point, Polygon};
 use proptest::prelude::*;

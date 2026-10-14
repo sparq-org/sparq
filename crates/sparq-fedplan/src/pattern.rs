@@ -5,7 +5,7 @@
 //! self-contained one (an IRI/literal term or a named variable per position) rather
 //! than the engine's full algebra term — this slice plans over descriptors, never over
 //! a live `Graph`, and pulling in the engine's term type would couple the lean planner
-//! to the execution stack. [OPUS-4.8] sq-a35t.
+//! to the execution stack. sq-a35t.
 
 /// A query variable, identified by name (without the leading `?`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

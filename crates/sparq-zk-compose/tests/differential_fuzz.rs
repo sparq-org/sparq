@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-61g: differential prove → verify → compare-to-cleartext fuzzer.
 //!
 //! For each random iteration the fuzzer:
@@ -126,7 +126,7 @@ struct FuzzCase {
 /// circuit's `digits: [u8; D]` witness requires the operand's decimal digit
 /// count to EXACTLY equal a compiled `D` (and forbids a leading zero for D>1),
 /// so an operand is provable iff its digit count == a compiled `D`. The compiled
-/// range is now the contiguous 1..=4 ([OPUS-4.8] sq-wto added the `d=3` member
+/// range is now the contiguous 1..=4 (sq-wto added the `d=3` member
 /// that closes the old gap — a 3-digit operand used to derive an unprovable
 /// `d=4`); 5..=19 digit operands still have NO member and `build_filter_int`
 /// returns `None` (a CLEAN error, never a silently-unprovable d — that is exactly
@@ -140,7 +140,7 @@ fn value_with_digits(rng: &mut Rng, d: u32) -> u64 {
     match d {
         1 => rng.below(10),                       // 0..=9
         2 => 10 + rng.below(90),                  // 10..=99
-        3 => 100 + rng.below(900),                // 100..=999 ([OPUS-4.8] sq-wto)
+        3 => 100 + rng.below(900),                // 100..=999 (sq-wto)
         4 => 1000 + rng.below(9000),              // 1000..=9999
         _ => unreachable!("only compiled buckets"),
     }
@@ -452,7 +452,7 @@ fn differential_fuzz_full_prove() {
 
 // --- sq-wto: the FILTER digit-bucket completeness fix --------------------------
 //
-// [OPUS-4.8] sq-wto. The bug the differential fuzzer surfaced: `build_filter_int`
+// sq-wto. The bug the differential fuzzer surfaced: `build_filter_int`
 // derived the `filter_int_d{D}` member from the operand's decimal DIGIT COUNT via
 // `smallest_bucket(.., digits)` (smallest compiled `D >= digits`), but the circuit
 // requires the digit count to EXACTLY equal `D`. So a 3-digit operand derived

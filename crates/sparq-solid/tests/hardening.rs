@@ -90,7 +90,7 @@ fn reserved_session_values_fail_closed() {
 }
 
 /// End-to-end sanity after hardening: the normal path still works.
-// [OPUS-4.8] sq-gq28y (issue #1546): probes via an explicit `GRAPH ?g` pattern (feature-
+// sq-gq28y (issue #1546): probes via an explicit `GRAPH ?g` pattern (feature-
 // agnostic under the empty-default flip — a single-triple bare pattern under the old
 // union-always default was exactly this) so alice's authorized-union count (599) is asserted
 // on the default (spec-conformant) build.

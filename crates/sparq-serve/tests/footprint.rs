@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-fggn) Behavioural tests for the conservative write-footprint
+//! (sq-fggn) Behavioural tests for the conservative write-footprint
 //! analysis (`Footprint` / `TargetGraph`) that drives commutativity batching
 //! under [`CommitGranularity::CommuteGroup`](sparq_serve::CommitGranularity).
 //!

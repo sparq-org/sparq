@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-kf56o: exercise all five wrapper proposals through one live graph.
+// sq-kf56o: exercise all five wrapper proposals through one live graph.
 #![cfg(all(
     feature = "proposed-distinct",
     feature = "proposed-cardinality",

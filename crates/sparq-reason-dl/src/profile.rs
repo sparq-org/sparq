@@ -1,6 +1,6 @@
 //! L2 — syntactic OWL 2 EL / QL / RL profile-membership checker.
 //!
-//! 🤖 SPARQ agent [SONNET-4.6]. Bead sq-pbz04.4.2. Implements a purely SYNTACTIC
+//! 🤖 SPARQ agent. Bead sq-pbz04.4.2. Implements a purely SYNTACTIC
 //! grammar walk over a [`crate::model::Ontology`] — terminating by construction, no
 //! semantic reasoning — to decide membership in the three principal tractable OWL 2
 //! profiles per the W3C OWL 2 Profiles specification:
@@ -190,7 +190,7 @@ fn el_axiom(axiom: &Axiom) -> Result<(), String> {
         // Ground role assertions are always EL (§2 ABox)
         Axiom::ObjectPropertyAssertion { .. } => Ok(()),
         // TransitiveObjectProperty is in the EL grammar (§2 supports transitive object
-        // properties, a special case of property chains). [GPT-5.6] sq-zfwzq
+        // properties, a special case of property chains). sq-zfwzq
         #[cfg(feature = "dl_transitive")]
         Axiom::TransitiveObjectProperty { .. } => Ok(()),
     }
@@ -288,7 +288,7 @@ fn ql_axiom(axiom: &Axiom) -> Result<(), String> {
         },
         Axiom::ObjectPropertyAssertion { .. } => Ok(()),
         // TransitiveObjectProperty is NOT in the QL grammar (§3 explicitly excludes
-        // transitive object properties). [GPT-5.6] sq-zfwzq
+        // transitive object properties). sq-zfwzq
         #[cfg(feature = "dl_transitive")]
         Axiom::TransitiveObjectProperty { .. } => Err(
             "TransitiveObjectProperty is not permitted in OWL 2 QL (QL §3)".into(),
@@ -380,7 +380,7 @@ fn ql_super_ce(ce: &ClassExpression, ctx: &str) -> Result<(), String> {
         // ObjectSomeValuesFrom(OPE, Class) is a valid QL super-CE (§3.2.3 superObjectSomeValuesFrom).
         // "Class" in the OWL 2 grammar (§5.1) is any IRI — it includes owl:Thing and owl:Nothing.
         // Only a complex CE filler (intersection, union, complement, etc.) is invalid here.
-        // [SONNET-4.6] sq-pbz04.4.2: corrected from "named-only" to "any Class (IRI)".
+        // sq-pbz04.4.2: corrected from "named-only" to "any Class (IRI)".
         ClassExpression::ObjectSomeValuesFrom(_, filler) => match filler.as_ref() {
             ClassExpression::Class(_) | ClassExpression::Thing | ClassExpression::Nothing => Ok(()),
             _ => Err(format!(
@@ -442,7 +442,7 @@ fn rl_axiom(axiom: &Axiom) -> Result<(), String> {
         Axiom::ClassAssertion { class, .. } => rl_super_ce(class, "ClassAssertion"),
         Axiom::ObjectPropertyAssertion { .. } => Ok(()),
         // TransitiveObjectProperty is in the RL grammar (§4 supports transitive object
-        // properties). [GPT-5.6] sq-zfwzq
+        // properties). sq-zfwzq
         #[cfg(feature = "dl_transitive")]
         Axiom::TransitiveObjectProperty { .. } => Ok(()),
     }

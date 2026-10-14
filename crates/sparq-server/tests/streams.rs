@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-2999l (gh-906): e2e integration tests for the OPT-IN CDC change-stream poll
+//! sq-2999l (gh-906): e2e integration tests for the OPT-IN CDC change-stream poll
 //! endpoint (`GET /streams`) in the Amazon-Neptune-Streams `GetRecords` shape, over the merged
 //! durable change-stream (sq-b4fns / #1223).
 //!
@@ -11,7 +11,7 @@
 //!   * the iterator types (`TRIM_HORIZON`, `AT_SEQUENCE_NUMBER`, `AFTER_SEQUENCE_NUMBER`, `LATEST`);
 //!   * `limit` paging + resume via the returned continuation token;
 //!   * fail-closed `400` on a sequence-anchored iterator type with no anchor;
-//!   * [OPUS-5] (sq-iz7ag) retention-awareness — a log whose oldest segments retention already
+//!   * (sq-iz7ag) retention-awareness — a log whose oldest segments retention already
 //!     dropped still replays under `TRIM_HORIZON` (from the horizon, never a `500`), and an
 //!     `at`/`after` offset below the horizon is a `410` naming where to resume;
 //!   * the read-auth gate (a poll is a READ);
@@ -372,7 +372,7 @@ async fn poll_is_gated_by_read_auth() {
 }
 
 // ---------------------------------------------------------------------------
-// [FABLE-5] (gh-2436) POST /admin/change-stream/rebase — the operator resync of the RUNNING
+// (gh-2436) POST /admin/change-stream/rebase — the operator resync of the RUNNING
 // server's tracked log (an honest gap record; the recorder never stops).
 // ---------------------------------------------------------------------------
 
@@ -552,7 +552,7 @@ async fn recorded_changes_are_durable_on_disk() {
 }
 
 // ---------------------------------------------------------------------------
-// [GPT-5.6] (sq-kqofk) Concurrency: concurrent updates may share a group-committed generation;
+// (sq-kqofk) Concurrency: concurrent updates may share a group-committed generation;
 // the writer-thread hook records one gapless, monotonic stream record per published generation.
 // ---------------------------------------------------------------------------
 
@@ -624,7 +624,7 @@ async fn concurrent_updates_record_a_gapless_monotonic_stream() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-5] (sq-iz7ag) Retention-aware TRIM_HORIZON — a log whose oldest segments retention
+// (sq-iz7ag) Retention-aware TRIM_HORIZON — a log whose oldest segments retention
 // already dropped (sq-n9s4d) still replays, and a dropped offset is a caller-recoverable 410.
 // ---------------------------------------------------------------------------
 

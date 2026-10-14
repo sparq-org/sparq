@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-dwb5: batched / vector secret sharing — generalise the
+// sq-dwb5: batched / vector secret sharing — generalise the
 // single-scalar `share_private_input` to a holder sharing a `Vec<Fp>` (per-row
 // hidden values / a salary vector / per-graph commitments) under a DOCUMENTED
 // row-binding, so the secure aggregate and the hidden-value join can range over
@@ -145,7 +145,7 @@ impl BatchedShares {
     }
 }
 
-/// [OPUS-4.8] sq-dwb5 — the **multi-row secure aggregate**: element-wise
+/// sq-dwb5 — the **multi-row secure aggregate**: element-wise
 /// cumulative sum across several holders' POSITIONAL batches. This is the Shamir
 /// zero-round linear fold ([`add_shares`]) lifted to a vector — row `i` of the
 /// result is the sum of row `i` across every holder's batch — so the secure

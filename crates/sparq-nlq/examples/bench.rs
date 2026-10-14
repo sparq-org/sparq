@@ -1,4 +1,4 @@
-//! sparq-nlq offline NL→SPARQL micro-benchmark. [OPUS-4.8] sq-ncvq.12. Run:
+//! sparq-nlq offline NL→SPARQL micro-benchmark. sq-ncvq.12. Run:
 //!     cargo run -p sparq-nlq --example bench --release
 //!
 //! Measures the crate's deterministic, OFFLINE core operations — NO network, NO

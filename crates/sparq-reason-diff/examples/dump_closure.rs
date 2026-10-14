@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-xg6uu — corpus triage helper: print sparq-reason's NORMALIZED
+//! sq-xg6uu — corpus triage helper: print sparq-reason's NORMALIZED
 //! canonical OWL 2 RL closure for one N-Triples file (the exact left-hand side the
 //! differential test compares), so a divergence can be re-derived by eye while
 //! updating the corpus or the disposition ledger.

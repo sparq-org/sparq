@@ -1,4 +1,4 @@
-//! Regression: `ORDER BY … LIMIT 0` must not panic. [OPUS-4.8] (sq-7d3dj.30.3)
+//! Regression: `ORDER BY … LIMIT 0` must not panic. (sq-7d3dj.30.3)
 //!
 //! The bounded-select top-k ORDER BY path (bead sq-7d3dj.30.2) computes a row
 //! budget `k = OFFSET + LIMIT` and, for `k` within the threshold, runs

@@ -1,11 +1,11 @@
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
 
 mod incremental;
-// [FABLE-5] sq-pbz04.1.2 (epic sq-pbz04.1) — the opt-in substrate seam-3 adoption: the
+// sq-pbz04.1.2 (epic sq-pbz04.1) — the opt-in substrate seam-3 adoption: the
 // SHARED SPARQL term total order (`sparq_substrate::compare`) implemented for the
 // reasoner's dictionary-id term representation, so entailed-solution ordering is
 // parity-identical to the engine's ORDER BY. Behind the `substrate-compare` feature; when
@@ -14,11 +14,11 @@ mod incremental;
 pub mod compare;
 #[cfg(feature = "substrate-join")]
 pub(crate) mod substrate_join;
-// [SONNET-4.6] sq-qonbz.2 — delta-aware adjacency tables for the OWL-RL semi-naive fixpoint,
+// sq-qonbz.2 — delta-aware adjacency tables for the OWL-RL semi-naive fixpoint,
 // gated behind `substrate-join` (same feature, no new dep).
 #[cfg(feature = "substrate-join")]
 mod owl_delta_adj;
-// [FABLE-5] sq-6tykl.3 (epic sq-6tykl) — opt-in STRATIFIED DATALOG rules (RDFox-parity
+// sq-6tykl.3 (epic sq-6tykl) — opt-in STRATIFIED DATALOG rules (RDFox-parity
 // track): a small native rule dialect with NOT (negation as failure) + AGGREGATE
 // (COUNT) atoms, a stratification checker, and a non-incremental per-stratum
 // evaluator on the shared substrate join kernels. Behind the `datalog` feature; when
@@ -40,17 +40,17 @@ mod rdfs;
 // base stays finite (termination argument in the module docs). Behind the
 // `quoted-triples` feature; when off the whole module is cfg'd out (the lean-core
 // posture, like `dtype` / `datalog`) and `Profile::OwlRl` closures are byte-identical
-// to before this module existed. [FABLE-5] sq-afun3 (second increment): `ReifyMode` —
+// to before this module existed. sq-afun3 (second increment): `ReifyMode` —
 // `materialize_owl_rl_reify(…, ReifyMode::DestructureOnly)` is the STRICT-OPACITY
 // variant (reif-dtr only; inference never mints a triple term).
 #[cfg(feature = "quoted-triples")]
 mod reify;
-// [OPUS-4.8] sq-rh4gu (epic sq-pbz04) — the opt-in RIF-Core (monotone Horn) rule
+// sq-rh4gu (epic sq-pbz04) — the opt-in RIF-Core (monotone Horn) rule
 // front-end over the N3 chainer. Behind the `rif-core` feature; when off the whole
 // module is cfg'd out (the lean-core posture, like `dtype` / `explain`).
 #[cfg(feature = "rif-core")]
 pub mod rif;
-// [SONNET-4.6] sq-pbz04.5.3 — OPT-IN RIF/XML importer: parse the W3C RIF-Core
+// sq-pbz04.5.3 — OPT-IN RIF/XML importer: parse the W3C RIF-Core
 // XML presentation syntax into `rif::Document` with Or-split / Exists-flatten
 // desugaring and a fail-closed taxonomy. Requires the `rif-core` feature (wired by
 // the `rif-xml` feature below). When off, zero rif_xml code is compiled.
@@ -96,7 +96,7 @@ pub enum Profile {
     /// datatype-typing rule under a recognized datatype map, with CORRECT TYPED
     /// (value-space) literal equality — `"1"^^xsd:integer` is the SAME value as
     /// `"1.0"^^xsd:decimal`. OPT-IN, behind the `d-entail` feature; see the
-    /// [`dtype`] module. [OPUS-4.8] sq-e5atd. (`materialize` uses the conservative
+    /// [`dtype`] module. sq-e5atd. (`materialize` uses the conservative
     /// STANDARD datatype map for this profile; for a custom map call
     /// [`dtype::materialize_d`] with a [`dtype::Recognized`] directly.)
     #[cfg(feature = "d-entail")]

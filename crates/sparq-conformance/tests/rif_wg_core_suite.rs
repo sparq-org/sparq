@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-pbz04.5.5 (epic sq-pbz04.5) — the **W3C RIF Working Group test-suite
+//! sq-pbz04.5.5 (epic sq-pbz04.5) — the **W3C RIF Working Group test-suite
 //! conformance arm**, Core dialect, driven end-to-end through the REAL path:
 //! RIF/XML `import` → `validate` → `closure` → conclusion oracle. Wired as a
 //! crate-local `cargo test` + a pinned pass-count FLOOR that may only RISE
@@ -85,9 +85,9 @@
 //!   `UnrecognizedElement`. `ImportRejection` tests remain SKIPs (blanket
 //!   import-refusal).
 //!
-//! [SONNET-4.6] sq-n7y15: floor raised 0 → 3. [SONNET-4.6] sq-jsgyn: multi-slot frame
+//! sq-n7y15: floor raised 0 → 3. sq-jsgyn: multi-slot frame
 //! import added, leaving the floor RISE-READY pending a re-run against the fetched
-//! archive. [SONNET-4.6] #3469: that re-run was performed — floor raised 3 → the
+//! archive. #3469: that re-run was performed — floor raised 3 → the
 //! MEASURED 5. Remaining blockers: arity-3+ atoms, Import-closure, local constants. The
 //! honest denominator with a legible skip taxonomy is more informative than an inflated
 //! count from vacuous rejections.
@@ -105,7 +105,7 @@
 //! stays green. `RIF_WG_CORE_FLOOR` is read TEXTUALLY by `tests/scoreboard_floors.rs`,
 //! so the central scoreboard's mirrored value can never silently drift.
 
-// [FABLE-5] When the lane feature is OFF the runner is a single self-SKIP test so the
+// When the lane feature is OFF the runner is a single self-SKIP test so the
 // default + `--workspace` builds neither link the RIF/XML importer nor go red on a
 // fresh checkout. (cfg gate, not a runtime branch — zero RIF code compiles in the
 // default state, the lean-core invariant.)
@@ -131,11 +131,11 @@ mod gated {
     /// `tests/scoreboard_floors.rs`. It may only RISE — never lower it (raise as the
     /// RIF/XML importer's Core coverage grows and real W3C tests graduate from SKIP to
     /// PASS). A STANDARDS-suite result (family "W3C RIF"), NOT a self-asserting
-    /// expressivity ratchet. [FABLE-5] sq-pbz04.5.5
-    // [SONNET-4.6] sq-n7y15: raised from 0 to 3 by positional-Atom import.
-    // [SONNET-4.6] sq-jsgyn: multi-slot frame import added, leaving the floor rise-ready
+    /// expressivity ratchet. sq-pbz04.5.5
+    // sq-n7y15: raised from 0 to 3 by positional-Atom import.
+    // sq-jsgyn: multi-slot frame import added, leaving the floor rise-ready
     // pending a re-measure against the (non-vendored) fetched archive.
-    // [SONNET-4.6] #3469: re-measured. With the archive fetched via
+    // #3469: re-measured. With the archive fetched via
     // scripts/fetch-inference-suites.sh and the lane run with `--features rif-wg-core`,
     // BOTH this lane and bench/rif/run.sh report 5 passes, 0 fails, 41 skips of 46 —
     // so the floor rises 3 -> the MEASURED 5. The 5 are PositiveEntailment {Frames,
@@ -212,7 +212,7 @@ mod gated {
     fn skip_bucket(e: &ImportError) -> &'static str {
         match e {
             ImportError::ImportDirective { .. } => "skip:imports",
-            // [SONNET-4.6] sq-wbql1: InconsistentImport is a genuine detection; when it
+            // sq-wbql1: InconsistentImport is a genuine detection; when it
             // reaches the skip path (e.g. as an un-importable premise in a positive test)
             // it lands in the "skip:imports" bucket — same family as ImportDirective, since
             // both arise from the <Import> directive path.
@@ -223,7 +223,7 @@ mod gated {
             // rif:local constant, an out-of-subset construct), or a validation failure
             // that is NOT a modelled Core violation are all "the condition/rule shape is
             // outside what the importer models" — the condition-shape bucket.
-            // Note: multi-slot frames no longer land here (sq-jsgyn [SONNET-4.6]):
+            // Note: multi-slot frames no longer land here (sq-jsgyn):
             // they now import successfully and desugar to per-slot conjunction.
             ImportError::NamedArgUniterm { .. }
             | ImportError::UnrecognizedElement { .. }
@@ -601,7 +601,7 @@ mod gated {
     ///   `BuiltinInHead`, `EqualInConclusion` (`is_genuine_core_violation`). A
     ///   `NegativeSyntaxTest` (e.g. `Core_NonSafeness`) targets exactly a
     ///   range-restriction violation, so detecting it is a genuine pass.
-    /// - [SONNET-4.6] sq-wbql1: An `InconsistentImport` — the imports-closure
+    /// - sq-wbql1: An `InconsistentImport` — the imports-closure
     ///   consistency check detected the specific invalidity the ImportRejectionTest
     ///   targets (a non-Core profile, or combined rules that fail validation). This is
     ///   a NON-VACUOUS detection: the importer examined the import and found it
@@ -644,7 +644,7 @@ mod gated {
                 // (a) A ValidationFailed carrying a Core violation the checker DETECTS
                 //     (safety / syntactic) — NOT an unsupported-capability fail-close and
                 //     NOT an unsupported-construct rejection.
-                // (b) [SONNET-4.6] sq-wbql1: An InconsistentImport — the imports-closure
+                // (b) sq-wbql1: An InconsistentImport — the imports-closure
                 //     consistency check detected the specific invalidity the test targets
                 //     (a non-Core profile, or combined rules failing validation). This is a
                 //     NON-VACUOUS detection: the importer examined the import content, not
@@ -654,7 +654,7 @@ mod gated {
                 // profile is a genuine detection via (b).
                 let genuinely_modelled = match &e {
                     ImportError::ValidationFailed(re) => is_genuine_core_violation(re),
-                    // [SONNET-4.6] sq-wbql1: InconsistentImport is a genuine detection.
+                    // sq-wbql1: InconsistentImport is a genuine detection.
                     ImportError::InconsistentImport { .. } => true,
                     _ => false,
                 };
@@ -764,7 +764,7 @@ mod gated {
             return;
         }
 
-        // [FABLE-5] The CI ratchet greps this exact `TOTAL rif-wg-core` line (pass count
+        // The CI ratchet greps this exact `TOTAL rif-wg-core` line (pass count
         // in field $3), mirroring the D-entailment lane's `TOTAL <cat>` shape. Positional
         // `println!` args (not inline `{pass}`) per the CodeQL `rust/unused-variable`
         // false-positive guard in the shared agent contract.
@@ -799,8 +799,8 @@ mod gated {
             "RIF WG Core lane has genuine wrong answers on the supported subset: {:?}",
             fails
         );
-        // [FABLE-5] `pass >= RIF_WG_CORE_FLOOR` is the RATCHET check (the floor may only
-        // RISE). [SONNET-4.6] #3469: with the floor at the MEASURED 5 the comparison is
+        // `pass >= RIF_WG_CORE_FLOOR` is the RATCHET check (the floor may only
+        // RISE). #3469: with the floor at the MEASURED 5 the comparison is
         // no longer trivially true against the `usize` minimum, so the former
         // `#[allow(clippy::absurd_extreme_comparisons)]` is gone — the check now bites
         // for real.
@@ -963,7 +963,7 @@ mod gated {
             }),
             "skip:imports"
         );
-        // [SONNET-4.6] sq-wbql1: InconsistentImport lands in "skip:imports" when it
+        // sq-wbql1: InconsistentImport lands in "skip:imports" when it
         // reaches the skip path (e.g. as a premise in a positive test). In a reject-kind
         // test it is a genuine detection → Outcome::Pass, not skip.
         assert_eq!(
@@ -1144,7 +1144,7 @@ mod gated {
         }));
     }
 
-    // ---- [SONNET-4.6] sq-wbql1: imports-closure consistency check unit tests ----
+    // ---- sq-wbql1: imports-closure consistency check unit tests ----
 
     /// POSITIVE: a CONSISTENT import (valid RIF-Core payload, resolvable, Core-compatible
     /// profile) is ACCEPTED by `import_with_closure`. Drives the REAL path through the
@@ -1249,7 +1249,7 @@ mod gated {
         let _ = outcome; // outcome is Skip:imports here — confirmed by inspection
     }
 
-    // ---- [SONNET-4.6] sq-paxr0: positional-Atom conclusion path unit tests ----
+    // ---- sq-paxr0: positional-Atom conclusion path unit tests ----
     //
     // These tests pin the end-to-end positional-Atom conclusion path:
     //   wrap_conclusion(<Atom …>) → import_or_skip → conclusion_ground_triples → entailment.

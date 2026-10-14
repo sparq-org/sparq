@@ -3,7 +3,7 @@
 //! evaluates. See [`EvalMode`] for the four strategies and the crate README
 //! for the measured throughput of each.
 //!
-//! [FABLE-5] (sq-2n1q3.4) The `Delta`/`Snapshot` consecutive-window diff (the
+//! (sq-2n1q3.4) The `Delta`/`Snapshot` consecutive-window diff (the
 //! ISTREAM/DSTREAM-shaped slide) runs on the shared eval substrate: each window
 //! is interned into a persistent diff dictionary and diffed as `Id = u32`
 //! id-rows via `sparq_substrate::join::delta::DeltaTable` — see `WindowDiff`
@@ -37,7 +37,7 @@ pub enum EvalMode {
     /// hashing/allocation from the window loop. The benchmark winner across
     /// every scenario; the default.
     ///
-    /// [OPUS-4.8] The dictionary no longer grows monotonically with the
+    /// The dictionary no longer grows monotonically with the
     /// stream's vocabulary. Liveness is exact: a term is reachable iff some
     /// live window (a buffered/open window, the count ring, or a closed window
     /// not yet taken) still references it; terms that have aged out of every
@@ -53,7 +53,7 @@ pub enum EvalMode {
     PersistentDict,
     /// ONE live graph maintained by `Graph::apply_delta(inserts, deletes)` per
     /// slide — the set-semantic diff between consecutive windows, computed on
-    /// the shared eval substrate ([FABLE-5] sq-2n1q3.4: each window is interned
+    /// the shared eval substrate (sq-2n1q3.4: each window is interned
     /// into a persistent diff dictionary and diffed as `Id = u32` id-rows
     /// against the previous window's persisted
     /// `sparq_substrate::join::delta::DeltaTable`, the semi-naive Δ-vs-full
@@ -68,7 +68,7 @@ pub enum EvalMode {
     /// does the separate diff dictionary, which tracks the same all-time
     /// vocabulary).
     Delta,
-    /// [OPUS-4.8] (sq-j39) The TRUE overlay-snapshot mode: identical per-slide
+    /// (sq-j39) The TRUE overlay-snapshot mode: identical per-slide
     /// maintenance to [`Delta`](Self::Delta) — ONE live mutable graph evolved by
     /// `Graph::apply_delta` over the set-semantic diff between consecutive
     /// windows — but each closed window is evaluated over a cheap, IMMUTABLE
@@ -98,7 +98,7 @@ pub enum EvalMode {
 /// compact on every slide).
 const MIN_COMPACT_CHURN: usize = 256;
 
-/// [OPUS-4.8] Persistent-dictionary compaction trigger. After each batch of
+/// Persistent-dictionary compaction trigger. After each batch of
 /// closed windows, the dictionary holds `live + dead` distinct terms, where
 /// `live` are still referenced by some window and `dead` have aged out. A
 /// compaction rebuild is O(live + dead) (it walks the live payloads and
@@ -117,7 +117,7 @@ const MIN_DEAD_TERMS: usize = 1024;
 const DEAD_RATIO_NUM: usize = 1;
 const DEAD_RATIO_DEN: usize = 2;
 
-// [OPUS-4.8] The PersistentDict variant holds the live `Dict` inline — that IS the
+// The PersistentDict variant holds the live `Dict` inline — that IS the
 // persistent-dictionary mode (the dict lives across windows). Boxing it to equalise
 // variant sizes would add a hot-path indirection per tick for no real benefit: there
 // is exactly ONE Materializer per ContinuousQuery (never a large collection), so the
@@ -134,7 +134,7 @@ enum Materializer {
         /// moved back out of `graph.dict` after evaluation).
         dict: Option<Dict>,
         window: WindowedStream<[Id; 3]>,
-        /// [OPUS-4.8] `dict.len()` (distinct non-inline terms) at the last
+        /// `dict.len()` (distinct non-inline terms) at the last
         /// compaction. The cheap compaction trigger: once `dict.len()` has
         /// grown by at least [`MIN_DEAD_TERMS`] beyond this, enough terms have
         /// been interned since the last rebuild that a liveness scan is worth
@@ -148,7 +148,7 @@ enum Materializer {
         /// Boxed: a `Graph` (dictionary + indexes) is much larger than the
         /// other variants' state.
         graph: Box<Graph>,
-        /// [FABLE-5] (sq-2n1q3.4) The persistent id-level diff state — the diff
+        /// (sq-2n1q3.4) The persistent id-level diff state — the diff
         /// dictionary, the previous window's deduplicated id-rows + terms, and
         /// the substrate `DeltaTable` build side (the diff base for the next
         /// slide).
@@ -156,7 +156,7 @@ enum Materializer {
         /// Inserts + deletes applied since the last compaction.
         churn: usize,
     },
-    /// [OPUS-4.8] (sq-j39) Same live-graph maintenance as `Delta`; differs only
+    /// (sq-j39) Same live-graph maintenance as `Delta`; differs only
     /// in that each closed window is evaluated over `graph.snapshot()` (an O(1)
     /// immutable point-in-time view) rather than `&*graph`.
     Snapshot {
@@ -221,7 +221,7 @@ impl WindowEval {
         }
     }
 
-    /// [OPUS-4.8] The number of distinct non-inline terms currently held by the
+    /// The number of distinct non-inline terms currently held by the
     /// persistent dictionary, or `None` for the modes without a lifetime
     /// dictionary ([`EvalMode::Rebuild`] builds and drops one per window;
     /// [`EvalMode::Delta`] keeps the live graph's dictionary, not exposed here).
@@ -278,7 +278,7 @@ impl WindowEval {
                     *dict = Some(graph.dict);
                     r?;
                 }
-                // [OPUS-4.8] Reclaim the dictionary entries of terms that have
+                // Reclaim the dictionary entries of terms that have
                 // aged out of every live window. Safe HERE: every closed window
                 // for this call has been evaluated and dropped (the `take`
                 // vector is gone), no `Graph` borrows the dictionary, and the
@@ -300,7 +300,7 @@ impl WindowEval {
             Materializer::Snapshot { window, graph, diff, churn } => {
                 for w in take(window, flush) {
                     apply_window_delta(&w, graph, diff, churn)?;
-                    // [OPUS-4.8] (sq-j39) The true overlay-snapshot step: evaluate
+                    // (sq-j39) The true overlay-snapshot step: evaluate
                     // this window over a cheap O(overlay) IMMUTABLE point-in-time
                     // view of the live graph, not a borrow into it. The snapshot
                     // `Arc`-shares the compacted base and copies only the small
@@ -316,7 +316,7 @@ impl WindowEval {
         Ok(())
     }
 
-    /// [OPUS-4.8] Persistent-dictionary compaction: rebuild the lifetime
+    /// Persistent-dictionary compaction: rebuild the lifetime
     /// dictionary from ONLY the terms still referenced by a live window, and
     /// remap the live window payloads onto the fresh dense ids — bounding the
     /// dictionary at the live vocabulary instead of the all-time vocabulary.
@@ -412,7 +412,7 @@ fn remap_id(id: Id, remap: &FxHashMap<Id, Id>) -> Id {
     }
 }
 
-/// [FABLE-5] (sq-2n1q3.4) The persistent id-level window-diff state shared by
+/// (sq-2n1q3.4) The persistent id-level window-diff state shared by
 /// `EvalMode::Delta` and `EvalMode::Snapshot` — the consecutive-window set-diff
 /// (the ISTREAM/DSTREAM shape) computed on the shared eval substrate
 /// (`sparq_substrate::join::delta::DeltaTable` over `sparq_substrate::rows::Row`)
@@ -497,7 +497,7 @@ impl WindowDiff {
     }
 }
 
-/// [OPUS-4.8] (sq-j39) One slide of the live-graph maintenance shared by
+/// (sq-j39) One slide of the live-graph maintenance shared by
 /// [`EvalMode::Delta`] and [`EvalMode::Snapshot`]: diff the closed window `w`
 /// against the previous window under RDF set semantics — a triple present at
 /// several timestamps counts once, so inserts/deletes are computed over the
@@ -508,7 +508,7 @@ impl WindowDiff {
 /// differ only in WHAT they then hand the engine (a live borrow vs an immutable
 /// snapshot).
 ///
-/// [FABLE-5] (sq-2n1q3.4) The diff itself runs on the shared eval substrate —
+/// (sq-2n1q3.4) The diff itself runs on the shared eval substrate —
 /// the semi-naive Δ-vs-full probe shape of
 /// `sparq_substrate::join::delta::DeltaTable` over `Id = u32` id-rows; see
 /// `WindowDiff` for the exact-equivalence argument.
@@ -599,7 +599,7 @@ mod tests {
         ]
     }
 
-    /// [OPUS-4.8] (sq-j39) The graph `EvalMode::Snapshot` hands the engine per
+    /// (sq-j39) The graph `EvalMode::Snapshot` hands the engine per
     /// closed window is a TRUE point-in-time IMMUTABLE view of the live master,
     /// logically independent of every later slide — that is the whole point of
     /// the mode (vs `Delta`'s live borrow). Test it on the REAL internal graph:
@@ -653,7 +653,7 @@ mod tests {
         assert!(counts.windows(2).all(|w| w[0] < w[1]), "windows strictly grow, so views must differ");
     }
 
-    /// [FABLE-5] (sq-2n1q3.4) Per-window solutions for one mode, sorted
+    /// (sq-2n1q3.4) Per-window solutions for one mode, sorted
     /// order-insensitively (ties between value-equal literals may order
     /// differently across materialisation strategies).
     fn windows_of(mode: EvalMode, spec: WindowSpec, pushes: &[([Term; 3], u64)]) -> Vec<Vec<String>> {
@@ -674,7 +674,7 @@ mod tests {
         out
     }
 
-    /// [FABLE-5] (sq-2n1q3.4) The substrate-backed id-level diff must stay
+    /// (sq-2n1q3.4) The substrate-backed id-level diff must stay
     /// LEXICAL, exactly like the term-level hash-set diff it replaced:
     /// `"42"^^xsd:integer` and `"042"^^xsd:integer` are value-equal but
     /// lexically DISTINCT terms (only the canonical form takes an inline id; a
@@ -714,7 +714,7 @@ mod tests {
         );
     }
 
-    /// [FABLE-5] (sq-2n1q3.4) The `DeltaTable`-backed slide end to end:
+    /// (sq-2n1q3.4) The `DeltaTable`-backed slide end to end:
     /// duplicate timestamps dedup to one triple (RDF set semantics via the
     /// window's own build table), a partially-overlapping next window diffs to
     /// exactly the changed triples, an empty window deletes everything, and the

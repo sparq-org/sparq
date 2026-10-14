@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-nuok: adversarial-share negative suite + a 'no fake crypto'
+// sq-nuok: adversarial-share negative suite + a 'no fake crypto'
 // stub gate for sparq-mpc. Written while Fable unavailable — re-review on return.
 //! Adversarial / robustness negative suite for `sparq-mpc` (sq-nuok).
 //!
@@ -68,7 +68,7 @@ mod tamper {
     /// faulty party feeding a wrong share). `delta != 0` guarantees the value
     /// actually changes in the field.
     fn corrupt_one(shares: &mut [Share], idx: usize, delta: u64) {
-        // [OPUS-4.8] (sq-qmth) stable-1.96 clippy `manual_is_multiple_of`.
+        // (sq-qmth) stable-1.96 clippy `manual_is_multiple_of`.
         let nonzero = if delta.is_multiple_of(P) { 1 } else { delta };
         shares[idx].y = shares[idx].y.add(fp(nonzero));
     }
@@ -370,7 +370,7 @@ mod tamper {
         );
     }
 
-    /// [OPUS-4.8] **END-TO-END guarantee (D) at the production API boundary
+    /// **END-TO-END guarantee (D) at the production API boundary
     /// (sq-uu0u).** The tests above exercise the RS checker via `reconstruct` /
     /// `reconstruct_degree`. This one drives the WHOLE public [`MpcBackend`]
     /// pipeline a federation actually calls — `run_secure` then
@@ -630,7 +630,7 @@ mod robust_props {
     }
 
     // =================================================================
-    // [OPUS-4.8] sq-7q9i (WI-2): degree-2t open property tests. The
+    // sq-7q9i (WI-2): degree-2t open property tests. The
     // equality/mult path opens m = d·r at degree 2t; these pin the
     // n>2t+1 (detect/correct) vs n=2t+1 (no detection) boundary at the
     // ACTUAL product degree, mirroring the degree-t props above.
@@ -641,7 +641,7 @@ mod robust_props {
     /// coefficients are drawn from the deterministic test RNG so the resulting
     /// codeword genuinely has the requested degree.
     ///
-    /// [OPUS-4.8] sq-7q9i (WI-2): the LEADING (highest-index) coefficient is
+    /// sq-7q9i (WI-2): the LEADING (highest-index) coefficient is
     /// forced non-zero by rejection sampling. If it were left as a raw RNG draw
     /// it could be 0 with probability ~1/P, silently dropping the polynomial
     /// below the requested `degree`; that would hand the degree-`2t` boundary /
@@ -1262,7 +1262,7 @@ mod no_fake_crypto {
     impl MpcBackend for StubBackend {
         type Share = ();
         fn info(&self) -> BackendInfo {
-            // [OPUS-4.8] sq-mq8q — a dishonest-majority, semi-honest-only stub
+            // sq-mq8q — a dishonest-majority, semi-honest-only stub
             // built from the three-axis descriptor. `BackendInfo::new` derives the
             // back-compat `trust_model = DishonestMajority` / `malicious_security =
             // SemiHonestOnly` projection. Under a dishonest majority the ONLY
@@ -1530,7 +1530,7 @@ mod no_fake_crypto {
         );
     }
 
-    // === ROW 6b [OPUS-4.8] sq-mq8q: PER-OPERATOR security reporting. =========
+    // === ROW 6b sq-mq8q: PER-OPERATOR security reporting. =========
     // The degree-`t` linear aggregate and the degree-`2t` equality open deliver
     // DIFFERENT guarantees for the SAME backend `(n, t)`. One backend-level bit
     // would lie: at n=3,t=1 the aggregate is detect-and-abort (one redundant
@@ -1608,7 +1608,7 @@ mod no_fake_crypto {
         );
     }
 
-    // === ROW 6c [OPUS-4.8] sq-mq8q: the dishonest-majority stub cannot advertise
+    // === ROW 6c sq-mq8q: the dishonest-majority stub cannot advertise
     // a Cleve-forbidden guarantee. The three-axis descriptor it returns has a
     // DishonestMajority threshold, under which fairness/GOD are unconstructible —
     // so its honest output guarantee can only be Abort. ======================

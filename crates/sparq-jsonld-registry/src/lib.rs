@@ -10,7 +10,7 @@ use sparq_jsonld::{DocumentLoader, JsonLdError, NoopLoader, RemoteDocument};
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RegistryLoader;
 
-// [GPT-5.6] sq-ypu93 — byte-for-byte embedded contexts keep lookup deterministic and
+// sq-ypu93 — byte-for-byte embedded contexts keep lookup deterministic and
 // independent of the filesystem and network at runtime.
 const CONTEXTS: &[(&str, &str)] = &[
     (

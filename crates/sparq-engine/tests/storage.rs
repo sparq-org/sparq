@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-6vshe.9 — storage integration-test harness.
+//! sq-6vshe.9 — storage integration-test harness.
 //! Consolidates compressed-build, dict, persistence, fork, and flat-read tests
 //! into a single link unit.
 //!

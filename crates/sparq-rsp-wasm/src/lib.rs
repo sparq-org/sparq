@@ -1,5 +1,5 @@
 //! sparq-rsp-wasm: the sparq windowed **RSP-QL stream processor** compiled to
-//! WebAssembly — the tier-b "W-rsp" bundle ([OPUS-4.8] sq-nzcb).
+//! WebAssembly — the tier-b "W-rsp" bundle (sq-nzcb).
 //!
 //! This is a SEPARATE, lazy-loaded bundle from the lean `sparq-wasm` triplestore bundle.
 //! It exposes `sparq-rsp`'s deterministic windowed continuous SPARQL — sliding/tumbling
@@ -32,7 +32,7 @@
 //! // [{ "start": 0, "end": 60, "results": { "head": {...}, "results": {...} } }]
 //! const tail = JSON.parse(q.flush()); // end-of-stream: close remaining windows
 //! ```
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-nzcb: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-nzcb: crate has zero `unsafe`
 
 use oxrdf::Term;
 use sparq_core::Graph;
@@ -44,7 +44,7 @@ use wasm_bindgen::prelude::*;
 // PANICS off-wasm — so every `JsError` is constructed only inside a `#[wasm_bindgen]` method
 // (which never runs natively), exactly the discipline the sibling wasm bundles follow.
 
-/// [OPUS-4.8] sq-734a — converts a JS-supplied numeric argument (`range` / `step` /
+/// sq-734a — converts a JS-supplied numeric argument (`range` / `step` /
 /// `max_delay` / `ts`) to the `u64` the underlying `sparq-rsp` window API uses.
 ///
 /// The wasm-boundary parameters are typed `f64` — a plain JS `Number` — NOT `u64`. A `u64`
@@ -179,7 +179,7 @@ impl Rsp {
     /// default), `"istream"` (rows added vs. the previous window) or `"dstream"` (rows
     /// removed).
     ///
-    /// `range` / `step` / `max_delay` are plain JS `Number`s ([OPUS-4.8] sq-734a). They are
+    /// `range` / `step` / `max_delay` are plain JS `Number`s (sq-734a). They are
     /// the integer logical-time unit the pushes use; each must be a whole number in
     /// `[0, 2^53-1]` (negative / fractional / NaN / too-large is a clean error). See
     /// `u64_arg` for why the boundary is `f64` and not `u64`.
@@ -216,7 +216,7 @@ impl Rsp {
     /// `"hi"@en`, `"v"^^<…#decimal>`, `_:b`. Returns the windows this push CLOSED — a JSON
     /// ARRAY of `{"start","end","results"}` objects, oldest first, possibly empty (`[]`).
     ///
-    /// `ts` is a plain JS `Number` ([OPUS-4.8] sq-734a) — a whole logical timestamp in
+    /// `ts` is a plain JS `Number` (sq-734a) — a whole logical timestamp in
     /// `[0, 2^53-1]` (see `u64_arg`); a fractional / negative / too-large `ts` is a clean
     /// error.
     ///
@@ -248,7 +248,7 @@ impl Rsp {
     /// closed) — the observability counter the page surfaces so a late push that lands in no
     /// window is visible rather than silently swallowed.
     ///
-    /// Returned as a JS `Number` ([OPUS-4.8] sq-734a) — symmetric with the `f64` inputs, so
+    /// Returned as a JS `Number` (sq-734a) — symmetric with the `f64` inputs, so
     /// the page reads it without a `BigInt`. The count is bounded by the number of pushes, so
     /// it stays within `Number`'s exact-integer range in every realistic stream.
     #[wasm_bindgen(js_name = lateDropped)]
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(windows_json(&[]), "[]");
     }
 
-    /// [OPUS-4.8] sq-734a — the `f64 → u64` boundary narrowing accepts the JS-`Number`
+    /// sq-734a — the `f64 → u64` boundary narrowing accepts the JS-`Number`
     /// values the streaming page sends (a whole `60.0`) and the boundary cases (`0`,
     /// `Number.MAX_SAFE_INTEGER`), and rejects fractional / negative / non-finite / too-large
     /// values cleanly. This is the regression guard for the `Cannot convert 60 to a BigInt`

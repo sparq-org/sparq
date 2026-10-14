@@ -12,7 +12,7 @@
 //!
 //! # Query surface (what crosses the wasm boundary)
 //!
-//! [OPUS-4.8] sq-0ptd (gh-54) — the read-replica / edge-cache tier audit. Every SPARQL
+//! sq-0ptd (gh-54) — the read-replica / edge-cache tier audit. Every SPARQL
 //! query *form* is exported: SELECT/ASK via [`Store::query`] / [`Store::ask`] (plus the
 //! streaming [`Store::query_cursor`] / [`Store::query_chunks`]) and **CONSTRUCT / DESCRIBE**
 //! via [`Store::query_quads`] / [`Store::query_quads_chunks`] (the constructed graph as
@@ -66,18 +66,18 @@
 //!
 //! See `README.md` (the "Browser memory bound" / persistence sections) for the operational
 //! detail; this audit is tracked as bead sq-0ptd / gh-54.
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use sparq_core::Graph;
 use wasm_bindgen::prelude::*;
 
-// [OPUS-4.8] sq-yqi1 (#162): the opt-in SHACL `Store::validate(...)` binding.
+// sq-yqi1 (#162): the opt-in SHACL `Store::validate(...)` binding.
 // Behind the non-default `shacl` feature so the standard bundle carries zero SHACL
 // code; the module adds a `#[wasm_bindgen] impl Store` method to the `Store` below.
 #[cfg(feature = "shacl")]
 mod shacl;
 
-// [OPUS-4.8] sq-fe1s: the opt-in `Store::serialize(format, …)` RDF-writer binding.
+// sq-fe1s: the opt-in `Store::serialize(format, …)` RDF-writer binding.
 // Behind the non-default `serialize-rdf` feature so the lean bundle carries zero
 // serializer code; the module adds a `#[wasm_bindgen] impl Store` method to the
 // `Store` below, calling straight through to `sparq-engine`'s pretty Turtle / TriG
@@ -85,7 +85,7 @@ mod shacl;
 #[cfg(feature = "serialize-rdf")]
 mod serialize;
 
-// [OPUS-4.8] sq-quly (#796): the opt-in `Store::parseShaclCompact(text, base?)`
+// sq-quly (#796): the opt-in `Store::parseShaclCompact(text, base?)`
 // SHACL-Compact-Syntax parse binding. Behind the non-default `scs` feature (which
 // implies `shacl` + `serialize-rdf`) so the lean bundle carries zero SCS/serializer
 // code; the module adds a `#[wasm_bindgen] impl Store` method that parses SCS into a
@@ -94,7 +94,7 @@ mod serialize;
 #[cfg(feature = "scs")]
 mod scs;
 
-// [SONNET-4.6] sq-q4apb (#2396): the opt-in hosted-web
+// sq-q4apb (#2396): the opt-in hosted-web
 // `Store.deriveForm(data, shapes, focus, format, optionsJson)` forms bridge.
 // Behind the non-default `forms` feature so the lean bundle carries zero
 // forms/serde code; the module adds a `#[wasm_bindgen] impl Store` method that
@@ -104,7 +104,7 @@ mod scs;
 #[cfg(feature = "forms")]
 mod forms;
 
-// [OPUS-4.8] sq-1dd5t (#1047): the opt-in RDFC-1.0 `canonicalizeNQuads(nquads)` free
+// sq-1dd5t (#1047): the opt-in RDFC-1.0 `canonicalizeNQuads(nquads)` free
 // function (the @sparq-org/sparq RDF/JS `Dataset` consumes it for isomorphism-aware
 // toCanonical / equals / contains). Behind the non-default `canon` feature so the lean
 // bundle carries zero canonicalization code; the module exports a `#[wasm_bindgen]` free
@@ -113,7 +113,7 @@ mod forms;
 #[cfg(feature = "canon")]
 mod canon;
 
-// [SONNET-4.6] sq-yz27r (#3251): the opt-in `Store.loadJsonLdWithContexts(text, contexts)`
+// sq-yz27r (#3251): the opt-in `Store.loadJsonLdWithContexts(text, contexts)`
 // binding — JSON-LD ingest for a document whose `@context` is given by URL (a Verifiable
 // Credential's `"@context": "https://www.w3.org/2018/credentials/v1"`), which the
 // no-callback `load(_, "jsonld")` path rejects. Behind the non-default `jsonld-contexts`
@@ -244,7 +244,7 @@ impl QuadChunks {
 
 #[wasm_bindgen]
 impl Store {
-    /// [OPUS-4.8] sq-ty78o (#1114): a public **empty, mutable** store — the ergonomic
+    /// sq-ty78o (#1114): a public **empty, mutable** store — the ergonomic
     /// `new Store()` constructor.
     ///
     /// Until now the only way to obtain a `Store` was a static [`load`](Self::load) /
@@ -307,7 +307,7 @@ impl Store {
         Ok(Store { graph })
     }
 
-    /// [OPUS-4.8] sq-f66jz (#1115): like [`load`](Self::load) but resolves the document's
+    /// sq-f66jz (#1115): like [`load`](Self::load) but resolves the document's
     /// RELATIVE IRIs against `base`.
     ///
     /// A document fetched from a URL (or a SHACL shapes graph / W3C test manifest addressed
@@ -464,7 +464,7 @@ impl Store {
     /// is unusable on `wasm32` — so only the portable row cap is exposed here.)
     #[wasm_bindgen(js_name = askWithMaxRows)]
     pub fn ask_with_max_rows(&self, sparql: &str, max_rows: usize) -> Result<bool, JsError> {
-        // [OPUS-4.8] `QueryBudget`'s fields are cfg-gated: on `wasm32` the struct has
+        // `QueryBudget`'s fields are cfg-gated: on `wasm32` the struct has
         // ONLY `max_rows` (the wall-clock `deadline` is native-only — `Instant` panics
         // on wasm32), so `..Default::default()` would be a NEEDLESS struct update there
         // (clippy::needless_update under a wasm-target lint). Start from the unlimited
@@ -509,7 +509,7 @@ impl Store {
             .map_err(|e| JsError::new(&e))
     }
 
-    /// [OPUS-4.8] sq-ncvq.14: query-plan introspection — `EXPLAIN`.
+    /// sq-ncvq.14: query-plan introspection — `EXPLAIN`.
     ///
     /// Returns the engine's plan for `sparql` as a human-readable string — the
     /// algebra tree plus, per BGP, the chosen join order with cardinality
@@ -525,7 +525,7 @@ impl Store {
         sparq_engine::explain(&self.graph, sparql).map_err(|e| JsError::new(&e))
     }
 
-    /// [OPUS-4.8] sq-ncvq.14: query-plan introspection — `EXPLAIN ANALYZE`.
+    /// sq-ncvq.14: query-plan introspection — `EXPLAIN ANALYZE`.
     ///
     /// Like [`explain`](Self::explain) but **executes** the query (SELECT / ASK
     /// only) and appends a per-operator execution trace — output row count per
@@ -811,7 +811,7 @@ mod tests {
         // without ever building a counted result, so it never approaches the cap — exactly the
         // early-exit win). A generous cap answers; a zero cap trips with a budget error.
         let q = "PREFIX ex: <http://ex/> ASK { ?s ex:knows ?o . ?s ex:age ?a FILTER(?a > 28) }";
-        // [OPUS-4.8] Mirror `ask_with_max_rows`: start from `unlimited()` and assign
+        // Mirror `ask_with_max_rows`: start from `unlimited()` and assign
         // `max_rows`, rather than a struct literal with `..Default::default()`. On wasm32
         // the struct has only the `max_rows` field, so a `..` fill is needless and a
         // wasm-target clippy run flags it (clippy::needless_update); this form is clean
@@ -953,7 +953,7 @@ mod tests {
         assert!(cmp.heap_bytes() <= raw.heap_bytes());
     }
 
-    // ---- [OPUS-4.8] sq-ty78o (#1114): the empty `new Store()` constructor ----
+    // ---- sq-ty78o (#1114): the empty `new Store()` constructor ----
 
     /// `Store::new()` yields an empty, mutable store (the `new Store()` path), and a
     /// `GRAPH`-targeted `updateInPlace` insert then a `GRAPH ?g` query round-trips — the
@@ -986,7 +986,7 @@ mod tests {
         assert_eq!(viaload.size(), 1);
     }
 
-    // ---- [OPUS-4.8] sq-f66jz (#1115): base-IRI load (`loadWithBase`) ----
+    // ---- sq-f66jz (#1115): base-IRI load (`loadWithBase`) ----
 
     /// `Store::loadWithBase` resolves relative IRIs against the supplied base — the gap the
     /// issue reported (the core `load_str_with_base` existed but was unexposed). A relative
@@ -1075,7 +1075,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-0ptd (gh-54): the NEGATIVE half of the audit — "REGEX/REPLACE are
+    // sq-0ptd (gh-54): the NEGATIVE half of the audit — "REGEX/REPLACE are
     // compiled OUT of the lean default bundle" — is asserted ONLY on the real `wasm32`
     // target, in `tests/web.rs::regex_compiled_out_by_default`. It is NOT a native unit
     // test, and deliberately so: `sparq-engine`'s `regex` feature is part of its DEFAULT
@@ -1113,7 +1113,7 @@ mod tests {
     }
 }
 
-// [FABLE-5] sq-586sh (#890 ask A): the opt-in ODRL usage-control PROBE binding —
+// sq-586sh (#890 ask A): the opt-in ODRL usage-control PROBE binding —
 // `sparq-policy` compiled to wasm32 behind the non-default `policy` feature, so the
 // lean bundle carries zero policy code. Two EXPERIMENTAL free functions
 // (`policyEvaluate` / `policyConflicts`); the full JS API awaits a maintainer
@@ -1130,7 +1130,7 @@ mod policy;
 #[cfg(feature = "policy")]
 pub use policy::{policy_conflicts, policy_evaluate};
 
-// [FABLE-5] sq-ixc3.19: the opt-in STRUCTURED-explain bindings —
+// sq-ixc3.19: the opt-in STRUCTURED-explain bindings —
 // `Store::explainPlanJson` / `Store::explainPlanAnalyzeJson` return the engine's typed
 // plan tree (`sparq_engine::explain_json::PlanNode`, sq-u4lgr/#902) as camelCase JSON
 // for the GUI plan explorer, behind the non-default `explain-json` feature (zero new
@@ -1141,7 +1141,7 @@ pub use policy::{policy_conflicts, policy_evaluate};
 #[cfg(feature = "explain-json")]
 mod explain_plan;
 
-// [FABLE-5] sq-3ul2n.3: the opt-in `Store::loadBytes` / `loadBytesWithBase` byte-ingest
+// sq-3ul2n.3: the opt-in `Store::loadBytes` / `loadBytesWithBase` byte-ingest
 // bindings — a `Uint8Array` (from `response.arrayBuffer()` / `File.arrayBuffer()`) is
 // copied ONCE into linear memory (no UTF-16 JS-string round-trip), validated as UTF-8
 // fail-closed, and fed the SAME parse path as `load`. Behind the non-default

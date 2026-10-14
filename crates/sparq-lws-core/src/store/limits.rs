@@ -1,4 +1,4 @@
-// [GPT-5.6] Bounded in-memory storage configuration and observability.
+// Bounded in-memory storage configuration and observability.
 
 /// Default aggregate body-byte ceiling for the in-memory Solid store (64 MiB).
 pub const DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;

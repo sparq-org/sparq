@@ -1,4 +1,4 @@
-// [FABLE-5] sq-wo5jw: the README front page embeds a RUNNABLE quickstart driving
+// sq-wo5jw: the README front page embeds a RUNNABLE quickstart driving
 // `geof_registry` through `sparq_engine::query_with_functions` — an `engine`-feature
 // surface. Attached unconditionally, that doctest failed to COMPILE under
 // `--no-default-features` (its imports don't exist there). The README — and its
@@ -19,21 +19,21 @@
     doc = "(a runnable doctest) is attached only when `engine` is enabled. docs.rs",
     doc = "builds all features and always renders the full README."
 )]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 pub mod geof;
-pub mod gml; // [OPUS-4.8] sq-zy0: GML-SF geometry parser (geo:gmlLiteral)
+pub mod gml; // sq-zy0: GML-SF geometry parser (geo:gmlLiteral)
 pub mod index;
 pub mod literal;
-pub mod metadata; // [OPUS-4.8] sq-mzmh: geo:dimension/isEmpty/isSimple/… metadata (OGC R9)
+pub mod metadata; // sq-mzmh: geo:dimension/isEmpty/isSimple/… metadata (OGC R9)
 #[cfg(feature = "engine")]
 pub mod provider;
 #[cfg(feature = "engine")]
 pub mod registry;
 #[cfg(feature = "reproject")]
 pub mod reproject;
-// [OPUS-4.8] sq-9g58: GeoSPARQL query-rewrite extension (topology property forms).
-// [OPUS-4.8] sq-wf9qg: behind the OPT-IN `geosparql_rewrite` feature (OFF by default),
+// sq-9g58: GeoSPARQL query-rewrite extension (topology property forms).
+// sq-wf9qg: behind the OPT-IN `geosparql_rewrite` feature (OFF by default),
 // NOT the default-on `engine` feature — a default build never exposes the rewrite entry
 // point, so the STANDARD SPARQL behaviour stays untouched. The feature implies `engine`,
 // so the rewrite's `sparq_engine` dependency is always satisfied here.
@@ -41,21 +41,21 @@ pub mod reproject;
 pub mod rewrite;
 
 pub use geof::Unit;
-pub use gml::parse_gml_literal; // [OPUS-4.8]
+pub use gml::parse_gml_literal; //
 pub use index::GeoIndex;
 pub use literal::{
     is_geometry_datatype, parse_geometry_literal, parse_wkt_literal, Crs, GeoGeometry,
-}; // [OPUS-4.8]
-pub use metadata::GeometryMetadata; // [OPUS-4.8] sq-mzmh
+}; //
+pub use metadata::GeometryMetadata; // sq-mzmh
 #[cfg(feature = "engine")]
 pub use provider::GeoIndexProvider;
 #[cfg(feature = "engine")]
 pub use registry::geof_registry;
-// [OPUS-4.8] sq-wf9qg: the rewrite surface is exported only under the opt-in
+// sq-wf9qg: the rewrite surface is exported only under the opt-in
 // `geosparql_rewrite` feature, so a default (engine-only) build neither compiles nor
 // re-exports it — the rewrite is a strict opt-in superset over standard SPARQL.
 #[cfg(feature = "geosparql_rewrite")]
-pub use rewrite::{geosparql_rewrite, is_topology_property, rewrite_query}; // [OPUS-4.8] sq-9g58
+pub use rewrite::{geosparql_rewrite, is_topology_property, rewrite_query}; // sq-9g58
 
 /// The GeoSPARQL vocabulary IRIs this crate touches.
 pub mod vocab {
@@ -63,19 +63,19 @@ pub mod vocab {
     pub const GEO_NS: &str = "http://www.opengis.net/ont/geosparql#";
     /// `geo:wktLiteral` — the WKT serialization datatype (GeoSPARQL 8.5.1).
     pub const WKT_LITERAL: &str = "http://www.opengis.net/ont/geosparql#wktLiteral";
-    /// `geo:gmlLiteral` — the GML serialization datatype (GeoSPARQL 8.5.2). [OPUS-4.8]
+    /// `geo:gmlLiteral` — the GML serialization datatype (GeoSPARQL 8.5.2).
     pub const GML_LITERAL: &str = "http://www.opengis.net/ont/geosparql#gmlLiteral";
-    /// `gml:` — the GML 3.2 namespace (GML-SF geometry elements). [OPUS-4.8]
+    /// `gml:` — the GML 3.2 namespace (GML-SF geometry elements).
     pub const GML_NS: &str = "http://www.opengis.net/gml/3.2";
     /// `geo:asWKT` — geometry node -> WKT serialization (GeoSPARQL 8.5.2).
     pub const AS_WKT: &str = "http://www.opengis.net/ont/geosparql#asWKT";
-    /// `geo:asGML` — geometry node -> GML serialization (GeoSPARQL 8.5.2). [OPUS-4.8]
+    /// `geo:asGML` — geometry node -> GML serialization (GeoSPARQL 8.5.2).
     pub const AS_GML: &str = "http://www.opengis.net/ont/geosparql#asGML";
     /// `geo:hasGeometry` — feature -> geometry node (GeoSPARQL 8.3).
     pub const HAS_GEOMETRY: &str = "http://www.opengis.net/ont/geosparql#hasGeometry";
     /// `geo:hasDefaultGeometry` — feature -> default geometry node (GeoSPARQL 8.3).
     pub const HAS_DEFAULT_GEOMETRY: &str = "http://www.opengis.net/ont/geosparql#hasDefaultGeometry";
-    // ---- geometry-METADATA properties (GeoSPARQL 8.4; OGC R9). [OPUS-4.8] sq-mzmh ----
+    // ---- geometry-METADATA properties (GeoSPARQL 8.4; OGC R9). sq-mzmh ----
     /// `geo:dimension` — topological dimension of a geometry (`xsd:integer`).
     pub const DIMENSION: &str = "http://www.opengis.net/ont/geosparql#dimension";
     /// `geo:coordinateDimension` — coordinate measurements per point (`xsd:integer`).
@@ -93,7 +93,7 @@ pub mod vocab {
     pub const GEOF_NS: &str = "http://www.opengis.net/def/function/geosparql/";
     /// `sf:` — the OGC Simple Features geometry-class namespace (`sf:Point`,
     /// `sf:Polygon`, …), the value space of the opt-in `geof:geometryType`
-    /// accessor (`geof_accessors` feature). [FABLE-5] sq-lsp7k
+    /// accessor (`geof_accessors` feature). sq-lsp7k
     #[cfg(feature = "geof_accessors")]
     pub const SF_NS: &str = "http://www.opengis.net/ont/sf#";
     /// `uom:` — the OGC units-of-measure namespace used by `geof:distance`.
@@ -138,7 +138,7 @@ impl std::error::Error for GeoError {}
 
 #[cfg(test)]
 mod error_display_tests {
-    // [OPUS-4.8] sq-9g58 coverage: every GeoError Display arm renders its
+    // sq-9g58 coverage: every GeoError Display arm renders its
     // payload. These arms (CrsMismatch / NonGeographicCrs / UnknownUnit) were
     // unexercised — Parse / Unsupported are hit by the parser/eval tests.
     use super::GeoError;

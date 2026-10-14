@@ -1,6 +1,6 @@
 //! The serde-JSON [`FormDescription`] model — the headless contract between the
 //! derivation engine (this crate) and any renderer (Tauri workbench, hosted web
-//! via wasm, sparq-mcp agent tools). [FABLE-5] sq-lsp7k.1.1
+//! via wasm, sparq-mcp agent tools). sq-lsp7k.1.1
 //!
 //! Everything here is plain data: renderers never need sparq types to consume a
 //! form, and the model round-trips through JSON losslessly (`Deserialize` is
@@ -93,10 +93,10 @@ pub enum ShapeVia {
     /// `sh:targetSubjectsOf` names a predicate the focus node is a subject of.
     /// Ranked BELOW [`Self::ApplicableToClass`] in the switcher: a predicate
     /// target says the node participates in a relation, not that the shape
-    /// describes what the node *is*. [OPUS-4.8] sq-vfcxv
+    /// describes what the node *is*. sq-vfcxv
     TargetSubjectsOf,
     /// `sh:targetObjectsOf` names a predicate the focus node is an object of
-    /// (ranked below [`Self::TargetSubjectsOf`]). [OPUS-4.8] sq-vfcxv
+    /// (ranked below [`Self::TargetSubjectsOf`]). sq-vfcxv
     TargetObjectsOf,
     /// Explicitly requested via [`crate::FormOptions::shape`].
     Explicit,
@@ -235,7 +235,7 @@ pub struct FormValue {
     pub nested: Option<Box<FormDescription>>,
 }
 
-/// [GPT-5.6] One SHACL validation result attached to its declared form field.
+/// One SHACL validation result attached to its declared form field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ValidationHint {
     /// Constraint-component IRI (for example, `sh:PatternConstraintComponent`).
@@ -278,22 +278,22 @@ pub struct FormField {
     pub multi: bool,
     /// `false` for view mode, for off-shape (read-only) fields, and for
     /// property shapes declaring `dash:readOnly true` (read-only even in
-    /// edit mode). [FABLE-5]
+    /// edit mode).
     pub editable: bool,
     /// `dash:hidden true` on the property shape: the field still participates
     /// in the data model (values, constraints, diffing) but a renderer should
-    /// not display it. [FABLE-5] sq-lsp7k.1.5
+    /// not display it. sq-lsp7k.1.5
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub hidden: bool,
     /// `sh:defaultValue` on the property shape, carried verbatim: the seed
     /// value a renderer pre-fills when the field currently has no values.
-    /// [FABLE-5] sq-lsp7k.1.5
+    /// sq-lsp7k.1.5
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub default_value: Option<TermRef>,
     pub widget: WidgetChoice,
     pub values: Vec<FormValue>,
     pub constraints: Constraints,
-    /// [GPT-5.6] Live SHACL results for this declared, editable field.
+    /// Live SHACL results for this declared, editable field.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub validation: Vec<ValidationHint>,
 }

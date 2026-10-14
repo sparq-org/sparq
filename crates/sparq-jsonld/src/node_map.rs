@@ -1,7 +1,7 @@
 //! Node Map Generation (JSON-LD 1.1 API §7.2) + Merge Node Maps (§7.3) + the
 //! Generate Blank Node Identifier helper (§7.4).
 //!
-//! [FABLE-5] (sq-oy1f.26) The **node map** is the shared intermediate that the
+//! (sq-oy1f.26) The **node map** is the shared intermediate that the
 //! [`flatten`](mod@crate::flatten) module (and, later, `from_rdf`) projects from. It indexes
 //! every node object of an **expanded** document by graph name and `@id`, assigns fresh
 //! blank-node identifiers to unlabelled nodes and named graphs (in first-encounter order,
@@ -48,7 +48,7 @@ impl BlankNodeIssuer {
                 return existing.clone();
             }
         }
-        // [FABLE-5] positional format arg (avoids the CodeQL rust/unused-variable
+        // positional format arg (avoids the CodeQL rust/unused-variable
         // false positive on inline-captured identifiers).
         let label = format!("_:b{}", self.counter);
         self.counter += 1;
@@ -208,7 +208,7 @@ impl NodeMap {
 /// `element` must be the output of [`crate::expand::expand`] (an array of node
 /// objects, value objects, or lists). Node-map generation performs no context processing.
 ///
-/// [FABLE-5] (sq-oy1f.26)
+/// (sq-oy1f.26)
 pub fn generate_node_map(element: &Json) -> NodeMap {
     let mut node_map = NodeMap::new();
     let mut issuer = BlankNodeIssuer::new();

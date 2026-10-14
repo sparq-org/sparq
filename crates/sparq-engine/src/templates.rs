@@ -27,7 +27,7 @@
 //!
 //! When the `templates` feature is off, none of this compiles; the default build is
 //! byte-identical. The only dependency delta is `serde_json` (already ubiquitous in the
-//! workspace tree), pulled in behind the feature. [FABLE-5] sq-lsp7k.10
+//! workspace tree), pulled in behind the feature. sq-lsp7k.10
 
 use std::collections::BTreeMap;
 

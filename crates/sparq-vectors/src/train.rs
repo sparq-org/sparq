@@ -1,7 +1,7 @@
 //! Thin in-tree shallow-KGE **trainer** (DistMult) — the embedding producer the
 //! structure-aware-vectorisation eval harness measures.
 //!
-//! [OPUS-4.8] sq-0wo9e.8 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.8 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §P6 eval-harness + sq-0wo9e.8 trainer). This module is **opt-in** (the `kge` cargo feature,
 //! off by default, which implies `structure`) and changes **nothing** in the default
 //! `sparq-vectors` build or the core engine.
@@ -154,7 +154,7 @@ pub struct TrainConfig {
     /// The P0 ablation switch: [`SamplingMode::TypeConstrained`] (type-valid negatives) vs
     /// [`SamplingMode::Unconstrained`] (uniform-random negatives).
     pub sampling: SamplingMode,
-    /// [OPUS-4.8] sq-2489d.4 — the Phase-4 PROVENANCE-WEIGHTING ablation switch
+    /// sq-2489d.4 — the Phase-4 PROVENANCE-WEIGHTING ablation switch
     /// ([`WeightMode`](crate::provenance::WeightMode)). Under
     /// [`WeightMode::Provenance`](crate::provenance::WeightMode::Provenance) each positive's SGD step
     /// is scaled by the design-§USE-1 provenance weight `w(t)` (the CKRL confidence-weighted-loss
@@ -196,10 +196,10 @@ impl TrainConfig {
             negatives_per_positive: 8,
             sampling,
             // Default OFF: an existing caller (and the P0 ablation) keeps the unweighted baseline
-            // until it explicitly opts into provenance-weighting via `weight_mode`. [OPUS-4.8]
+            // until it explicitly opts into provenance-weighting via `weight_mode`.
             weight_mode: crate::provenance::WeightMode::Uniform,
             // Default OFF (`TermScope::IriBlank`): quoted-term visibility is opt-in per ablation
-            // arm; every existing baseline stays byte-identical. [FABLE-5]
+            // arm; every existing baseline stays byte-identical.
             term_scope: TermScope::default(),
             seed,
         }
@@ -210,7 +210,7 @@ impl TrainConfig {
 /// dictionary id into a parameter row. Scoring ([`TrainedModel::score`]) and the eval harness read
 /// only this struct, so a model is self-contained once trained.
 ///
-/// [OPUS-5] `Clone` so an eval harness can derive a *post-processed* model — e.g. the
+/// `Clone` so an eval harness can derive a *post-processed* model — e.g. the
 /// confidence-weighted structural-sketch augmentation `eval::run_pooling_ablation` measures —
 /// without retraining, keeping the two ablation arms on genuinely identical parameters.
 #[derive(Clone)]
@@ -266,7 +266,7 @@ impl TrainedModel {
 
     /// The model score for parameter rows `(h_row, r_row, t_row)`. Dispatches on [`TrainedModel::model`]:
     /// DistMult `Σ_i e_h[i]·w_r[i]·e_t[i]` (symmetric) or ComplEx `Re(⟨e_h, w_r, conj(e_t)⟩)`
-    /// (asymmetric, computed by the private `score_complex` helper). [OPUS-4.8] sq-0wo9e.8
+    /// (asymmetric, computed by the private `score_complex` helper). sq-0wo9e.8
     #[inline]
     pub fn score_rows(&self, h_row: usize, r_row: usize, t_row: usize) -> f32 {
         let h = self.entity_vec(h_row);
@@ -295,7 +295,7 @@ impl TrainedModel {
 
     /// The **compositional STATEMENT-level encoding** of parameter rows `(h_row, r_row, t_row)` —
     /// the per-component interaction terms of the model's own scoring product, as a `dim`-float
-    /// vector. [SONNET-4.6] sq-1e5kk (follow-up to the node-level quoted-terms visibility arm).
+    /// vector. sq-1e5kk (follow-up to the node-level quoted-terms visibility arm).
     ///
     /// Construction, per [`ModelKind`]:
     /// - [`ModelKind::DistMult`]: `v[i] = e_h[i]·w_r[i]·e_t[i]` — the trilinear product *before*
@@ -356,7 +356,7 @@ impl TrainedModel {
     /// The compositional STATEMENT-level encoding of the RDF 1.2 **quoted-triple term** `term` —
     /// unpack its `(s, p, o)` constituent ids from the dictionary and delegate to
     /// [`TrainedModel::encode_statement`]. `None` if `term` is not a quoted-triple term or any
-    /// constituent is unknown to the model. [SONNET-4.6] sq-1e5kk.
+    /// constituent is unknown to the model. sq-1e5kk.
     ///
     /// This is the compositional counterpart of the **node-level** quoted-terms path (which stays
     /// intact and independent): under [`TermScope::Embeddable`] a quoted term gets an *opaque*
@@ -531,7 +531,7 @@ pub fn train(
     let sampler =
         NegativeSampler::new_scoped(graph, constraints, config.sampling, config.term_scope);
 
-    // [OPUS-4.8] sq-2489d.4 (Phase 4): mine the per-triple provenance weights ONCE. Under
+    // sq-2489d.4 (Phase 4): mine the per-triple provenance weights ONCE. Under
     // `WeightMode::Uniform` this still reads the graph but every `weight_of` returns 1.0, so the
     // loop below is byte-identical to the unweighted trainer (the ablation-off baseline); the read
     // is cheap (a single id-scan) and keeps the two arms sharing the same code path.
@@ -570,7 +570,7 @@ pub fn train(
                 .wrapping_add(pi as u64);
 
             // The training batch: 1 positive (label 1) + negatives (label 0).
-            // [OPUS-4.8] sq-2489d.4 (Phase 4): the CKRL confidence-weighted-loss move — scale the
+            // sq-2489d.4 (Phase 4): the CKRL confidence-weighted-loss move — scale the
             // POSITIVE step's effective learning rate by the triple's provenance weight `w(t)` so a
             // high-assurance fact contributes a full-strength gradient and a low-assurance/low-source
             // fact a down-weighted one. Negatives are NOT weighted (a corruption has no provenance of

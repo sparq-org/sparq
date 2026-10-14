@@ -9,7 +9,7 @@ use proptest::strategy::ValueTree;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 use sparq_vectors::{Codebook, INVALID_SLOT};
 
-// [GPT-5.6] sq-lyf31: retain the term kind in the generated identity so the
+// sq-lyf31: retain the term kind in the generated identity so the
 // corpus exercises both RDF IRIs and literals while remaining distinct.
 fn term(kind: bool, id: u16) -> Term {
     if kind {

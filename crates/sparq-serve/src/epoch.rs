@@ -100,12 +100,12 @@ impl PodEpochs {
         *e
     }
 
-    /// [OPUS-4.8] (sq-o5bi) Sets a pod's epoch to an exact value while RECONSTRUCTING the
+    /// (sq-o5bi) Sets a pod's epoch to an exact value while RECONSTRUCTING the
     /// vector from a backup artifact (`crate::backup`). Crate-private: the only legal caller is
     /// the importer rebuilding the recorded epoch vector before it seeds the restored ring —
     /// published vectors are still never mutated in normal operation. Compiled when EITHER the
     /// `backup` or the `change-stream` feature is on (sq-b4fns: the change stream pulls the
-    /// `backup` module privately for its shared `BackupError`/digest). [OPUS-4.8]
+    /// `backup` module privately for its shared `BackupError`/digest).
     #[cfg(any(feature = "backup", feature = "change-stream"))]
     #[allow(dead_code)] // unused in a change-stream-only build (the importer is backup-only)
     pub(crate) fn set(&mut self, pod: PodId, epoch: Epoch) {

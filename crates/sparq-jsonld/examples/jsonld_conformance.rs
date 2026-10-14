@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-w42s3 (epic sq-hmd7l) — W3C JSON-LD 1.1 SELF-conformance
+//! sq-w42s3 (epic sq-hmd7l) — W3C JSON-LD 1.1 SELF-conformance
 //! pass-rate SCOREBOARD runner for the NATIVE `sparq-jsonld` pipeline.
 //!
 //! The cross-engine conformance record
@@ -577,7 +577,7 @@ fn unescape(raw: &str, line: usize) -> Result<String, String> {
 /// SKIPs (honest, per the ratchet lane): `requires` optional features, remote inputs,
 /// no-expect.
 ///
-/// [OPUS-5] sq-gzsky — NegativeEvaluationTests are RUN, not skipped (mirroring the ratchet
+/// sq-gzsky — NegativeEvaluationTests are RUN, not skipped (mirroring the ratchet
 /// lane): the case passes iff `expand()` raises EXACTLY the manifest's `expectErrorCode`.
 fn run_expand(root: &Path, entries: &[Entry]) -> Score {
     let mut s = Score::default();

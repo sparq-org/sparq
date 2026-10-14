@@ -1411,7 +1411,7 @@ mod tests {
         assert_eq!(result.len(), 1);
     }
 
-    // --- RDF 1.2 quoted triples (rdf-12) are rejected fail-closed [FABLE-5] sq-gg0qq.2 ----------
+    // --- RDF 1.2 quoted triples (rdf-12) are rejected fail-closed sq-gg0qq.2 ----------
     // In the sparq workspace this crate takes oxrdf/oxttl WITH `rdf-12`, so `Term::Triple` /
     // `N3Term::Triple` are real inhabitants. N3 Patch has no quoted triples: both entry points
     // must refuse them with UnprocessablePatch (422), never accept or panic.

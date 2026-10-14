@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-5ts8 — GeoSPARQL RDFS/OWL Feature/Geometry class entailment
+//! sq-5ts8 — GeoSPARQL RDFS/OWL Feature/Geometry class entailment
 //! conformance, plus an honest gap-marker for the query-rewrite extension.
 //!
 //! The OGC GeoSPARQL compliance ratchet (`tests/ogc_compliance_ratchet.rs`,
@@ -362,7 +362,7 @@ fn entailment_is_idempotent() {
 /// (no rule manufactures it), so a `geo:sfWithin` predicate matched on the
 /// STANDARD (non-rewrite) entry points binds only asserted triples — there are
 /// none here. The rewrite path (separate entry point) is what answers the
-/// property form; the reasoner stays W3C-conformant. [OPUS-4.8] sq-9g58
+/// property form; the reasoner stays W3C-conformant. sq-9g58
 #[test]
 fn query_rewrite_property_form_is_not_materialized() {
     const GEO_SF_WITHIN: &str = "http://www.opengis.net/ont/geosparql#sfWithin";

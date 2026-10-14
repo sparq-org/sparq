@@ -15,7 +15,7 @@
 //!
 //! Only compiled with the opt-in `did` feature.
 //!
-//! [OPUS-4.8] sq-pfae.3 (issue #940 / gh-940). 🤖 SPARQ agent — trust-graph authz PoC.
+//! sq-pfae.3 (issue #940 / gh-940). 🤖 SPARQ agent — trust-graph authz PoC.
 #![cfg(feature = "did")]
 
 use std::collections::HashMap;

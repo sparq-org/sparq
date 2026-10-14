@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-hj4n, gh-916) Integration tests for the Graph-Store-Protocol `PATCH` method —
+//! (sq-hj4n, gh-916) Integration tests for the Graph-Store-Protocol `PATCH` method —
 //! 🤖 SPARQ agent.
 //!
 //! Two dialects:
@@ -10,7 +10,7 @@
 //!
 //! The server runs on an ephemeral port in-process and is driven over real HTTP with `reqwest`.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the

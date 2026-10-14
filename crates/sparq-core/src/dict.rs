@@ -36,7 +36,7 @@ pub const INLINE_BASE: Id = 1 << 31;
 /// fall back to the dictionary).
 const INLINE_MAX: u32 = (1 << 30) - 1;
 
-/// [OPUS-4.8] (review 1409) On-disk format marker for the mmap dictionary (`dict-meta.bin`).
+/// (review 1409) On-disk format marker for the mmap dictionary (`dict-meta.bin`).
 /// `INLINE_BASE` partitions the `u32` id space, so persisted RAW ids only mean what they say
 /// under the SAME partition the file was written with. A file written before `INLINE_BASE`
 /// moved (from `1 << 30` to `1 << 31`) encodes inline integers in `[1<<30, 1<<31)`, which the
@@ -85,7 +85,7 @@ pub fn is_inline(id: Id) -> bool {
     id >= INLINE_BASE && id - INLINE_BASE <= INLINE_MAX
 }
 
-/// [FABLE-5] (sq-1ivw7) Whether `id` denotes an RDF LITERAL, given the dictionary that owns
+/// (sq-1ivw7) Whether `id` denotes an RDF LITERAL, given the dictionary that owns
 /// it. An inline-integer id is always an `xsd:integer` literal; any other id is classified by
 /// its stored record (`TermParts::Lit`). `NO_ID` is not a literal. This is the id-level term-kind
 /// predicate the engine's predicate-range non-literal inference is built on: an object column of a
@@ -239,7 +239,7 @@ fn hash_blank(label: &str) -> u64 {
 /// its components, NOT strings. Unlike the other term kinds this hash is dict-relative
 /// (the ids are), so a `Term::Triple` is hashed only AFTER its children are resolved in
 /// the target dict (`intern`/`lookup` handle this; `hash_term` cannot).
-/// [OPUS-4.8] (sq-jvbr) `pub(crate)` so the dict-spill external builder can content-address
+/// (sq-jvbr) `pub(crate)` so the dict-spill external builder can content-address
 /// an RDF 1.2 triple term by its components' FINAL dense ids when it assembles the
 /// triple-term dictionary records (the same `(hash, id)` pair `save_mmap`/`into_merged`
 /// produce), keeping `dict-hash.bin`/`dict-hid.bin` consistent for triple terms too.
@@ -261,7 +261,7 @@ pub(crate) fn hash_triple_ids(ids: [Id; 3]) -> u64 {
 /// a valid language tag, so the encoding is unambiguous). One string field keeps the
 /// storage layout, hashing and equality unchanged; [`reconstruct_ref`] splits it back out.
 #[inline]
-// [OPUS-4.8] (T1) `pub(crate)` so the Turtle chunk worker's borrowed-slice interner
+// (T1) `pub(crate)` so the Turtle chunk worker's borrowed-slice interner
 // (`intern_object_ref` in lib.rs) builds the EXACT same lang(+base-direction) string this
 // module's `Dict::intern` uses — required for intern/hash parity (a directional literal must
 // land on the identical id whether interned via the owned-Term path or the borrowed path).
@@ -278,7 +278,7 @@ pub(crate) fn lang_with_dir(l: &Literal) -> Option<std::borrow::Cow<'_, str>> {
 /// components the SPARQL 1.2 results formats keep apart (`xml:lang` vs `its:dir`) — see the
 /// engine's `json.rs` and the conformance results reader.
 ///
-/// [OPUS-4.8] sq-bj7o: VALIDATION. The base direction in RDF 1.2 / SPARQL 1.2 is exactly
+/// sq-bj7o: VALIDATION. The base direction in RDF 1.2 / SPARQL 1.2 is exactly
 /// `ltr` or `rtl`, lowercase (oxrdf's `BaseDirection` enum, whose `Display` emits those two
 /// strings — the only suffixes `lang_with_dir` ever writes). A trusted store therefore only
 /// ever holds `lang--ltr` / `lang--rtl`. But a STORED slot can come from an untrusted/mmap'd
@@ -299,7 +299,7 @@ pub fn split_lang_dir(slot: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// [OPUS-4.8] sq-bj7o / sq-s955: the single source of truth for "is this RDF 1.2 base
+/// sq-bj7o / sq-s955: the single source of truth for "is this RDF 1.2 base
 /// direction string valid?" — the base-direction validator for the whole stack. Takes a
 /// candidate direction string (NOT a `lang--dir` slot; just the direction component) and
 /// returns the typed [`oxrdf::BaseDirection`] when it is one of the two valid values, else
@@ -414,7 +414,7 @@ fn stored_eq_term(s: &Stored, q: &Term, prefixes: &[Box<str>], datatypes: &[Name
     }
 }
 
-/// [OPUS-4.8] sq-cvug — the safe placeholders `reconstruct_triple` substitutes when a
+/// sq-cvug — the safe placeholders `reconstruct_triple` substitutes when a
 /// triple-term component id is IN RANGE but resolves to the WRONG term KIND (e.g. a
 /// literal id in the subject/predicate position). This can only arise from a tampered,
 /// checksum-less mmap'd index (threat-model B5 / T-MMAP-DoS); the trusted in-process
@@ -428,7 +428,7 @@ const OOR_TRIPLE_PREDICATE: &str = "urn:sparq:wrong-kind-triple-predicate";
 /// stores a valid (IRI|blank, IRI, any-term) shape, so on ids produced by this dict the
 /// inner matches always take a valid arm.
 ///
-/// [OPUS-4.8] sq-cvug — on the UNTRUSTED mmap path a tampered index can carry a component
+/// sq-cvug — on the UNTRUSTED mmap path a tampered index can carry a component
 /// id that is in range yet of the wrong kind (a literal where the subject must be IRI/blank
 /// or the predicate an IRI). That used to hit `unreachable!()` → a clean panic (DoS) on a
 /// hostile/corrupt file. Fail closed instead: substitute a safe placeholder of the required
@@ -476,7 +476,7 @@ pub(crate) enum StoredRef<'a> {
     Triple([Id; 3]),
 }
 
-/// [OPUS-4.8] sq-ky2a — the safe placeholder `record` returns for an OUT-OF-RANGE id (one
+/// sq-ky2a — the safe placeholder `record` returns for an OUT-OF-RANGE id (one
 /// that can only arise from a tampered, checksum-less permutation file; see `Dict::record`).
 /// A `Blank` needs no table lookup, so reconstructing it can never itself OOB. Decoding it
 /// is wrong-but-safe — exactly the documented trusted-store integrity boundary, never UB.
@@ -500,7 +500,7 @@ fn rd_str<'a>(b: &'a [u8], p: &mut usize) -> &'a str {
     // / forked base), whose records are GUARANTEED valid UTF-8 by construction. The
     // untrusted mmap path (a hostile/corrupt `.spq` file) MUST NOT reach here — it uses
     // the bounds-/UTF-8-checked `rd_str_checked` below and is fully validated at open
-    // (`Dict::open_mmap` → `MappedDict::validate`). See bead sq-znld. [OPUS-4.8]
+    // (`Dict::open_mmap` → `MappedDict::validate`). See bead sq-znld.
     unsafe { std::str::from_utf8_unchecked(s) }
 }
 
@@ -529,7 +529,7 @@ fn parse_stored_ref(b: &[u8]) -> StoredRef<'_> {
     }
 }
 
-// [OPUS-4.8] sq-znld — bounds-/UTF-8-CHECKED record parser for the UNTRUSTED mmap path.
+// sq-znld — bounds-/UTF-8-CHECKED record parser for the UNTRUSTED mmap path.
 // `parse_stored_ref` / `rd_str` use `from_utf8_unchecked` and unguarded slice indexing,
 // which is sound ONLY for in-process-built blobs. A memory-mapped `.spq` file is
 // attacker-controlled: an out-of-range offset/length panics (DoS) and a non-UTF-8 byte
@@ -537,7 +537,7 @@ fn parse_stored_ref(b: &[u8]) -> StoredRef<'_> {
 // helpers return `None` on ANY malformation (short read, OOB length, non-UTF-8) so the
 // mmap loader can reject a hostile file with a clean `Err` instead — never UB, never a
 // panic, never a mis-decoded term.
-// [OPUS-4.8] The `*_checked` helpers only serve the mmap loader (gated below); gate them
+// The `*_checked` helpers only serve the mmap loader (gated below); gate them
 // too so non-mmap builds don't trip `dead_code` / `-D warnings`.
 #[cfg(feature = "mmap")]
 #[inline]
@@ -559,7 +559,7 @@ fn rd_str_checked<'a>(b: &'a [u8], p: &mut usize) -> Option<&'a str> {
 }
 
 /// Parses one term record with FULL bounds + UTF-8 validation; `None` on any malformation.
-/// Used for the untrusted memory-mapped term blob (see [`rd_str_checked`]). [OPUS-4.8]
+/// Used for the untrusted memory-mapped term blob (see [`rd_str_checked`]).
 #[cfg(feature = "mmap")]
 #[inline]
 fn parse_stored_ref_checked(b: &[u8]) -> Option<StoredRef<'_>> {
@@ -599,7 +599,7 @@ fn reconstruct_ref(d: &Dict, s: &StoredRef) -> Term {
         }
         StoredRef::Lit { value, datatype, lang } => Term::Literal(match lang {
             // A stored `lang--dir` slot is an RDF 1.2 directional language-tagged string
-            // (see `lang_with_dir`); a plain tag is an ordinary one. [OPUS-4.8] sq-bj7o: the
+            // (see `lang_with_dir`); a plain tag is an ordinary one. sq-bj7o: the
             // suffix is only a base direction when it is exactly `ltr`/`rtl`
             // (`parse_base_direction`) — the SAME validation `split_lang_dir` (the JSON fast
             // path) applies, so a malformed slot like `en--bogus` from an untrusted/mmap'd
@@ -621,7 +621,7 @@ fn reconstruct_ref(d: &Dict, s: &StoredRef) -> Term {
     }
 }
 
-/// [OPUS-4.8] sq-cvug — depth-bounded term resolution for the triple-term reconstruction
+/// sq-cvug — depth-bounded term resolution for the triple-term reconstruction
 /// recursion. A validly-built store nests triple terms only shallowly (each is interned
 /// after its components, so the structure is a finite DAG), but a TAMPERED mmap'd index
 /// could encode a self/cyclic component reference that would recurse without bound →
@@ -773,7 +773,7 @@ impl MappedDict {
     }
     /// The parsed term record for a 1-based id.
     ///
-    /// [OPUS-4.8] sq-znld: this reads from an UNTRUSTED memory-mapped blob, so it uses the
+    /// sq-znld: this reads from an UNTRUSTED memory-mapped blob, so it uses the
     /// bounds-/UTF-8-CHECKED parser. `Dict::open_mmap` runs [`validate`](Self::validate)
     /// up front, which proves every offset is in range and every record parses, so by the
     /// time `stored` is reached the `expect` is structurally impossible — but the checked
@@ -786,7 +786,7 @@ impl MappedDict {
             .expect("mmap dict record validated at open (sq-znld); a failure here means the mapped file changed under us")
     }
 
-    /// [OPUS-4.8] sq-znld — validate the four UNTRUSTED data files at open time so the
+    /// sq-znld — validate the four UNTRUSTED data files at open time so the
     /// hostile-on-disk-file boundary (B5 in research/threat-model.md, T-MMAP-UB) never
     /// reaches `unsafe`/unchecked code with attacker-controlled bytes.
     ///
@@ -806,13 +806,13 @@ impl MappedDict {
     /// Any violation is a clean `InvalidData` error — never a panic, never UB.
     #[cfg(feature = "mmap")]
     fn validate(&self, len: usize, prefixes: &[Box<str>], datatypes: &[NamedNode]) -> std::io::Result<()> {
-        // [OPUS-4.8] sq-ueuk — delegate to the mmap-free `&[u8]` seam below. The four
+        // sq-ueuk — delegate to the mmap-free `&[u8]` seam below. The four
         // mmap'd files are passed as plain byte slices (a `memmap2::Mmap` derefs to `&[u8]`),
         // so ALL of the header/length/bounds/record/index logic lives in a pure function
         // that has no `mmap`/file-I/O/FFI dependency and can be Kani-proof-harnessed (the
         // MS-G4 follow-up the .spqv validator already enjoys — see .github/workflows/kani.yml).
         //
-        // [OPUS-4.8] sq-lvw8 (sq-ueuk/#418 verify note) — the seam reads the offset/hashid
+        // sq-lvw8 (sq-ueuk/#418 verify note) — the seam reads the offset/hashid
         // arrays with EXPLICIT `from_le_bytes`, while the runtime mmap readers (`slice_u64` /
         // `hashids`) reinterpret the same bytes with a NATIVE-endian pointer cast. PR #418's
         // claim that this delegation is "byte-for-byte unchanged" from the old inline validator
@@ -824,7 +824,7 @@ impl MappedDict {
     }
 }
 
-/// [OPUS-4.8] sq-ueuk — the mmap-FREE core of [`MappedDict::validate`].
+/// sq-ueuk — the mmap-FREE core of [`MappedDict::validate`].
 ///
 /// Takes the four on-disk regions as plain `&[u8]` (a `memmap2::Mmap` derefs to one) so the
 /// whole validator is a pure function of its byte inputs: no `mmap`, no file I/O, no FFI, no
@@ -882,7 +882,7 @@ fn validate_dict_bytes(
         let bytes: [u8; 8] = offsets.get(start..end)?.try_into().ok()?;
         Some(u64::from_le_bytes(bytes) as usize)
     };
-    // [OPUS-4.8] sq-cvug — triple-term `(own_id, subject, predicate)` ids collected
+    // sq-cvug — triple-term `(own_id, subject, predicate)` ids collected
     // during the parse pass, verified for KIND once every record offset is known in range.
     let mut triple_sp: Vec<(Id, Id, Id)> = Vec::new();
     for idx in 0..len {
@@ -914,7 +914,7 @@ fn validate_dict_bytes(
                 // LESS than the triple's own id. Enforcing that here rejects a tampered
                 // self/forward/cyclic reference (e.g. a triple whose object id is the
                 // triple itself), which would otherwise drive `reconstruct_triple` into
-                // UNBOUNDED RECURSION → stack overflow → process abort (a DoS). [OPUS-4.8]
+                // UNBOUNDED RECURSION → stack overflow → process abort (a DoS).
                 if ids
                     .iter()
                     .any(|&c| c == 0 || (c < INLINE_BASE && (c > len_id || c >= own_id)))
@@ -926,7 +926,7 @@ fn validate_dict_bytes(
             StoredRef::Blank(_) => {}
         }
     }
-    // [OPUS-4.8] sq-cvug — KIND check: a component id can be in range yet of the wrong
+    // sq-cvug — KIND check: a component id can be in range yet of the wrong
     // kind (e.g. a literal where the subject must be IRI/blank or the predicate an IRI).
     // `reconstruct_triple` now fails closed to a placeholder rather than panicking, but
     // reject such an index here too so a corrupt store never opens. Resolving each id is
@@ -965,7 +965,7 @@ fn validate_dict_bytes(
     Ok(())
 }
 
-// [OPUS-4.8] sq-ueuk (epic sq-toze, gap MS-G4) — Kani bounded proof of the mmap dict
+// sq-ueuk (epic sq-toze, gap MS-G4) — Kani bounded proof of the mmap dict
 // validator, now that the `&[u8]` seam above lets Kani reach the header/length/bounds/record
 // logic WITHOUT a real `mmap` (which Kani — like Miri — cannot model; see the WHY scope note
 // in .github/workflows/kani.yml). This is the dict-side twin of `sparq-vectors`'
@@ -973,7 +973,7 @@ fn validate_dict_bytes(
 // bounded symbolic byte domain — it always returns `Ok`/`Err`, never panics, never reads out
 // of bounds, never hits UB — for EVERY hostile input in that domain.
 //
-// [SONNET-4.6] sq-sqtk2.2 — extended with PROVED (complete-domain) Kani harnesses for the
+// sq-sqtk2.2 — extended with PROVED (complete-domain) Kani harnesses for the
 // inline-id round-trip and four-region id-partition disjointness properties (§3.3 C-1 of
 // research/mechanized-proof-program.md). These prove purely numeric invariants of the `u32`
 // id space; CBMC models each type as a bit-vector and explores the full symbolic domain, so
@@ -988,7 +988,7 @@ fn validate_dict_bytes(
 mod kani_proofs {
     use super::*;
 
-    // ---- [SONNET-4.6] sq-sqtk2.2 — inline-id round-trip + id-partition disjointness ----
+    // ---- sq-sqtk2.2 — inline-id round-trip + id-partition disjointness ----
     //
     // Both harnesses are pure integer arithmetic — no loops, no heap, no strings. CBMC
     // models `u32` and `i64` as bit-vectors and exhausts the full symbolic domain; no
@@ -1073,7 +1073,7 @@ mod kani_proofs {
     /// concrete arithmetic over the partition constants (no loop, no unwind, so nothing here
     /// can itself be pruned) — plus two `kani::cover!`s proving the `inline_id_round_trip`
     /// assume-domain (`v <= INLINE_MAX`) actually REACHES both its adversarial boundary
-    /// (`INLINE_MAX`) and zero. Runs in BOTH feature states (no `mmap`). [OPUS-4.8] sq-og8u8
+    /// (`INLINE_MAX`) and zero. Runs in BOTH feature states (no `mmap`). sq-og8u8
     #[kani::proof]
     fn domain_id_partition_regions_are_all_nonempty() {
         // Every one of the four regions has at least one member — else a "four-region"
@@ -1104,7 +1104,7 @@ mod kani_proofs {
         kani::cover!(v == 0, "the round-trip domain reaches zero");
     }
 
-    // ---- [OPUS-4.8] sq-ueuk — mmap dict validator bounded proofs ----
+    // ---- sq-ueuk — mmap dict validator bounded proofs ----
     //
     // These harnesses require the `mmap` feature (they call `validate_dict_bytes`, which
     // is `#[cfg(feature = "mmap")]`). They run only when both `kani` AND `mmap` are active,
@@ -1192,7 +1192,7 @@ mod kani_proofs {
     /// to an `Ok`) is pinned by the unit test
     /// [`validate_dict_bytes_seam_accepts_valid_and_rejects_corruption`], which builds a REAL
     /// valid dict and asserts `Ok` — so the symbolic totality proof is non-vacuous on both the
-    /// shallow (here) and the deep (that unit test) accept paths. [OPUS-4.8] sq-og8u8
+    /// shallow (here) and the deep (that unit test) accept paths. sq-og8u8
     #[cfg(feature = "mmap")]
     #[kani::proof]
     fn domain_dict_validator_accepts_the_empty_dict() {
@@ -1354,7 +1354,7 @@ impl Dict {
     // arena dict only the table branch does work, so the bulk-load hot path keeps its
     // shape (two predictable never-taken branches).
     //
-    // [OPUS-5] (sq-7d3dj.21b) HASH-BEFORE-MEMCMP — SCOPED HONESTLY, PER PATH. The bead asked to
+    // (sq-7d3dj.21b) HASH-BEFORE-MEMCMP — SCOPED HONESTLY, PER PATH. The bead asked to
     // compare a stored 64-bit hash before falling through to the string compare ("skip if
     // already done — verify first"). It is in place on the MMAP path only; the in-memory path
     // keeps a weaker, tag-only prefilter BY CHOICE. What each dedup path actually does:
@@ -1514,7 +1514,7 @@ impl Dict {
     /// (ids may include inline-integer ids). Content-addressed by the component ids, so
     /// separately-interned identical triples share one id.
     ///
-    /// [OPUS-4.8] `pub(crate)` so the byte-level N-Triples parser (`nt`) can intern a
+    /// `pub(crate)` so the byte-level N-Triples parser (`nt`) can intern a
     /// `<<( s p o )>>` triple-term object STRUCTURALLY (interning s/p/o first, then the
     /// triple by their ids) — the identical path `intern(&Term::Triple(_))` takes — so the
     /// N-Triples and Turtle loaders agree on triple-term content-addressing.
@@ -1553,7 +1553,7 @@ impl Dict {
     /// terms.
     ///
     /// Triple terms are NOT handled here: `TermParts::Triple` carries ids of the SOURCE
-    /// dict, meaningless in another dict. [OPUS-4.8] (sq-t3rt) The sharded merge no longer
+    /// dict, meaningless in another dict. (sq-t3rt) The sharded merge no longer
     /// reaches this with a triple term — `ShardedDict::intern_partials` SKIPS triple terms
     /// in the (hash-routed) leaf pass and interns them structurally into a dedicated triple
     /// shard via `intern_triple_ids` instead. This stays a loud guard, not a path.
@@ -1635,7 +1635,7 @@ impl Dict {
         }
     }
 
-    /// [FABLE-5] sq-7d3dj.30.21 — if `id` is a PLAIN `xsd:string` literal (datatype exactly
+    /// sq-7d3dj.30.21 — if `id` is a PLAIN `xsd:string` literal (datatype exactly
     /// `xsd:string`, NO language tag), returns its value as a ZERO-COPY `&str` borrowed from
     /// the record store; otherwise `None`. A single-probe eligibility test AND value accessor
     /// for the engine's lazy top-k ORDER-BY string key — it matches EXACTLY the engine's
@@ -1674,14 +1674,14 @@ impl Dict {
     /// or the in-memory blob. Pure-arena dicts always take the first branch (base = 0).
     #[inline]
     fn record(&self, id: Id) -> StoredRef<'_> {
-        // [OPUS-4.8] sq-ky2a: `id == 0` is never a valid 1-based id, but a tampered perm can
+        // sq-ky2a: `id == 0` is never a valid 1-based id, but a tampered perm can
         // contain it; `id - 1` would underflow (a panic in debug). Treat it as out-of-range.
         if id == 0 {
             return OOR_TERM;
         }
         let i = (id - 1) as usize;
         if i >= self.base {
-            // [OPUS-4.8] sq-ky2a: `id` can originate from a TAMPERED permutation file (the
+            // sq-ky2a: `id` can originate from a TAMPERED permutation file (the
             // raw/compressed perm is a trusted-format asset with no per-row checksum — see
             // research/threat-model.md T-MMAP-DoS). A garbage id beyond the arena would
             // index `self.terms` OUT OF BOUNDS (a panic, and with the unchecked blob path a
@@ -1774,7 +1774,7 @@ impl Dict {
         remap
     }
 
-    /// [GPT-5.6] (sq-eiv) Consumes this dictionary and builds a dense dictionary containing
+    /// (sq-eiv) Consumes this dictionary and builds a dense dictionary containing
     /// only the real ids for which `retain` returns `true`. Returns the rebuilt dictionary
     /// and an old-to-new remap where `remap[(old_id - 1) as usize]` is `NO_ID` for a dropped
     /// term. Inline integers are not dictionary records, are not passed to `retain`, and keep
@@ -2037,7 +2037,7 @@ impl Dict {
     /// Loads a dictionary written by [`save`](Self::save), rebuilding the hash table.
     pub fn open(path: &std::path::Path) -> std::io::Result<Dict> {
         let file = std::fs::File::open(path)?;
-        // [OPUS-4.8] sq-f5jh: the legacy single-file `dict.bin` is an UNTRUSTED on-disk file
+        // sq-f5jh: the legacy single-file `dict.bin` is an UNTRUSTED on-disk file
         // (trust boundary B5), the same as the mmap dict files. Its entry COUNTS (np/nd/nt)
         // and every string LENGTH are read straight from it; `Vec::with_capacity(n)` /
         // `vec![0u8; n]` on a hostile count drove a multi-GB allocation that ABORTS the
@@ -2126,7 +2126,7 @@ impl Dict {
         // grown dictionary persists totally (the compaction path relies on this).
         let n = self.len();
 
-        // meta: [OPUS-4.8] (review 1409) version header (magic + version + id partition), then
+        // meta: (review 1409) version header (magic + version + id partition), then
         // prefixes, datatypes, term count.
         let mut meta = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-meta.bin"))?);
         meta.write_all(&DICT_META_MAGIC.to_le_bytes())?;
@@ -2177,7 +2177,7 @@ impl Dict {
     pub fn open_mmap(dir: &std::path::Path) -> std::io::Result<Dict> {
         use std::io::Read;
         let meta_file = std::fs::File::open(dir.join("dict-meta.bin"))?;
-        // [OPUS-4.8] sq-znld: `dict-meta.bin` is attacker-controlled. Its entry COUNTS (np,
+        // sq-znld: `dict-meta.bin` is attacker-controlled. Its entry COUNTS (np,
         // nd) and every string LENGTH are u32s read from it; the original code fed them
         // straight to `Vec::with_capacity` / `vec![0u8; n]`, so one flipped count byte drove
         // a multi-GB allocation that ABORTS the process (uncatchable OOM DoS). The file
@@ -2185,7 +2185,7 @@ impl Dict {
         // string length, so we clamp pre-allocations to it and bound each `read_str`.
         let meta_len = meta_file.metadata()?.len() as usize;
         let mut r = std::io::BufReader::new(meta_file);
-        // [OPUS-4.8] (review 1409) Validate the on-disk id-space partition before trusting any
+        // (review 1409) Validate the on-disk id-space partition before trusting any
         // persisted RAW id. A header-less file (legacy, written before this marker) or one
         // whose INLINE_BASE differs from the running build must be REJECTED — its inline vs
         // dictionary id ranges would be misinterpreted, silently corrupting numeric values.
@@ -2244,7 +2244,7 @@ impl Dict {
             hashes: map("dict-hash.bin")?,
             hashids: map("dict-hid.bin")?,
         };
-        // [OPUS-4.8] sq-znld: the four data files above are attacker-controlled. Validate
+        // sq-znld: the four data files above are attacker-controlled. Validate
         // their sizes + every offset + every record (bounds + UTF-8 + table-index range)
         // BEFORE handing back a Dict whose `term`/`lookup` paths would otherwise
         // dereference them unchecked.
@@ -2370,10 +2370,10 @@ impl Dict {
         self.len() == 0
     }
 
-    /// [OPUS-4.8] (sq-hxgb) Whether this dict stores any RDF 1.2 triple term
+    /// (sq-hxgb) Whether this dict stores any RDF 1.2 triple term
     /// (`Stored::Triple`).
     //
-    // [OPUS-4.8] (sq-jvbr) The SOLE caller is the DICT-SPILL external builder's
+    // (sq-jvbr) The SOLE caller is the DICT-SPILL external builder's
     // `SpillInterner::intern_batch` (`#[cfg(feature = "dict-spill")]`), which uses it to SKIP
     // the serial triple-term arena pass on the common triple-term-free hot path. Gated to
     // `dict-spill` so the method is not dead code on the default / wasm builds, which
@@ -2384,7 +2384,7 @@ impl Dict {
         self.any_triple_terms()
     }
 
-    /// [OPUS-4.8] (sq-perf) Cheap enum-tag scan for any stored RDF 1.2 triple term, used by
+    /// (sq-perf) Cheap enum-tag scan for any stored RDF 1.2 triple term, used by
     /// `ShardedDict::intern_partials` to SKIP the serial triple-term second pass on the common
     /// triple-term-free hot path. Unlike [`has_triple_terms`](Self::has_triple_terms) this is
     /// NOT gated on `parallel` (the sharded interner runs in the non-parallel build too, and the
@@ -2497,7 +2497,7 @@ pub(crate) fn write_record(w: &mut impl std::io::Write, t: &StoredRef) -> std::i
     })
 }
 
-/// [OPUS-4.8] sq-lvw8 (sq-ueuk/#418 follow-up): the mmap on-disk dictionary format is
+/// sq-lvw8 (sq-ueuk/#418 follow-up): the mmap on-disk dictionary format is
 /// little-endian. [`write_pod_slice`] / [`MappedDict::slice_u64`] / [`MappedDict::hashids`]
 /// move the offset/hash/id arrays through a raw native-endian byte cast, while
 /// [`validate_dict_bytes`] and the `dict-spill` external builder use explicit
@@ -2519,7 +2519,7 @@ const DICT_ON_DISK_LE_GUARD: () = assert!(
 /// Writes a slice of plain-old-data (u32/u64) as raw bytes (for the mmap offset / hash /
 /// id arrays — `dict-offs.bin` / `dict-hash.bin` / `dict-hid.bin`).
 ///
-/// [OPUS-4.8] sq-lvw8 (sq-ueuk/#418 follow-up): this is a raw `transmute`-style byte copy,
+/// sq-lvw8 (sq-ueuk/#418 follow-up): this is a raw `transmute`-style byte copy,
 /// so the on-disk byte order is the HOST's native endianness — little-endian on every target
 /// sparq currently builds for. The whole mmap dictionary format relies on that:
 ///   * the mmap readers ([`MappedDict::slice_u64`] / [`MappedDict::hashids`]) reinterpret
@@ -2560,7 +2560,7 @@ fn read_u8(r: &mut impl std::io::Read) -> std::io::Result<u8> {
     Ok(b[0])
 }
 
-/// [OPUS-4.8] sq-f5jh — `read_str` for the UNTRUSTED legacy `dict.bin` loader (always
+/// sq-f5jh — `read_str` for the UNTRUSTED legacy `dict.bin` loader (always
 /// compiled, unlike the `mmap`-gated [`read_str_bounded`]). Rejects a declared length
 /// larger than `max` (the bytes that can possibly remain in the source file) BEFORE
 /// allocating, so a hostile u32 length cannot trigger a multi-GB `vec![0u8; n]`
@@ -2581,7 +2581,7 @@ fn read_str_bounded_io(r: &mut impl std::io::Read, max: usize) -> std::io::Resul
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid utf-8 in dictionary"))
 }
 
-/// [OPUS-4.8] sq-znld — `read_str` for UNTRUSTED metadata: rejects a length larger than
+/// sq-znld — `read_str` for UNTRUSTED metadata: rejects a length larger than
 /// `max` (the bytes that can possibly remain in the source file) BEFORE allocating, so a
 /// hostile u32 length cannot trigger a multi-GB `vec![0u8; n]` allocation/abort. The
 /// subsequent `read_exact` still errors cleanly if the file actually ends early.
@@ -2628,7 +2628,7 @@ fn stored_owned_bytes(s: &Stored) -> usize {
 
 /// A hash-sharded interner — see the module comment above.
 ///
-/// [OPUS-4.8] (sq-t3rt) RDF 1.2 triple terms `<<( s p o )>>` cannot be hash-routed like leaf
+/// (sq-t3rt) RDF 1.2 triple terms `<<( s p o )>>` cannot be hash-routed like leaf
 /// terms: a triple term's content IS its components' ids, and those final ids are only known
 /// after every leaf consolidates (a component may live in any shard). So `shards` holds
 /// `n_leaf` LEAF shards (`shards[0..n_leaf]`, routed by `hash % n_leaf`, unchanged) PLUS one
@@ -2655,7 +2655,7 @@ impl ShardedDict {
         // reserves the top stride-band for the triple shard so its temp ids stay below
         // INLINE_BASE; leaf shards' FINAL ids are unaffected (final = base + local).
         ShardedDict {
-            // [OPUS-4.8] `0..(n_leaf + 1)` (== `0..=n_leaf`) — `n_leaf` leaf shards plus the
+            // `0..(n_leaf + 1)` (== `0..=n_leaf`) — `n_leaf` leaf shards plus the
             // one trailing triple-term shard. Parenthesised so the bound reads unambiguously.
             shards: (0..(n_leaf + 1)).map(|_| Dict::new()).collect(),
             n_leaf,
@@ -2695,7 +2695,7 @@ impl ShardedDict {
                 .into_iter()
                 .map(|(tag, idx, t)| {
                     let lid = shard.intern(&t);
-                    // [OPUS-4.8] Always-on (not debug_assert): a shard overflowing its STRIDE
+                    // Always-on (not debug_assert): a shard overflowing its STRIDE
                     // makes temp-id ranges of adjacent shards overlap, which silently corrupts
                     // the order-preserving remap (`remap_sharded`) in release builds. Fail hard.
                     assert!(lid < stride, "shard {s} exceeded STRIDE ({stride}) — raise shard count / widen Id");
@@ -2741,7 +2741,7 @@ impl ShardedDict {
     /// into the shared remap table (disjoint writes: a term instance `(partial, local-id)`
     /// is hash-routed to exactly one shard).
     ///
-    /// [OPUS-4.8] (sq-t3rt) RDF 1.2 triple terms (`Stored::Triple`) are handled in a SERIAL
+    /// (sq-t3rt) RDF 1.2 triple terms (`Stored::Triple`) are handled in a SERIAL
     /// second pass into the dedicated triple shard (`shards[n_leaf]`): they cannot be
     /// hash-routed (their content is their components' ids, only resolvable once the leaves
     /// are interned), so each is content-addressed by its components' already-known TEMP ids
@@ -2751,7 +2751,7 @@ impl ShardedDict {
     /// the serial pass is not on the hot path.
     ///
     /// # Errors
-    /// [OPUS-4.8] Returns `Err` if a partial is malformed — a triple term whose component
+    /// Returns `Err` if a partial is malformed — a triple term whose component
     /// local id is out of the partial's range, or references a slot that was never
     /// routed/interned (e.g. children-first arena ordering was violated). Such input is
     /// rejected with a descriptive message rather than silently mis-indexing the remap.
@@ -2793,10 +2793,10 @@ impl ShardedDict {
         // SAFETY: `SlotPtr` (a `*mut Id`) only ever touches its own disjoint slot — the
         // hash routing above assigns each (pidx, i) leaf slot to exactly one shard, so the
         // raw-pointer handle can be sent/shared across the parallel scatter without
-        // aliasing; no reads happen until the parallel scope ends. [OPUS-4.8 sq-8wbn]
+        // aliasing; no reads happen until the parallel scope ends. [sq-8wbn]
         unsafe impl Send for SlotPtr {}
         // SAFETY: shared read of a `Copy` raw-pointer handle; the writes it performs are
-        // disjoint by the hash routing above (see the `Send` argument). [OPUS-4.8 sq-8wbn]
+        // disjoint by the hash routing above (see the `Send` argument). [sq-8wbn]
         unsafe impl Sync for SlotPtr {}
         let scatter: Vec<SlotPtr> = remaps.iter_mut().map(|v| SlotPtr(v.as_mut_ptr(), v.len())).collect();
 
@@ -2808,7 +2808,7 @@ impl ShardedDict {
                 let SlotPtr(ptr, len) = scatter[pidx];
                 for (i, tp) in &per_partial[s] {
                     let lid = shard.intern_parts(tp);
-                    // [OPUS-4.8] Always-on (not debug_assert): STRIDE overflow makes adjacent
+                    // Always-on (not debug_assert): STRIDE overflow makes adjacent
                     // shards' temp-id ranges overlap and silently corrupts `remap_sharded`
                     // (the scatter below would also write a wrong final id). Fail hard.
                     assert!(lid < stride, "shard {s} exceeded STRIDE ({stride}) — raise shard count / widen Id");
@@ -2829,8 +2829,8 @@ impl ShardedDict {
         #[cfg(not(feature = "parallel"))]
         self.shards[..n].iter_mut().enumerate().for_each(|(s, shard)| intern_shard(s, shard));
 
-        // [OPUS-4.8] (sq-t3rt) Serial second pass — triple terms into the triple shard.
-        // [OPUS-4.8] (sq-perf) FAST PATH: triple terms are rare reification metadata, but the
+        // (sq-t3rt) Serial second pass — triple terms into the triple shard.
+        // (sq-perf) FAST PATH: triple terms are rare reification metadata, but the
         // common N-Triples/Turtle hot path is triple-term-FREE. Skip the whole serial second
         // pass (a per-term `term_parts` walk over every partial) unless some partial actually
         // carries one — `any_triple_terms` short-circuits on a cheap enum-tag scan that bails
@@ -2842,7 +2842,7 @@ impl ShardedDict {
         Ok(remaps)
     }
 
-    /// [OPUS-4.8] (sq-t3rt) Intern every partial's RDF 1.2 triple terms into the dedicated
+    /// (sq-t3rt) Intern every partial's RDF 1.2 triple terms into the dedicated
     /// triple shard (`shards[n_leaf]`), filling their slots in `remaps`. Runs AFTER the leaf
     /// pass, so every component's temp id is already in `remaps` (children precede their
     /// triple in a partial's arena). Each triple is content-addressed by its components'
@@ -2858,7 +2858,7 @@ impl ShardedDict {
         // leaf (filled by the parallel pass) or a NESTED triple term (filled earlier in this
         // same ordered walk — children always precede their parent in arena order).
         //
-        // [OPUS-4.8] (sq-t3rt review) A component id is VALIDATED before it indexes the remap:
+        // (sq-t3rt review) A component id is VALIDATED before it indexes the remap:
         // a malformed partial that violated children-first arena ordering, or that carried a
         // component id which was never routed/interned, would otherwise index a wrong/empty
         // slot silently. Both failures are recoverable bad input, not invariant breaches, so
@@ -2917,7 +2917,7 @@ impl ShardedDict {
     pub fn into_merged(self) -> (Dict, Vec<u64>, u32) {
         let base = self.bases();
         let stride = self.stride;
-        // [OPUS-4.8] Validate capacity before producing the merged dict. (1) No shard may
+        // Validate capacity before producing the merged dict. (1) No shard may
         // have overflowed its STRIDE — otherwise its temp ids overlapped the next shard's
         // range and `remap_sharded` produced corrupt final ids. (2) The total distinct-term
         // count must fit in the dictionary id partition `[1, INLINE_BASE)`; otherwise final
@@ -2976,7 +2976,7 @@ impl ShardedDict {
                     Stored::Iri { prefix, suffix } => Stored::Iri { prefix: pr[prefix as usize], suffix },
                     Stored::Lit { value, datatype, lang } => Stored::Lit { value, datatype: dr[datatype as usize], lang },
                     Stored::Blank(b) => Stored::Blank(b),
-                    // [OPUS-4.8] (sq-t3rt) A triple term lives only in the triple shard
+                    // (sq-t3rt) A triple term lives only in the triple shard
                     // (`shards[n_leaf]`); its component ids are TEMP ids (leaf or earlier
                     // nested-triple temps) — resolve each to its FINAL dense id with the same
                     // order-preserving `remap_sharded` the perm files use. Children sort
@@ -3063,7 +3063,7 @@ mod tests {
         assert_eq!(d.len(), 0, "no inline integer is stored in the dictionary");
     }
 
-    /// [FABLE-5] sq-7d3dj.30.21 — `plain_string_value` returns the ZERO-COPY value slice for
+    /// sq-7d3dj.30.21 — `plain_string_value` returns the ZERO-COPY value slice for
     /// EXACTLY a plain `xsd:string` literal (no lang tag, datatype `xsd:string`) and `None` for
     /// every other term kind — the eligibility gate the engine's lazy top-k string key relies
     /// on to stay byte-identical to the `LiteralKind::String` set.
@@ -3105,7 +3105,7 @@ mod tests {
         assert_eq!(d.plain_string_value(inline_int), None, "inline integer id is never a string");
     }
 
-    /// [OPUS-4.8] sq-cvug — a triple-term component id that is IN RANGE but resolves to the
+    /// sq-cvug — a triple-term component id that is IN RANGE but resolves to the
     /// WRONG KIND (a literal where the subject must be IRI/blank, or where the predicate must
     /// be an IRI) used to hit `reconstruct_triple`'s `unreachable!()` → a clean panic (DoS) on
     /// a hostile/corrupt mmap'd index. It must now FAIL CLOSED to a safe placeholder, never
@@ -3153,7 +3153,7 @@ mod tests {
         assert_eq!(t.subject, oxrdf::BlankNode::new_unchecked(OOR_TRIPLE_SUBJECT).into());
     }
 
-    /// [OPUS-4.8] sq-bj7o — base-direction VALIDATION + cross-path PARITY. The stored
+    /// sq-bj7o — base-direction VALIDATION + cross-path PARITY. The stored
     /// language slot can come from an untrusted/mmap'd index whose `--<suffix>` is
     /// attacker-controlled. The split used by the JSON fast path (`split_lang_dir`) and the
     /// materialised-`Term` path (`reconstruct_ref`, reached via `Dict::term`) must AGREE on
@@ -3293,7 +3293,7 @@ mod tests {
 
     #[test]
     fn merged_dict_lookup_and_intern_after_build_table() {
-        // [OPUS-4.8] Regression for review 1373 (Medium): `into_merged` returns a dict with an
+        // Regression for review 1373 (Medium): `into_merged` returns a dict with an
         // empty lookup table; `build_table` must rebuild it so the merged dict honours the
         // normal lookup/intern invariant — lookup hits every term, and re-interning an existing
         // term returns its id (no duplicate), while a fresh term appends above the merged ids.
@@ -3549,7 +3549,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// [OPUS-4.8] (sq-t3rt review) `intern_triple_terms` must REJECT a malformed partial whose
+    /// (sq-t3rt review) `intern_triple_terms` must REJECT a malformed partial whose
     /// triple-term component id is out of range or references an unpopulated remap slot, rather
     /// than silently mis-indexing the per-partial remap (returning garbage / panicking).
     #[test]
@@ -3598,7 +3598,7 @@ mod tests {
             .expect("a well-formed triple-term partial must intern without error");
     }
 
-    /// [OPUS-5] sq-7d3dj.21b — HASH-BEFORE-MEMCMP on the MMAP dedup path (and that path only —
+    /// sq-7d3dj.21b — HASH-BEFORE-MEMCMP on the MMAP dedup path (and that path only —
     /// the in-memory table's weaker tag-only prefilter is pinned separately by
     /// `in_memory_dedup_has_only_the_h2_tag_prefilter`). Here it holds in its strongest form:
     /// `mapped_find` binary-searches the sorted 64-bit hash array and calls the `eq`
@@ -3644,7 +3644,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// [OPUS-5] sq-7d3dj.21b — the OTHER half of the HASH-BEFORE-MEMCMP scope note on
+    /// sq-7d3dj.21b — the OTHER half of the HASH-BEFORE-MEMCMP scope note on
     /// `find_iri` & co., pinned so the mmap guarantee is never read as covering every dedup
     /// path. The in-memory `self.table` stores bare ids and so has NO full-64-bit hash gate:
     /// hashbrown matches only the top-7-bit `h2` tag, which means
@@ -3734,7 +3734,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// [OPUS-4.8] sq-lvw8 (sq-ueuk/#418 follow-up) — endianness invariant of the mmap on-disk
+    /// sq-lvw8 (sq-ueuk/#418 follow-up) — endianness invariant of the mmap on-disk
     /// dictionary format. The format mixes two byte-order conventions for the SAME files: the
     /// runtime writer/readers (`write_pod_slice`, `MappedDict::slice_u64`/`hashids`) move the
     /// `u64`/`u32` arrays through a raw NATIVE-endian byte cast, while `validate_dict_bytes` and
@@ -3787,7 +3787,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// [OPUS-4.8] Regression for review 1409: the mmap dictionary must carry an on-disk
+    /// Regression for review 1409: the mmap dictionary must carry an on-disk
     /// id-space partition marker so a store written under a DIFFERENT `INLINE_BASE` (or a
     /// legacy header-less file) is REJECTED rather than silently misinterpreting its ids.
     #[cfg(feature = "mmap")]
@@ -3824,7 +3824,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// [OPUS-4.8] sq-ueuk — exercise the mmap-FREE `&[u8]` validator seam directly from
+    /// sq-ueuk — exercise the mmap-FREE `&[u8]` validator seam directly from
     /// in-memory buffers (no real `mmap`, no file I/O), the same seam the Kani harness proves
     /// over a bounded symbolic domain. Builds a well-formed two-term store in RAM (one IRI +
     /// one literal) and then mutates each region to hit every rejection branch.
@@ -3890,7 +3890,7 @@ mod tests {
         validate_dict_bytes(&[], &[], &[], &[], 0, &[], &[]).expect("an empty store validates");
     }
 
-    /// [OPUS-4.8] sq-ueuk — the seam must reject a tampered triple term whose component id
+    /// sq-ueuk — the seam must reject a tampered triple term whose component id
     /// forward-references (or self-references) its own id, which would otherwise drive the
     /// reconstruct recursion unbounded. Build a single triple term whose subject id equals its
     /// own id and confirm it is refused at the `&[u8]` boundary (no panic / no stack blowup).
@@ -3938,7 +3938,7 @@ mod tests {
         assert_eq!(d.term(id), iri);
     }
 
-    /// [OPUS-4.8] sq-bif — `inline_id_of_int` is the engine's fast path for resolving a
+    /// sq-bif — `inline_id_of_int` is the engine's fast path for resolving a
     /// COMPUTED integer (BIND / aggregate result) directly to its inline id, with no term or
     /// lexical built. Previously it had no test. The id it returns MUST be the very id the
     /// canonical `xsd:integer` literal of that value interns to (so a computed value and a
@@ -3964,7 +3964,7 @@ mod tests {
         assert_eq!(d.len(), 0);
     }
 
-    /// [OPUS-4.8] sq-bif — `is_inline` must classify the id partition EXACTLY at its
+    /// sq-bif — `is_inline` must classify the id partition EXACTLY at its
     /// boundaries: `NO_ID`(0) and every dictionary id are NOT inline; `INLINE_BASE` (value 0)
     /// up to `INLINE_BASE + INLINE_MAX` (the inline ceiling) ARE; the first id ABOVE the
     /// inline range (the engine's local-vocab space) is NOT. A drift here would silently

@@ -295,7 +295,7 @@ fn decimal_data_reaching_concatenation_falls_back_sticky_and_stays_correct() {
 /// stratification is unsound and the analysis must conservatively fall back. In acp-c.n3 a
 /// simple-grant rule CONCLUDES `{ ?p ?pred ?r }` (predicate bound from
 /// `solidx:allowPred`/`denyPred` data), so the derived-predicate set is not statically known.
-/// In acp-a.n3 ([OPUS-4.8] sq-3jtd.5) the CreatorAgent/OwnerAgent candidate rule has a
+/// In acp-a.n3 (sq-3jtd.5) the CreatorAgent/OwnerAgent candidate rule has a
 /// variable-predicate PREMISE `?r ?kind ?w` (`?kind` bound to `solidx:creator`/`owner` from
 /// `solidx:provMatcher`), likewise outside the statically-stratifiable whitelist. Both
 /// fallbacks are SOUND (the engine path is always correct); they only forgo the counting
@@ -574,7 +574,7 @@ fn ownership_transfer_deltas_stay_incremental_and_match_from_scratch() {
     );
 }
 
-// [OPUS-4.8] Regression for reviews 1868 / 1884: a rule with NO plain join atom — an empty `{}`
+// Regression for reviews 1868 / 1884: a rule with NO plain join atom — an empty `{}`
 // premise — must NOT enter the counting profile (which seeds emissions only from plain premise
 // atoms, so its conclusion would be silently dropped). It must run in Fallback so the maintained
 // closure equals the batch oracle, which DOES derive the constant fact.
@@ -595,7 +595,7 @@ fn empty_premise_rule_falls_back_and_stays_correct() {
     assert_equal(&g, rules, &baseset, "after empty-premise build");
 }
 
-// [OPUS-4.8] Regression for reviews 1868 / 1884: a rule whose premise is ONLY a whitelisted
+// Regression for reviews 1868 / 1884: a rule whose premise is ONLY a whitelisted
 // builtin (no plain join atom) must also fall back to the batch engine — the counting path would
 // never seed it. The builtin-derived constant must still appear in the closure.
 #[test]
@@ -616,7 +616,7 @@ fn builtin_only_premise_rule_falls_back_and_stays_correct() {
     assert_equal(&g, rules, &baseset, "after builtin-only build");
 }
 
-// [OPUS-4.8] Regression for review 1868 (Low): when fallback is forced by log:implies-family
+// Regression for review 1868 (Low): when fallback is forced by log:implies-family
 // rules-as-data in the base (not by rule analysis), fallback_reason() must report the cause so
 // the documented `None ⇔ counting active` contract holds; and it must clear when the data is gone.
 #[test]

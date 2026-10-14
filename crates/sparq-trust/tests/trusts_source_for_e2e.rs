@@ -15,7 +15,7 @@
 //! `acl:agent` triple under a source trusted only for `schema:age`. The claim-level form
 //! is NOT a weaker admission path: every soundness side-condition holds identically.
 //!
-//! [OPUS-4.8] sq-pfae.4 (issue #940 / gh-940). 🤖 SPARQ agent — trust-graph authz PoC.
+//! sq-pfae.4 (issue #940 / gh-940). 🤖 SPARQ agent — trust-graph authz PoC.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use sparq_trust::admit::{admit, PresentedCredential, Session};

@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-lsp7k.1.1 — sparq-forms derivation micro-bench (registered in
+//! sq-lsp7k.1.1 — sparq-forms derivation micro-bench (registered in
 //! bench/benchmarks.toml as `forms-derive-overhead`, featured = false).
 //!
 //! Measures the cost of `derive_form_with_model` over a SYNTHETIC in-process

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-3dyje.12) OCC transaction concurrency stress tests — lost-update /
+//! (sq-3dyje.12) OCC transaction concurrency stress tests — lost-update /
 //! write-write interleaving under real `std::thread` contention, plus reader-under-writer
 //! snapshot-isolation assertions.
 //!

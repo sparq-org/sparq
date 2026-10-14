@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! Batch atomicity (§6.5): a reader sees EXACTLY 0-or-all rows of a bulk update,
 //! never a partial prefix. Mirrors sparq-server's
 //! `readers_are_not_blocked_during_a_slow_update` but asserts the stronger

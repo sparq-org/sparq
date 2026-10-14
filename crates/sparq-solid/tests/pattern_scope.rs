@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-lrtc3.3 — the pattern-scope differential acceptance test.
+//! sq-lrtc3.3 — the pattern-scope differential acceptance test.
 //!
 //! THE soundness property of masked-subgraph materialization (design record
 //! `research/odrl-pattern-scoped-targets-2026-07.md` §0/§3): for every query in a

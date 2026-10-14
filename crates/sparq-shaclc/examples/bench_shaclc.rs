@@ -1,4 +1,4 @@
-//! [FABLE-5] In-crate micro-bench for the generated SHACL-CS parsers +
+//! In-crate micro-bench for the generated SHACL-CS parsers +
 //! residual printer (gate G1 registration; see `bench/benchmarks.toml`
 //! `sparq-shaclc`). Deterministic synthetic corpus generated in-process;
 //! prints `metric_us` lines (min-of-3), NOT a committed regression number.

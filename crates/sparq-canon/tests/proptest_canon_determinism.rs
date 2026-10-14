@@ -1,4 +1,4 @@
-// [FABLE-5] sq-3dyje.8 — Property-based tests for sparq-canon: RDFC-1.0 determinism
+// sq-3dyje.8 — Property-based tests for sparq-canon: RDFC-1.0 determinism
 // under blank-node relabeling + quad permutation, idempotence, and API-path agreement.
 //
 // SCOPE: test-only (no production-code change). Uses proptest as a [dev-dependency]

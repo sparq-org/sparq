@@ -1,11 +1,11 @@
-//! [OPUS-4.8] sq-toze.36 (cert gap GX-13) — end-to-end test of the in-binary container
+//! sq-toze.36 (cert gap GX-13) — end-to-end test of the in-binary container
 //! HEALTHCHECK probe. The Dockerfile's `HEALTHCHECK` runs `sparq-server --health-probe`,
 //! which opens a TCP connection to the loopback `/health` and exits 0/non-zero. This boots
 //! the REAL server on an ephemeral port and drives `health_probe::run_probe` against it
 //! (healthy), then against a closed port (unhealthy) — the two outcomes the container
 //! runtime maps to healthy/unhealthy.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the

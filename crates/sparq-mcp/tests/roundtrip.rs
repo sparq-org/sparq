@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-0z43i, gh #909) Real MCP round-trip over an in-memory store:
+//! (sq-0z43i, gh #909) Real MCP round-trip over an in-memory store:
 //! initialize → tools/list → tools/call. Exercises the actual dispatch core
 //! (`McpServer::handle_message`) — no mock bypasses the engine; `query` runs through
 //! the real `sparq-engine` query path and `introspect`/`stats`/`classes`/`prefixes`
@@ -19,14 +19,14 @@ ex:alice rdf:type ex:Person ; ex:name "Alice" ; ex:knows ex:bob .
 ex:bob   rdf:type ex:Person ; ex:name "Bob" .
 "#;
 
-// [GPT-5.6] sq-kx5b0: three distinct schema.org IRIs and one FOAF IRI give the
+// sq-kx5b0: three distinct schema.org IRIs and one FOAF IRI give the
 // `prefixes` tool a mutation-witnessed ordering/count fixture.
 const PREFIXES_TTL: &str = r#"@prefix schema: <https://schema.org/> .
 @prefix foaf: <http://xmlns.com/foaf/0.1/> .
 schema:alice schema:knows schema:bob ; foaf:name "Alice" .
 "#;
 
-// [GPT-5.6] sq-cekgj: two classes with unequal populations and predicate profiles give
+// sq-cekgj: two classes with unequal populations and predicate profiles give
 // the `classes` tool mutation-witnessed ordering and count assertions.
 const CLASSES_TTL: &str = r#"@prefix ex: <http://ex/> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -72,7 +72,7 @@ fn initialize_handshake_reports_server_info() {
     assert!(result["capabilities"]["tools"].is_object());
 }
 
-// [SONNET-4.6] sq-bvnqm: MCP version negotiation — a supported client-proposed
+// sq-bvnqm: MCP version negotiation — a supported client-proposed
 // revision is accepted verbatim; anything else is answered with the server's
 // latest supported revision (per the MCP versioning rules), never a fixed echo.
 #[test]
@@ -148,10 +148,10 @@ fn read_only_server_lists_read_tools_only() {
     assert!(names.contains(&"classes"));
     assert!(names.contains(&"prefixes"));
     assert!(names.contains(&"void"));
-    // [GPT-5.6] sq-lsp7k.22: the validator dependency and tool stay opt-in.
+    // sq-lsp7k.22: the validator dependency and tool stay opt-in.
     #[cfg(not(feature = "shacl"))]
     assert!(!names.contains(&"validate"));
-    // [FABLE-5] sq-lsp7k.1.6: form derivation shares the same opt-in gate — absent
+    // sq-lsp7k.1.6: form derivation shares the same opt-in gate — absent
     // from the default (feature-off) tool surface.
     #[cfg(not(feature = "shacl"))]
     assert!(!names.contains(&"describe_form"));
@@ -177,7 +177,7 @@ fn read_only_server_lists_read_tools_only() {
 
 #[test]
 fn shapes_tool_returns_data_grounded_constraints_for_a_class() {
-    // [OPUS-4.8] sq-zak4f: the structured shape tool, exercised through the REAL MCP
+    // sq-zak4f: the structured shape tool, exercised through the REAL MCP
     // dispatch (no mock bypasses the introspection miner).
     let mut server = McpServer::new(graph());
     let req = r#"{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{

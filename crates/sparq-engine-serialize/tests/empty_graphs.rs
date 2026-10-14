@@ -1,4 +1,4 @@
-// [GPT-5.6] (sq-lzaw6) Mutation-witnessed empty graph and empty-default-graph round trips.
+// (sq-lzaw6) Mutation-witnessed empty graph and empty-default-graph round trips.
 #![cfg(feature = "serialize-rdf")]
 
 use std::collections::{BTreeSet, HashMap};

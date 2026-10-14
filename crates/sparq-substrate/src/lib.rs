@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
-// [OPUS-4.8] sq-ev41x (epic sq-qonbz, umbrella sq-6tykl) — see research/shared-eval-substrate.md.
+// sq-ev41x (epic sq-qonbz, umbrella sq-6tykl) — see research/shared-eval-substrate.md.
 //
 // This crate is the KEYSTONE leaf of the shared-evaluation-substrate move-chain. It defines
 // the shared id-tuple vocabulary (`rows`) and the XSD numeric value tower (`numeric`),
@@ -32,7 +32,7 @@
 // so a wholesale `Value` relocation would be non-neutral and sprawling — the correct seam moves
 // the ALGORITHM, leaving `Value` engine-resident; see the deferred-remainder note in the PR).
 //
-// sq-v5evr (un-parked, [OPUS-4.8]): the VALUE-SPACE RELATIONAL COMPARE — the XPath
+// sq-v5evr (un-parked,): the VALUE-SPACE RELATIONAL COMPARE — the XPath
 // `op:numeric-less-than`/`op:numeric-equal` semantics, where NaN is incomparable (`None`)
 // and same-tier pairs compare exactly via the `Dec` tower — has been added to the `numeric`
 // module as `Num::cmp_relational`. This is the correct comparison for SPARQL `<`/`>`/`=`
@@ -55,7 +55,7 @@ pub mod rows;
 #[cfg(feature = "numeric")]
 pub mod numeric;
 
-// [OPUS-4.8] sq-hknqs (epic sq-qonbz) — Phase 3 of the substrate move-chain. The FOUR id-tuple
+// sq-hknqs (epic sq-qonbz) — Phase 3 of the substrate move-chain. The FOUR id-tuple
 // join kernels (merge / hash / bind / leapfrog-trie) now live here, MOVED from
 // `sparq-engine::exec`, generic over a `JoinKeys` descriptor + a generic `Budget` hook so the
 // engine and a future reasoner share one probe loop with NO `Box<dyn>`/`&dyn`/vtable between a
@@ -63,7 +63,7 @@ pub mod numeric;
 #[cfg(feature = "join")]
 pub mod join;
 
-// [OPUS-4.8] sq-vezew (epic sq-qonbz) — Phase 4 of the substrate move-chain. The SPARQL term
+// sq-vezew (epic sq-qonbz) — Phase 4 of the substrate move-chain. The SPARQL term
 // TOTAL ORDER (`compare_values` — the `ORDER BY` / `<` term ordering: error < blank < IRI <
 // literal < triple, numeric-aware + strict typed/temporal + string fallback + recursive
 // triple-term order) now lives here, MOVED from `sparq-engine::exec`, generalised over a tiny
@@ -75,7 +75,7 @@ pub mod join;
 #[cfg(feature = "compare")]
 pub mod compare;
 
-// [FABLE-5] sq-atjue — the zero-overhead DELTA harness. This is the substrate half of the
+// sq-atjue — the zero-overhead DELTA harness. This is the substrate half of the
 // sparq-engine-systems paper's §8 protocol (`site/papers/sparq-engine-systems.typ`): it
 // measures each shared kernel (`join` / `numeric` / `compare`) against a hand-rolled
 // pre-extraction equivalent and emits the house JSON envelope with the evidence keys

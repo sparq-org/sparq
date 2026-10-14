@@ -145,7 +145,7 @@ pub mod provider {
         }
     }
 
-    // [OPUS-4.8] Concrete reqwest blocking transport + env-driven constructor
+    // Concrete reqwest blocking transport + env-driven constructor
     // (non-default `embeddings` feature, sq-fg9y). This is the piece that makes the
     // crate usable for real retrieval WITHOUT caller glue: with the feature on, a
     // `RemoteEmbedder` can be built straight from environment variables and embeds
@@ -261,7 +261,7 @@ pub mod provider {
             // them so they don't race when the binary runs them in parallel.
             static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-            // [OPUS-4.8] The full set of SPARQ_EMBEDDINGS_* vars any test in this
+            // The full set of SPARQ_EMBEDDINGS_* vars any test in this
             // module reads or writes — the guard snapshots/restores exactly these.
             const ENV_VARS: [&str; 4] = [
                 "SPARQ_EMBEDDINGS_API_KEY",
@@ -270,7 +270,7 @@ pub mod provider {
                 "SPARQ_EMBEDDINGS_DIM",
             ];
 
-            /// [OPUS-4.8] RAII env guard: on construction it takes [`ENV_LOCK`] (so all
+            /// RAII env guard: on construction it takes [`ENV_LOCK`] (so all
             /// env-touching tests are serialized — including the live round-trip, which
             /// only *reads* the vars) and snapshots the current value of every
             /// [`ENV_VARS`] entry; on drop it restores each to exactly what it was —
@@ -373,7 +373,7 @@ pub mod provider {
             #[test]
             #[ignore = "hits a live /v1/embeddings endpoint; needs SPARQ_EMBEDDINGS_API_KEY"]
             fn embeddings_live_round_trip() {
-                // [OPUS-4.8] Take ENV_LOCK (via the guard) so this serializes against
+                // Take ENV_LOCK (via the guard) so this serializes against
                 // the env-parsing unit tests when run together under `--ignored`; do NOT
                 // `clear()`, the user-set SPARQ_EMBEDDINGS_* opt-in vars are the input.
                 let _g = EnvGuard::acquire();
@@ -514,7 +514,7 @@ pub mod provider {
             assert!(err.contains("duplicate embedding index 1"), "got: {err}");
         }
 
-        // [OPUS-4.8] The rest of the `RemoteEmbedder::embed` response-validation contract — the
+        // The rest of the `RemoteEmbedder::embed` response-validation contract — the
         // fail-closed protocol-violation branches. Each is a *distinct* error a buggy or hostile
         // provider could trigger; the Embedder contract is "one finite, dim()-length vector per
         // input, in input order", and a violation must be a descriptive `Err`, never a silently

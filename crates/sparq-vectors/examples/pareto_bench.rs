@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-0ut5x — self-relative build-time/query-time/recall Pareto sweep for sparq's
+//! sq-0ut5x — self-relative build-time/query-time/recall Pareto sweep for sparq's
 //! internal HNSW, DiskANN, and product-quantized indexes.
 //!
 //! Every emitted frontier row first clears the same recall@10 floor used by `bench/vector/run.sh`,

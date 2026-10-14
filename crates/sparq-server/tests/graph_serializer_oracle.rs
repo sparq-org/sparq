@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-rt6v — **graph serialiser oracle** for the RDF *graph* writers in
+//! sq-rt6v — **graph serialiser oracle** for the RDF *graph* writers in
 //! `sparq_server::graph` (`triples_to_ntriples` / `triples_to_turtle` / `triples_to_rdfxml`).
 //!
 //! Mirrors the SELECT/ASK `tests/serializer_oracle.rs` but for the graph syntaxes: OUR

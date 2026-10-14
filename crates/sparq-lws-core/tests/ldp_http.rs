@@ -234,7 +234,7 @@ async fn put_creates_then_get_reads_it_back() {
     assert_eq!(&bytes[..], TURTLE.as_bytes());
 }
 
-/// [GPT-5.6] sq-r1ei8: in the core tier `/sparql` is an ordinary absent LDP
+/// sq-r1ei8: in the core tier `/sparql` is an ordinary absent LDP
 /// resource (404), while authenticated CRUD and private-resource WAC remain live.
 /// Enabling the route mutates the first assertion to 400 (missing query), so this
 /// is a direct compiled-route witness rather than a symbol-only check.
@@ -267,7 +267,7 @@ async fn core_tier_has_no_sparql_route_but_keeps_ldp_and_wac() {
 
 #[tokio::test]
 async fn put_flood_beyond_resource_cap_is_refused_with_507() {
-    // [GPT-5.6] The seed ACL and any implicit ancestor containers consume the same bounded store.
+    // The seed ACL and any implicit ancestor containers consume the same bounded store.
     // Keep issuing unique, zero-ish-body resources until the deliberately tiny cap trips; at least
     // one write must land first, and every later admission must fail closed as HTTP 507.
     let limits = InMemoryStoreLimits::new(1024 * 1024, 8);

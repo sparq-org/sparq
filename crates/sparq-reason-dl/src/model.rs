@@ -1,4 +1,4 @@
-// [FABLE-5] sq-pbz04.4.1 (epic sq-pbz04.4, design record
+// sq-pbz04.4.1 (epic sq-pbz04.4, design record
 // research/owl2-direct-semantics-scoping.md §3): the structural OWL model for the ALCH
 // fragment.
 //
@@ -15,7 +15,7 @@
 // the design record §5 deferral ledger — it is NOT modelled here, and the extractor
 // fail-closes on it rather than dropping it silently.
 //
-// [GPT-5.6] sq-zfwzq: the OPT-IN `dl_transitive` cargo feature (OFF by default) extends the
+// sq-zfwzq: the OPT-IN `dl_transitive` cargo feature (OFF by default) extends the
 // fragment with TRANSITIVE roles (`owl:TransitiveProperty` → `Axiom::TransitiveObjectProperty`)
 // — the design record's "first-in-line" §5 extension. Inverses / cardinality / nominals /
 // datatypes remain fail-closed deferrals in BOTH feature states.
@@ -165,7 +165,7 @@ pub enum Axiom {
         target: Id,
     },
     /// `owl:TransitiveProperty` — the role is transitive (`R ∘ R ⊑ R`). OPT-IN: this variant
-    /// exists only under the `dl_transitive` cargo feature ([GPT-5.6] sq-zfwzq); with the
+    /// exists only under the `dl_transitive` cargo feature (sq-zfwzq); with the
     /// feature OFF the extractor keeps refusing `owl:TransitiveProperty` fail-closed, exactly
     /// as before. The L3 tableau consumes it via the ∀₊-propagation rule, whose extended
     /// termination/soundness/completeness argument is written in the `tableau` module docs

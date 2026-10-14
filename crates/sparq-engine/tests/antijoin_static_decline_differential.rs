@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7d3dj.30.20) Differential + non-vacuity tests for the anti-join STATIC
+//! (sq-7d3dj.30.20) Differential + non-vacuity tests for the anti-join STATIC
 //! early-decline (`antijoin-static-decline` feature).
 //!
 //! # What the feature does

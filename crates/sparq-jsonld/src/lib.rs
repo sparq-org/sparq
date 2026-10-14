@@ -44,7 +44,7 @@
 //!   including frame matching, value patterns, embedding, defaults, named graphs, and
 //!   framing-specific validation. Its pinned W3C framing lane passes all 92 cases.
 //!
-//! [GPT-5.6] (`sq-ci15w`) Only [`to_rdf`] and [`api`] remain documented stubs. The
+//! (`sq-ci15w`) Only [`to_rdf`] and [`api`] remain documented stubs. The
 //! implemented pipeline is `todo!()`-free; remote loading and HTML extraction remain
 //! separate, opt-in follow-on capabilities.
 

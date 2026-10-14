@@ -1,5 +1,5 @@
 //! The **live cheap-model batch extractor** behind the `extract::Extractor` trait — the
-//! Phase-6 slot the record/replay design left open (§4.3, §4.7). [SONNET-4.6] sq-tzars.6
+//! Phase-6 slot the record/replay design left open (§4.3, §4.7). sq-tzars.6
 //! (epic `sq-tzars`, design records `research/research-kb-program.md` +
 //! `research/provenance-driven-genai-kb.md`). 🤖 SPARQ agent — research-KB live ingestion.
 //!

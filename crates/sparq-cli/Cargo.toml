@@ -9,11 +9,11 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
-# [OPUS-4.8] crate-local README so crates.io (package.readme) matches the docs.rs front
+# crate-local README so crates.io (package.readme) matches the docs.rs front
 # page (main.rs include_str!("../README.md")) — same content on both registries.
 readme = "README.md"
 
-# [OPUS-4.8] Build the README-as-front-page docs on docs.rs with all features
+# Build the README-as-front-page docs on docs.rs with all features
 # enabled, and pass `--cfg docsrs` so any `#[cfg(docsrs)]`-gated doc attrs apply.
 [package.metadata.docs.rs]
 all-features = true
@@ -23,7 +23,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 # Out-of-core querying (memory-mapped on-disk indexes) — on by default for the CLI.
 # mimalloc: the global allocator (T1.0). On by default; `--no-default-features --features mmap`
 # falls back to the system allocator for A/B measurement of allocator contention.
-# [OPUS-4.8] (sq-oy1f.4, MAINTAINER-DIRECTED DEFAULT-ON EXCEPTION) `jsonld` is in the default
+# (sq-oy1f.4, MAINTAINER-DIRECTED DEFAULT-ON EXCEPTION) `jsonld` is in the default
 # set: the native CLI parses AND re-serialises JSON-LD out of the box (the user-prioritised
 # sq-oy1f epic). This is a deliberate exception to sparq's opt-in-by-default principle — JSON-LD
 # is the dominant linked-data interchange format and the native binary has no bundle-size floor.
@@ -34,21 +34,21 @@ mmap = ["sparq-core/mmap"]
 # runtime via SPARQ_DICT_SPILL — default behavior is unchanged when the vars are unset).
 dict-spill = ["sparq-core/dict-spill"]
 mimalloc = ["dep:mimalloc"]
-# [FABLE-5] sq-7d3dj.32.2.7: forwards sparq-core's `spqcprm2` so `save ... compressed --format-v2`
+# sq-7d3dj.32.2.7: forwards sparq-core's `spqcprm2` so `save ... compressed --format-v2`
 # (and `recompress ... --v2`, or `SPARQ_EMIT_FORMAT=v2`) write the SPQCPRM2 frame-of-reference
-# on-disk format — [SONNET-4.6] sq-kmve2 added the flags; without the feature they are a hard
+# on-disk format — sq-kmve2 added the flags; without the feature they are a hard
 # exit-2 error, never a silent SPQCPRM1 write.
 # OFF by default (the default CLI emits SPQCPRM1 bit-for-bit); enabling it is how the
 # real-data B/triple comparison writes both formats from the same corpus.
 spqcprm2 = ["sparq-core/spqcprm2"]
-# [OPUS-4.8] (sq-oy1f.4, epic sq-oy1f) `jsonld` — JSON-LD ingest + re-serialisation, DEFAULT ON
+# (sq-oy1f.4, epic sq-oy1f) `jsonld` — JSON-LD ingest + re-serialisation, DEFAULT ON
 # (maintainer-directed exception to opt-in-by-default; see `default` above). Forwards
 # `sparq-core/jsonld` (the `oxjsonld` parser `dump <file> jsonld …` / `load <file> jsonld` use to
 # READ a JSON-LD document) and implies `serialize-rdf` (the engine's hand-rolled JSON-LD WRITER, so
 # `dump … jsonld[-…]` EMITS one). Toggleable: drop it via `--no-default-features` to omit the
 # `oxjsonld` parser. Native-only; the lean wasm bundle keeps JSON-LD opt-in (sparq-wasm/jsonld).
 jsonld = ["sparq-core/jsonld", "serialize-rdf"]
-# [OPUS-4.8] (sq-678h) `dump <file> <in-format> <out-format>` — load an RDF document and
+# (sq-678h) `dump <file> <in-format> <out-format>` — load an RDF document and
 # re-serialize it as Turtle / TriG / N-Quads / JSON-LD (the writer matrix). Forwards sparq-engine's
 # `serialize-rdf` feature (no new dependencies — the JSON-LD writer is a hand-rolled emitter).
 # Pulled into the default build by `jsonld` (above); a `--no-default-features` build that wants ONLY
@@ -68,13 +68,13 @@ streaming-serialization = ["serialize-rdf", "sparq-engine/streaming-serializatio
 # for the common load-and-query paths. Enable with
 # `cargo build -p sparq-cli --features hdt`.
 hdt = ["dep:sparq-hdt"]
-# [FABLE-5] (sq-8ju74) `hdt-write` — the `to-hdt` EXPORT subcommand (Graph -> standard-layout
+# (sq-8ju74) `hdt-write` — the `to-hdt` EXPORT subcommand (Graph -> standard-layout
 # HDT v1.0 via sparq-hdt's direct in-memory encoder; `.hdt.gz`/`.hdt.zst`/`.hdt.bz2` chosen by
 # the OUTPUT extension). Implies `hdt` (the loader — `to-hdt` reads its input through the same
 # shared load path, so any ingestible format, HDT itself included, can be exported) and turns
 # on sparq-hdt's `write` feature. OFF by default for the same two reasons as `hdt` above.
 hdt-write = ["hdt", "sparq-hdt?/write"]
-# [OPUS-4.8] (sq-i3xc, lever H5) `zlib-ng`: opt-in, OFF by default, NATIVE-ONLY faster
+# (sq-i3xc, lever H5) `zlib-ng`: opt-in, OFF by default, NATIVE-ONLY faster
 # gzip backend (zlib-ng C library via flate2) — a measured 1.5–3× inflate on every gzip
 # ingest path (`.nt.gz` etc.) at ~zero code change. The weak `sparq-hdt?/zlib-ng` dep
 # extends the speedup to the `.hdt.gz` path too, but ONLY when the `hdt` feature is also
@@ -82,7 +82,7 @@ hdt-write = ["hdt", "sparq-hdt?/write"]
 # SAFE because the CLI is native-only and never in the sparq-wasm graph, so the C dep can
 # never reach the wasm bundle. The default flate2 backend stays pure-Rust miniz_oxide.
 zlib-ng = ["flate2/zlib-ng", "sparq-hdt?/zlib-ng"]
-# [OPUS-4.8] (sq-vczh2, epic sq-2m6zm, design research/llm-ergonomic-sparql-surface.md §4) `terse`
+# (sq-vczh2, epic sq-2m6zm, design research/llm-ergonomic-sparql-surface.md §4) `terse`
 # (default OFF) adds the `terse <terse-query>` subcommand: it transpiles a *terse* query (the
 # `K:<name>` keyword layer over canonical SPARQL) and prints the CANONICAL SPARQL it expands to PLUS
 # the keyword expansions / warnings / legend version, as JSON — the same verifiable contract the
@@ -94,43 +94,43 @@ zlib-ng = ["flate2/zlib-ng", "sparq-hdt?/zlib-ng"]
 # the feature carries no terse code and the subcommand is absent. Enable with
 # `cargo build -p sparq-cli --features terse`.
 terse = ["dep:sparq-terse"]
-# [FABLE-5] (sq-1ivw7) Forward sparq-engine's opt-in `id-filter-fastpath` — the id-level `=`/`!=`
+# (sq-1ivw7) Forward sparq-engine's opt-in `id-filter-fastpath` — the id-level `=`/`!=`
 # FILTER fast path (subject/predicate-only + snapshot-aware predicate-range non-literal object
 # operands decided by dictionary-id (in)equality). OFF by default (the default CLI build carries
 # none of the fast-path machinery and is behaviour-identical). Enable to bench the fast path, e.g.
 # `cargo build --release -p sparq-cli --features id-filter-fastpath`.
 id-filter-fastpath = ["sparq-engine/id-filter-fastpath"]
-# [FABLE-5] (sq-jnb1e) Forward sparq-engine's opt-in `cs-anchor-incidence` — the
+# (sq-jnb1e) Forward sparq-engine's opt-in `cs-anchor-incidence` — the
 # characteristic-set anchor-incidence prune for the DISTINCT predicate-projection semijoin
 # (SP2Bench q09). OFF by default (the default CLI build carries none of the incidence
 # machinery and is behaviour-identical). Enable to bench the prune, e.g.
 # `cargo build --release -p sparq-cli --features cs-anchor-incidence`.
 cs-anchor-incidence = ["sparq-engine/cs-anchor-incidence"]
-# [FABLE-5] (sq-7d3dj.30.21) Forward sparq-engine's opt-in `topk-lazy-strkey` — the lazy
+# (sq-7d3dj.30.21) Forward sparq-engine's opt-in `topk-lazy-strkey` — the lazy
 # string-literal collation key for the top-k ORDER BY selection path (an ORDER-BY on a plain
 # `xsd:string` column + LIMIT builds a zero-allocation id-carrying sort key instead of
 # reconstructing + re-allocating the literal value per input row). OFF by default (the default
 # CLI build carries none of it and is behaviour-identical). Enable to bench the fast path, e.g.
 # `cargo build --release -p sparq-cli --features topk-lazy-strkey`.
 topk-lazy-strkey = ["sparq-engine/topk-lazy-strkey"]
-# [FABLE-5] (sq-lsp7k.8, epic sq-lsp7k) `tabular` — the `tabular` subcommand: MATERIALIZING
+# (sq-lsp7k.8, epic sq-lsp7k) `tabular` — the `tabular` subcommand: MATERIALIZING
 # tabular→RDF import (CSV direct mapping + the R2RML materializing subset over CSV logical
 # tables). OFF by default — the default CLI build carries no CSV/R2RML code and the subcommand
 # is absent. ZERO new dependencies: the streaming RFC-4180 CSV reader is first-party, R2RML
 # mappings parse through sparq-core's Turtle parser, and generated triples stream as N-Triples
 # chunks into the existing parallel ingest (`Graph::load_reader_parallel`) — so `.csv.gz` /
-# `.csv.zst` / `.csv.bz2` inputs reuse `open_reader`'s transparent decompression. [OPUS-5]
+# `.csv.zst` / `.csv.bz2` inputs reuse `open_reader`'s transparent decompression.
 # (sq-u1z86) extends the subset with cross-CSV joins (`rr:parentTriplesMap` +
 # `rr:joinCondition`, a keyed hash join), named-graph output (`rr:graphMap`/`rr:graph` →
 # N-Quads + a dataset load) and `--row-provenance`, still with zero new dependencies.
 # Enable with `cargo build -p sparq-cli --features tabular`.
 tabular = []
-# [GPT-5.6] (sq-lsp7k.28) `diff <file-a> <file-b> [--exact]` compares the two RDF
+# (sq-lsp7k.28) `diff <file-a> <file-b> [--exact]` compares the two RDF
 # triple sets and emits a deterministic N-Triples patch. OFF by default: without this
 # feature the dispatch arm, implementation, and subprocess contract tests are absent.
 # The implementation uses only sparq-core's existing load path and adds no dependency.
 diff = []
-# [OPUS-5] (sq-2ch27, Phase E6 of research/owl2-el-ql-reasoning-spike.md §5) `el` — the OWL 2 EL
+# (sq-2ch27, Phase E6 of research/owl2-el-ql-reasoning-spike.md §5) `el` — the OWL 2 EL
 # CLASSIFIER surface: `--reason el` on `query`, `reason <f> <fmt> el`, and the `classify`
 # subcommand. Pulls the separate opt-in `sparq-reason-el` crate WITH its `rbox` feature, so the
 # CLI surface is the E1+E2 capability this bead depends on (CR1–CR6 class saturation PLUS the
@@ -149,7 +149,7 @@ diff = []
 # No new third-party dependency: sparq-reason-el rides sparq-core + oxrdf + rustc-hash, all
 # already in the CLI's tree. Enable with `cargo build -p sparq-cli --features el`.
 el = ["dep:sparq-reason-el", "sparq-reason-el/rbox"]
-# [SONNET-4.6] (sq-p4zci, design record research/stratified-datalog-rules.md §6 item 6)
+# (sq-p4zci, design record research/stratified-datalog-rules.md §6 item 6)
 # `datalog` — the STRATIFIED DATALOG surface: `--reason datalog:<rules.dlog>` on `query` and
 # `reason <f> <fmt> datalog:<rules.dlog>`. Forwards the already-present `sparq-reason` dep's
 # opt-in `datalog` feature (the parser + stratification checker + per-stratum evaluator), so
@@ -165,11 +165,11 @@ datalog = ["sparq-reason/datalog"]
 # `version` alongside `path` on the sparq-* deps: cargo uses the path locally and the
 # version on crates.io (required to publish — crates.io strips `path`).
 sparq-core = { path = "../sparq-core", version = "0.1.6", features = ["mmap"] }
-# [SONNET-4.6] sq-7d3dj.30.5: enable the opt-in DPccp join-order planner so the CLI
+# sq-7d3dj.30.5: enable the opt-in DPccp join-order planner so the CLI
 # (the canonical bench binary) uses the cost-optimal bushy join tree by default for
 # small BGPs. sparq-engine's default features are unchanged; the feature is ON only for
 # the CLI, keeping the core lean per the opt-in feature architecture.
-# [FABLE-5] sq-7d3dj.30.13: also enable the opt-in pre-execution ALGEBRA-REWRITE pass
+# sq-7d3dj.30.13: also enable the opt-in pre-execution ALGEBRA-REWRITE pass
 # (#1735 — result-equivalent FILTER `?v = <iri>` constant substitution + `!bound` anti-join)
 # the same way, so the shipped CLI and every canonical benchmark measure the rewritten
 # plans instead of a rewrite-dark binary. sparq-engine's LIBRARY default stays OFF (library
@@ -177,21 +177,21 @@ sparq-core = { path = "../sparq-core", version = "0.1.6", features = ["mmap"] }
 # witnesses run in the `sparq-engine (algebra-rewrite)` feature-matrix leg, and
 # `tests/cli_contract.rs::algebra_rewrite_*` is the compile-time + behavioral tripwire
 # that this dep line keeps the pass lit.
-# [OPUS-4.8] sq-7d3dj.30.20: also enable the opt-in `antijoin-static-decline` — a purely
+# sq-7d3dj.30.20: also enable the opt-in `antijoin-static-decline` — a purely
 # static, bag-result-equivalent evaluation-ordering fix that stops the correlated-anti-join
 # recogniser re-evaluating a bare-`!bound` OPTIONAL's (SP2Bench q07's) dominant left side.
 # Same rationale as `algebra-rewrite`: the shipped CLI and canonical bench measure the fixed
 # plan, the LIBRARY default stays OFF, zero new deps / no `unsafe`. Its equivalence witnesses
 # run in the `sparq-engine (antijoin-static-decline)` feature-matrix leg.
 sparq-engine = { path = "../sparq-engine", version = "0.1.6", features = ["dp-planner", "algebra-rewrite", "antijoin-static-decline"] }
-# [OPUS-4.8] (sq-l4ki) `query` reuses sparq-server's W3C SELECT result serialisers
+# (sq-l4ki) `query` reuses sparq-server's W3C SELECT result serialisers
 # (XML/CSV/TSV) for its `--format` flag instead of re-implementing them. We take ONLY
 # the pure serialiser library (`results`) — `default-features = false` drops the `server`
 # feature so axum/tokio/hyper are NOT pulled into the CLI (verified: `cargo tree -p
 # sparq-cli -e normal | grep -c axum` == 0). JSON / ASK-boolean / CONSTRUCT come straight
 # from sparq-engine (`query_json` / `construct_ntriples`), so the dep is serialiser-only.
 sparq-server = { path = "../sparq-server", version = "0.1.6", default-features = false }
-# [OPUS-4.8] Classify the parsed query form (Select / Ask / Construct / Describe) so
+# Classify the parsed query form (Select / Ask / Construct / Describe) so
 # `query` can dispatch SELECT→rows, ASK→boolean, CONSTRUCT/DESCRIBE→triples. Mirrors how
 # sparq-server classifies before dispatch; already in the CLI's tree transitively via
 # sparq-engine, so the direct dep adds no new code.
@@ -205,14 +205,14 @@ mimalloc = { version = "0.1", optional = true }
 # Opt-in reasoning (RDFS/OWL-RL materialization) — engaged only by `--reason` / the `reason`
 # subcommand; the default query/build path never touches it.
 sparq-reason = { path = "../sparq-reason", version = "0.1.6" }
-# [OPUS-5] (sq-2ch27) Behind the opt-in `el` feature only: the OWL 2 EL consequence-based
+# (sq-2ch27) Behind the opt-in `el` feature only: the OWL 2 EL consequence-based
 # classifier (`sparq_reason_el::classify_graph`) behind `--reason el` / `classify`. OFF by
 # default — a build without the feature links none of it. Adds no third-party dependency
 # (sparq-core + oxrdf + rustc-hash are all already in the CLI's tree).
 sparq-reason-el = { path = "../sparq-reason-el", version = "0.1.6", optional = true }
 # Opt-in HDT ingestion (the `hdt` feature; see [features] for why it is not default).
 sparq-hdt = { path = "../sparq-hdt", version = "0.1.6", optional = true }
-# [OPUS-4.8] (sq-vczh2) Behind the opt-in `terse` feature only: the verifiable LLM-ergonomic
+# (sq-vczh2) Behind the opt-in `terse` feature only: the verifiable LLM-ergonomic
 # transpiler (`sparq_terse::terse_to_sparql`) for the `terse` subcommand. Pulled WITHOUT its
 # `vectors` feature, so this is the LEAN build (depends only on `spargebra`, already in the CLI's
 # tree). OFF by default — a build without the `terse` feature carries no terse code.
@@ -229,7 +229,7 @@ zstd = "0.13"
 memmap2 = { workspace = true }
 
 [dev-dependencies]
-# [OPUS-4.8] cli_contract.rs generates gzip/zstd/bzip2 copies of the same N-Triples
+# cli_contract.rs generates gzip/zstd/bzip2 copies of the same N-Triples
 # fixture in a tempdir to assert the CLI's compressed-input auto-detection. These are
 # already regular deps above (the CLI decodes the same three codecs), so declaring them
 # as dev-deps adds nothing to the dependency tree — it just lets the integration test
@@ -237,7 +237,7 @@ memmap2 = { workspace = true }
 flate2 = "1"
 bzip2 = "0.6"
 zstd = "0.13"
-# [OPUS-4.8] (sq-d7d) `bench`/`bench-mmap` emit a dependency-free JSON results document via
+# (sq-d7d) `bench`/`bench-mmap` emit a dependency-free JSON results document via
 # `--json <path>` (the runtime CLI adds NO serde dep — it hand-builds the JSON like
 # mpc_net_bench::cell_json). serde_json is a TEST-ONLY dep so cli_contract.rs can prove the
 # emitted document is genuinely valid, parseable JSON with the expected keys (a stronger

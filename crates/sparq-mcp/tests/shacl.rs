@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.22: JSON-RPC round trips for the opt-in SHACL validation tool.
+//! sq-lsp7k.22: JSON-RPC round trips for the opt-in SHACL validation tool.
 
 #![cfg(feature = "shacl")]
 

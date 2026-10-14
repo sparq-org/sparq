@@ -363,7 +363,7 @@ pub struct GenAiRetrievalExpressibilityEntry {
 /// Approximate ANN and fusion signals only propose candidates. Generated queries are parsed and
 /// executed by the exact engine, while citations are emitted only from provenance asserted in the
 /// graph. Every provider pair below names a crate and Cargo feature declared in this workspace.
-/// [GPT-5.6] `sq-oti9m` keeps this catalogue data-only and independent of workload execution.
+/// `sq-oti9m` keeps this catalogue data-only and independent of workload execution.
 pub const GENAI_RETRIEVAL_EXPRESSIBILITY: [GenAiRetrievalExpressibilityEntry; 5] = [
     GenAiRetrievalExpressibilityEntry {
         capability: "vec:nearest ANN-in-SPARQL",
@@ -610,7 +610,7 @@ pub fn compile_wac(row: &IntentRow) -> CompiledPolicy {
 /// - Output is deterministic given the same `row` and `group_members` slice.
 /// - No dependency on any sparq crate.
 /// - The oracle and the live driver both call this function, so alignment here
-///   makes the ACP oracle and engine agree on the authorization shape. [SONNET-4.6]
+///   makes the ACP oracle and engine agree on the authorization shape.
 #[must_use]
 #[allow(clippy::too_many_lines)]
 pub fn compile_acp(row: &IntentRow, group_members: &[String]) -> CompiledPolicy {
@@ -629,7 +629,7 @@ pub fn compile_acp(row: &IntentRow, group_members: &[String]) -> CompiledPolicy 
     // (audience key, scope, effect) so that multiple compile_acp calls for the SAME
     // resource URI (one per intent row) produce DISTINCT IRIs — otherwise all matchers
     // would accumulate on a single shared policy node, causing over-grant.
-    // FNV-1a is simple, dependency-free, and deterministic across platforms. [SONNET-4.6]
+    // FNV-1a is simple, dependency-free, and deterministic across platforms.
     let aud_key = match &row.audience {
         Audience::Public => "pub".to_string(),
         Audience::Authenticated => "auth".to_string(),
@@ -676,7 +676,7 @@ pub fn compile_acp(row: &IntentRow, group_members: &[String]) -> CompiledPolicy 
     // Access modes — MUST use the acl: namespace (http://www.w3.org/ns/auth/acl#).
     // The engine's acp-c.n3 maps modes as `acl:Read solidx:allowPred auth:read`; using
     // `acp:Read` (a different IRI) causes the mode mapping to silently miss and the
-    // policy never fires. [SONNET-4.6] sq-kvvcl defect-1 fix.
+    // policy never fires. sq-kvvcl defect-1 fix.
     if row.mode.read {
         triples.push(format!(
             "{policy_id} {effect_pred} <http://www.w3.org/ns/auth/acl#Read> ."
@@ -699,7 +699,7 @@ pub fn compile_acp(row: &IntentRow, group_members: &[String]) -> CompiledPolicy 
     //   => { ?pol solidx:appliesToResource ?r . }
     // So we need <acr> acp:accessControl|memberAccessControl <acr#c> and
     //            <acr#c> acp:apply <policy>  — NOT <resource> acp:accessControl <policy>.
-    // [SONNET-4.6] sq-kvvcl defect-1 fix.
+    // sq-kvvcl defect-1 fix.
     let ac_link_pred = match row.scope {
         Scope::Resource => "<http://www.w3.org/ns/solid/acp#accessControl>",
         Scope::Subtree => "<http://www.w3.org/ns/solid/acp#memberAccessControl>",

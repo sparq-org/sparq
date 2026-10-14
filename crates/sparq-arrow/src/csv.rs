@@ -16,7 +16,7 @@
 //! hardening for CR-tolerant readers: a field is quoted iff it contains a comma, a
 //! double quote, CR, or LF; quotes are escaped by doubling; records end with LF; the
 //! header row is always present. The parser accepts LF, CRLF, and bare-CR record
-//! terminators and a missing final terminator. [FABLE-5]
+//! terminators and a missing final terminator.
 
 use arrow_schema::{ArrowError as ArrowLibraryError, Field, Schema};
 use oxrdf::{Term, Variable};
@@ -106,7 +106,7 @@ pub fn to_csv_bytes(result: &QueryResult) -> Result<Vec<u8>, ArrowExportError> {
 }
 
 // Write one cell as its five fields (four commas). Field order is RDF_TERM_FIELDS:
-// kind, value, datatype, language, direction. [FABLE-5]
+// kind, value, datatype, language, direction.
 fn write_cell(out: &mut Vec<u8>, cell: Option<&Term>) {
     match cell {
         None => out.extend_from_slice(b",,,,"),
@@ -410,7 +410,7 @@ pub fn from_csv_bytes(bytes: &[u8]) -> Result<QueryResult, ArrowError> {
 // (never empty for a bound term): a bound row's empty `value` field is the empty
 // string, while an empty `kind` marks an unbound row — which must not carry data in
 // any other field, so a malformed "unbound slot carrying data" fails closed instead of
-// being silently dropped. [FABLE-5]
+// being silently dropped.
 fn decode_cell(group: &[CsvField<'_>], column: &str, row: usize) -> Result<Option<Term>, ArrowError> {
     let kind = group[0].as_str();
     let value = group[1].as_str();

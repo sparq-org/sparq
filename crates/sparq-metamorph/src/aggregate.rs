@@ -1,5 +1,5 @@
 //! **Aggregate-aware partitioning: `COUNT`/`SUM` recombined over the three TLP
-//! branches.** [OPUS-5] sq-gum8.12
+//! branches.** sq-gum8.12
 //!
 //! TLP for SQL has aggregate variants (Rigger & Su, OOPSLA 2020 §3.3): partition the
 //! table, aggregate each partition, and recombine — `COUNT` and `SUM` by addition. The

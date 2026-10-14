@@ -17,7 +17,7 @@
 //! the script uses `cargo tree -i`, this test uses `cargo metadata`'s resolve graph;
 //! either alone would catch a violation, both together is belt-and-braces.
 //!
-//! [OPUS-4.8] sq-s1uy — flagged for Fable re-review.
+//! sq-s1uy — flagged for Fable re-review.
 
 use std::collections::{HashMap, HashSet};
 use std::process::Command;

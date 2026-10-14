@@ -68,7 +68,6 @@
 //!   The RFC-4180 serializer/parser is hand-rolled over `std` (the schema is fixed, so
 //!   the feature adds **zero** dependencies); the reader decodes bound terms through the
 //!   same term decoder as `from_record_batch`, so the two readers cannot drift.
-//!   [FABLE-5]
 
 /// Struct field name: the term kind — `"uri"`, `"bnode"`, `"literal"`, or `"triple"`.
 pub const FIELD_KIND: &str = "kind";

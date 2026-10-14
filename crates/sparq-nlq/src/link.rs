@@ -172,7 +172,7 @@ impl Linking {
             // The mention and the label are UNTRUSTED text: the label is a literal
             // whoever wrote the triple chose, so it is the crate's indirect
             // (data-)injection vector into the prompt. Each is rendered on one line,
-            // so flatten it — a no-op for ordinary labels. [SONNET-4.6] sq-j1wv
+            // so flatten it — a no-op for ordinary labels. sq-j1wv
             s.push_str(&format!(
                 "- entity \"{}\" ({kind}) -> <{}>  (label: {})\n",
                 crate::guard::flatten_untrusted(&e.mention),
@@ -213,7 +213,7 @@ impl Linking {
                     .collect();
                 // The literal is untrusted data. Its N-Triples rendering already escapes
                 // quotes/newlines, so flattening is a no-op here — applied anyway so every
-                // data-derived span in the prompt goes through the one guard. [SONNET-4.6]
+                // data-derived span in the prompt goes through the one guard.
                 s.push_str(&format!(
                     "- value \"{}\" -> {}  (object of {}, {} triples)\n",
                     crate::guard::flatten_untrusted(&v.mention),
@@ -252,14 +252,14 @@ pub struct EntityLinker<'g> {
     /// lower-cased literal lexical form -> the dictionary literals with that form (each
     /// with the predicates it objects and its use count). EMPTY unless
     /// [`with_values`](Self::with_values) was called, so the default linker pays neither
-    /// the scan nor the memory. [SONNET-4.6] sq-na0q
+    /// the scan nor the memory. sq-na0q
     values: BTreeMap<String, Vec<ValueEntry>>,
     /// Whether the **exact dictionary tier** (`sq-na0q`) is on — set ONLY by
     /// [`with_values`](Self::with_values). It gates BOTH of the tier's probes: the literal
     /// value lookup and the verbatim-IRI [`Graph::id_of`] probe. A separate flag rather
     /// than `!values.is_empty()`, because the IRI probe needs no value index at all (a
     /// store holding no indexable literal still has an empty `values`), and because the
-    /// crate's public docs promise the whole tier is opt-in. [SONNET-4.6]
+    /// crate's public docs promise the whole tier is opt-in.
     exact_dict: bool,
     /// How many similar siblings to attach per linked entity.
     expand_k: usize,
